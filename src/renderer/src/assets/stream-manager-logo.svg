@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:1.5;">
+    <rect id="Artboard1" x="0" y="0" width="1024" height="1024" style="fill:none;"/>
+    <clipPath id="_clip1">
+        <rect id="Artboard11" serif:id="Artboard1" x="0" y="0" width="1024" height="1024"/>
+    </clipPath>
+    <g clip-path="url(#_clip1)">
+        <g transform="matrix(1.282686,0,0,1.282686,-1584.598432,-169.704559)">
+            <path d="M1565.682,704.085C1495.565,676.552 1445.871,608.233 1445.871,528.398C1445.871,448.563 1495.565,380.244 1565.682,352.711L1565.682,555.664C1565.682,555.664 1581.528,579.131 1634.538,579.131C1687.548,579.131 1703.395,555.664 1703.395,555.664L1703.395,352.711C1773.511,380.244 1823.205,448.563 1823.205,528.398C1823.205,608.233 1773.511,676.552 1703.395,704.085L1703.395,881.798C1703.395,881.798 1687.548,905.265 1634.538,905.265C1581.528,905.265 1565.682,881.798 1565.682,881.798L1565.682,704.085Z" style="fill:url(#_Radial2);"/>
+        </g>
+        <path d="M852.759,171.241C940.006,258.488 994,378.988 994,512C994,645.012 940.006,765.512 852.759,852.759M767.922,767.922C833.448,702.397 874,611.897 874,512C874,412.103 833.448,321.603 767.922,256.078M256.078,256.078C190.552,321.603 150,412.103 150,512C150,611.897 190.552,702.397 256.078,767.922M171.241,852.759C83.994,765.512 30,645.012 30,512C30,378.988 83.994,258.488 171.241,171.241M423.679,733.415C333.742,698.099 270,610.467 270,508.064C270,405.661 333.742,318.029 423.679,282.713L423.679,543.038C423.679,543.038 444.005,573.138 512,573.138C579.995,573.138 600.321,543.038 600.321,543.038L600.321,282.713C690.258,318.029 754,405.661 754,508.064C754,610.467 690.258,698.099 600.321,733.415L600.321,961.365C600.321,961.365 579.995,991.466 512,991.466C444.005,991.466 423.679,961.365 423.679,961.365L423.679,733.415Z" style="fill:none;stroke:url(#_Radial3);stroke-width:60px;"/>
+    </g>
+    <defs>
+        <radialGradient id="_Radial2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(399.16253,0,-0,399.16253,1634.538154,577.141617)"><stop offset="0" style="stop-color:rgb(182,163,254);stop-opacity:1"/><stop offset="1" style="stop-color:rgb(75,28,255);stop-opacity:1"/></radialGradient>
+        <radialGradient id="_Radial3" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(512,0,0,435.637745,512,570.68679)"><stop offset="0" style="stop-color:rgb(142,112,255);stop-opacity:1"/><stop offset="1" style="stop-color:rgb(196,181,253);stop-opacity:1"/></radialGradient>
+    </defs>
+</svg>

@@ -1,0 +1,278 @@
+import { contextBridge, ipcRenderer } from 'electron'
+
+// Expose a typed API surface to the renderer process
+contextBridge.exposeInMainWorld('api', {
+  // ── Video ──────────────────────────────────────────────────────────────────
+  probeFile: (filePath: string) =>
+    ipcRenderer.invoke('video:probe', filePath),
+
+  extractAudioTracks: (filePath: string, trackIndices?: number[]) =>
+    ipcRenderer.invoke('video:extractTracks', filePath, trackIndices),
+
+  cancelExtractAudioTracks: () =>
+    ipcRenderer.invoke('video:cancelExtract'),
+
+  cleanupTracks: (paths: string[]) =>
+    ipcRenderer.invoke('video:cleanupTracks', paths),
+
+  getWaveform: (filePath: string) =>
+    ipcRenderer.invoke('video:getWaveform', filePath),
+
+  clearAudioCache: () =>
+    ipcRenderer.invoke('video:clearAudioCache'),
+
+  getAudioCacheSize: () =>
+    ipcRenderer.invoke('video:getAudioCacheSize'),
+
+  getThumbnailCache: (filePath: string) =>
+    ipcRenderer.invoke('video:getThumbnailCache', filePath),
+
+  saveThumbnailFrame: (filePath: string, index: number, dataUrl: string) =>
+    ipcRenderer.invoke('video:saveThumbnailFrame', filePath, index, dataUrl),
+
+  finalizeThumbnailCache: (filePath: string, timecodes: number[]) =>
+    ipcRenderer.invoke('video:finalizeThumbnailCache', filePath, timecodes),
+
+  onExtractProgress: (
+    callback: (data: { trackIndex: number; percent: number }) => void
+  ) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('video:extractProgress', handler)
+    return () => ipcRenderer.removeListener('video:extractProgress', handler)
+  },
+
+  // ── Files ──────────────────────────────────────────────────────────────────
+  openFileDialog: (options?: Electron.OpenDialogOptions) =>
+    ipcRenderer.invoke('files:openFileDialog', options),
+
+  openDirectoryDialog: () =>
+    ipcRenderer.invoke('files:openDirectoryDialog'),
+
+  moveFile: (src: string, dest: string) =>
+    ipcRenderer.invoke('files:move', src, dest),
+
+  copyFile: (src: string, dest: string) =>
+    ipcRenderer.invoke('files:copy', src, dest),
+
+  renameFile: (filePath: string, newName: string) =>
+    ipcRenderer.invoke('files:rename', filePath, newName),
+
+  deleteFile: (filePath: string) =>
+    ipcRenderer.invoke('files:delete', filePath),
+
+  listFiles: (dir: string) =>
+    ipcRenderer.invoke('files:list', dir),
+
+  fileExists: (filePath: string) =>
+    ipcRenderer.invoke('files:exists', filePath),
+
+  mkdir: (dirPath: string) =>
+    ipcRenderer.invoke('files:mkdir', dirPath),
+
+  openUrl: (url: string) =>
+    ipcRenderer.invoke('files:openUrl', url),
+
+  openInExplorer: (filePath: string) =>
+    ipcRenderer.invoke('files:openInExplorer', filePath),
+
+  readFile: (filePath: string) =>
+    ipcRenderer.invoke('files:readFile', filePath),
+
+  saveScreenshot: (destPath: string, base64Data: string) =>
+    ipcRenderer.invoke('files:saveScreenshot', destPath, base64Data),
+
+  checkLocalFiles: (filePaths: string[]) =>
+    ipcRenderer.invoke('files:checkLocalFiles', filePaths),
+
+  listFileNames: (dirPath: string) =>
+    ipcRenderer.invoke('files:listNames', dirPath),
+
+  // ── File Watcher ───────────────────────────────────────────────────────────
+  startWatcher: (rules: any[]) =>
+    ipcRenderer.invoke('watcher:start', rules),
+
+  stopWatcher: () =>
+    ipcRenderer.invoke('watcher:stop'),
+
+  onFileMatched: (callback: (event: any) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('watcher:fileMatched', handler)
+    return () => ipcRenderer.removeListener('watcher:fileMatched', handler)
+  },
+
+  // ── Templates ─────────────────────────────────────────────────────────────
+  getTemplates: () =>
+    ipcRenderer.invoke('templates:getAll'),
+
+  saveTemplate: (template: any) =>
+    ipcRenderer.invoke('templates:save', template),
+
+  deleteTemplate: (id: string) =>
+    ipcRenderer.invoke('templates:delete', id),
+
+  applyTemplate: (templateId: string, basePath: string, variables: Record<string, string>) =>
+    ipcRenderer.invoke('templates:apply', templateId, basePath, variables),
+
+  // ── Converter ─────────────────────────────────────────────────────────────
+  getBuiltinPresets: () =>
+    ipcRenderer.invoke('converter:getBuiltinPresets'),
+
+  importPreset: (filePath: string) =>
+    ipcRenderer.invoke('converter:importPreset', filePath),
+
+  getImportedPresets: () =>
+    ipcRenderer.invoke('converter:getImportedPresets'),
+
+  deleteImportedPreset: (id: string) =>
+    ipcRenderer.invoke('converter:deleteImportedPreset', id),
+
+  renameImportedPreset: (id: string, newName: string) =>
+    ipcRenderer.invoke('converter:renameImportedPreset', id, newName),
+
+  addToQueue: (job: any) =>
+    ipcRenderer.invoke('converter:addToQueue', job),
+
+  cancelJob: (jobId: string) =>
+    ipcRenderer.invoke('converter:cancelJob', jobId),
+
+  pauseJob: (jobId: string) =>
+    ipcRenderer.invoke('converter:pauseJob', jobId),
+
+  resumeJob: (jobId: string) =>
+    ipcRenderer.invoke('converter:resumeJob', jobId),
+
+  getJobs: () =>
+    ipcRenderer.invoke('converter:getJobs'),
+
+  onJobProgress: (callback: (data: { jobId: string; percent: number }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('converter:jobProgress', handler)
+    return () => ipcRenderer.removeListener('converter:jobProgress', handler)
+  },
+
+  onJobComplete: (callback: (data: { jobId: string; outputPath: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('converter:jobComplete', handler)
+    return () => ipcRenderer.removeListener('converter:jobComplete', handler)
+  },
+
+  onJobError: (callback: (data: { jobId: string; error: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('converter:jobError', handler)
+    return () => ipcRenderer.removeListener('converter:jobError', handler)
+  },
+
+  // ── Store ─────────────────────────────────────────────────────────────────
+  getConfig: () =>
+    ipcRenderer.invoke('store:getConfig'),
+
+  setConfig: (config: any) =>
+    ipcRenderer.invoke('store:setConfig', config),
+
+  getWatchRules: () =>
+    ipcRenderer.invoke('store:getWatchRules'),
+
+  setWatchRules: (rules: any[]) =>
+    ipcRenderer.invoke('store:setWatchRules', rules),
+
+  // ── Streams ───────────────────────────────────────────────────────────────
+  listStreams: (dir: string) =>
+    ipcRenderer.invoke('streams:list', dir),
+
+  writeStreamMeta: (folderPath: string, meta: any) =>
+    ipcRenderer.invoke('streams:writeMeta', folderPath, meta),
+
+  listStreamTemplates: (streamsDir: string) =>
+    ipcRenderer.invoke('streams:listTemplates', streamsDir),
+
+  createStreamFolder: (parentDir: string, date: string, meta?: any, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) =>
+    ipcRenderer.invoke('streams:createFolder', parentDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath),
+
+  stampArchived: (dir: string) =>
+    ipcRenderer.invoke('streams:stampArchived', dir),
+
+  watchStreamsDir: (dir: string) =>
+    ipcRenderer.invoke('streams:watchDir', dir),
+
+  unwatchStreamsDir: () =>
+    ipcRenderer.invoke('streams:unwatchDir'),
+
+  onStreamsChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('streams:changed', handler)
+    return () => ipcRenderer.removeListener('streams:changed', handler)
+  },
+
+  archiveFolders: (folderPaths: string[], preset: any) =>
+    ipcRenderer.invoke('streams:archiveFolders', folderPaths, preset),
+
+  cancelArchive: () =>
+    ipcRenderer.invoke('streams:cancelArchive'),
+
+  deleteStreamFolder: (folderPath: string) =>
+    ipcRenderer.invoke('streams:deleteFolder', folderPath),
+
+  removeStreamOrphans: (streamsDir: string, folderNames: string[]) =>
+    ipcRenderer.invoke('streams:removeOrphans', streamsDir, folderNames),
+
+  onArchiveProgress: (callback: (data: any) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('streams:archiveProgress', handler)
+    return () => ipcRenderer.removeListener('streams:archiveProgress', handler)
+  },
+
+  // ── Combine ───────────────────────────────────────────────────────────────
+  combineFiles: (files: string[], outputPath: string, totalDurationSec: number) =>
+    ipcRenderer.invoke('combine:run', files, outputPath, totalDurationSec),
+
+  onCombineProgress: (callback: (data: { percent: number }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('combine:progress', handler)
+    return () => ipcRenderer.removeListener('combine:progress', handler)
+  },
+
+  // ── YouTube ───────────────────────────────────────────────────────────────
+  youtubeGetStatus: () =>
+    ipcRenderer.invoke('youtube:getStatus'),
+
+  youtubeConnect: () =>
+    ipcRenderer.invoke('youtube:connect'),
+
+  youtubeDisconnect: () =>
+    ipcRenderer.invoke('youtube:disconnect'),
+
+  youtubeGetBroadcasts: () =>
+    ipcRenderer.invoke('youtube:getBroadcasts'),
+
+  youtubeUpdateBroadcast: (
+    broadcastId: string,
+    snippet: { title: string; description: string; gameTitle?: string },
+    tags: string[]
+  ) => ipcRenderer.invoke('youtube:updateBroadcast', broadcastId, snippet, tags),
+
+  // ── YouTube Templates ─────────────────────────────────────────────────────
+  getYTTitleTemplates: () => ipcRenderer.invoke('store:getYTTitleTemplates'),
+  setYTTitleTemplates: (v: any[]) => ipcRenderer.invoke('store:setYTTitleTemplates', v),
+  getYTDescriptionTemplates: () => ipcRenderer.invoke('store:getYTDescriptionTemplates'),
+  setYTDescriptionTemplates: (v: any[]) => ipcRenderer.invoke('store:setYTDescriptionTemplates', v),
+  getYTTagTemplates: () => ipcRenderer.invoke('store:getYTTagTemplates'),
+  setYTTagTemplates: (v: any[]) => ipcRenderer.invoke('store:setYTTagTemplates', v),
+
+  // ── Twitch ────────────────────────────────────────────────────────────────
+  twitchGetStatus: () =>
+    ipcRenderer.invoke('twitch:getStatus'),
+
+  twitchConnect: () =>
+    ipcRenderer.invoke('twitch:connect'),
+
+  twitchDisconnect: () =>
+    ipcRenderer.invoke('twitch:disconnect'),
+
+  twitchUpdateChannel: (title: string, gameName?: string) =>
+    ipcRenderer.invoke('twitch:updateChannel', title, gameName),
+
+  // ── Window Controls ───────────────────────────────────────────────────────
+  windowMinimize: () => ipcRenderer.send('window:minimize'),
+  windowMaximize: () => ipcRenderer.send('window:maximize'),
+  windowClose: () => ipcRenderer.send('window:close')
+})

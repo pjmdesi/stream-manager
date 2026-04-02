@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0d0d1a;
+  color: #e2e8f0;
+  font-family: 'Recursive', system-ui, sans-serif;
+  font-variation-settings: 'MONO' 0, 'CASL' 0, 'CRSV' 0.5;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Mono variant — flip MONO axis to 1 */
+.font-mono, code, pre, kbd, samp {
+  font-variation-settings: 'MONO' 1, 'CASL' 0, 'CRSV' 0.5;
+}
+
+/* Allow text selection in inputs and content areas */
+input, textarea, select, .selectable {
+  user-select: text;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+/* Range input reset for custom sliders */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #8b5cf6;
+  cursor: pointer;
+  border: 2px solid #c4b5fd;
+  margin-top: -5px;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  background: rgba(255,255,255,0.1);
+  height: 4px;
+  border-radius: 2px;
+}
