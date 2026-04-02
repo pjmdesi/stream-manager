@@ -176,7 +176,7 @@ export default function App() {
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <nav className="w-48 bg-navy-800 border-r border-white/5 flex flex-col py-3 shrink-0">
+        <nav className="w-48 bg-navy-800 border-r border-white/5 flex flex-col shrink-0">
           <div className="flex-1">
             {NAV_ITEMS.map(item => (
               <button
@@ -198,7 +198,7 @@ export default function App() {
           <div className="border-t border-white/5" />
           {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} />}
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} />
-          <div className="px-4 py-2">
+          <div className="py-1 flex justify-center">
             <span className="text-[10px] text-gray-700">v{appVersion}</span>
           </div>
         </nav>
