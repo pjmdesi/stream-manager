@@ -48,7 +48,7 @@ export async function probeFile(filePath: string): Promise<VideoInfo> {
         language: stream.tags?.language,
         title: stream.tags?.title,
         channels: stream.channels || 2,
-        sampleRate: stream.sample_rate ? parseInt(stream.sample_rate) : undefined
+        sampleRate: stream.sample_rate ? Number(stream.sample_rate) : undefined
       }))
 
       const fps = videoStream?.r_frame_rate

@@ -265,7 +265,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             <div className="flex items-center gap-1.5">
               <div className="text-sm font-medium text-gray-200 truncate">{p.name}</div>
               {isArchiveDefault && (
-                <Archive size={11} className="text-purple-400 shrink-0" title="Default archive preset" />
+                <span title="Default archive preset"><Archive size={11} className="text-purple-400 shrink-0" /></span>
               )}
             </div>
           )}

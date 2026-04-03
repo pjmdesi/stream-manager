@@ -34,6 +34,7 @@ export interface StreamFolder {
   meta: StreamMeta | null
   hasMeta: boolean
   detectedGames: string[]
+  thumbnails: string[]
   videoCount: number
   videos: string[]
   isMissing?: boolean
@@ -275,11 +276,7 @@ export function registerStreamsIPC(): void {
       if (!entry.isDirectory()) continue
       if (!DATE_FOLDER_RE.test(entry.name)) continue
       allMeta[entry.name] = {
-        date: entry.name,
-        streamType: 'games' as const,
-        games: [],
-        comments: '',
-        ...(allMeta[entry.name] ?? {}),
+        ...(allMeta[entry.name] ?? { date: entry.name, streamType: 'games' as const, games: [], comments: '' }),
         archived: true
       }
       count++
@@ -320,10 +317,7 @@ export function registerStreamsIPC(): void {
         const baseName = path.basename(fileName, path.extname(fileName))
         const ext = preset.outputExtension || 'mkv'
 
-        // For script presets the bat determines output; for ffmpeg we control it
-        const tempFile = preset.type === 'script'
-          ? path.join(folderPath, `${baseName}${preset.scriptOutputSuffix ?? '_archived'}.${ext}`)
-          : path.join(folderPath, `${baseName}__arc_tmp.${ext}`)
+        const tempFile = path.join(folderPath, `${baseName}__arc_tmp.${ext}`)
 
         const sendProgress = (percent: number, phase: ArchiveProgress['phase'], error?: string) => {
           if (event.sender.isDestroyed()) return
@@ -363,7 +357,7 @@ export function registerStreamsIPC(): void {
             resolve(false)
           }
 
-          const job = runConversion(inputFile, tempFile, preset.ffmpegArgs, onProgress, onComplete, onError)
+          const job = runConversion(inputFile, tempFile, preset.ffmpegArgs, 0, onProgress, onComplete, onError)
           cancelJob = job.cancel
         })
 
@@ -375,11 +369,7 @@ export function registerStreamsIPC(): void {
         const folderName = path.basename(folderPath)
         const allMeta = readAllMeta(streamsDir)
         allMeta[folderName] = {
-          date: folderName,
-          streamType: 'games' as const,
-          games: [],
-          comments: '',
-          ...(allMeta[folderName] ?? {}),
+          ...(allMeta[folderName] ?? { date: folderName, streamType: 'games' as const, games: [], comments: '' }),
           archived: true
         }
         writeAllMeta(streamsDir, allMeta)

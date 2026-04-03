@@ -10,6 +10,7 @@ export interface YTTagTemplate { id: string; name: string; tags: string[] }
 export interface AppConfig {
   defaultWatchDir: string
   defaultOutputDir: string
+  batPresetsDir: string
   tempDir: string
   theme: 'dark' | 'light'
   autoStartWatcher: boolean
@@ -30,6 +31,7 @@ function getDefaultConfig(): AppConfig {
   return {
     defaultWatchDir: app.getPath('videos'),
     defaultOutputDir: app.getPath('videos'),
+    batPresetsDir: '',
     tempDir: path.join(app.getPath('temp'), 'stream-manager'),
     theme: 'dark',
     autoStartWatcher: false,
@@ -70,6 +72,7 @@ export function getStore(): Store<StoreShape> {
         ytDescriptionTemplates: [],
         ytTagTemplates: [],
         importedPresets: [],
+        metaMigrated: false,
       }
     })
   }

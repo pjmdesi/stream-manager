@@ -40,7 +40,7 @@ export function registerCombineIPC(): void {
           outputPath
         ]
 
-        const proc = spawn(ffmpegStatic, args)
+        const proc = spawn(ffmpegStatic as string, args)
 
         proc.stdout?.on('data', (data: Buffer) => {
           const text = data.toString()

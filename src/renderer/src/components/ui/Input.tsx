@@ -5,7 +5,7 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   error?: string
   hint?: string
   suffix?: React.ReactNode
-  prefix?: React.ReactNode
+  inputPrefix?: React.ReactNode
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -13,7 +13,7 @@ export const Input: React.FC<InputProps> = ({
   error,
   hint,
   suffix,
-  prefix,
+  inputPrefix: prefix,
   className = '',
   id,
   ...props
