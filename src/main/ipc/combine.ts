@@ -5,6 +5,10 @@ import path from 'path'
 import os from 'os'
 import ffmpegStatic from 'ffmpeg-static'
 
+function fixAsarPath(p: string): string {
+  return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
+}
+
 export function registerCombineIPC(): void {
   ipcMain.handle(
     'combine:run',
@@ -40,7 +44,7 @@ export function registerCombineIPC(): void {
           outputPath
         ]
 
-        const proc = spawn(ffmpegStatic as string, args)
+        const proc = spawn(fixAsarPath(ffmpegStatic as string), args)
 
         proc.stdout?.on('data', (data: Buffer) => {
           const text = data.toString()

@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { version as appVersion } from '../../../package.json'
 import { Film, FolderPlus, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play } from 'lucide-react'
 import { Button } from './components/ui/Button'
+import { Modal } from './components/ui/Modal'
 import logoUrl from './assets/stream-manager-logo.svg'
 import type { Page } from './types'
 import { StreamsPage } from './components/pages/StreamsPage'
@@ -117,6 +118,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
 
 export default function App() {
   const [page, setPage] = useState<Page>('streams')
+  const [aboutOpen, setAboutOpen] = useState(false)
   const [pendingPlayer, setPendingPlayer] = useState<PendingFile | null>(null)
   const [pendingConverter, setPendingConverter] = useState<PendingConverterFile | null>(null)
   const [pendingCombine, setPendingCombine] = useState<PendingFiles | null>(null)
@@ -198,9 +200,12 @@ export default function App() {
           <div className="border-t border-white/5" />
           {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} />}
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} />
-          <div className="py-1 flex justify-center">
+          <button
+            onClick={() => setAboutOpen(true)}
+            className="py-1 flex justify-center w-full hover:text-gray-500 transition-colors"
+          >
             <span className="text-[10px] text-gray-700">v{appVersion}</span>
-          </div>
+          </button>
         </nav>
 
         {/* Page content */}
@@ -221,6 +226,24 @@ export default function App() {
         </main>
       </div>
     </div>
+      <Modal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} title="About Stream Manager" width="sm">
+        <div className="flex flex-col items-center gap-4 py-2 text-center">
+          <img src={logoUrl} alt="" className="w-12 h-12 opacity-90" />
+          <div className="flex flex-col gap-1">
+            <p className="text-sm text-gray-300 leading-relaxed">
+              A desktop app for streamers to manage, review, and process local recording files.
+            </p>
+            <p className="text-xs text-gray-500 mt-1">Version {appVersion}</p>
+          </div>
+          <a
+            href="https://github.com/pjmdesi/stream-manager"
+            onClick={e => { e.preventDefault(); window.api.openUrl('https://github.com/pjmdesi/stream-manager') }}
+            className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+          >
+            github.com/pjmdesi/stream-manager
+          </a>
+        </div>
+      </Modal>
     </ConversionProvider>
     </WatcherProvider>
   )

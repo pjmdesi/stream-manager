@@ -6,11 +6,19 @@ import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
 
-// Set binary paths
-if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic)
+// When running from a packaged asar, binaries are unpacked to app.asar.unpacked
+function fixAsarPath(p: string): string {
+  return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
 }
-ffmpeg.setFfprobePath(ffprobeStatic.path)
+
+const ffmpegBin = ffmpegStatic ? fixAsarPath(ffmpegStatic) : null
+const ffprobeBin = fixAsarPath(ffprobeStatic.path)
+
+// Set binary paths
+if (ffmpegBin) {
+  ffmpeg.setFfmpegPath(ffmpegBin)
+}
+ffmpeg.setFfprobePath(ffprobeBin)
 
 export interface AudioTrackInfo {
   index: number
@@ -156,9 +164,9 @@ async function detectGpuVendor(): Promise<GpuVendor> {
   if (_gpuVendorCache !== undefined) return _gpuVendorCache
 
   return new Promise(resolve => {
-    if (!ffmpegStatic) { _gpuVendorCache = null; resolve(null); return }
+    if (!ffmpegBin) { _gpuVendorCache = null; resolve(null); return }
 
-    const proc = spawn(ffmpegStatic, ['-hide_banner', '-encoders'], {
+    const proc = spawn(ffmpegBin, ['-hide_banner', '-encoders'], {
       stdio: ['ignore', 'pipe', 'ignore']
     })
     let out = ''
@@ -324,11 +332,11 @@ export async function extractWaveformPeaks(
   numPeaks = 2000
 ): Promise<WaveformPeak[]> {
   return new Promise((resolve, reject) => {
-    if (!ffmpegStatic) { reject(new Error('ffmpeg binary not found')); return }
+    if (!ffmpegBin) { reject(new Error('ffmpeg binary not found')); return }
 
     const chunks: Buffer[] = []
 
-    const proc = spawn(ffmpegStatic, [
+    const proc = spawn(ffmpegBin, [
       '-i', filePath,
       '-map', '0:a:0',
       '-ac', '1',

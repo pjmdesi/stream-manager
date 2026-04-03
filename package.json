@@ -51,6 +51,10 @@
         }
       ]
     },
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**/*",
+      "node_modules/ffprobe-static/**/*"
+    ],
     "extraResources": [
       {
         "from": "resources/icon.png",

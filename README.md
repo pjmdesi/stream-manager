@@ -25,7 +25,7 @@ The main hub for browsing and managing your local stream sessions. Each date fol
 
 ### Video Player
 
-Drop or browse to any video file and play it back with a visual thumbnail strip for timeline scrubbing. Multi-track audio (common in OBS recordings) is explicitly supported — select which tracks to merge, with per-track volume and mute controls. Merged audio is cached to disk so repeat opens are instant.
+Drop or browse to any video file and play it back with a visual thumbnail strip for timeline scrubbing. Multi-track audio (common in OBS recordings) is explicitly supported — select which tracks to merge. Merged audio is cached to disk so repeat opens are instant.
 
 ### Converter
 

@@ -242,7 +242,7 @@ export function PlayerPage({ initialFile }: { initialFile?: PendingFile | null }
                             <>
                               <div className="w-32 h-1.5 bg-white/10 rounded-full overflow-hidden">
                                 <div
-                                  className="h-full bg-purple-500 rounded-full transition-all"
+                                  className={`h-full rounded-full transition-all ${(extractProgress[i] ?? 0) >= 100 ? 'bg-green-500' : 'bg-purple-500'}`}
                                   style={{ width: `${extractProgress[i] ?? 0}%` }}
                                 />
                               </div>
@@ -667,7 +667,7 @@ export function PlayerPage({ initialFile }: { initialFile?: PendingFile | null }
 
       {error && (
         <div className="px-4 py-2 bg-red-900/30 border-t border-red-800/50 text-red-400 text-sm flex items-center gap-2">
-          <span className="flex-1">{error}</span>
+          <span className="flex-1 select-text cursor-text">{error}</span>
           <button onClick={clearError} className="shrink-0 hover:text-red-200 transition-colors">
             <X size={14} />
           </button>
