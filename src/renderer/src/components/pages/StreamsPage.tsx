@@ -897,7 +897,7 @@ function PresetPickerModal({ onPick, onClose }: PresetPickerProps) {
         {loading ? (
           <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 size={14} className="animate-spin" /> Loading presets…</div>
         ) : presets.length === 0 ? (
-          <p className="text-sm text-yellow-600">No presets found. Configure your .bat presets directory in Settings first.</p>
+          <p className="text-sm text-yellow-600">No presets found. Configure your presets directory in Settings first.</p>
         ) : (
           <div className="relative">
             <select
@@ -1504,7 +1504,7 @@ export function StreamsPage({
       {archivePresetWarning && (
         <div className="flex items-center gap-2 px-6 py-2 bg-yellow-900/20 border-b border-yellow-700/30 text-xs text-yellow-400 shrink-0">
           <AlertTriangle size={12} className="shrink-0" />
-          <span>The configured archive preset could not be found. Check your <strong>.bat Presets Directory</strong> in Settings.</span>
+          <span>The configured archive preset could not be found. Check your <strong>Presets Directory</strong> in Settings.</span>
           <button onClick={() => setArchivePresetWarning(false)} className="ml-auto text-yellow-600 hover:text-yellow-300">
             <X size={12} />
           </button>

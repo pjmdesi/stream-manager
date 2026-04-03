@@ -84,7 +84,7 @@ export interface ConversionJob {
 export interface AppConfig {
   defaultWatchDir: string
   defaultOutputDir: string
-  batPresetsDir: string
+  presetsDir: string
   tempDir: string
   theme: 'dark' | 'light'
   autoStartWatcher: boolean

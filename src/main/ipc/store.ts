@@ -10,7 +10,7 @@ export interface YTTagTemplate { id: string; name: string; tags: string[] }
 export interface AppConfig {
   defaultWatchDir: string
   defaultOutputDir: string
-  batPresetsDir: string
+  presetsDir: string
   tempDir: string
   theme: 'dark' | 'light'
   autoStartWatcher: boolean
@@ -31,7 +31,7 @@ function getDefaultConfig(): AppConfig {
   return {
     defaultWatchDir: app.getPath('videos'),
     defaultOutputDir: app.getPath('videos'),
-    batPresetsDir: '',
+    presetsDir: '',
     tempDir: path.join(app.getPath('temp'), 'stream-manager'),
     theme: 'dark',
     autoStartWatcher: false,

@@ -240,7 +240,7 @@ export function SettingsPage() {
             {local.archivePresetId && !allPresets.find(p => p.id === local.archivePresetId) && (
               <p className="flex items-center gap-1 text-xs text-yellow-500">
                 <AlertTriangle size={11} />
-                Selected preset not found — it may have been removed or the .bat directory hasn't loaded yet.
+                Selected preset not found — it may have been removed or the presets directory hasn't loaded yet.
               </p>
             )}
             <p className="text-xs text-gray-500">Converter preset used when archiving stream folders from the Streams page. Compresses MKVs in-place and marks them as archived.</p>

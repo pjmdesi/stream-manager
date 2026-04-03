@@ -4,7 +4,7 @@ import { AppConfig } from '../types'
 const defaultConfig: AppConfig = {
   defaultWatchDir: '',
   defaultOutputDir: '',
-  batPresetsDir: '',
+  presetsDir: '',
   tempDir: '',
   theme: 'dark',
   autoStartWatcher: false,
