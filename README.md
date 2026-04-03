@@ -1,6 +1,6 @@
 # Stream Manager
 
-![Stream Manager icon](resources/icon.png)
+<img src="resources/icon.png" width="48" alt="Stream Manager icon" />
 
 A desktop app for streamers to manage, review, and process their local recording files. Built with Electron + React.
 
