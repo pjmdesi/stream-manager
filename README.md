@@ -14,43 +14,22 @@ A desktop app for streamers to manage, review, and process their local recording
 
 ### Streams
 
-The main hub. Points at your streams folder and shows every stream session (one folder per date) as a row with:
+The main hub for browsing and managing your local stream sessions. Each date folder is scanned automatically for video files and thumbnails, displayed as a row with:
 
-- Thumbnail preview (click to open lightbox)
-- Video file count with a hover tooltip listing filenames and durations — cloud-synced offline files are detected and skipped so they aren't downloaded just to be read
-- Date, games played, stream type, and freeform comments
-- Archived status badge
-- Per-row actions: send to Player, send to Converter, send to Combine, edit metadata, open folder, delete
+- Auto-detection of stream files (video and thumbnails) from date-based folders
+- Custom tagging and metadata — games played, stream type, and freeform comments
+- Batch archive processing — multi-select sessions and compress them in bulk using a conversion preset
+- Cloud-sync aware — offline files (e.g. Synology Drive) are detected and skipped to prevent unwanted downloads
 
-**Select mode** lets you multi-select sessions and archive them in bulk using a conversion preset. Sessions compressed externally can be stamped as archived without re-encoding.
-
-**Metadata** is stored in a single `_meta.json` file at the root of your streams directory rather than inside individual session folders, so taking folders offline (e.g. with a NAS sync client) doesn't affect the app's ability to read session information. Missing folders are detected on load and the user is prompted to remove stale records or keep them visible as warnings.
+**Metadata** is stored in a single `_meta.json` file at the root of your streams directory rather than inside individual session folders, so taking folders offline doesn't affect the app's ability to read session information. Missing folders are detected on load and the user is prompted to remove stale records or keep them visible as warnings.
 
 ### Video Player
 
-Drop or browse to any video file and play it back. Multi-track audio (common in OBS recordings) is handled explicitly:
-
-- Only the first audio track plays natively — this is a Chromium limitation
-- All detected audio tracks are listed; select which ones to extract and mix together
-- Extracted audio is cached to disk so repeat opens are instant
-- Per-track volume and mute controls with per-track waveform visualisation (also disk-cached)
-
-Playback controls:
-
-- Play / pause, frame-step forward and back, and jump buttons (±1s, ±5s, ±10s)
-- Clickable, editable timecode — type any H:MM:SS.FF value to seek directly, or use arrow keys to increment/decrement individual time segments (hours, minutes, seconds, frames)
-- Thumbnail strip (200 frames generated and disk-cached on first load) for visual timeline scrubbing
-- Progress bar with current position, hover preview position, and playhead indicators
+Drop or browse to any video file and play it back with a visual thumbnail strip for timeline scrubbing. Multi-track audio (common in OBS recordings) is explicitly supported — select which tracks to merge, with per-track volume and mute controls. Merged audio is cached to disk so repeat opens are instant.
 
 ### Converter
 
-Queue video files for conversion using built-in or imported ffmpeg presets. Features:
-
-- ETA and elapsed time (EMA-smoothed for stable estimates)
-- Pause / resume / cancel per job
-- Progress bar with paused state indicator
-- Completed, cancelled, and error states with per-job clear buttons
-- Presets stored as JSON and importable from a configured presets directory
+Queue video files for conversion using ffmpeg presets. Supports pause, resume, and cancel per job with ETA tracking. Presets can be imported directly from HandBrake preset files or created manually as JSON.
 
 ### Combine
 
@@ -65,14 +44,6 @@ File watcher rules that automatically move, copy, or rename files matching a glo
 - Update a live YouTube broadcast title, description, tags, and game title directly from the app
 - Update Twitch channel title and category
 - Title/description/tag template system for reusable formats with merge fields
-
-### Settings
-
-- Streams directory, default archive preset, default thumbnail template
-- Presets directory for importing conversion presets
-- Cache directory and storage limit with current usage display and clear button
-- Auto-rules behaviour (auto-start watcher on launch)
-- YouTube and Twitch OAuth credentials
 
 ---
 
