@@ -1,6 +1,10 @@
 # Stream Manager
 
+![Stream Manager icon](resources/icon.png)
+
 A desktop app for streamers to manage, review, and process their local recording files. Built with Electron + React.
+
+![Stream Manager screenshot](resources/stream-manager-screenshot.png)
 
 > 100% vibe-coded with [Claude](https://claude.ai) (Anthropic) — every line of code in this project was written through conversation with Claude Code (I only made the crappy logo lol). Think of that what you will, but the result is a fully functional Electron app that meets my requirements for a personal stream management tool. I'm sharing it here in case it can be useful to other streamers with similar needs. It cost me about $30 and about 2 days of back-and-forth with Claude Code to build. I hope it can save other streamers time and money by providing a ready-made solution for managing their local stream recordings.
 
