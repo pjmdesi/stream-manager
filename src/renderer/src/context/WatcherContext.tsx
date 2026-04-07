@@ -37,7 +37,15 @@ export function WatcherProvider({ children }: { children: React.ReactNode }) {
       }
     })
     const unsub = window.api.onFileMatched((event: WatchEvent) => {
-      setEvents(prev => [event, ...prev].slice(0, 200))
+      setEvents(prev => {
+        const idx = prev.findIndex(e => e.id === event.id)
+        if (idx !== -1) {
+          const updated = [...prev]
+          updated[idx] = event
+          return updated
+        }
+        return [event, ...prev].slice(0, 200)
+      })
     })
     return () => { unsub() }
   }, [])

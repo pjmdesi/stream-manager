@@ -2,6 +2,37 @@ import chokidar, { FSWatcher } from 'chokidar'
 import micromatch from 'micromatch'
 import path from 'path'
 import fs from 'fs'
+import { pipeline } from 'stream/promises'
+import { createReadStream, createWriteStream } from 'fs'
+import { Transform } from 'stream'
+
+const PROGRESS_THROTTLE_MS = 250
+
+async function copyWithProgress(
+  src: string,
+  dest: string,
+  onProgress: (pct: number) => void
+): Promise<void> {
+  const { size } = await fs.promises.stat(src)
+  let transferred = 0
+  let lastEmit = 0
+
+  const tracker = new Transform({
+    transform(chunk, _enc, cb) {
+      transferred += chunk.length
+      const now = Date.now()
+      if (now - lastEmit >= PROGRESS_THROTTLE_MS) {
+        lastEmit = now
+        onProgress(size > 0 ? Math.round((transferred / size) * 100) : 0)
+      }
+      cb(null, chunk)
+    }
+  })
+
+  onProgress(0)
+  await pipeline(createReadStream(src), tracker, createWriteStream(dest))
+  onProgress(100)
+}
 
 export interface WatchRule {
   id: string
@@ -13,16 +44,20 @@ export interface WatchRule {
   destination?: string
   autoMatchDate?: boolean
   namePattern?: string
+  onlyNewFiles?: boolean
 }
 
 export interface WatchEvent {
+  id: string
   ruleId: string
   ruleName: string
   filePath: string
   action: WatchRule['action']
   destination?: string
   timestamp: number
-  status: 'matched' | 'applied' | 'error'
+  lastChecked?: number
+  progress?: number
+  status: 'matched' | 'applied' | 'error' | 'waiting'
   error?: string
 }
 
@@ -33,6 +68,7 @@ class FileWatcher {
   private rules: WatchRule[] = []
   private callbacks: EventCallback[] = []
   private streamsDir: string = ''
+  private retryTimers = new Map<string, ReturnType<typeof setInterval>>()
 
   start(rules: WatchRule[], streamsDir: string = ''): void {
     this.stop()
@@ -66,6 +102,24 @@ class FileWatcher {
       this.watcher.close()
       this.watcher = null
     }
+    for (const timer of this.retryTimers.values()) clearInterval(timer)
+    this.retryTimers.clear()
+  }
+
+  async processExistingFiles(): Promise<void> {
+    for (const rule of this.rules) {
+      if (rule.onlyNewFiles) continue
+      try {
+        const entries = fs.readdirSync(rule.watchPath, { withFileTypes: true })
+        for (const entry of entries) {
+          if (!entry.isFile()) continue
+          if (!micromatch.isMatch(entry.name, rule.pattern)) continue
+          await this.handleFile(path.join(rule.watchPath, entry.name))
+        }
+      } catch {
+        // Watch path inaccessible — skip silently
+      }
+    }
   }
 
   onFileMatched(callback: EventCallback): void {
@@ -96,7 +150,9 @@ class FileWatcher {
         ? (this.resolveAutoDestination(rule, filePath) ?? rule.destination)
         : rule.destination
 
+      const eventId = `${rule.id}:${filePath}`
       const event: WatchEvent = {
+        id: eventId,
         ruleId: rule.id,
         ruleName: rule.watchPath,
         filePath,
@@ -108,11 +164,36 @@ class FileWatcher {
 
       this.emit({ ...event, status: 'matched' })
 
+      const onProgress = (pct: number) => this.emit({ ...event, status: 'matched', progress: pct })
+
       try {
-        await this.applyRule(rule, filePath)
+        await this.applyRule(rule, filePath, onProgress)
         this.emit({ ...event, status: 'applied' })
       } catch (err: any) {
-        this.emit({ ...event, status: 'error', error: err.message })
+        if (err.code === 'EBUSY') {
+          this.emit({ ...event, status: 'waiting' })
+          const timer = setInterval(async () => {
+            const onRetryProgress = (pct: number) =>
+              this.emit({ ...event, status: 'waiting', lastChecked: Date.now(), progress: pct })
+            try {
+              await this.applyRule(rule, filePath, onRetryProgress)
+              clearInterval(timer)
+              this.retryTimers.delete(eventId)
+              this.emit({ ...event, status: 'applied', lastChecked: Date.now() })
+            } catch (retryErr: any) {
+              if (retryErr.code === 'EBUSY') {
+                this.emit({ ...event, status: 'waiting', lastChecked: Date.now() })
+              } else {
+                clearInterval(timer)
+                this.retryTimers.delete(eventId)
+                this.emit({ ...event, status: 'error', error: retryErr.message, lastChecked: Date.now() })
+              }
+            }
+          }, 30_000)
+          this.retryTimers.set(eventId, timer)
+        } else {
+          this.emit({ ...event, status: 'error', error: err.message })
+        }
       }
     }
   }
@@ -129,7 +210,11 @@ class FileWatcher {
     return folderPath
   }
 
-  private async applyRule(rule: WatchRule, filePath: string): Promise<void> {
+  private async applyRule(
+    rule: WatchRule,
+    filePath: string,
+    onProgress?: (pct: number) => void
+  ): Promise<void> {
     const fileName = path.basename(filePath)
     const ext = path.extname(fileName)
     const nameWithoutExt = path.basename(fileName, ext)
@@ -158,15 +243,14 @@ class FileWatcher {
           await fs.promises.rename(filePath, destPath)
         } catch (err: any) {
           if (err.code === 'EXDEV') {
-            // Cross-device move: copy then delete
-            await fs.promises.copyFile(filePath, destPath)
+            await copyWithProgress(filePath, destPath, onProgress ?? (() => {}))
             await fs.promises.unlink(filePath)
           } else {
             throw err
           }
         }
       } else {
-        await fs.promises.copyFile(filePath, destPath)
+        await copyWithProgress(filePath, destPath, onProgress ?? (() => {}))
       }
     } else if (rule.action === 'rename') {
       const dir = path.dirname(filePath)
@@ -175,7 +259,7 @@ class FileWatcher {
         await fs.promises.rename(filePath, destPath)
       } catch (err: any) {
         if (err.code === 'EXDEV') {
-          await fs.promises.copyFile(filePath, destPath)
+          await copyWithProgress(filePath, destPath, onProgress ?? (() => {}))
           await fs.promises.unlink(filePath)
         } else {
           throw err

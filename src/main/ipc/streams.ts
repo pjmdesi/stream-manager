@@ -3,7 +3,6 @@ import fs from 'fs'
 import path from 'path'
 import { spawnSync } from 'child_process'
 import chokidar, { FSWatcher } from 'chokidar'
-import { runConversion } from '../services/ffmpegService'
 import { getStore } from './store'
 import type { ConversionPreset } from './converter'
 
@@ -500,6 +499,7 @@ export function registerStreamsIPC(): void {
           } as ArchiveProgress)
         }
 
+        const { runConversion } = await import('../services/ffmpegService')
         const success = await new Promise<boolean>((resolve) => {
           let cancelJob: (() => void) | null = null
           const prevCancel = archiveCancelFn

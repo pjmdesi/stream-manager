@@ -11,8 +11,121 @@
       href="https://fonts.googleapis.com/css2?family=Recursive:slnt,wght,CASL,CRSV,MONO@-15..0,300..800,0..1,0..1,0..1&display=swap"
       rel="stylesheet"
     />
+    <style>
+      @keyframes splash-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50%       { opacity: 0.6; transform: scale(0.94); }
+      }
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #1a1a2e;
+        display: flex;
+        flex-direction: column;
+        transition: opacity 400ms ease;
+      }
+      #splash.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #splash-titlebar {
+        height: 40px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        -webkit-app-region: drag;
+      }
+      #splash-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-family: 'Recursive', system-ui, sans-serif;
+        font-size: 14px;
+        font-weight: 600;
+        color: #a78bfa;
+        letter-spacing: 0.05em;
+      }
+      #splash-controls {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        -webkit-app-region: no-drag;
+      }
+      .splash-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: #6b7280;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        line-height: 1;
+        transition: background 150ms, color 150ms;
+      }
+      .splash-btn:hover { background: rgba(255,255,255,0.1); color: #d1d5db; }
+      .splash-btn.close:hover { background: #dc2626; color: #fff; }
+      #splash-body {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #splash-logo {
+        width: 72px;
+        height: 72px;
+        animation: splash-pulse 2s ease-in-out infinite;
+      }
+    </style>
   </head>
   <body>
+    <div id="splash">
+      <div id="splash-titlebar">
+        <div id="splash-title">
+          <svg width="20" height="20" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;">
+            <defs>
+              <radialGradient id="sg1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(399.16,0,0,399.16,1634.54,577.14)"><stop offset="0" stop-color="#b6a3fe"/><stop offset="1" stop-color="#4b1cff"/></radialGradient>
+              <radialGradient id="sg2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(512,0,0,435.64,512,570.69)"><stop offset="0" stop-color="#8e70ff"/><stop offset="1" stop-color="#c4b5fd"/></radialGradient>
+              <clipPath id="sc1"><rect x="0" y="0" width="1024" height="1024"/></clipPath>
+            </defs>
+            <g clip-path="url(#sc1)">
+              <g transform="matrix(1.282686,0,0,1.282686,-1584.598432,-169.704559)">
+                <path d="M1565.682,704.085C1495.565,676.552 1445.871,608.233 1445.871,528.398C1445.871,448.563 1495.565,380.244 1565.682,352.711L1565.682,555.664C1565.682,555.664 1581.528,579.131 1634.538,579.131C1687.548,579.131 1703.395,555.664 1703.395,555.664L1703.395,352.711C1773.511,380.244 1823.205,448.563 1823.205,528.398C1823.205,608.233 1773.511,676.552 1703.395,704.085L1703.395,881.798C1703.395,881.798 1687.548,905.265 1634.538,905.265C1581.528,905.265 1565.682,881.798 1565.682,881.798L1565.682,704.085Z" fill="url(#sg1)"/>
+              </g>
+              <path d="M852.759,171.241C940.006,258.488 994,378.988 994,512C994,645.012 940.006,765.512 852.759,852.759M767.922,767.922C833.448,702.397 874,611.897 874,512C874,412.103 833.448,321.603 767.922,256.078M256.078,256.078C190.552,321.603 150,412.103 150,512C150,611.897 190.552,702.397 256.078,767.922M171.241,852.759C83.994,765.512 30,645.012 30,512C30,378.988 83.994,258.488 171.241,171.241M423.679,733.415C333.742,698.099 270,610.467 270,508.064C270,405.661 333.742,318.029 423.679,282.713L423.679,543.038C423.679,543.038 444.005,573.138 512,573.138C579.995,573.138 600.321,543.038 600.321,543.038L600.321,282.713C690.258,318.029 754,405.661 754,508.064C754,610.467 690.258,698.099 600.321,733.415L600.321,961.365C600.321,961.365 579.995,991.466 512,991.466C444.005,991.466 423.679,961.365 423.679,961.365L423.679,733.415Z" fill="none" stroke="url(#sg2)" stroke-width="60px"/>
+            </g>
+          </svg>
+          Stream Manager
+        </div>
+        <div id="splash-controls">
+          <button class="splash-btn" onclick="window.api.windowMinimize()">&#x2212;</button>
+          <button class="splash-btn" onclick="window.api.windowMaximize()">&#x25A1;</button>
+          <button class="splash-btn close" onclick="window.api.windowClose()">&#x2715;</button>
+        </div>
+      </div>
+      <div id="splash-body">
+        <svg id="splash-logo" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;">
+          <defs>
+            <radialGradient id="lg1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(399.16,0,0,399.16,1634.54,577.14)"><stop offset="0" stop-color="#b6a3fe"/><stop offset="1" stop-color="#4b1cff"/></radialGradient>
+            <radialGradient id="lg2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(512,0,0,435.64,512,570.69)"><stop offset="0" stop-color="#8e70ff"/><stop offset="1" stop-color="#c4b5fd"/></radialGradient>
+            <clipPath id="lc1"><rect x="0" y="0" width="1024" height="1024"/></clipPath>
+          </defs>
+          <g clip-path="url(#lc1)">
+            <g transform="matrix(1.282686,0,0,1.282686,-1584.598432,-169.704559)">
+              <path d="M1565.682,704.085C1495.565,676.552 1445.871,608.233 1445.871,528.398C1445.871,448.563 1495.565,380.244 1565.682,352.711L1565.682,555.664C1565.682,555.664 1581.528,579.131 1634.538,579.131C1687.548,579.131 1703.395,555.664 1703.395,555.664L1703.395,352.711C1773.511,380.244 1823.205,448.563 1823.205,528.398C1823.205,608.233 1773.511,676.552 1703.395,704.085L1703.395,881.798C1703.395,881.798 1687.548,905.265 1634.538,905.265C1581.528,905.265 1565.682,881.798 1565.682,881.798L1565.682,704.085Z" fill="url(#lg1)"/>
+            </g>
+            <path d="M852.759,171.241C940.006,258.488 994,378.988 994,512C994,645.012 940.006,765.512 852.759,852.759M767.922,767.922C833.448,702.397 874,611.897 874,512C874,412.103 833.448,321.603 767.922,256.078M256.078,256.078C190.552,321.603 150,412.103 150,512C150,611.897 190.552,702.397 256.078,767.922M171.241,852.759C83.994,765.512 30,645.012 30,512C30,378.988 83.994,258.488 171.241,171.241M423.679,733.415C333.742,698.099 270,610.467 270,508.064C270,405.661 333.742,318.029 423.679,282.713L423.679,543.038C423.679,543.038 444.005,573.138 512,573.138C579.995,573.138 600.321,543.038 600.321,543.038L600.321,282.713C690.258,318.029 754,405.661 754,508.064C754,610.467 690.258,698.099 600.321,733.415L600.321,961.365C600.321,961.365 579.995,991.466 512,991.466C444.005,991.466 423.679,961.365 423.679,961.365L423.679,733.415Z" fill="none" stroke="url(#lg2)" stroke-width="60px"/>
+          </g>
+        </svg>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="./src/main.tsx"></script>
   </body>

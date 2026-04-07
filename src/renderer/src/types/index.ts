@@ -48,16 +48,20 @@ export interface WatchRule {
   destination?: string
   autoMatchDate?: boolean
   namePattern?: string
+  onlyNewFiles?: boolean
 }
 
 export interface WatchEvent {
+  id: string
   ruleId: string
   ruleName: string
   filePath: string
   action: WatchRule['action']
   destination?: string
   timestamp: number
-  status: 'matched' | 'applied' | 'error'
+  lastChecked?: number
+  progress?: number
+  status: 'matched' | 'applied' | 'error' | 'waiting'
   error?: string
 }
 
@@ -189,3 +193,26 @@ export interface LiveBroadcast {
 }
 
 export type Page = 'streams' | 'player' | 'templates' | 'rules' | 'converter' | 'combine' | 'youtube' | 'settings'
+
+// ── Clip mode ─────────────────────────────────────────────────────────────────
+
+export type CropMode = 'none' | '9:16'
+
+export interface BleepRegion {
+  id: string
+  start: number   // seconds
+  end: number     // seconds
+}
+
+export interface ClipState {
+  inPoint: number | null    // seconds; null = not set
+  outPoint: number | null   // seconds; null = not set
+  cropMode: CropMode
+  cropX: number             // 0–1; horizontal center of the 9:16 crop region (0 = left, 0.5 = centre, 1 = right)
+  bleepRegions: BleepRegion[]
+}
+
+export interface TimelineViewport {
+  viewStart: number   // seconds
+  viewEnd: number     // seconds
+}

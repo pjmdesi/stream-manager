@@ -23,6 +23,7 @@ function RuleModal({
   const [destination, setDestination] = useState(rule?.destination || '')
   const [autoMatchDate, setAutoMatchDate] = useState(rule?.autoMatchDate ?? true)
   const [namePattern, setNamePattern] = useState(rule?.namePattern || '')
+  const [onlyNewFiles, setOnlyNewFiles] = useState(rule?.onlyNewFiles ?? false)
 
   const pickDir = async (setter: (v: string) => void) => {
     const dir = await window.api.openDirectoryDialog()
@@ -39,7 +40,8 @@ function RuleModal({
       destinationMode: action !== 'rename' ? destinationMode : undefined,
       destination: action !== 'rename' && destinationMode === 'static' ? destination : undefined,
       autoMatchDate: action !== 'rename' && destinationMode === 'auto' ? autoMatchDate : undefined,
-      namePattern: namePattern || undefined
+      namePattern: namePattern || undefined,
+      onlyNewFiles: onlyNewFiles || undefined,
     })
   }
 
@@ -145,15 +147,34 @@ function RuleModal({
           placeholder="{date}_{name}.{ext}"
           hint="Variables: {name} {ext} {date} {year} {month} {day} {time}"
         />
+
+        <div className="border-t border-white/5 pt-4 flex flex-col gap-1.5">
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={onlyNewFiles}
+              onChange={e => setOnlyNewFiles(e.target.checked)}
+              className="accent-purple-500 w-4 h-4"
+            />
+            <span className="text-sm text-gray-300">Only apply to new files</span>
+          </label>
+          {onlyNewFiles && (
+            <p className="text-xs text-gray-500 pl-6">The rule will only apply to files created when the watcher is active.</p>
+          )}
+        </div>
       </div>
     </Modal>
   )
 }
 
 function EventBadge({ status }: { status: WatchEvent['status'] }) {
-  if (status === 'applied') return <CheckCircle size={12} className="text-green-400" />
-  if (status === 'error')   return <AlertCircle size={12} className="text-red-400" />
-  return <Clock size={12} className="text-yellow-500" />
+  return (
+    <div className="w-3 h-3 shrink-0 flex items-center justify-center mt-0.5">
+      {status === 'applied'                      && <CheckCircle size={12} className="text-green-400" />}
+      {status === 'error'                        && <AlertCircle size={12} className="text-red-400" />}
+      {(status === 'matched' || status === 'waiting') && <Clock size={12} className="text-yellow-500" />}
+    </div>
+  )
 }
 
 export function RulesPage() {
@@ -274,13 +295,32 @@ export function RulesPage() {
             {events.length === 0 && (
               <div className="text-center text-xs text-gray-600 py-8">No events yet</div>
             )}
-            {events.map((ev, i) => (
-              <div key={i} className="px-3 py-2 border-b border-white/5 flex items-start gap-2">
+            {events.map((ev) => (
+              <div key={ev.id} className="px-3 py-2 border-b border-white/5 flex items-start gap-2">
                 <EventBadge status={ev.status} />
-                <div className="min-w-0">
+                <div className="min-w-0 w-full">
                   <div className="text-xs text-gray-300 truncate">{ev.filePath.split(/[\\/]/).pop()}</div>
                   <div className="text-xs text-gray-600">{ev.action} · {new Date(ev.timestamp).toLocaleTimeString()}</div>
-                  {ev.error && <div className="text-xs text-red-400 truncate" title={ev.error}>{ev.error}</div>}
+                  {ev.progress !== undefined && ev.status !== 'applied' && ev.status !== 'error' && (
+                    <div className="mt-1">
+                      <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-purple-500 rounded-full transition-all duration-200"
+                          style={{ width: `${ev.progress}%` }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-gray-600 mt-0.5">{ev.progress}%</div>
+                    </div>
+                  )}
+                  {ev.status === 'waiting' && ev.progress === undefined && (
+                    <div className="text-xs text-yellow-600">
+                      File busy — retrying every 30s
+                      {ev.lastChecked && <span> · last checked {new Date(ev.lastChecked).toLocaleTimeString()}</span>}
+                    </div>
+                  )}
+                  {ev.status === 'error' && ev.error && (
+                    <div className="text-xs text-red-400 truncate" title={ev.error}>{ev.error}</div>
+                  )}
                 </div>
               </div>
             ))}

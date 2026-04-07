@@ -26,7 +26,6 @@ function createWindow(): BrowserWindow {
     height: 900,
     minWidth: 1000,
     minHeight: 700,
-    show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
     frame: false,
@@ -38,10 +37,6 @@ function createWindow(): BrowserWindow {
       webSecurity: false, // Required for local file:// audio/video
       allowRunningInsecureContent: false
     }
-  })
-
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -75,6 +70,19 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (win) {
+    if (win.isMinimized()) win.restore()
+    win.focus()
+  }
+})
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.streammanager')
 
@@ -82,18 +90,22 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Register all IPC handlers
-  registerVideoIPC()
-  registerFilesIPC()
-  registerTemplatesIPC()
-  registerConverterIPC()
-  registerStoreIPC()
-  registerStreamsIPC()
-  registerCombineIPC()
-  registerYouTubeIPC()
-  registerTwitchIPC()
+  // Register handlers needed immediately on startup
+  registerStoreIPC()    // useStore calls getConfig on mount
+  registerStreamsIPC()  // default page — calls listStreams + watchStreamsDir on first render
+  registerFilesIPC()   // WatcherContext may autostart the watcher on mount
 
   createWindow()
+
+  // Defer page-specific handlers — only called when the user navigates there
+  setImmediate(() => {
+    registerVideoIPC()
+    registerTemplatesIPC()
+    registerConverterIPC()
+    registerCombineIPC()
+    registerYouTubeIPC()
+    registerTwitchIPC()
+  })
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

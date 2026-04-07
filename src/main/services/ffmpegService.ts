@@ -284,10 +284,13 @@ export function runConversion(
   duration: number,
   onProgress: (percent: number) => void,
   onComplete: () => void,
-  onError: (err: Error) => void
+  onError: (err: Error) => void,
+  inputOptions?: string[]
 ): { cancel: () => void; pause: () => void; resume: () => void } {
   const args = parseArgsString(ffmpegArgs)
-  let command = ffmpeg(inputFile).outputOptions(args).output(outputFile)
+  let command = ffmpeg(inputFile)
+  if (inputOptions && inputOptions.length > 0) command = command.inputOptions(inputOptions)
+  command = command.outputOptions(args).output(outputFile)
   let ffmpegPid: number | null = null
 
   command

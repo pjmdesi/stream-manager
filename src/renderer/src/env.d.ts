@@ -35,6 +35,7 @@ declare global {
 
       // ── Files ────────────────────────────────────────────────────────────────
       openFileDialog(options?: Electron.OpenDialogOptions): Promise<string[]>
+      saveFileDialog(options?: Electron.SaveDialogOptions): Promise<string | null>
       openDirectoryDialog(): Promise<string | null>
       moveFile(src: string, dest: string): Promise<void>
       copyFile(src: string, dest: string): Promise<void>
@@ -68,6 +69,16 @@ declare global {
       deleteImportedPreset(id: string): Promise<void>
       renameImportedPreset(id: string, newName: string): Promise<void>
       addToQueue(job: ConversionJob): Promise<string>
+      addClipToQueue(params: {
+        job: ConversionJob
+        inPoint: number
+        outPoint: number
+        cropMode: 'none' | '9:16'
+        videoWidth: number
+        videoHeight: number
+        cropX: number
+        bleepRegions: Array<{ id: string; start: number; end: number }>
+      }): Promise<string>
       cancelJob(jobId: string): Promise<void>
       pauseJob(jobId: string): Promise<void>
       resumeJob(jobId: string): Promise<void>

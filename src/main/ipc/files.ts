@@ -56,6 +56,12 @@ export function registerFilesIPC(): void {
     return result.filePaths
   })
 
+  ipcMain.handle('files:saveFileDialog', async (event, options: Electron.SaveDialogOptions) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = await dialog.showSaveDialog(win!, options)
+    return result.canceled ? null : result.filePath ?? null
+  })
+
   ipcMain.handle('files:openDirectoryDialog', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const result = await dialog.showOpenDialog(win!, {
@@ -170,6 +176,8 @@ export function registerFilesIPC(): void {
     })
     const streamsDir = (getStore().get('config') as any)?.streamsDir ?? ''
     fileWatcher.start(rules, streamsDir)
+    // Non-blocking: process existing files for rules that opted in
+    fileWatcher.processExistingFiles()
   })
 
   ipcMain.handle('watcher:stop', async () => {

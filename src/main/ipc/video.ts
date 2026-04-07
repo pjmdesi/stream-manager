@@ -1,5 +1,5 @@
 import { ipcMain, IpcMainInvokeEvent, BrowserWindow } from 'electron'
-import { probeFile, extractAudioTracks, cancelExtraction, extractWaveformPeaks, WaveformPeak } from '../services/ffmpegService'
+import type { WaveformPeak } from '../services/ffmpegService'
 import { audioCacheManager } from '../services/audioCacheManager'
 import { thumbnailCacheManager } from '../services/thumbnailCacheManager'
 import { waveformCacheManager } from '../services/waveformCacheManager'
@@ -10,6 +10,7 @@ const waveformCache = new Map<string, WaveformPeak[]>()
 
 export function registerVideoIPC(): void {
   ipcMain.handle('video:probe', async (_event: IpcMainInvokeEvent, filePath: string) => {
+    const { probeFile } = await import('../services/ffmpegService')
     return await probeFile(filePath)
   })
 
@@ -27,6 +28,7 @@ export function registerVideoIPC(): void {
       const hash = audioCacheManager.hashKey(filePath)
       const cacheDir = audioCacheManager.cacheDir
 
+      const { extractAudioTracks } = await import('../services/ffmpegService')
       const paths = await extractAudioTracks(
         filePath,
         cacheDir,
@@ -47,6 +49,7 @@ export function registerVideoIPC(): void {
   )
 
   ipcMain.handle('video:cancelExtract', async () => {
+    const { cancelExtraction } = await import('../services/ffmpegService')
     cancelExtraction()
   })
 
@@ -79,6 +82,7 @@ export function registerVideoIPC(): void {
     if (waveformCache.has(filePath)) return waveformCache.get(filePath)
     const disk = waveformCacheManager.getCached(filePath)
     if (disk) { waveformCache.set(filePath, disk); return disk }
+    const { extractWaveformPeaks } = await import('../services/ffmpegService')
     const peaks = await extractWaveformPeaks(filePath)
     waveformCache.set(filePath, peaks)
     waveformCacheManager.save(filePath, peaks)

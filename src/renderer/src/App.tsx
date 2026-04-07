@@ -125,8 +125,12 @@ export default function App() {
   const { config, loading } = useStore()
 
   useEffect(() => {
-    if (!loading && !config.streamsDir) {
-      setOnboardingOpen(true)
+    if (loading) return
+    if (!config.streamsDir) setOnboardingOpen(true)
+    const splash = document.getElementById('splash')
+    if (splash) {
+      splash.classList.add('fade-out')
+      setTimeout(() => splash.remove(), 400)
     }
   }, [loading])
   const [pendingPlayer, setPendingPlayer] = useState<PendingFile | null>(null)
@@ -222,7 +226,7 @@ export default function App() {
         <main className="flex-1 overflow-hidden">
           {/* Persistent pages — must live outside ErrorBoundary so key={page} doesn't remount them */}
           <div className={`h-full ${page === 'player' ? '' : 'hidden'}`}>
-            <PlayerPage initialFile={pendingPlayer} />
+            <PlayerPage initialFile={pendingPlayer} onNavigateToConverter={() => setPage('converter')} />
           </div>
           <div className={`h-full ${page === 'converter' ? '' : 'hidden'}`}>
             <ConverterPage initialFile={pendingConverter} />

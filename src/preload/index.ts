@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('api', {
   openFileDialog: (options?: Electron.OpenDialogOptions) =>
     ipcRenderer.invoke('files:openFileDialog', options),
 
+  saveFileDialog: (options?: Electron.SaveDialogOptions) =>
+    ipcRenderer.invoke('files:saveFileDialog', options),
+
   openDirectoryDialog: () =>
     ipcRenderer.invoke('files:openDirectoryDialog'),
 
@@ -131,6 +134,9 @@ contextBridge.exposeInMainWorld('api', {
 
   addToQueue: (job: any) =>
     ipcRenderer.invoke('converter:addToQueue', job),
+
+  addClipToQueue: (params: any) =>
+    ipcRenderer.invoke('converter:addClipToQueue', params),
 
   cancelJob: (jobId: string) =>
     ipcRenderer.invoke('converter:cancelJob', jobId),

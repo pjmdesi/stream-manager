@@ -9,19 +9,15 @@ const DISPLAY_HEIGHT = 32
 const RENDER_SCALE = 3
 const FIXED_COUNT = 200
 
-function closestFrame(frames: Thumbnail[], targetTime: number): Thumbnail {
-  return frames.reduce((best, f) =>
-    Math.abs(f.time - targetTime) < Math.abs(best.time - targetTime) ? f : best
-  )
-}
-
 export function useThumbnailStrip(
   filePath: string | null,
   videoUrl: string | null,
   duration: number,
   videoWidth: number,
   videoHeight: number,
-  containerWidth: number
+  containerWidth: number,
+  viewStart: number = 0,
+  viewEnd: number = 0,
 ) {
   const [cachedFrames, setCachedFrames] = useState<Thumbnail[]>([])
   const [generating, setGenerating] = useState(false)
@@ -116,16 +112,39 @@ export function useThumbnailStrip(
     return () => { cancelled = true }
   }, [filePath, videoUrl, duration, videoWidth, videoHeight])
 
-  // Map the fixed 200 frames to however many slots fit the current container width
-  const thumbnails = useMemo(() => {
+  // Map cached frames to screen slots for the current container width and viewport.
+  //
+  // Each cached frame is placed at its "natural" slot — the slot whose target time
+  // is closest to the frame's actual time. At most one frame lands per slot.
+  // Slots with no nearby cached frame are null (gap), so that zooming in beyond
+  // the cache resolution shows real empty space rather than repeated thumbnails.
+  const thumbnails = useMemo((): (Thumbnail | null)[] => {
     if (cachedFrames.length === 0 || containerWidth < 10 || videoWidth <= 0 || videoHeight <= 0) return []
+
     const displayThumbWidth = Math.round(DISPLAY_HEIGHT * (videoWidth / videoHeight))
     const slotCount = Math.max(2, Math.floor(containerWidth / displayThumbWidth))
-    return Array.from({ length: slotCount }, (_, i) => {
-      const targetTime = i === 0 ? 0 : i === slotCount - 1 ? duration : (i / (slotCount - 1)) * duration
-      return closestFrame(cachedFrames, targetTime)
-    })
-  }, [cachedFrames, containerWidth, duration, videoWidth, videoHeight])
+
+    const vs = viewStart
+    const ve = viewEnd > 0 ? viewEnd : duration
+    const span = Math.max(0.001, ve - vs)
+
+    const slots: (Thumbnail | null)[] = Array(slotCount).fill(null)
+
+    for (const frame of cachedFrames) {
+      // Which slot does this frame naturally belong to?
+      const slotPos = Math.round(((frame.time - vs) / span) * (slotCount - 1))
+      if (slotPos < 0 || slotPos >= slotCount) continue
+
+      // Keep the frame that is closest to the slot's target time
+      const targetTime = vs + (slotPos / (slotCount - 1)) * span
+      const existing = slots[slotPos]
+      if (!existing || Math.abs(frame.time - targetTime) < Math.abs(existing.time - targetTime)) {
+        slots[slotPos] = frame
+      }
+    }
+
+    return slots
+  }, [cachedFrames, containerWidth, duration, videoWidth, videoHeight, viewStart, viewEnd])
 
   return { thumbnails, generating }
 }

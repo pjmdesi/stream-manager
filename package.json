@@ -1,6 +1,6 @@
 {
   "name": "stream-manager",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A streaming file management app for Twitch/YouTube streamers",
   "main": "./out/main/index.js",
   "scripts": {
@@ -81,9 +81,9 @@
     "@types/uuid": "^9.0.7",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
-    "electron": "^28.2.0",
-    "electron-builder": "^24.13.3",
-    "electron-vite": "^2.0.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^26.0.0",
+    "electron-vite": "^2.3.0",
     "lucide-react": "^0.312.0",
     "postcss": "^8.4.33",
     "react": "^18.2.0",

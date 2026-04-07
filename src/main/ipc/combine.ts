@@ -3,7 +3,6 @@ import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import ffmpegStatic from 'ffmpeg-static'
 
 function fixAsarPath(p: string): string {
   return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
@@ -18,6 +17,7 @@ export function registerCombineIPC(): void {
       outputPath: string,
       totalDurationSec: number
     ): Promise<void> => {
+      const { default: ffmpegStatic } = await import('ffmpeg-static')
       if (!ffmpegStatic) throw new Error('ffmpeg binary not found')
 
       // Write a concat list file to a temp location

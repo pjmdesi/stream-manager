@@ -2,7 +2,6 @@ import { ipcMain, BrowserWindow, app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import { runConversion, applyGpuAcceleration, probeFile } from '../services/ffmpegService'
 import { getStore } from './store'
 
 export interface ConversionPreset {
@@ -305,9 +304,106 @@ export function registerConverterIPC(): void {
       }
     }
 
+    const { runConversion, applyGpuAcceleration, probeFile } = await import('../services/ffmpegService')
     const gpuArgs = await applyGpuAcceleration(job.preset.ffmpegArgs)
     const duration = await probeFile(job.inputFile).then(info => info.duration).catch(() => 0)
     const result = runConversion(job.inputFile, job.outputFile, gpuArgs, duration, onProgress, onComplete, onError)
+    cancellers.set(id, result.cancel)
+    pausers.set(id, result.pause)
+    resumers.set(id, result.resume)
+    return id
+  })
+
+  ipcMain.handle('converter:addClipToQueue', async (event, params: {
+    job: ConversionJob
+    inPoint: number
+    outPoint: number
+    cropMode: 'none' | '9:16'
+    cropX: number
+    videoWidth: number
+    videoHeight: number
+    bleepRegions: Array<{ id: string; start: number; end: number }>
+  }) => {
+    const { job, inPoint, outPoint, cropMode, cropX, videoWidth, videoHeight, bleepRegions } = params
+    const id = job.id || uuidv4()
+    const clipDuration = outPoint - inPoint
+    const hasCrop  = cropMode === '9:16'
+    const hasBleep = bleepRegions.length > 0
+
+    const { runConversion, probeFile } = await import('../services/ffmpegService')
+    const fileInfo = await probeFile(job.inputFile).catch(() => null)
+    const audioTrackCount = fileInfo?.audioTracks?.length ?? 1
+    const hasMultiTrack = audioTrackCount > 1
+
+    // Build between(t,...) expressions relative to clip start (input-side -ss resets t to 0)
+    const betweenExpr = bleepRegions
+      .map(r => `between(t,${(r.start - inPoint).toFixed(3)},${(r.end - inPoint).toFixed(3)})`)
+      .join('+')
+
+    // Assemble filter_complex graph
+    const fcParts: string[] = []
+    let aMap = '-map 0:a:0'
+    let vMap = '-map 0:v'
+
+    if (hasCrop) {
+      // Ensure even dimensions — required by libx264
+      const cropW = Math.floor(videoHeight * 9 / 16 / 2) * 2
+      const cropOffsetX = Math.floor(cropX * (videoWidth - cropW) / 2) * 2
+      fcParts.push(`[0:v]crop=${cropW}:${videoHeight}:${cropOffsetX}:0[vout]`)
+      vMap = '-map "[vout]"'
+    }
+
+    // Merge all audio tracks into one before any bleep processing
+    let audioSrc = '[0:a:0]'
+    if (hasMultiTrack) {
+      const trackInputs = Array.from({ length: audioTrackCount }, (_, i) => `[0:a:${i}]`).join('')
+      fcParts.push(`${trackInputs}amix=inputs=${audioTrackCount}:normalize=0:duration=first[mixed]`)
+      audioSrc = '[mixed]'
+    }
+
+    if (hasBleep) {
+      const notExpr = `not(${betweenExpr})`
+      const bExpr   = `0.25*(${betweenExpr})`
+      fcParts.push(`${audioSrc}volume=volume='${notExpr}':eval=frame[muted]`)
+      fcParts.push(`sine=frequency=1000[sine_raw]`)
+      fcParts.push(`[sine_raw]volume=volume='${bExpr}':eval=frame[bleep]`)
+      fcParts.push(`[muted][bleep]amix=inputs=2:normalize=0:duration=shortest[aout]`)
+      aMap = '-map "[aout]"'
+    } else if (hasMultiTrack) {
+      aMap = '-map "[mixed]"'
+    }
+
+    const mapArgs = `${vMap} ${aMap}`
+    const filterPart = fcParts.length > 0
+      ? `-filter_complex "${fcParts.join(';')}" ${mapArgs}`
+      : ''
+    const ffmpegArgs = [filterPart, '-c:v libx264 -crf 18 -preset fast -c:a aac -b:a 192k -ac 2']
+      .filter(Boolean).join(' ')
+
+    const inputOptions = ['-ss', `${inPoint}`, '-to', `${outPoint}`]
+    const newJob: ConversionJob = { ...job, id, status: 'running', progress: 0 }
+    jobs.set(id, newJob)
+
+    const win = BrowserWindow.fromWebContents(event.sender)
+    win?.webContents.send('converter:jobProgress', { jobId: id, percent: 0 })
+
+    const onProgress = (percent: number) => {
+      const j = jobs.get(id)
+      if (j) jobs.set(id, { ...j, progress: percent })
+      if (win && !win.isDestroyed()) win.webContents.send('converter:jobProgress', { jobId: id, percent })
+    }
+    const onComplete = () => {
+      jobs.set(id, { ...jobs.get(id)!, status: 'done', progress: 100 })
+      cancellers.delete(id)
+      if (win && !win.isDestroyed()) win.webContents.send('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
+    }
+    const onError = (err: Error) => {
+      jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
+      cancellers.delete(id)
+      if (win && !win.isDestroyed()) win.webContents.send('converter:jobError', { jobId: id, error: err.message })
+    }
+
+    const result = runConversion(job.inputFile, job.outputFile, ffmpegArgs, clipDuration, onProgress, onComplete, onError, inputOptions)
     cancellers.set(id, result.cancel)
     pausers.set(id, result.pause)
     resumers.set(id, result.resume)
