@@ -278,6 +278,27 @@ export function SettingsPage() {
             </div>
           </label>
         </section>
+
+        {import.meta.env.DEV && (
+          <section className="flex flex-col gap-4">
+            <h2 className="text-sm font-semibold text-yellow-600 uppercase tracking-wider border-b border-yellow-600/20 pb-2">
+              Dev Tools
+            </h2>
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  await window.api.resetOnboarding()
+                  window.location.reload()
+                }}
+              >
+                Reset onboarding
+              </Button>
+              <p className="text-xs text-gray-600">Clears streamsDir and streamerName, then reloads the app to trigger the onboarding flow. Not visible in production builds.</p>
+            </div>
+          </section>
+        )}
       </div>
       </div>
       </div>

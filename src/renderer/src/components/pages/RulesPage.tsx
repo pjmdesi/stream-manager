@@ -280,7 +280,7 @@ export function RulesPage() {
                 <div className="min-w-0">
                   <div className="text-xs text-gray-300 truncate">{ev.filePath.split(/[\\/]/).pop()}</div>
                   <div className="text-xs text-gray-600">{ev.action} · {new Date(ev.timestamp).toLocaleTimeString()}</div>
-                  {ev.error && <div className="text-xs text-red-400 truncate">{ev.error}</div>}
+                  {ev.error && <div className="text-xs text-red-400 truncate" title={ev.error}>{ev.error}</div>}
                 </div>
               </div>
             ))}

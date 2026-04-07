@@ -1135,10 +1135,15 @@ export function StreamsPage({
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<StreamFolder | null>(null)
   const [deleteTree, setDeleteTree] = useState<TreeNode[]>([])
+  const [deleteFileList, setDeleteFileList] = useState<string[]>([])
 
   useEffect(() => {
-    if (!deleteTarget) { setDeleteTree([]); return }
-    buildTree(deleteTarget.folderPath).then(setDeleteTree)
+    if (!deleteTarget) { setDeleteTree([]); setDeleteFileList([]); return }
+    if (isDumpMode) {
+      window.api.listFilesForDate(deleteTarget.folderPath, deleteTarget.date).then(setDeleteFileList)
+    } else {
+      buildTree(deleteTarget.folderPath).then(setDeleteTree)
+    }
   }, [deleteTarget])
 
   useEffect(() => {
@@ -1164,14 +1169,14 @@ export function StreamsPage({
   const [templates, setTemplates] = useState<{ name: string; path: string }[]>([])
 
   const streamsDir = config.streamsDir
+  const streamMode = config.streamMode || 'folder-per-stream'
+  const isDumpMode = streamMode === 'dump-folder'
 
-  // loadFolders takes an explicit dir — no closure on streamsDir,
-  // so it has an empty dep array and a stable reference.
   const loadFolders = useCallback(async (dir: string) => {
     if (!dir) return
     setLoading(true)
     try {
-      const result = await window.api.listStreams(dir)
+      const result = await window.api.listStreams(dir, streamMode as any)
       setFolders(result)
       const hasMissing = result.some(f => f.isMissing)
       if (hasMissing) {
@@ -1185,14 +1190,14 @@ export function StreamsPage({
       }
     } catch (_) {}
     setLoading(false)
-  }, [])
+  }, [streamMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Only re-run when streamsDir itself changes, not when loadFolders ref changes.
+  // Only re-run when streamsDir or streamMode changes.
   useEffect(() => {
     if (!streamsDir) return
     loadFolders(streamsDir)
     window.api.listStreamTemplates(streamsDir).then(setTemplates)
-    window.api.watchStreamsDir(streamsDir)
+    window.api.watchStreamsDir(streamsDir, streamMode as any)
     return () => { window.api.unwatchStreamsDir() }
   }, [streamsDir]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1239,33 +1244,38 @@ export function StreamsPage({
     '.divx', '.3gp', '.ogv', '.asf', '.rmvb', '.f4v', '.hevc'
   ])
 
-  const sendVideo = async (folderPath: string, action: 'player' | 'converter') => {
-    const allFiles = await window.api.listFiles(folderPath)
-    const videos = allFiles.filter((f: any) => !f.isDirectory && VIDEO_EXTS_RENDERER.has(f.extension?.toLowerCase()))
+  const getVideosForFolder = async (folder: StreamFolder): Promise<string[]> => {
+    if (isDumpMode) return folder.videos
+    const allFiles = await window.api.listFiles(folder.folderPath)
+    return allFiles
+      .filter((f: any) => !f.isDirectory && VIDEO_EXTS_RENDERER.has(f.extension?.toLowerCase()))
+      .map((f: any) => f.path)
+  }
+
+  const sendVideo = async (folder: StreamFolder, action: 'player' | 'converter') => {
+    const videos = await getVideosForFolder(folder)
     if (videos.length === 0) return
     if (videos.length === 1) {
-      action === 'player' ? onSendToPlayer(videos[0].path) : onSendToConverter(videos[0].path)
+      action === 'player' ? onSendToPlayer(videos[0]) : onSendToConverter(videos[0])
     } else {
-      setVideoPicker({ files: videos.map((f: any) => f.path), action })
+      setVideoPicker({ files: videos, action })
     }
   }
 
-  const sendToCombine = async (folderPath: string) => {
-    const allFiles = await window.api.listFiles(folderPath)
-    const videos = allFiles.filter((f: any) => !f.isDirectory && VIDEO_EXTS_RENDERER.has(f.extension?.toLowerCase()))
+  const sendToCombine = async (folder: StreamFolder) => {
+    const videos = await getVideosForFolder(folder)
     if (videos.length === 0) return
-    const paths = videos.map((f: any) => f.path)
     if (videos.length === 1) {
-      onSendToCombine(paths)
+      onSendToCombine(videos)
     } else {
-      setVideoPicker({ files: paths, action: 'combine' })
+      setVideoPicker({ files: videos, action: 'combine' })
     }
   }
 
   const stampArchiveFolder = async () => {
     const dir = await window.api.openDirectoryDialog()
     if (!dir) return
-    const count = await window.api.stampArchived(dir)
+    const count = await window.api.stampArchived(dir, streamMode as any)
     if (count > 0) await loadFolders(streamsDir)
     // brief feedback via title attribute is enough; no modal needed
   }
@@ -1276,19 +1286,20 @@ export function StreamsPage({
     lastClickedIndex.current = null
   }
 
-  const toggleSelected = (folderPath: string, shiftKey: boolean, index: number) => {
+  const toggleSelected = (key: string, shiftKey: boolean, index: number) => {
     setSelectedPaths(prev => {
       const next = new Set(prev)
       if (shiftKey && lastClickedIndex.current !== null) {
         const start = Math.min(lastClickedIndex.current, index)
         const end = Math.max(lastClickedIndex.current, index)
         for (let i = start; i <= end; i++) {
-          const path = filteredFolders[i]?.folderPath
-          if (path) lastClickedAction.current === 'add' ? next.add(path) : next.delete(path)
+          const f = filteredFolders[i]
+          const k = f ? selectionKey(f) : undefined
+          if (k) lastClickedAction.current === 'add' ? next.add(k) : next.delete(k)
         }
       } else {
-        const wasSelected = next.has(folderPath)
-        wasSelected ? next.delete(folderPath) : next.add(folderPath)
+        const wasSelected = next.has(key)
+        wasSelected ? next.delete(key) : next.add(key)
         lastClickedAction.current = wasSelected ? 'remove' : 'add'
         lastClickedIndex.current = index
       }
@@ -1296,17 +1307,25 @@ export function StreamsPage({
     })
   }
 
-  const selectAll = () => setSelectedPaths(new Set(filteredFolders.map(f => f.folderPath)))
+  const selectionKey = (f: StreamFolder) => isDumpMode ? f.date : f.folderPath
+
+  const selectAll = () => setSelectedPaths(new Set(filteredFolders.map(selectionKey)))
   const clearSelection = () => { setSelectedPaths(new Set()); lastClickedIndex.current = null }
 
   const startArchive = async (preset: ConversionPreset, setAsDefault: boolean) => {
     if (setAsDefault) await updateConfig({ archivePresetId: preset.id })
     setShowPresetPicker(false)
 
-    const paths = Array.from(selectedPaths)
-    const initialStatuses: FolderArchiveStatus[] = paths.map(p => ({
-      folderPath: p,
-      folderName: p.split(/[\\/]/).pop() ?? p,
+    const selectedFolders = folders.filter(f => selectedPaths.has(f.folderPath) || selectedPaths.has(f.date))
+
+    const sessions = selectedFolders.map(f => isDumpMode
+      ? { folderPath: f.folderPath, date: f.date, filePaths: f.videos }
+      : { folderPath: f.folderPath, date: f.date }
+    )
+
+    const initialStatuses: FolderArchiveStatus[] = sessions.map(s => ({
+      folderPath: s.folderPath,
+      folderName: s.date,
       phase: 'queued',
       percent: 0,
       currentFile: '',
@@ -1316,7 +1335,7 @@ export function StreamsPage({
     setArchiveStatuses(initialStatuses)
     setArchiveDone(false)
 
-    await window.api.archiveFolders(paths, preset)
+    await window.api.archiveFolders(sessions, preset)
 
     setArchiveDone(true)
     await loadFolders(streamsDir)
@@ -1334,7 +1353,7 @@ export function StreamsPage({
 
   const handleSave = useCallback(async (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => {
     if (modal.mode === 'new') {
-      await window.api.createStreamFolder(streamsDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath)
+      await window.api.createStreamFolder(streamsDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath, streamMode as any)
     } else if (modal.mode === 'edit' || modal.mode === 'add') {
       await window.api.writeStreamMeta(modal.folder.folderPath, meta)
     }
@@ -1492,7 +1511,7 @@ export function StreamsPage({
         <div className="flex items-center gap-2 px-6 py-2 bg-red-900/20 border-b border-red-700/30 text-xs text-red-400 shrink-0">
           <AlertTriangle size={12} className="shrink-0" />
           <span>
-            {folders.filter(f => f.isMissing).length} stream {folders.filter(f => f.isMissing).length === 1 ? 'folder' : 'folders'} could not be found on disk. Missing items are shown in red below.
+            {folders.filter(f => f.isMissing).length} stream {folders.filter(f => f.isMissing).length === 1 ? 'session' : 'sessions'} {isDumpMode ? 'with no files detected' : 'could not be found on disk'}. Missing items are shown in red below.
           </span>
           <button onClick={() => setOrphanConfirmOpen(true)} className="ml-auto underline hover:text-red-300">
             Review
@@ -1619,19 +1638,21 @@ export function StreamsPage({
                 <tr><td colSpan={selectMode ? 8 : 7} className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</td></tr>
               ) : filteredFolders.map((folder, i) => (
                 <StreamRow
-                  key={folder.folderPath}
+                  key={isDumpMode ? folder.date : folder.folderPath}
                   folder={folder}
                   zebra={i % 2 === 0}
                   selectMode={selectMode}
-                  selected={selectedPaths.has(folder.folderPath)}
-                  onToggleSelect={(shiftKey) => toggleSelected(folder.folderPath, shiftKey, i)}
+                  selected={selectedPaths.has(selectionKey(folder))}
+                  onToggleSelect={(shiftKey) => toggleSelected(selectionKey(folder), shiftKey, i)}
                   onEdit={() => setModal({ mode: 'edit', folder })}
                   onAdd={() => setModal({ mode: 'add', folder })}
-                  onOpen={() => window.api.openInExplorer(folder.folderPath)}
+                  onOpen={() => isDumpMode && folder.videos.length > 0
+                    ? window.api.openInExplorer(folder.videos[0])
+                    : window.api.openInExplorer(folder.folderPath)}
                   onDelete={() => setDeleteTarget(folder)}
-                  onSendToPlayer={() => sendVideo(folder.folderPath, 'player')}
-                  onSendToConverter={() => sendVideo(folder.folderPath, 'converter')}
-                  onSendToCombine={() => sendToCombine(folder.folderPath)}
+                  onSendToPlayer={() => sendVideo(folder, 'player')}
+                  onSendToConverter={() => sendVideo(folder, 'converter')}
+                  onSendToCombine={() => sendToCombine(folder)}
                   onThumbClick={folder.thumbnails.length > 0
                     ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i })
                     : undefined}
@@ -1659,7 +1680,7 @@ export function StreamsPage({
         <Modal
           isOpen
           onClose={() => setDeleteTarget(null)}
-          title="Move folder to Recycle Bin?"
+          title={isDumpMode ? 'Move files to Recycle Bin?' : 'Move folder to Recycle Bin?'}
           width="sm"
           footer={
             <>
@@ -1670,7 +1691,11 @@ export function StreamsPage({
                 onClick={async () => {
                   const target = deleteTarget
                   setDeleteTarget(null)
-                  await window.api.deleteStreamFolder(target.folderPath)
+                  if (isDumpMode) {
+                    await window.api.deleteStreamFiles(target.folderPath, target.date)
+                  } else {
+                    await window.api.deleteStreamFolder(target.folderPath)
+                  }
                   await loadFolders(streamsDir)
                 }}
               >
@@ -1683,7 +1708,18 @@ export function StreamsPage({
             The following will be moved to the Recycle Bin:
           </p>
           <div className="bg-white/5 rounded-lg px-3 py-2.5 mb-3 font-mono text-sm text-gray-200 max-h-64 overflow-y-auto">
-            <TreeView nodes={deleteTree} depth={0} rootName={deleteTarget.folderName} />
+            {isDumpMode ? (
+              deleteFileList.length === 0
+                ? <span className="text-gray-600 italic text-xs">No files found for this date.</span>
+                : deleteFileList.map(f => (
+                    <div key={f} className="flex items-center gap-1.5 text-gray-500 py-px">
+                      <span className="shrink-0 text-gray-700">·</span>
+                      <span className="truncate">{f.split(/[\\/]/).pop()}</span>
+                    </div>
+                  ))
+            ) : (
+              <TreeView nodes={deleteTree} depth={0} rootName={deleteTarget.folderName} />
+            )}
           </div>
           <p className="text-xs text-gray-600">This action can be undone from the Recycle Bin.</p>
         </Modal>
@@ -1693,7 +1729,7 @@ export function StreamsPage({
       <Modal
         isOpen={orphanConfirmOpen}
         onClose={() => { setOrphanConfirmOpen(false); setOrphanDismissed(true) }}
-        title="Stream folders not found"
+        title={isDumpMode ? 'Stream sessions with no files' : 'Stream folders not found'}
         width="sm"
         footer={
           <>
@@ -1717,7 +1753,9 @@ export function StreamsPage({
         }
       >
         <p className="text-sm text-gray-300 mb-3">
-          The following stream folders could not be found on disk. They may have been deleted or moved outside of the app.
+          {isDumpMode
+            ? 'The following stream sessions have metadata records but no files were detected on disk. They may have been deleted or moved outside of the app.'
+            : 'The following stream folders could not be found on disk. They may have been deleted or moved outside of the app.'}
         </p>
         <ul className="space-y-1 mb-3">
           {folders.filter(f => f.isMissing).map(f => (

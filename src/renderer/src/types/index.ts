@@ -81,6 +81,8 @@ export interface ConversionJob {
   error?: string
 }
 
+export type StreamMode = 'folder-per-stream' | 'dump-folder' | ''
+
 export interface AppConfig {
   defaultWatchDir: string
   defaultOutputDir: string
@@ -91,6 +93,7 @@ export interface AppConfig {
   streamerName: string
   defaultGame: string
   streamsDir: string
+  streamMode: StreamMode
   archivePresetId: string
   defaultThumbnailTemplate: string
   checkEpisodeIteration: boolean

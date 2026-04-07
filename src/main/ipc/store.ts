@@ -7,6 +7,8 @@ export interface YTTitleTemplate { id: string; name: string; template: string }
 export interface YTDescriptionTemplate { id: string; name: string; description: string }
 export interface YTTagTemplate { id: string; name: string; tags: string[] }
 
+export type StreamMode = 'folder-per-stream' | 'dump-folder' | ''
+
 export interface AppConfig {
   defaultWatchDir: string
   defaultOutputDir: string
@@ -17,6 +19,7 @@ export interface AppConfig {
   streamerName: string
   defaultGame: string
   streamsDir: string
+  streamMode: StreamMode
   archivePresetId: string
   defaultThumbnailTemplate: string
   checkEpisodeIteration: boolean
@@ -38,6 +41,7 @@ function getDefaultConfig(): AppConfig {
     streamerName: '',
     defaultGame: '',
     streamsDir: '',
+    streamMode: '' as StreamMode,
     archivePresetId: '',
     defaultThumbnailTemplate: '',
     checkEpisodeIteration: true,
@@ -104,4 +108,12 @@ export function registerStoreIPC(): void {
   ipcMain.handle('store:setYTDescriptionTemplates', async (_e, v: YTDescriptionTemplate[]) => getStore().set('ytDescriptionTemplates', v))
   ipcMain.handle('store:getYTTagTemplates', async () => getStore().get('ytTagTemplates', []))
   ipcMain.handle('store:setYTTagTemplates', async (_e, v: YTTagTemplate[]) => getStore().set('ytTagTemplates', v))
+
+  if (!app.isPackaged) {
+    ipcMain.handle('store:resetOnboarding', async () => {
+      const s = getStore()
+      const current = s.get('config', getDefaultConfig())
+      s.set('config', { ...current, streamsDir: '', streamerName: '', streamMode: '' })
+    })
+  }
 }

@@ -176,8 +176,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('store:setWatchRules', rules),
 
   // ── Streams ───────────────────────────────────────────────────────────────
-  listStreams: (dir: string) =>
-    ipcRenderer.invoke('streams:list', dir),
+  listStreams: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
+    ipcRenderer.invoke('streams:list', dir, mode),
 
   writeStreamMeta: (folderPath: string, meta: any) =>
     ipcRenderer.invoke('streams:writeMeta', folderPath, meta),
@@ -185,14 +185,20 @@ contextBridge.exposeInMainWorld('api', {
   listStreamTemplates: (streamsDir: string) =>
     ipcRenderer.invoke('streams:listTemplates', streamsDir),
 
-  createStreamFolder: (parentDir: string, date: string, meta?: any, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) =>
-    ipcRenderer.invoke('streams:createFolder', parentDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath),
+  createStreamFolder: (parentDir: string, date: string, meta?: any, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder') =>
+    ipcRenderer.invoke('streams:createFolder', parentDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath, mode),
 
-  stampArchived: (dir: string) =>
-    ipcRenderer.invoke('streams:stampArchived', dir),
+  stampArchived: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
+    ipcRenderer.invoke('streams:stampArchived', dir, mode),
 
-  watchStreamsDir: (dir: string) =>
-    ipcRenderer.invoke('streams:watchDir', dir),
+  listFilesForDate: (dir: string, date: string) =>
+    ipcRenderer.invoke('streams:listFilesForDate', dir, date),
+
+  deleteStreamFiles: (dir: string, date: string) =>
+    ipcRenderer.invoke('streams:deleteStreamFiles', dir, date),
+
+  watchStreamsDir: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
+    ipcRenderer.invoke('streams:watchDir', dir, mode),
 
   unwatchStreamsDir: () =>
     ipcRenderer.invoke('streams:unwatchDir'),
@@ -203,8 +209,8 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('streams:changed', handler)
   },
 
-  archiveFolders: (folderPaths: string[], preset: any) =>
-    ipcRenderer.invoke('streams:archiveFolders', folderPaths, preset),
+  archiveFolders: (sessions: Array<{ folderPath: string; date: string; filePaths?: string[] }>, preset: any) =>
+    ipcRenderer.invoke('streams:archiveFolders', sessions, preset),
 
   cancelArchive: () =>
     ipcRenderer.invoke('streams:cancelArchive'),
@@ -214,6 +220,12 @@ contextBridge.exposeInMainWorld('api', {
 
   removeStreamOrphans: (streamsDir: string, folderNames: string[]) =>
     ipcRenderer.invoke('streams:removeOrphans', streamsDir, folderNames),
+
+  convertDumpFolder: (dirPath: string) =>
+    ipcRenderer.invoke('streams:convertDumpFolder', dirPath),
+
+  undoConvertDumpFolder: (manifest: { moves: { from: string; to: string }[]; createdFolders: string[] }) =>
+    ipcRenderer.invoke('streams:undoConvertDumpFolder', manifest),
 
   onArchiveProgress: (callback: (data: any) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
@@ -274,5 +286,8 @@ contextBridge.exposeInMainWorld('api', {
   // ── Window Controls ───────────────────────────────────────────────────────
   windowMinimize: () => ipcRenderer.send('window:minimize'),
   windowMaximize: () => ipcRenderer.send('window:maximize'),
-  windowClose: () => ipcRenderer.send('window:close')
+  windowClose: () => ipcRenderer.send('window:close'),
+
+  // ── Dev tools ─────────────────────────────────────────────────────────────
+  resetOnboarding: () => ipcRenderer.invoke('store:resetOnboarding')
 })

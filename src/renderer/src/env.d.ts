@@ -83,18 +83,22 @@ declare global {
       setWatchRules(rules: WatchRule[]): Promise<void>
 
       // ── Streams ──────────────────────────────────────────────────────────────
-      listStreams(dir: string): Promise<StreamFolder[]>
+      listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
       writeStreamMeta(folderPath: string, meta: StreamMeta): Promise<void>
       listStreamTemplates(streamsDir: string): Promise<{ name: string; path: string }[]>
-      createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string): Promise<string>
-      stampArchived(dir: string): Promise<number>
-      watchStreamsDir(dir: string): Promise<void>
+      createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<string>
+      stampArchived(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<number>
+      listFilesForDate(dir: string, date: string): Promise<string[]>
+      deleteStreamFiles(dir: string, date: string): Promise<void>
+      watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
       unwatchStreamsDir(): Promise<void>
       onStreamsChanged(cb: () => void): () => void
-      archiveFolders(folderPaths: string[], preset: ConversionPreset): Promise<{ errors: string[] }>
+      archiveFolders(sessions: Array<{ folderPath: string; date: string; filePaths?: string[] }>, preset: ConversionPreset): Promise<{ errors: string[] }>
       cancelArchive(): Promise<void>
       deleteStreamFolder(folderPath: string): Promise<void>
       removeStreamOrphans(streamsDir: string, folderNames: string[]): Promise<void>
+      convertDumpFolder(dirPath: string): Promise<{ moved: number; skipped: number; manifest: { moves: { from: string; to: string }[]; createdFolders: string[] } }>
+      undoConvertDumpFolder(manifest: { moves: { from: string; to: string }[]; createdFolders: string[] }): Promise<void>
       onArchiveProgress(cb: (data: any) => void): () => void
 
       // ── Combine ──────────────────────────────────────────────────────────────
@@ -124,6 +128,7 @@ declare global {
       windowMinimize(): void
       windowMaximize(): void
       windowClose(): void
+      resetOnboarding(): Promise<void>
     }
   }
 }

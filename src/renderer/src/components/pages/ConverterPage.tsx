@@ -270,7 +270,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             </div>
           )}
           {!isRenaming && p.description && (
-            <div className="text-xs text-gray-500 mt-0.5 truncate">{p.description}</div>
+            <div className="text-xs text-gray-500 mt-0.5 truncate" title={p.description}>{p.description}</div>
           )}
         </div>
         {deletable && !isRenaming && (

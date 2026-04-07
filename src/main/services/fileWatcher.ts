@@ -150,18 +150,37 @@ class FileWatcher {
           : 'No destination configured'
       )
 
-      fs.mkdirSync(destination, { recursive: true })
+      await fs.promises.mkdir(destination, { recursive: true })
       const destPath = path.join(destination, newName)
 
       if (rule.action === 'move') {
-        fs.renameSync(filePath, destPath)
+        try {
+          await fs.promises.rename(filePath, destPath)
+        } catch (err: any) {
+          if (err.code === 'EXDEV') {
+            // Cross-device move: copy then delete
+            await fs.promises.copyFile(filePath, destPath)
+            await fs.promises.unlink(filePath)
+          } else {
+            throw err
+          }
+        }
       } else {
-        fs.copyFileSync(filePath, destPath)
+        await fs.promises.copyFile(filePath, destPath)
       }
     } else if (rule.action === 'rename') {
       const dir = path.dirname(filePath)
       const destPath = path.join(dir, newName)
-      fs.renameSync(filePath, destPath)
+      try {
+        await fs.promises.rename(filePath, destPath)
+      } catch (err: any) {
+        if (err.code === 'EXDEV') {
+          await fs.promises.copyFile(filePath, destPath)
+          await fs.promises.unlink(filePath)
+        } else {
+          throw err
+        }
+      }
     }
   }
 }

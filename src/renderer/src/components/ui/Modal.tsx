@@ -8,6 +8,7 @@ interface ModalProps {
   children: React.ReactNode
   width?: 'sm' | 'md' | 'lg' | 'xl' | '2xl'
   footer?: React.ReactNode
+  dismissible?: boolean
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -16,11 +17,12 @@ export const Modal: React.FC<ModalProps> = ({
   title,
   children,
   width = 'md',
-  footer
+  footer,
+  dismissible = true,
 }) => {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && dismissible) onClose()
     }
     if (isOpen) {
       window.addEventListener('keydown', handler)
@@ -47,7 +49,7 @@ export const Modal: React.FC<ModalProps> = ({
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={dismissible ? onClose : undefined}
       />
 
       {/* Modal */}
@@ -55,12 +57,14 @@ export const Modal: React.FC<ModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
           <h2 className="text-lg font-semibold text-white">{title}</h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
-          >
-            <X size={16} />
-          </button>
+          {dismissible && (
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         {/* Content */}

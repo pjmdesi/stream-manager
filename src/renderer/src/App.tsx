@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { version as appVersion } from '../../../package.json'
 import { Film, FolderPlus, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play } from 'lucide-react'
 import { Button } from './components/ui/Button'
@@ -15,6 +15,8 @@ import { YouTubePage } from './components/pages/YouTubePage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { ConversionProvider, useConversionJobs } from './context/ConversionContext'
 import { WatcherProvider, useWatcher } from './context/WatcherContext'
+import { useStore } from './hooks/useStore'
+import { OnboardingModal } from './components/OnboardingModal'
 
 interface PendingFile {
   path: string
@@ -119,6 +121,14 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
 export default function App() {
   const [page, setPage] = useState<Page>('streams')
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const { config, loading } = useStore()
+
+  useEffect(() => {
+    if (!loading && !config.streamsDir) {
+      setOnboardingOpen(true)
+    }
+  }, [loading])
   const [pendingPlayer, setPendingPlayer] = useState<PendingFile | null>(null)
   const [pendingConverter, setPendingConverter] = useState<PendingConverterFile | null>(null)
   const [pendingCombine, setPendingCombine] = useState<PendingFiles | null>(null)
@@ -226,6 +236,8 @@ export default function App() {
         </main>
       </div>
     </div>
+      <OnboardingModal isOpen={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
+
       <Modal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} title="About Stream Manager" width="sm">
         <div className="flex flex-col items-center gap-4 py-2 text-center">
           <img src={logoUrl} alt="" className="w-12 h-12 opacity-90" />

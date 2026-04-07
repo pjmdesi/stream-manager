@@ -11,6 +11,7 @@ const defaultConfig: AppConfig = {
   streamerName: '',
   defaultGame: '',
   streamsDir: '',
+  streamMode: '' as import('../types').StreamMode,
   archivePresetId: '',
   defaultThumbnailTemplate: '',
   checkEpisodeIteration: true,
