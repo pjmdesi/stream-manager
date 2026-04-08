@@ -8,10 +8,11 @@ import type { ConversionPreset } from './converter'
 
 export interface StreamMeta {
   date: string
-  streamType: 'games' | 'other'
+  streamType: string[]
   games: string[]
   comments: string
   archived?: boolean
+  ytVideoId?: string
 }
 
 export interface ArchiveProgress {
@@ -419,7 +420,7 @@ export function registerStreamsIPC(): void {
       }
       for (const date of dates) {
         allMeta[date] = {
-          ...(allMeta[date] ?? { date, streamType: 'games' as const, games: [], comments: '' }),
+          ...(allMeta[date] ?? { date, streamType: ['games'], games: [], comments: '' }),
           archived: true
         }
         count++
@@ -429,7 +430,7 @@ export function registerStreamsIPC(): void {
         if (!entry.isDirectory()) continue
         if (!DATE_FOLDER_RE.test(entry.name)) continue
         allMeta[entry.name] = {
-          ...(allMeta[entry.name] ?? { date: entry.name, streamType: 'games' as const, games: [], comments: '' }),
+          ...(allMeta[entry.name] ?? { date: entry.name, streamType: ['games'], games: [], comments: '' }),
           archived: true
         }
         count++
@@ -540,7 +541,7 @@ export function registerStreamsIPC(): void {
         const streamsDir = explicitFiles ? folderPath : path.dirname(folderPath)
         const allMeta = readAllMeta(streamsDir)
         allMeta[date] = {
-          ...(allMeta[date] ?? { date, streamType: 'games' as const, games: [], comments: '' }),
+          ...(allMeta[date] ?? { date, streamType: ['games'], games: [], comments: '' }),
           archived: true
         }
         writeAllMeta(streamsDir, allMeta)

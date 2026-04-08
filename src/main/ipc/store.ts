@@ -21,9 +21,11 @@ export interface AppConfig {
   streamsDir: string
   streamMode: StreamMode
   archivePresetId: string
+  clipPresetId: string
   defaultThumbnailTemplate: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number
+  defaultBleepVolume: number
   youtubeClientId: string
   youtubeClientSecret: string
   twitchClientId: string
@@ -43,9 +45,11 @@ function getDefaultConfig(): AppConfig {
     streamsDir: '',
     streamMode: '' as StreamMode,
     archivePresetId: '',
+    clipPresetId: '',
     defaultThumbnailTemplate: '',
     checkEpisodeIteration: true,
     audioCacheLimit: 1_073_741_824,  // 1 GB
+    defaultBleepVolume: 0.25,
     youtubeClientId: '',
     youtubeClientSecret: '',
     twitchClientId: '',
@@ -61,6 +65,7 @@ type StoreShape = {
   ytTagTemplates: YTTagTemplate[]
   importedPresets: any[]
   metaMigrated: boolean
+  streamTypeTags: Record<string, string>
 }
 
 let store: Store<StoreShape> | null = null
@@ -77,6 +82,7 @@ export function getStore(): Store<StoreShape> {
         ytTagTemplates: [],
         importedPresets: [],
         metaMigrated: false,
+        streamTypeTags: {},
       }
     })
   }
@@ -108,6 +114,9 @@ export function registerStoreIPC(): void {
   ipcMain.handle('store:setYTDescriptionTemplates', async (_e, v: YTDescriptionTemplate[]) => getStore().set('ytDescriptionTemplates', v))
   ipcMain.handle('store:getYTTagTemplates', async () => getStore().get('ytTagTemplates', []))
   ipcMain.handle('store:setYTTagTemplates', async (_e, v: YTTagTemplate[]) => getStore().set('ytTagTemplates', v))
+
+  ipcMain.handle('store:getStreamTypeTags', async () => getStore().get('streamTypeTags', {}))
+  ipcMain.handle('store:setStreamTypeTags', async (_e, v: Record<string, string>) => getStore().set('streamTypeTags', v))
 
   if (!app.isPackaged) {
     ipcMain.handle('store:resetOnboarding', async () => {

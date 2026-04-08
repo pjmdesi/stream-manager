@@ -64,3 +64,19 @@ input[type=range]::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 2px;
 }
+
+/* Survivor pulse — used in combine-tags mode to highlight the tag that will survive the merge.
+   Uses outline (not box-shadow) so it is never clipped by overflow:auto/hidden containers. */
+@keyframes survivor-pulse {
+  0%, 100% {
+    outline: 2px solid rgba(250, 204, 21, 0.0);
+    outline-offset: 1px;
+  }
+  50% {
+    outline: 2px solid rgba(250, 204, 21, 0.65);
+    outline-offset: 1px;
+  }
+}
+.survivor-pulse {
+  animation: survivor-pulse 1.8s ease-in-out infinite;
+}

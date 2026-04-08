@@ -99,9 +99,11 @@ export interface AppConfig {
   streamsDir: string
   streamMode: StreamMode
   archivePresetId: string
+  clipPresetId: string
   defaultThumbnailTemplate: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number
+  defaultBleepVolume: number
   youtubeClientId: string
   youtubeClientSecret: string
   twitchClientId: string
@@ -110,11 +112,12 @@ export interface AppConfig {
 
 export interface StreamMeta {
   date: string
-  streamType: 'games' | 'other'
+  streamType: string[]
   games: string[]
   comments: string
   archived?: boolean
   // YouTube
+  ytVideoId?: string
   ytTitle?: string
   ytDescription?: string
   ytGameTitle?: string

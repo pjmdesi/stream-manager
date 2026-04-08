@@ -2,6 +2,7 @@ import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
 import { Play, Pause, FolderOpen, Info, Layers, CheckSquare, Square, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera, X, Loader2, Scissors, LogIn, LogOut, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2 } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
+import { useStore } from '../../hooks/useStore'
 import type { BleepRegion, ClipState, CropMode, TimelineViewport } from '../../types'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
@@ -170,6 +171,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   initialFile?: PendingFile | null
   onNavigateToConverter?: () => void
 }) {
+  const { config } = useStore()
   const { videoRef, state, loadFile, extractTracks, cancelExtraction, resetExtraction, clearError, closeVideo, seek, fastSeek, togglePlay, audioElements } = useVideoPlayer()
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [editingTimecode, setEditingTimecode] = useState(false)
@@ -184,7 +186,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     cropMode: 'none' as CropMode,
     cropX: 0.5,
     bleepRegions: [],
-    bleepVolume: 0.25,
+    bleepVolume: config.defaultBleepVolume ?? 0.25,
   })
 
   // Viewport for zoom/pan — always kept in sync; only applied in clip mode
@@ -816,7 +818,15 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   const exportClip = useCallback(async () => {
     if (!state.filePath || !videoInfo || clipState.inPoint === null || clipState.outPoint === null) return
-    const ext = state.filePath.split(/[\\/]/).pop()!.split('.').pop() ?? 'mkv'
+
+    // Resolve clip preset if one is configured
+    let clipPreset: { id: string; name: string; ffmpegArgs: string; outputExtension: string; isBuiltin: boolean } | null = null
+    if (config.clipPresetId) {
+      const [builtin, imported] = await Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
+      clipPreset = [...builtin, ...imported].find(p => p.id === config.clipPresetId) ?? null
+    }
+
+    const ext = clipPreset?.outputExtension || (state.filePath.split(/[\\/]/).pop()!.split('.').pop() ?? 'mkv')
     const base = state.filePath.replace(/[\\/]/g, '/').split('/').pop()!.replace(/\.[^.]+$/, '')
     const dir  = state.filePath.replace(/[\\/][^\\/]+$/, '').replace(/\\/g, '/')
     const defaultPath = `${dir}/${base}_clip.${ext}`
@@ -828,7 +838,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     })
     if (!outPath) return
 
-    const syntheticPreset = {
+    const syntheticPreset = clipPreset ?? {
       id: 'clip-export',
       name: 'Clip Export',
       ffmpegArgs: '',
@@ -859,7 +869,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     })
 
     onNavigateToConverter?.()
-  }, [state.filePath, videoInfo, clipState, setJobs, onNavigateToConverter])
+  }, [state.filePath, videoInfo, clipState, config.clipPresetId, setJobs, onNavigateToConverter])
 
   const [screenshotFlash, setScreenshotFlash] = useState(false)
   const [isPopupOpen, setIsPopupOpen] = useState(false)

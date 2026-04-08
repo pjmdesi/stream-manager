@@ -260,6 +260,58 @@ export function SettingsPage() {
           </label>
         </section>
 
+        {/* Video Player */}
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
+            Video Player
+          </h2>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Default Clip Export Preset</label>
+            <div className="relative">
+              <select
+                value={local.clipPresetId ?? ''}
+                onChange={e => set('clipPresetId', e.target.value)}
+                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              >
+                <option value="">— Copy stream (no re-encode) —</option>
+                {allPresets.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+            </div>
+            {local.clipPresetId && !allPresets.find(p => p.id === local.clipPresetId) && (
+              <p className="flex items-center gap-1 text-xs text-yellow-500">
+                <AlertTriangle size={11} />
+                Selected preset not found — it may have been removed.
+              </p>
+            )}
+            <p className="text-xs text-gray-500">Converter preset used when exporting clips from the player. Leave blank to copy the stream without re-encoding.</p>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">
+              Default Bleep Volume — <span className="text-purple-400 tabular-nums">{Math.round((local.defaultBleepVolume ?? 0.25) * 100)}%</span>
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={1.5}
+              step={0.01}
+              value={local.defaultBleepVolume ?? 0.25}
+              onChange={e => set('defaultBleepVolume', parseFloat(e.target.value))}
+              className="w-full accent-purple-500"
+            />
+            <div className="flex justify-between text-xs text-gray-600">
+              <span>Silent</span>
+              <span>100%</span>
+              <span>150%</span>
+            </div>
+            <p className="text-xs text-gray-500">Starting volume for bleep markers in clip mode. Can be adjusted per-session by dragging the line on a marker.</p>
+          </div>
+        </section>
+
         {/* Behaviour */}
         <section className="flex flex-col gap-4">
           <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">

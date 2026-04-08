@@ -1,16 +1,18 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import ReactDOM from 'react-dom'
 import {
   Plus, FolderOpen, AlertTriangle, PencilLine, FilePlus,
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle,
-  Film, Zap, Combine, Youtube, Twitch, ListFilter, Trash2
+  Film, Zap, Combine, Youtube, Twitch, ListFilter, Trash2, Tags
 } from 'lucide-react'
 import type { StreamFolder, StreamMeta, ConversionPreset, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast } from '../../types'
 import { useStore } from '../../hooks/useStore'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
+import { TagComboBox } from '../ui/TagComboBox'
+import { ManageTagsModal } from '../ui/ManageTagsModal'
+import { getTagColor, pickColorForNewTag } from '../../constants/tagColors'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -28,49 +30,10 @@ function toFileUrl(absPath: string): string {
   return 'file:///' + absPath.replace(/\\/g, '/')
 }
 
-// ─── Highlight matching substring in suggestion ──────────────────────────────
-
-function HighlightMatch({ text, query }: { text: string; query: string }) {
-  const idx = text.toLowerCase().indexOf(query.toLowerCase())
-  if (idx === -1) return <>{text}</>
-  return (
-    <>
-      {text.slice(0, idx)}
-      <span className="font-semibold text-purple-300">{text.slice(idx, idx + query.length)}</span>
-      {text.slice(idx + query.length)}
-    </>
-  )
-}
-
-// ─── Portal dropdown for game suggestions ───────────────────────────────────
-
-function GameSuggestionsPortal({
-  anchorRef,
-  children,
-}: {
-  anchorRef: React.RefObject<HTMLElement | null>
-  children: React.ReactNode
-}) {
-  const rect = anchorRef.current?.getBoundingClientRect()
-  if (!rect) return null
-
-  const style: React.CSSProperties = {
-    position: 'fixed',
-    top: rect.bottom + 4,
-    left: rect.left,
-    width: rect.width,
-    zIndex: 9999,
-  }
-
-  return ReactDOM.createPortal(
-    <div
-      style={style}
-      className="bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden max-h-44 overflow-y-auto"
-    >
-      {children}
-    </div>,
-    document.body
-  )
+// Normalise legacy string streamType values from stored JSON to the new string[] format
+function normalizeStreamTypes(v: string | string[] | undefined): string[] {
+  if (!v) return []
+  return Array.isArray(v) ? v : [v]
 }
 
 // ─── Video count tooltip ─────────────────────────────────────────────────────
@@ -261,9 +224,12 @@ interface MetaModalProps {
   initialMeta?: StreamMeta | null
   detectedGames?: string[]
   allGames?: string[]
+  allStreamTypes?: string[]
   allFolders?: StreamFolder[]
   templates?: { name: string; path: string }[]
   defaultTemplateName?: string
+  tagColors?: Record<string, string>
+  onNewStreamType?: (tag: string) => void
   onSave: (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => Promise<void>
   onClose: () => void
 }
@@ -294,11 +260,13 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[]): 
     .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
 }
 
-function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allFolders = [], templates = [], defaultTemplateName = '', onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', tagColors = {}, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
 
   const [date, setDate] = useState(initialMeta?.date ?? today())
-  const [streamType, setStreamType] = useState<'games' | 'other'>(initialMeta?.streamType ?? 'games')
+  const [streamTypes, setStreamTypes] = useState<string[]>(
+    normalizeStreamTypes(initialMeta?.streamType)
+  )
   const [games, setGames] = useState<string[]>(
     initialMeta?.games?.length ? initialMeta.games : detectedGames
   )
@@ -316,14 +284,10 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allFo
     const hasPrev = (initPrevFolder?.thumbnails.length ?? 0) > 0
     return hasPrev ? PREV_EPISODE_SENTINEL : (defaultTemplate?.path ?? '')
   })
-  const [gameInput, setGameInput] = useState('')
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
   const [comments, setComments] = useState(initialMeta?.comments ?? '')
   const [archived, setArchived] = useState(initialMeta?.archived ?? false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const gameInputRef = useRef<HTMLInputElement>(null)
 
   // ── YouTube state ──────────────────────────────────────────────────────────
   const [ytConnected, setYtConnected] = useState(false)
@@ -416,25 +380,6 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allFo
     if (tmpl) setYtTagsText(tmpl.tags.join(', '))
   }, [ytSelectedTagId, ytTagTemplates])
 
-  const suggestions = useMemo(() => {
-    const q = gameInput.toLowerCase()
-    return allGames.filter(
-      g => !games.includes(g) && (q === '' || g.toLowerCase().includes(q))
-    )
-  }, [allGames, games, gameInput])
-
-  // Reset highlight to first item whenever the suggestion list changes
-  useEffect(() => { setHighlightedIndex(0) }, [suggestions])
-
-  const addGame = (name?: string) => {
-    const trimmed = (name ?? gameInput).trim()
-    if (trimmed && !games.includes(trimmed)) setGames(prev => [...prev, trimmed])
-    setGameInput('')
-    gameInputRef.current?.focus()
-  }
-
-  const removeGame = (g: string) => setGames(prev => prev.filter(x => x !== g))
-
   const handleSave = async () => {
     if (!date) { setError('Date is required.'); return }
     setSaving(true)
@@ -445,8 +390,9 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allFo
       const effectiveTwitchTitle = syncTitle ? ytTitle : twitchTitle
       await onSave(
         {
-          date, streamType, games: streamType === 'games' ? games : [], comments,
+          date, streamType: streamTypes, games, comments,
           archived: mode === 'edit' ? archived : undefined,
+          ytVideoId: (ytPush && ytConnected && ytSelectedBroadcastId) ? ytSelectedBroadcastId : undefined,
           ytTitle: ytTitle || undefined,
           ytDescription: ytDescription || undefined,
           ytGameTitle: ytGameTitle || undefined,
@@ -508,103 +454,36 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allFo
         </div>
 
         {/* Stream type */}
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <label className="text-sm font-medium text-gray-300">Stream Type</label>
-          <div className="relative">
-            <select
-              value={streamType}
-              onChange={e => setStreamType(e.target.value as 'games' | 'other')}
-              className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-            >
-              <option value="games">Games</option>
-              <option value="other">Other</option>
-            </select>
-            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-          </div>
+          <TagComboBox
+            values={streamTypes}
+            onChange={setStreamTypes}
+            allOptions={allStreamTypes}
+            placeholder="e.g. games, just chatting…"
+            emptyLabel="No types added"
+            tagColors={tagColors}
+            onNewTag={onNewStreamType}
+          />
         </div>
 
-        {/* Games */}
-        {streamType === 'games' && (
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-gray-300">
-              Games Played
-              {detectedGames.length > 0 && !initialMeta && (
-                <span className="ml-2 text-xs text-gray-500 font-normal">(auto-detected from files)</span>
-              )}
-            </label>
-            <div className="flex flex-wrap gap-1.5 min-h-[28px]">
-              {games.map(g => (
-                <span
-                  key={g}
-                  className="inline-flex items-center gap-1 text-xs bg-purple-900/40 text-purple-300 border border-purple-700/40 px-2 py-1 rounded-full"
-                >
-                  {g}
-                  <button onClick={() => removeGame(g)} className="text-purple-500 hover:text-purple-200 transition-colors">
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
-              {games.length === 0 && <span className="text-xs text-gray-600 italic">No games added</span>}
-            </div>
-            <div className="relative flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  ref={gameInputRef}
-                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                  value={gameInput}
-                  onChange={e => { setGameInput(e.target.value); setSuggestionsOpen(true) }}
-                  onFocus={() => setSuggestionsOpen(true)}
-                  onBlur={() => setTimeout(() => setSuggestionsOpen(false), 120)}
-                  onKeyDown={e => {
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault()
-                      setSuggestionsOpen(true)
-                      setHighlightedIndex(i => Math.min(i + 1, suggestions.length - 1))
-                    } else if (e.key === 'ArrowUp') {
-                      e.preventDefault()
-                      setHighlightedIndex(i => Math.max(i - 1, 0))
-                    } else if (e.key === 'Enter') {
-                      e.preventDefault()
-                      if (suggestionsOpen && suggestions.length > 0) {
-                        addGame(suggestions[highlightedIndex])
-                      } else {
-                        addGame()
-                      }
-                    } else if (e.key === 'Escape') {
-                      setSuggestionsOpen(false)
-                    }
-                  }}
-                  placeholder="Type a game name and press Enter…"
-                  autoComplete="off"
-                />
-                {suggestionsOpen && suggestions.length > 0 && (
-                  <GameSuggestionsPortal anchorRef={gameInputRef}>
-                    {suggestions.map((g, i) => (
-                      <button
-                        key={g}
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); addGame(g) }}
-                        onMouseEnter={() => setHighlightedIndex(i)}
-                        className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                          i === highlightedIndex
-                            ? 'bg-purple-600/30 text-purple-200'
-                            : 'text-gray-200 hover:bg-purple-600/20 hover:text-purple-200'
-                        }`}
-                      >
-                        {gameInput && g.toLowerCase().includes(gameInput.toLowerCase()) ? (
-                          <HighlightMatch text={g} query={gameInput} />
-                        ) : g}
-                      </button>
-                    ))}
-                  </GameSuggestionsPortal>
-                )}
-              </div>
-              <Button variant="secondary" size="sm" icon={<Plus size={12} />} onClick={() => addGame()}>
-                Add
-              </Button>
-            </div>
-          </div>
-        )}
+        {/* Topics / Games */}
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-gray-300">
+            Topics / Games
+            {detectedGames.length > 0 && !initialMeta && (
+              <span className="ml-2 text-xs text-gray-500 font-normal">(auto-detected from files)</span>
+            )}
+          </label>
+          <TagComboBox
+            values={games}
+            onChange={setGames}
+            allOptions={allGames}
+            placeholder="Type a topic or game and press Enter…"
+            emptyLabel="No topics added"
+            compact
+          />
+        </div>
 
         {/* Thumbnail template — new streams only */}
         {mode === 'new' && (templates.length > 0 || hasPrevThumbnails) && (
@@ -1123,6 +1002,8 @@ export function StreamsPage({
   const [folders, setFolders] = useState<StreamFolder[]>([])
   const [loading, setLoading] = useState(false)
   const [modal, setModal] = useState<ModalState>({ mode: 'none' })
+  const [showManageTags, setShowManageTags] = useState(false)
+  const [tagColors, setTagColors] = useState<Record<string, string>>({})
   const [lightbox, setLightbox] = useState<{ thumbnails: string[]; index: number } | null>(null)
 
   // Startup warning: archive preset configured but missing
@@ -1145,6 +1026,15 @@ export function StreamsPage({
       buildTree(deleteTarget.folderPath).then(setDeleteTree)
     }
   }, [deleteTarget])
+
+  useEffect(() => {
+    window.api.getStreamTypeTags().then(setTagColors)
+  }, [])
+
+  const saveTagColors = useCallback((updated: Record<string, string>) => {
+    setTagColors(updated)
+    window.api.setStreamTypeTags(updated)
+  }, [])
 
   useEffect(() => {
     if (configLoading || !config.archivePresetId) return
@@ -1368,14 +1258,22 @@ export function StreamsPage({
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [folders])
 
+  const allStreamTypes = useMemo(() => {
+    const set = new Set<string>(Object.keys(tagColors))
+    set.add('games')
+    set.add('other')
+    folders.forEach(f => normalizeStreamTypes(f.meta?.streamType).forEach(t => set.add(t)))
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [folders, tagColors])
+
   const [filterGames, setFilterGames] = useState<Set<string>>(new Set())
-  const [filterType, setFilterType] = useState<'all' | 'games' | 'other'>('all')
+  const [filterType, setFilterType] = useState<string>('all')
   const [openFilter, setOpenFilter] = useState<'type' | 'games' | null>(null)
 
   const filteredFolders = useMemo(() => {
     return folders.filter(f => {
       if (f.isMissing) return true // always show missing items regardless of filters
-      if (filterType !== 'all' && f.meta?.streamType !== filterType) return false
+      if (filterType !== 'all' && !normalizeStreamTypes(f.meta?.streamType).includes(filterType)) return false
       if (filterGames.size > 0) {
         const fGames = f.meta?.games?.length ? f.meta.games : f.detectedGames
         if (!Array.from(filterGames).every(g => fGames.includes(g))) return false
@@ -1467,6 +1365,14 @@ export function StreamsPage({
               title="Stamp an existing archive folder — marks all YYYY-MM-DD subfolders as archived without converting"
             >
               Stamp Archive
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Tags size={14} />}
+              onClick={() => setShowManageTags(true)}
+            >
+              Manage Tags
             </Button>
             <Button
               variant="ghost"
@@ -1566,31 +1472,38 @@ export function StreamsPage({
                     {openFilter === 'type' && (
                       <>
                         <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
-                        <div className="absolute top-full left-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[100px]">
-                          {(['all', 'games', 'other'] as const).map(t => (
-                            <button
-                              key={t}
-                              onClick={() => { setFilterType(t); setOpenFilter(null) }}
-                              className={`flex items-center gap-2 w-full px-3 py-2 text-left text-xs capitalize hover:bg-white/5 transition-colors ${filterType === t ? 'text-purple-300' : 'text-gray-300'}`}
-                            >
-                              {filterType === t && <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />}
-                              {filterType !== t && <span className="w-1.5 h-1.5 shrink-0" />}
-                              {t}
-                            </button>
-                          ))}
+                        <div className="absolute top-full left-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[120px] max-h-60 overflow-y-auto">
+                          {['all', ...allStreamTypes].map(t => {
+                            const color = t !== 'all' ? getTagColor(tagColors[t]) : null
+                            const isActive = filterType === t
+                            return (
+                              <button
+                                key={t}
+                                onClick={() => { setFilterType(t); setOpenFilter(null) }}
+                                className={`flex items-center gap-2 w-full px-3 py-2 text-left text-xs capitalize hover:bg-white/5 transition-colors ${isActive ? (color?.text ?? 'text-purple-300') : 'text-gray-300'}`}
+                              >
+                                {color ? (
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color.swatch} ${isActive ? 'opacity-100' : 'opacity-30'}`} />
+                                ) : (
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-purple-400' : ''}`} />
+                                )}
+                                {t}
+                              </button>
+                            )
+                          })}
                         </div>
                       </>
                     )}
                   </div>
                 </th>
-                {/* Games column with filter */}
+                {/* Topics / Games column with filter */}
                 <th className="text-left px-4 py-2.5">
                   <div className="relative flex items-center gap-1">
-                    <span>Games</span>
+                    <span>Topics / Games</span>
                     <button
                       onClick={() => setOpenFilter(openFilter === 'games' ? null : 'games')}
                       className={`p-0.5 rounded transition-colors ${filterGames.size > 0 ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
-                      title="Filter by game"
+                      title="Filter by topic or game"
                     >
                       <ListFilter size={12} />
                     </button>
@@ -1643,6 +1556,7 @@ export function StreamsPage({
                   zebra={i % 2 === 0}
                   selectMode={selectMode}
                   selected={selectedPaths.has(selectionKey(folder))}
+                  tagColors={tagColors}
                   onToggleSelect={(shiftKey) => toggleSelected(selectionKey(folder), shiftKey, i)}
                   onEdit={() => setModal({ mode: 'edit', folder })}
                   onAdd={() => setModal({ mode: 'add', folder })}
@@ -1778,9 +1692,18 @@ export function StreamsPage({
           initialMeta={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta : null}
           detectedGames={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.detectedGames : []}
           allGames={allGames}
+          allStreamTypes={allStreamTypes}
           allFolders={folders}
           templates={templates}
           defaultTemplateName={config.defaultThumbnailTemplate}
+          tagColors={tagColors}
+          onNewStreamType={tag => {
+            setTagColors(prev => {
+              const updated = { ...prev, [tag]: pickColorForNewTag(prev) }
+              window.api.setStreamTypeTags(updated)
+              return updated
+            })
+          }}
           onSave={handleSave}
           onClose={() => setModal({ mode: 'none' })}
         />
@@ -1821,6 +1744,87 @@ export function StreamsPage({
             setSelectMode(false)
             setSelectedPaths(new Set())
           }}
+        />
+      )}
+
+      {/* Manage Tags */}
+      {showManageTags && (
+        <ManageTagsModal
+          tags={allStreamTypes}
+          tagColors={tagColors}
+          games={allGames}
+          folders={folders}
+          onColorChange={(tag, colorKey) => {
+            saveTagColors({ ...tagColors, [tag]: colorKey })
+          }}
+          onAddTag={(name, colorKey) => {
+            saveTagColors({ ...tagColors, [name]: colorKey })
+          }}
+          onDeleteTag={tag => {
+            const affected = folders.filter(f =>
+              normalizeStreamTypes(f.meta?.streamType).includes(tag)
+            )
+            Promise.all(
+              affected.map(f =>
+                window.api.writeStreamMeta(f.folderPath, {
+                  ...f.meta!,
+                  streamType: normalizeStreamTypes(f.meta?.streamType).filter(t => t !== tag),
+                })
+              )
+            ).then(() => {
+              const updated = { ...tagColors }
+              delete updated[tag]
+              saveTagColors(updated)
+              loadFolders(streamsDir)
+            })
+          }}
+          onCombineTags={(dying, survivor) => {
+            const allDying = new Set(dying)
+            const affected = folders.filter(f =>
+              normalizeStreamTypes(f.meta?.streamType).some(t => allDying.has(t))
+            )
+            Promise.all(
+              affected.map(f => {
+                const types = normalizeStreamTypes(f.meta?.streamType)
+                const merged = types.includes(survivor)
+                  ? types.filter(t => !allDying.has(t))
+                  : [survivor, ...types.filter(t => !allDying.has(t))]
+                return window.api.writeStreamMeta(f.folderPath, { ...f.meta!, streamType: merged })
+              })
+            ).then(() => {
+              const updated = { ...tagColors }
+              for (const d of dying) delete updated[d]
+              saveTagColors(updated)
+              loadFolders(streamsDir)
+            })
+          }}
+          onDeleteGame={game => {
+            const affected = folders.filter(f => f.meta?.games?.includes(game))
+            Promise.all(
+              affected.map(f =>
+                window.api.writeStreamMeta(f.folderPath, {
+                  ...f.meta!,
+                  games: (f.meta!.games ?? []).filter(g => g !== game),
+                })
+              )
+            ).then(() => loadFolders(streamsDir))
+          }}
+          onCombineGames={(dying, survivor) => {
+            const allDying = new Set(dying)
+            const affected = folders.filter(f =>
+              (f.meta?.games ?? []).some(g => allDying.has(g))
+            )
+            Promise.all(
+              affected.map(f => {
+                const gs = f.meta!.games ?? []
+                const merged = gs.includes(survivor)
+                  ? gs.filter(g => !allDying.has(g))
+                  : [survivor, ...gs.filter(g => !allDying.has(g))]
+                return window.api.writeStreamMeta(f.folderPath, { ...f.meta!, games: merged })
+              })
+            ).then(() => loadFolders(streamsDir))
+          }}
+          onClose={() => setShowManageTags(false)}
         />
       )}
     </div>
@@ -1864,6 +1868,7 @@ interface StreamRowProps {
   zebra: boolean
   selectMode: boolean
   selected: boolean
+  tagColors: Record<string, string>
   onToggleSelect: (shiftKey: boolean) => void
   onEdit: () => void
   onAdd: () => void
@@ -1875,7 +1880,7 @@ interface StreamRowProps {
   onThumbClick?: (index: number) => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, onToggleSelect, onEdit, onAdd, onOpen, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSelect, onEdit, onAdd, onOpen, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -1990,13 +1995,16 @@ function StreamRow({ folder, zebra, selectMode, selected, onToggleSelect, onEdit
       {/* Type */}
       <td className="px-4 py-3 align-middle">
         {meta ? (
-          <span className={`inline-block text-xs px-2 py-0.5 rounded-full border ${
-            meta.streamType === 'games'
-              ? 'bg-purple-900/30 text-purple-300 border-purple-800/30'
-              : 'bg-blue-900/30 text-blue-300 border-blue-800/30'
-          }`}>
-            {meta.streamType}
-          </span>
+          <div className="flex flex-wrap gap-1">
+            {normalizeStreamTypes(meta.streamType).map(t => {
+              const color = getTagColor(tagColors[t])
+              return (
+                <span key={t} className={`inline-block text-xs px-2 py-0.5 rounded-full border ${color.chip}`}>
+                  {t}
+                </span>
+              )
+            })}
+          </div>
         ) : (
           <span className="text-xs text-gray-700">—</span>
         )}

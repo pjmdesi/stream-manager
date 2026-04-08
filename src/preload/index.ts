@@ -275,6 +275,8 @@ contextBridge.exposeInMainWorld('api', {
   setYTDescriptionTemplates: (v: any[]) => ipcRenderer.invoke('store:setYTDescriptionTemplates', v),
   getYTTagTemplates: () => ipcRenderer.invoke('store:getYTTagTemplates'),
   setYTTagTemplates: (v: any[]) => ipcRenderer.invoke('store:setYTTagTemplates', v),
+  getStreamTypeTags: (): Promise<Record<string, string>> => ipcRenderer.invoke('store:getStreamTypeTags'),
+  setStreamTypeTags: (v: Record<string, string>) => ipcRenderer.invoke('store:setStreamTypeTags', v),
 
   // ── Twitch ────────────────────────────────────────────────────────────────
   twitchGetStatus: () =>

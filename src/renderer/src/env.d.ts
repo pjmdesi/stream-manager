@@ -93,6 +93,8 @@ declare global {
       setConfig(config: Partial<AppConfig>): Promise<void>
       getWatchRules(): Promise<WatchRule[]>
       setWatchRules(rules: WatchRule[]): Promise<void>
+      getStreamTypeTags(): Promise<Record<string, string>>
+      setStreamTypeTags(v: Record<string, string>): Promise<void>
 
       // ── Streams ──────────────────────────────────────────────────────────────
       listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
