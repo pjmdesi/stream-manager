@@ -210,6 +210,7 @@ export interface ClipState {
   cropMode: CropMode
   cropX: number             // 0–1; horizontal center of the 9:16 crop region (0 = left, 0.5 = centre, 1 = right)
   bleepRegions: BleepRegion[]
+  bleepVolume: number       // 0–1; shared across all bleep markers
 }
 
 export interface TimelineViewport {

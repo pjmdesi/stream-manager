@@ -1,90 +1,136 @@
 import { useEffect, useState, useMemo } from 'react'
 
-export interface WaveformPeak { min: number; max: number }
+// How many peaks to render across the visible viewport.
+// 1200 gives ~1 peak per pixel on a 1200px-wide strip and is fast to compute.
+const TARGET_PEAKS = 1200
 
-// Module-level cache keyed by joined paths — survives component unmounts (tab switches)
-const peakCache = new Map<string, WaveformPeak[]>()
+const SAMPLE_RATE = 200 // must match ffmpegService '-ar' value
 
-function combinePeaks(allPeaks: WaveformPeak[][]): WaveformPeak[] {
-  if (allPeaks.length === 0) return []
-  if (allPeaks.length === 1) return allPeaks[0]
+// Module-level cache of raw samples keyed by file path — survives tab switches
+const rawCache = new Map<string, Float32Array>()
 
-  const n = Math.max(...allPeaks.map(p => p.length))
-  const result: WaveformPeak[] = []
+function toFloat32(buf: Uint8Array): Float32Array {
+  // buf may have a non-zero byteOffset if it's a subarray of a shared ArrayBuffer
+  const aligned = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+  return new Float32Array(aligned)
+}
 
-  for (let i = 0; i < n; i++) {
+function globalMax(raw: Float32Array): number {
+  let mx = 0
+  for (let i = 0; i < raw.length; i++) {
+    const v = Math.abs(raw[i])
+    if (v > mx) mx = v
+  }
+  return mx
+}
+
+// Re-bucket raw samples from [vStart, vEnd] into exactly targetPeaks min/max pairs.
+function rebucket(raw: Float32Array, vStart: number, vEnd: number, targetPeaks: number): { mins: Float32Array; maxs: Float32Array } {
+  const startSample = Math.max(0, Math.floor(vStart * SAMPLE_RATE))
+  const endSample   = Math.min(raw.length, Math.ceil(vEnd * SAMPLE_RATE))
+  const sampleCount = endSample - startSample
+  const mins = new Float32Array(targetPeaks)
+  const maxs = new Float32Array(targetPeaks)
+
+  if (sampleCount <= 0) return { mins, maxs }
+
+  const samplesPerPeak = sampleCount / targetPeaks
+  for (let i = 0; i < targetPeaks; i++) {
+    const s = Math.floor(startSample + i * samplesPerPeak)
+    const e = Math.min(Math.floor(startSample + (i + 1) * samplesPerPeak), endSample)
     let mn = 0, mx = 0
-    for (const peaks of allPeaks) {
-      if (peaks.length === 0) continue
-      const idx = Math.min(i, peaks.length - 1)
-      if (peaks[idx].min < mn) mn = peaks[idx].min
-      if (peaks[idx].max > mx) mx = peaks[idx].max
+    for (let j = s; j < e; j++) {
+      const v = raw[j]
+      if (v < mn) mn = v
+      if (v > mx) mx = v
     }
-    result.push({ min: mn, max: mx })
+    mins[i] = mn
+    maxs[i] = mx
   }
-  return result
+  return { mins, maxs }
 }
 
-function normalizePeaks(peaks: WaveformPeak[]): WaveformPeak[] {
-  if (peaks.length === 0) return []
-  let globalMax = 0
-  for (const p of peaks) {
-    const v = Math.max(Math.abs(p.min), Math.abs(p.max))
-    if (v > globalMax) globalMax = v
+function buildSvgPath(mins: Float32Array, maxs: Float32Array, gmax: number): string {
+  const n = mins.length
+  if (n === 0) return ''
+  const amp = 47
+  const mid = 50
+  const scale = gmax > 0 ? 1 / gmax : 1
+
+  const parts: string[] = []
+  for (let i = 0; i < n; i++) {
+    parts.push(`${i === 0 ? 'M' : 'L'}${i},${(mid - maxs[i] * scale * amp).toFixed(1)}`)
   }
-  if (globalMax === 0) return peaks
-  return peaks.map(p => ({ min: p.min / globalMax, max: p.max / globalMax }))
+  for (let i = n - 1; i >= 0; i--) {
+    parts.push(`L${i},${(mid - mins[i] * scale * amp).toFixed(1)}`)
+  }
+  parts.push('Z')
+  return parts.join(' ')
 }
 
-// sources: array of file paths — single path for pre-merge, multiple for post-merge
-export function useWaveform(sources: string[]) {
+// sources: array of file paths — single for original file, multiple for extracted tracks
+export function useWaveform(sources: string[], vStart: number, vEnd: number, duration: number) {
   const cacheKey = sources.join('\0')
 
-  const [peaks, setPeaks] = useState<WaveformPeak[]>(
-    () => peakCache.get(cacheKey) ?? []
+  const [rawArrays, setRawArrays] = useState<Float32Array[]>(() =>
+    sources.map(s => rawCache.get(s) ?? new Float32Array(0))
   )
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (sources.length === 0) { setPeaks([]); setLoading(false); return }
+    if (sources.length === 0) { setRawArrays([]); setLoading(false); return }
 
-    const cached = peakCache.get(cacheKey)
-    if (cached) { setPeaks(cached); return }
+    // All sources already in cache?
+    const cached = sources.map(s => rawCache.get(s))
+    if (cached.every(Boolean)) {
+      setRawArrays(cached as Float32Array[])
+      return
+    }
 
     let cancelled = false
     setLoading(true)
-    setPeaks([])
+    setRawArrays(sources.map(s => rawCache.get(s) ?? new Float32Array(0)))
 
-    Promise.all(sources.map(p => window.api.getWaveform(p)))
-      .then(allPeaks => {
-        if (cancelled) return
-        const combined = combinePeaks(allPeaks)
-        const normalized = normalizePeaks(combined)
-        peakCache.set(cacheKey, normalized)
-        setPeaks(normalized)
-        setLoading(false)
-      })
-      .catch(() => { if (!cancelled) setLoading(false) })
+    Promise.all(sources.map(async s => {
+      if (rawCache.has(s)) return rawCache.get(s)!
+      const buf = await window.api.getWaveform(s)
+      const raw = toFloat32(buf)
+      rawCache.set(s, raw)
+      return raw
+    })).then(arrays => {
+      if (cancelled) return
+      setRawArrays(arrays)
+      setLoading(false)
+    }).catch(() => { if (!cancelled) setLoading(false) })
 
     return () => { cancelled = true }
   }, [cacheKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const svgPath = useMemo(() => {
-    if (peaks.length === 0) return ''
-    const n = peaks.length
-    const mid = 50
-    const amp = 47
+    const filled = rawArrays.filter(r => r.length > 0)
+    if (filled.length === 0) return ''
 
-    const parts: string[] = []
-    for (let i = 0; i < n; i++) {
-      parts.push(`${i === 0 ? 'M' : 'L'}${i},${(mid - peaks[i].max * amp).toFixed(1)}`)
-    }
-    for (let i = n - 1; i >= 0; i--) {
-      parts.push(`L${i},${(mid - peaks[i].min * amp).toFixed(1)}`)
-    }
-    parts.push('Z')
-    return parts.join(' ')
-  }, [peaks])
+    const safeStart = Math.max(0, vStart)
+    const safeEnd   = duration > 0 ? Math.min(duration, vEnd) : vEnd
 
-  return { peaks, svgPath, peakCount: peaks.length, loading }
+    // Re-bucket each track independently, then combine (take min of mins, max of maxs)
+    const bucketed = filled.map(raw => rebucket(raw, safeStart, safeEnd, TARGET_PEAKS))
+    const combinedMins = new Float32Array(TARGET_PEAKS)
+    const combinedMaxs = new Float32Array(TARGET_PEAKS)
+    for (let i = 0; i < TARGET_PEAKS; i++) {
+      let mn = 0, mx = 0
+      for (const { mins, maxs } of bucketed) {
+        if (mins[i] < mn) mn = mins[i]
+        if (maxs[i] > mx) mx = maxs[i]
+      }
+      combinedMins[i] = mn
+      combinedMaxs[i] = mx
+    }
+
+    // Global max across all raw data for consistent amplitude scaling
+    const gmax = Math.max(...filled.map(globalMax))
+    return buildSvgPath(combinedMins, combinedMaxs, gmax)
+  }, [rawArrays, vStart, vEnd, duration])
+
+  return { svgPath, peakCount: TARGET_PEAKS, loading }
 }

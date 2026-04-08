@@ -179,7 +179,7 @@ function Lightbox({ thumbnails, index, onClose, onNavigate }: LightboxProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/92 select-none"
+      className="fixed inset-x-0 bottom-0 top-10 z-50 flex flex-col items-center justify-center bg-black/92 select-none"
       onClick={onClose}
     >
       {/* Close */}

@@ -328,12 +328,9 @@ export function runConversion(
 }
 
 
-export interface WaveformPeak { min: number; max: number }
-
-export async function extractWaveformPeaks(
-  filePath: string,
-  numPeaks = 2000
-): Promise<WaveformPeak[]> {
+// Returns raw mono PCM at 200 samples/sec as a Buffer of f32le floats.
+// The renderer holds the full buffer and re-buckets dynamically per viewport.
+export async function extractWaveformData(filePath: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     if (!ffmpegBin) { reject(new Error('ffmpeg binary not found')); return }
 
@@ -343,39 +340,14 @@ export async function extractWaveformPeaks(
       '-i', filePath,
       '-map', '0:a:0',
       '-ac', '1',
-      '-ar', '200',   // 200 samples/sec — ~8 MB for a 3-hour file
+      '-ar', '200',   // 200 samples/sec — ~5.8 MB for a 2-hour file
       '-f', 'f32le',
       '-vn',
       'pipe:1'
     ], { stdio: ['ignore', 'pipe', 'ignore'] })
 
     proc.stdout!.on('data', (chunk: Buffer) => chunks.push(chunk))
-
-    proc.on('close', () => {
-      if (chunks.length === 0) { resolve([]); return }
-
-      const buf = Buffer.concat(chunks)
-      const floatCount = Math.floor(buf.byteLength / 4)
-
-      const samplesPerPeak = Math.max(1, Math.floor(floatCount / numPeaks))
-      const actualPeaks = Math.min(numPeaks, Math.ceil(floatCount / samplesPerPeak))
-      const peaks: WaveformPeak[] = []
-
-      for (let i = 0; i < actualPeaks; i++) {
-        const start = i * samplesPerPeak
-        const end = Math.min(start + samplesPerPeak, floatCount)
-        let mn = 0, mx = 0
-        for (let j = start; j < end; j++) {
-          const v = buf.readFloatLE(j * 4)
-          if (v < mn) mn = v
-          if (v > mx) mx = v
-        }
-        peaks.push({ min: Math.max(-1, mn), max: Math.min(1, mx) })
-      }
-
-      resolve(peaks)
-    })
-
+    proc.on('close', () => resolve(Buffer.concat(chunks)))
     proc.on('error', reject)
   })
 }

@@ -323,8 +323,9 @@ export function registerConverterIPC(): void {
     videoWidth: number
     videoHeight: number
     bleepRegions: Array<{ id: string; start: number; end: number }>
+    bleepVolume: number
   }) => {
-    const { job, inPoint, outPoint, cropMode, cropX, videoWidth, videoHeight, bleepRegions } = params
+    const { job, inPoint, outPoint, cropMode, cropX, videoWidth, videoHeight, bleepRegions, bleepVolume } = params
     const id = job.id || uuidv4()
     const clipDuration = outPoint - inPoint
     const hasCrop  = cropMode === '9:16'
@@ -363,7 +364,7 @@ export function registerConverterIPC(): void {
 
     if (hasBleep) {
       const notExpr = `not(${betweenExpr})`
-      const bExpr   = `0.25*(${betweenExpr})`
+      const bExpr   = `${bleepVolume.toFixed(4)}*(${betweenExpr})`
       fcParts.push(`${audioSrc}volume=volume='${notExpr}':eval=frame[muted]`)
       fcParts.push(`sine=frequency=1000[sine_raw]`)
       fcParts.push(`[sine_raw]volume=volume='${bExpr}':eval=frame[bleep]`)

@@ -12,7 +12,15 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/preload/index.ts'),
+          popup: resolve('src/preload/popup.ts'),
+        }
+      }
+    }
   },
   renderer: {
     resolve: {
@@ -26,7 +34,13 @@ export default defineConfig({
       postcss: './postcss.config.js'
     },
     build: {
-      sourcemap: true
+      sourcemap: true,
+      rollupOptions: {
+        input: {
+          index: resolve('src/renderer/index.html'),
+          popup: resolve('src/renderer/popup.html'),
+        }
+      }
     }
   }
 })

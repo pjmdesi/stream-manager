@@ -17,6 +17,7 @@ import { registerStreamsIPC } from './ipc/streams'
 import { registerCombineIPC } from './ipc/combine'
 import { registerYouTubeIPC } from './ipc/youtube'
 import { registerTwitchIPC } from './ipc/twitch'
+import { registerVideoPopupIPC } from './ipc/videoPopup'
 import { tempManager } from './services/tempManager'
 import { fileWatcher } from './services/fileWatcher'
 
@@ -105,6 +106,7 @@ app.whenReady().then(() => {
     registerCombineIPC()
     registerYouTubeIPC()
     registerTwitchIPC()
+    registerVideoPopupIPC()
   })
 
   app.on('activate', function () {

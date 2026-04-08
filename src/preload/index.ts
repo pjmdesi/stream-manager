@@ -289,6 +289,28 @@ contextBridge.exposeInMainWorld('api', {
   twitchUpdateChannel: (title: string, gameName?: string) =>
     ipcRenderer.invoke('twitch:updateChannel', title, gameName),
 
+  // ── Video Popup ───────────────────────────────────────────────────────────
+  openVideoPopup: (filePath: string, currentTime: number, videoWidth: number, videoHeight: number) =>
+    ipcRenderer.invoke('popup:open', filePath, currentTime, videoWidth, videoHeight),
+
+  controlVideoPopup: (cmd: string, ...args: any[]) =>
+    ipcRenderer.invoke('popup:control', cmd, ...args),
+
+  closeVideoPopup: () =>
+    ipcRenderer.invoke('popup:close'),
+
+  onVideoPopupClosed: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('popup:closed', handler)
+    return () => ipcRenderer.removeListener('popup:closed', handler)
+  },
+
+  onVideoPopupTimeUpdate: (callback: (time: number) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, time: number) => callback(time)
+    ipcRenderer.on('popup:timeupdate', handler)
+    return () => ipcRenderer.removeListener('popup:timeupdate', handler)
+  },
+
   // ── Window Controls ───────────────────────────────────────────────────────
   windowMinimize: () => ipcRenderer.send('window:minimize'),
   windowMaximize: () => ipcRenderer.send('window:maximize'),

@@ -1,12 +1,11 @@
 import { ipcMain, IpcMainInvokeEvent, BrowserWindow } from 'electron'
-import type { WaveformPeak } from '../services/ffmpegService'
 import { audioCacheManager } from '../services/audioCacheManager'
 import { thumbnailCacheManager } from '../services/thumbnailCacheManager'
 import { waveformCacheManager } from '../services/waveformCacheManager'
 import { getStore } from './store'
 
 // In-process waveform cache — persists for the lifetime of the app
-const waveformCache = new Map<string, WaveformPeak[]>()
+const waveformCache = new Map<string, Buffer>()
 
 export function registerVideoIPC(): void {
   ipcMain.handle('video:probe', async (_event: IpcMainInvokeEvent, filePath: string) => {
@@ -82,10 +81,10 @@ export function registerVideoIPC(): void {
     if (waveformCache.has(filePath)) return waveformCache.get(filePath)
     const disk = waveformCacheManager.getCached(filePath)
     if (disk) { waveformCache.set(filePath, disk); return disk }
-    const { extractWaveformPeaks } = await import('../services/ffmpegService')
-    const peaks = await extractWaveformPeaks(filePath)
-    waveformCache.set(filePath, peaks)
-    waveformCacheManager.save(filePath, peaks)
-    return peaks
+    const { extractWaveformData } = await import('../services/ffmpegService')
+    const samples = await extractWaveformData(filePath)
+    waveformCache.set(filePath, samples)
+    waveformCacheManager.save(filePath, samples)
+    return samples
   })
 }

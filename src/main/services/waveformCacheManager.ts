@@ -2,13 +2,6 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { app } from 'electron'
-import type { WaveformPeak } from './ffmpegService'
-
-interface WaveformCacheFile {
-  filePath: string
-  mtime: number
-  peaks: WaveformPeak[]
-}
 
 class WaveformCacheManager {
   private _cacheDir: string | null = null
@@ -23,34 +16,40 @@ class WaveformCacheManager {
 
   private cachePath(filePath: string): string {
     const hash = crypto.createHash('md5').update(filePath).digest('hex')
-    return path.join(this.cacheDir, `${hash}.json`)
+    return path.join(this.cacheDir, `${hash}.bin`)
   }
 
-  getCached(filePath: string): WaveformPeak[] | null {
+  // Stored format: 8-byte header (mtime as uint64 LE) followed by raw f32le samples
+  getCached(filePath: string): Buffer | null {
     const file = this.cachePath(filePath)
-    let data: WaveformCacheFile
+    let data: Buffer
     try {
-      data = JSON.parse(fs.readFileSync(file, 'utf-8'))
+      data = fs.readFileSync(file)
     } catch {
       return null
     }
 
+    if (data.byteLength < 8) return null
+
+    const cachedMtime = data.readBigUInt64LE(0)
     try {
       const stat = fs.statSync(filePath)
-      if (Math.floor(stat.mtimeMs) !== data.mtime) return null
+      if (BigInt(Math.floor(stat.mtimeMs)) !== cachedMtime) return null
     } catch {
       return null
     }
 
-    return data.peaks
+    // Return only the samples portion (skip 8-byte header)
+    return data.subarray(8)
   }
 
-  save(filePath: string, peaks: WaveformPeak[]): void {
+  save(filePath: string, samples: Buffer): void {
     let mtime = 0
     try { mtime = Math.floor(fs.statSync(filePath).mtimeMs) } catch {}
-    const data: WaveformCacheFile = { filePath, mtime, peaks }
+    const header = Buffer.allocUnsafe(8)
+    header.writeBigUInt64LE(BigInt(mtime), 0)
     try {
-      fs.writeFileSync(this.cachePath(filePath), JSON.stringify(data))
+      fs.writeFileSync(this.cachePath(filePath), Buffer.concat([header, samples]))
     } catch {}
   }
 

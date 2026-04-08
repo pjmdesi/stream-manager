@@ -25,7 +25,7 @@ declare global {
       extractAudioTracks(filePath: string, trackIndices?: number[]): Promise<string[]>
       cancelExtractAudioTracks(): Promise<void>
       cleanupTracks(paths: string[]): Promise<void>
-      getWaveform(filePath: string): Promise<Array<{ min: number; max: number }>>
+      getWaveform(filePath: string): Promise<Uint8Array>
       clearAudioCache(): Promise<void>
       getAudioCacheSize(): Promise<number>
       getThumbnailCache(filePath: string): Promise<{ timecodes: number[]; frameUrls: string[] } | null>
@@ -78,6 +78,7 @@ declare global {
         videoHeight: number
         cropX: number
         bleepRegions: Array<{ id: string; start: number; end: number }>
+        bleepVolume: number
       }): Promise<string>
       cancelJob(jobId: string): Promise<void>
       pauseJob(jobId: string): Promise<void>
@@ -134,6 +135,13 @@ declare global {
       twitchConnect(): Promise<void>
       twitchDisconnect(): Promise<void>
       twitchUpdateChannel(title: string, gameName?: string): Promise<void>
+
+      // ── Video Popup ───────────────────────────────────────────────────────────
+      openVideoPopup(filePath: string, currentTime: number, videoWidth: number, videoHeight: number): Promise<void>
+      controlVideoPopup(cmd: string, ...args: any[]): Promise<void>
+      closeVideoPopup(): Promise<void>
+      onVideoPopupClosed(cb: () => void): () => void
+      onVideoPopupTimeUpdate(cb: (time: number) => void): () => void
 
       // ── Window Controls ──────────────────────────────────────────────────────
       windowMinimize(): void

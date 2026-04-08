@@ -43,6 +43,7 @@ export function useVideoPlayer() {
   const tempPaths = useRef<string[]>([])
   const syncInterval = useRef<ReturnType<typeof setInterval> | null>(null)
   const isSeeking = useRef(false)
+  const pendingSeekTime = useRef<number | null>(null)
   const setupSyncRef = useRef<() => void>(() => {})
 
   // Cleanup old tracks
@@ -223,6 +224,15 @@ export function useVideoPlayer() {
       audioElements.current.forEach(audio => {
         if (audio) audio.currentTime = video.currentTime
       })
+      // Flush any pending scrub position that arrived while a seek was in-flight
+      const pending = pendingSeekTime.current
+      if (pending !== null) {
+        pendingSeekTime.current = null
+        video.currentTime = pending
+        audioElements.current.forEach(audio => { if (audio) audio.currentTime = pending })
+      } else {
+        isSeeking.current = false
+      }
     }
     const onTimeUpdate = () => {
       setState(prev => ({ ...prev, currentTime: video.currentTime }))
@@ -286,11 +296,28 @@ export function useVideoPlayer() {
 
   const seek = useCallback((time: number) => {
     const video = videoRef.current
-    if (video) {
+    if (!video) return
+    // Cancel any queued scrub position — this is an authoritative exact seek
+    pendingSeekTime.current = null
+    isSeeking.current = true
+    video.currentTime = time
+    audioElements.current.forEach(audio => {
+      if (audio) audio.currentTime = time
+    })
+  }, [])
+
+  // Throttled seek for scrub drags. Only one seek is ever in-flight at a time;
+  // intermediate positions are dropped, keeping only the latest pending one.
+  // Call seek() on mouseup to land on the exact frame.
+  const fastSeek = useCallback((time: number) => {
+    const video = videoRef.current
+    if (!video) return
+    if (isSeeking.current) {
+      pendingSeekTime.current = time
+    } else {
+      isSeeking.current = true
       video.currentTime = time
-      audioElements.current.forEach(audio => {
-        if (audio) audio.currentTime = time
-      })
+      audioElements.current.forEach(audio => { if (audio) audio.currentTime = time })
     }
   }, [])
 
@@ -366,7 +393,9 @@ export function useVideoPlayer() {
     setTrackVolume,
     setTrackMuted,
     seek,
+    fastSeek,
     togglePlay,
-    cleanupTracks
+    cleanupTracks,
+    audioElements,
   }
 }

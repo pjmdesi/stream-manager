@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
-import { Play, Pause, FolderOpen, Info, Layers, CheckSquare, Square, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera, X, Loader2, Scissors, LogIn, LogOut, Crop, Volume2, Upload, ZoomIn } from 'lucide-react'
+import { Play, Pause, FolderOpen, Info, Layers, CheckSquare, Square, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera, X, Loader2, Scissors, LogIn, LogOut, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2 } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import type { BleepRegion, ClipState, CropMode, TimelineViewport } from '../../types'
@@ -170,7 +170,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   initialFile?: PendingFile | null
   onNavigateToConverter?: () => void
 }) {
-  const { videoRef, state, loadFile, extractTracks, cancelExtraction, resetExtraction, clearError, closeVideo, seek, togglePlay } = useVideoPlayer()
+  const { videoRef, state, loadFile, extractTracks, cancelExtraction, resetExtraction, clearError, closeVideo, seek, fastSeek, togglePlay, audioElements } = useVideoPlayer()
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [editingTimecode, setEditingTimecode] = useState(false)
   const [timecodeInput, setTimecodeInput] = useState('')
@@ -184,6 +184,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     cropMode: 'none' as CropMode,
     cropX: 0.5,
     bleepRegions: [],
+    bleepVolume: 0.25,
   })
 
   // Viewport for zoom/pan — always kept in sync; only applied in clip mode
@@ -193,9 +194,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const isClipModeRef = useRef(isClipMode)
   useEffect(() => { isClipModeRef.current = isClipMode }, [isClipMode])
   const durationRef = useRef(0)
-
-  // Pan scrollbar drag state
-  const panDragRef = useRef<{ startX: number; startViewStart: number; startViewEnd: number; barWidth: number } | null>(null)
 
   // Waveform element ref for non-passive wheel listener
   const waveformStripRef = useRef<HTMLDivElement>(null)
@@ -236,6 +234,10 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   // Confirm exit clip mode
   const [showExitClipConfirm, setShowExitClipConfirm] = useState(false)
 
+  // Multi-track warning modal before entering clip mode
+  const [clipModeModal, setClipModeModal] = useState<'warn' | 'merge' | null>(null)
+  const pendingClipAfterMerge = useRef(false)
+
   // Clip duration display / edit
   const [editingDuration, setEditingDuration] = useState(false)
   const [durationInput, setDurationInput] = useState('')
@@ -245,6 +247,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [activeBleepId, setActiveBleepId] = useState<string | null>(null)
   const [bleepLengthInput, setBleepLengthInput] = useState('')
   const bleepLengthInputRef = useRef<HTMLInputElement>(null)
+  const bleepPopupRef       = useRef<HTMLDivElement>(null)
 
   // Web Audio for bleep playback
   const audioCtxRef  = useRef<AudioContext | null>(null)
@@ -253,15 +256,23 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const isBleepingRef = useRef(false)
 
   // Stable refs for values needed in memoised callbacks
-  const currentTimeRef = useRef(0)
-  const videoInfoRef   = useRef(state.videoInfo)
-  const clipStateRef   = useRef(clipState)
-  const seekRef        = useRef(seek)
+  const currentTimeRef  = useRef(0)
+  const videoInfoRef    = useRef(state.videoInfo)
+  const clipStateRef    = useRef(clipState)
+  // Declared early so seekRef/fastSeekRef can close over them; synced via useEffect below.
+  const isPopupOpenRef          = useRef(false)
+  const setPopupCurrentTimeRef  = useRef<(t: number) => void>(() => {})
+  const effectiveCurrentTimeRef = useRef(0)
+  // Popup-aware: relay to popup when open, else seek local video.
+  // All playhead-drag, waveform-click, and slider handlers use these refs
+  // so they don't need to know about popup state themselves.
+  const seekRef     = useRef((t: number) => seek(t))
+  const fastSeekRef = useRef((t: number) => fastSeek(t))
 
   const exitClipMode = useCallback(() => {
     setIsClipMode(false)
     setActiveBleepId(null)
-    setClipState({ inPoint: null, outPoint: null, cropMode: 'none', cropX: 0.5, bleepRegions: [] })
+    setClipState({ inPoint: null, outPoint: null, cropMode: 'none', cropX: 0.5, bleepRegions: [], bleepVolume: 0.25 })
     setViewport({ viewStart: 0, viewEnd: durationRef.current })
     setShowInPopup(false)
     setShowOutPopup(false)
@@ -312,10 +323,23 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   useEffect(() => { currentTimeRef.current = currentTime }, [currentTime])
   useEffect(() => { videoInfoRef.current   = videoInfo  }, [videoInfo])
   useEffect(() => { clipStateRef.current   = clipState  }, [clipState])
-  useEffect(() => { seekRef.current        = seek       }, [seek])
+  useEffect(() => { seekRef.current     = (t) => { if (isPopupOpenRef.current) { window.api.controlVideoPopup('seek', t); setPopupCurrentTimeRef.current(t) } else seek(t) }     }, [seek])
+  useEffect(() => { fastSeekRef.current = (t) => { if (isPopupOpenRef.current) { window.api.controlVideoPopup('seek', t); setPopupCurrentTimeRef.current(t) } else fastSeek(t) } }, [fastSeek])
   useEffect(() => {
     if (duration > 0) setViewport({ viewStart: 0, viewEnd: duration })
+    // Close popup whenever the loaded file changes or is cleared
+    window.api.closeVideoPopup().catch(() => {})
+    setIsPopupOpen(false)
   }, [state.videoUrl]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // After a merge triggered from the clip-mode modal completes, enter clip mode automatically
+  useEffect(() => {
+    if (tracksExtracted && pendingClipAfterMerge.current) {
+      pendingClipAfterMerge.current = false
+      setClipModeModal(null)
+      setIsClipMode(true)
+    }
+  }, [tracksExtracted])
 
 
   // Snap viewport to keep playhead visible whenever currentTime changes
@@ -476,11 +500,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       const { viewStart, viewEnd } = viewportRef.current
       return viewStart + Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * (viewEnd - viewStart)
     }
-    seekRef.current(getTime(e.clientX))
-    const onMove = (me: MouseEvent) => seekRef.current(getTime(me.clientX))
-    const onUp = () => {
+    fastSeekRef.current(getTime(e.clientX))
+    const onMove = (me: MouseEvent) => fastSeekRef.current(getTime(me.clientX))
+    const onUp = (me: MouseEvent) => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      seekRef.current(getTime(me.clientX))
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -510,7 +535,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const startBleep = useCallback(() => {
     if (isBleepingRef.current) return
     isBleepingRef.current = true
-    if (videoRef.current) videoRef.current.muted = true
+    if (videoRef.current && audioElements.current.length === 0) videoRef.current.muted = true
+    audioElements.current.forEach(a => { if (a) a.muted = true })
 
     if (!audioCtxRef.current) audioCtxRef.current = new AudioContext()
     const ctx = audioCtxRef.current
@@ -522,18 +548,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     osc.frequency.value = 1000
     // Fade in over 5 ms to avoid a click on entry
     gain.gain.setValueAtTime(0, ctx.currentTime)
-    gain.gain.setTargetAtTime(0.25, ctx.currentTime, 0.005)
+    gain.gain.setTargetAtTime(clipStateRef.current.bleepVolume, ctx.currentTime, 0.005)
     osc.connect(gain)
     gain.connect(ctx.destination)
     osc.start()
     bleepOscRef.current  = osc
     bleepGainRef.current = gain
-  }, [videoRef])
+  }, [videoRef, audioElements])
 
   const stopBleep = useCallback(() => {
     if (!isBleepingRef.current) return
     isBleepingRef.current = false
-    if (videoRef.current) videoRef.current.muted = false
+    // Only unmute the video element if it's the active audio source (no extracted tracks)
+    if (videoRef.current && audioElements.current.length === 0) videoRef.current.muted = false
+    audioElements.current.forEach(a => { if (a) a.muted = false })
 
     const ctx  = audioCtxRef.current
     const osc  = bleepOscRef.current
@@ -545,7 +573,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
     bleepOscRef.current  = null
     bleepGainRef.current = null
-  }, [videoRef])
+  }, [videoRef, audioElements])
 
   // rAF loop — check every frame whether playback is inside a bleep region
   useEffect(() => {
@@ -566,6 +594,18 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   // Close AudioContext when the component unmounts
   useEffect(() => () => { audioCtxRef.current?.close() }, [])
+
+  // Dismiss bleep popup when clicking outside it
+  useEffect(() => {
+    if (!activeBleepId) return
+    const handler = (e: MouseEvent) => {
+      if (bleepPopupRef.current && !bleepPopupRef.current.contains(e.target as Node)) {
+        setActiveBleepId(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [activeBleepId])
 
   // Move an existing bleep region by dragging its centre area
   const startBleepMove = useCallback((e: React.MouseEvent, bleepId: string, wrapperRect: DOMRect) => {
@@ -645,6 +685,30 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     window.addEventListener('mouseup', onUp)
   }, [])
 
+  // Drag the volume line on a bleep marker up/down to adjust shared bleep volume
+  const startBleepVolumeDrag = useCallback((e: React.MouseEvent, markerRect: DOMRect) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startY = e.clientY
+    const startVol = clipStateRef.current.bleepVolume
+    const onMove = (me: MouseEvent) => {
+      const dy = me.clientY - startY
+      // Dragging up → higher volume; full marker height maps 0–2
+      const newVol = Math.max(0, Math.min(1.5, startVol - (dy / markerRect.height) * 1.5))
+      setClipState(s => ({ ...s, bleepVolume: newVol }))
+      // Update live gain if currently bleeping
+      if (bleepGainRef.current && audioCtxRef.current) {
+        bleepGainRef.current.gain.setTargetAtTime(newVol, audioCtxRef.current.currentTime, 0.01)
+      }
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [])
+
   // I / O keyboard shortcuts — set in/out point at current playhead
   useEffect(() => {
     if (!isClipMode) return
@@ -691,19 +755,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const stepFrame = useCallback((dir: 1 | -1) => {
     const vid = videoRef.current
     if (!vid) return
-    if (!vid.paused) vid.pause()
+    if (!isPopupOpenRef.current && !vid.paused) vid.pause()
     const fps = videoInfo?.fps ?? 30
-    seek(Math.max(0, Math.min(duration, currentTime + dir / fps)))
-  }, [videoRef, videoInfo, duration, currentTime, seek])
+    seekRef.current(Math.max(0, Math.min(duration, effectiveCurrentTimeRef.current + dir / fps)))
+  }, [videoRef, videoInfo, duration])
 
   const skip = useCallback((seconds: number) => {
-    seek(Math.max(0, Math.min(duration, currentTime + seconds)))
-  }, [duration, currentTime, seek])
+    seekRef.current(Math.max(0, Math.min(duration, effectiveCurrentTimeRef.current + seconds)))
+  }, [duration])
 
   // Thumbnail strip
   const [filmstripEl, setFilmstripEl] = useState<HTMLDivElement | null>(null)
   const [stripWidth, setStripWidth] = useState(0)
   const [hoverRatio, setHoverRatio] = useState<number | null>(null)
+  const [sliderHoverRatio, setSliderHoverRatio] = useState<number | null>(null)
 
   useEffect(() => {
     if (!filmstripEl) return
@@ -734,7 +799,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     return [state.filePath]
   }, [state.filePath, tracksExtracted, state.tracks])
 
-  const { svgPath: waveformPath, peakCount, loading: waveformLoading } = useWaveform(waveformSources)
+  const { svgPath: waveformPath, peakCount, loading: waveformLoading } = useWaveform(waveformSources, vStart, vEnd, duration)
 
   const { thumbnails, generating } = useThumbnailStrip(
     state.filePath ?? null,
@@ -790,12 +855,73 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       videoWidth:   videoInfo.width,
       videoHeight:  videoInfo.height,
       bleepRegions: clipState.bleepRegions,
+      bleepVolume:  clipState.bleepVolume,
     })
 
     onNavigateToConverter?.()
   }, [state.filePath, videoInfo, clipState, setJobs, onNavigateToConverter])
 
   const [screenshotFlash, setScreenshotFlash] = useState(false)
+  const [isPopupOpen, setIsPopupOpen] = useState(false)
+  // Popup has its own play/time state so the main window's video can be fully suspended
+  const [popupPlaying, setPopupPlaying]         = useState(false)
+  const [popupCurrentTime, setPopupCurrentTime] = useState(0)
+  const effectivePlaying     = isPopupOpen ? popupPlaying     : isPlaying
+  const effectiveCurrentTime = isPopupOpen ? popupCurrentTime : currentTime
+  // Stable setters — assign inline every render so early-declared refs stay current.
+  setPopupCurrentTimeRef.current  = setPopupCurrentTime
+  effectiveCurrentTimeRef.current = effectiveCurrentTime
+  const wasPlayingAtPopup = useRef(false)
+  const lastPopupTime     = useRef(0)
+
+  // Track popup time updates (popup sends ~4 times/sec)
+  useEffect(() => {
+    return window.api.onVideoPopupTimeUpdate(t => {
+      lastPopupTime.current = t
+      setPopupCurrentTime(t)
+    })
+  }, [])
+
+  // When popup closes: restore main video to popup's last position
+  useEffect(() => {
+    return window.api.onVideoPopupClosed(() => {
+      setIsPopupOpen(false)
+      setPopupPlaying(false)
+      const v = videoRef.current
+      if (!v || !state.videoUrl) return
+      v.currentTime = lastPopupTime.current
+      if (wasPlayingAtPopup.current) v.play().catch(() => {})
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.videoUrl])
+
+  const openVideoPopup = useCallback(async () => {
+    if (!state.filePath || !videoInfo) return
+    // Pause (and remember state) before opening so only one decoder runs at a time
+    wasPlayingAtPopup.current = isPlaying
+    videoRef.current?.pause()
+    audioElements.current.forEach(a => a?.pause())
+    lastPopupTime.current = currentTime
+    setPopupCurrentTime(currentTime)
+    await window.api.openVideoPopup(state.filePath, currentTime, videoInfo.width, videoInfo.height)
+    setIsPopupOpen(true)
+    setPopupPlaying(true)   // popup auto-plays on open
+  }, [state.filePath, videoInfo, currentTime, isPlaying, audioElements])
+
+  // Keep isPopupOpenRef in sync so seekRef/fastSeekRef can read it at call time.
+  useEffect(() => { isPopupOpenRef.current = isPopupOpen }, [isPopupOpen])
+
+  const effectiveTogglePlay = useCallback(() => {
+    if (isPopupOpenRef.current) {
+      setPopupPlaying(prev => {
+        const next = !prev
+        window.api.controlVideoPopup(next ? 'play' : 'pause')
+        return next
+      })
+    } else {
+      togglePlay()
+    }
+  }, [togglePlay])
 
   const captureScreenshot = useCallback(async () => {
     const vid = videoRef.current
@@ -847,7 +973,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   src={videoUrl}
                   className="w-full h-full object-contain cursor-pointer"
                   preload="auto"
-                  onClick={togglePlay}
+                  onClick={effectiveTogglePlay}
                 />
                 {/* 9:16 crop overlay */}
                 {isClipMode && clipState.cropMode === '9:16' && videoInfo && vcSize.w > 0 && (() => {
@@ -880,14 +1006,34 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 <div className="absolute inset-0 bg-white/30 pointer-events-none" />
               )}
 
-              {/* Screenshot button — visible on hover */}
-              <button
-                onClick={captureScreenshot}
-                title="Save screenshot (PNG)"
-                className="absolute bottom-3 right-3 p-2 rounded-lg bg-black/60 text-white/70 hover:text-white hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Camera size={16} />
-              </button>
+              {/* Screenshot + popup buttons — visible on hover */}
+              <div className="absolute bottom-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={captureScreenshot}
+                  title="Save screenshot (PNG)"
+                  className="p-2 rounded-lg bg-black/60 text-white/70 hover:text-white hover:bg-black/80"
+                >
+                  <Camera size={16} />
+                </button>
+                {videoUrl && (
+                  <button
+                    onClick={isPopupOpen ? () => window.api.closeVideoPopup() : openVideoPopup}
+                    title={isPopupOpen ? 'Return video to player' : 'Pop out video (for OBS capture)'}
+                    className={`p-2 rounded-lg bg-black/60 hover:bg-black/80 transition-colors ${isPopupOpen ? 'text-purple-400 hover:text-purple-300' : 'text-white/70 hover:text-white'}`}
+                  >
+                    <Tv2 size={16} />
+                  </button>
+                )}
+              </div>
+
+              {/* Popup placeholder — shown when video is open in the popup window */}
+              {isPopupOpen && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 pointer-events-none">
+                  <Tv2 size={28} className="text-purple-400 opacity-60" />
+                  <p className="text-sm text-gray-400">Video opened in separate window</p>
+                  <p className="text-xs text-gray-600">Controls still work from here</p>
+                </div>
+              )}
 
               {/* Extracting overlay */}
               {isExtracting && (
@@ -987,7 +1133,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       }}
                       className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors"
                     >
-                      <Volume2 size={11} /> Add Bleep
+                      <AudioWaveform size={11} /> Add Bleep
                     </button>
 
                     <div className="flex-1" />
@@ -1087,7 +1233,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       title={clipState.inPoint !== null && clipState.outPoint !== null ? 'Export clip' : 'Set in and out points first'}
                       onClick={exportClip}
                       disabled={clipState.inPoint === null || clipState.outPoint === null}
-                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-blue-300 border-blue-400/50 hover:bg-blue-950/60 disabled:hover:bg-transparent"
+                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-purple-300 border-purple-600/30 bg-purple-600/20 hover:bg-purple-600/35 disabled:hover:bg-transparent"
                     >
                       <Upload size={11} /> Export Clip
                     </button>
@@ -1245,10 +1391,10 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 )}
 
                 {/* Playhead — hidden when scrolled out of view */}
-                {duration > 0 && currentTime >= vStart && currentTime <= vEnd && (
+                {duration > 0 && effectiveCurrentTime >= vStart && effectiveCurrentTime <= vEnd && (
                   <div
                     className="absolute top-0 bottom-0 w-0.5 bg-purple-400/90 pointer-events-none z-20"
-                    style={{ left: `${((currentTime - vStart) / vSpan) * 100}%`, transform: 'translateX(-50%)' }}
+                    style={{ left: `${((effectiveCurrentTime - vStart) / vSpan) * 100}%`, transform: 'translateX(-50%)' }}
                   />
                 )}
 
@@ -1286,6 +1432,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   seek(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
                 }}
                 onMouseDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
+                onMouseMove={e => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  setHoverRatio((e.clientX - rect.left) / rect.width)
+                }}
+                onMouseLeave={() => setHoverRatio(null)}
               >
                 {waveformLoading && (
                   <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-600 pointer-events-none">
@@ -1295,7 +1446,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 )}
                 {waveformPath && (
                   <svg
-                    viewBox={`${(vStart / duration) * peakCount} 0 ${(vSpan / duration) * peakCount} 100`}
+                    viewBox={`0 0 ${peakCount} 100`}
                     preserveAspectRatio="none"
                     className="w-full h-full"
                   >
@@ -1306,19 +1457,19 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   </svg>
                 )}
                 {/* Playhead — hidden when scrolled out of view */}
-                {duration > 0 && currentTime >= vStart && currentTime <= vEnd && (
+                {duration > 0 && effectiveCurrentTime >= vStart && effectiveCurrentTime <= vEnd && (
                   <div
                     className="absolute top-0 bottom-0 w-0.5 bg-purple-400/80 pointer-events-none z-[8]"
-                    style={{ left: `${((currentTime - vStart) / vSpan) * 100}%`, transform: 'translateX(-50%)' }}
+                    style={{ left: `${((effectiveCurrentTime - vStart) / vSpan) * 100}%`, transform: 'translateX(-50%)' }}
                   />
                 )}
               </div>
 
               {/* Draggable playhead — z-10 beats region drag (no z-index), yields to handles (z-20) */}
-              {duration > 0 && currentTime >= vStart && currentTime <= vEnd && (
+              {duration > 0 && effectiveCurrentTime >= vStart && effectiveCurrentTime <= vEnd && (
                 <div
                   className="absolute inset-y-0 z-10 -translate-x-1/2 cursor-ew-resize"
-                  style={{ left: `${((currentTime - vStart) / vSpan) * 100}%`, width: '12px' }}
+                  style={{ left: `${((effectiveCurrentTime - vStart) / vSpan) * 100}%`, width: '12px' }}
                   onMouseDown={startPlayheadDrag}
                 />
               )}
@@ -1358,17 +1509,26 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           startBleepMove(e, region.id, waveformStripRef.current!.getBoundingClientRect())
                         }}
                       >
-                        {/* Single-period sine wave */}
-                        <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
-                          <path
-                            d="M 0,50 C 12,10 38,10 50,50 C 62,90 88,90 100,50"
-                            fill="none"
-                            stroke="white"
-                            strokeWidth="2"
-                            strokeOpacity="0.35"
-                            vectorEffect="non-scaling-stroke"
-                          />
-                        </svg>
+                        {/* Icon centered in the marker — VolumeX when muted, AudioWaveform otherwise */}
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-35">
+                          {clipState.bleepVolume < 0.01
+                            ? <VolumeX size={14} className="text-white" />
+                            : <AudioWaveform size={14} className="text-white" />
+                          }
+                        </div>
+                        {/* Volume line — draggable horizontal bar; top position = 1 - volume */}
+                        <div
+                          className="absolute left-0 right-0 h-3 -translate-y-1/2 cursor-ns-resize group z-10"
+                          style={{ top: `${(1 - clipState.bleepVolume / 1.5) * 100}%` }}
+                          onMouseDown={e => {
+                            if (e.button !== 0) return
+                            e.stopPropagation()
+                            startBleepVolumeDrag(e, e.currentTarget.parentElement!.getBoundingClientRect())
+                          }}
+                        >
+                          {/* Visible line — thicker hit area above for easier grabbing */}
+                          <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-white/70 group-hover:bg-white transition-colors" />
+                        </div>
                         {/* Resize handles — only shown when the marker is wide enough */}
                         {showHandles && (
                           <>
@@ -1536,6 +1696,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     const centerPct = Math.max(2, Math.min(98, (((region.start + region.end) / 2 - vStart) / vSpan) * 100))
                     return (
                       <div
+                        ref={bleepPopupRef}
                         className="absolute flex -translate-x-1/2 z-50"
                         style={{ left: `${centerPct}%`, top: '100%' }}
                       >
@@ -1569,7 +1730,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                   return { ...s, bleepRegions: s.bleepRegions.map(b => b.id === activeBleepId ? { ...b, end: newEnd } : b) }
                                 })
                               }
-                              setActiveBleepId(null)
+                              // Don't dismiss here — click-outside handler does it
                             }}
                             className="text-[11px] text-blue-200 tabular-nums bg-transparent focus:outline-none min-w-0 text-center"
                             style={{ width: `${Math.max(4, bleepLengthInput.length)}ch` }}
@@ -1598,14 +1759,34 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               {isClipMode && <div className="h-[12px] shrink-0" />}
 
               {/* Seek bar */}
-              <Slider
-                value={duration > 0 ? currentTime / duration : 0}
-                min={0}
-                max={1}
-                step={0.001}
-                onChange={(v) => seek(v * duration)}
-                color="purple"
-              />
+              <div className="relative">
+                {sliderHoverRatio !== null && duration > 0 && (
+                  <div
+                    className="absolute pointer-events-none z-20 tabular-nums"
+                    style={{
+                      bottom: '100%',
+                      marginBottom: 3,
+                      left: `${Math.min(Math.max(sliderHoverRatio * 100, 2), 98)}%`,
+                      transform: 'translateX(-50%)'
+                    }}
+                  >
+                    <div className="text-[10px] text-white bg-black/70 px-1 py-0.5 rounded">
+                      {formatTime(sliderHoverRatio * duration, videoInfo?.fps)}
+                    </div>
+                  </div>
+                )}
+                <Slider
+                  value={duration > 0 ? effectiveCurrentTime / duration : 0}
+                  min={0}
+                  max={1}
+                  step={0.001}
+                  onChange={(v) => seekRef.current(v * duration)}
+                  onDrag={(v) => fastSeekRef.current(v * duration)}
+                  onCommit={(v) => seekRef.current(v * duration)}
+                  onHover={setSliderHoverRatio}
+                  color="purple"
+                />
+              </div>
               {/* Timecodes + playback controls on one row */}
               <div className="flex items-center">
                 {editingTimecode ? (
@@ -1616,16 +1797,16 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     onKeyDown={e => {
                       if (e.key === 'Enter') {
                         const t = parseTimecode(timecodeInput, videoInfo?.fps)
-                        if (t !== null) seek(Math.max(0, Math.min(t, duration)))
+                        if (t !== null) seekRef.current(Math.max(0, Math.min(t, duration)))
                         setEditingTimecode(false)
                       }
                       if (e.key === 'Escape') setEditingTimecode(false)
                       const arrow = applyTimecodeArrow(e, timecodeInput, timecodeInputRef, videoInfo?.fps, 0, duration)
-                      if (arrow) { setTimecodeInput(arrow.newValue); seek(arrow.newTime) }
+                      if (arrow) { setTimecodeInput(arrow.newValue); seekRef.current(arrow.newTime) }
                     }}
                     onBlur={() => {
                       const t = parseTimecode(timecodeInput, videoInfo?.fps)
-                      if (t !== null) seek(Math.max(0, Math.min(t, duration)))
+                      if (t !== null) seekRef.current(Math.max(0, Math.min(t, duration)))
                       setEditingTimecode(false)
                     }}
                     className="w-24 shrink-0 text-xs text-purple-300 tabular-nums bg-transparent border-b border-purple-500 focus:outline-none"
@@ -1636,17 +1817,17 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     title="Click to enter timecode"
                     onClick={() => {
                       if (!duration) return
-                      setTimecodeInput(formatViewTime(currentTime, videoInfo?.fps))
+                      setTimecodeInput(formatViewTime(effectiveCurrentTime, videoInfo?.fps))
                       setEditingTimecode(true)
                       setTimeout(() => timecodeInputRef.current?.select(), 0)
                     }}
                   >
-                    {formatTime(currentTime, videoInfo?.fps)}
+                    {formatTime(effectiveCurrentTime, videoInfo?.fps)}
                   </span>
                 )}
                 <div className="flex-1 flex items-center justify-center gap-1">
                 {/* Skip to start */}
-                <button onClick={() => seek(0)} title="Skip to start" className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                <button onClick={() => seekRef.current(0)} title="Skip to start" className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
                   <ChevronsLeft size={15} />
                 </button>
 
@@ -1667,8 +1848,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 </button>
 
                 {/* Play / Pause */}
-                <button onClick={togglePlay} title={isPlaying ? 'Pause' : 'Play'} className="p-2 mx-1 rounded-full bg-purple-600 hover:bg-purple-500 text-white transition-colors">
-                  {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                <button
+                  onClick={effectiveTogglePlay}
+                  title={effectivePlaying ? 'Pause' : 'Play'}
+                  className="p-2 mx-1 rounded-full bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+                >
+                  {effectivePlaying ? <Pause size={16} /> : <Play size={16} />}
                 </button>
 
                 {/* Next frame */}
@@ -1688,7 +1873,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
 
                 {/* Skip to end */}
-                <button onClick={() => seek(duration)} title="Skip to end" className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                <button onClick={() => seekRef.current(duration)} title="Skip to end" className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
                   <ChevronsRight size={15} />
                 </button>
 
@@ -1704,7 +1889,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 {videoUrl && (
                   <button
                     onClick={() => {
-                      if (!isClipMode) { setIsClipMode(true); return }
+                      if (!isClipMode) {
+                        // Warn if multi-track and not yet merged
+                        if (multiTrack && !tracksExtracted) { setClipModeModal('warn'); return }
+                        setIsClipMode(true)
+                        return
+                      }
                       if (clipState.inPoint !== null && clipState.outPoint !== null) {
                         setShowExitClipConfirm(true)
                       } else {
@@ -1718,7 +1908,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     }`}
                   >
                     <Scissors size={12} />
-                    {isClipMode ? 'Stop Clipping' : 'Clip'}
+                    {isClipMode ? 'Stop Clipping' : 'Start Clipping'}
                   </button>
                 )}
                 {videoInfo && (
@@ -1734,10 +1924,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     )}
                     <button
                       onClick={closeVideo}
-                      className="ml-1 p-0.5 text-gray-600 hover:text-red-400 transition-colors shrink-0"
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border ml-1 p-0.5 text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors shrink-0"
                       title="Close video"
                     >
                       <X size={12} />
+                      Close Video
                     </button>
                   </div>
                 )}
@@ -1887,6 +2078,138 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
           </button>
         </div>
       )}
+
+      {/* ── Multi-track warning / merge modal before entering clip mode ────── */}
+      <Modal
+        isOpen={clipModeModal !== null}
+        onClose={() => setClipModeModal(null)}
+        title={clipModeModal === 'merge' ? 'Select tracks to merge' : 'Multiple audio tracks detected'}
+        width="sm"
+        dismissible={!isExtracting}
+        footer={
+          clipModeModal === 'warn' ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => { setClipModeModal(null); setIsClipMode(true) }}>
+                Continue anyway
+              </Button>
+              <Button variant="primary" size="sm" onClick={() => setClipModeModal('merge')}>
+                Merge audio now
+              </Button>
+            </>
+          ) : isExtracting ? null : (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setClipModeModal(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={selectedIndices.size < 1}
+                onClick={() => {
+                  pendingClipAfterMerge.current = true
+                  extractTracks(Array.from(selectedIndices).sort())
+                }}
+              >
+                Merge audio tracks
+              </Button>
+            </>
+          )
+        }
+      >
+        {clipModeModal === 'warn' && (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-start gap-2.5 text-sm text-gray-300 leading-relaxed">
+              <Layers size={15} className="text-purple-400 mt-0.5 shrink-0" />
+              <span>
+                This video has <strong className="text-white">{videoInfo?.audioTracks.length} audio tracks</strong>.
+                You will only hear <strong className="text-white">Track 1</strong>.
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 leading-relaxed pl-[23px]">
+              Merging combines all tracks so you hear everything while clipping. Exporting always includes all audio tracks. Merging takes time to process.
+            </p>
+          </div>
+        )}
+
+        {clipModeModal === 'merge' && (
+          <div className="flex flex-col gap-3">
+            {isExtracting ? (
+              /* Progress view */
+              <div className="flex flex-col items-center gap-4 py-2">
+                <div className="text-purple-300 font-medium text-sm">Merging audio tracks…</div>
+                <div className="flex flex-col gap-2.5 w-full">
+                  {videoInfo?.audioTracks.map((t, i) => {
+                    const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
+                    const selected = selectedIndices.has(i)
+                    return (
+                      <div key={i} className="flex items-center gap-3">
+                        <span className={`text-xs text-white whitespace-nowrap min-w-[80px] ${selected ? '' : 'line-through opacity-50'}`}>
+                          {label} <span className="text-white/50">(Track {i + 1})</span>
+                        </span>
+                        {selected ? (
+                          <>
+                            <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${(extractProgress[i] ?? 0) >= 100 ? 'bg-green-500' : 'bg-purple-500'}`}
+                                style={{ width: `${extractProgress[i] ?? 0}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-white/50 w-8 text-right tabular-nums">{extractProgress[i] ?? 0}%</span>
+                          </>
+                        ) : (
+                          <div className="flex-1 h-1.5 bg-white/5 rounded-full" />
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                <button
+                  onClick={() => { cancelExtraction(); pendingClipAfterMerge.current = false; setClipModeModal(null) }}
+                  className="text-xs text-white/50 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              /* Track selector */
+              <>
+                <div className="flex items-start gap-2 text-xs text-gray-400 leading-relaxed">
+                  <Layers size={13} className="text-purple-400 mt-0.5 shrink-0" />
+                  <span>Select which tracks to include in the merge.</span>
+                </div>
+                <div className="flex flex-col gap-1">
+                  {videoInfo!.audioTracks.map((t, i) => {
+                    const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
+                    const checked = selectedIndices.has(i)
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => toggleIndex(i)}
+                        className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
+                          checked
+                            ? 'bg-purple-600/20 border-purple-600/40 text-purple-200'
+                            : 'bg-white/[0.03] border-white/5 text-gray-400 hover:bg-white/[0.06] hover:text-gray-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          {checked
+                            ? <CheckSquare size={13} className="text-purple-400 shrink-0" />
+                            : <Square size={13} className="text-gray-600 shrink-0" />
+                          }
+                          <span className="text-xs font-medium">{label}</span>
+                        </div>
+                        <div className="text-[10px] text-gray-600 mt-0.5 pl-5">
+                          {t.codec} · {t.channels}ch{t.language ? ` · ${t.language}` : ''}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
 
       <Modal
         isOpen={showExitClipConfirm}
