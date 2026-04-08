@@ -13,6 +13,8 @@ const defaultConfig: AppConfig = {
   streamsDir: '',
   streamMode: '' as import('../types').StreamMode,
   archivePresetId: '',
+  clipPresetId: '',
+  defaultBleepVolume: 0.25,
   defaultThumbnailTemplate: '',
   checkEpisodeIteration: true,
   audioCacheLimit: 1_073_741_824,

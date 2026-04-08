@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import ReactDOM from 'react-dom'
 import {
   Plus, FolderOpen, AlertTriangle, PencilLine, FilePlus,
   RefreshCw, Radio, X, ChevronDown, ImageOff,
