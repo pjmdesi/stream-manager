@@ -1,8 +1,10 @@
 import React, { useState } from 'react'
-import { FolderOpen, CheckCircle } from 'lucide-react'
+import { FolderOpen, CheckCircle, MoveRight, HelpCircle } from 'lucide-react'
+import { v4 as uuidv4 } from 'uuid'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
-import type { StreamMode } from '../types'
+import { Tooltip } from './ui/Tooltip'
+import type { StreamMode, WatchRule } from '../types'
 import imgFolderPerStream from '../assets/onboarding/per-stream-folders.png'
 import imgDumpFolder from '../assets/onboarding/stream-dump-folder.png'
 
@@ -173,7 +175,7 @@ function Step1_5({ dir, onDirChange, onResult }: Step1_5Props) {
         <div className="flex items-start gap-2 text-sm text-green-400 bg-green-400/10 border border-green-400/20 rounded-lg px-4 py-3">
           <CheckCircle size={16} className="shrink-0 mt-0.5" />
           <span>
-            Done — {result.manifest.createdFolders.length} folder{result.manifest.createdFolders.length !== 1 ? 's' : ''} created, {result.moved} file{result.moved !== 1 ? 's' : ''} organised.
+            Done — {result.manifest.createdFolders.length} folder{result.manifest.createdFolders.length !== 1 ? 's' : ''} created, {result.moved} file{result.moved !== 1 ? 's' : ''} organized.
             {result.skipped > 0 && ` ${result.skipped} file${result.skipped !== 1 ? 's' : ''} with no date in the filename were left in place.`}
           </span>
         </div>
@@ -189,15 +191,110 @@ function Step1_5({ dir, onDirChange, onResult }: Step1_5Props) {
   )
 }
 
+// ── Step 2.5: Suggested auto-rule ─────────────────────────────────────────────
+
+interface StepAutoRuleProps {
+  streamsDir: string
+  recordingsDir: string
+  pattern: string
+  onRecordingsDirChange: (dir: string) => void
+  onPatternChange: (pattern: string) => void
+}
+
+function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChange, onPatternChange }: StepAutoRuleProps) {
+  const pick = async () => {
+    const picked = await window.api.openDirectoryDialog()
+    if (picked) onRecordingsDirChange(picked)
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-sm text-gray-400 leading-relaxed">
+        Many streamers save recordings to a separate folder — often kept off a cloud or NAS drive to avoid sync conflicts — and then move them into their organized streams folder afterward. Stream Manager can automate this for you with an <span className="font-semibold text-gray-200">Auto-rule</span>.
+      </p>
+      <p className="text-sm text-gray-400 leading-relaxed">
+        If this matches your workflow, enter the folder where your streaming software saves recordings. The rule will automatically move new files into your streams folder. You can adjust or disable this at any time from the <span className="font-semibold text-gray-200">Auto-rules</span> page.
+      </p>
+
+      <div className="flex flex-col gap-4">
+        {/* Source */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-300">Recordings folder <span className="text-gray-500 font-normal">(where your streaming software saves files)</span></label>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              value={recordingsDir}
+              readOnly
+              placeholder="Select your recordings folder…"
+            />
+            <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={pick}>
+              Browse
+            </Button>
+          </div>
+        </div>
+
+        {/* Arrow + destination */}
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-white/10" />
+          <div className="flex items-center gap-1.5 text-xs text-gray-500">
+            <MoveRight size={14} />
+            <span>moves to</span>
+          </div>
+          <div className="flex-1 h-px bg-white/10" />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-300">Destination <span className="text-gray-500 font-normal">(your streams folder)</span></label>
+          <input
+            className="flex-1 bg-navy-900/50 border border-white/10 text-gray-500 text-sm rounded-lg px-3 py-2 cursor-not-allowed"
+            value={streamsDir}
+            readOnly
+          />
+        </div>
+
+        {/* Pattern */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <label className="text-sm font-medium text-gray-300">File pattern <span className="text-gray-500 font-normal">(which files to watch for)</span></label>
+            <Tooltip width="w-72" content={
+              <>
+                <p className="font-semibold text-gray-200 mb-1">Glob pattern syntax</p>
+                <p><span className="font-mono text-purple-300">*</span> — matches any sequence of characters</p>
+                <p><span className="font-mono text-purple-300">?</span> — matches any single character</p>
+                <p><span className="font-mono text-purple-300">{'*.{mkv,mp4}'}</span> — matches multiple types using comma-separated values inside <span className="font-mono">{'{}'}</span></p>
+                <p className="mt-1.5 font-semibold text-gray-400">Examples</p>
+                <p><span className="font-mono text-purple-300">*.mkv</span> — all MKV files (OBS default)</p>
+                <p><span className="font-mono text-purple-300">*.mp4</span> — all MP4 files</p>
+                <p><span className="font-mono text-purple-300">{'*.{mkv,mp4}'}</span> — MKV or MP4</p>
+                <p><span className="font-mono text-purple-300">*</span> — all files <span className="text-gray-500">(not recommended)</span></p>
+              </>
+            }>
+              <HelpCircle size={14} className="text-gray-600 hover:text-gray-400 cursor-default transition-colors" />
+            </Tooltip>
+          </div>
+          <input
+            className="w-48 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            value={pattern}
+            onChange={e => onPatternChange(e.target.value)}
+            placeholder="e.g. *.mkv"
+            spellCheck={false}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Step 3: Done ──────────────────────────────────────────────────────────────
 
 interface Step3Props {
   mode: StreamMode
   streamsDir: string
   convertResult: ConvertResult | null
+  autoRule: WatchRule | null
 }
 
-function Step3({ mode, streamsDir, convertResult }: Step3Props) {
+function Step3({ mode, streamsDir, convertResult, autoRule }: Step3Props) {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -217,8 +314,14 @@ function Step3({ mode, streamsDir, convertResult }: Step3Props) {
             <div className="flex items-center justify-between px-4 py-3">
               <span className="text-sm text-gray-400">Structure update</span>
               <span className="text-sm text-gray-200 font-medium">
-                {convertResult.manifest.createdFolders.length} folder{convertResult.manifest.createdFolders.length !== 1 ? 's' : ''} created, {convertResult.moved} file{convertResult.moved !== 1 ? 's' : ''} organised
+                {convertResult.manifest.createdFolders.length} folder{convertResult.manifest.createdFolders.length !== 1 ? 's' : ''} created, {convertResult.moved} file{convertResult.moved !== 1 ? 's' : ''} organized
               </span>
+            </div>
+          )}
+          {autoRule && (
+            <div className="flex items-start justify-between gap-4 px-4 py-3">
+              <span className="text-sm text-gray-400 shrink-0">Auto-rule created</span>
+              <span className="text-sm text-gray-200 font-medium text-right break-all">{autoRule.watchPath}</span>
             </div>
           )}
         </div>
@@ -235,14 +338,38 @@ function Step3({ mode, streamsDir, convertResult }: Step3Props) {
 
 interface Step2Props {
   streamsDir: string
+  mode: StreamMode
   onDirChange: (dir: string) => void
 }
 
-function Step2({ streamsDir, onDirChange }: Step2Props) {
+function Step2({ streamsDir, mode, onDirChange }: Step2Props) {
+  const [scanning, setScanning] = useState(false)
+  const [preview, setPreview] = useState<{ date: string; games: string[] }[] | null>(null)
+
   const pickDir = async () => {
     const picked = await window.api.openDirectoryDialog()
-    if (picked) onDirChange(picked)
+    if (picked) {
+      onDirChange(picked)
+      setPreview(null)
+      setScanning(true)
+      try {
+        const folders = await window.api.listStreams(picked, mode || 'folder-per-stream')
+        setPreview(
+          folders.map(f => ({
+            date: f.date,
+            games: f.meta?.games ?? f.detectedGames ?? [],
+          }))
+        )
+      } catch {
+        setPreview([])
+      } finally {
+        setScanning(false)
+      }
+    }
   }
+
+  const shown = preview?.slice(0, 5) ?? []
+  const overflow = (preview?.length ?? 0) - shown.length
 
   return (
     <div className="flex flex-col gap-5">
@@ -260,13 +387,51 @@ function Step2({ streamsDir, onDirChange }: Step2Props) {
           Browse
         </Button>
       </div>
+
+      {scanning && (
+        <p className="text-sm text-gray-500 animate-pulse">Scanning folder…</p>
+      )}
+
+      {!scanning && preview !== null && (
+        preview.length === 0 ? (
+          <div className="flex flex-col gap-1 rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-4 py-3">
+            <p className="text-sm text-yellow-400 font-medium">No stream sessions detected</p>
+            <p className="text-xs text-gray-500">Make sure this is the correct folder and that it contains dated session folders or recordings.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+              {preview.length} session{preview.length !== 1 ? 's' : ''} detected
+            </p>
+            <div className="flex flex-col divide-y divide-white/5 rounded-xl border border-white/10 overflow-hidden">
+              {shown.map(s => (
+                <div key={s.date} className="flex items-center justify-between gap-4 px-4 py-2.5">
+                  <span className="text-sm text-gray-300 font-medium tabular-nums shrink-0">{s.date}</span>
+                  <span className="text-xs text-gray-500 truncate text-right">
+                    {s.games.length > 0 ? s.games.join(', ') : '—'}
+                  </span>
+                </div>
+              ))}
+              {overflow > 0 && (
+                <div className="px-4 py-2.5 text-xs text-gray-600">
+                  …and {overflow} more
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-green-400">
+              <CheckCircle size={13} />
+              <span>Looks good — these sessions will appear on the Streams page.</span>
+            </div>
+          </div>
+        )
+      )}
     </div>
   )
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 
-type Step = 'mode' | 'convert' | 'streams-dir' | 'done'
+type Step = 'mode' | 'convert' | 'streams-dir' | 'auto-rule' | 'done'
 
 export function OnboardingModal({ isOpen, onComplete }: Props) {
   const [step, setStep] = useState<Step>('mode')
@@ -274,6 +439,9 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
   const [dumpDir, setDumpDir] = useState('')
   const [streamsDir, setStreamsDir] = useState('')
   const [convertResult, setConvertResult] = useState<ConvertResult | null>(null)
+  const [recordingsDir, setRecordingsDir] = useState('')
+  const [rulePattern, setRulePattern] = useState('*.{mkv,mp4}')
+  const [createdRule, setCreatedRule] = useState<WatchRule | null>(null)
 
   // When the dump folder is picked in step 1.5, pre-fill streams dir for step 2
   const handleDumpDirChange = (dir: string) => {
@@ -295,6 +463,26 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
     if (step === 'streams-dir') {
       if (!streamsDir) return
       await window.api.setConfig({ streamsDir })
+      setStep('auto-rule')
+      return
+    }
+    if (step === 'auto-rule') {
+      if (recordingsDir) {
+        const rule: WatchRule = {
+          id: uuidv4(),
+          enabled: true,
+          watchPath: recordingsDir,
+          pattern: rulePattern || '*',
+          action: 'move',
+          destinationMode: 'auto',
+          destination: streamsDir,
+          autoMatchDate: true,
+          onlyNewFiles: true,
+        }
+        const existing = await window.api.getWatchRules()
+        await window.api.setWatchRules([...existing, rule])
+        setCreatedRule(rule)
+      }
       setStep('done')
       return
     }
@@ -307,6 +495,7 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
     'mode': 'Get Started',
     'convert': 'Convert your dump folder (Recommended)',
     'streams-dir': 'Your streams folder',
+    'auto-rule': 'Set up automatic file moving',
     'done': 'Ready to go!',
   }
 
@@ -314,7 +503,7 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
     (step === 'mode' && !selectedMode) ||
     (step === 'streams-dir' && !streamsDir)
 
-  const nextLabel = step === 'done' ? 'Get started' : 'Next'
+  const nextLabel = step === 'done' ? 'Get started' : step === 'auto-rule' ? (recordingsDir ? 'Create rule & continue' : 'Skip') : 'Next'
 
   return (
     <Modal
@@ -345,10 +534,19 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
         <Step1_5 dir={dumpDir} onDirChange={handleDumpDirChange} onResult={setConvertResult} />
       )}
       {step === 'streams-dir' && (
-        <Step2 streamsDir={streamsDir} onDirChange={setStreamsDir} />
+        <Step2 streamsDir={streamsDir} mode={selectedMode} onDirChange={setStreamsDir} />
+      )}
+      {step === 'auto-rule' && (
+        <StepAutoRule
+          streamsDir={streamsDir}
+          recordingsDir={recordingsDir}
+          pattern={rulePattern}
+          onRecordingsDirChange={setRecordingsDir}
+          onPatternChange={setRulePattern}
+        />
       )}
       {step === 'done' && (
-        <Step3 mode={selectedMode} streamsDir={streamsDir} convertResult={convertResult} />
+        <Step3 mode={selectedMode} streamsDir={streamsDir} convertResult={convertResult} autoRule={createdRule} />
       )}
     </Modal>
   )

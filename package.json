@@ -1,6 +1,6 @@
 {
   "name": "stream-manager",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "A streaming file management app for Twitch/YouTube streamers",
   "main": "./out/main/index.js",
   "scripts": {

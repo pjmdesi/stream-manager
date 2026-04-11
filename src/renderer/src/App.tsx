@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { version as appVersion } from '../../../package.json'
-import { Film, FolderPlus, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import logoUrl from './assets/stream-manager-logo.svg'
@@ -13,8 +13,8 @@ import { ConverterPage } from './components/pages/ConverterPage'
 import { CombinePage } from './components/pages/CombinePage'
 import { YouTubePage } from './components/pages/YouTubePage'
 import { SettingsPage } from './components/pages/SettingsPage'
-import { ConversionProvider, useConversionJobs } from './context/ConversionContext'
-import { WatcherProvider, useWatcher } from './context/WatcherContext'
+import { useConversionJobs } from './context/ConversionContext'
+import { useWatcher } from './context/WatcherContext'
 import { useStore } from './hooks/useStore'
 import { OnboardingModal } from './components/OnboardingModal'
 
@@ -42,7 +42,6 @@ function ConversionWidget({ onNavigate }: { onNavigate: () => void }) {
 
   const hasError   = active.some(j => j.status === 'error')
   const allPaused  = !hasError && active.every(j => j.status === 'paused')
-  const anyRunning = !hasError && active.some(j => j.status === 'running')
 
   const label = hasError ? 'Error' : allPaused ? 'All Paused' : 'In Progress'
   const totalProgress = relevant.length > 0
@@ -88,23 +87,27 @@ function AutoRulesWidget({ active, onNavigate }: { active: boolean; onNavigate: 
         <Shuffle size={18} />
         Auto-Rules
       </button>
-      <div className="px-3 pb-1">
-        {running ? (
-          <Button variant="danger" size="sm" icon={<Square size={12} />} className="w-full" onClick={stopWatcher}>
-            Stop Watcher
-          </Button>
-        ) : (
-          <Button variant="success" size="sm" icon={<Play size={12} />} className="w-full" onClick={startWatcher} disabled={enabledCount === 0}>
-            Start Watcher
-          </Button>
-        )}
-      </div>
-      <div className="px-4 py-2 flex items-center gap-1.5">
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-        <span className="text-[10px] text-gray-500">
-          {running ? 'Running' : 'Stopped'} · {enabledCount} rule{enabledCount !== 1 ? 's' : ''} active
-        </span>
-      </div>
+      {rules.length > 0 && (
+        <>
+          <div className="px-3 pb-1">
+            {running ? (
+              <Button variant="danger" size="sm" icon={<Square size={12} />} className="w-full" onClick={stopWatcher}>
+                Stop Watcher
+              </Button>
+            ) : (
+              <Button variant="success" size="sm" icon={<Play size={12} />} className="w-full" onClick={startWatcher} disabled={enabledCount === 0}>
+                Start Watcher
+              </Button>
+            )}
+          </div>
+          <div className="px-4 py-2 flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+            <span className="text-[10px] text-gray-500">
+              {running ? 'Running' : 'Stopped'} · {enabledCount} rule{enabledCount !== 1 ? 's' : ''} active
+            </span>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -122,7 +125,23 @@ export default function App() {
   const [page, setPage] = useState<Page>('streams')
   const [aboutOpen, setAboutOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const { config, loading } = useStore()
+  const [integrationAlert, setIntegrationAlert] = useState(false)
+  const { config, loading, refreshConfig } = useStore()
+  const { refreshRules } = useWatcher()
+
+  const checkIntegrationAlert = () => {
+    window.api.youtubeValidateToken?.().then(r => {
+      setIntegrationAlert(!r.valid)
+    }).catch(() => {})
+  }
+
+  useEffect(() => {
+    checkIntegrationAlert()
+  }, [])
+
+  useEffect(() => {
+    if (page === 'youtube') checkIntegrationAlert()
+  }, [page])
 
   useEffect(() => {
     if (loading) return
@@ -152,8 +171,6 @@ export default function App() {
   }
 
   return (
-    <WatcherProvider>
-    <ConversionProvider>
     <div className="flex flex-col h-screen bg-navy-900 text-gray-200 overflow-hidden">
       {/* Custom title bar */}
       <div
@@ -194,22 +211,28 @@ export default function App() {
         {/* Sidebar */}
         <nav className="w-48 bg-navy-800 border-r border-white/5 flex flex-col shrink-0">
           <div className="flex-1">
-            {NAV_ITEMS.map(item => (
-              <button
-                key={item.id}
-                onClick={() => setPage(item.id)}
-                className={`
-                  w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-all duration-150 border
-                  ${page === item.id
-                    ? 'bg-purple-600/20 text-purple-300 border-purple-600/30'
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border-transparent'
-                  }
-                `}
-              >
-                {item.icon}
-                {item.label}
-              </button>
-            ))}
+            {NAV_ITEMS.map(item => {
+              const showAlert = item.id === 'youtube' && integrationAlert
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setPage(item.id)}
+                  className={`
+                    w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-all duration-150 border
+                    ${page === item.id
+                      ? 'bg-purple-600/20 text-purple-300 border-purple-600/30'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border-transparent'
+                    }
+                  `}
+                >
+                  {item.icon}
+                  <span className="flex-1 text-left">{item.label}</span>
+                  {showAlert && (
+                    <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+                  )}
+                </button>
+              )
+            })}
           </div>
           <div className="border-t border-white/5" />
           {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} />}
@@ -239,8 +262,7 @@ export default function App() {
           {page === 'settings'  && <SettingsPage />}
         </main>
       </div>
-    </div>
-      <OnboardingModal isOpen={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
+      <OnboardingModal isOpen={onboardingOpen} onComplete={() => { setOnboardingOpen(false); refreshConfig(); refreshRules() }} />
 
       <Modal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} title="About Stream Manager" width="sm">
         <div className="flex flex-col items-center gap-4 py-2 text-center">
@@ -260,7 +282,6 @@ export default function App() {
           </a>
         </div>
       </Modal>
-    </ConversionProvider>
-    </WatcherProvider>
+    </div>
   )
 }

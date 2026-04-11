@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react'
 import ReactDOM from 'react-dom'
 import {
   Plus, FolderOpen, AlertTriangle, PencilLine, FilePlus,
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
-  Square, CheckCheck, Loader2, CheckCircle2, XCircle,
+  Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Zap, Combine, Youtube, Twitch, ListFilter, Trash2, Tags
 } from 'lucide-react'
 import type { StreamFolder, StreamMeta, ConversionPreset, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast } from '../../types'
@@ -13,6 +13,7 @@ import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { TagComboBox } from '../ui/TagComboBox'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
+import { Checkbox } from '../ui/Checkbox'
 import { getTagColor, pickColorForNewTag } from '../../constants/tagColors'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -218,6 +219,70 @@ function Lightbox({ thumbnails, index, onClose, onNavigate }: LightboxProps) {
   )
 }
 
+// ─── Thumbnail carousel ──────────────────────────────────────────────────────
+
+function ThumbnailCarousel({ thumbnails }: { thumbnails: string[] }) {
+  const [index, setIndex] = useState(0)
+  const [translateX, setTranslateX] = useState(0)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const imgRefs = useRef<(HTMLImageElement | null)[]>([])
+  const single = thumbnails.length === 1
+
+  const recenter = useCallback(() => {
+    const el = imgRefs.current[index]
+    const container = containerRef.current
+    if (!el || !container) return
+    const itemCenter = el.offsetLeft + el.offsetWidth / 2
+    setTranslateX(container.clientWidth / 2 - itemCenter)
+  }, [index])
+
+  useLayoutEffect(() => { recenter() }, [recenter])
+
+  const filename = thumbnails[index].split(/[\\/]/).pop() ?? ''
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="relative overflow-hidden" style={{ height: 200 }} ref={containerRef}>
+        <div
+          className="flex items-center gap-2 h-full transition-transform duration-200"
+          style={{ transform: `translateX(${translateX}px)` }}
+        >
+          {thumbnails.map((t, i) => (
+            <img
+              key={t}
+              ref={el => { imgRefs.current[i] = el }}
+              src={toFileUrl(t)}
+              alt={`Thumbnail ${i + 1}`}
+              className={`h-full w-auto shrink-0 cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
+              onClick={() => setIndex(i)}
+              onLoad={recenter}
+            />
+          ))}
+        </div>
+        {!single && (
+          <>
+            <button
+              onClick={() => setIndex(i => (i - 1 + thumbnails.length) % thumbnails.length)}
+              className="absolute left-1 top-1/2 -translate-y-1/2 flex items-center justify-center w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              onClick={() => setIndex(i => (i + 1) % thumbnails.length)}
+              className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </>
+        )}
+      </div>
+      {!single && (
+        <p className="text-xs text-gray-500 text-center truncate px-8">{filename}</p>
+      )}
+    </div>
+  )
+}
+
 // ─── Metadata modal ─────────────────────────────────────────────────────────
 
 interface MetaModalProps {
@@ -229,6 +294,7 @@ interface MetaModalProps {
   allFolders?: StreamFolder[]
   templates?: { name: string; path: string }[]
   defaultTemplateName?: string
+  thumbnails?: string[]
   tagColors?: Record<string, string>
   onNewStreamType?: (tag: string) => void
   onSave: (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => Promise<void>
@@ -261,7 +327,7 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[]): 
     .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
 }
 
-function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', tagColors = {}, onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', thumbnails = [], tagColors = {}, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
 
   const [date, setDate] = useState(initialMeta?.date ?? today())
@@ -296,6 +362,7 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
   const [ytDescTemplates, setYtDescTemplates] = useState<YTDescriptionTemplate[]>([])
   const [ytTagTemplates, setYtTagTemplates] = useState<YTTagTemplate[]>([])
   const [ytBroadcasts, setYtBroadcasts] = useState<LiveBroadcast[]>([])
+  const [ytBroadcastError, setYtBroadcastError] = useState('')
   const [ytSelectedBroadcastId, setYtSelectedBroadcastId] = useState('')
   const [ytSelectedTitleId, setYtSelectedTitleId] = useState('')
   const [ytSelectedDescId, setYtSelectedDescId] = useState('')
@@ -333,6 +400,7 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
 
   useEffect(() => {
     window.api.youtubeGetStatus().then((s: { connected: boolean }) => {
+      console.log('[YT renderer] getStatus:', s)
       setYtConnected(s.connected)
       if (!s.connected) return
       Promise.allSettled([
@@ -345,11 +413,15 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
         if (descsR.status === 'fulfilled') setYtDescTemplates(descsR.value)
         if (tagsR.status === 'fulfilled') setYtTagTemplates(tagsR.value)
         if (broadcastsR.status === 'fulfilled') {
+          console.log('[YT renderer] broadcasts:', broadcastsR.value?.length ?? 0, broadcastsR.value?.map((b: any) => b.id))
           setYtBroadcasts(broadcastsR.value)
           if (broadcastsR.value.length > 0) setYtSelectedBroadcastId(broadcastsR.value[0].id)
+        } else {
+          console.error('[YT renderer] getBroadcasts failed:', broadcastsR.reason)
+          setYtBroadcastError((broadcastsR.reason as any)?.message ?? 'Failed to load broadcasts')
         }
       })
-    }).catch(() => {})
+    }).catch((e: any) => { console.error('[YT renderer] getStatus failed:', e) })
   }, [])
 
   // Auto-fill game title from first game
@@ -406,6 +478,7 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
         mode === 'new' && !isPrevEpisode ? (selectedTemplatePath || undefined) : undefined,
         mode === 'new' && isPrevEpisode ? (prevEpisodeFolder?.folderPath ?? undefined) : undefined,
       )
+      console.log('[YT renderer] save — ytPush:', ytPush, '| ytConnected:', ytConnected, '| broadcastId:', ytSelectedBroadcastId || '(empty)')
       if (ytPush && ytConnected && ytSelectedBroadcastId) {
         await window.api.youtubeUpdateBroadcast(
           ytSelectedBroadcastId,
@@ -442,6 +515,11 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
       }
     >
       <div className="flex flex-col gap-5">
+        {/* Thumbnail carousel */}
+        {thumbnails.length > 0 && (
+          <ThumbnailCarousel thumbnails={thumbnails} />
+        )}
+
         {/* Date */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-300">Date</label>
@@ -523,36 +601,28 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
 
         {/* Archived — only in edit mode */}
         {mode === 'edit' && (
-          <label className="flex items-center gap-2.5 cursor-pointer select-none w-fit">
-            <div
-              onClick={() => setArchived(v => !v)}
-              className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${archived ? 'bg-green-600 border-green-600' : 'border-gray-600 hover:border-gray-400'}`}
-            >
-              {archived && <CheckCircle2 size={10} className="text-white" />}
-            </div>
-            <span className="text-sm text-gray-300">Archived</span>
-          </label>
+          <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
         )}
 
         {/* ── YouTube ─────────────────────────────────────────────────────── */}
         {ytConnected && (
           <div className="flex flex-col gap-3 pt-1 border-t border-white/5">
-            <button
-              type="button"
-              onClick={() => setYtPush(v => !v)}
-              className="flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
-            >
-              <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${ytPush ? 'bg-red-500 border-red-500' : 'border-gray-600'}`}>
-                {ytPush && <CheckCircle2 size={10} className="text-white" />}
-              </div>
-              <Youtube size={13} className="text-red-400" />
-              Update YouTube live stream info
-            </button>
+            <Checkbox
+              checked={ytPush}
+              onChange={setYtPush}
+              color="red"
+              label={<span className="flex items-center gap-1.5 font-medium"><Youtube size={13} className="text-red-400" />Update YouTube live stream info</span>}
+            />
 
             {ytPush && (
               <div className="flex flex-col gap-3 pl-6">
                 {/* Broadcast picker */}
-                {ytBroadcasts.length === 0 ? (
+                {ytBroadcastError ? (
+                  <p className="text-xs text-red-400 flex items-center gap-1.5">
+                    <AlertTriangle size={12} className="shrink-0" />
+                    {ytBroadcastError}
+                  </p>
+                ) : ytBroadcasts.length === 0 ? (
                   <p className="text-xs text-gray-500 italic">No upcoming or active broadcasts found.</p>
                 ) : (
                   <div className="flex flex-col gap-1">
@@ -571,27 +641,6 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
                     </div>
                   </div>
                 )}
-
-                {/* Template pickers */}
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { label: 'Title template', items: ytTitleTemplates, value: ytSelectedTitleId, onChange: setYtSelectedTitleId },
-                    { label: 'Description template', items: ytDescTemplates, value: ytSelectedDescId, onChange: setYtSelectedDescId },
-                    { label: 'Tag template', items: ytTagTemplates, value: ytSelectedTagId, onChange: setYtSelectedTagId },
-                  ].map(({ label, items, value, onChange }) => (
-                    <div key={label} className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-400">{label}</label>
-                      <div className="relative">
-                        <select value={value} onChange={e => onChange(e.target.value)}
-                          className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 pr-6 focus:outline-none focus:ring-2 focus:ring-red-500/40">
-                          <option value="">— None —</option>
-                          {items.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        </select>
-                        <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
 
                 {/* Merge field inputs */}
                 <div className="grid grid-cols-3 gap-2">
@@ -624,7 +673,10 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
 
                 {/* Editable title */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-gray-400">Title <span className="text-gray-600 font-normal">(editable)</span></label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-400">Title <span className="text-gray-600 font-normal">(editable)</span></label>
+                    <InlineTemplateSelect items={ytTitleTemplates} value={ytSelectedTitleId} onChange={setYtSelectedTitleId} />
+                  </div>
                   <input
                     value={ytTitle}
                     onChange={e => setYtTitle(e.target.value)}
@@ -636,7 +688,10 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
 
                 {/* Editable description */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-gray-400">Description <span className="text-gray-600 font-normal">(editable)</span></label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-400">Description <span className="text-gray-600 font-normal">(editable)</span></label>
+                    <InlineTemplateSelect items={ytDescTemplates} value={ytSelectedDescId} onChange={setYtSelectedDescId} />
+                  </div>
                   <textarea
                     value={ytDescription}
                     onChange={e => setYtDescription(e.target.value)}
@@ -647,7 +702,10 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
 
                 {/* Editable tags */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-gray-400">Tags <span className="text-gray-600 font-normal">(comma-separated, editable)</span></label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-400">Tags <span className="text-gray-600 font-normal">(comma-separated, editable)</span></label>
+                    <InlineTemplateSelect items={ytTagTemplates} value={ytSelectedTagId} onChange={setYtSelectedTagId} />
+                  </div>
                   <textarea
                     value={ytTagsText}
                     onChange={e => setYtTagsText(e.target.value)}
@@ -664,30 +722,16 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
         {/* ── Twitch ──────────────────────────────────────────────────────── */}
         {twConnected && (
           <div className="flex flex-col gap-3 pt-1 border-t border-white/5">
-            <button
-              type="button"
-              onClick={() => setTwPush(v => !v)}
-              className="flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
-            >
-              <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${twPush ? 'bg-purple-500 border-purple-500' : 'border-gray-600'}`}>
-                {twPush && <CheckCircle2 size={10} className="text-white" />}
-              </div>
-              <Twitch size={13} className="text-purple-400" />
-              Update Twitch channel info
-            </button>
+            <Checkbox
+              checked={twPush}
+              onChange={setTwPush}
+              label={<span className="flex items-center gap-1.5 font-medium"><Twitch size={13} className="text-purple-400" />Update Twitch channel info</span>}
+            />
 
             {twPush && (
               <div className="flex flex-col gap-3 pl-6">
                 {/* Sync toggle */}
-                <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-300 select-none">
-                  <input
-                    type="checkbox"
-                    checked={syncTitle}
-                    onChange={e => setSyncTitle(e.target.checked)}
-                    className="accent-purple-500 w-3.5 h-3.5"
-                  />
-                  Sync title with YouTube
-                </label>
+                <Checkbox checked={syncTitle} onChange={setSyncTitle} label="Sync title with YouTube" size="sm" />
 
                 {/* Separate title when not synced */}
                 {!syncTitle && (
@@ -792,15 +836,7 @@ function PresetPickerModal({ onPick, onClose }: PresetPickerProps) {
             <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
           </div>
         )}
-        <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
-          <input
-            type="checkbox"
-            checked={setAsDefault}
-            onChange={e => setSetAsDefault(e.target.checked)}
-            className="accent-purple-500 w-4 h-4"
-          />
-          Save as default archive preset
-        </label>
+        <Checkbox checked={setAsDefault} onChange={setSetAsDefault} label="Save as default archive preset" />
       </div>
     </Modal>
   )
@@ -893,6 +929,214 @@ function ArchiveProgressModal({ statuses, onCancel, onClose, done }: ArchiveProg
               )}
             </div>
           ))}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── Inline template select ───────────────────────────────────────────────────
+
+function InlineTemplateSelect<T extends { id: string; name: string }>({
+  items,
+  value,
+  onChange,
+  placeholder = 'Template…',
+}: {
+  items: T[]
+  value: string
+  onChange: (id: string) => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const selected = items.find(t => t.id === value)
+
+  const close = () => setOpen(false)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (anchorRef.current && !anchorRef.current.contains(e.target as Node)) close()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const rect = anchorRef.current?.getBoundingClientRect()
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors focus:outline-none"
+      >
+        <span>{selected ? selected.name : placeholder}</span>
+        <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && rect && ReactDOM.createPortal(
+        <div
+          style={{ position: 'fixed', top: rect.bottom + 4, right: window.innerWidth - rect.right, zIndex: 9999, minWidth: 160 }}
+          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden"
+          onMouseDown={e => e.preventDefault()}
+        >
+          {value && (
+            <button
+              className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:bg-white/5 transition-colors border-b border-white/5"
+              onClick={() => { onChange(''); close() }}
+            >
+              — Clear —
+            </button>
+          )}
+          {items.length === 0 && (
+            <p className="px-3 py-2 text-xs text-gray-600 italic">No templates</p>
+          )}
+          {items.map(t => (
+            <button
+              key={t.id}
+              className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                t.id === value ? 'text-purple-300 bg-purple-600/20' : 'text-gray-300 hover:bg-white/5'
+              }`}
+              onClick={() => { onChange(t.id); close() }}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+// ─── Bulk tag modal ───────────────────────────────────────────────────────────
+
+function BulkTagModal({
+  count,
+  allStreamTypes,
+  allGames,
+  presentStreamTypes,
+  presentGames,
+  tagColors,
+  onNewStreamType,
+  onApply,
+  onClose,
+}: {
+  count: number
+  allStreamTypes: string[]
+  allGames: string[]
+  presentStreamTypes: string[]
+  presentGames: string[]
+  tagColors: Record<string, string>
+  onNewStreamType: (tag: string) => void
+  onApply: (mode: 'add' | 'remove', streamTypes: string[], games: string[], onProgress: (done: number) => void) => void
+  onClose: () => void
+}) {
+  const [mode, setMode] = useState<'add' | 'remove'>('add')
+  const [streamTypes, setStreamTypes] = useState<string[]>([])
+  const [games, setGames] = useState<string[]>([])
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+
+  const switchMode = (next: 'add' | 'remove') => {
+    setMode(next)
+    setStreamTypes([])
+    setGames([])
+  }
+
+  const canApply = (streamTypes.length > 0 || games.length > 0) && !progress
+  const isRemoving = mode === 'remove'
+
+  const handleApply = () => {
+    setProgress({ done: 0, total: count })
+    onApply(mode, streamTypes, games, (done) => setProgress({ done, total: count }))
+  }
+
+  const pct = progress ? Math.round((progress.done / progress.total) * 100) : 0
+
+  return (
+    <Modal
+      isOpen
+      onClose={progress ? () => {} : onClose}
+      title={`Edit Tags — ${count} stream${count !== 1 ? 's' : ''}`}
+      width="sm"
+      footer={
+        progress ? (
+          <div className="flex flex-col gap-2 w-full">
+            <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-purple-500 h-full rounded-full transition-all duration-150"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-400 text-center">
+              {progress.done} / {progress.total} streams updated…
+            </p>
+          </div>
+        ) : (
+          <div className="flex gap-2 justify-end w-full">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button
+              variant="primary"
+              icon={<Tags size={13} />}
+              onClick={handleApply}
+              disabled={!canApply}
+            >
+              {isRemoving ? 'Remove from' : 'Add to'} {count}
+            </Button>
+          </div>
+        )
+      }
+    >
+      <div className="flex flex-col gap-5">
+        {/* Mode toggle */}
+        {!progress && (
+          <div className="flex rounded-lg overflow-hidden border border-white/10 self-start">
+            <button
+              onClick={() => switchMode('add')}
+              className={`px-4 py-1.5 text-xs font-medium transition-colors ${mode === 'add' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+            >
+              Add Tags
+            </button>
+            <button
+              onClick={() => switchMode('remove')}
+              className={`px-4 py-1.5 text-xs font-medium transition-colors border-l border-white/10 ${mode === 'remove' ? 'bg-red-700/70 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+            >
+              Remove Tags
+            </button>
+          </div>
+        )}
+        {!progress && (
+          <p className="text-xs text-gray-500 -mt-2">
+            {isRemoving
+              ? <>Selected tags will be <span className="text-red-400">removed from</span> each stream's existing tags.</>
+              : <>Selected tags will be <span className="text-gray-300">added to</span> each stream's existing tags.</>
+            }
+          </p>
+        )}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-gray-400 uppercase tracking-wide">Stream Types</label>
+          <TagComboBox
+            values={streamTypes}
+            onChange={progress ? () => {} : setStreamTypes}
+            allOptions={isRemoving ? presentStreamTypes : allStreamTypes}
+            placeholder={isRemoving ? 'Select tags to remove…' : 'Type to search or add…'}
+            emptyLabel="No stream types selected"
+            tagColors={tagColors}
+            onNewTag={isRemoving ? undefined : onNewStreamType}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-gray-400 uppercase tracking-wide">Topics / Games</label>
+          <TagComboBox
+            values={games}
+            onChange={progress ? () => {} : setGames}
+            allOptions={isRemoving ? presentGames : allGames}
+            placeholder={isRemoving ? 'Select topics to remove…' : 'Type to search or add…'}
+            emptyLabel="No topics selected"
+            compact
+          />
         </div>
       </div>
     </Modal>
@@ -1051,6 +1295,14 @@ export function StreamsPage({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const lastClickedIndex = useRef<number | null>(null)
   const lastClickedAction = useRef<'add' | 'remove'>('add')
+  const [showBulkTag, setShowBulkTag] = useState(false)
+
+  // Drag-to-select
+  const isDragging = useRef(false)
+  const dragStartIndex = useRef<number | null>(null)
+  const dragAction = useRef<'add' | 'remove'>('add')
+  const preDragPaths = useRef<Set<string>>(new Set())
+  const dragMoved = useRef(false)
 
   // Archive
   const [showPresetPicker, setShowPresetPicker] = useState(false)
@@ -1203,6 +1455,37 @@ export function StreamsPage({
   const selectAll = () => setSelectedPaths(new Set(filteredFolders.map(selectionKey)))
   const clearSelection = () => { setSelectedPaths(new Set()); lastClickedIndex.current = null }
 
+  const startDrag = (index: number) => {
+    const key = selectionKey(filteredFolders[index])
+    isDragging.current = true
+    dragStartIndex.current = index
+    dragAction.current = selectedPaths.has(key) ? 'remove' : 'add'
+    preDragPaths.current = new Set(selectedPaths)
+    dragMoved.current = false
+  }
+
+  const updateDrag = (index: number) => {
+    if (!isDragging.current || dragStartIndex.current === null) return
+    dragMoved.current = true
+    const start = Math.min(dragStartIndex.current, index)
+    const end = Math.max(dragStartIndex.current, index)
+    setSelectedPaths(() => {
+      const next = new Set(preDragPaths.current)
+      for (let i = start; i <= end; i++) {
+        const f = filteredFolders[i]
+        if (!f) continue
+        dragAction.current === 'add' ? next.add(selectionKey(f)) : next.delete(selectionKey(f))
+      }
+      return next
+    })
+  }
+
+  useEffect(() => {
+    const handler = () => { isDragging.current = false }
+    document.addEventListener('mouseup', handler)
+    return () => document.removeEventListener('mouseup', handler)
+  }, [])
+
   const startArchive = async (preset: ConversionPreset, setAsDefault: boolean) => {
     if (setAsDefault) await updateConfig({ archivePresetId: preset.id })
     setShowPresetPicker(false)
@@ -1240,6 +1523,36 @@ export function StreamsPage({
       if (preset) { startArchive(preset, false); return }
     }
     setShowPresetPicker(true)
+  }
+
+  const handleBulkEditTags = async (
+    mode: 'add' | 'remove',
+    editStreamTypes: string[],
+    editGames: string[],
+    onProgress: (done: number) => void
+  ) => {
+    const selectedFolders = folders.filter(f => selectedPaths.has(selectionKey(f)))
+    const removing = new Set(editStreamTypes)
+    const removingGames = new Set(editGames)
+    let done = 0
+    for (const f of selectedFolders) {
+      const existing = f.meta ?? { date: f.date, streamType: [], games: [], comments: '' }
+      const merged: StreamMeta = mode === 'add'
+        ? {
+            ...existing,
+            streamType: Array.from(new Set([...normalizeStreamTypes(existing.streamType), ...editStreamTypes])),
+            games: Array.from(new Set([...(existing.games ?? []), ...editGames])),
+          }
+        : {
+            ...existing,
+            streamType: normalizeStreamTypes(existing.streamType).filter(t => !removing.has(t)),
+            games: (existing.games ?? []).filter(g => !removingGames.has(g)),
+          }
+      await window.api.writeStreamMeta(f.folderPath, merged)
+      onProgress(++done)
+    }
+    setShowBulkTag(false)
+    await loadFolders(streamsDir)
   }
 
   const handleSave = useCallback(async (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => {
@@ -1341,6 +1654,15 @@ export function StreamsPage({
               {selectedPaths.size === filteredFolders.length ? 'Deselect All' : 'Select All'}
             </Button>
             <Button
+              variant="ghost"
+              size="sm"
+              icon={<Tags size={14} />}
+              onClick={() => setShowBulkTag(true)}
+              disabled={selectedPaths.size === 0}
+            >
+              Edit Tags {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}
+            </Button>
+            <Button
               variant="primary"
               size="sm"
               icon={<Archive size={14} />}
@@ -1350,7 +1672,7 @@ export function StreamsPage({
               Archive {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}
             </Button>
             <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode}>
-              Cancel
+              Stop Selecting
             </Button>
           </>
         ) : (
@@ -1558,7 +1880,12 @@ export function StreamsPage({
                   selectMode={selectMode}
                   selected={selectedPaths.has(selectionKey(folder))}
                   tagColors={tagColors}
-                  onToggleSelect={(shiftKey) => toggleSelected(selectionKey(folder), shiftKey, i)}
+                  onToggleSelect={(shiftKey) => {
+                    if (dragMoved.current) { dragMoved.current = false; return }
+                    toggleSelected(selectionKey(folder), shiftKey, i)
+                  }}
+                  onDragStart={() => startDrag(i)}
+                  onDragEnter={() => updateDrag(i)}
                   onEdit={() => setModal({ mode: 'edit', folder })}
                   onAdd={() => setModal({ mode: 'add', folder })}
                   onOpen={() => isDumpMode && folder.videos.length > 0
@@ -1692,6 +2019,7 @@ export function StreamsPage({
           mode={modal.mode}
           initialMeta={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta : null}
           detectedGames={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.detectedGames : []}
+          thumbnails={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnails : []}
           allGames={allGames}
           allStreamTypes={allStreamTypes}
           allFolders={folders}
@@ -1828,6 +2156,32 @@ export function StreamsPage({
           onClose={() => setShowManageTags(false)}
         />
       )}
+
+      {/* Bulk tag */}
+      {showBulkTag && (() => {
+        const selectedFolders = folders.filter(f => selectedPaths.has(selectionKey(f)))
+        const presentStreamTypes = Array.from(new Set(selectedFolders.flatMap(f => normalizeStreamTypes(f.meta?.streamType)))).sort()
+        const presentGames = Array.from(new Set(selectedFolders.flatMap(f => f.meta?.games ?? []))).sort()
+        return (
+          <BulkTagModal
+            count={selectedPaths.size}
+            allStreamTypes={allStreamTypes}
+            allGames={allGames}
+            presentStreamTypes={presentStreamTypes}
+            presentGames={presentGames}
+            tagColors={tagColors}
+            onNewStreamType={tag => {
+              setTagColors(prev => {
+                const updated = { ...prev, [tag]: pickColorForNewTag(prev) }
+                window.api.setStreamTypeTags(updated)
+                return updated
+              })
+            }}
+            onApply={handleBulkEditTags}
+            onClose={() => setShowBulkTag(false)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -1871,6 +2225,8 @@ interface StreamRowProps {
   selected: boolean
   tagColors: Record<string, string>
   onToggleSelect: (shiftKey: boolean) => void
+  onDragStart: () => void
+  onDragEnter: () => void
   onEdit: () => void
   onAdd: () => void
   onOpen: () => void
@@ -1881,7 +2237,7 @@ interface StreamRowProps {
   onThumbClick?: (index: number) => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSelect, onEdit, onAdd, onOpen, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -1918,7 +2274,9 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
     <tr
       className={`border-b border-white/5 group transition-colors hover:bg-white/[0.03] ${zebra ? 'bg-white/[0.02]' : ''} ${selected ? 'bg-purple-900/10' : ''}`}
       onClick={selectMode ? (e) => onToggleSelect(e.shiftKey) : undefined}
-      style={selectMode ? { cursor: 'pointer' } : undefined}
+      onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart() } : undefined}
+      onMouseEnter={selectMode ? onDragEnter : undefined}
+      style={selectMode ? { cursor: 'pointer', userSelect: 'none' } : undefined}
     >
 
       {/* Checkbox */}

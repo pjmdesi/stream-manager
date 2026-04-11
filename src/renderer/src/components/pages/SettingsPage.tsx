@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2 } from 'lucide-react'
+import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, Youtube, Twitch, AlertCircle } from 'lucide-react'
 import { useStore } from '../../hooks/useStore'
 import { Button } from '../ui/Button'
+import { Checkbox } from '../ui/Checkbox'
 import { Input } from '../ui/Input'
 import type { ConversionPreset } from '../../types'
 
@@ -56,6 +57,8 @@ export function SettingsPage() {
   const [thumbnailTemplates, setThumbnailTemplates] = useState<{ name: string; path: string }[]>([])
   const [cacheSize, setCacheSize] = useState<number>(0)
   const [clearingCache, setClearingCache] = useState(false)
+  const [ytStatus, setYtStatus] = useState<{ connected: boolean; valid: boolean } | null>(null)
+  const [twStatus, setTwStatus] = useState<{ connected: boolean } | null>(null)
 
   useEffect(() => {
     if (!loading) setLocal(config)
@@ -73,6 +76,17 @@ export function SettingsPage() {
 
   useEffect(() => {
     window.api.getAudioCacheSize().then(setCacheSize)
+  }, [])
+
+  useEffect(() => {
+    window.api.youtubeGetStatus().then(async (s: { connected: boolean }) => {
+      if (!s.connected) { setYtStatus({ connected: false, valid: false }); return }
+      const v = await window.api.youtubeValidateToken().catch(() => ({ valid: false }))
+      setYtStatus({ connected: true, valid: v.valid })
+    }).catch(() => {})
+    window.api.twitchGetStatus?.().then((s: { connected: boolean }) => {
+      setTwStatus({ connected: s.connected })
+    }).catch(() => {})
   }, [])
 
   const clearCache = async () => {
@@ -129,13 +143,31 @@ export function SettingsPage() {
             placeholder="Your channel name"
             hint="Used to pre-fill your name in stream metadata and integrations"
           />
-          <Input
-            label="Default Game"
-            value={local.defaultGame}
-            onChange={e => set('defaultGame', e.target.value)}
-            placeholder="e.g. Minecraft"
-            hint="Pre-fills the game field when creating stream folders or updating broadcast info"
-          />
+          {(ytStatus || twStatus) && (
+            <div className="flex items-center gap-4">
+              {ytStatus && (
+                <span className={`flex items-center gap-1.5 text-xs ${
+                  ytStatus.connected && ytStatus.valid ? 'text-green-400' :
+                  ytStatus.connected && !ytStatus.valid ? 'text-amber-400' :
+                  'text-gray-600'
+                }`}>
+                  {ytStatus.connected && !ytStatus.valid
+                    ? <AlertCircle size={18} />
+                    : <Youtube size={18} />
+                  }
+                  {ytStatus.connected && ytStatus.valid ? 'Connected' :
+                   ytStatus.connected ? 'Token expired' :
+                   'Not connected'}
+                </span>
+              )}
+              {twStatus && (
+                <span className={`flex items-center gap-1.5 text-xs ${twStatus.connected ? 'text-purple-400' : 'text-gray-600'}`}>
+                  <Twitch size={18} />
+                  {twStatus.connected ? 'Connected' : 'Not connected'}
+                </span>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Directories */}
@@ -246,18 +278,11 @@ export function SettingsPage() {
             <p className="text-xs text-gray-500">Converter preset used when archiving stream folders from the Streams page. Compresses MKVs in-place and marks them as archived.</p>
           </div>
 
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={local.checkEpisodeIteration ?? true}
-              onChange={e => set('checkEpisodeIteration', e.target.checked)}
-              className="accent-purple-500 w-4 h-4"
-            />
-            <div>
-              <div className="text-sm font-medium text-gray-200">Check for episode iteration</div>
-              <div className="text-xs text-gray-500">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game</div>
-            </div>
-          </label>
+          <Checkbox
+            checked={local.checkEpisodeIteration ?? true}
+            onChange={v => set('checkEpisodeIteration', v)}
+            label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration</div><div className="text-xs text-gray-500">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game</div></div>}
+          />
         </section>
 
         {/* Video Player */}
@@ -317,18 +342,11 @@ export function SettingsPage() {
           <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
             Auto-rules Behaviour
           </h2>
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={local.autoStartWatcher}
-              onChange={e => set('autoStartWatcher', e.target.checked)}
-              className="accent-purple-500 w-4 h-4"
-            />
-            <div>
-              <div className="text-sm font-medium text-gray-200">Auto-start file watcher on launch</div>
-              <div className="text-xs text-gray-500">Automatically activate all enabled rules when the app opens</div>
-            </div>
-          </label>
+          <Checkbox
+            checked={local.autoStartWatcher}
+            onChange={v => set('autoStartWatcher', v)}
+            label={<div><div className="text-sm font-medium text-gray-200">Auto-start file watcher on launch</div><div className="text-xs text-gray-500">Automatically activate all enabled rules when the app opens</div></div>}
+          />
         </section>
 
         {import.meta.env.DEV && (

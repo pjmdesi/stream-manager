@@ -15,6 +15,8 @@ export interface VideoInfo {
   audioTracks: AudioTrackInfo[]
   videoCodec?: string
   fps?: number
+  /** Video stream bitrate in bits/sec from ffprobe (may be absent for some containers) */
+  videoBitrate?: number
 }
 
 export interface FolderNode {
@@ -95,7 +97,6 @@ export interface AppConfig {
   theme: 'dark' | 'light'
   autoStartWatcher: boolean
   streamerName: string
-  defaultGame: string
   streamsDir: string
   streamMode: StreamMode
   archivePresetId: string
@@ -207,13 +208,18 @@ export interface BleepRegion {
   end: number     // seconds
 }
 
+export interface ClipRegion {
+  id: string
+  inPoint: number   // seconds
+  outPoint: number  // seconds
+}
+
 export interface ClipState {
-  inPoint: number | null    // seconds; null = not set
-  outPoint: number | null   // seconds; null = not set
+  clipRegions: ClipRegion[]   // sorted by inPoint; no overlaps
   cropMode: CropMode
-  cropX: number             // 0–1; horizontal center of the 9:16 crop region (0 = left, 0.5 = centre, 1 = right)
+  cropX: number               // 0–1; horizontal center of the 9:16 crop region (0 = left, 0.5 = centre, 1 = right)
   bleepRegions: BleepRegion[]
-  bleepVolume: number       // 0–1; shared across all bleep markers
+  bleepVolume: number         // 0–1; shared across all bleep markers
 }
 
 export interface TimelineViewport {

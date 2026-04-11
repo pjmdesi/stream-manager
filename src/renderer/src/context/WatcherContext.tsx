@@ -6,6 +6,7 @@ interface WatcherContextValue {
   running: boolean
   events: WatchEvent[]
   saveRules: (updated: WatchRule[]) => Promise<void>
+  refreshRules: () => Promise<void>
   startWatcher: () => Promise<void>
   stopWatcher: () => Promise<void>
   toggleRule: (id: string) => Promise<void>
@@ -16,6 +17,7 @@ const WatcherContext = createContext<WatcherContextValue>({
   running: false,
   events: [],
   saveRules: async () => {},
+  refreshRules: async () => {},
   startWatcher: async () => {},
   stopWatcher: async () => {},
   toggleRule: async () => {},
@@ -58,6 +60,11 @@ export function WatcherProvider({ children }: { children: React.ReactNode }) {
     }
   }, [running])
 
+  const refreshRules = useCallback(async () => {
+    const saved = await window.api.getWatchRules()
+    setRules(saved)
+  }, [])
+
   const startWatcher = useCallback(async () => {
     const enabled = rules.filter(r => r.enabled)
     if (enabled.length === 0) return
@@ -76,7 +83,7 @@ export function WatcherProvider({ children }: { children: React.ReactNode }) {
   }, [rules, saveRules])
 
   return (
-    <WatcherContext.Provider value={{ rules, running, events, saveRules, startWatcher, stopWatcher, toggleRule }}>
+    <WatcherContext.Provider value={{ rules, running, events, saveRules, refreshRules, startWatcher, stopWatcher, toggleRule }}>
       {children}
     </WatcherContext.Provider>
   )

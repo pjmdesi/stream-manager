@@ -1,6 +1,35 @@
-import { app, BrowserWindow, shell, ipcMain, globalShortcut } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, globalShortcut, screen } from 'electron'
 import { join } from 'path'
+import Store from 'electron-store'
 const is = { dev: process.env['NODE_ENV'] === 'development' || !!process.env['ELECTRON_RENDERER_URL'] }
+
+interface WindowState { x: number; y: number; width: number; height: number; maximized: boolean }
+const windowStateStore = new Store<{ windowState: WindowState }>({
+  name: 'window-state',
+  defaults: { windowState: { x: 0, y: 0, width: 1400, height: 900, maximized: false } }
+})
+
+function loadWindowState(): WindowState {
+  const state = windowStateStore.get('windowState')
+  // Validate that the saved position is still on a connected display
+  const displays = screen.getAllDisplays()
+  const onScreen = displays.some(d =>
+    state.x < d.bounds.x + d.bounds.width &&
+    state.x + state.width > d.bounds.x &&
+    state.y < d.bounds.y + d.bounds.height &&
+    state.y + state.height > d.bounds.y
+  )
+  return onScreen ? state : { ...state, x: 0, y: 0 }
+}
+
+function saveWindowState(win: BrowserWindow): void {
+  if (win.isMaximized()) {
+    windowStateStore.set('windowState', { ...windowStateStore.get('windowState'), maximized: true })
+    return
+  }
+  const { x, y, width, height } = win.getBounds()
+  windowStateStore.set('windowState', { x, y, width, height, maximized: false })
+}
 
 // Resolve the app icon — dev: project root resources/, prod: electron resourcesPath
 const iconPath = is.dev
@@ -22,9 +51,13 @@ import { tempManager } from './services/tempManager'
 import { fileWatcher } from './services/fileWatcher'
 
 function createWindow(): BrowserWindow {
+  const savedState = loadWindowState()
+
   const mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    x: savedState.x || undefined,
+    y: savedState.y || undefined,
+    width: savedState.width,
+    height: savedState.height,
     minWidth: 1000,
     minHeight: 700,
     autoHideMenuBar: true,
@@ -39,6 +72,18 @@ function createWindow(): BrowserWindow {
       allowRunningInsecureContent: false
     }
   })
+
+  if (savedState.maximized) mainWindow.maximize()
+
+  // Debounced save on move/resize
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  const debouncedSave = () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => saveWindowState(mainWindow), 500)
+  }
+  mainWindow.on('move', debouncedSave)
+  mainWindow.on('resize', debouncedSave)
+  mainWindow.on('close', () => saveWindowState(mainWindow))
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)

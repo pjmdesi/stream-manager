@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, createContext, useContext } from 'react'
 import { AppConfig } from '../types'
 
 const defaultConfig: AppConfig = {
@@ -9,7 +9,6 @@ const defaultConfig: AppConfig = {
   theme: 'dark',
   autoStartWatcher: false,
   streamerName: '',
-  defaultGame: '',
   streamsDir: '',
   streamMode: '' as import('../types').StreamMode,
   archivePresetId: '',
@@ -24,22 +23,22 @@ const defaultConfig: AppConfig = {
   twitchClientSecret: '',
 }
 
-export function useStore() {
-  const [config, setConfigState] = useState<AppConfig>(defaultConfig)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    window.api.getConfig().then((cfg) => {
-      setConfigState(cfg)
-      setLoading(false)
-    })
-  }, [])
-
-  const updateConfig = useCallback(async (partial: Partial<AppConfig>) => {
-    const updated = { ...config, ...partial }
-    setConfigState(updated)
-    await window.api.setConfig(partial)
-  }, [config])
-
-  return { config, updateConfig, loading }
+interface StoreContextValue {
+  config: AppConfig
+  loading: boolean
+  updateConfig: (partial: Partial<AppConfig>) => Promise<void>
+  refreshConfig: () => Promise<void>
 }
+
+export const StoreContext = createContext<StoreContextValue>({
+  config: defaultConfig,
+  loading: true,
+  updateConfig: async () => {},
+  refreshConfig: async () => {},
+})
+
+export function useStore() {
+  return useContext(StoreContext)
+}
+
+export { defaultConfig }

@@ -3,6 +3,7 @@ import { Plus, Trash2, FolderOpen, CheckCircle, AlertCircle, Clock } from 'lucid
 import { v4 as uuidv4 } from 'uuid'
 import type { WatchRule, WatchEvent } from '../../types'
 import { Button } from '../ui/Button'
+import { Checkbox } from '../ui/Checkbox'
 import { Input, Select } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { useWatcher } from '../../context/WatcherContext'
@@ -121,15 +122,7 @@ function RuleModal({
 
             {destinationMode === 'auto' && (
               <div className="flex flex-col gap-2 pl-1">
-                <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-300 select-none">
-                  <input
-                    type="checkbox"
-                    checked={autoMatchDate}
-                    onChange={e => setAutoMatchDate(e.target.checked)}
-                    className="accent-purple-500 w-4 h-4"
-                  />
-                  <span>Match date in filename</span>
-                </label>
+                <Checkbox checked={autoMatchDate} onChange={setAutoMatchDate} label="Match date in filename" />
                 {autoMatchDate && (
                   <p className="text-xs text-gray-500 pl-6">
                     Looks for a <span className="font-mono text-gray-400">YYYY-MM-DD</span> date in the filename and moves the file to the matching stream folder. The watcher will wait for the recording to finish writing before moving.
@@ -149,15 +142,7 @@ function RuleModal({
         />
 
         <div className="border-t border-white/5 pt-4 flex flex-col gap-1.5">
-          <label className="flex items-center gap-2.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={onlyNewFiles}
-              onChange={e => setOnlyNewFiles(e.target.checked)}
-              className="accent-purple-500 w-4 h-4"
-            />
-            <span className="text-sm text-gray-300">Only apply to new files</span>
-          </label>
+          <Checkbox checked={onlyNewFiles} onChange={setOnlyNewFiles} label="Only apply to new files" />
           {onlyNewFiles && (
             <p className="text-xs text-gray-500 pl-6">The rule will only apply to files created when the watcher is active.</p>
           )}
@@ -182,6 +167,7 @@ export function RulesPage() {
   const [editing, setEditing] = useState<WatchRule | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [autoStart, setAutoStart] = useState(false)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
     window.api.getConfig().then(c => setAutoStart(c.autoStartWatcher))
@@ -192,9 +178,12 @@ export function RulesPage() {
     await window.api.setConfig({ autoStartWatcher: value })
   }
 
-  const deleteRule = async (id: string) => {
-    if (!confirm('Delete this rule?')) return
-    await saveRules(rules.filter(r => r.id !== id))
+  const confirmDelete = (id: string) => setConfirmDeleteId(id)
+
+  const deleteRule = async () => {
+    if (!confirmDeleteId) return
+    await saveRules(rules.filter(r => r.id !== confirmDeleteId))
+    setConfirmDeleteId(null)
   }
 
   const handleSave = async (rule: WatchRule) => {
@@ -212,15 +201,7 @@ export function RulesPage() {
           <h1 className="text-lg font-semibold">Auto-Rules</h1>
           <p className="text-xs text-gray-500 mt-0.5">Watch folders and automatically move, copy, or rename files</p>
         </div>
-        <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-400 select-none">
-          <input
-            type="checkbox"
-            checked={autoStart}
-            onChange={e => toggleAutoStart(e.target.checked)}
-            className="accent-purple-500 w-4 h-4"
-          />
-          Start watcher on launch
-        </label>
+        <Checkbox checked={autoStart} onChange={toggleAutoStart} label="Start watcher on launch" />
         <Button
           variant="primary"
           size="sm"
@@ -242,12 +223,7 @@ export function RulesPage() {
               key={rule.id}
               className={`bg-navy-800 border rounded-lg p-4 flex items-start gap-3 ${rule.enabled ? 'border-white/5' : 'border-white/5 opacity-50'}`}
             >
-              <input
-                type="checkbox"
-                checked={rule.enabled}
-                onChange={() => toggleRule(rule.id)}
-                className="mt-0.5 accent-purple-500"
-              />
+              <Checkbox checked={rule.enabled} onChange={() => toggleRule(rule.id)} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-mono text-gray-300 truncate">{rule.watchPath}</span>
@@ -274,7 +250,7 @@ export function RulesPage() {
                 <Button variant="ghost" size="sm" onClick={() => { setEditing(rule); setShowEdit(true) }}>
                   Edit
                 </Button>
-                <Button variant="danger" size="sm" icon={<Trash2 size={12} />} onClick={() => deleteRule(rule.id)} />
+                <Button variant="danger" size="sm" icon={<Trash2 size={12} />} onClick={() => confirmDelete(rule.id)} />
               </div>
             </div>
           ))}
@@ -334,6 +310,23 @@ export function RulesPage() {
           onClose={() => { setShowEdit(false); setEditing(null) }}
           onSave={handleSave}
         />
+      )}
+
+      {confirmDeleteId && (
+        <Modal
+          isOpen
+          onClose={() => setConfirmDeleteId(null)}
+          title="Delete rule?"
+          width="sm"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+              <Button variant="danger" onClick={deleteRule}>Delete</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-400">This rule will be permanently removed. Any files already moved by this rule will not be affected.</p>
+        </Modal>
       )}
     </div>
   )

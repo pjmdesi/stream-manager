@@ -20,10 +20,17 @@
         background: #000;
         pointer-events: none;
       }
+      body.cropped {
+        overflow: hidden;
+        position: relative;
+      }
+      body.cropped #video {
+        /* overridden by inline style set from main process */
+      }
     </style>
   </head>
   <body>
-    <video id="video" autoplay></video>
+    <video id="video" muted playsinline></video>
     <script type="module" src="./src/popup.ts"></script>
   </body>
 </html>

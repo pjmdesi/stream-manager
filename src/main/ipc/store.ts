@@ -17,7 +17,6 @@ export interface AppConfig {
   theme: 'dark' | 'light'
   autoStartWatcher: boolean
   streamerName: string
-  defaultGame: string
   streamsDir: string
   streamMode: StreamMode
   archivePresetId: string
@@ -41,7 +40,6 @@ function getDefaultConfig(): AppConfig {
     theme: 'dark',
     autoStartWatcher: false,
     streamerName: '',
-    defaultGame: '',
     streamsDir: '',
     streamMode: '' as StreamMode,
     archivePresetId: '',

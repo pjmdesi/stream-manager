@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, app } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import { getStore } from './store'
 
@@ -316,8 +317,7 @@ export function registerConverterIPC(): void {
 
   ipcMain.handle('converter:addClipToQueue', async (event, params: {
     job: ConversionJob
-    inPoint: number
-    outPoint: number
+    clipRegions: Array<{ id: string; inPoint: number; outPoint: number }>
     cropMode: 'none' | '9:16'
     cropX: number
     videoWidth: number
@@ -325,89 +325,176 @@ export function registerConverterIPC(): void {
     bleepRegions: Array<{ id: string; start: number; end: number }>
     bleepVolume: number
   }) => {
-    const { job, inPoint, outPoint, cropMode, cropX, videoWidth, videoHeight, bleepRegions, bleepVolume } = params
+    const { job, clipRegions, cropMode, cropX, videoWidth, videoHeight, bleepRegions, bleepVolume } = params
+    if (clipRegions.length === 0) return
     const id = job.id || uuidv4()
-    const clipDuration = outPoint - inPoint
+
+    const totalDuration = clipRegions.reduce((acc, r) => acc + (r.outPoint - r.inPoint), 0)
     const hasCrop  = cropMode === '9:16'
     const hasBleep = bleepRegions.length > 0
+    const n = clipRegions.length
 
-    const { runConversion, probeFile } = await import('../services/ffmpegService')
+    const { extractSegmentToFile, runClipConversion, probeFile, applyGpuAcceleration } = await import('../services/ffmpegService')
     const fileInfo = await probeFile(job.inputFile).catch(() => null)
     const audioTrackCount = fileInfo?.audioTracks?.length ?? 1
     const hasMultiTrack = audioTrackCount > 1
 
-    // Build between(t,...) expressions relative to clip start (input-side -ss resets t to 0)
-    const betweenExpr = bleepRegions
-      .map(r => `between(t,${(r.start - inPoint).toFixed(3)},${(r.end - inPoint).toFixed(3)})`)
-      .join('+')
+    const cropW       = hasCrop ? Math.floor(videoHeight * 9 / 16 / 2) * 2 : 0
+    const cropOffsetX = hasCrop ? Math.floor(cropX * (videoWidth - cropW) / 2) * 2 : 0
+    const sampleRate  = fileInfo?.audioTracks?.[0]?.sampleRate ?? 48000
 
-    // Assemble filter_complex graph
-    const fcParts: string[] = []
-    let aMap = '-map 0:a:0'
-    let vMap = '-map 0:v'
+    // -bf 0: disable B-frames — prevents DTS/PTS ordering confusion at concat boundaries
+    // -g 60: keyframe every 60 frames (~1s at 60fps) — simpler than expr: and works on GPU encoders
+    const rawCodecArgs = '-c:v libx264 -crf 18 -preset fast -bf 0 -g 60 -c:a aac -b:a 192k -ac 2'
+    const gpuCodecArgs = await applyGpuAcceleration(rawCodecArgs)
+    const outputArgs = ['-map', '[vout]', '-map', '[aout]', ...gpuCodecArgs.split(/\s+/).filter(Boolean)]
 
-    if (hasCrop) {
-      // Ensure even dimensions — required by libx264
-      const cropW = Math.floor(videoHeight * 9 / 16 / 2) * 2
-      const cropOffsetX = Math.floor(cropX * (videoWidth - cropW) / 2) * 2
-      fcParts.push(`[0:v]crop=${cropW}:${videoHeight}:${cropOffsetX}:0[vout]`)
-      vMap = '-map "[vout]"'
-    }
-
-    // Merge all audio tracks into one before any bleep processing
-    let audioSrc = '[0:a:0]'
-    if (hasMultiTrack) {
-      const trackInputs = Array.from({ length: audioTrackCount }, (_, i) => `[0:a:${i}]`).join('')
-      fcParts.push(`${trackInputs}amix=inputs=${audioTrackCount}:normalize=0:duration=first[mixed]`)
-      audioSrc = '[mixed]'
-    }
-
-    if (hasBleep) {
-      const notExpr = `not(${betweenExpr})`
-      const bExpr   = `${bleepVolume.toFixed(4)}*(${betweenExpr})`
-      fcParts.push(`${audioSrc}volume=volume='${notExpr}':eval=frame[muted]`)
-      fcParts.push(`sine=frequency=1000[sine_raw]`)
-      fcParts.push(`[sine_raw]volume=volume='${bExpr}':eval=frame[bleep]`)
-      fcParts.push(`[muted][bleep]amix=inputs=2:normalize=0:duration=shortest[aout]`)
-      aMap = '-map "[aout]"'
-    } else if (hasMultiTrack) {
-      aMap = '-map "[mixed]"'
-    }
-
-    const mapArgs = `${vMap} ${aMap}`
-    const filterPart = fcParts.length > 0
-      ? `-filter_complex "${fcParts.join(';')}" ${mapArgs}`
-      : ''
-    const ffmpegArgs = [filterPart, '-c:v libx264 -crf 18 -preset fast -c:a aac -b:a 192k -ac 2']
-      .filter(Boolean).join(' ')
-
-    const inputOptions = ['-ss', `${inPoint}`, '-to', `${outPoint}`]
+    // Register the job immediately so it appears in the UI
     const newJob: ConversionJob = { ...job, id, status: 'running', progress: 0 }
     jobs.set(id, newJob)
 
     const win = BrowserWindow.fromWebContents(event.sender)
-    win?.webContents.send('converter:jobProgress', { jobId: id, percent: 0 })
 
-    const onProgress = (percent: number) => {
+    const sendProgress = (percent: number) => {
       const j = jobs.get(id)
       if (j) jobs.set(id, { ...j, progress: percent })
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobProgress', { jobId: id, percent })
     }
     const onComplete = () => {
       jobs.set(id, { ...jobs.get(id)!, status: 'done', progress: 100 })
-      cancellers.delete(id)
+      cancellers.delete(id); pausers.delete(id); resumers.delete(id)
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
     }
     const onError = (err: Error) => {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
-      cancellers.delete(id)
+      cancellers.delete(id); pausers.delete(id); resumers.delete(id)
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobError', { jobId: id, error: err.message })
     }
 
-    const result = runConversion(job.inputFile, job.outputFile, ffmpegArgs, clipDuration, onProgress, onComplete, onError, inputOptions)
-    cancellers.set(id, result.cancel)
+    win?.webContents.send('converter:jobProgress', { jobId: id, percent: 0 })
+
+    // Temp directory — one MKV per segment will be stream-copied here
+    const tempDir = path.join(os.tmpdir(), `sm-clip-${id}`)
+    fs.mkdirSync(tempDir, { recursive: true })
+
+    const cleanup = () => {
+      try { fs.rmSync(tempDir, { recursive: true, force: true }) } catch (_) {}
+    }
+
+    let cancelled = false
+    let currentKill: () => void = () => {}
+
+    // Install canceller early so the user can cancel during extraction
+    const installCanceller = (kill: () => void) => {
+      currentKill = kill
+      cancellers.set(id, () => {
+        cancelled = true
+        currentKill()
+        cleanup()
+        const j = jobs.get(id)
+        if (j) jobs.set(id, { ...j, status: 'cancelled' })
+        cancellers.delete(id); pausers.delete(id); resumers.delete(id)
+      })
+    }
+    installCanceller(() => {})
+    pausers.set(id, () => {})  // no-op during extraction phase
+    resumers.set(id, () => {}) // no-op during extraction phase
+
+    // ── Phase 1: Stream-copy each segment to a temp file (I/O speed) ─────────
+    // After extraction we probe each temp file to get its actual start_time.
+    // FFmpeg subtracts start_time from all PTS values before passing them to the
+    // filtergraph, so trim/atrim must use (absTime - tempStartTime), not absTime.
+    const tempFiles: string[] = []
+    const tempStartTimes: number[] = []
+    try {
+      for (let i = 0; i < n; i++) {
+        if (cancelled) { cleanup(); return id }
+        const { inPoint, outPoint } = clipRegions[i]
+        const tempFile = path.join(tempDir, `seg_${i}.mkv`)
+        tempFiles.push(tempFile)
+
+        const { promise, kill } = extractSegmentToFile(job.inputFile, tempFile, inPoint, outPoint)
+        installCanceller(kill)
+        await promise
+        installCanceller(() => {})
+
+        // Probe the temp file to get the actual container start_time
+        const tempInfo = await probeFile(tempFile).catch(() => null)
+        tempStartTimes.push(tempInfo?.startTime ?? 0)
+      }
+    } catch (err) {
+      if (!cancelled) { cleanup(); onError(err as Error) }
+      return id
+    }
+
+    if (cancelled) { cleanup(); return id }
+
+    // ── Build filter_complex (after Phase 1 so tempStartTimes are known) ─────
+    const fcParts: string[] = []
+
+    for (let i = 0; i < n; i++) {
+      const { inPoint, outPoint } = clipRegions[i]
+      const ts = tempStartTimes[i]
+      const trimStart = Math.max(0, inPoint - ts)
+      const trimEnd   = outPoint - ts
+
+      let vChain = `[${i}:v]trim=start=${trimStart}:end=${trimEnd},setpts=PTS-STARTPTS`
+      if (hasCrop) vChain += `,crop=${cropW}:${videoHeight}:${cropOffsetX}:0`
+      fcParts.push(`${vChain}[v${i}]`)
+
+      let audioIn = `[${i}:a:0]`
+      if (hasMultiTrack) {
+        const trackInputs = Array.from({ length: audioTrackCount }, (_, t) => `[${i}:a:${t}]`).join('')
+        fcParts.push(`${trackInputs}amix=inputs=${audioTrackCount}:normalize=0:duration=first[amix${i}]`)
+        audioIn = `[amix${i}]`
+      }
+
+      let aChain = `${audioIn}atrim=start=${trimStart}:end=${trimEnd},asetpts=PTS-STARTPTS`
+
+      const segDur    = outPoint - inPoint
+      const segBleeps = bleepRegions.filter(b => b.end > inPoint && b.start < outPoint)
+      if (hasBleep && segBleeps.length > 0) {
+        const betweenExpr = segBleeps
+          .map(b => `between(t,${Math.max(0, b.start - inPoint).toFixed(3)},${Math.min(outPoint - inPoint, b.end - inPoint).toFixed(3)})`)
+          .join('+')
+        const notExpr = `not(${betweenExpr})`
+        const bExpr   = `${bleepVolume.toFixed(4)}*(${betweenExpr})`
+        fcParts.push(`${aChain}[atrimmed${i}]`)
+        fcParts.push(`[atrimmed${i}]volume=volume='${notExpr}':eval=frame[muted${i}]`)
+        // Explicit sample_rate and duration so the sine source exactly matches
+        // the segment audio — prevents sample-count drift that causes a freeze at the cut point
+        fcParts.push(`sine=frequency=1000:sample_rate=${sampleRate}:duration=${segDur.toFixed(3)}[sine${i}]`)
+        fcParts.push(`[sine${i}]volume=volume='${bExpr}':eval=frame[bleep${i}]`)
+        // duration=first: output ends when muted (atrim-derived, exact duration) ends
+        fcParts.push(`[muted${i}][bleep${i}]amix=inputs=2:normalize=0:duration=first[a${i}]`)
+      } else {
+        fcParts.push(`${aChain}[a${i}]`)
+      }
+    }
+
+    const concatInputs = Array.from({ length: n }, (_, i) => `[v${i}][a${i}]`).join('')
+    fcParts.push(`${concatInputs}concat=n=${n}:v=1:a=1[vout][aout]`)
+    const filterComplex = fcParts.join(';')
+
+    if (cancelled) { cleanup(); return id }
+
+    // ── Phase 2: Encode using filter_complex on the small temp files ──────────
+    const result = runClipConversion({
+      inputFiles: tempFiles,
+      outputFile: job.outputFile,
+      filterComplex,
+      outputArgs,
+      totalDuration,
+      onProgress: sendProgress,
+      onComplete: () => { cleanup(); onComplete() },
+      onError:    (err) => { cleanup(); onError(err) },
+    })
+
+    // Update canceller and pause/resume to control the encoding process
+    installCanceller(result.cancel)
     pausers.set(id, result.pause)
     resumers.set(id, result.resume)
+
     return id
   })
 

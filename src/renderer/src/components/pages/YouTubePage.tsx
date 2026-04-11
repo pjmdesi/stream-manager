@@ -167,6 +167,8 @@ export function YouTubePage() {
   const [ytClientSecret, setYtClientSecret] = useState('')
   const [ytCredsSaved, setYtCredsSaved] = useState(false)
   const [ytConnected, setYtConnected] = useState(false)
+  const [ytTokenValid, setYtTokenValid] = useState(true)
+  const [ytTokenError, setYtTokenError] = useState<string | null>(null)
   const [ytConnecting, setYtConnecting] = useState(false)
   const [ytError, setYtError] = useState<string | null>(null)
 
@@ -201,7 +203,12 @@ export function YouTubePage() {
   useEffect(() => {
     window.api.youtubeGetStatus().then((s: { connected: boolean }) => {
       setYtConnected(s.connected)
-      if (s.connected) setExpandedSection('yt-titles')
+      if (!s.connected) return
+      window.api.youtubeValidateToken().then(r => {
+        setYtTokenValid(r.valid)
+        setYtTokenError(r.valid ? null : (r.error ?? 'Token is invalid'))
+        if (r.valid) setExpandedSection('yt-titles')
+      }).catch(() => {})
     }).catch(() => {})
     window.api.twitchGetStatus().then((s: { connected: boolean }) => {
       setTwConnected(s.connected)
@@ -222,11 +229,22 @@ export function YouTubePage() {
   }
   const connectYt = async () => {
     setYtConnecting(true); setYtError(null)
-    try { await window.api.youtubeConnect(); setYtConnected(true); setExpandedSection('yt-titles') }
+    try {
+      await window.api.youtubeConnect()
+      setYtConnected(true)
+      setYtTokenValid(true)
+      setYtTokenError(null)
+      setExpandedSection('yt-titles')
+    }
     catch (e: any) { setYtError(e.message) }
     finally { setYtConnecting(false) }
   }
-  const disconnectYt = async () => { await window.api.youtubeDisconnect(); setYtConnected(false) }
+  const disconnectYt = async () => {
+    await window.api.youtubeDisconnect()
+    setYtConnected(false)
+    setYtTokenValid(true)
+    setYtTokenError(null)
+  }
 
   // ── Twitch actions ────────────────────────────────────────────────────────
   const saveTwCredentials = async () => {
@@ -260,12 +278,18 @@ export function YouTubePage() {
           <p className="text-xs text-gray-500 mt-0.5">Connect and manage your streaming platform accounts.</p>
         </div>
         <div className="ml-auto flex items-center gap-4">
-          <span className={`flex items-center gap-1.5 text-xs ${ytConnected ? 'text-green-400' : 'text-gray-600'}`}>
-            <Youtube size={13} />
-            {ytConnected ? 'Connected' : 'Not connected'}
+          <span className={`flex items-center gap-1.5 text-xs ${
+            ytConnected && ytTokenValid ? 'text-green-400' :
+            ytConnected && !ytTokenValid ? 'text-amber-400' :
+            'text-gray-600'
+          }`}>
+            <Youtube size={18} />
+            {ytConnected && ytTokenValid ? 'Connected' :
+             ytConnected && !ytTokenValid ? 'Token expired' :
+             'Not connected'}
           </span>
           <span className={`flex items-center gap-1.5 text-xs ${twConnected ? 'text-purple-400' : 'text-gray-600'}`}>
-            <Twitch size={13} />
+            <Twitch size={18} />
             {twConnected ? 'Connected' : 'Not connected'}
           </span>
         </div>
@@ -282,6 +306,21 @@ export function YouTubePage() {
             YouTube
           </div>
         </div>
+
+        {/* Token expired banner */}
+        {ytConnected && !ytTokenValid && (
+          <div className="mx-6 mb-1 flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+            <AlertCircle size={15} className="text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-300">YouTube token expired</p>
+              <p className="text-xs text-amber-400/70 mt-0.5">{ytTokenError ?? 'The stored token is no longer valid.'} Reconnect to restore access.</p>
+            </div>
+            <Button variant="primary" size="sm" onClick={connectYt} disabled={ytConnecting}
+              icon={ytConnecting ? <Loader2 size={13} className="animate-spin" /> : <Youtube size={13} />}>
+              {ytConnecting ? 'Connecting…' : 'Reconnect'}
+            </Button>
+          </div>
+        )}
 
         {/* YT Credentials */}
         <div>

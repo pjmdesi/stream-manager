@@ -439,7 +439,11 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                         <div className="flex items-center gap-3 text-xs text-gray-500 tabular-nums">
                           <span>{job.progress.toFixed(1)}%</span>
                           {elapsed > 0 && <span>Elapsed: {formatDuration(elapsed)}</span>}
-                          <span>ETA: {eta !== null && eta > 0 ? formatDuration(eta) : 'Estimating...'}</span>
+                          <span>
+                            {job.progress === 0
+                              ? 'Starting\u2026'
+                              : `ETA: ${eta !== null && eta > 0 ? formatDuration(eta) : 'Estimating\u2026'}`}
+                          </span>
                           <button
                             onClick={() => window.api.openInExplorer(outputDir)}
                             className="ml-auto text-gray-600 hover:text-gray-300 transition-colors truncate max-w-[200px]"

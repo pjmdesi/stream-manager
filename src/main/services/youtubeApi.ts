@@ -49,26 +49,26 @@ async function ytRequest(
 }
 
 /** Fetch all live broadcasts for the authenticated user.
- *  Queries persistent (reusable stream key) and event (scheduled) broadcasts separately
- *  to avoid the broadcastType + broadcastStatus + mine incompatibility in the YouTube API. */
+ *  Queries persistent and event broadcasts separately — broadcastType and broadcastStatus
+ *  cannot be combined in a single request. All queries require mine=true. */
 export async function getLiveBroadcasts(
   clientId: string,
   clientSecret: string
 ): Promise<LiveBroadcast[]> {
   const results = await Promise.allSettled([
-    // Persistent stream key broadcasts (no broadcastStatus filter — they're always "ready")
+    // Persistent stream key broadcast — requires mine=true, incompatible with broadcastStatus
     ytRequest(
       `/liveBroadcasts?${new URLSearchParams({ part: 'snippet,status', mine: 'true', broadcastType: 'persistent', maxResults: '5' })}`,
       { method: 'GET' },
       clientId, clientSecret
     ),
-    // Upcoming scheduled event broadcasts
+    // Upcoming scheduled event broadcasts — broadcastStatus is incompatible with mine
     ytRequest(
       `/liveBroadcasts?${new URLSearchParams({ part: 'snippet,status', broadcastStatus: 'upcoming', maxResults: '10' })}`,
       { method: 'GET' },
       clientId, clientSecret
     ),
-    // Active/live event broadcasts
+    // Active/live event broadcasts — broadcastStatus is incompatible with mine
     ytRequest(
       `/liveBroadcasts?${new URLSearchParams({ part: 'snippet,status', broadcastStatus: 'active', maxResults: '5' })}`,
       { method: 'GET' },
@@ -78,13 +78,27 @@ export async function getLiveBroadcasts(
 
   const seen = new Set<string>()
   const broadcasts: LiveBroadcast[] = []
+  const errors: string[] = []
   for (const r of results) {
     if (r.status === 'fulfilled') {
       for (const item of (r.value?.items ?? [])) {
         if (!seen.has(item.id)) { seen.add(item.id); broadcasts.push(item) }
       }
+    } else {
+      const msg: string = (r.reason as any)?.message ?? 'Unknown error'
+      console.warn('[YT api] broadcast query rejected:', msg)
+      errors.push(msg)
     }
   }
+
+  // If every query failed with an auth error, surface it so the caller can inform the user
+  const allFailed = errors.length === results.length
+  if (allFailed) {
+    const isAuthError = errors.some(e => /expired|revoked|invalid.*(token|credentials)/i.test(e))
+    if (isAuthError) throw new Error('YouTube token has expired or been revoked. Please reconnect in Settings.')
+    throw new Error(errors[0])
+  }
+
   return broadcasts
 }
 

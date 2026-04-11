@@ -174,8 +174,10 @@ export function registerFilesIPC(): void {
         win.webContents.send('watcher:fileMatched', watchEvent)
       }
     })
-    const streamsDir = (getStore().get('config') as any)?.streamsDir ?? ''
-    fileWatcher.start(rules, streamsDir)
+    const config = (getStore().get('config') as any) ?? {}
+    const streamsDir = config.streamsDir ?? ''
+    const streamMode = config.streamMode ?? ''
+    fileWatcher.start(rules, streamsDir, streamMode)
     // Non-blocking: process existing files for rules that opted in
     fileWatcher.processExistingFiles()
   })

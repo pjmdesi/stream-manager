@@ -71,8 +71,7 @@ declare global {
       addToQueue(job: ConversionJob): Promise<string>
       addClipToQueue(params: {
         job: ConversionJob
-        inPoint: number
-        outPoint: number
+        clipRegions: Array<{ id: string; inPoint: number; outPoint: number }>
         cropMode: 'none' | '9:16'
         videoWidth: number
         videoHeight: number
@@ -124,6 +123,7 @@ declare global {
       youtubeConnect(): Promise<void>
       youtubeDisconnect(): Promise<void>
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>
+      youtubeValidateToken(): Promise<{ valid: boolean; error?: string }>
       youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string; gameTitle?: string }, tags: string[]): Promise<void>
       getYTTitleTemplates(): Promise<YTTitleTemplate[]>
       setYTTitleTemplates(v: YTTitleTemplate[]): Promise<void>
@@ -139,11 +139,11 @@ declare global {
       twitchUpdateChannel(title: string, gameName?: string): Promise<void>
 
       // ── Video Popup ───────────────────────────────────────────────────────────
-      openVideoPopup(filePath: string, currentTime: number, videoWidth: number, videoHeight: number): Promise<void>
-      controlVideoPopup(cmd: string, ...args: any[]): Promise<void>
+      openVideoPopup(offerSdp: string, videoWidth: number, videoHeight: number, cropMode?: string, cropX?: number): Promise<void>
       closeVideoPopup(): Promise<void>
+      setCropPopup(videoWidth: number, videoHeight: number, cropMode: string, cropX: number): Promise<void>
       onVideoPopupClosed(cb: () => void): () => void
-      onVideoPopupTimeUpdate(cb: (time: number) => void): () => void
+      onPopupRtcSignal(cb: (data: unknown) => void): () => void
 
       // ── Window Controls ──────────────────────────────────────────────────────
       windowMinimize(): void

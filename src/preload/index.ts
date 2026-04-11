@@ -262,6 +262,9 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetBroadcasts: () =>
     ipcRenderer.invoke('youtube:getBroadcasts'),
 
+  youtubeValidateToken: () =>
+    ipcRenderer.invoke('youtube:validateToken'),
+
   youtubeUpdateBroadcast: (
     broadcastId: string,
     snippet: { title: string; description: string; gameTitle?: string },
@@ -292,14 +295,16 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('twitch:updateChannel', title, gameName),
 
   // ── Video Popup ───────────────────────────────────────────────────────────
-  openVideoPopup: (filePath: string, currentTime: number, videoWidth: number, videoHeight: number) =>
-    ipcRenderer.invoke('popup:open', filePath, currentTime, videoWidth, videoHeight),
-
-  controlVideoPopup: (cmd: string, ...args: any[]) =>
-    ipcRenderer.invoke('popup:control', cmd, ...args),
+  // offerSdp is the WebRTC offer SDP from the main renderer's RTCPeerConnection.
+  // The popup receives it, answers, and streams the video from the main window.
+  openVideoPopup: (offerSdp: string, videoWidth: number, videoHeight: number, cropMode?: string, cropX?: number) =>
+    ipcRenderer.invoke('popup:open', offerSdp, videoWidth, videoHeight, cropMode, cropX),
 
   closeVideoPopup: () =>
     ipcRenderer.invoke('popup:close'),
+
+  setCropPopup: (videoWidth: number, videoHeight: number, cropMode: string, cropX: number) =>
+    ipcRenderer.invoke('popup:setcrop', videoWidth, videoHeight, cropMode, cropX),
 
   onVideoPopupClosed: (callback: () => void) => {
     const handler = () => callback()
@@ -307,10 +312,11 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('popup:closed', handler)
   },
 
-  onVideoPopupTimeUpdate: (callback: (time: number) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, time: number) => callback(time)
-    ipcRenderer.on('popup:timeupdate', handler)
-    return () => ipcRenderer.removeListener('popup:timeupdate', handler)
+  // WebRTC signaling: receive answer SDP from popup → main renderer
+  onPopupRtcSignal: (callback: (data: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data)
+    ipcRenderer.on('popup:rtc-p2m', handler)
+    return () => ipcRenderer.removeListener('popup:rtc-p2m', handler)
   },
 
   // ── Window Controls ───────────────────────────────────────────────────────

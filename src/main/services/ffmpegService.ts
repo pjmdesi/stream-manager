@@ -32,11 +32,15 @@ export interface AudioTrackInfo {
 export interface VideoInfo {
   path: string
   duration: number
+  /** Container start time in seconds (the PTS of the first packet) */
+  startTime: number
   width: number
   height: number
   audioTracks: AudioTrackInfo[]
   videoCodec?: string
   fps?: number
+  /** Video stream bitrate in bits/sec from ffprobe (may be absent for some containers) */
+  videoBitrate?: number
 }
 
 export async function probeFile(filePath: string): Promise<VideoInfo> {
@@ -66,14 +70,20 @@ export async function probeFile(filePath: string): Promise<VideoInfo> {
           })()
         : undefined
 
+      // Prefer the per-stream bitrate; fall back to overall container bitrate
+      const rawBitrate = videoStream?.bit_rate ?? metadata.format.bit_rate
+      const videoBitrate = rawBitrate ? Number(rawBitrate) : undefined
+
       resolve({
         path: filePath,
         duration: metadata.format.duration || 0,
+        startTime: metadata.format.start_time ? Number(metadata.format.start_time) : 0,
         width: videoStream?.width || 0,
         height: videoStream?.height || 0,
         audioTracks,
         videoCodec: videoStream?.codec_name,
-        fps
+        fps,
+        videoBitrate,
       })
     })
   })
@@ -360,5 +370,128 @@ function parseArgsString(argsStr: string): string[] {
     result.push(match[0].replace(/^["']|["']$/g, ''))
   }
   return result
+}
+
+/**
+ * Stream-copies a time range from `inputFile` into a new MKV file.
+ *
+ * Uses a demuxer seek (`-ss` as input option) and `-c copy` so no decoding
+ * occurs — this runs at near I/O speed regardless of where in the file the
+ * segment lives.  Original PTS timestamps are preserved, so the output can be
+ * used with trim/atrim filters that reference the original absolute timecodes.
+ *
+ * A 10-second margin is added before `inPoint` to ensure the keyframe that
+ * precedes the clip is included in the temp file.
+ *
+ * Returns `{ promise, kill }` — call `kill()` to abort mid-extraction.
+ */
+export function extractSegmentToFile(
+  inputFile: string,
+  outputFile: string,
+  inPoint: number,
+  outPoint: number
+): { promise: Promise<void>; kill: () => void } {
+  const margin = 10 // seconds before inPoint to ensure keyframe capture
+  const seekTime = Math.max(0, inPoint - margin)
+  const duration = (outPoint - inPoint) + margin + 5 // small tail buffer
+
+  let proc: ReturnType<typeof spawn> | null = null
+  let killed = false
+
+  const promise = new Promise<void>((resolve, reject) => {
+    if (!ffmpegBin) { reject(new Error('ffmpeg binary not found')); return }
+
+    let stderr = ''
+    proc = spawn(ffmpegBin, [
+      '-ss', seekTime.toFixed(3),
+      '-t',  duration.toFixed(3),
+      '-i',  inputFile,
+      '-map', '0',      // copy ALL streams (default only picks "best" audio)
+      '-c',  'copy',
+      '-copyts',        // preserve original PTS so trim= timestamps still match
+      '-y',
+      outputFile,
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
+
+    proc.stderr!.on('data', (c: Buffer) => {
+      stderr += c.toString()
+      if (stderr.length > 4000) stderr = stderr.slice(-2000)
+    })
+    proc.on('close', code => {
+      if (killed) { reject(new Error('cancelled')); return }
+      if (code === 0) resolve()
+      else reject(new Error(`Segment extraction failed (code ${code}): ${stderr.slice(-500)}`))
+    })
+    proc.on('error', err => { if (!killed) reject(err) })
+  })
+
+  return {
+    promise,
+    kill: () => { killed = true; try { proc?.kill('SIGKILL') } catch (_) {} },
+  }
+}
+
+/**
+ * Encodes clip regions using `filter_complex` applied to pre-extracted temp
+ * segment files.  Call `extractSegmentToFile` for each region first, then
+ * pass the resulting paths as `inputFiles`.
+ *
+ * Because each temp file is only a few seconds long, FFmpeg processes them
+ * near-instantly — no slow linear reads through a multi-hour source file.
+ */
+export function runClipConversion(params: {
+  inputFiles: string[]    // one temp file per segment, in order
+  outputFile: string
+  filterComplex: string
+  outputArgs: string[]    // e.g. ['-map','[vout]','-map','[aout]','-c:v','libx264',...]
+  totalDuration: number   // sum of all segment durations, for progress calculation
+  onProgress: (percent: number) => void
+  onComplete: () => void
+  onError: (err: Error) => void
+}): { cancel: () => void; pause: () => void; resume: () => void } {
+  const { inputFiles, outputFile, filterComplex, outputArgs, totalDuration, onProgress, onComplete, onError } = params
+
+  if (!ffmpegBin) {
+    onError(new Error('ffmpeg binary not found'))
+    return { cancel: () => {}, pause: () => {}, resume: () => {} }
+  }
+
+  // Build args: -i temp0 -i temp1 ... -filter_complex "..." [output args] outputFile
+  const args: string[] = []
+  for (const f of inputFiles) args.push('-i', f)
+  args.push('-filter_complex', filterComplex)
+  args.push(...outputArgs, outputFile)
+
+  let cancelled = false
+  let ffmpegPid: number | null = null
+  let stderrBuf = ''
+
+  const proc = spawn(ffmpegBin, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+  ffmpegPid = proc.pid ?? null
+
+  proc.stderr!.on('data', (chunk: Buffer) => {
+    stderrBuf += chunk.toString()
+    // FFmpeg writes progress as: "… time=HH:MM:SS.ss …"
+    const m = /time=(\d{2}):(\d{2}):(\d{2})[.,](\d+)/.exec(stderrBuf)
+    if (m && totalDuration > 0) {
+      const secs = parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 100
+      onProgress(Math.min(100, Math.round((secs / totalDuration) * 1000) / 10))
+    }
+    if (stderrBuf.length > 8000) stderrBuf = stderrBuf.slice(-4000)
+  })
+
+  proc.on('close', code => {
+    if (cancelled) return
+    if (code === 0) { onProgress(100); onComplete() }
+    else onError(new Error(`ffmpeg exited with code ${code ?? '?'}: ${stderrBuf.slice(-2000)}`))
+  })
+
+  proc.on('error', err => { if (!cancelled) onError(err) })
+
+  return {
+    cancel:  () => { cancelled = true; try { proc.kill('SIGKILL') } catch (_) {} },
+    pause:   () => { if (ffmpegPid) suspendProcess(ffmpegPid) },
+    resume:  () => { if (ffmpegPid) resumeProcess(ffmpegPid) },
+  }
 }
 

@@ -1,14 +1,13 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
-import { Play, Pause, FolderOpen, Info, Layers, CheckSquare, Square, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera, X, Loader2, Scissors, LogIn, LogOut, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2 } from 'lucide-react'
+import { Play, Pause, FolderOpen, Info, Layers, CheckSquare, Square, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera, X, Loader2, Scissors, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, Trash2, GitMerge } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useStore } from '../../hooks/useStore'
-import type { BleepRegion, ClipState, CropMode, TimelineViewport } from '../../types'
+import type { BleepRegion, ClipRegion, ClipState, CropMode, TimelineViewport } from '../../types'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
 import { useWaveform } from '../../hooks/useWaveform'
 import { FileDropZone } from '../ui/FileDropZone'
-import { Slider } from '../ui/Slider'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 
@@ -129,6 +128,27 @@ function applyTimecodeArrow(
 }
 
 /**
+ * Returns the free interval [lo, hi] around `anchor` — the gap between the
+ * nearest clip regions on each side (or the video boundary). Used to find where
+ * a new segment or a dragged segment can be placed without overlap.
+ * `excludeId` lets a segment ignore itself during its own drag.
+ */
+function getSegmentFreeInterval(
+  regions: ClipRegion[],
+  anchor: number,
+  totalDuration: number,
+  excludeId?: string,
+): { lo: number; hi: number } {
+  let lo = 0, hi = totalDuration
+  for (const r of regions) {
+    if (r.id === excludeId) continue
+    if (r.outPoint <= anchor) lo = Math.max(lo, r.outPoint)
+    if (r.inPoint > anchor)  hi = Math.min(hi, r.inPoint)
+  }
+  return { lo, hi }
+}
+
+/**
  * Returns the largest free interval [lo, hi] that contains `anchor` and does not
  * overlap any bleep region in `regions` (excluding the one with `excludeId`).
  */
@@ -165,6 +185,159 @@ function getCropGeometry(vcW: number, vcH: number, videoW: number, videoH: numbe
 
 const TRACK_LABELS = ['Game', 'Mic', 'Discord', 'Music', 'SFX']
 
+// ── Export Clip Dialog ────────────────────────────────────────────────────────
+
+interface ExportClipDialogProps {
+  defaultPresetId: string
+  filePath: string
+  hasBleepsOutsideRegions: boolean
+  onConfirm: (opts: ExportClipOptions) => void
+  onClose: () => void
+}
+
+export interface ExportClipOptions {
+  presetId: string
+  saveNextToSource: boolean
+  outputDir: string
+  suffix: string
+}
+
+function ExportClipDialog({ defaultPresetId, filePath, hasBleepsOutsideRegions, onConfirm, onClose }: ExportClipDialogProps) {
+  const [presets, setPresets] = useState<{ id: string; name: string }[]>([])
+  const [presetId, setPresetId] = useState(defaultPresetId)
+  const [saveNextToSource, setSaveNextToSource] = useState(true)
+  const [outputDir, setOutputDir] = useState('')
+  const [suffix, setSuffix] = useState('_clip')
+
+  useEffect(() => {
+    Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
+      .then(([b, i]) => setPresets([...b, ...i]))
+  }, [])
+
+  const pickDir = async () => {
+    const picked = await window.api.openDirectoryDialog()
+    if (picked) setOutputDir(picked)
+  }
+
+  const sourceDir = filePath.replace(/[\\/][^\\/]+$/, '')
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Export Clip"
+      width="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            onClick={() => onConfirm({ presetId, saveNextToSource, outputDir: saveNextToSource ? sourceDir : outputDir, suffix })}
+            disabled={!saveNextToSource && !outputDir}
+          >
+            Export
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        {/* Preset */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-300">Encoding Preset</label>
+          <select
+            value={presetId}
+            onChange={e => setPresetId(e.target.value)}
+            className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+          >
+            <option value="">— Copy stream (no re-encode) —</option>
+            {presets.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Save location */}
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-gray-300">Save Location</label>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={saveNextToSource}
+              onChange={e => setSaveNextToSource(e.target.checked)}
+              className="w-4 h-4 rounded accent-purple-500"
+            />
+            <span className="text-sm text-gray-300">Save next to source</span>
+          </label>
+          {!saveNextToSource && (
+            <div className="flex gap-2">
+              <input
+                className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                value={outputDir}
+                readOnly
+                placeholder="Select output folder…"
+              />
+              <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={pickDir}>
+                Browse
+              </Button>
+            </div>
+          )}
+          {saveNextToSource && (
+            <p className="text-xs text-gray-500 break-all">{sourceDir}</p>
+          )}
+        </div>
+
+        {/* Suffix */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-gray-300">Filename Suffix</label>
+          <input
+            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            value={suffix}
+            onChange={e => setSuffix(e.target.value)}
+            placeholder="_clip"
+            spellCheck={false}
+          />
+          <p className="text-xs text-gray-500">Added to the end of the filename before the extension.</p>
+        </div>
+
+        {/* Warning: bleeps outside all clip regions */}
+        {hasBleepsOutsideRegions && (
+          <div className="flex items-start gap-2 bg-yellow-950/40 border border-yellow-600/30 rounded-lg px-3 py-2">
+            <span className="text-yellow-400 text-xs mt-0.5">⚠</span>
+            <p className="text-xs text-yellow-300/80">Some bleep markers are outside all clip segments and will be ignored during export.</p>
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+// Inject b=AS and b=TIAS bandwidth lines into every m=video section of an SDP.
+// This bypasses Chrome's congestion controller, which otherwise starts at
+// ~300 kbps and ramps up slowly even on a loopback connection.
+function injectSdpBandwidth(sdp: string, bitsPerSec: number): string {
+  if (!isFinite(bitsPerSec) || bitsPerSec <= 0) return sdp
+  const kbps = Math.floor(bitsPerSec / 1000)
+  return sdp.replace(
+    /(m=video[^\r\n]*\r?\n)/g,
+    `$1b=AS:${kbps}\r\nb=TIAS:${bitsPerSec}\r\n`,
+  )
+}
+
+function waitForIceComplete(pc: RTCPeerConnection): Promise<void> {
+  return new Promise((resolve) => {
+    if (pc.iceGatheringState === 'complete') { resolve(); return }
+    const onStateChange = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', onStateChange)
+        resolve()
+      }
+    }
+    pc.addEventListener('icegatheringstatechange', onStateChange)
+    // Safety timeout: 2 s max wait; local connections gather in < 100 ms
+    setTimeout(() => { pc.removeEventListener('icegatheringstatechange', onStateChange); resolve() }, 2000)
+  })
+}
+
 interface PendingFile { path: string; token: number }
 
 export function PlayerPage({ initialFile, onNavigateToConverter }: {
@@ -181,8 +354,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   // Clip mode
   const [isClipMode, setIsClipMode] = useState(false)
   const [clipState, setClipState] = useState<ClipState>({
-    inPoint: null,
-    outPoint: null,
+    clipRegions: [],
     cropMode: 'none' as CropMode,
     cropX: 0.5,
     bleepRegions: [],
@@ -211,13 +383,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [vEndInput, setVEndInput] = useState('')
   const vEndInputRef = useRef<HTMLInputElement>(null)
 
-  // In/Out handle popups
-  const [showInPopup, setShowInPopup]   = useState(false)
-  const [showOutPopup, setShowOutPopup] = useState(false)
-  const [inPointInput,  setInPointInput]  = useState('')
-  const [outPointInput, setOutPointInput] = useState('')
-  const inPointInputRef  = useRef<HTMLInputElement>(null)
-  const outPointInputRef = useRef<HTMLInputElement>(null)
+  // Active handle popup: { regionId, which: 'in'|'out', value }
+  const [handlePopup, setHandlePopup] = useState<{ regionId: string; which: 'in' | 'out'; value: string } | null>(null)
+  const handlePopupInputRef = useRef<HTMLInputElement>(null)
+  // While dragging an in/out handle, the playhead indicator freezes at the pre-drag position
+  // so the user can see the frame at the handle without losing track of where they were.
+  const [handleDragDisplayTime, setHandleDragDisplayTime] = useState<number | null>(null)
+  const handleDragSavedTimeRef = useRef<number>(0)
+  const isDraggingHandleRef = useRef<boolean>(false)
+  // Duration label editing per region
+  const [editingDurationId, setEditingDurationId] = useState<string | null>(null)
+  const [durationInput, setDurationInput] = useState('')
+  const durationInputRef = useRef<HTMLInputElement>(null)
+  // Add-segment error tooltip
+  const [addSegmentError, setAddSegmentError] = useState<string | null>(null)
   const stripsWrapperRef = useRef<HTMLDivElement>(null)
 
   // Video container size — tracked to compute crop overlay geometry
@@ -235,15 +414,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   // Confirm exit clip mode
   const [showExitClipConfirm, setShowExitClipConfirm] = useState(false)
+  // Confirm close video while clip work is in progress
+  const [showCloseVideoConfirm, setShowCloseVideoConfirm] = useState(false)
 
   // Multi-track warning modal before entering clip mode
   const [clipModeModal, setClipModeModal] = useState<'warn' | 'merge' | null>(null)
   const pendingClipAfterMerge = useRef(false)
 
-  // Clip duration display / edit
-  const [editingDuration, setEditingDuration] = useState(false)
-  const [durationInput, setDurationInput] = useState('')
-  const durationInputRef = useRef<HTMLInputElement>(null)
+  const [clipFocus, setClipFocus] = useState(false)
+  const clipFocusRef = useRef(false)
+  // Per-region duration lock: dragging one handle moves the other to preserve duration
+  const [lockedRegionIds, setLockedRegionIds] = useState<Set<string>>(new Set())
+  const lockedRegionIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => { lockedRegionIdsRef.current = lockedRegionIds }, [lockedRegionIds])
+  const isPlayingRef = useRef(false)
 
   // Bleep markers
   const [activeBleepId, setActiveBleepId] = useState<string | null>(null)
@@ -261,23 +445,24 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const currentTimeRef  = useRef(0)
   const videoInfoRef    = useRef(state.videoInfo)
   const clipStateRef    = useRef(clipState)
-  // Declared early so seekRef/fastSeekRef can close over them; synced via useEffect below.
-  const isPopupOpenRef          = useRef(false)
-  const setPopupCurrentTimeRef  = useRef<(t: number) => void>(() => {})
-  const effectiveCurrentTimeRef = useRef(0)
-  // Popup-aware: relay to popup when open, else seek local video.
+  const isPopupOpenRef  = useRef(false)
   // All playhead-drag, waveform-click, and slider handlers use these refs
-  // so they don't need to know about popup state themselves.
+  // so they don't need to be recreated when seek changes.
   const seekRef     = useRef((t: number) => seek(t))
   const fastSeekRef = useRef((t: number) => fastSeek(t))
+  // WebRTC peer connection for popup streaming
+  const popupPCRef          = useRef<RTCPeerConnection | null>(null)
+  const popupRtcCleanupRef  = useRef<(() => void) | null>(null)
 
   const exitClipMode = useCallback(() => {
     setIsClipMode(false)
     setActiveBleepId(null)
-    setClipState({ inPoint: null, outPoint: null, cropMode: 'none', cropX: 0.5, bleepRegions: [], bleepVolume: 0.25 })
+    setClipState({ clipRegions: [], cropMode: 'none', cropX: 0.5, bleepRegions: [], bleepVolume: 0.25 })
     setViewport({ viewStart: 0, viewEnd: durationRef.current })
-    setShowInPopup(false)
-    setShowOutPopup(false)
+    setHandlePopup(null)
+    setEditingDurationId(null)
+    setClipFocus(false)
+    setAddSegmentError(null)
   }, [])
 
   // Shared zoom handler — uses refs to avoid stale closures in non-passive listeners
@@ -325,13 +510,33 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   useEffect(() => { currentTimeRef.current = currentTime }, [currentTime])
   useEffect(() => { videoInfoRef.current   = videoInfo  }, [videoInfo])
   useEffect(() => { clipStateRef.current   = clipState  }, [clipState])
-  useEffect(() => { seekRef.current     = (t) => { if (isPopupOpenRef.current) { window.api.controlVideoPopup('seek', t); setPopupCurrentTimeRef.current(t) } else seek(t) }     }, [seek])
-  useEffect(() => { fastSeekRef.current = (t) => { if (isPopupOpenRef.current) { window.api.controlVideoPopup('seek', t); setPopupCurrentTimeRef.current(t) } else fastSeek(t) } }, [fastSeek])
+  useEffect(() => { clipFocusRef.current = clipFocus }, [clipFocus])
+
+  // Clear the handle-drag playhead freeze once the video's currentTime has caught up to the
+  // saved position after a drag release seek (prevents a flash to the handle's frame position).
+  // Gated by isDraggingHandleRef so it doesn't fire prematurely while the drag is still active.
+  useEffect(() => {
+    if (handleDragDisplayTime === null) return
+    if (isDraggingHandleRef.current) return
+    if (Math.abs(currentTime - handleDragDisplayTime) < 0.05) setHandleDragDisplayTime(null)
+  }, [currentTime, handleDragDisplayTime])
+
+  // Auto-enable clip focus when the first segment is added
+  const segmentCount = clipState.clipRegions.length
+  useEffect(() => {
+    if (segmentCount > 0) setClipFocus(true)
+  }, [segmentCount > 0]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { seekRef.current     = (t) => seek(t)     }, [seek])
+  useEffect(() => { fastSeekRef.current = (t) => fastSeek(t) }, [fastSeek])
   useEffect(() => {
     if (duration > 0) setViewport({ viewStart: 0, viewEnd: duration })
-    // Close popup whenever the loaded file changes or is cleared
+    // Close popup and tear down WebRTC whenever the loaded file changes or is cleared
     window.api.closeVideoPopup().catch(() => {})
     setIsPopupOpen(false)
+    popupRtcCleanupRef.current?.()
+    popupRtcCleanupRef.current = null
+    popupPCRef.current?.close()
+    popupPCRef.current = null
   }, [state.videoUrl]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // After a merge triggered from the clip-mode modal completes, enter clip mode automatically
@@ -344,7 +549,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   }, [tracksExtracted])
 
 
-  // Snap viewport to keep playhead visible whenever currentTime changes
+  // Snap viewport to keep playhead visible
   useEffect(() => {
     if (!isClipMode || duration <= 0) return
     const { viewStart, viewEnd } = viewportRef.current
@@ -358,8 +563,9 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
   }, [currentTime, isClipMode, duration]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Middle-click pan: captures drag start and applies delta against initial viewport
-  const startMiddleClickPan = useCallback((e: React.MouseEvent, containerWidthPx: number) => {
+  // Middle-click pan: captures drag start and applies delta against initial viewport.
+  // Accepts native or React mouse events — only needs button, preventDefault, clientX.
+  const startMiddleClickPan = useCallback((e: { button: number; preventDefault: () => void; clientX: number }, containerWidthPx: number) => {
     if (e.button !== 1) return
     e.preventDefault()
     const startX = e.clientX
@@ -383,9 +589,23 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  // Drag an In or Out handle. Uses refs for all mutable values so the callback is stable.
-  // Shows the popup immediately on mousedown; input updates live during drag.
-  const startHandleDrag = useCallback((e: React.MouseEvent, which: 'in' | 'out') => {
+  // Capture-phase middle-click intercept: fires before any child's onMouseDown, so middle-click
+  // always pans the timeline regardless of which interactive element is under the cursor.
+  useEffect(() => {
+    const el = stripsWrapperRef.current
+    if (!el) return
+    const onCapture = (e: MouseEvent) => {
+      if (e.button !== 1) return
+      e.stopPropagation()
+      startMiddleClickPan(e, el.getBoundingClientRect().width)
+    }
+    el.addEventListener('mousedown', onCapture, true)
+    return () => el.removeEventListener('mousedown', onCapture, true)
+  }, [startMiddleClickPan, isClipMode])
+
+  // Drag an In or Out handle of a specific segment. Collision-aware.
+  const startSegmentHandleDrag = useCallback((e: React.MouseEvent, regionId: string, which: 'in' | 'out') => {
+    if (e.button !== 0) return // capture-phase handler above takes middle-click; ignore right-click
     e.preventDefault()
     e.stopPropagation()
     const wrapperEl = stripsWrapperRef.current
@@ -394,19 +614,19 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     const startX = e.clientX
     let hasMoved = false
 
-    // Show popup immediately and sync current value to input
+    // Show the popup immediately with the current handle value
     const fps = videoInfoRef.current?.fps
-    if (which === 'in') {
-      const ip = clipStateRef.current.inPoint
-      if (ip !== null) setInPointInput(formatViewTime(ip, fps))
-      setShowInPopup(true)
-      setShowOutPopup(false)
-    } else {
-      const op = clipStateRef.current.outPoint
-      if (op !== null) setOutPointInput(formatViewTime(op, fps))
-      setShowOutPopup(true)
-      setShowInPopup(false)
-    }
+    const region = clipStateRef.current.clipRegions.find(r => r.id === regionId)
+    if (!region) return
+    const initVal = formatViewTime(which === 'in' ? region.inPoint : region.outPoint, fps)
+    setHandlePopup({ regionId, which, value: initVal })
+
+    // Bug 4: freeze playhead at current position; preview handle frame in video
+    const handleTime = which === 'in' ? region.inPoint : region.outPoint
+    handleDragSavedTimeRef.current = currentTimeRef.current
+    isDraggingHandleRef.current = true
+    setHandleDragDisplayTime(currentTimeRef.current)
+    seekRef.current(handleTime)
 
     const onMove = (me: MouseEvent) => {
       if (!hasMoved && Math.abs(me.clientX - startX) > 2) hasMoved = true
@@ -415,29 +635,54 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       const t = viewStart + ratio * (viewEnd - viewStart)
       const dur = durationRef.current
       const moveFps = videoInfoRef.current?.fps
-      if (which === 'in') {
-        const clamped = Math.max(0, Math.min(t, clipStateRef.current.outPoint !== null ? clipStateRef.current.outPoint - 0.001 : dur))
-        setInPointInput(formatViewTime(clamped, moveFps))
-        setClipState(s => ({ ...s, inPoint: clamped }))
-        seekRef.current(clamped)
-      } else {
-        const clamped = Math.min(dur, Math.max(t, clipStateRef.current.inPoint !== null ? clipStateRef.current.inPoint + 0.001 : 0))
-        setOutPointInput(formatViewTime(clamped, moveFps))
-        setClipState(s => ({ ...s, outPoint: clamped }))
-        seekRef.current(clamped)
-      }
+      const frameTime = 1 / (moveFps ?? 30)
+      const locked = lockedRegionIdsRef.current.has(regionId)
+      setClipState(s => {
+        const r = s.clipRegions.find(c => c.id === regionId)
+        if (!r) return s
+        const segDur = r.outPoint - r.inPoint
+        // Compute left/right walls from direct neighbour lookup — avoids the anchor-inside-neighbour
+        // bug that getSegmentFreeInterval has when the handle has already been clamped to the edge.
+        const others = s.clipRegions.filter(c => c.id !== regionId)
+        const leftWall  = others.reduce<number>((b, c) => c.outPoint < r.outPoint ? Math.max(b, c.outPoint) : b, -Infinity)
+        const rightWall = others.reduce<number>((b, c) => c.inPoint  > r.inPoint  ? Math.min(b, c.inPoint)  : b, Infinity)
+        // Stop 1 frame from a neighbour so the merge button can appear; use full extent at video boundary.
+        const lo = leftWall  === -Infinity ? 0   : leftWall  + frameTime
+        const hi = rightWall === Infinity  ? dur : rightWall - frameTime
+        if (which === 'in') {
+          const clamped = Math.max(lo, Math.min(t, r.outPoint - frameTime))
+          setHandlePopup(p => p ? { ...p, value: formatViewTime(clamped, moveFps) } : p)
+          seekRef.current(clamped) // preview handle frame while dragging
+          if (locked) {
+            const newOut = Math.min(hi, clamped + segDur)
+            return { ...s, clipRegions: s.clipRegions.map(c => c.id === regionId ? { ...c, inPoint: clamped, outPoint: newOut } : c) }
+          }
+          return { ...s, clipRegions: s.clipRegions.map(c => c.id === regionId ? { ...c, inPoint: clamped } : c) }
+        } else {
+          const clamped = Math.min(hi, Math.max(t, r.inPoint + frameTime))
+          setHandlePopup(p => p ? { ...p, value: formatViewTime(clamped, moveFps) } : p)
+          seekRef.current(clamped) // preview handle frame while dragging
+          if (locked) {
+            const newIn = Math.max(lo, clamped - segDur)
+            return { ...s, clipRegions: s.clipRegions.map(c => c.id === regionId ? { ...c, inPoint: newIn, outPoint: clamped } : c) }
+          }
+          return { ...s, clipRegions: s.clipRegions.map(c => c.id === regionId ? { ...c, outPoint: clamped } : c) }
+        }
+      })
     }
     const onUp = () => {
+      isDraggingHandleRef.current = false
       if (!hasMoved) {
-        // Clean click: keep popup open and focus the input so the user can type immediately
-        setTimeout(() => {
-          if (which === 'in') inPointInputRef.current?.select()
-          else outPointInputRef.current?.select()
-        }, 0)
+        // Click (no drag): leave video at handle position, jump playhead there too
+        setHandleDragDisplayTime(null)
+        setTimeout(() => handlePopupInputRef.current?.select(), 0)
       } else {
-        // Drag ended: close the popup
-        if (which === 'in') setShowInPopup(false)
-        else setShowOutPopup(false)
+        // Drag release: restore video to saved position. Keep handleDragDisplayTime frozen at
+        // that position so the playhead doesn't flash to the handle's frame while the seek
+        // resolves. The useEffect below clears it once currentTime catches up.
+        seekRef.current(handleDragSavedTimeRef.current)
+        setHandleDragDisplayTime(handleDragSavedTimeRef.current)
+        setHandlePopup(null)
       }
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
@@ -446,22 +691,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     window.addEventListener('mouseup', onUp)
   }, []) // all mutable values accessed via refs
 
-  // Drag the entire clip region (both handles together). Preserves clip duration.
-  const startRegionDrag = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) {
-      // Middle-click should pan the timeline, not move the region
-      if (e.button === 1) startMiddleClickPan(e, stripsWrapperRef.current?.getBoundingClientRect().width ?? 0)
-      return
-    }
+  // Drag an entire clip segment (both handles together). Collision-aware.
+  const startSegmentDrag = useCallback((e: React.MouseEvent, regionId: string) => {
+    if (e.button !== 0) return // capture-phase handler takes middle-click; ignore right-click
     e.preventDefault()
     e.stopPropagation()
     const wrapperEl = stripsWrapperRef.current
     if (!wrapperEl) return
     const rect = wrapperEl.getBoundingClientRect()
     const startX = e.clientX
-    const startIn  = clipStateRef.current.inPoint!
-    const startOut = clipStateRef.current.outPoint!
-    const clipDur  = startOut - startIn
+    const region = clipStateRef.current.clipRegions.find(r => r.id === regionId)
+    if (!region) return
+    const startIn  = region.inPoint
+    const startOut = region.outPoint
+    const segDur   = startOut - startIn
     let hasMoved = false
     const onMove = (me: MouseEvent) => {
       if (!hasMoved && Math.abs(me.clientX - startX) > 2) hasMoved = true
@@ -469,16 +712,31 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       const { viewStart, viewEnd } = viewportRef.current
       const span = viewEnd - viewStart
       const dur = durationRef.current
+      const frameTime = 1 / (videoInfoRef.current?.fps ?? 30)
       const dtSec = ((me.clientX - startX) / rect.width) * span
-      let newIn  = startIn  + dtSec
-      let newOut = startOut + dtSec
-      if (newIn  < 0)   { newIn = 0;            newOut = clipDur }
-      if (newOut > dur) { newOut = dur;          newIn  = dur - clipDur }
-      setClipState(s => ({ ...s, inPoint: newIn, outPoint: newOut }))
+      setClipState(s => {
+        const r = s.clipRegions.find(c => c.id === regionId)
+        if (!r) return s
+        // Find bounds from neighbouring regions
+        const others = s.clipRegions.filter(c => c.id !== regionId)
+        const lo = others.reduce((acc, c) => c.outPoint <= startIn + dtSec ? Math.max(acc, c.outPoint) : acc, 0)
+        const hi = others.reduce((acc, c) => c.inPoint >= startIn + dtSec + segDur ? Math.min(acc, c.inPoint) : acc, dur)
+        let newIn  = startIn  + dtSec
+        let newOut = startOut + dtSec
+        // Clamp to neighbours and video bounds
+        if (newIn < lo)          { newIn = lo;         newOut = lo + segDur }
+        if (newOut > hi)         { newOut = hi;         newIn  = hi - segDur }
+        if (newIn < 0)           { newIn = 0;           newOut = segDur }
+        if (newOut > dur)        { newOut = dur;         newIn  = dur - segDur }
+        // If clamped segment overlaps a neighbour (can happen with tight gaps), prevent the move
+        const wouldOverlap = others.some(c => newIn < c.outPoint - frameTime && newOut > c.inPoint + frameTime)
+        if (wouldOverlap) return s
+        const updated = s.clipRegions.map(c => c.id === regionId ? { ...c, inPoint: newIn, outPoint: newOut } : c)
+        return { ...s, clipRegions: updated.sort((a, b) => a.inPoint - b.inPoint) }
+      })
     }
     const onUp = (ue: MouseEvent) => {
       if (!hasMoved) {
-        // Clean click: seek to the cursor position
         const ratio = Math.max(0, Math.min(1, (ue.clientX - rect.left) / rect.width))
         const { viewStart, viewEnd } = viewportRef.current
         seekRef.current(viewStart + ratio * (viewEnd - viewStart))
@@ -488,7 +746,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, [startMiddleClickPan]) // startMiddleClickPan is stable ([] deps)
+  }, []) // all mutable values accessed via refs
 
   // Scrub by dragging the playhead
   const startPlayheadDrag = useCallback((e: React.MouseEvent) => {
@@ -502,9 +760,16 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       const { viewStart, viewEnd } = viewportRef.current
       return viewStart + Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * (viewEnd - viewStart)
     }
+    isPlayheadDraggingRef.current = true
     fastSeekRef.current(getTime(e.clientX))
-    const onMove = (me: MouseEvent) => fastSeekRef.current(getTime(me.clientX))
+    setHoverRatio(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)))
+    const onMove = (me: MouseEvent) => {
+      fastSeekRef.current(getTime(me.clientX))
+      setHoverRatio(Math.max(0, Math.min(1, (me.clientX - rect.left) / rect.width)))
+    }
     const onUp = (me: MouseEvent) => {
+      isPlayheadDraggingRef.current = false
+      setHoverRatio(null)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
       seekRef.current(getTime(me.clientX))
@@ -593,6 +858,34 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     rafId = requestAnimationFrame(tick)
     return () => { cancelAnimationFrame(rafId); stopBleep() }
   }, [isPlaying, startBleep, stopBleep, videoRef])
+
+  // Clip focus — skip gaps between segments, loop back to first when done.
+  // The initial snap is intentionally omitted here: calling seek() at the same
+  // time as play() aborts the play() promise. The RAF tick handles it instead,
+  // and vid.seeking prevents seek-thrashing while a seek is in progress.
+  useEffect(() => {
+    if (!clipFocus || !isPlaying) return
+    if (clipStateRef.current.clipRegions.length === 0) return
+    let rafId: number
+    const tick = () => {
+      const vid = videoRef.current
+      if (vid && clipFocusRef.current && !vid.seeking) {
+        const rs = clipStateRef.current.clipRegions
+        if (rs.length > 0) {
+          const t = vid.currentTime
+          const inRegion = rs.some(r => t >= r.inPoint && t < r.outPoint)
+          if (!inRegion) {
+            // Between/before/after regions — jump to the next region, or loop to first
+            const next = rs.find(r => r.inPoint > t)
+            vid.currentTime = next ? next.inPoint : rs[0].inPoint
+          }
+        }
+      }
+      rafId = requestAnimationFrame(tick)
+    }
+    rafId = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafId)
+  }, [clipFocus, isPlaying, videoRef]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close AudioContext when the component unmounts
   useEffect(() => () => { audioCtxRef.current?.close() }, [])
@@ -711,23 +1004,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  // I / O keyboard shortcuts — set in/out point at current playhead
-  useEffect(() => {
-    if (!isClipMode) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return
-      if (e.key === 'i' || e.key === 'I') {
-        e.preventDefault()
-        setClipState(s => ({ ...s, inPoint: currentTimeRef.current }))
-      }
-      if (e.key === 'o' || e.key === 'O') {
-        e.preventDefault()
-        setClipState(s => ({ ...s, outPoint: currentTimeRef.current }))
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [isClipMode])
 
   // Viewport-derived values — when not in clip mode, the full video is always visible
   const vStart = isClipMode && duration > 0 ? viewport.viewStart : 0
@@ -736,12 +1012,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const zoomLevel = duration > 0 ? duration / vSpan : 1
   const isZoomed  = isClipMode && zoomLevel > 1.01
 
-  // Snap playhead to nearest boundary when the user adjusts the viewport range
-  useEffect(() => {
-    if (!isClipMode || duration <= 0) return
-    if (currentTime < vStart) seek(vStart)
-    else if (currentTime > vEnd) seek(vEnd)
-  }, [vStart, vEnd]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFiles = useCallback((paths: string[]) => {
     if (paths[0]) loadFile(paths[0])
@@ -757,20 +1027,26 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const stepFrame = useCallback((dir: 1 | -1) => {
     const vid = videoRef.current
     if (!vid) return
-    if (!isPopupOpenRef.current && !vid.paused) vid.pause()
+    if (!vid.paused) vid.pause()
     const fps = videoInfo?.fps ?? 30
-    seekRef.current(Math.max(0, Math.min(duration, effectiveCurrentTimeRef.current + dir / fps)))
+    const regions = clipStateRef.current.clipRegions
+    const lo = clipFocusRef.current && regions.length > 0 ? regions[0].inPoint : 0
+    const hi = clipFocusRef.current && regions.length > 0 ? regions[regions.length - 1].outPoint : duration
+    seekRef.current(Math.max(lo, Math.min(hi, currentTimeRef.current + dir / fps)))
   }, [videoRef, videoInfo, duration])
 
   const skip = useCallback((seconds: number) => {
-    seekRef.current(Math.max(0, Math.min(duration, effectiveCurrentTimeRef.current + seconds)))
+    const regions = clipStateRef.current.clipRegions
+    const lo = clipFocusRef.current && regions.length > 0 ? regions[0].inPoint : 0
+    const hi = clipFocusRef.current && regions.length > 0 ? regions[regions.length - 1].outPoint : duration
+    seekRef.current(Math.max(lo, Math.min(hi, currentTimeRef.current + seconds)))
   }, [duration])
 
   // Thumbnail strip
   const [filmstripEl, setFilmstripEl] = useState<HTMLDivElement | null>(null)
   const [stripWidth, setStripWidth] = useState(0)
   const [hoverRatio, setHoverRatio] = useState<number | null>(null)
-  const [sliderHoverRatio, setSliderHoverRatio] = useState<number | null>(null)
+  const isPlayheadDraggingRef = useRef(false)
 
   useEffect(() => {
     if (!filmstripEl) return
@@ -816,27 +1092,69 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   const { setJobs } = useConversionJobs()
 
-  const exportClip = useCallback(async () => {
-    if (!state.filePath || !videoInfo || clipState.inPoint === null || clipState.outPoint === null) return
+  const [showExportDialog, setShowExportDialog] = useState(false)
 
-    // Resolve clip preset if one is configured
+  // Add a new segment centered on the playhead, sized to ~10% of the visible span.
+  const addSegment = useCallback(() => {
+    const fps = videoInfoRef.current?.fps ?? 30
+    const frameTime = 1 / fps
+    const t = currentTimeRef.current
+    const dur = durationRef.current
+    const { lo, hi } = getSegmentFreeInterval(clipStateRef.current.clipRegions, t, dur)
+    const available = hi - lo
+    if (available < 2 * frameTime) {
+      setAddSegmentError('No room at playhead')
+      setTimeout(() => setAddSegmentError(null), 2500)
+      return
+    }
+    const { viewStart, viewEnd } = viewportRef.current
+    const desired = Math.max(2 * frameTime, (viewEnd - viewStart) * 0.10)
+    const segDur   = Math.min(desired, available)
+    let segIn  = t - segDur / 2
+    let segOut = t + segDur / 2
+    if (segIn  < lo) { segIn = lo; segOut = lo + segDur }
+    if (segOut > hi) { segOut = hi; segIn = hi - segDur }
+    const newRegion: ClipRegion = { id: `seg-${uuidv4()}`, inPoint: segIn, outPoint: segOut }
+    setClipState(s => ({
+      ...s,
+      clipRegions: [...s.clipRegions, newRegion].sort((a, b) => a.inPoint - b.inPoint),
+    }))
+  }, [])
+
+  // Split the clip region that contains the playhead into two regions at the playhead.
+  const splitSegment = useCallback(() => {
+    const fps = videoInfoRef.current?.fps ?? 30
+    const frameTime = 1 / fps
+    const t = currentTimeRef.current
+    setClipState(s => {
+      const seg = s.clipRegions.find(r => t > r.inPoint + frameTime && t < r.outPoint - frameTime)
+      if (!seg) return s
+      const left: ClipRegion  = { id: `seg-${uuidv4()}`, inPoint: seg.inPoint, outPoint: t }
+      const right: ClipRegion = { id: `seg-${uuidv4()}`, inPoint: t, outPoint: seg.outPoint }
+      return {
+        ...s,
+        clipRegions: s.clipRegions
+          .filter(r => r.id !== seg.id)
+          .concat(left, right)
+          .sort((a, b) => a.inPoint - b.inPoint),
+      }
+    })
+  }, [])
+
+  const runExport = useCallback(async (opts: ExportClipOptions) => {
+    if (!state.filePath || !videoInfo || clipState.clipRegions.length === 0) return
+    setShowExportDialog(false)
+
     let clipPreset: { id: string; name: string; ffmpegArgs: string; outputExtension: string; isBuiltin: boolean } | null = null
-    if (config.clipPresetId) {
+    if (opts.presetId) {
       const [builtin, imported] = await Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
-      clipPreset = [...builtin, ...imported].find(p => p.id === config.clipPresetId) ?? null
+      clipPreset = [...builtin, ...imported].find(p => p.id === opts.presetId) ?? null
     }
 
     const ext = clipPreset?.outputExtension || (state.filePath.split(/[\\/]/).pop()!.split('.').pop() ?? 'mkv')
     const base = state.filePath.replace(/[\\/]/g, '/').split('/').pop()!.replace(/\.[^.]+$/, '')
-    const dir  = state.filePath.replace(/[\\/][^\\/]+$/, '').replace(/\\/g, '/')
-    const defaultPath = `${dir}/${base}_clip.${ext}`
-
-    const outPath = await window.api.saveFileDialog({
-      title: 'Export Clip',
-      defaultPath,
-      filters: [{ name: 'Video', extensions: [ext] }],
-    })
-    if (!outPath) return
+    const outDir = opts.outputDir.replace(/\\/g, '/')
+    const outPath = `${outDir}/${base}${opts.suffix}.${ext}`
 
     const syntheticPreset = clipPreset ?? {
       id: 'clip-export',
@@ -853,13 +1171,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       status: 'queued' as const,
       progress: 0,
     }
-    // Add the job to the shared context so it appears in the Converter page immediately
     setJobs(prev => [...prev, job])
 
     await window.api.addClipToQueue({
       job,
-      inPoint:      clipState.inPoint,
-      outPoint:     clipState.outPoint,
+      clipRegions:  clipState.clipRegions,
       cropMode:     clipState.cropMode,
       cropX:        clipState.cropX,
       videoWidth:   videoInfo.width,
@@ -869,68 +1185,124 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     })
 
     onNavigateToConverter?.()
-  }, [state.filePath, videoInfo, clipState, config.clipPresetId, setJobs, onNavigateToConverter])
+  }, [state.filePath, videoInfo, clipState, setJobs, onNavigateToConverter])
 
   const [screenshotFlash, setScreenshotFlash] = useState(false)
   const [isPopupOpen, setIsPopupOpen] = useState(false)
-  // Popup has its own play/time state so the main window's video can be fully suspended
-  const [popupPlaying, setPopupPlaying]         = useState(false)
-  const [popupCurrentTime, setPopupCurrentTime] = useState(0)
-  const effectivePlaying     = isPopupOpen ? popupPlaying     : isPlaying
-  const effectiveCurrentTime = isPopupOpen ? popupCurrentTime : currentTime
-  // Stable setters — assign inline every render so early-declared refs stay current.
-  setPopupCurrentTimeRef.current  = setPopupCurrentTime
-  effectiveCurrentTimeRef.current = effectiveCurrentTime
-  const wasPlayingAtPopup = useRef(false)
-  const lastPopupTime     = useRef(0)
+  isPopupOpenRef.current      = isPopupOpen
+  isPlayingRef.current = isPlaying
 
-  // Track popup time updates (popup sends ~4 times/sec)
-  useEffect(() => {
-    return window.api.onVideoPopupTimeUpdate(t => {
-      lastPopupTime.current = t
-      setPopupCurrentTime(t)
-    })
-  }, [])
-
-  // When popup closes: restore main video to popup's last position
+  // When popup closes: tear down WebRTC connection
   useEffect(() => {
     return window.api.onVideoPopupClosed(() => {
       setIsPopupOpen(false)
-      setPopupPlaying(false)
-      const v = videoRef.current
-      if (!v || !state.videoUrl) return
-      v.currentTime = lastPopupTime.current
-      if (wasPlayingAtPopup.current) v.play().catch(() => {})
+      popupRtcCleanupRef.current?.()
+      popupRtcCleanupRef.current = null
+      popupPCRef.current?.close()
+      popupPCRef.current = null
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.videoUrl])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const openVideoPopup = useCallback(async () => {
-    if (!state.filePath || !videoInfo) return
-    // Pause (and remember state) before opening so only one decoder runs at a time
-    wasPlayingAtPopup.current = isPlaying
-    videoRef.current?.pause()
-    audioElements.current.forEach(a => a?.pause())
-    lastPopupTime.current = currentTime
-    setPopupCurrentTime(currentTime)
-    await window.api.openVideoPopup(state.filePath, currentTime, videoInfo.width, videoInfo.height)
-    setIsPopupOpen(true)
-    setPopupPlaying(true)   // popup auto-plays on open
-  }, [state.filePath, videoInfo, currentTime, isPlaying, audioElements])
+    if (!videoInfo) return
+    const videoEl = videoRef.current
+    if (!videoEl) return
 
-  // Keep isPopupOpenRef in sync so seekRef/fastSeekRef can read it at call time.
-  useEffect(() => { isPopupOpenRef.current = isPopupOpen }, [isPopupOpen])
+    // Tear down any previous connection before creating a new one
+    popupRtcCleanupRef.current?.()
+    popupRtcCleanupRef.current = null
+    popupPCRef.current?.close()
+    popupPCRef.current = null
+
+    // Capture video-only stream from the main window's <video> element.
+    // captureStream() delivers already-decoded frames — the popup never
+    // touches the file or decoder directly, so there is no cold-start lag.
+    const rawStream = (videoEl as HTMLVideoElement & { captureStream(): MediaStream }).captureStream()
+    const [videoTrack] = rawStream.getVideoTracks()
+    if (!videoTrack) return
+
+    // For a local (in-memory) connection there is no real bandwidth limit.
+    // Target 2× the source bitrate so re-encoding never becomes the bottleneck,
+    // with a floor of 50 Mbps and a ceiling of 200 Mbps.
+    const sourceBps   = (videoInfo.videoBitrate && isFinite(videoInfo.videoBitrate)) ? videoInfo.videoBitrate : 0
+    const targetBps   = Math.min(200_000_000, Math.max(50_000_000, sourceBps * 2))
+
+    const pc = new RTCPeerConnection({ iceServers: [] })
+    popupPCRef.current = pc
+
+    // addTransceiver gives us direct access to codec preferences and encoding params
+    const transceiver = pc.addTransceiver(videoTrack, {
+      direction: 'sendonly',
+      sendEncodings: [{
+        maxBitrate: targetBps,
+        degradationPreference: 'maintain-resolution',
+      }],
+    })
+
+    // H264 is rejected by setCodecPreferences in this Electron build regardless
+    // of how it's listed — exclude it and prefer AV1 → VP9.
+    // Keep RTX/RED/FEC entries in the list (removing them causes validation errors).
+    const allCodecs = RTCRtpSender.getCapabilities('video')?.codecs ?? []
+    const codecPriority = (c: RTCRtpCodecCapability) => {
+      if (/av1/i.test(c.mimeType)) return 0
+      if (/vp9/i.test(c.mimeType)) return 1
+      return 2  // VP8, RTX, RED, ULPFEC, etc.
+    }
+    const sorted = [...allCodecs]
+      .filter(c => !/h264/i.test(c.mimeType))
+      .sort((a, b) => codecPriority(a) - codecPriority(b))
+    if (sorted.length > 0) {
+      try { transceiver.setCodecPreferences(sorted) } catch { /* fall back to browser default */ }
+    }
+
+    // Create offer and wait for ICE gathering to finish before sending.
+    // "Vanilla ICE": all candidates are embedded in the SDP so there's no
+    // trickle-ICE race condition between the two renderer processes.
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription({ type: 'offer', sdp: injectSdpBandwidth(offer.sdp!, targetBps) })
+    await waitForIceComplete(pc)
+    const offerSdp = pc.localDescription!.sdp
+
+    // Listen for the answer SDP from the popup (one-shot)
+    popupRtcCleanupRef.current = window.api.onPopupRtcSignal(async (data) => {
+      const msg = data as { type: string; sdp?: string }
+      if (!popupPCRef.current || msg.type !== 'answer' || !msg.sdp) return
+      await popupPCRef.current.setRemoteDescription(
+        new RTCSessionDescription({ type: 'answer', sdp: msg.sdp })
+      )
+      // Reinforce the bitrate cap after negotiation — Chrome's congestion
+      // control can override encoding params; setting them again post-answer
+      // ensures the high cap is applied for the life of the connection.
+      const sender = popupPCRef.current.getSenders().find(s => s.track?.kind === 'video')
+      if (sender) {
+        const params = sender.getParameters()
+        if (params.encodings.length === 0) params.encodings = [{}]
+        params.encodings[0].maxBitrate = targetBps
+        params.encodings[0].degradationPreference = 'maintain-resolution'
+        sender.setParameters(params).catch(() => {})
+      }
+      setIsPopupOpen(true)
+    })
+
+    // Open popup window, passing the offer SDP so the popup can answer immediately
+    window.api.openVideoPopup(
+      offerSdp,
+      videoInfo.width, videoInfo.height,
+      clipState.cropMode === '9:16' ? '9:16' : undefined,
+      clipState.cropMode === '9:16' ? clipState.cropX : undefined,
+    )
+  }, [videoInfo, clipState.cropMode, clipState.cropX])
+
+  // Push live crop changes to popup when mode or position changes while it's open.
+  // isPopupOpen is intentionally excluded — crop is already sent during popup:open,
+  // and including it here would trigger a resize that overrides the saved window size.
+  useEffect(() => {
+    if (!isPopupOpen || !videoInfo) return
+    window.api.setCropPopup?.(videoInfo.width, videoInfo.height, clipState.cropMode, clipState.cropX)
+  }, [clipState.cropMode, clipState.cropX, videoInfo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const effectiveTogglePlay = useCallback(() => {
-    if (isPopupOpenRef.current) {
-      setPopupPlaying(prev => {
-        const next = !prev
-        window.api.controlVideoPopup(next ? 'play' : 'pause')
-        return next
-      })
-    } else {
-      togglePlay()
-    }
+    togglePlay()
   }, [togglePlay])
 
   const captureScreenshot = useCallback(async () => {
@@ -980,7 +1352,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               <div ref={setVideoContainerEl} className="absolute inset-0">
                 <video
                   ref={videoRef}
-                  src={videoUrl}
+                  src={videoUrl ?? undefined}
                   className="w-full h-full object-contain cursor-pointer"
                   preload="auto"
                   onClick={effectiveTogglePlay}
@@ -1096,19 +1468,63 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     <span className="text-[11px] font-semibold text-blue-400 tracking-wide shrink-0">Clip Mode</span>
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
 
+                    {/* Add Segment / Split Segment button */}
+                    {(() => {
+                      const fps = videoInfo?.fps ?? 30
+                      const frameTime = 1 / fps
+                      // Check if playhead is inside a clip region
+                      const insideSeg = clipState.clipRegions.find(r => currentTime >= r.inPoint && currentTime <= r.outPoint)
+                      if (insideSeg) {
+                        const canSplit = currentTime > insideSeg.inPoint + frameTime && currentTime < insideSeg.outPoint - frameTime
+                        return (
+                          <div className="relative">
+                            <button
+                              title="Split segment at playhead"
+                              onClick={splitSegment}
+                              disabled={!canSplit}
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-purple-400 border border-purple-500/30 hover:bg-purple-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <Scissors size={11} /> Split
+                            </button>
+                            {!canSplit && (
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50">
+                                Too close to segment edge
+                              </div>
+                            )}
+                          </div>
+                        )
+                      }
+                      const { lo, hi } = getSegmentFreeInterval(clipState.clipRegions, currentTime, duration)
+                      const noRoom = (hi - lo) < 2 * frameTime
+                      return (
+                        <div className="relative">
+                          <button
+                            title="Add a clip segment at the playhead"
+                            onClick={addSegment}
+                            disabled={noRoom}
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400 border border-blue-500/30 hover:bg-blue-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <PlusSquare size={11} /> Add Segment
+                          </button>
+                          {(noRoom || addSegmentError) && (
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50">
+                              {addSegmentError ?? 'No room at playhead'}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
                     <button
-                      title="Set In Point (I)"
-                      onClick={() => setClipState(s => ({ ...s, inPoint: currentTime }))}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400 border border-blue-500/30 hover:bg-blue-950/60 transition-colors"
+                      title={clipFocus ? 'Clip Focus on — playback skips gaps between segments' : 'Clip Focus — skip gaps between segments during playback'}
+                      onClick={() => setClipFocus(v => !v)}
+                      disabled={clipState.clipRegions.length === 0}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        clipFocus
+                          ? 'text-blue-200 border-blue-400/50 bg-blue-500/25 hover:bg-blue-500/35'
+                          : 'text-blue-400/70 border-blue-500/20 hover:bg-blue-950/60'
+                      }`}
                     >
-                      <LogIn size={11} /> In
-                    </button>
-                    <button
-                      title="Set Out Point (O)"
-                      onClick={() => setClipState(s => ({ ...s, outPoint: currentTime }))}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400 border border-blue-500/30 hover:bg-blue-950/60 transition-colors"
-                    >
-                      <LogOut size={11} /> Out
+                      <Repeat size={11} /> Focus
                     </button>
 
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
@@ -1239,10 +1655,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       </>
                     )}
 
+                    <div className="w-px h-3 bg-white/10 mx-0.5 shrink-0" />
+
                     <button
-                      title={clipState.inPoint !== null && clipState.outPoint !== null ? 'Export clip' : 'Set in and out points first'}
-                      onClick={exportClip}
-                      disabled={clipState.inPoint === null || clipState.outPoint === null}
+                      title={clipState.clipRegions.length > 0 ? 'Export clip' : 'Add at least one segment first'}
+                      onClick={() => setShowExportDialog(true)}
+                      disabled={clipState.clipRegions.length === 0}
                       className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-purple-300 border-purple-600/30 bg-purple-600/20 hover:bg-purple-600/35 disabled:hover:bg-transparent"
                     >
                       <Upload size={11} /> Export Clip
@@ -1259,6 +1677,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 >
                   {/* Track */}
                   <div className="absolute inset-y-1 inset-x-0 bg-white/5 rounded-full" />
+                  {/* Playhead position needle — sits on the track, behind the thumb */}
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-purple-400/70 pointer-events-none z-[1] -translate-x-1/2"
+                    style={{ left: `${((handleDragDisplayTime ?? currentTime) / duration) * 100}%` }}
+                  />
                   {/* Thumb — drag to pan */}
                   <div
                     className="absolute inset-y-0 rounded-full bg-blue-500/30 hover:bg-blue-500/40 cursor-grab active:cursor-grabbing flex items-center"
@@ -1353,14 +1776,15 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 onClick={e => {
                   const rect = e.currentTarget.getBoundingClientRect()
                   const ratio = (e.clientX - rect.left) / rect.width
-                  seek(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
+                  seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
                 }}
                 onMouseDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
                 onMouseMove={e => {
+                  if (isPlayheadDraggingRef.current) return
                   const rect = e.currentTarget.getBoundingClientRect()
                   setHoverRatio((e.clientX - rect.left) / rect.width)
                 }}
-                onMouseLeave={() => setHoverRatio(null)}
+                onMouseLeave={() => { if (!isPlayheadDraggingRef.current) setHoverRatio(null) }}
               >
                 {/* Clipped background */}
                 <div className="absolute inset-0 rounded bg-black/40 overflow-hidden pointer-events-none" />
@@ -1400,14 +1824,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   </div>
                 )}
 
-                {/* Playhead — hidden when scrolled out of view */}
-                {duration > 0 && effectiveCurrentTime >= vStart && effectiveCurrentTime <= vEnd && (
-                  <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-purple-400/90 pointer-events-none z-20"
-                    style={{ left: `${((effectiveCurrentTime - vStart) / vSpan) * 100}%`, transform: 'translateX(-50%)' }}
-                  />
-                )}
-
                 {/* Hover marker + timecode */}
                 {hoverRatio !== null && duration > 0 && (
                   <>
@@ -1439,14 +1855,15 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 onClick={e => {
                   const rect = e.currentTarget.getBoundingClientRect()
                   const ratio = (e.clientX - rect.left) / rect.width
-                  seek(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
+                  seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
                 }}
                 onMouseDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
                 onMouseMove={e => {
+                  if (isPlayheadDraggingRef.current) return
                   const rect = e.currentTarget.getBoundingClientRect()
                   setHoverRatio((e.clientX - rect.left) / rect.width)
                 }}
-                onMouseLeave={() => setHoverRatio(null)}
+                onMouseLeave={() => { if (!isPlayheadDraggingRef.current) setHoverRatio(null) }}
               >
                 {waveformLoading && (
                   <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-600 pointer-events-none">
@@ -1466,41 +1883,42 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     />
                   </svg>
                 )}
-                {/* Playhead — hidden when scrolled out of view */}
-                {duration > 0 && effectiveCurrentTime >= vStart && effectiveCurrentTime <= vEnd && (
-                  <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-purple-400/80 pointer-events-none z-[8]"
-                    style={{ left: `${((effectiveCurrentTime - vStart) / vSpan) * 100}%`, transform: 'translateX(-50%)' }}
-                  />
-                )}
               </div>
 
-              {/* Draggable playhead — z-10 beats region drag (no z-index), yields to handles (z-20) */}
-              {duration > 0 && effectiveCurrentTime >= vStart && effectiveCurrentTime <= vEnd && (
-                <div
-                  className="absolute inset-y-0 z-10 -translate-x-1/2 cursor-ew-resize"
-                  style={{ left: `${((effectiveCurrentTime - vStart) / vSpan) * 100}%`, width: '12px' }}
-                  onMouseDown={startPlayheadDrag}
-                />
+              {/* Playhead — single element spanning both strips; frozen during handle drag */}
+              {duration > 0 && (handleDragDisplayTime ?? currentTime) >= vStart && (handleDragDisplayTime ?? currentTime) <= vEnd && (
+                <>
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-purple-400/90 pointer-events-none z-20"
+                    style={{ left: `${(((handleDragDisplayTime ?? currentTime) - vStart) / vSpan) * 100}%`, transform: 'translateX(-50%)' }}
+                  />
+                  {/* Draggable hit area — z-10 beats region drag (no z-index), yields to handles (z-20) */}
+                  <div
+                    className="absolute inset-y-0 z-10 -translate-x-1/2 cursor-ew-resize"
+                    style={{ left: `${(((handleDragDisplayTime ?? currentTime) - vStart) / vSpan) * 100}%`, width: '12px' }}
+                    onMouseDown={startPlayheadDrag}
+                  />
+                </>
               )}
 
-              {/* Clip region shading + bleep markers + draggable In/Out handles — spans both strips */}
+              {/* Clip region shading + bleep markers + per-region handles — spans both strips */}
               {isClipMode && (
                 <>
-                  {/* Left shading: before in-point — z-[5] so it dims bleeps that stray outside clip window */}
-                  {clipState.inPoint !== null && (
-                    <div
-                      className="absolute inset-y-0 bg-black/45 pointer-events-none z-[5]"
-                      style={{ left: 0, width: `${Math.max(0, Math.min(100, ((clipState.inPoint - vStart) / vSpan) * 100))}%` }}
-                    />
-                  )}
-                  {/* Right shading: after out-point */}
-                  {clipState.outPoint !== null && (
-                    <div
-                      className="absolute inset-y-0 bg-black/45 pointer-events-none z-[5]"
-                      style={{ right: 0, width: `${Math.max(0, Math.min(100, ((vEnd - clipState.outPoint) / vSpan) * 100))}%` }}
-                    />
-                  )}
+                  {/* Shade everything outside clip regions */}
+                  {clipState.clipRegions.length > 0 && (() => {
+                    // Build shaded intervals: gaps before first, between, and after last region
+                    const regions = clipState.clipRegions
+                    const intervals: { s: number; e: number }[] = []
+                    if (regions[0].inPoint > 0) intervals.push({ s: 0, e: regions[0].inPoint })
+                    for (let i = 0; i < regions.length - 1; i++) intervals.push({ s: regions[i].outPoint, e: regions[i + 1].inPoint })
+                    if (regions[regions.length - 1].outPoint < duration) intervals.push({ s: regions[regions.length - 1].outPoint, e: duration })
+                    return intervals.map((iv, idx) => {
+                      const l = Math.max(0, Math.min(100, ((iv.s - vStart) / vSpan) * 100))
+                      const r = Math.max(0, Math.min(100, ((vEnd - iv.e) / vSpan) * 100))
+                      if (l + r >= 100) return null
+                      return <div key={idx} className="absolute inset-y-0 bg-black/45 pointer-events-none z-[5]" style={{ left: `${l}%`, right: `${r}%` }} />
+                    })
+                  })()}
                   {/* Bleep markers — positioned at waveform strip height only (top-8 = thumbnail h-8) */}
                   {clipState.bleepRegions.map(region => {
                     if (region.end < vStart || region.start > vEnd) return null
@@ -1519,14 +1937,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           startBleepMove(e, region.id, waveformStripRef.current!.getBoundingClientRect())
                         }}
                       >
-                        {/* Icon centered in the marker — VolumeX when muted, AudioWaveform otherwise */}
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-35">
                           {clipState.bleepVolume < 0.01
                             ? <VolumeX size={14} className="text-white" />
                             : <AudioWaveform size={14} className="text-white" />
                           }
                         </div>
-                        {/* Volume line — draggable horizontal bar; top position = 1 - volume */}
                         <div
                           className="absolute left-0 right-0 h-3 -translate-y-1/2 cursor-ns-resize group z-10"
                           style={{ top: `${(1 - clipState.bleepVolume / 1.5) * 100}%` }}
@@ -1536,165 +1952,226 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             startBleepVolumeDrag(e, e.currentTarget.parentElement!.getBoundingClientRect())
                           }}
                         >
-                          {/* Visible line — thicker hit area above for easier grabbing */}
                           <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-white/70 group-hover:bg-white transition-colors" />
                         </div>
-                        {/* Resize handles — only shown when the marker is wide enough */}
                         {showHandles && (
                           <>
-                            <div
-                              className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-white/30 transition-colors"
-                              onMouseDown={e => { e.stopPropagation(); if (e.button === 0) startBleepResize(e, region.id, 'start', waveformStripRef.current!.getBoundingClientRect()) }}
-                            />
-                            <div
-                              className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-white/30 transition-colors"
-                              onMouseDown={e => { e.stopPropagation(); if (e.button === 0) startBleepResize(e, region.id, 'end', waveformStripRef.current!.getBoundingClientRect()) }}
-                            />
+                            <div className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-white/30 transition-colors" onMouseDown={e => { e.stopPropagation(); if (e.button === 0) startBleepResize(e, region.id, 'start', waveformStripRef.current!.getBoundingClientRect()) }} />
+                            <div className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-white/30 transition-colors" onMouseDown={e => { e.stopPropagation(); if (e.button === 0) startBleepResize(e, region.id, 'end', waveformStripRef.current!.getBoundingClientRect()) }} />
                           </>
                         )}
                       </div>
                     )
                   })}
-                  {/* Clip region drag hit area (no border — interaction only) + visual border (pointer-events-none on top) */}
-                  {clipState.inPoint !== null && clipState.outPoint !== null && (() => {
-                    const l = Math.max(0, ((clipState.inPoint  - vStart) / vSpan) * 100)
-                    const r = Math.max(0, ((vEnd - clipState.outPoint) / vSpan) * 100)
+                  {/* Per-segment: drag area, border, handles, duration label, delete, merge button */}
+                  {clipState.clipRegions.map((seg, segIdx) => {
+                    if (seg.outPoint < vStart || seg.inPoint > vEnd) return null
+                    const lPct  = Math.max(0, Math.min(100, ((seg.inPoint  - vStart) / vSpan) * 100))
+                    const rPct  = Math.max(0, Math.min(100, ((vEnd - seg.outPoint) / vSpan) * 100))
+                    const segDur = seg.outPoint - seg.inPoint
+                    const centerPct = Math.max(2, Math.min(98, (((seg.inPoint + seg.outPoint) / 2 - vStart) / vSpan) * 100))
+                    const durStr = formatViewTime(segDur, videoInfo?.fps)
+
+                    // Merge button: show when this segment's outPoint is within 1 frame of the next segment's inPoint.
+                    // Use positional lookup (not array index) since the array is always sorted by inPoint.
+                    const fps = videoInfo?.fps ?? 30
+                    const frameTime = 1 / fps
+                    const nextSeg = clipState.clipRegions.find(r => r.inPoint > seg.outPoint - frameTime)
+                    const showMerge = nextSeg && nextSeg.id !== seg.id && (nextSeg.inPoint - seg.outPoint) <= frameTime * 1.5
+
                     return (
-                      <>
+                      <React.Fragment key={seg.id}>
                         {/* Transparent drag hit area — z-[2] so bleeps (z-[4]) take priority */}
                         <div
                           className="absolute inset-y-0 z-[2] cursor-grab active:cursor-grabbing"
-                          style={{ left: `${l}%`, right: `${r}%` }}
-                          onMouseDown={startRegionDrag}
+                          style={{ left: `${lPct}%`, right: `${rPct}%` }}
+                          onMouseDown={e => startSegmentDrag(e, seg.id)}
                         />
-                        {/* Visual border — z-[9] so it renders above bleeps and playhead line */}
+                        {/* Visual border */}
                         <div
                           className="absolute inset-y-0 border-y border-blue-400/50 pointer-events-none z-[9]"
-                          style={{ left: `${l}%`, right: `${r}%` }}
+                          style={{ left: `${lPct}%`, right: `${rPct}%` }}
                         />
-                      </>
-                    )
-                  })()}
-                  {/* In-point handle */}
-                  {clipState.inPoint !== null && clipState.inPoint >= vStart - 0.001 && clipState.inPoint <= vEnd + 0.001 && (
-                    <div
-                      className="absolute inset-y-0 z-20 cursor-ew-resize"
-                      style={{
-                        left: `${Math.max(0, Math.min(100, ((clipState.inPoint - vStart) / vSpan) * 100))}%`,
-                        transform: 'translateX(-50%)',
-                        width: '12px',
-                      }}
-                      onMouseDown={e => startHandleDrag(e, 'in')}
-                    >
-                      {/* Visible bar */}
-                      <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] bg-blue-400 rounded-sm" />
-                    </div>
-                  )}
-                  {/* Out-point handle */}
-                  {clipState.outPoint !== null && clipState.outPoint >= vStart - 0.001 && clipState.outPoint <= vEnd + 0.001 && (
-                    <div
-                      className="absolute inset-y-0 z-20 cursor-ew-resize"
-                      style={{
-                        left: `${Math.max(0, Math.min(100, ((clipState.outPoint - vStart) / vSpan) * 100))}%`,
-                        transform: 'translateX(-50%)',
-                        width: '12px',
-                      }}
-                      onMouseDown={e => startHandleDrag(e, 'out')}
-                    >
-                      {/* Visible bar */}
-                      <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] bg-blue-400 rounded-sm" />
-                    </div>
-                  )}
-                  {/* In/Out popups — absolute inside wrapper so bottom:100% lands flush on the handle top */}
-                  {[
-                    { which: 'in'  as const, point: clipState.inPoint,  show: showInPopup,  input: inPointInput,  setInput: setInPointInput,  inputRef: inPointInputRef,  setShow: setShowInPopup  },
-                    { which: 'out' as const, point: clipState.outPoint, show: showOutPopup, input: outPointInput, setInput: setOutPointInput, inputRef: outPointInputRef, setShow: setShowOutPopup },
-                  ].map(({ which, point, show, input, setInput, inputRef, setShow }) => {
-                    if (!show || point === null) return null
-                    const leftPct = Math.max(2, Math.min(98, ((point - vStart) / vSpan) * 100))
-                    const minT = which === 'in' ? 0 : (clipState.inPoint ?? 0) + 0.001
-                    const maxT = which === 'in' ? (clipState.outPoint ?? duration) - 0.001 : duration
-                    return (
-                      <div
-                        key={which}
-                        className="absolute flex -translate-x-1/2 z-50"
-                        style={{ left: `${leftPct}%`, top: '100%' }}
-                      >
-                        <div className="bg-blue-950 border border-blue-400 rounded px-1 pt-0.5 pb-0 flex items-center shadow-xl">
-                          <input
-                            ref={inputRef}
-                            value={input}
-                            onChange={e => setInput(e.target.value)}
-                            onKeyDown={e => {
-                              const arrow = applyTimecodeArrow(e, input, inputRef, videoInfo?.fps, minT, maxT)
-                              if (arrow) { setInput(arrow.newValue); setClipState(s => ({ ...s, [which === 'in' ? 'inPoint' : 'outPoint']: arrow.newTime })); seek(arrow.newTime) }
-                              if (e.key === 'Enter') {
-                                const t = parseTimecode(input, videoInfo?.fps)
-                                if (t !== null) { const ct = Math.max(minT, Math.min(t, maxT)); setClipState(s => ({ ...s, [which === 'in' ? 'inPoint' : 'outPoint']: ct })); seek(ct) }
-                                setShow(false)
-                              }
-                              if (e.key === 'Escape') setShow(false)
-                            }}
-                            onBlur={() => {
-                              const t = parseTimecode(input, videoInfo?.fps)
-                              if (t !== null) { const ct = Math.max(minT, Math.min(t, maxT)); setClipState(s => ({ ...s, [which === 'in' ? 'inPoint' : 'outPoint']: ct })); seek(ct) }
-                              setShow(false)
-                            }}
-                            className="text-[11px] text-blue-200 tabular-nums bg-transparent focus:outline-none min-w-0 text-center"
-                            style={{ width: `${input.length}ch` }}
-                          />
+                        {/* In-point handle */}
+                        {seg.inPoint >= vStart - 0.001 && seg.inPoint <= vEnd + 0.001 && (
+                          <div
+                            className="absolute inset-y-0 z-20 cursor-ew-resize"
+                            style={{ left: `${lPct}%`, transform: 'translateX(-50%)', width: '12px' }}
+                            onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'in')}
+                          >
+                            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] bg-blue-400 rounded-sm" />
+                          </div>
+                        )}
+                        {/* Out-point handle */}
+                        {seg.outPoint >= vStart - 0.001 && seg.outPoint <= vEnd + 0.001 && (
+                          <div
+                            className="absolute inset-y-0 z-20 cursor-ew-resize"
+                            style={{ left: `${100 - rPct}%`, transform: 'translateX(-50%)', width: '12px' }}
+                            onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'out')}
+                          >
+                            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] bg-blue-400 rounded-sm" />
+                          </div>
+                        )}
+                        {/* Duration label + delete button — centered below the region */}
+                        <div className="absolute flex -translate-x-1/2 z-40" style={{ left: `${centerPct}%`, top: '100%' }}>
+                          <div className="bg-blue-950 border border-blue-400 rounded-b px-1 pt-0.5 pb-0 flex items-center gap-1 shadow-xl">
+                            <button
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={e => {
+                                e.stopPropagation()
+                                setLockedRegionIds(prev => {
+                                  const next = new Set(prev)
+                                  next.has(seg.id) ? next.delete(seg.id) : next.add(seg.id)
+                                  return next
+                                })
+                              }}
+                              title={lockedRegionIds.has(seg.id) ? 'Unlock duration' : 'Lock duration'}
+                              className={`flex items-center justify-center transition-colors shrink-0 ${lockedRegionIds.has(seg.id) ? 'text-orange-400 hover:text-orange-300' : 'text-blue-400/50 hover:text-blue-300'}`}
+                            >
+                              {lockedRegionIds.has(seg.id) ? <Lock size={9} /> : <Unlock size={9} />}
+                            </button>
+                            {editingDurationId === seg.id ? (
+                              <input
+                                ref={durationInputRef}
+                                value={durationInput}
+                                onChange={e => setDurationInput(e.target.value)}
+                                onKeyDown={e => {
+                                  const arrow = applyTimecodeArrow(e, durationInput, durationInputRef, videoInfo?.fps, frameTime, duration - seg.inPoint)
+                                  if (arrow) {
+                                    setDurationInput(arrow.newValue)
+                                    const newOut = Math.min(duration, seg.inPoint + arrow.newTime)
+                                    setClipState(s => ({ ...s, clipRegions: s.clipRegions.map(c => c.id === seg.id ? { ...c, outPoint: newOut } : c) }))
+                                    seek(newOut)
+                                  }
+                                  if (e.key === 'Enter' || e.key === 'Escape') {
+                                    if (e.key === 'Enter') {
+                                      const t = parseTimecode(durationInput, videoInfo?.fps)
+                                      if (t !== null && t >= frameTime) {
+                                        const newOut = Math.min(duration, seg.inPoint + t)
+                                        setClipState(s => ({ ...s, clipRegions: s.clipRegions.map(c => c.id === seg.id ? { ...c, outPoint: newOut } : c) }))
+                                        seek(newOut)
+                                      }
+                                    }
+                                    setEditingDurationId(null)
+                                  }
+                                }}
+                                onBlur={() => {
+                                  const t = parseTimecode(durationInput, videoInfo?.fps)
+                                  if (t !== null && t >= frameTime) {
+                                    const newOut = Math.min(duration, seg.inPoint + t)
+                                    setClipState(s => ({ ...s, clipRegions: s.clipRegions.map(c => c.id === seg.id ? { ...c, outPoint: newOut } : c) }))
+                                    seek(newOut)
+                                  }
+                                  setEditingDurationId(null)
+                                }}
+                                className="text-[11px] text-blue-200 tabular-nums bg-transparent focus:outline-none min-w-0 text-center"
+                                style={{ width: `${durationInput.length}ch` }}
+                              />
+                            ) : (
+                              <span
+                                className="text-[11px] text-blue-200 tabular-nums cursor-text select-none"
+                                onClick={() => { setDurationInput(durStr); setEditingDurationId(seg.id); setTimeout(() => durationInputRef.current?.select(), 0) }}
+                              >
+                                {durStr}
+                              </span>
+                            )}
+                            <button
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={e => {
+                                e.stopPropagation()
+                                setClipState(s => ({ ...s, clipRegions: s.clipRegions.filter(c => c.id !== seg.id) }))
+                                if (editingDurationId === seg.id) setEditingDurationId(null)
+                                setLockedRegionIds(prev => { const next = new Set(prev); next.delete(seg.id); return next })
+                              }}
+                              className="flex items-center justify-center text-red-500/60 hover:text-red-400 transition-colors ml-0.5"
+                              title="Delete segment"
+                            >
+                              <Trash2 size={9} />
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                        {/* Merge button — shown when this seg is exactly touching the next */}
+                        {showMerge && nextSeg.inPoint >= vStart && nextSeg.inPoint <= vEnd && (
+                          <div
+                            className="absolute z-50 -translate-x-1/2 -translate-y-1/2"
+                            style={{ left: `${Math.max(2, Math.min(98, ((seg.outPoint - vStart) / vSpan) * 100))}%`, top: '50%' }}
+                          >
+                            <button
+                              onMouseDown={e => e.stopPropagation()}
+                              onClick={e => {
+                                e.stopPropagation()
+                                setClipState(s => {
+                                  const a = s.clipRegions.find(c => c.id === seg.id)
+                                  const b = s.clipRegions.find(c => c.id === nextSeg.id)
+                                  if (!a || !b) return s
+                                  const merged: ClipRegion = { id: `seg-${uuidv4()}`, inPoint: a.inPoint, outPoint: b.outPoint }
+                                  return { ...s, clipRegions: s.clipRegions.filter(c => c.id !== seg.id && c.id !== nextSeg.id).concat(merged).sort((x, y) => x.inPoint - y.inPoint) }
+                                })
+                              }}
+                              className="flex items-center gap-0.5 px-1 py-0.5 text-[10px] text-teal-300 bg-teal-950 border border-teal-500/50 rounded hover:bg-teal-900 transition-colors shadow-lg"
+                              title="Merge adjacent segments"
+                            >
+                              <GitMerge size={9} /> Merge
+                            </button>
+                          </div>
+                        )}
+                      </React.Fragment>
                     )
                   })}
-                  {/* Clip duration — centered on the region, permanently visible when both points set */}
-                  {clipState.inPoint !== null && clipState.outPoint !== null && (() => {
-                    const clipDur = clipState.outPoint - clipState.inPoint
-                    const centerPct = Math.max(2, Math.min(98, (((clipState.inPoint + clipState.outPoint) / 2 - vStart) / vSpan) * 100))
-                    const durStr = formatViewTime(clipDur, videoInfo?.fps)
+                  {/* Handle popup — timecode input shown when a handle is clicked/dragged */}
+                  {handlePopup && (() => {
+                    const seg = clipState.clipRegions.find(r => r.id === handlePopup.regionId)
+                    if (!seg) return null
+                    const point = handlePopup.which === 'in' ? seg.inPoint : seg.outPoint
+                    const leftPct = Math.max(2, Math.min(98, ((point - vStart) / vSpan) * 100))
+                    const fps = videoInfo?.fps
+                    const frameTime = 1 / (fps ?? 30)
+                    const popupOthers = clipState.clipRegions.filter(c => c.id !== handlePopup.regionId)
+                    const popupLeftWall  = popupOthers.reduce<number>((b, c) => c.outPoint < seg.outPoint ? Math.max(b, c.outPoint) : b, -Infinity)
+                    const popupRightWall = popupOthers.reduce<number>((b, c) => c.inPoint  > seg.inPoint  ? Math.min(b, c.inPoint)  : b, Infinity)
+                    const minT = handlePopup.which === 'in'
+                      ? (popupLeftWall  === -Infinity ? 0        : popupLeftWall  + frameTime)
+                      : seg.inPoint + frameTime
+                    const maxT = handlePopup.which === 'in'
+                      ? seg.outPoint - frameTime
+                      : (popupRightWall === Infinity  ? duration : popupRightWall - frameTime)
                     return (
-                      <div
-                        className="absolute flex -translate-x-1/2 z-40"
-                        style={{ left: `${centerPct}%`, top: '100%' }}
-                      >
-                        <div className="bg-blue-950 border border-blue-400 rounded-b px-1 pt-0.5 pb-0 flex items-center shadow-xl">
-                          {editingDuration ? (
-                            <input
-                              ref={durationInputRef}
-                              value={durationInput}
-                              onChange={e => setDurationInput(e.target.value)}
-                              onKeyDown={e => {
-                                const arrow = applyTimecodeArrow(e, durationInput, durationInputRef, videoInfo?.fps, 0.001, duration - (clipState.inPoint ?? 0))
-                                if (arrow) {
-                                  setDurationInput(arrow.newValue)
-                                  const newOut = Math.min(duration, (clipState.inPoint ?? 0) + arrow.newTime)
-                                  setClipState(s => ({ ...s, outPoint: newOut }))
-                                  seek(newOut)
+                      <div className="absolute flex -translate-x-1/2 z-50" style={{ left: `${leftPct}%`, bottom: '100%', marginBottom: 3 }}>
+                        <div className="bg-blue-950 border border-blue-400 rounded px-1 pt-0.5 pb-0 flex items-center shadow-xl">
+                          <input
+                            ref={handlePopupInputRef}
+                            value={handlePopup.value}
+                            onChange={e => setHandlePopup(p => p ? { ...p, value: e.target.value } : p)}
+                            onKeyDown={e => {
+                              const arrow = applyTimecodeArrow(e, handlePopup.value, handlePopupInputRef, fps, minT, maxT)
+                              if (arrow) {
+                                setHandlePopup(p => p ? { ...p, value: arrow.newValue } : p)
+                                setClipState(s => ({ ...s, clipRegions: s.clipRegions.map(c => c.id === handlePopup.regionId ? { ...c, [handlePopup.which === 'in' ? 'inPoint' : 'outPoint']: arrow.newTime } : c) }))
+                                seek(arrow.newTime)
+                              }
+                              if (e.key === 'Enter') {
+                                const t = parseTimecode(handlePopup.value, fps)
+                                if (t !== null) {
+                                  const ct = Math.max(minT, Math.min(t, maxT))
+                                  setClipState(s => ({ ...s, clipRegions: s.clipRegions.map(c => c.id === handlePopup.regionId ? { ...c, [handlePopup.which === 'in' ? 'inPoint' : 'outPoint']: ct } : c) }))
+                                  seek(ct)
                                 }
-                                if (e.key === 'Enter' || e.key === 'Escape') {
-                                  if (e.key === 'Enter') {
-                                    const t = parseTimecode(durationInput, videoInfo?.fps)
-                                    if (t !== null && t > 0) { const newOut = Math.min(duration, (clipState.inPoint ?? 0) + t); setClipState(s => ({ ...s, outPoint: newOut })); seek(newOut) }
-                                  }
-                                  setEditingDuration(false)
-                                }
-                              }}
-                              onBlur={() => {
-                                const t = parseTimecode(durationInput, videoInfo?.fps)
-                                if (t !== null && t > 0) { const newOut = Math.min(duration, (clipState.inPoint ?? 0) + t); setClipState(s => ({ ...s, outPoint: newOut })); seek(newOut) }
-                                setEditingDuration(false)
-                              }}
-                              className="text-[11px] text-blue-200 tabular-nums bg-transparent focus:outline-none min-w-0 text-center"
-                              style={{ width: `${durationInput.length}ch` }}
-                            />
-                          ) : (
-                            <span
-                              className="text-[11px] text-blue-200 tabular-nums cursor-text select-none"
-                              onClick={() => { setDurationInput(durStr); setEditingDuration(true); setTimeout(() => durationInputRef.current?.select(), 0) }}
-                            >
-                              {durStr}
-                            </span>
-                          )}
+                                setHandlePopup(null)
+                              }
+                              if (e.key === 'Escape') setHandlePopup(null)
+                            }}
+                            onBlur={() => {
+                              const t = parseTimecode(handlePopup.value, fps)
+                              if (t !== null) {
+                                const ct = Math.max(minT, Math.min(t, maxT))
+                                setClipState(s => ({ ...s, clipRegions: s.clipRegions.map(c => c.id === handlePopup.regionId ? { ...c, [handlePopup.which === 'in' ? 'inPoint' : 'outPoint']: ct } : c) }))
+                                seek(ct)
+                              }
+                              setHandlePopup(null)
+                            }}
+                            className="text-[11px] text-blue-200 tabular-nums bg-transparent focus:outline-none min-w-0 text-center"
+                            style={{ width: `${Math.max(8, handlePopup.value.length)}ch` }}
+                          />
                         </div>
                       </div>
                     )
@@ -1765,38 +2242,9 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               )}
               </div>{/* end stripsWrapperRef */}
 
-              {/* Spacer — reserves room for the handle/duration popups below the strips */}
-              {isClipMode && <div className="h-[12px] shrink-0" />}
+              {/* Spacer — reserves room for handle/duration popups below the strips; divider separates timeline from controls */}
+              <div className={`shrink-0 ${isClipMode ? 'h-[12px]' : 'h-px bg-white/15 mt-1'}`} />
 
-              {/* Seek bar */}
-              <div className="relative">
-                {sliderHoverRatio !== null && duration > 0 && (
-                  <div
-                    className="absolute pointer-events-none z-20 tabular-nums"
-                    style={{
-                      bottom: '100%',
-                      marginBottom: 3,
-                      left: `${Math.min(Math.max(sliderHoverRatio * 100, 2), 98)}%`,
-                      transform: 'translateX(-50%)'
-                    }}
-                  >
-                    <div className="text-[10px] text-white bg-black/70 px-1 py-0.5 rounded">
-                      {formatTime(sliderHoverRatio * duration, videoInfo?.fps)}
-                    </div>
-                  </div>
-                )}
-                <Slider
-                  value={duration > 0 ? effectiveCurrentTime / duration : 0}
-                  min={0}
-                  max={1}
-                  step={0.001}
-                  onChange={(v) => seekRef.current(v * duration)}
-                  onDrag={(v) => fastSeekRef.current(v * duration)}
-                  onCommit={(v) => seekRef.current(v * duration)}
-                  onHover={setSliderHoverRatio}
-                  color="purple"
-                />
-              </div>
               {/* Timecodes + playback controls on one row */}
               <div className="flex items-center">
                 {editingTimecode ? (
@@ -1827,12 +2275,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     title="Click to enter timecode"
                     onClick={() => {
                       if (!duration) return
-                      setTimecodeInput(formatViewTime(effectiveCurrentTime, videoInfo?.fps))
+                      setTimecodeInput(formatViewTime(currentTime, videoInfo?.fps))
                       setEditingTimecode(true)
                       setTimeout(() => timecodeInputRef.current?.select(), 0)
                     }}
                   >
-                    {formatTime(effectiveCurrentTime, videoInfo?.fps)}
+                    {formatTime(currentTime, videoInfo?.fps)}
                   </span>
                 )}
                 <div className="flex-1 flex items-center justify-center gap-1">
@@ -1860,10 +2308,10 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 {/* Play / Pause */}
                 <button
                   onClick={effectiveTogglePlay}
-                  title={effectivePlaying ? 'Pause' : 'Play'}
+                  title={isPlaying ? 'Pause' : 'Play'}
                   className="p-2 mx-1 rounded-full bg-purple-600 hover:bg-purple-500 text-white transition-colors"
                 >
-                  {effectivePlaying ? <Pause size={16} /> : <Play size={16} />}
+                  {isPlaying ? <Pause size={16} /> : <Play size={16} />}
                 </button>
 
                 {/* Next frame */}
@@ -1905,7 +2353,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         setIsClipMode(true)
                         return
                       }
-                      if (clipState.inPoint !== null && clipState.outPoint !== null) {
+                      if (clipState.clipRegions.length > 0) {
                         setShowExitClipConfirm(true)
                       } else {
                         exitClipMode()
@@ -1933,7 +2381,16 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       </span>
                     )}
                     <button
-                      onClick={closeVideo}
+                      onClick={() => {
+                        const hasClipWork = isClipMode && (
+                          clipState.clipRegions.length > 0 || clipState.bleepRegions.length > 0
+                        )
+                        if (hasClipWork) {
+                          setShowCloseVideoConfirm(true)
+                        } else {
+                          closeVideo()
+                        }
+                      }}
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border ml-1 p-0.5 text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors shrink-0"
                       title="Close video"
                     >
@@ -2245,6 +2702,46 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
           You've set in and out points for this clip. Exiting clip mode will discard them.
         </p>
       </Modal>
+
+      <Modal
+        isOpen={showCloseVideoConfirm}
+        onClose={() => setShowCloseVideoConfirm(false)}
+        title="Close video?"
+        width="sm"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setShowCloseVideoConfirm(false)}>
+              Keep editing
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => { setShowCloseVideoConfirm(false); closeVideo() }}
+            >
+              Discard &amp; close
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-300 leading-relaxed">
+          You have unsaved clip work — {[
+            clipState.clipRegions.length > 0 && `${clipState.clipRegions.length} clip segment${clipState.clipRegions.length !== 1 ? 's' : ''}`,
+            clipState.bleepRegions.length > 0 && `${clipState.bleepRegions.length} bleep marker${clipState.bleepRegions.length !== 1 ? 's' : ''}`,
+          ].filter(Boolean).join(' and ')}. Closing the video will discard them.
+        </p>
+      </Modal>
+
+      {showExportDialog && state.filePath && (
+        <ExportClipDialog
+          defaultPresetId={config.clipPresetId ?? ''}
+          filePath={state.filePath}
+          hasBleepsOutsideRegions={clipState.bleepRegions.some(b =>
+            !clipState.clipRegions.some(r => b.start >= r.inPoint && b.end <= r.outPoint)
+          )}
+          onConfirm={runExport}
+          onClose={() => setShowExportDialog(false)}
+        />
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import {
   CheckCircle2, AlertCircle, Loader2, X, FolderSearch
 } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { Checkbox } from '../ui/Checkbox'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -293,18 +294,14 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
 
         {/* Delete source files option + combine button */}
         <div className="flex items-center justify-between">
-          <label className="flex items-center gap-2 cursor-pointer select-none group">
-            <input
-              type="checkbox"
-              checked={deleteAfter}
-              onChange={e => setDeleteAfter(e.target.checked)}
-              disabled={running}
-              className="w-3.5 h-3.5 accent-purple-500 cursor-pointer disabled:opacity-50"
-            />
-            <span className={`text-xs ${deleteAfter ? 'text-red-400' : 'text-gray-500'} group-hover:text-gray-300 transition-colors`}>
-              Delete source files after combining
-            </span>
-          </label>
+          <Checkbox
+            checked={deleteAfter}
+            onChange={setDeleteAfter}
+            disabled={running}
+            color="red"
+            size="sm"
+            label={<span className={deleteAfter ? 'text-red-400' : 'text-gray-500'}>Delete source files after combining</span>}
+          />
           <Button
             variant="primary"
             icon={running ? <Loader2 size={14} className="animate-spin" /> : <Combine size={14} />}

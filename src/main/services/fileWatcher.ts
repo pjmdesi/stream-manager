@@ -68,12 +68,14 @@ class FileWatcher {
   private rules: WatchRule[] = []
   private callbacks: EventCallback[] = []
   private streamsDir: string = ''
+  private streamMode: string = ''
   private retryTimers = new Map<string, ReturnType<typeof setInterval>>()
 
-  start(rules: WatchRule[], streamsDir: string = ''): void {
+  start(rules: WatchRule[], streamsDir: string = '', streamMode: string = ''): void {
     this.stop()
     this.rules = rules.filter(r => r.enabled)
     this.streamsDir = streamsDir
+    this.streamMode = streamMode
 
     if (this.rules.length === 0) return
 
@@ -210,6 +212,26 @@ class FileWatcher {
     return folderPath
   }
 
+  /**
+   * When stream mode is folder-per-stream and the rule's destination points at the
+   * streams root directory, attempt to route the file into the dated subfolder instead.
+   * Falls back to the original destination if no date is found or no subfolder exists.
+   */
+  private resolveFolderPerStreamDestination(destination: string, filePath: string): string {
+    if (this.streamMode !== 'folder-per-stream') return destination
+    if (!this.streamsDir) return destination
+    // Only intercept when destination is exactly the streams root
+    if (path.resolve(destination) !== path.resolve(this.streamsDir)) return destination
+
+    const fileName = path.basename(filePath)
+    const match = fileName.match(/(\d{4}-\d{2}-\d{2})/)
+    if (!match) return destination
+    const date = match[1]
+    const subFolder = path.join(this.streamsDir, date)
+    if (!fs.existsSync(subFolder)) return destination
+    return subFolder
+  }
+
   private async applyRule(
     rule: WatchRule,
     filePath: string,
@@ -225,9 +247,13 @@ class FileWatcher {
     }
 
     if (rule.action === 'move' || rule.action === 'copy') {
-      const destination = rule.destinationMode === 'auto'
+      const rawDestination = rule.destinationMode === 'auto'
         ? this.resolveAutoDestination(rule, filePath)
         : (rule.destination ?? null)
+
+      const destination = rawDestination
+        ? this.resolveFolderPerStreamDestination(rawDestination, filePath)
+        : rawDestination
 
       if (!destination) throw new Error(
         rule.destinationMode === 'auto'

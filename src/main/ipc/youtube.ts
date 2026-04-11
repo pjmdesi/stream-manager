@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { startOAuthFlow, exchangeCode, clearTokens, isConnected, REDIRECT_URI } from '../services/youtubeAuth'
+import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
 import { getLiveBroadcasts, updateBroadcastSnippet, updateVideoTags } from '../services/youtubeApi'
 import { getStore } from './store'
 
@@ -13,7 +13,9 @@ function getCreds() {
 
 export function registerYouTubeIPC(): void {
   ipcMain.handle('youtube:getStatus', () => {
-    return { connected: isConnected(), redirectUri: REDIRECT_URI }
+    const connected = isConnected()
+    console.log('[YT main] getStatus — connected:', connected)
+    return { connected, redirectUri: REDIRECT_URI }
   })
 
   ipcMain.handle('youtube:connect', async () => {
@@ -27,9 +29,28 @@ export function registerYouTubeIPC(): void {
     clearTokens()
   })
 
+  ipcMain.handle('youtube:validateToken', async () => {
+    if (!isConnected()) return { valid: false, error: 'Not connected' }
+    const { clientId, clientSecret } = getCreds()
+    try {
+      await getValidToken(clientId, clientSecret)
+      return { valid: true }
+    } catch (e: any) {
+      return { valid: false, error: e.message as string }
+    }
+  })
+
   ipcMain.handle('youtube:getBroadcasts', async () => {
     const { clientId, clientSecret } = getCreds()
-    return getLiveBroadcasts(clientId, clientSecret)
+    console.log('[YT main] getBroadcasts — clientId set:', !!clientId, '| clientSecret set:', !!clientSecret)
+    try {
+      const result = await getLiveBroadcasts(clientId, clientSecret)
+      console.log('[YT main] getBroadcasts — returned', result.length, 'broadcasts')
+      return result
+    } catch (e: any) {
+      console.error('[YT main] getBroadcasts — error:', e.message)
+      throw e
+    }
   })
 
   ipcMain.handle('youtube:updateBroadcast', async (
