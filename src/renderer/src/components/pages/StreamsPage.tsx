@@ -601,7 +601,15 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
 
         {/* Archived — only in edit mode */}
         {mode === 'edit' && (
-          <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
+          <div className="flex flex-col gap-1.5">
+            <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
+            {archived && !initialMeta?.archived && (
+              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-600/30 text-xs text-amber-300/90">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5 text-amber-400" />
+                <span>This only marks the stream as archived. To compress and save storage space, use the <strong>Archive</strong> button on the streams page instead.</span>
+              </div>
+            )}
+          </div>
         )}
 
         {/* ── YouTube ─────────────────────────────────────────────────────── */}

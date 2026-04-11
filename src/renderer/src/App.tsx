@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, Component } from 'react'
 import { version as appVersion } from '../../../package.json'
 import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle } from 'lucide-react'
 import { Button } from './components/ui/Button'
@@ -17,6 +17,32 @@ import { useConversionJobs } from './context/ConversionContext'
 import { useWatcher } from './context/WatcherContext'
 import { useStore } from './hooks/useStore'
 import { OnboardingModal } from './components/OnboardingModal'
+
+class PageErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { error: null }
+  }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
+          <AlertTriangle size={32} className="text-red-400" />
+          <p className="text-sm text-gray-300 font-medium">Something went wrong on this page.</p>
+          <p className="text-xs text-gray-500 font-mono break-all max-w-lg">{this.state.error.message}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="px-3 py-1.5 rounded text-xs bg-white/10 hover:bg-white/15 text-gray-300 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 interface PendingFile {
   path: string
@@ -247,6 +273,7 @@ export default function App() {
 
         {/* Page content */}
         <main className="flex-1 overflow-hidden">
+        <PageErrorBoundary>
           {/* Persistent pages — must live outside ErrorBoundary so key={page} doesn't remount them */}
           <div className={`h-full ${page === 'player' ? '' : 'hidden'}`}>
             <PlayerPage initialFile={pendingPlayer} onNavigateToConverter={() => setPage('converter')} />
@@ -260,6 +287,7 @@ export default function App() {
           {page === 'combine'   && <CombinePage initialFiles={pendingCombine} />}
           {page === 'youtube'   && <YouTubePage />}
           {page === 'settings'  && <SettingsPage />}
+        </PageErrorBoundary>
         </main>
       </div>
       <OnboardingModal isOpen={onboardingOpen} onComplete={() => { setOnboardingOpen(false); refreshConfig(); refreshRules() }} />
@@ -279,6 +307,13 @@ export default function App() {
             className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
           >
             github.com/pjmdesi/stream-manager
+          </a>
+          <a
+            href="https://buymeacoffee.com/pjm"
+            onClick={e => { e.preventDefault(); window.api.openUrl('https://buymeacoffee.com/pjm') }}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-yellow-400/10 border border-yellow-400/30 hover:bg-yellow-400/20 transition-colors text-xs text-yellow-300 font-medium"
+          >
+            ☕ Buy me a coffee
           </a>
         </div>
       </Modal>

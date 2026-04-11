@@ -416,6 +416,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [showExitClipConfirm, setShowExitClipConfirm] = useState(false)
   // Confirm close video while clip work is in progress
   const [showCloseVideoConfirm, setShowCloseVideoConfirm] = useState(false)
+  // Right panel collapsed state
+  const [panelCollapsed, setPanelCollapsed] = useState(false)
 
   // Multi-track warning modal before entering clip mode
   const [clipModeModal, setClipModeModal] = useState<'warn' | 'merge' | null>(null)
@@ -427,6 +429,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [lockedRegionIds, setLockedRegionIds] = useState<Set<string>>(new Set())
   const lockedRegionIdsRef = useRef<Set<string>>(new Set())
   useEffect(() => { lockedRegionIdsRef.current = lockedRegionIds }, [lockedRegionIds])
+  const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null)
+  const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null)
   const isPlayingRef = useRef(false)
 
   // Bleep markers
@@ -465,22 +469,36 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     setAddSegmentError(null)
   }, [])
 
-  // Shared zoom handler — uses refs to avoid stale closures in non-passive listeners
+  // Shared zoom/pan handler — uses refs to avoid stale closures in non-passive listeners.
+  // Horizontal scroll (|deltaX| dominant) pans the timeline; vertical scroll zooms.
   const handleZoom = useCallback((e: WheelEvent, rect: DOMRect) => {
-    if (!isClipModeRef.current || durationRef.current <= 0) return
+    if (durationRef.current <= 0) return
     e.preventDefault()
     const { viewStart, viewEnd } = viewportRef.current
     const span = viewEnd - viewStart
-    const cursorRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-    const cursorTime = viewStart + cursorRatio * span
-    const factor = e.deltaY < 0 ? 0.7 : 1 / 0.7   // scroll up = zoom in
     const dur = durationRef.current
-    const newSpan = Math.max(dur / 500, Math.min(dur, span * factor))
-    let newStart = cursorTime - cursorRatio * newSpan
-    let newEnd = newStart + newSpan
-    if (newStart < 0) { newStart = 0; newEnd = Math.min(dur, newSpan) }
-    if (newEnd > dur) { newEnd = dur; newStart = Math.max(0, dur - newSpan) }
-    setViewport({ viewStart: newStart, viewEnd: newEnd })
+    const isPan = e.deltaX !== 0 || e.shiftKey
+    if (isPan) {
+      // Pan: horizontal scroll or Shift+scroll; deltaX takes priority over shifted deltaY
+      const rawDelta = e.deltaX !== 0 ? e.deltaX : e.deltaY
+      const dtSec = (rawDelta / rect.width) * span
+      let ns = viewStart + dtSec
+      let ne = viewEnd + dtSec
+      if (ns < 0) { ns = 0; ne = Math.min(dur, span) }
+      if (ne > dur) { ne = dur; ns = Math.max(0, dur - span) }
+      setViewport({ viewStart: ns, viewEnd: ne })
+    } else {
+      // Zoom: vertical scroll, centred on cursor position
+      const cursorRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+      const cursorTime = viewStart + cursorRatio * span
+      const factor = e.deltaY < 0 ? 0.7 : 1 / 0.7
+      const newSpan = Math.max(dur / 500, Math.min(dur, span * factor))
+      let newStart = cursorTime - cursorRatio * newSpan
+      let newEnd = newStart + newSpan
+      if (newStart < 0) { newStart = 0; newEnd = Math.min(dur, newSpan) }
+      if (newEnd > dur) { newEnd = dur; newStart = Math.max(0, dur - newSpan) }
+      setViewport({ viewStart: newStart, viewEnd: newEnd })
+    }
   }, [])
 
   useEffect(() => {
@@ -696,6 +714,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     if (e.button !== 0) return // capture-phase handler takes middle-click; ignore right-click
     e.preventDefault()
     e.stopPropagation()
+    setSelectedRegionId(regionId)
     const wrapperEl = stripsWrapperRef.current
     if (!wrapperEl) return
     const rect = wrapperEl.getBoundingClientRect()
@@ -714,6 +733,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       const dur = durationRef.current
       const frameTime = 1 / (videoInfoRef.current?.fps ?? 30)
       const dtSec = ((me.clientX - startX) / rect.width) * span
+      const snapThresholdSec = (span / rect.width) * 2 // 2px snap zone
       setClipState(s => {
         const r = s.clipRegions.find(c => c.id === regionId)
         if (!r) return s
@@ -728,6 +748,17 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         if (newOut > hi)         { newOut = hi;         newIn  = hi - segDur }
         if (newIn < 0)           { newIn = 0;           newOut = segDur }
         if (newOut > dur)        { newOut = dur;         newIn  = dur - segDur }
+        // Snap outPoint → next segment's inPoint, or inPoint → prev segment's outPoint
+        for (const c of others) {
+          if (Math.abs(newOut - c.inPoint) <= snapThresholdSec) {
+            newOut = c.inPoint; newIn = newOut - segDur
+            break
+          }
+          if (Math.abs(newIn - c.outPoint) <= snapThresholdSec) {
+            newIn = c.outPoint; newOut = newIn + segDur
+            break
+          }
+        }
         // If clamped segment overlaps a neighbour (can happen with tight gaps), prevent the move
         const wouldOverlap = others.some(c => newIn < c.outPoint - frameTime && newOut > c.inPoint + frameTime)
         if (wouldOverlap) return s
@@ -735,18 +766,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         return { ...s, clipRegions: updated.sort((a, b) => a.inPoint - b.inPoint) }
       })
     }
-    const onUp = (ue: MouseEvent) => {
-      if (!hasMoved) {
-        const ratio = Math.max(0, Math.min(1, (ue.clientX - rect.left) / rect.width))
-        const { viewStart, viewEnd } = viewportRef.current
-        seekRef.current(viewStart + ratio * (viewEnd - viewStart))
-      }
+    const onUp = () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, []) // all mutable values accessed via refs
+  }, [setSelectedRegionId]) // setSelectedRegionId is stable
 
   // Scrub by dragging the playhead
   const startPlayheadDrag = useCallback((e: React.MouseEvent) => {
@@ -1006,8 +1032,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
 
   // Viewport-derived values — when not in clip mode, the full video is always visible
-  const vStart = isClipMode && duration > 0 ? viewport.viewStart : 0
-  const vEnd   = isClipMode && duration > 0 ? viewport.viewEnd   : duration
+  const vStart = duration > 0 ? viewport.viewStart : 0
+  const vEnd   = duration > 0 ? viewport.viewEnd   : duration
   const vSpan  = Math.max(0.001, vEnd - vStart)
   const zoomLevel = duration > 0 ? duration / vSpan : 1
   const isZoomed  = isClipMode && zoomLevel > 1.01
@@ -1236,14 +1262,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       sendEncodings: [{
         maxBitrate: targetBps,
         degradationPreference: 'maintain-resolution',
-      }],
+      } as RTCRtpEncodingParameters],
     })
 
     // H264 is rejected by setCodecPreferences in this Electron build regardless
     // of how it's listed — exclude it and prefer AV1 → VP9.
     // Keep RTX/RED/FEC entries in the list (removing them causes validation errors).
     const allCodecs = RTCRtpSender.getCapabilities('video')?.codecs ?? []
-    const codecPriority = (c: RTCRtpCodecCapability) => {
+    const codecPriority = (c: { mimeType: string }) => {
       if (/av1/i.test(c.mimeType)) return 0
       if (/vp9/i.test(c.mimeType)) return 1
       return 2  // VP8, RTX, RED, ULPFEC, etc.
@@ -1278,7 +1304,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         const params = sender.getParameters()
         if (params.encodings.length === 0) params.encodings = [{}]
         params.encodings[0].maxBitrate = targetBps
-        params.encodings[0].degradationPreference = 'maintain-resolution'
+        ;(params.encodings[0] as any).degradationPreference = 'maintain-resolution'
         sender.setParameters(params).catch(() => {})
       }
       setIsPopupOpen(true)
@@ -1417,44 +1443,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 </div>
               )}
 
-              {/* Extracting overlay */}
-              {isExtracting && (
-                <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-4">
-                  <div className="text-purple-300 font-medium text-sm">Merging audio tracks…</div>
-                  <div className="flex flex-col gap-2.5">
-                    {videoInfo?.audioTracks.map((t, i) => {
-                      const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
-                      const selected = selectedIndices.has(i)
-                      return (
-                        <div key={i} className="flex items-center gap-3">
-                          <span className={`text-xs text-white whitespace-nowrap ${selected ? '' : 'line-through opacity-50'}`}>
-                            {label} <span className="text-white/50">(Track {i + 1})</span>
-                          </span>
-                          {selected ? (
-                            <>
-                              <div className="w-32 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all ${(extractProgress[i] ?? 0) >= 100 ? 'bg-green-500' : 'bg-purple-500'}`}
-                                  style={{ width: `${extractProgress[i] ?? 0}%` }}
-                                />
-                              </div>
-                              <span className="text-xs text-white/50 w-8 text-right tabular-nums">{extractProgress[i] ?? 0}%</span>
-                            </>
-                          ) : (
-                            <div className="w-32 h-1.5 bg-white/5 rounded-full" />
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                  <button
-                    onClick={cancelExtraction}
-                    className="mt-1 text-xs text-white/50 hover:text-white transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
             </FileDropZone>
 
             {/* Playback controls */}
@@ -1472,32 +1460,34 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     {(() => {
                       const fps = videoInfo?.fps ?? 30
                       const frameTime = 1 / fps
-                      // Check if playhead is inside a clip region
-                      const insideSeg = clipState.clipRegions.find(r => currentTime >= r.inPoint && currentTime <= r.outPoint)
+                      // Use frozen playhead position during handle drag so the button
+                      // doesn't flicker as the handle sweeps through the region
+                      const playheadTime = handleDragDisplayTime ?? currentTime
+                      const insideSeg = clipState.clipRegions.find(r => playheadTime >= r.inPoint && playheadTime <= r.outPoint)
                       if (insideSeg) {
-                        const canSplit = currentTime > insideSeg.inPoint + frameTime && currentTime < insideSeg.outPoint - frameTime
+                        const canSplit = playheadTime > insideSeg.inPoint + frameTime && playheadTime < insideSeg.outPoint - frameTime
                         return (
-                          <div className="relative">
+                          <div className="relative group">
                             <button
                               title="Split segment at playhead"
                               onClick={splitSegment}
                               disabled={!canSplit}
                               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-purple-400 border border-purple-500/30 hover:bg-purple-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             >
-                              <Scissors size={11} /> Split
+                              <Scissors size={11} /> Split Segment
                             </button>
                             {!canSplit && (
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50">
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity">
                                 Too close to segment edge
                               </div>
                             )}
                           </div>
                         )
                       }
-                      const { lo, hi } = getSegmentFreeInterval(clipState.clipRegions, currentTime, duration)
+                      const { lo, hi } = getSegmentFreeInterval(clipState.clipRegions, playheadTime, duration)
                       const noRoom = (hi - lo) < 2 * frameTime
                       return (
-                        <div className="relative">
+                        <div className="relative group">
                           <button
                             title="Add a clip segment at the playhead"
                             onClick={addSegment}
@@ -1507,7 +1497,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             <PlusSquare size={11} /> Add Segment
                           </button>
                           {(noRoom || addSegmentError) && (
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50">
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity">
                               {addSegmentError ?? 'No room at playhead'}
                             </div>
                           )}
@@ -1669,103 +1659,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 </div>
               )}
 
-              {/* Viewport scrollbar — directly under clip toolbar */}
-              {isClipMode && duration > 0 && (
-                <div
-                  ref={scrollbarRef}
-                  className="relative h-3 w-full select-none"
-                >
-                  {/* Track */}
-                  <div className="absolute inset-y-1 inset-x-0 bg-white/5 rounded-full" />
-                  {/* Playhead position needle — sits on the track, behind the thumb */}
-                  <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-purple-400/70 pointer-events-none z-[1] -translate-x-1/2"
-                    style={{ left: `${((handleDragDisplayTime ?? currentTime) / duration) * 100}%` }}
-                  />
-                  {/* Thumb — drag to pan */}
-                  <div
-                    className="absolute inset-y-0 rounded-full bg-blue-500/30 hover:bg-blue-500/40 cursor-grab active:cursor-grabbing flex items-center"
-                    style={{
-                      left: `${(vStart / duration) * 100}%`,
-                      width: `${Math.max((vSpan / duration) * 100, 2)}%`,
-                    }}
-                    onMouseDown={e => {
-                      if (e.button !== 0) return
-                      e.preventDefault()
-                      ;(document.activeElement as HTMLElement)?.blur()
-                      const rect = scrollbarRef.current!.getBoundingClientRect()
-                      const startX = e.clientX
-                      const { viewStart: svs, viewEnd: sve } = viewportRef.current
-                      const span = sve - svs
-                      const onMove = (me: MouseEvent) => {
-                        const dur = durationRef.current
-                        const dtSec = ((me.clientX - startX) / rect.width) * dur
-                        let ns = svs + dtSec
-                        let ne = sve + dtSec
-                        if (ns < 0) { ns = 0; ne = span }
-                        if (ne > dur) { ne = dur; ns = dur - span }
-                        setViewport({ viewStart: ns, viewEnd: ne })
-                      }
-                      const onUp = () => {
-                        window.removeEventListener('mousemove', onMove)
-                        window.removeEventListener('mouseup', onUp)
-                      }
-                      window.addEventListener('mousemove', onMove)
-                      window.addEventListener('mouseup', onUp)
-                    }}
-                  >
-                    {/* Left resize handle */}
-                    <div
-                      className="absolute left-0 top-0 bottom-0 w-2.5 rounded-l-full cursor-ew-resize bg-blue-400/60 hover:bg-blue-400/90 transition-colors z-10"
-                      onMouseDown={e => {
-                        e.preventDefault(); e.stopPropagation()
-                        ;(document.activeElement as HTMLElement)?.blur()
-                        const rect = scrollbarRef.current!.getBoundingClientRect()
-                        const startX = e.clientX
-                        const startVStart = viewportRef.current.viewStart
-                        const startVEnd = viewportRef.current.viewEnd
-                        const onMove = (me: MouseEvent) => {
-                          const dur = durationRef.current
-                          const dtSec = ((me.clientX - startX) / rect.width) * dur
-                          const newVStart = Math.max(0, Math.min(startVStart + dtSec, startVEnd - dur / 500))
-                          setViewport({ viewStart: newVStart, viewEnd: startVEnd })
-                        }
-                        const onUp = () => {
-                          window.removeEventListener('mousemove', onMove)
-                          window.removeEventListener('mouseup', onUp)
-                        }
-                        window.addEventListener('mousemove', onMove)
-                        window.addEventListener('mouseup', onUp)
-                      }}
-                    />
-                    {/* Right resize handle */}
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-2.5 rounded-r-full cursor-ew-resize bg-blue-400/60 hover:bg-blue-400/90 transition-colors z-10"
-                      onMouseDown={e => {
-                        e.preventDefault(); e.stopPropagation()
-                        ;(document.activeElement as HTMLElement)?.blur()
-                        const rect = scrollbarRef.current!.getBoundingClientRect()
-                        const startX = e.clientX
-                        const startVStart = viewportRef.current.viewStart
-                        const startVEnd = viewportRef.current.viewEnd
-                        const onMove = (me: MouseEvent) => {
-                          const dur = durationRef.current
-                          const dtSec = ((me.clientX - startX) / rect.width) * dur
-                          const newVEnd = Math.min(dur, Math.max(startVEnd + dtSec, startVStart + dur / 500))
-                          setViewport({ viewStart: startVStart, viewEnd: newVEnd })
-                        }
-                        const onUp = () => {
-                          window.removeEventListener('mousemove', onMove)
-                          window.removeEventListener('mouseup', onUp)
-                        }
-                        window.addEventListener('mousemove', onMove)
-                        window.addEventListener('mouseup', onUp)
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
               {/* Thumbnail strip + waveform strip — wrapped so handles can span both */}
               <div ref={stripsWrapperRef} className="relative">
 
@@ -1853,6 +1746,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 ref={waveformStripRef}
                 className="relative h-10 w-full cursor-pointer"
                 onClick={e => {
+                  setSelectedRegionId(null)
                   const rect = e.currentTarget.getBoundingClientRect()
                   const ratio = (e.clientX - rect.left) / rect.width
                   seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
@@ -1972,12 +1866,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     const centerPct = Math.max(2, Math.min(98, (((seg.inPoint + seg.outPoint) / 2 - vStart) / vSpan) * 100))
                     const durStr = formatViewTime(segDur, videoInfo?.fps)
 
-                    // Merge button: show when this segment's outPoint is within 1 frame of the next segment's inPoint.
-                    // Use positional lookup (not array index) since the array is always sorted by inPoint.
+                    // Merge button: show when this segment's outPoint is within ~10px of the next segment's inPoint.
+                    // Use a pixel-based threshold so it works at any zoom level.
                     const fps = videoInfo?.fps ?? 30
                     const frameTime = 1 / fps
+                    const stripWidth = stripsWrapperRef.current?.offsetWidth ?? 1000
+                    const mergeThresholdSec = Math.max(frameTime, (vSpan / stripWidth) * 2)
                     const nextSeg = clipState.clipRegions.find(r => r.inPoint > seg.outPoint - frameTime)
-                    const showMerge = nextSeg && nextSeg.id !== seg.id && (nextSeg.inPoint - seg.outPoint) <= frameTime * 1.5
+                    const showMerge = nextSeg && nextSeg.id !== seg.id && (nextSeg.inPoint - seg.outPoint) <= mergeThresholdSec
 
                     return (
                       <React.Fragment key={seg.id}>
@@ -1986,10 +1882,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           className="absolute inset-y-0 z-[2] cursor-grab active:cursor-grabbing"
                           style={{ left: `${lPct}%`, right: `${rPct}%` }}
                           onMouseDown={e => startSegmentDrag(e, seg.id)}
+                          onMouseEnter={() => setHoveredRegionId(seg.id)}
+                          onMouseLeave={() => setHoveredRegionId(null)}
                         />
-                        {/* Visual border */}
+                        {/* Visual border — brightens on hover, solid when selected */}
                         <div
-                          className="absolute inset-y-0 border-y border-blue-400/50 pointer-events-none z-[9]"
+                          className={`absolute inset-y-0 border-y pointer-events-none z-[9] transition-colors ${selectedRegionId === seg.id ? 'border-blue-300 bg-blue-400/10' : hoveredRegionId === seg.id ? 'border-blue-400/80 bg-blue-400/5' : 'border-blue-400/50'}`}
                           style={{ left: `${lPct}%`, right: `${rPct}%` }}
                         />
                         {/* In-point handle */}
@@ -1999,7 +1897,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             style={{ left: `${lPct}%`, transform: 'translateX(-50%)', width: '12px' }}
                             onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'in')}
                           >
-                            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] bg-blue-400 rounded-sm" />
+                            <div className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] rounded-sm transition-colors ${selectedRegionId === seg.id ? 'bg-blue-200' : 'bg-blue-400'}`} />
                           </div>
                         )}
                         {/* Out-point handle */}
@@ -2009,11 +1907,19 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             style={{ left: `${100 - rPct}%`, transform: 'translateX(-50%)', width: '12px' }}
                             onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'out')}
                           >
-                            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] bg-blue-400 rounded-sm" />
+                            <div className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] rounded-sm transition-colors ${selectedRegionId === seg.id ? 'bg-blue-200' : 'bg-blue-400'}`} />
+                          </div>
+                        )}
+                        {/* Timecode label — shown above region when selected */}
+                        {selectedRegionId === seg.id && (
+                          <div className="absolute flex -translate-x-1/2 z-50 pointer-events-none" style={{ left: `${centerPct}%`, bottom: '100%', marginBottom: '4px' }}>
+                            <div className="bg-blue-950 border border-blue-300 rounded px-1.5 py-0.5 text-[11px] text-blue-100 tabular-nums whitespace-nowrap shadow-xl">
+                              {formatTime(seg.inPoint, videoInfo?.fps)} → {formatTime(seg.outPoint, videoInfo?.fps)}
+                            </div>
                           </div>
                         )}
                         {/* Duration label + delete button — centered below the region */}
-                        <div className="absolute flex -translate-x-1/2 z-40" style={{ left: `${centerPct}%`, top: '100%' }}>
+                        <div className="absolute flex -translate-x-1/2" style={{ left: `${centerPct}%`, top: '100%', zIndex: selectedRegionId === seg.id ? 60 : 40 }}>
                           <div className="bg-blue-950 border border-blue-400 rounded-b px-1 pt-0.5 pb-0 flex items-center gap-1 shadow-xl">
                             <button
                               onMouseDown={e => e.preventDefault()}
@@ -2242,8 +2148,116 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               )}
               </div>{/* end stripsWrapperRef */}
 
+              {/* Viewport scrollbar — below waveform, above playback controls */}
+              {duration > 0 && (
+                <div
+                  ref={scrollbarRef}
+                  className="relative h-3 w-full select-none mt-1"
+                >
+                  {/* Track */}
+                  <div className="absolute inset-y-1 inset-x-0 bg-white/5 rounded-full" />
+                  {/* Clip region bars — blue to match clipping feature theme */}
+                  {clipState.clipRegions.map(r => (
+                    <div
+                      key={r.id}
+                      className="absolute inset-y-1 bg-blue-500/40 pointer-events-none z-[1]"
+                      style={{
+                        left: `${(r.inPoint / duration) * 100}%`,
+                        width: `${((r.outPoint - r.inPoint) / duration) * 100}%`,
+                      }}
+                    />
+                  ))}
+                  {/* Playhead position needle */}
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-purple-400/70 pointer-events-none z-[2] -translate-x-1/2"
+                    style={{ left: `${((handleDragDisplayTime ?? currentTime) / duration) * 100}%` }}
+                  />
+                  {/* Thumb — purple to distinguish from clip markers */}
+                  <div
+                    className="absolute inset-y-0 rounded-full bg-purple-500/30 hover:bg-purple-500/40 cursor-grab active:cursor-grabbing flex items-center"
+                    style={{
+                      left: `${(vStart / duration) * 100}%`,
+                      width: `${Math.max((vSpan / duration) * 100, 2)}%`,
+                    }}
+                    onMouseDown={e => {
+                      if (e.button !== 0) return
+                      e.preventDefault()
+                      ;(document.activeElement as HTMLElement)?.blur()
+                      const rect = scrollbarRef.current!.getBoundingClientRect()
+                      const startX = e.clientX
+                      const { viewStart: svs, viewEnd: sve } = viewportRef.current
+                      const span = sve - svs
+                      const onMove = (me: MouseEvent) => {
+                        const dur = durationRef.current
+                        const dtSec = ((me.clientX - startX) / rect.width) * dur
+                        let ns = svs + dtSec
+                        let ne = sve + dtSec
+                        if (ns < 0) { ns = 0; ne = span }
+                        if (ne > dur) { ne = dur; ns = dur - span }
+                        setViewport({ viewStart: ns, viewEnd: ne })
+                      }
+                      const onUp = () => {
+                        window.removeEventListener('mousemove', onMove)
+                        window.removeEventListener('mouseup', onUp)
+                      }
+                      window.addEventListener('mousemove', onMove)
+                      window.addEventListener('mouseup', onUp)
+                    }}
+                  >
+                    {/* Left resize handle */}
+                    <div
+                      className="absolute left-0 top-0 bottom-0 w-2.5 rounded-l-full cursor-ew-resize bg-purple-400/60 hover:bg-purple-400/90 transition-colors z-10"
+                      onMouseDown={e => {
+                        e.preventDefault(); e.stopPropagation()
+                        ;(document.activeElement as HTMLElement)?.blur()
+                        const rect = scrollbarRef.current!.getBoundingClientRect()
+                        const startX = e.clientX
+                        const startVStart = viewportRef.current.viewStart
+                        const startVEnd = viewportRef.current.viewEnd
+                        const onMove = (me: MouseEvent) => {
+                          const dur = durationRef.current
+                          const dtSec = ((me.clientX - startX) / rect.width) * dur
+                          const newVStart = Math.max(0, Math.min(startVStart + dtSec, startVEnd - dur / 500))
+                          setViewport({ viewStart: newVStart, viewEnd: startVEnd })
+                        }
+                        const onUp = () => {
+                          window.removeEventListener('mousemove', onMove)
+                          window.removeEventListener('mouseup', onUp)
+                        }
+                        window.addEventListener('mousemove', onMove)
+                        window.addEventListener('mouseup', onUp)
+                      }}
+                    />
+                    {/* Right resize handle */}
+                    <div
+                      className="absolute right-0 top-0 bottom-0 w-2.5 rounded-r-full cursor-ew-resize bg-purple-400/60 hover:bg-purple-400/90 transition-colors z-10"
+                      onMouseDown={e => {
+                        e.preventDefault(); e.stopPropagation()
+                        ;(document.activeElement as HTMLElement)?.blur()
+                        const rect = scrollbarRef.current!.getBoundingClientRect()
+                        const startX = e.clientX
+                        const startVStart = viewportRef.current.viewStart
+                        const startVEnd = viewportRef.current.viewEnd
+                        const onMove = (me: MouseEvent) => {
+                          const dur = durationRef.current
+                          const dtSec = ((me.clientX - startX) / rect.width) * dur
+                          const newVEnd = Math.min(dur, Math.max(startVEnd + dtSec, startVStart + dur / 500))
+                          setViewport({ viewStart: startVStart, viewEnd: newVEnd })
+                        }
+                        const onUp = () => {
+                          window.removeEventListener('mousemove', onMove)
+                          window.removeEventListener('mouseup', onUp)
+                        }
+                        window.addEventListener('mousemove', onMove)
+                        window.addEventListener('mouseup', onUp)
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Spacer — reserves room for handle/duration popups below the strips; divider separates timeline from controls */}
-              <div className={`shrink-0 ${isClipMode ? 'h-[12px]' : 'h-px bg-white/15 mt-1'}`} />
+              <div className={`shrink-0 ${duration > 0 ? 'h-[8px]' : 'h-px bg-white/15 mt-1'}`} />
 
               {/* Timecodes + playback controls on one row */}
               <div className="flex items-center">
@@ -2376,9 +2390,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     {videoInfo.fps && <span className="shrink-0">· {videoInfo.fps.toFixed(2)} fps</span>}
                     <span className="shrink-0">· {videoInfo.videoCodec}</span>
                     {state.filePath && (
-                      <span className="truncate" title={state.filePath}>
+                      <button
+                        className="truncate hover:text-gray-300 transition-colors cursor-pointer"
+                        title={`Show in Explorer: ${state.filePath}`}
+                        onClick={() => window.api.openInExplorer(state.filePath!)}
+                      >
                         · {state.filePath.split(/[\\/]/).pop()}
-                      </span>
+                      </button>
                     )}
                     <button
                       onClick={() => {
@@ -2404,7 +2422,16 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
           </div>
 
           {/* Audio tracks panel */}
-          <div className="w-56 bg-navy-800 border-l border-white/5 flex flex-col overflow-y-auto shrink-0">
+          <div className={`relative bg-navy-800 border-l border-white/5 flex flex-col shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-6 overflow-hidden' : 'w-56 overflow-y-auto'}`}>
+            {/* Collapse toggle — always visible on the left edge */}
+            <button
+              onClick={() => setPanelCollapsed(v => !v)}
+              title={panelCollapsed ? 'Expand panel' : 'Collapse panel'}
+              className="absolute left-0 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-4 h-8 bg-white/5 hover:bg-white/10 border border-white/[0.04] rounded-r text-gray-600 hover:text-gray-400 transition-colors"
+            >
+              {panelCollapsed ? <ChevronLeft size={10} /> : <ChevronRight size={10} />}
+            </button>
+            {!panelCollapsed && (<>
             <div className="px-4 py-3 border-b border-white/5">
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Audio Tracks</h3>
             </div>
@@ -2455,6 +2482,52 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 >
                   Merge audio tracks
                   <div className="text-[10px] text-purple-500 font-normal mt-0.5">Takes a moment to process</div>
+                </button>
+              </div>
+            )}
+
+            {/* During merge: progress bars */}
+            {multiTrack && isExtracting && (
+              <div className="px-4 py-4 flex flex-col gap-3">
+                <div className="flex items-center gap-2 text-xs text-purple-300 font-medium">
+                  <Loader2 size={12} className="animate-spin shrink-0" />
+                  Merging audio tracks…
+                </div>
+                <div className="flex flex-col gap-3">
+                  {videoInfo!.audioTracks.map((t, i) => {
+                    const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
+                    const selected = selectedIndices.has(i)
+                    const progress = extractProgress[i] ?? 0
+                    return (
+                      <div key={i} className={`flex flex-col gap-1 ${selected ? '' : 'opacity-35'}`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[11px] text-gray-400 truncate ${selected ? '' : 'line-through'}`}>
+                            {label}
+                          </span>
+                          {selected && (
+                            <span className="text-[11px] tabular-nums text-gray-500 shrink-0 ml-2">
+                              {progress >= 100 ? <span className="text-green-400">✓</span> : `${progress}%`}
+                            </span>
+                          )}
+                        </div>
+                        <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                          {selected
+                            ? <div
+                                className={`h-full rounded-full transition-all duration-300 ${progress >= 100 ? 'bg-green-500' : 'bg-purple-500'}`}
+                                style={{ width: `${progress}%` }}
+                              />
+                            : null
+                          }
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <button
+                  onClick={cancelExtraction}
+                  className="text-xs text-gray-600 hover:text-gray-400 transition-colors text-left"
+                >
+                  Cancel
                 </button>
               </div>
             )}
@@ -2533,6 +2606,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
             {!multiTrack && !tracksExtracted && !isExtracting && (
               <div className="px-4 py-6 text-center text-xs text-gray-600">No audio tracks found</div>
             )}
+            </>)}
           </div>
         </div>
       )}
