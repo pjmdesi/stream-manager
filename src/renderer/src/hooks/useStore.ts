@@ -21,6 +21,11 @@ const defaultConfig: AppConfig = {
   youtubeClientSecret: '',
   twitchClientId: '',
   twitchClientSecret: '',
+  startWithWindows: false,
+  startMinimized: false,
+  claudeApiKey: '',
+  claudeSystemPrompt: '',
+  launcherWidgetGroupId: '',
 }
 
 interface StoreContextValue {

@@ -5,6 +5,8 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob } from '../../types'
 import { Button } from '../ui/Button'
 import { FileDropZone } from '../ui/FileDropZone'
+import { Modal } from '../ui/Modal'
+import { Tooltip } from '../ui/Tooltip'
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000)
@@ -67,6 +69,8 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [autoDeletePartial, setAutoDeletePartial] = useState(false)
+  const [deleteDialog, setDeleteDialog] = useState<{ jobId: string; outputFile: string } | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
   const [, setTick] = useState(0)
@@ -90,6 +94,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
       setBuiltinPresets(builtin)
       setImportedPresets(imported)
       setArchivePresetId(config.archivePresetId ?? '')
+      setAutoDeletePartial(!!config.autoDeletePartialOnCancel)
       setSelectedPreset(prev => prev ?? builtin[0] ?? null)
     })
   }, [])
@@ -214,10 +219,18 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   }
 
   const cancelJob = async (id: string) => {
+    const job = jobs.find(j => j.id === id)
     await window.api.cancelJob(id)
     setJobs(prev => prev.map(j => j.id === id ? { ...j, status: 'cancelled' } : j))
     jobEtas.current.delete(id)
     jobElapsed.current.delete(id)
+    if (job?.outputFile) {
+      if (autoDeletePartial) {
+        window.api.deleteFile(job.outputFile).catch(() => {})
+      } else {
+        setDeleteDialog({ jobId: id, outputFile: job.outputFile })
+      }
+    }
   }
 
   const pauseJob = async (id: string) => {
@@ -265,30 +278,36 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             <div className="flex items-center gap-1.5">
               <div className="text-sm font-medium text-gray-200 truncate">{p.name}</div>
               {isArchiveDefault && (
-                <span title="Default archive preset"><Archive size={11} className="text-purple-400 shrink-0" /></span>
+                <Tooltip content="Default archive preset">
+                  <span><Archive size={11} className="text-purple-400 shrink-0" /></span>
+                </Tooltip>
               )}
             </div>
           )}
           {!isRenaming && p.description && (
-            <div className="text-xs text-gray-500 mt-0.5 truncate" title={p.description}>{p.description}</div>
+            <Tooltip content={p.description} side="right" width="w-64">
+              <div className="text-xs text-gray-500 mt-0.5 truncate">{p.description}</div>
+            </Tooltip>
           )}
         </div>
         {deletable && !isRenaming && (
           <div className="flex opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-2 mr-1">
-            <button
-              onClick={e => { e.stopPropagation(); startRename(p) }}
-              className="p-1.5 text-gray-600 hover:text-blue-400 transition-colors"
-              title="Rename preset"
-            >
-              <Pencil size={11} />
-            </button>
-            <button
-              onClick={e => { e.stopPropagation(); deleteImported(p.id) }}
-              className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
-              title="Remove preset"
-            >
-              <Trash2 size={11} />
-            </button>
+            <Tooltip content="Rename preset">
+              <button
+                onClick={e => { e.stopPropagation(); startRename(p) }}
+                className="p-1.5 text-gray-600 hover:text-blue-400 transition-colors"
+              >
+                <Pencil size={11} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Remove preset">
+              <button
+                onClick={e => { e.stopPropagation(); deleteImported(p.id) }}
+                className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
+              >
+                <Trash2 size={11} />
+              </button>
+            </Tooltip>
           </div>
         )}
       </div>
@@ -296,6 +315,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   }
 
   return (
+    <>
     <div className="flex h-full overflow-hidden">
       {/* Left: presets sidebar */}
       <div className="w-64 bg-navy-800 border-r border-white/5 flex flex-col shrink-0 overflow-hidden">
@@ -444,13 +464,14 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                               ? 'Starting\u2026'
                               : `ETA: ${eta !== null && eta > 0 ? formatDuration(eta) : 'Estimating\u2026'}`}
                           </span>
-                          <button
-                            onClick={() => window.api.openInExplorer(outputDir)}
-                            className="ml-auto text-gray-600 hover:text-gray-300 transition-colors truncate max-w-[200px]"
-                            title="Open output folder"
-                          >
-                            {outputDir}
-                          </button>
+                          <Tooltip content="Open output folder" side="top">
+                            <button
+                              onClick={() => window.api.openInExplorer(outputDir)}
+                              className="ml-auto text-gray-600 hover:text-gray-300 transition-colors truncate max-w-[200px]"
+                            >
+                              {outputDir}
+                            </button>
+                          </Tooltip>
                         </div>
                       )}
 
@@ -458,13 +479,14 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                         <div className="flex items-center gap-3 text-xs text-gray-500 tabular-nums">
                           <span>100%</span>
                           {finalElapsed > 0 && <span>Elapsed: {formatDuration(finalElapsed)}</span>}
-                          <button
-                            onClick={() => window.api.openInExplorer(outputDir)}
-                            className="ml-auto text-gray-600 hover:text-gray-300 transition-colors truncate max-w-[200px]"
-                            title="Open output folder"
-                          >
-                            {outputDir}
-                          </button>
+                          <Tooltip content="Open output folder" side="top">
+                            <button
+                              onClick={() => window.api.openInExplorer(outputDir)}
+                              className="ml-auto text-gray-600 hover:text-gray-300 transition-colors truncate max-w-[200px]"
+                            >
+                              {outputDir}
+                            </button>
+                          </Tooltip>
                         </div>
                       )}
 
@@ -486,31 +508,34 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                     {/* Right: action buttons column */}
                     <div className="flex flex-row items-center justify-center gap-1 shrink-0">
                       {isActive && (
-                        <button
-                          onClick={() => job.status === 'paused' ? resumeJob(job.id) : pauseJob(job.id)}
-                          className={`p-1.5 text-gray-600 transition-colors ${job.status === 'paused' ? 'hover:text-blue-400' : 'hover:text-yellow-400'}`}
-                          title={job.status === 'paused' ? 'Resume' : 'Pause'}
-                        >
-                          {job.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
-                        </button>
+                        <Tooltip content={job.status === 'paused' ? 'Resume' : 'Pause'}>
+                          <button
+                            onClick={() => job.status === 'paused' ? resumeJob(job.id) : pauseJob(job.id)}
+                            className={`p-1.5 text-gray-600 transition-colors ${job.status === 'paused' ? 'hover:text-blue-400' : 'hover:text-yellow-400'}`}
+                          >
+                            {job.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
+                          </button>
+                        </Tooltip>
                       )}
                       {isActive && (
-                        <button
-                          onClick={() => cancelJob(job.id)}
-                          className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
-                          title="Cancel"
-                        >
-                          <Ban size={14} />
-                        </button>
+                        <Tooltip content="Cancel">
+                          <button
+                            onClick={() => cancelJob(job.id)}
+                            className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
+                          >
+                            <Ban size={14} />
+                          </button>
+                        </Tooltip>
                       )}
                       {(isDone || isCancelled || isError || job.status === 'queued') && (
-                        <button
-                          onClick={() => removeJob(job.id)}
-                          className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
-                          title="Remove"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <Tooltip content="Remove">
+                          <button
+                            onClick={() => removeJob(job.id)}
+                            className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </Tooltip>
                       )}
                     </div>
                   </div>
@@ -527,5 +552,40 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
         </div></div>
       </div>
     </div>
+
+    <Modal
+      isOpen={!!deleteDialog}
+      onClose={() => setDeleteDialog(null)}
+      title="Delete partial file?"
+      width="sm"
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-gray-300">
+          The conversion was cancelled. Do you want to delete the partial output file?
+        </p>
+        {deleteDialog && (
+          <p className="text-xs text-gray-500 font-mono break-all bg-navy-900 border border-white/5 rounded-lg px-3 py-2">
+            {deleteDialog.outputFile.replace(/.*[\\/]/, '')}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setDeleteDialog(null)}>
+            Keep file
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            icon={<Trash2 size={13} />}
+            onClick={() => {
+              if (deleteDialog) window.api.deleteFile(deleteDialog.outputFile).catch(() => {})
+              setDeleteDialog(null)
+            }}
+          >
+            Delete file
+          </Button>
+        </div>
+      </div>
+    </Modal>
+    </>
   )
 }

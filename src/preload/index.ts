@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 // Expose a typed API surface to the renderer process
 contextBridge.exposeInMainWorld('api', {
@@ -221,6 +221,12 @@ contextBridge.exposeInMainWorld('api', {
   cancelArchive: () =>
     ipcRenderer.invoke('streams:cancelArchive'),
 
+  previewReschedule: (folderPath: string, newDate: string) =>
+    ipcRenderer.invoke('streams:previewReschedule', folderPath, newDate),
+
+  rescheduleStream: (folderPath: string, newDate: string) =>
+    ipcRenderer.invoke('streams:reschedule', folderPath, newDate),
+
   deleteStreamFolder: (folderPath: string) =>
     ipcRenderer.invoke('streams:deleteFolder', folderPath),
 
@@ -262,8 +268,23 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetBroadcasts: () =>
     ipcRenderer.invoke('youtube:getBroadcasts'),
 
+  youtubeGetCompletedBroadcasts: () =>
+    ipcRenderer.invoke('youtube:getCompletedBroadcasts'),
+
+  youtubeGetVideoById: (videoId: string) =>
+    ipcRenderer.invoke('youtube:getVideoById', videoId),
+
+  youtubeUpdateVideo: (videoId: string, title: string, description: string, tags: string[]) =>
+    ipcRenderer.invoke('youtube:updateVideo', videoId, title, description, tags),
+
   youtubeValidateToken: () =>
     ipcRenderer.invoke('youtube:validateToken'),
+
+  youtubeGetQualifyingThumbnails: (paths: string[]) =>
+    ipcRenderer.invoke('youtube:getQualifyingThumbnails', paths),
+
+  youtubeUploadThumbnail: (videoId: string, imagePath: string) =>
+    ipcRenderer.invoke('youtube:uploadThumbnail', videoId, imagePath),
 
   youtubeUpdateBroadcast: (
     broadcastId: string,
@@ -280,6 +301,8 @@ contextBridge.exposeInMainWorld('api', {
   setYTTagTemplates: (v: any[]) => ipcRenderer.invoke('store:setYTTagTemplates', v),
   getStreamTypeTags: (): Promise<Record<string, string>> => ipcRenderer.invoke('store:getStreamTypeTags'),
   setStreamTypeTags: (v: Record<string, string>) => ipcRenderer.invoke('store:setStreamTypeTags', v),
+  getStreamTypeTextures: (): Promise<Record<string, string>> => ipcRenderer.invoke('store:getStreamTypeTextures'),
+  setStreamTypeTextures: (v: Record<string, string>) => ipcRenderer.invoke('store:setStreamTypeTextures', v),
 
   // ── Twitch ────────────────────────────────────────────────────────────────
   twitchGetStatus: () =>
@@ -323,7 +346,40 @@ contextBridge.exposeInMainWorld('api', {
   windowMinimize: () => ipcRenderer.send('window:minimize'),
   windowMaximize: () => ipcRenderer.send('window:maximize'),
   windowClose: () => ipcRenderer.send('window:close'),
+  windowMinimizeToTray: () => ipcRenderer.send('window:minimizeToTray'),
+
+  // ── Startup settings ──────────────────────────────────────────────────────
+  getStartupSettings: (): Promise<{ startWithWindows: boolean; startMinimized: boolean }> =>
+    ipcRenderer.invoke('app:getStartupSettings'),
+  setStartupSettings: (startWithWindows: boolean, startMinimized: boolean): Promise<void> =>
+    ipcRenderer.invoke('app:setStartupSettings', startWithWindows, startMinimized),
+
+  // ── Launcher ──────────────────────────────────────────────────────────────
+  getLauncherGroups: () =>
+    ipcRenderer.invoke('launcher:getGroups'),
+  setLauncherGroups: (groups: any[]) =>
+    ipcRenderer.invoke('launcher:setGroups', groups),
+  launchGroup: (groupId: string) =>
+    ipcRenderer.invoke('launcher:launchGroup', groupId),
+  launchApp: (filePath: string) =>
+    ipcRenderer.invoke('launcher:launchApp', filePath),
+  getFileIcon: (filePath: string) =>
+    ipcRenderer.invoke('launcher:getFileIcon', filePath),
+  resolveShortcut: (filePath: string) =>
+    ipcRenderer.invoke('launcher:resolveShortcut', filePath),
+  getStartMenuPath: () =>
+    ipcRenderer.invoke('launcher:getStartMenuPath'),
 
   // ── Dev tools ─────────────────────────────────────────────────────────────
-  resetOnboarding: () => ipcRenderer.invoke('store:resetOnboarding')
+  resetOnboarding: () => ipcRenderer.invoke('store:resetOnboarding'),
+
+  // ── Claude AI ─────────────────────────────────────────────────────────────
+  claudeGenerate: (field: string, context: Record<string, unknown>) =>
+    ipcRenderer.invoke('claude:generate', { field, context }),
+  claudeTestKey: (apiKey: string) =>
+    ipcRenderer.invoke('claude:testKey', apiKey),
+
+  // ── File utilities ────────────────────────────────────────────────────────
+  // File.prototype.path was removed in Electron 34; use webUtils instead.
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file)
 })

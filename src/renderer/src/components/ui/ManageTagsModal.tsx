@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { SwatchBook, Trash2, Star, X, GitMerge, Check, Plus } from 'lucide-react'
+import { SwatchBook, Trash2, Star, X, GitMerge, Check, Plus, Layers } from 'lucide-react'
 import { Modal } from './Modal'
 import { Button } from './Button'
-import { TAG_COLORS, getTagColor, pickColorForNewTag } from '../../constants/tagColors'
+import { Tooltip } from './Tooltip'
+import { TAG_COLORS, getTagColor, pickColorForNewTag, TAG_TEXTURES, getTagTextureStyle, pickTextureForNewTag, DEFAULT_TAG_TEXTURE } from '../../constants/tagColors'
 import type { StreamFolder } from '../../types'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -68,6 +69,66 @@ function SwatchPicker({
   )
 }
 
+// ─── Texture picker portal ────────────────────────────────────────────────────
+
+const TEXTURE_PREVIEW_BG = 'transparent'
+
+function TexturePicker({
+  anchorRef,
+  currentKey,
+  onPick,
+  onClose,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>
+  currentKey: string
+  onPick: (textureKey: string) => void
+  onClose: () => void
+}) {
+  const rect = anchorRef.current?.getBoundingClientRect()
+  const pickerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        pickerRef.current && !pickerRef.current.contains(e.target as Node) &&
+        anchorRef.current && !anchorRef.current.contains(e.target as Node)
+      ) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose, anchorRef])
+
+  if (!rect) return null
+
+  return ReactDOM.createPortal(
+    <div
+      ref={pickerRef}
+      style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, zIndex: 10000 }}
+      className="bg-navy-700 border border-white/10 rounded-xl shadow-2xl p-2"
+    >
+      <div className="grid grid-cols-3 gap-1.5">
+        {TAG_TEXTURES.map((t, i) => (
+          <Tooltip key={t.key} content={t.label} side={i < 3 ? 'top' : 'bottom'}>
+            <button
+              type="button"
+              onMouseDown={e => { e.preventDefault(); onPick(t.key) }}
+              className={`w-14 h-9 rounded-md border transition-colors flex items-center justify-center relative overflow-hidden ${
+                t.key === currentKey ? 'border-purple-400/70 ring-1 ring-purple-400/50' : 'border-white/10 hover:border-white/30'
+              }`}
+              style={{ backgroundColor: TEXTURE_PREVIEW_BG, ...getTagTextureStyle(t.key) }}
+            >
+              {t.key === currentKey && (
+                <Check size={12} className="text-white drop-shadow absolute" />
+              )}
+            </button>
+          </Tooltip>
+        ))}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 // ─── Shared tag list panel ────────────────────────────────────────────────────
 
 interface TagListPanelProps {
@@ -90,11 +151,14 @@ interface TagListPanelProps {
   /** Chip class. Omit to use tag color from tagColors. */
   chipClass?: string
   tagColors?: Record<string, string>
+  tagTextures?: Record<string, string>
   onColorChange?: (item: string, colorKey: string) => void
+  onTextureChange?: (item: string, textureKey: string) => void
   /** If provided, shows an "Add Tag" button and new-tag input row */
-  onAddItem?: (name: string, colorKey: string) => void
+  onAddItem?: (name: string, colorKey: string, textureKey: string) => void
   /** Returns the default color key for a new tag (least-used rule) */
   getDefaultColor?: () => string
+  getDefaultTexture?: () => string
 }
 
 function TagListPanel({
@@ -114,21 +178,28 @@ function TagListPanel({
   onConfirmCombine,
   chipClass,
   tagColors,
+  tagTextures,
   onColorChange,
+  onTextureChange,
   onAddItem,
   getDefaultColor,
+  getDefaultTexture,
 }: TagListPanelProps) {
   const [openColorPicker, setOpenColorPicker] = useState<string | null>(null)
+  const [openTexturePicker, setOpenTexturePicker] = useState<string | null>(null)
   const swatchBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const textureBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
   // New-tag inline state
-  const [newTag, setNewTag] = useState<{ name: string; colorKey: string } | null>(null)
+  const [newTag, setNewTag] = useState<{ name: string; colorKey: string; textureKey: string } | null>(null)
   const [newTagColorOpen, setNewTagColorOpen] = useState(false)
+  const [newTagTextureOpen, setNewTagTextureOpen] = useState(false)
   const [newTagError, setNewTagError] = useState('')
   const newTagInputRef = useRef<HTMLInputElement>(null)
   const newTagSwatchRef = useRef<HTMLButtonElement>(null)
+  const newTagTextureRef = useRef<HTMLButtonElement>(null)
 
-  useEffect(() => { if (combineMode) { setOpenColorPicker(null); setNewTag(null) } }, [combineMode])
+  useEffect(() => { if (combineMode) { setOpenColorPicker(null); setOpenTexturePicker(null); setNewTag(null) } }, [combineMode])
 
   // Autofocus input when new-tag row appears
   useEffect(() => {
@@ -136,15 +207,17 @@ function TagListPanel({
   }, [newTag !== null]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const openNewTag = () => {
-    setNewTag({ name: '', colorKey: getDefaultColor?.() ?? 'purple' })
+    setNewTag({ name: '', colorKey: getDefaultColor?.() ?? 'purple', textureKey: getDefaultTexture?.() ?? DEFAULT_TAG_TEXTURE })
     setNewTagError('')
     setNewTagColorOpen(false)
+    setNewTagTextureOpen(false)
   }
 
   const cancelNewTag = () => {
     setNewTag(null)
     setNewTagError('')
     setNewTagColorOpen(false)
+    setNewTagTextureOpen(false)
   }
 
   const commitNewTag = () => {
@@ -152,10 +225,11 @@ function TagListPanel({
     const name = newTag.name.trim()
     if (!name) { setNewTagError('Name is required.'); return }
     if (items.includes(name)) { setNewTagError('Already exists.'); return }
-    onAddItem(name, newTag.colorKey)
+    onAddItem(name, newTag.colorKey, newTag.textureKey)
     setNewTag(null)
     setNewTagError('')
     setNewTagColorOpen(false)
+    setNewTagTextureOpen(false)
   }
 
   const sorted = [...items].sort((a, b) => a.localeCompare(b))
@@ -243,7 +317,10 @@ function TagListPanel({
               )}
 
               {/* Chip */}
-              <span className={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${resolvedChip}`}>
+              <span
+                className={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${resolvedChip}`}
+                style={chipClass ? {} : getTagTextureStyle(tagTextures?.[item])}
+              >
                 {item}
               </span>
 
@@ -258,24 +335,38 @@ function TagListPanel({
               {!combineMode && !isPendingDelete && (
                 <div className="flex items-center gap-1">
                   {onColorChange && (
-                    <button
-                      ref={el => { swatchBtnRefs.current[item] = el }}
-                      type="button"
-                      title="Change color"
-                      onClick={() => setOpenColorPicker(prev => prev === item ? null : item)}
-                      className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
-                    >
-                      <SwatchBook size={14} />
-                    </button>
+                    <Tooltip content="Change color">
+                      <button
+                        ref={el => { swatchBtnRefs.current[item] = el }}
+                        type="button"
+                        onClick={() => { setOpenColorPicker(prev => prev === item ? null : item); setOpenTexturePicker(null) }}
+                        className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                      >
+                        <SwatchBook size={14} />
+                      </button>
+                    </Tooltip>
                   )}
-                  <button
-                    type="button"
-                    title="Delete"
-                    onClick={() => onDeleteItem(item)}
-                    className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {onTextureChange && (
+                    <Tooltip content="Change texture">
+                      <button
+                        ref={el => { textureBtnRefs.current[item] = el }}
+                        type="button"
+                        onClick={() => { setOpenTexturePicker(prev => prev === item ? null : item); setOpenColorPicker(null) }}
+                        className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                      >
+                        <Layers size={14} />
+                      </button>
+                    </Tooltip>
+                  )}
+                  <Tooltip content="Delete">
+                    <button
+                      type="button"
+                      onClick={() => onDeleteItem(item)}
+                      className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </Tooltip>
                 </div>
               )}
 
@@ -311,6 +402,15 @@ function TagListPanel({
                   onClose={() => setOpenColorPicker(null)}
                 />
               )}
+              {/* Texture picker */}
+              {openTexturePicker === item && onTextureChange && tagTextures && (
+                <TexturePicker
+                  anchorRef={{ current: textureBtnRefs.current[item] }}
+                  currentKey={tagTextures[item] ?? DEFAULT_TAG_TEXTURE}
+                  onPick={textureKey => { onTextureChange(item, textureKey); setOpenTexturePicker(null) }}
+                  onClose={() => setOpenTexturePicker(null)}
+                />
+              )}
             </div>
           )
         })}
@@ -320,7 +420,10 @@ function TagListPanel({
       {newTag && (
         <div className="flex items-center gap-3 mt-1 px-3 py-2.5 rounded-lg border bg-navy-800/60 border-white/10">
           {/* Chip with inline input */}
-          <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full border font-medium ${newTagError ? 'bg-red-900/30 text-red-300 border-red-700/50' : getTagColor(newTag.colorKey).chip}`}>
+          <span
+            className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full border font-medium ${newTagError ? 'bg-red-900/30 text-red-300 border-red-700/50' : getTagColor(newTag.colorKey).chip}`}
+            style={newTagError ? {} : getTagTextureStyle(newTag.textureKey)}
+          >
             <input
               ref={newTagInputRef}
               type="text"
@@ -345,15 +448,16 @@ function TagListPanel({
             {/* Color picker (Types tab only) */}
             {onColorChange && (
               <>
-                <button
-                  ref={newTagSwatchRef}
-                  type="button"
-                  title="Choose color"
-                  onClick={() => setNewTagColorOpen(p => !p)}
-                  className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
-                >
-                  <SwatchBook size={14} />
-                </button>
+                <Tooltip content="Choose color">
+                  <button
+                    ref={newTagSwatchRef}
+                    type="button"
+                    onClick={() => { setNewTagColorOpen(p => !p); setNewTagTextureOpen(false) }}
+                    className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                  >
+                    <SwatchBook size={14} />
+                  </button>
+                </Tooltip>
                 {newTagColorOpen && (
                   <SwatchPicker
                     anchorRef={newTagSwatchRef}
@@ -364,25 +468,50 @@ function TagListPanel({
                 )}
               </>
             )}
+            {/* Texture picker (Types tab only) */}
+            {onTextureChange && (
+              <>
+                <Tooltip content="Choose texture">
+                  <button
+                    ref={newTagTextureRef}
+                    type="button"
+                    onClick={() => { setNewTagTextureOpen(p => !p); setNewTagColorOpen(false) }}
+                    className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                  >
+                    <Layers size={14} />
+                  </button>
+                </Tooltip>
+                {newTagTextureOpen && (
+                  <TexturePicker
+                    anchorRef={newTagTextureRef}
+                    currentKey={newTag.textureKey}
+                    onPick={textureKey => { setNewTag(t => t ? { ...t, textureKey } : t); setNewTagTextureOpen(false) }}
+                    onClose={() => setNewTagTextureOpen(false)}
+                  />
+                )}
+              </>
+            )}
             {/* Save (in place of delete) */}
-            <button
-              type="button"
-              title={newTagError || 'Save tag'}
-              onClick={commitNewTag}
-              disabled={!newTag.name.trim()}
-              className="p-1.5 rounded text-gray-500 hover:text-green-400 hover:bg-green-900/20 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-            >
-              <Check size={14} />
-            </button>
+            <Tooltip content={newTagError || 'Save tag'}>
+              <button
+                type="button"
+                onClick={commitNewTag}
+                disabled={!newTag.name.trim()}
+                className="p-1.5 rounded text-gray-500 hover:text-green-400 hover:bg-green-900/20 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+              >
+                <Check size={14} />
+              </button>
+            </Tooltip>
             {/* Cancel */}
-            <button
-              type="button"
-              title="Cancel"
-              onClick={cancelNewTag}
-              className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
-            >
-              <X size={14} />
-            </button>
+            <Tooltip content="Cancel">
+              <button
+                type="button"
+                onClick={cancelNewTag}
+                className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </Tooltip>
           </div>
         </div>
       )}
@@ -444,10 +573,12 @@ function TagListPanel({
 interface Props {
   tags: string[]
   tagColors: Record<string, string>
+  tagTextures: Record<string, string>
   games: string[]
   folders: StreamFolder[]
   onColorChange: (tag: string, colorKey: string) => void
-  onAddTag: (name: string, colorKey: string) => void
+  onTextureChange: (tag: string, textureKey: string) => void
+  onAddTag: (name: string, colorKey: string, textureKey: string) => void
   onDeleteTag: (tag: string) => void
   onCombineTags: (dying: string[], survivor: string) => void
   onDeleteGame: (game: string) => void
@@ -458,8 +589,8 @@ interface Props {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ManageTagsModal({
-  tags, tagColors, games, folders,
-  onColorChange, onAddTag, onDeleteTag, onCombineTags,
+  tags, tagColors, tagTextures, games, folders,
+  onColorChange, onTextureChange, onAddTag, onDeleteTag, onCombineTags,
   onDeleteGame, onCombineGames,
   onClose,
 }: Props) {
@@ -624,9 +755,12 @@ export function ManageTagsModal({
           onSetCombineMode={v => { setCombineMode(v); if (!v) setSelected([]) }}
           onConfirmCombine={handleConfirmCombine}
           tagColors={tagColors}
+          tagTextures={tagTextures}
           onColorChange={onColorChange}
+          onTextureChange={onTextureChange}
           onAddItem={onAddTag}
           getDefaultColor={() => pickColorForNewTag(tagColors)}
+          getDefaultTexture={() => pickTextureForNewTag(tagTextures)}
         />
       )}
 

@@ -1,18 +1,21 @@
 import React, { useState, useEffect, Component } from 'react'
+import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, ChevronLeft, ChevronRight, AlertCircle, RefreshCw, Pause, Rocket } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
+import { Tooltip } from './components/ui/Tooltip'
 import logoUrl from './assets/stream-manager-logo.svg'
-import type { Page } from './types'
+import type { Page, LauncherGroup } from './types'
 import { StreamsPage } from './components/pages/StreamsPage'
 import { PlayerPage } from './components/pages/PlayerPage'
 import { TemplatesPage } from './components/pages/TemplatesPage'
 import { RulesPage } from './components/pages/RulesPage'
 import { ConverterPage } from './components/pages/ConverterPage'
 import { CombinePage } from './components/pages/CombinePage'
-import { YouTubePage } from './components/pages/YouTubePage'
+import { IntegrationsPage } from './components/pages/IntegrationsPage'
 import { SettingsPage } from './components/pages/SettingsPage'
+import { LauncherPage } from './components/pages/LauncherPage'
 import { useConversionJobs } from './context/ConversionContext'
 import { useWatcher } from './context/WatcherContext'
 import { useStore } from './hooks/useStore'
@@ -59,7 +62,7 @@ interface PendingConverterFile {
   token: number
 }
 
-function ConversionWidget({ onNavigate }: { onNavigate: () => void }) {
+function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; collapsed: boolean }) {
   const { jobs } = useConversionJobs()
 
   const relevant = jobs.filter(j => j.status === 'running' || j.status === 'paused' || j.status === 'error' || j.status === 'done')
@@ -74,7 +77,28 @@ function ConversionWidget({ onNavigate }: { onNavigate: () => void }) {
     ? relevant.reduce((sum, j) => sum + j.progress, 0) / relevant.length
     : 0
 
-  const barColor = hasError ? 'bg-red-500' : allPaused ? 'bg-yellow-400' : 'bg-purple-500'
+  const barColor     = hasError ? 'bg-red-500'    : allPaused ? 'bg-yellow-400'    : 'bg-purple-500'
+  const statusColor  = hasError ? 'text-red-400'  : allPaused ? 'text-yellow-400'  : 'text-purple-400'
+
+  if (collapsed) {
+    return (
+      <Tooltip content={`Converting · ${label} · ${totalProgress.toFixed(0)}%`} side="right" triggerClassName="block w-full">
+        <button
+          onClick={onNavigate}
+          className="w-full flex flex-col items-center gap-0.5 py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors"
+        >
+          <Zap size={14} className={statusColor} />
+          <span className={`text-[10px] tabular-nums ${statusColor}`}>{totalProgress.toFixed(0)}%</span>
+          {hasError
+            ? <AlertCircle size={10} className="text-red-400" />
+            : allPaused
+              ? <Pause size={10} className="text-yellow-400" />
+              : <RefreshCw size={10} className={`text-purple-400 animate-spin`} />
+          }
+        </button>
+      </Tooltip>
+    )
+  }
 
   return (
     <button
@@ -83,9 +107,7 @@ function ConversionWidget({ onNavigate }: { onNavigate: () => void }) {
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Converting</span>
-        <span className={`text-[10px] font-medium ${hasError ? 'text-red-400' : allPaused ? 'text-yellow-400' : 'text-purple-400'}`}>
-          {label}
-        </span>
+        <span className={`text-[10px] font-medium ${statusColor}`}>{label}</span>
       </div>
       <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
         <div
@@ -100,9 +122,40 @@ function ConversionWidget({ onNavigate }: { onNavigate: () => void }) {
   )
 }
 
-function AutoRulesWidget({ active, onNavigate }: { active: boolean; onNavigate: () => void }) {
+function AutoRulesWidget({ active, onNavigate, collapsed }: { active: boolean; onNavigate: () => void; collapsed: boolean }) {
   const { rules, running, startWatcher, stopWatcher } = useWatcher()
   const enabledCount = rules.filter(r => r.enabled).length
+
+  if (collapsed) {
+    return (
+      <div className={`border-y transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'bg-navy-900 border-white/5'}`}>
+        <Tooltip content="Auto-Rules" side="right" triggerClassName="block w-full">
+          <button
+            onClick={onNavigate}
+            className={`flex items-center justify-center w-full py-2.5 text-sm font-medium transition-colors ${active ? 'text-purple-300' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            <Shuffle size={18} />
+          </button>
+        </Tooltip>
+        {rules.length > 0 && (
+          <>
+            <div className="flex justify-center pb-1">
+              {running ? (
+                <Button variant="danger" size="sm" icon={<Square size={12} />} className="justify-center" onClick={stopWatcher} />
+              ) : (
+                <Button variant="success" size="sm" icon={<Play size={12} />} className="justify-center" onClick={startWatcher} disabled={enabledCount === 0} />
+              )}
+            </div>
+            <div className="flex items-center justify-center gap-1 pb-2">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+              <span className="text-[10px] text-gray-500">•</span>
+              <span className="text-[10px] text-gray-500">{enabledCount}</span>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className={`border-y transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'bg-navy-900 border-white/5'}`}>
@@ -138,12 +191,84 @@ function AutoRulesWidget({ active, onNavigate }: { active: boolean; onNavigate: 
   )
 }
 
+function GroupIcon({ name, size = 16 }: { name?: string; size?: number }) {
+  const pascal = (n: string) => n.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
+  const Icon = name
+    ? (((LucideIcons as unknown) as Record<string, React.ComponentType<{ size?: number }>>)[pascal(name)] ?? Rocket)
+    : Rocket
+  return <Icon size={size} />
+}
+
+function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; collapsed: boolean }) {
+  const { config } = useStore()
+  const [groups, setGroups] = useState<LauncherGroup[]>([])
+  const [launching, setLaunching] = useState(false)
+  const [feedback, setFeedback] = useState<number | null>(null)
+
+  useEffect(() => {
+    window.api.getLauncherGroups().then(setGroups).catch(() => {})
+  }, [config.launcherWidgetGroupId])
+
+  const group = groups.find(g => g.id === config.launcherWidgetGroupId) ?? null
+  if (!group) return null
+
+  const launch = async () => {
+    if (launching) return
+    setLaunching(true)
+    try {
+      const result = await window.api.launchGroup(group.id)
+      setFeedback(result.launched)
+      setTimeout(() => setFeedback(null), 2000)
+    } finally {
+      setLaunching(false)
+    }
+  }
+
+  if (collapsed) {
+    return (
+      <Tooltip content={`Launch: ${group.name}`} side="right" triggerClassName="block w-full">
+        <button
+          onClick={launch}
+          className="w-full flex items-center justify-center py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors text-gray-400 hover:text-gray-200"
+        >
+          <GroupIcon name={group.icon} size={16} />
+        </button>
+      </Tooltip>
+    )
+  }
+
+  return (
+    <div className="bg-navy-900 border-y border-white/5 hover:border-white/10 transition-colors">
+      <button
+        onClick={onNavigate}
+        className="flex items-center gap-3 w-full px-4 py-2.5 text-sm font-medium text-gray-400 hover:text-gray-200 transition-colors"
+      >
+        <GroupIcon name={group.icon} size={16} />
+        <span className="flex-1 text-left truncate">{group.name}</span>
+      </button>
+      <div className="px-3 pb-2">
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<Rocket size={12} />}
+          className="w-full"
+          disabled={launching || group.apps.length === 0}
+          onClick={launch}
+        >
+          {feedback != null ? `Launched ${feedback}` : 'Launch'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'streams',   label: 'Streams',      icon: <Radio size={18} /> },
   { id: 'player',    label: 'Player',       icon: <Film size={18} /> },
   { id: 'converter', label: 'Converter',    icon: <Zap size={18} /> },
   { id: 'combine',   label: 'Combine',      icon: <Combine size={18} /> },
-  { id: 'youtube',   label: 'Integrations', icon: <Plug size={18} /> },
+  { id: 'launcher',  label: 'Launcher',     icon: <Rocket size={18} /> },
+  { id: 'integrations',   label: 'Integrations', icon: <Plug size={18} /> },
   { id: 'settings',  label: 'Settings',     icon: <Settings size={18} /> },
 ]
 
@@ -152,6 +277,7 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [integrationAlert, setIntegrationAlert] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const { config, loading, refreshConfig } = useStore()
   const { refreshRules } = useWatcher()
 
@@ -166,7 +292,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (page === 'youtube') checkIntegrationAlert()
+    if (page === 'integrations') checkIntegrationAlert()
   }, [page])
 
   useEffect(() => {
@@ -211,6 +337,14 @@ export default function App() {
           className="flex items-center gap-1"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
+          <Tooltip content="Minimize to tray" side="bottom">
+            <button
+              onClick={() => window.api.windowMinimizeToTray()}
+              className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              <ArrowDownToLine size={12} />
+            </button>
+          </Tooltip>
           <button
             onClick={() => window.api.windowMinimize()}
             className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
@@ -235,16 +369,25 @@ export default function App() {
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <nav className="w-48 bg-navy-800 border-r border-white/5 flex flex-col shrink-0">
+        <nav className={`relative ${sidebarCollapsed ? 'w-14' : 'w-48'} bg-navy-800 border-r border-white/5 flex flex-col shrink-0 transition-[width] duration-200 overflow-hidden`}>
+          {/* Collapse toggle — always visible on the right edge */}
+          <Tooltip content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right">
+            <button
+              onClick={() => setSidebarCollapsed(c => !c)}
+              className="absolute right-0 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-4 h-8 bg-white/5 hover:bg-white/10 border border-white/[0.04] rounded-l text-gray-600 hover:text-gray-400 transition-colors"
+            >
+              {sidebarCollapsed ? <ChevronRight size={10} /> : <ChevronLeft size={10} />}
+            </button>
+          </Tooltip>
+
           <div className="flex-1">
             {NAV_ITEMS.map(item => {
-              const showAlert = item.id === 'youtube' && integrationAlert
-              return (
+              const showAlert = item.id === 'integrations' && integrationAlert
+              const btn = (
                 <button
-                  key={item.id}
                   onClick={() => setPage(item.id)}
                   className={`
-                    w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-all duration-150 border
+                    relative w-full flex items-center ${sidebarCollapsed ? 'justify-center py-2.5' : 'gap-3 px-4 py-2.5'} text-sm font-medium transition-all duration-150 border
                     ${page === item.id
                       ? 'bg-purple-600/20 text-purple-300 border-purple-600/30'
                       : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border-transparent'
@@ -252,17 +395,28 @@ export default function App() {
                   `}
                 >
                   {item.icon}
-                  <span className="flex-1 text-left">{item.label}</span>
-                  {showAlert && (
-                    <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+                  {!sidebarCollapsed && <span className="flex-1 text-left">{item.label}</span>}
+                  {!sidebarCollapsed && showAlert && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
+                  {sidebarCollapsed && showAlert && (
+                    <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-amber-400" />
                   )}
                 </button>
               )
+
+              return sidebarCollapsed ? (
+                <Tooltip key={item.id} content={item.label} side="right" triggerClassName="block w-full">
+                  {btn}
+                </Tooltip>
+              ) : (
+                <React.Fragment key={item.id}>{btn}</React.Fragment>
+              )
             })}
           </div>
+
           <div className="border-t border-white/5" />
-          {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} />}
-          <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} />
+          {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} collapsed={sidebarCollapsed} />}
+          <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
+          <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
           <button
             onClick={() => setAboutOpen(true)}
             className="py-1 flex justify-center w-full hover:text-gray-500 transition-colors"
@@ -285,7 +439,8 @@ export default function App() {
           {page === 'templates' && <TemplatesPage />}
           {page === 'rules'     && <RulesPage />}
           {page === 'combine'   && <CombinePage initialFiles={pendingCombine} />}
-          {page === 'youtube'   && <YouTubePage />}
+          {page === 'launcher'  && <LauncherPage />}
+          {page === 'integrations'   && <IntegrationsPage />}
           {page === 'settings'  && <SettingsPage />}
         </PageErrorBoundary>
         </main>

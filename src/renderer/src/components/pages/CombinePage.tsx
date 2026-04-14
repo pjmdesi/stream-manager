@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
+import { Tooltip } from '../ui/Tooltip'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -276,13 +277,14 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
             <span className="flex-1 truncate">
               Combined successfully — <span className="font-mono text-xs">{outputPath}</span>
             </span>
-            <button
-              onClick={() => window.api.openInExplorer(outputPath)}
-              className="shrink-0 p-1 rounded hover:bg-white/10 text-green-400 hover:text-green-300 transition-colors"
-              title="Open folder"
-            >
-              <FolderSearch size={14} />
-            </button>
+            <Tooltip content="Open folder">
+              <button
+                onClick={() => window.api.openInExplorer(outputPath)}
+                className="shrink-0 p-1 rounded hover:bg-white/10 text-green-400 hover:text-green-300 transition-colors"
+              >
+                <FolderSearch size={14} />
+              </button>
+            </Tooltip>
           </div>
         )}
         {error && (

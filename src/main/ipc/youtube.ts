@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, updateBroadcastSnippet, updateVideoTags } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -51,6 +51,41 @@ export function registerYouTubeIPC(): void {
       console.error('[YT main] getBroadcasts — error:', e.message)
       throw e
     }
+  })
+
+  ipcMain.handle('youtube:getCompletedBroadcasts', async () => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      return await getCompletedBroadcasts(clientId, clientSecret)
+    } catch (e: any) {
+      console.error('[YT main] getCompletedBroadcasts — error:', e.message)
+      throw e
+    }
+  })
+
+  ipcMain.handle('youtube:getVideoById', async (_event, videoId: string) => {
+    const { clientId, clientSecret } = getCreds()
+    return getVideoById(videoId, clientId, clientSecret)
+  })
+
+  ipcMain.handle('youtube:updateVideo', async (
+    _event,
+    videoId: string,
+    title: string,
+    description: string,
+    tags: string[]
+  ) => {
+    const { clientId, clientSecret } = getCreds()
+    await updateVideoTags(videoId, tags, clientId, clientSecret, title, description)
+  })
+
+  ipcMain.handle('youtube:getQualifyingThumbnails', (_event, paths: string[]) => {
+    return filterYouTubeThumbnails(paths)
+  })
+
+  ipcMain.handle('youtube:uploadThumbnail', async (_event, videoId: string, imagePath: string) => {
+    const { clientId, clientSecret } = getCreds()
+    await uploadThumbnail(videoId, imagePath, clientId, clientSecret)
   })
 
   ipcMain.handle('youtube:updateBroadcast', async (

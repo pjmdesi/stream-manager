@@ -108,6 +108,10 @@ class FileWatcher {
     this.retryTimers.clear()
   }
 
+  getStatus(): { active: boolean; ruleCount: number } {
+    return { active: this.watcher !== null, ruleCount: this.rules.length }
+  }
+
   async processExistingFiles(): Promise<void> {
     for (const rule of this.rules) {
       if (rule.onlyNewFiles) continue

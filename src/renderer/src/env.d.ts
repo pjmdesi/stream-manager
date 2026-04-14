@@ -15,6 +15,7 @@ import type {
   YTDescriptionTemplate,
   YTTagTemplate,
   LiveBroadcast,
+  LauncherGroup,
 } from './types'
 
 declare global {
@@ -94,6 +95,8 @@ declare global {
       setWatchRules(rules: WatchRule[]): Promise<void>
       getStreamTypeTags(): Promise<Record<string, string>>
       setStreamTypeTags(v: Record<string, string>): Promise<void>
+      getStreamTypeTextures(): Promise<Record<string, string>>
+      setStreamTypeTextures(v: Record<string, string>): Promise<void>
 
       // ── Streams ──────────────────────────────────────────────────────────────
       listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
@@ -108,6 +111,8 @@ declare global {
       onStreamsChanged(cb: () => void): () => void
       archiveFolders(sessions: Array<{ folderPath: string; date: string; filePaths?: string[] }>, preset: ConversionPreset): Promise<{ errors: string[] }>
       cancelArchive(): Promise<void>
+      previewReschedule(folderPath: string, newDate: string): Promise<{ conflictExists: boolean; filesToRename: { oldName: string; newName: string }[] }>
+      rescheduleStream(folderPath: string, newDate: string): Promise<string>
       deleteStreamFolder(folderPath: string): Promise<void>
       removeStreamOrphans(streamsDir: string, folderNames: string[]): Promise<void>
       convertDumpFolder(dirPath: string): Promise<{ moved: number; skipped: number; manifest: { moves: { from: string; to: string }[]; createdFolders: string[] } }>
@@ -123,7 +128,12 @@ declare global {
       youtubeConnect(): Promise<void>
       youtubeDisconnect(): Promise<void>
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>
+      youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
+      youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
+      youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[]): Promise<void>
       youtubeValidateToken(): Promise<{ valid: boolean; error?: string }>
+      youtubeGetQualifyingThumbnails(paths: string[]): Promise<string[]>
+      youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>
       youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string; gameTitle?: string }, tags: string[]): Promise<void>
       getYTTitleTemplates(): Promise<YTTitleTemplate[]>
       setYTTitleTemplates(v: YTTitleTemplate[]): Promise<void>
@@ -145,11 +155,30 @@ declare global {
       onVideoPopupClosed(cb: () => void): () => void
       onPopupRtcSignal(cb: (data: unknown) => void): () => void
 
+      // ── Claude AI ────────────────────────────────────────────────────────────
+      claudeGenerate(field: string, context: Record<string, unknown>): Promise<string | null>
+      claudeTestKey(apiKey: string): Promise<{ valid: boolean; error?: string }>
+
+      // ── File utilities ───────────────────────────────────────────────────────
+      getPathForFile(file: File): string
+
       // ── Window Controls ──────────────────────────────────────────────────────
       windowMinimize(): void
       windowMaximize(): void
       windowClose(): void
+      windowMinimizeToTray(): void
+      getStartupSettings(): Promise<{ startWithWindows: boolean; startMinimized: boolean }>
+      setStartupSettings(startWithWindows: boolean, startMinimized: boolean): Promise<void>
       resetOnboarding(): Promise<void>
+
+      // ── Launcher ─────────────────────────────────────────────────────────────
+      getLauncherGroups(): Promise<LauncherGroup[]>
+      setLauncherGroups(groups: LauncherGroup[]): Promise<void>
+      launchGroup(groupId: string): Promise<{ launched: number }>
+      launchApp(filePath: string): Promise<{ launched: boolean }>
+      getFileIcon(filePath: string): Promise<string | null>
+      resolveShortcut(filePath: string): Promise<string>
+      getStartMenuPath(): Promise<string>
     }
   }
 }

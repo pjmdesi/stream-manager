@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Youtube, Twitch, Plus, Trash2, ChevronDown, ChevronUp, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
+import { Youtube, Twitch, Plus, Trash2, ChevronDown, ChevronUp, CheckCircle2, AlertCircle, Loader2, Bot } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { useStore } from '../../hooks/useStore'
@@ -141,7 +141,7 @@ function TagTemplateModal({ initial, onSave, onClose }: { initial?: YTTagTemplat
 
 // ─── Shared section accordion ─────────────────────────────────────────────────
 
-type Section = 'yt-credentials' | 'yt-titles' | 'yt-descriptions' | 'yt-tags' | 'twitch-credentials' | null
+type Section = 'yt-credentials' | 'yt-titles' | 'yt-descriptions' | 'yt-tags' | 'twitch-credentials' | 'claude' | null
 
 function SectionHeader({ id, label, expanded, onToggle, icon }: {
   id: Section; label: string; expanded: boolean; onToggle: () => void; icon?: React.ReactNode
@@ -159,7 +159,7 @@ function SectionHeader({ id, label, expanded, onToggle, icon }: {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export function YouTubePage() {
+export function IntegrationsPage() {
   const { config, updateConfig } = useStore()
 
   // ── YouTube credentials ───────────────────────────────────────────────────
@@ -180,12 +180,19 @@ export function YouTubePage() {
   const [twConnecting, setTwConnecting] = useState(false)
   const [twError, setTwError] = useState<string | null>(null)
 
+  // ── Claude credentials ────────────────────────────────────────────────────
+  const [claudeApiKey, setClaudeApiKey] = useState('')
+  const [claudeSystemPrompt, setClaudeSystemPrompt] = useState('')
+  const [claudeSaved, setClaudeSaved] = useState(false)
+  const [claudeTesting, setClaudeTesting] = useState(false)
+  const [claudeTestResult, setClaudeTestResult] = useState<{ valid: boolean; error?: string } | null>(null)
+
   // ── Templates ─────────────────────────────────────────────────────────────
   const [titleTemplates, setTitleTemplates] = useState<YTTitleTemplate[]>([])
   const [descTemplates, setDescTemplates] = useState<YTDescriptionTemplate[]>([])
   const [tagTemplates, setTagTemplates] = useState<YTTagTemplate[]>([])
 
-  const [expandedSection, setExpandedSection] = useState<Section>('yt-credentials')
+  const [expandedSections, setExpandedSections] = useState<Set<Section>>(new Set(['yt-credentials']))
   type EditingState =
     | { type: 'title'; item?: YTTitleTemplate }
     | { type: 'description'; item?: YTDescriptionTemplate }
@@ -201,13 +208,18 @@ export function YouTubePage() {
   }, [config.youtubeClientId, config.youtubeClientSecret, config.twitchClientId, config.twitchClientSecret])
 
   useEffect(() => {
+    setClaudeApiKey(config.claudeApiKey ?? '')
+    setClaudeSystemPrompt(config.claudeSystemPrompt ?? '')
+  }, [config.claudeApiKey, config.claudeSystemPrompt])
+
+  useEffect(() => {
     window.api.youtubeGetStatus().then((s: { connected: boolean }) => {
       setYtConnected(s.connected)
       if (!s.connected) return
       window.api.youtubeValidateToken().then(r => {
         setYtTokenValid(r.valid)
         setYtTokenError(r.valid ? null : (r.error ?? 'Token is invalid'))
-        if (r.valid) setExpandedSection('yt-titles')
+        if (r.valid) setExpandedSections(prev => { const s = new Set(prev); s.delete('yt-credentials'); s.add('yt-titles'); return s })
       }).catch(() => {})
     }).catch(() => {})
     window.api.twitchGetStatus().then((s: { connected: boolean }) => {
@@ -220,7 +232,11 @@ export function YouTubePage() {
     ]).then(([t, d, g]) => { setTitleTemplates(t); setDescTemplates(d); setTagTemplates(g) }).catch(() => {})
   }, [])
 
-  const toggle = (id: Section) => setExpandedSection(prev => prev === id ? null : id)
+  const toggle = (id: Section) => setExpandedSections(prev => {
+    const s = new Set(prev)
+    s.has(id) ? s.delete(id) : s.add(id)
+    return s
+  })
 
   // ── YouTube actions ───────────────────────────────────────────────────────
   const saveYtCredentials = async () => {
@@ -244,6 +260,20 @@ export function YouTubePage() {
     setYtConnected(false)
     setYtTokenValid(true)
     setYtTokenError(null)
+  }
+
+  // ── Claude actions ────────────────────────────────────────────────────────
+  const saveClaudeSettings = async () => {
+    await updateConfig({ claudeApiKey: claudeApiKey.trim(), claudeSystemPrompt: claudeSystemPrompt.trim() })
+    setClaudeSaved(true); setTimeout(() => setClaudeSaved(false), 2000)
+    setClaudeTestResult(null)
+  }
+  const testClaudeKey = async () => {
+    if (!claudeApiKey.trim()) return
+    setClaudeTesting(true); setClaudeTestResult(null)
+    const result = await window.api.claudeTestKey(claudeApiKey.trim())
+    setClaudeTestResult(result)
+    setClaudeTesting(false)
   }
 
   // ── Twitch actions ────────────────────────────────────────────────────────
@@ -292,6 +322,10 @@ export function YouTubePage() {
             <Twitch size={18} />
             {twConnected ? 'Connected' : 'Not connected'}
           </span>
+          <span className={`flex items-center gap-1.5 text-xs ${config.claudeApiKey ? 'text-orange-400' : 'text-gray-600'}`}>
+            <Bot size={18} />
+            {config.claudeApiKey ? 'Connected' : 'Not connected'}
+          </span>
         </div>
       </div>
 
@@ -324,8 +358,8 @@ export function YouTubePage() {
 
         {/* YT Credentials */}
         <div>
-          <SectionHeader id="yt-credentials" label="Google API Credentials" expanded={expandedSection === 'yt-credentials'} onToggle={() => toggle('yt-credentials')} />
-          {expandedSection === 'yt-credentials' && (
+          <SectionHeader id="yt-credentials" label="Google API Credentials" expanded={expandedSections.has('yt-credentials')} onToggle={() => toggle('yt-credentials')} />
+          {expandedSections.has('yt-credentials') && (
             <div className="px-6 pb-5 flex flex-col gap-4">
               <p className="text-xs text-gray-500 leading-relaxed">
                 Enter your OAuth 2.0 Client ID and Secret from Google Cloud Console. Stored locally only.
@@ -368,8 +402,8 @@ export function YouTubePage() {
 
         {/* YT Title Templates */}
         <div>
-          <SectionHeader id="yt-titles" label={`Title Templates (${titleTemplates.length})`} expanded={expandedSection === 'yt-titles'} onToggle={() => toggle('yt-titles')} />
-          {expandedSection === 'yt-titles' && (
+          <SectionHeader id="yt-titles" label={`Title Templates (${titleTemplates.length})`} expanded={expandedSections.has('yt-titles')} onToggle={() => toggle('yt-titles')} />
+          {expandedSections.has('yt-titles') && (
             <div className="px-6 pb-5">
               <p className="text-xs text-gray-500 mb-3 leading-relaxed">
                 Use <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span> as merge fields.
@@ -387,8 +421,8 @@ export function YouTubePage() {
 
         {/* YT Description Templates */}
         <div>
-          <SectionHeader id="yt-descriptions" label={`Description Templates (${descTemplates.length})`} expanded={expandedSection === 'yt-descriptions'} onToggle={() => toggle('yt-descriptions')} />
-          {expandedSection === 'yt-descriptions' && (
+          <SectionHeader id="yt-descriptions" label={`Description Templates (${descTemplates.length})`} expanded={expandedSections.has('yt-descriptions')} onToggle={() => toggle('yt-descriptions')} />
+          {expandedSections.has('yt-descriptions') && (
             <div className="px-6 pb-5">
               <p className="text-xs text-gray-500 mb-3">Static text that gets pre-filled and can be edited before publishing.</p>
               <TemplateList items={descTemplates}
@@ -403,8 +437,8 @@ export function YouTubePage() {
 
         {/* YT Tag Templates */}
         <div>
-          <SectionHeader id="yt-tags" label={`Tag Templates (${tagTemplates.length})`} expanded={expandedSection === 'yt-tags'} onToggle={() => toggle('yt-tags')} />
-          {expandedSection === 'yt-tags' && (
+          <SectionHeader id="yt-tags" label={`Tag Templates (${tagTemplates.length})`} expanded={expandedSections.has('yt-tags')} onToggle={() => toggle('yt-tags')} />
+          {expandedSections.has('yt-tags') && (
             <div className="px-6 pb-5">
               <p className="text-xs text-gray-500 mb-3">Curated tag lists you can mix and match per stream.</p>
               <TemplateList items={tagTemplates}
@@ -427,15 +461,15 @@ export function YouTubePage() {
 
         {/* Twitch Credentials */}
         <div>
-          <SectionHeader id="twitch-credentials" label="Twitch API Credentials" expanded={expandedSection === 'twitch-credentials'} onToggle={() => toggle('twitch-credentials')} />
-          {expandedSection === 'twitch-credentials' && (
+          <SectionHeader id="twitch-credentials" label="Twitch API Credentials" expanded={expandedSections.has('twitch-credentials')} onToggle={() => toggle('twitch-credentials')} />
+          {expandedSections.has('twitch-credentials') && (
             <div className="px-6 pb-5 flex flex-col gap-4">
               <p className="text-xs text-gray-500 leading-relaxed">
                 Create an application at{' '}
-                <a href="#" onClick={e => { e.preventDefault(); window.api.openUrl('https://dev.twitch.tv/console') }}
-                  className="font-mono text-purple-400 hover:text-purple-300 underline cursor-pointer">
+                <button onClick={() => window.api.openUrl('https://dev.twitch.tv/console')}
+                  className="font-mono text-purple-400 hover:text-purple-300 hover:underline transition-colors">
                   dev.twitch.tv/console
-                </a>
+                </button>
                 {' '}using <strong className="text-gray-300">Confidential</strong> as the Client Type,
                 and add the following as a redirect URL:{' '}
                 <span className="font-mono text-gray-400 select-all">http://localhost:42814/oauth2callback</span>
@@ -474,6 +508,66 @@ export function YouTubePage() {
                 </p>
               )}
               {twError && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{twError}</p>}
+            </div>
+          )}
+        </div>
+
+        {/* ── Claude AI ───────────────────────────────────────────────────── */}
+        <div className="px-6 pt-4 pb-1">
+          <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <Bot size={12} className="text-purple-400" />
+            Claude AI
+          </div>
+        </div>
+
+        <div>
+          <SectionHeader id="claude" label="Claude API" expanded={expandedSections.has('claude')} onToggle={() => toggle('claude')} />
+          {expandedSections.has('claude') && (
+            <div className="px-6 pb-5 flex flex-col gap-4">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Connect your Anthropic API key to enable AI-generated suggestions for stream titles, descriptions, and tags.
+                Get a key at <button onClick={() => window.api.openUrl('https://console.anthropic.com')} className="text-purple-400 font-mono hover:text-purple-300 hover:underline transition-colors">console.anthropic.com</button>. Stored locally only.
+              </p>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-400">API Key</label>
+                <input
+                  type="password"
+                  value={claudeApiKey}
+                  onChange={e => { setClaudeApiKey(e.target.value); setClaudeTestResult(null) }}
+                  placeholder="sk-ant-…"
+                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-400">
+                  Preferences / System Prompt
+                  <span className="text-gray-600 font-normal ml-1">(optional)</span>
+                </label>
+                <textarea
+                  value={claudeSystemPrompt}
+                  onChange={e => setClaudeSystemPrompt(e.target.value)}
+                  rows={4}
+                  placeholder="e.g. I stream horror games. Keep titles under 60 characters. Always include the episode number. My channel tagline is …"
+                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y"
+                />
+                <p className="text-xs text-gray-600">Tell Claude about your channel, content style, or any preferences for how suggestions should be worded.</p>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <Button variant="secondary" size="sm" onClick={saveClaudeSettings}
+                  icon={claudeSaved ? <CheckCircle2 size={13} className="text-green-400" /> : undefined}>
+                  {claudeSaved ? 'Saved!' : 'Save'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={testClaudeKey}
+                  disabled={!claudeApiKey.trim() || claudeTesting}
+                  icon={claudeTesting ? <Loader2 size={13} className="animate-spin" /> : undefined}>
+                  {claudeTesting ? 'Testing…' : 'Test connection'}
+                </Button>
+                {claudeTestResult && (
+                  claudeTestResult.valid
+                    ? <span className="flex items-center gap-1.5 text-xs text-green-400"><CheckCircle2 size={13} /> Connected</span>
+                    : <span className="flex items-center gap-1.5 text-xs text-red-400"><AlertCircle size={13} /> {claudeTestResult.error ?? 'Invalid key'}</span>
+                )}
+              </div>
             </div>
           )}
         </div>

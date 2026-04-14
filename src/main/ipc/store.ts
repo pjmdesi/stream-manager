@@ -29,6 +29,12 @@ export interface AppConfig {
   youtubeClientSecret: string
   twitchClientId: string
   twitchClientSecret: string
+  startWithWindows: boolean
+  startMinimized: boolean
+  autoDeletePartialOnCancel: boolean
+  claudeApiKey: string
+  claudeSystemPrompt: string
+  launcherWidgetGroupId: string
 }
 
 function getDefaultConfig(): AppConfig {
@@ -52,6 +58,12 @@ function getDefaultConfig(): AppConfig {
     youtubeClientSecret: '',
     twitchClientId: '',
     twitchClientSecret: '',
+    startWithWindows: false,
+    startMinimized: false,
+    autoDeletePartialOnCancel: false,
+    claudeApiKey: '',
+    claudeSystemPrompt: '',
+    launcherWidgetGroupId: '',
   }
 }
 
@@ -64,6 +76,7 @@ type StoreShape = {
   importedPresets: any[]
   metaMigrated: boolean
   streamTypeTags: Record<string, string>
+  streamTypeTextures: Record<string, string>
 }
 
 let store: Store<StoreShape> | null = null
@@ -81,6 +94,7 @@ export function getStore(): Store<StoreShape> {
         importedPresets: [],
         metaMigrated: false,
         streamTypeTags: {},
+        streamTypeTextures: {},
       }
     })
   }
@@ -115,6 +129,24 @@ export function registerStoreIPC(): void {
 
   ipcMain.handle('store:getStreamTypeTags', async () => getStore().get('streamTypeTags', {}))
   ipcMain.handle('store:setStreamTypeTags', async (_e, v: Record<string, string>) => getStore().set('streamTypeTags', v))
+  ipcMain.handle('store:getStreamTypeTextures', async () => getStore().get('streamTypeTextures', {}))
+  ipcMain.handle('store:setStreamTypeTextures', async (_e, v: Record<string, string>) => getStore().set('streamTypeTextures', v))
+
+  ipcMain.handle('app:setStartupSettings', (_event, startWithWindows: boolean, startMinimized: boolean) => {
+    const s = getStore()
+    const current = s.get('config', getDefaultConfig())
+    s.set('config', { ...current, startWithWindows, startMinimized })
+    if (app.isPackaged) {
+      // For portable builds, PORTABLE_EXECUTABLE_FILE is the actual .exe on disk (not the temp-extracted copy).
+      const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
+      app.setLoginItemSettings({ openAtLogin: startWithWindows, path: exePath })
+    }
+  })
+
+  ipcMain.handle('app:getStartupSettings', () => {
+    const config = getStore().get('config', getDefaultConfig())
+    return { startWithWindows: config.startWithWindows, startMinimized: config.startMinimized }
+  })
 
   if (!app.isPackaged) {
     ipcMain.handle('store:resetOnboarding', async () => {

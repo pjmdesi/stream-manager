@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain, globalShortcut, screen } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
 const is = { dev: process.env['NODE_ENV'] === 'development' || !!process.env['ELECTRON_RENDERER_URL'] }
@@ -40,13 +40,15 @@ const optimizer = { watchWindowShortcuts: (_win: BrowserWindow) => {} }
 import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
-import { registerConverterIPC } from './ipc/converter'
-import { registerStoreIPC } from './ipc/store'
+import { registerConverterIPC, getConverterStatus } from './ipc/converter'
+import { registerStoreIPC, getStore } from './ipc/store'
 import { registerStreamsIPC } from './ipc/streams'
 import { registerCombineIPC } from './ipc/combine'
 import { registerYouTubeIPC } from './ipc/youtube'
 import { registerTwitchIPC } from './ipc/twitch'
 import { registerVideoPopupIPC } from './ipc/videoPopup'
+import { registerLauncherIPC } from './ipc/launcher'
+import { registerClaudeIPC } from './ipc/claude'
 import { tempManager } from './services/tempManager'
 import { fileWatcher } from './services/fileWatcher'
 
@@ -129,6 +131,62 @@ app.on('second-instance', () => {
   }
 })
 
+function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
+  const watcherStatus = fileWatcher.getStatus()
+  const converterStatus = getConverterStatus()
+  const config = getStore().get('config') as any
+
+  const watcherLabel = watcherStatus.active
+    ? `Watcher: Active · ${watcherStatus.ruleCount} rule${watcherStatus.ruleCount !== 1 ? 's' : ''}`
+    : 'Watcher: Off'
+  const converterLabel = converterStatus.active
+    ? `Converter: ${converterStatus.label}`
+    : 'Converter: Idle'
+
+  return Menu.buildFromTemplate([
+    { label: 'Stream Manager', enabled: false },
+    { type: 'separator' },
+    { label: watcherLabel, enabled: false },
+    { label: converterLabel, enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Open', click: () => {
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Start with Windows',
+      type: 'checkbox',
+      checked: !!config?.startWithWindows,
+      enabled: app.isPackaged,
+      click: (item) => {
+        const startMinimized = !!config?.startMinimized
+        ipcMain.emit('_setStartup', item.checked, startMinimized)
+        const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
+        app.setLoginItemSettings({ openAtLogin: item.checked, path: exePath })
+        const s = getStore()
+        const cur = s.get('config') as any
+        s.set('config', { ...cur, startWithWindows: item.checked })
+      }
+    },
+    {
+      label: 'Start Minimized',
+      type: 'checkbox',
+      checked: !!config?.startMinimized,
+      enabled: app.isPackaged && !!config?.startWithWindows,
+      click: (item) => {
+        const s = getStore()
+        const cur = s.get('config') as any
+        s.set('config', { ...cur, startMinimized: item.checked })
+      }
+    },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() }
+  ])
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.streammanager')
 
@@ -141,7 +199,51 @@ app.whenReady().then(() => {
   registerStreamsIPC()  // default page — calls listStreams + watchStreamsDir on first render
   registerFilesIPC()   // WatcherContext may autostart the watcher on mount
 
-  createWindow()
+  // Re-register startup entry on each launch (packaged only) to self-heal if app has been moved.
+  // For portable builds, PORTABLE_EXECUTABLE_FILE is the actual .exe on disk (not the temp-extracted copy).
+  if (app.isPackaged) {
+    const config = getStore().get('config') as any
+    const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
+    if (config?.startWithWindows) {
+      app.setLoginItemSettings({ openAtLogin: true, path: exePath })
+    }
+  }
+
+  const mainWindow = createWindow()
+
+  // Create system tray — always visible while app is running
+  const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
+  const tray = new Tray(trayIcon)
+  tray.setToolTip('Stream Manager')
+
+  tray.on('click', () => {
+    if (mainWindow.isVisible()) {
+      mainWindow.focus()
+    } else {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+
+  tray.on('right-click', () => {
+    // Build a fresh menu on every right-click and pass it directly to popUpContextMenu.
+    // Passing via setContextMenu() causes Windows to cache and show the old menu before
+    // the right-click event fires, resulting in stale status lines.
+    tray.popUpContextMenu(buildTrayMenu(mainWindow))
+  })
+
+  // Minimize-to-tray IPC — called by the title bar button
+  ipcMain.on('window:minimizeToTray', () => {
+    mainWindow.hide()
+  })
+
+  // Start minimized: hide the window before it's shown if both flags are set
+  if (app.isPackaged) {
+    const config = getStore().get('config') as any
+    if (config?.startWithWindows && config?.startMinimized) {
+      mainWindow.once('ready-to-show', () => mainWindow.hide())
+    }
+  }
 
   // Defer page-specific handlers — only called when the user navigates there
   setImmediate(() => {
@@ -152,6 +254,8 @@ app.whenReady().then(() => {
     registerYouTubeIPC()
     registerTwitchIPC()
     registerVideoPopupIPC()
+    registerLauncherIPC()
+    registerClaudeIPC()
   })
 
   app.on('activate', function () {

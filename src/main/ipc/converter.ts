@@ -212,6 +212,16 @@ function getPresetsDir(): string {
 
 // ── IPC handlers ───────────────────────────────────────────────────────────
 
+export function getConverterStatus(): { active: boolean; percent: number; label: string } {
+  const running = [...jobs.values()].filter(j => j.status === 'running' || j.status === 'queued')
+  if (running.length === 0) return { active: false, percent: 0, label: 'Idle' }
+  const current = running.find(j => j.status === 'running') ?? running[0]
+  const name = current.outputFile.split(/[\\/]/).pop() ?? ''
+  const queued = running.length - 1
+  const label = queued > 0 ? `${Math.round(current.progress ?? 0)}% — ${name} (+${queued} queued)` : `${Math.round(current.progress ?? 0)}% — ${name}`
+  return { active: true, percent: current.progress ?? 0, label }
+}
+
 export function registerConverterIPC(): void {
   ipcMain.handle('converter:getBuiltinPresets', async () => BUILTIN_PRESETS)
 

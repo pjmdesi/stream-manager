@@ -564,6 +564,54 @@ export function registerStreamsIPC(): void {
     archiveCancelFn?.()
   })
 
+  ipcMain.handle('streams:previewReschedule', async (
+    _event,
+    folderPath: string,
+    newDate: string
+  ): Promise<{ conflictExists: boolean; filesToRename: { oldName: string; newName: string }[] }> => {
+    const streamsDir = path.dirname(folderPath)
+    const oldDate = path.basename(folderPath)
+    const conflictExists = fs.existsSync(path.join(streamsDir, newDate))
+    let filesToRename: { oldName: string; newName: string }[] = []
+    try {
+      filesToRename = fs.readdirSync(folderPath, { withFileTypes: true })
+        .filter(e => e.isFile() && e.name.startsWith(oldDate))
+        .map(e => ({ oldName: e.name, newName: newDate + e.name.slice(oldDate.length) }))
+    } catch {}
+    return { conflictExists, filesToRename }
+  })
+
+  ipcMain.handle('streams:reschedule', async (
+    _event,
+    folderPath: string,
+    newDate: string
+  ): Promise<string> => {
+    const streamsDir = path.dirname(folderPath)
+    const oldDate = path.basename(folderPath)
+
+    // Rename files whose names start with the old date
+    try {
+      for (const entry of fs.readdirSync(folderPath, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.startsWith(oldDate)) continue
+        const newName = newDate + entry.name.slice(oldDate.length)
+        fs.renameSync(path.join(folderPath, entry.name), path.join(folderPath, newName))
+      }
+    } catch {}
+
+    // Update meta: move the key from oldDate to newDate
+    const allMeta = readAllMeta(streamsDir)
+    if (allMeta[oldDate]) {
+      allMeta[newDate] = { ...allMeta[oldDate], date: newDate }
+      delete allMeta[oldDate]
+      writeAllMeta(streamsDir, allMeta)
+    }
+
+    // Rename the folder last (after files inside are done)
+    const newFolderPath = path.join(streamsDir, newDate)
+    fs.renameSync(folderPath, newFolderPath)
+    return newFolderPath
+  })
+
   ipcMain.handle('streams:deleteFolder', async (_event, folderPath: string) => {
     const streamsDir = path.dirname(folderPath)
     const folderName = path.basename(folderPath)

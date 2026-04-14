@@ -17,6 +17,8 @@ export interface TagColor {
   highlight: string
   /** Solid Tailwind background class for the swatch circle in the color picker */
   swatch: string
+  /** Ring class for the highlighted chip in the dropdown */
+  ring: string
 }
 
 export const TAG_COLORS: TagColor[] = [
@@ -27,6 +29,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-slate-300',
     highlight: 'bg-slate-600/30',
     swatch: 'bg-slate-500',
+    ring: 'ring-slate-400/70',
   },
   {
     key: 'red',
@@ -35,6 +38,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-red-300',
     highlight: 'bg-red-600/30',
     swatch: 'bg-red-500',
+    ring: 'ring-red-400/70',
   },
   {
     key: 'orange',
@@ -43,6 +47,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-orange-300',
     highlight: 'bg-orange-600/30',
     swatch: 'bg-orange-500',
+    ring: 'ring-orange-400/70',
   },
   {
     key: 'amber',
@@ -51,6 +56,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-amber-300',
     highlight: 'bg-amber-600/30',
     swatch: 'bg-amber-500',
+    ring: 'ring-amber-400/70',
   },
   {
     key: 'yellow',
@@ -59,6 +65,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-yellow-300',
     highlight: 'bg-yellow-600/30',
     swatch: 'bg-yellow-400',
+    ring: 'ring-yellow-400/70',
   },
   {
     key: 'lime',
@@ -67,6 +74,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-lime-300',
     highlight: 'bg-lime-600/30',
     swatch: 'bg-lime-500',
+    ring: 'ring-lime-400/70',
   },
   {
     key: 'green',
@@ -75,6 +83,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-green-300',
     highlight: 'bg-green-600/30',
     swatch: 'bg-green-500',
+    ring: 'ring-green-400/70',
   },
   {
     key: 'teal',
@@ -83,6 +92,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-teal-300',
     highlight: 'bg-teal-600/30',
     swatch: 'bg-teal-500',
+    ring: 'ring-teal-400/70',
   },
   {
     key: 'cyan',
@@ -91,6 +101,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-cyan-300',
     highlight: 'bg-cyan-600/30',
     swatch: 'bg-cyan-500',
+    ring: 'ring-cyan-400/70',
   },
   {
     key: 'blue',
@@ -99,6 +110,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-blue-300',
     highlight: 'bg-blue-600/30',
     swatch: 'bg-blue-500',
+    ring: 'ring-blue-400/70',
   },
   {
     key: 'purple',
@@ -107,6 +119,7 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-purple-300',
     highlight: 'bg-purple-600/30',
     swatch: 'bg-purple-500',
+    ring: 'ring-purple-400/70',
   },
   {
     key: 'pink',
@@ -115,8 +128,72 @@ export const TAG_COLORS: TagColor[] = [
     text: 'text-pink-300',
     highlight: 'bg-pink-600/30',
     swatch: 'bg-pink-500',
+    ring: 'ring-pink-400/70',
   },
 ]
+
+// ── Tag Textures ──────────────────────────────────────────────────────────────
+
+export interface TagTexture {
+  key: string
+  label: string
+  /** Short symbol shown in the picker button tooltip */
+  symbol: string
+}
+
+export const TAG_TEXTURES: TagTexture[] = [
+  { key: 'solid',            label: 'Solid',              symbol: '■'   },
+  { key: 'diagonal',         label: 'Diagonal',           symbol: '///' },
+  { key: 'reverse-diagonal', label: 'Reverse Diagonal',   symbol: '\\\\\\' },
+  { key: 'crosshatch',       label: 'Crosshatch',         symbol: '###' },
+  { key: 'dots',             label: 'Dots',               symbol: '⬡'  },
+  { key: 'checker',          label: 'Checker',            symbol: '🏁'  },
+]
+
+export const DEFAULT_TAG_TEXTURE = 'solid'
+
+export type TagTextureStyle = {
+  backgroundImage?: string
+  backgroundSize?: string
+  backgroundPosition?: string
+}
+
+const D = 'rgba(0,0,0,0.5)'
+
+export function getTagTextureStyle(textureKey: string | undefined): TagTextureStyle {
+  switch (textureKey) {
+    case 'diagonal':
+      return { backgroundImage: `repeating-linear-gradient(45deg, ${D} 0px, ${D} 1.4px, transparent 1.4px, transparent 4.2px)` }
+    case 'reverse-diagonal':
+      return { backgroundImage: `repeating-linear-gradient(-45deg, ${D} 0px, ${D} 1.4px, transparent 1.4px, transparent 4.2px)` }
+    case 'crosshatch':
+      return { backgroundImage: `repeating-linear-gradient(45deg, ${D} 0px, ${D} 1.4px, transparent 1.4px, transparent 4.2px), repeating-linear-gradient(-45deg, ${D} 0px, ${D} 1.4px, transparent 1.4px, transparent 4.2px)` }
+    case 'dots':
+      return {
+        backgroundImage: `radial-gradient(circle, ${D} 1px, transparent 1px), radial-gradient(circle, ${D} 1px, transparent 1px)`,
+        backgroundSize: '6px 9px, 6px 9px',
+        backgroundPosition: '0 0, 3px 4.5px',
+      }
+    case 'checker':
+      return {
+        backgroundImage: `repeating-conic-gradient(${D} 0% 25%, transparent 0% 50%)`,
+        backgroundSize: '6px 6px',
+      }
+    default:
+      return {}
+  }
+}
+
+export function pickTextureForNewTag(tagTextures: Record<string, string>): string {
+  const usageCounts: Record<string, number> = {}
+  for (const t of TAG_TEXTURES) usageCounts[t.key] = 0
+  for (const texture of Object.values(tagTextures)) {
+    if (texture in usageCounts) usageCounts[texture]++
+  }
+  const minUsage = Math.min(...Object.values(usageCounts))
+  const candidates = TAG_TEXTURES.filter(t => usageCounts[t.key] === minUsage)
+  return candidates[Math.floor(Math.random() * candidates.length)].key
+}
 
 /** Fast key → color lookup */
 export const TAG_COLOR_MAP: Record<string, TagColor> = Object.fromEntries(

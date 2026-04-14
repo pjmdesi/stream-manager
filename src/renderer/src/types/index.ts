@@ -109,6 +109,11 @@ export interface AppConfig {
   youtubeClientSecret: string
   twitchClientId: string
   twitchClientSecret: string
+  startWithWindows: boolean
+  startMinimized: boolean
+  claudeApiKey: string
+  claudeSystemPrompt: string
+  launcherWidgetGroupId: string
 }
 
 export interface StreamMeta {
@@ -122,6 +127,8 @@ export interface StreamMeta {
   ytTitle?: string
   ytDescription?: string
   ytGameTitle?: string
+  ytCatchyTitle?: string
+  ytEpisode?: string
   ytTags?: string[]
   // Twitch
   twitchTitle?: string
@@ -196,7 +203,20 @@ export interface LiveBroadcast {
   }
 }
 
-export type Page = 'streams' | 'player' | 'templates' | 'rules' | 'converter' | 'combine' | 'youtube' | 'settings'
+export type Page = 'streams' | 'player' | 'templates' | 'rules' | 'converter' | 'combine' | 'integrations' | 'settings' | 'launcher'
+
+export interface LauncherApp {
+  id: string
+  name: string
+  path: string
+}
+
+export interface LauncherGroup {
+  id: string
+  name: string
+  icon?: string  // kebab-case lucide icon name, e.g. "rocket"
+  apps: LauncherApp[]
+}
 
 // ── Clip mode ─────────────────────────────────────────────────────────────────
 

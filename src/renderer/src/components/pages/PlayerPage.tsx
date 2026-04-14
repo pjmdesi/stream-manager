@@ -10,6 +10,7 @@ import { useWaveform } from '../../hooks/useWaveform'
 import { FileDropZone } from '../ui/FileDropZone'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
+import { Tooltip } from '../ui/Tooltip'
 
 function formatTime(seconds: number, fps?: number): string {
   const h = Math.floor(seconds / 3600)
@@ -1105,7 +1106,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   const { svgPath: waveformPath, peakCount, loading: waveformLoading } = useWaveform(waveformSources, vStart, vEnd, duration)
 
-  const { thumbnails, generating } = useThumbnailStrip(
+  const { thumbnails, generating, zoomGenerating } = useThumbnailStrip(
     state.filePath ?? null,
     videoUrl ?? null,
     duration,
@@ -1416,21 +1417,23 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
               {/* Screenshot + popup buttons — visible on hover */}
               <div className="absolute bottom-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={captureScreenshot}
-                  title="Save screenshot (PNG)"
-                  className="p-2 rounded-lg bg-black/60 text-white/70 hover:text-white hover:bg-black/80"
-                >
-                  <Camera size={16} />
-                </button>
-                {videoUrl && (
+                <Tooltip content="Save screenshot (PNG)">
                   <button
-                    onClick={isPopupOpen ? () => window.api.closeVideoPopup() : openVideoPopup}
-                    title={isPopupOpen ? 'Return video to player' : 'Pop out video (for OBS capture)'}
-                    className={`p-2 rounded-lg bg-black/60 hover:bg-black/80 transition-colors ${isPopupOpen ? 'text-purple-400 hover:text-purple-300' : 'text-white/70 hover:text-white'}`}
+                    onClick={captureScreenshot}
+                    className="p-2 rounded-lg bg-black/60 text-white/70 hover:text-white hover:bg-black/80"
                   >
-                    <Tv2 size={16} />
+                    <Camera size={16} />
                   </button>
+                </Tooltip>
+                {videoUrl && (
+                  <Tooltip content={isPopupOpen ? 'Return video to player' : 'Pop out video (for OBS capture)'}>
+                    <button
+                      onClick={isPopupOpen ? () => window.api.closeVideoPopup() : openVideoPopup}
+                      className={`p-2 rounded-lg bg-black/60 hover:bg-black/80 transition-colors ${isPopupOpen ? 'text-purple-400 hover:text-purple-300' : 'text-white/70 hover:text-white'}`}
+                    >
+                      <Tv2 size={16} />
+                    </button>
+                  </Tooltip>
                 )}
               </div>
 
@@ -1469,7 +1472,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         return (
                           <div className="relative group">
                             <button
-                              title="Split segment at playhead"
                               onClick={splitSegment}
                               disabled={!canSplit}
                               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-purple-400 border border-purple-500/30 hover:bg-purple-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1489,7 +1491,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       return (
                         <div className="relative group">
                           <button
-                            title="Add a clip segment at the playhead"
                             onClick={addSegment}
                             disabled={noRoom}
                             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400 border border-blue-500/30 hover:bg-blue-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1504,35 +1505,37 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         </div>
                       )
                     })()}
-                    <button
-                      title={clipFocus ? 'Clip Focus on — playback skips gaps between segments' : 'Clip Focus — skip gaps between segments during playback'}
-                      onClick={() => setClipFocus(v => !v)}
-                      disabled={clipState.clipRegions.length === 0}
-                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                        clipFocus
-                          ? 'text-blue-200 border-blue-400/50 bg-blue-500/25 hover:bg-blue-500/35'
-                          : 'text-blue-400/70 border-blue-500/20 hover:bg-blue-950/60'
-                      }`}
-                    >
-                      <Repeat size={11} /> Focus
-                    </button>
+                    <Tooltip content={clipFocus ? 'Clip Focus on — playback skips gaps between segments' : 'Clip Focus — skip gaps between segments during playback'}>
+                      <button
+                        onClick={() => setClipFocus(v => !v)}
+                        disabled={clipState.clipRegions.length === 0}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                          clipFocus
+                            ? 'text-blue-200 border-blue-400/50 bg-blue-500/25 hover:bg-blue-500/35'
+                            : 'text-blue-400/70 border-blue-500/20 hover:bg-blue-950/60'
+                        }`}
+                      >
+                        <Repeat size={11} /> Focus
+                      </button>
+                    </Tooltip>
 
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
 
-                    <button
-                      title="Toggle 9:16 crop"
-                      onClick={() => setClipState(s => ({ ...s, cropMode: s.cropMode === '9:16' ? 'none' : '9:16', cropX: 0.5 }))}
-                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors ${
-                        clipState.cropMode === '9:16'
-                          ? 'text-blue-300 border-blue-400/60 bg-blue-950/60'
-                          : 'text-gray-400 border-white/20 hover:text-blue-300 hover:border-blue-400/40'
-                      }`}
-                    >
-                      <Crop size={11} /> Crop
-                    </button>
-                    <button
-                      title="Add a bleep at the current playhead position"
-                      onClick={() => {
+                    <Tooltip content="Toggle 9:16 crop">
+                      <button
+                        onClick={() => setClipState(s => ({ ...s, cropMode: s.cropMode === '9:16' ? 'none' : '9:16', cropX: 0.5 }))}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors ${
+                          clipState.cropMode === '9:16'
+                            ? 'text-blue-300 border-blue-400/60 bg-blue-950/60'
+                            : 'text-gray-400 border-white/20 hover:text-blue-300 hover:border-blue-400/40'
+                        }`}
+                      >
+                        <Crop size={11} /> Crop
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Add a bleep at the current playhead position">
+                      <button
+                        onClick={() => {
                         const t = currentTime
                         const dur = duration
                         const { lo, hi } = getBleepFreeInterval(clipState.bleepRegions, t, dur)
@@ -1547,10 +1550,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         setActiveBleepId(newId)
                         setBleepLengthInput((end - s).toFixed(2))
                       }}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors"
-                    >
-                      <AudioWaveform size={11} /> Add Bleep
-                    </button>
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors"
+                      >
+                        <AudioWaveform size={11} /> Add Bleep
+                      </button>
+                    </Tooltip>
 
                     <div className="flex-1" />
 
@@ -1583,13 +1587,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           className="w-16 text-[11px] text-blue-300 tabular-nums bg-transparent border-b border-blue-500/60 focus:outline-none text-right"
                         />
                       ) : (
-                        <span
-                          className="text-[11px] text-blue-400/70 tabular-nums cursor-text hover:text-blue-300 transition-colors"
-                          title="Click to set view start"
-                          onClick={() => { setVStartInput(formatViewTime(vStart, videoInfo?.fps)); setEditingVStart(true); setTimeout(() => vStartInputRef.current?.select(), 0) }}
-                        >
-                          {formatViewTime(vStart, videoInfo?.fps)}
-                        </span>
+                        <Tooltip content="Click to set view start">
+                          <span
+                            className="text-[11px] text-blue-400/70 tabular-nums cursor-text hover:text-blue-300 transition-colors"
+                            onClick={() => { setVStartInput(formatViewTime(vStart, videoInfo?.fps)); setEditingVStart(true); setTimeout(() => vStartInputRef.current?.select(), 0) }}
+                          >
+                            {formatViewTime(vStart, videoInfo?.fps)}
+                          </span>
+                        </Tooltip>
                       )}
                       <span className="text-[11px] text-blue-400/30 select-none">—</span>
                       {editingVEnd ? (
@@ -1618,13 +1623,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           className="w-16 text-[11px] text-blue-300 tabular-nums bg-transparent border-b border-blue-500/60 focus:outline-none"
                         />
                       ) : (
-                        <span
-                          className="text-[11px] text-blue-400/70 tabular-nums cursor-text hover:text-blue-300 transition-colors"
-                          title="Click to set view end"
-                          onClick={() => { setVEndInput(formatViewTime(vEnd, videoInfo?.fps)); setEditingVEnd(true); setTimeout(() => vEndInputRef.current?.select(), 0) }}
-                        >
-                          {formatViewTime(vEnd, videoInfo?.fps)}
-                        </span>
+                        <Tooltip content="Click to set view end">
+                          <span
+                            className="text-[11px] text-blue-400/70 tabular-nums cursor-text hover:text-blue-300 transition-colors"
+                            onClick={() => { setVEndInput(formatViewTime(vEnd, videoInfo?.fps)); setEditingVEnd(true); setTimeout(() => vEndInputRef.current?.select(), 0) }}
+                          >
+                            {formatViewTime(vEnd, videoInfo?.fps)}
+                          </span>
+                        </Tooltip>
                       )}
                     </div>
 
@@ -1634,27 +1640,29 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     {isZoomed && (
                       <>
                         <span className="text-[10px] text-blue-400/60 tabular-nums">{zoomLevel.toFixed(1)}×</span>
-                        <button
-                          onClick={() => setViewport({ viewStart: 0, viewEnd: duration })}
-                          title="Reset zoom"
-                          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400/70 border border-blue-500/20 hover:bg-blue-950/60 transition-colors"
-                        >
-                          <ZoomIn size={10} /> 1×
-                        </button>
+                        <Tooltip content="Reset zoom">
+                          <button
+                            onClick={() => setViewport({ viewStart: 0, viewEnd: duration })}
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400/70 border border-blue-500/20 hover:bg-blue-950/60 transition-colors"
+                          >
+                            <ZoomIn size={10} /> 1×
+                          </button>
+                        </Tooltip>
                         <div className="w-px h-3 bg-white/10 mx-0.5 shrink-0" />
                       </>
                     )}
 
                     <div className="w-px h-3 bg-white/10 mx-0.5 shrink-0" />
 
-                    <button
-                      title={clipState.clipRegions.length > 0 ? 'Export clip' : 'Add at least one segment first'}
-                      onClick={() => setShowExportDialog(true)}
-                      disabled={clipState.clipRegions.length === 0}
-                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-purple-300 border-purple-600/30 bg-purple-600/20 hover:bg-purple-600/35 disabled:hover:bg-transparent"
-                    >
-                      <Upload size={11} /> Export Clip
-                    </button>
+                    <Tooltip content={clipState.clipRegions.length > 0 ? 'Export clip' : 'Add at least one segment first'}>
+                      <button
+                        onClick={() => setShowExportDialog(true)}
+                        disabled={clipState.clipRegions.length === 0}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-purple-300 border-purple-600/30 bg-purple-600/20 hover:bg-purple-600/35 disabled:hover:bg-transparent"
+                      >
+                        <Upload size={11} /> Export Clip
+                      </button>
+                    </Tooltip>
                   </div>
                 </div>
               )}
@@ -1689,7 +1697,15 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   return (
                     <div className={`absolute inset-0 ${isClipMode ? 'overflow-hidden' : 'overflow-visible'}`}>
                       {thumbnails.map((thumb, i) => {
-                        if (!thumb) return null
+                        if (!thumb) return zoomGenerating ? (
+                          <div
+                            key={i}
+                            className="absolute h-full flex items-center justify-center pointer-events-none"
+                            style={{ left: `${i * naturalW}px`, width: `${naturalW}px` }}
+                          >
+                            <Loader2 size={8} className="animate-spin text-gray-700" />
+                          </div>
+                        ) : null
                         const isHovered = !isClipMode && hoverRatio !== null &&
                           Math.min(Math.floor(hoverRatio * thumbnails.length), thumbnails.length - 1) === i
                         return (
@@ -1823,7 +1839,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     return (
                       <div
                         key={region.id}
-                        className="absolute top-8 bottom-0 bg-black overflow-hidden cursor-grab active:cursor-grabbing z-[4]"
+                        className="absolute top-8 bottom-0 bg-black overflow-hidden cursor-grab active:cursor-grabbing z-[4] border border-white/20"
                         style={{ left: `${l}%`, right: `${r}%` }}
                         onMouseDown={e => {
                           if (e.button !== 0) return
@@ -1921,21 +1937,22 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         {/* Duration label + delete button — centered below the region */}
                         <div className="absolute flex -translate-x-1/2" style={{ left: `${centerPct}%`, top: '100%', zIndex: selectedRegionId === seg.id ? 60 : 40 }}>
                           <div className="bg-blue-950 border border-blue-400 rounded-b px-1 pt-0.5 pb-0 flex items-center gap-1 shadow-xl">
-                            <button
-                              onMouseDown={e => e.preventDefault()}
-                              onClick={e => {
-                                e.stopPropagation()
-                                setLockedRegionIds(prev => {
-                                  const next = new Set(prev)
-                                  next.has(seg.id) ? next.delete(seg.id) : next.add(seg.id)
-                                  return next
-                                })
-                              }}
-                              title={lockedRegionIds.has(seg.id) ? 'Unlock duration' : 'Lock duration'}
-                              className={`flex items-center justify-center transition-colors shrink-0 ${lockedRegionIds.has(seg.id) ? 'text-orange-400 hover:text-orange-300' : 'text-blue-400/50 hover:text-blue-300'}`}
-                            >
-                              {lockedRegionIds.has(seg.id) ? <Lock size={9} /> : <Unlock size={9} />}
-                            </button>
+                            <Tooltip content={lockedRegionIds.has(seg.id) ? 'Unlock duration' : 'Lock duration'}>
+                              <button
+                                onMouseDown={e => e.preventDefault()}
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  setLockedRegionIds(prev => {
+                                    const next = new Set(prev)
+                                    next.has(seg.id) ? next.delete(seg.id) : next.add(seg.id)
+                                    return next
+                                  })
+                                }}
+                                className={`flex items-center justify-center transition-colors shrink-0 ${lockedRegionIds.has(seg.id) ? 'text-orange-400 hover:text-orange-300' : 'text-blue-400/50 hover:text-blue-300'}`}
+                              >
+                                {lockedRegionIds.has(seg.id) ? <Lock size={9} /> : <Unlock size={9} />}
+                              </button>
+                            </Tooltip>
                             {editingDurationId === seg.id ? (
                               <input
                                 ref={durationInputRef}
@@ -1981,19 +1998,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                 {durStr}
                               </span>
                             )}
-                            <button
-                              onMouseDown={e => e.preventDefault()}
-                              onClick={e => {
-                                e.stopPropagation()
-                                setClipState(s => ({ ...s, clipRegions: s.clipRegions.filter(c => c.id !== seg.id) }))
-                                if (editingDurationId === seg.id) setEditingDurationId(null)
-                                setLockedRegionIds(prev => { const next = new Set(prev); next.delete(seg.id); return next })
-                              }}
-                              className="flex items-center justify-center text-red-500/60 hover:text-red-400 transition-colors ml-0.5"
-                              title="Delete segment"
-                            >
-                              <Trash2 size={9} />
-                            </button>
+                            <Tooltip content="Delete segment">
+                              <button
+                                onMouseDown={e => e.preventDefault()}
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  setClipState(s => ({ ...s, clipRegions: s.clipRegions.filter(c => c.id !== seg.id) }))
+                                  if (editingDurationId === seg.id) setEditingDurationId(null)
+                                  setLockedRegionIds(prev => { const next = new Set(prev); next.delete(seg.id); return next })
+                                }}
+                                className="flex items-center justify-center text-red-500/60 hover:text-red-400 transition-colors ml-0.5"
+                              >
+                                <Trash2 size={9} />
+                              </button>
+                            </Tooltip>
                           </div>
                         </div>
                         {/* Merge button — shown when this seg is exactly touching the next */}
@@ -2002,23 +2020,24 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             className="absolute z-50 -translate-x-1/2 -translate-y-1/2"
                             style={{ left: `${Math.max(2, Math.min(98, ((seg.outPoint - vStart) / vSpan) * 100))}%`, top: '50%' }}
                           >
-                            <button
-                              onMouseDown={e => e.stopPropagation()}
-                              onClick={e => {
-                                e.stopPropagation()
-                                setClipState(s => {
-                                  const a = s.clipRegions.find(c => c.id === seg.id)
-                                  const b = s.clipRegions.find(c => c.id === nextSeg.id)
-                                  if (!a || !b) return s
-                                  const merged: ClipRegion = { id: `seg-${uuidv4()}`, inPoint: a.inPoint, outPoint: b.outPoint }
-                                  return { ...s, clipRegions: s.clipRegions.filter(c => c.id !== seg.id && c.id !== nextSeg.id).concat(merged).sort((x, y) => x.inPoint - y.inPoint) }
-                                })
-                              }}
-                              className="flex items-center gap-0.5 px-1 py-0.5 text-[10px] text-teal-300 bg-teal-950 border border-teal-500/50 rounded hover:bg-teal-900 transition-colors shadow-lg"
-                              title="Merge adjacent segments"
-                            >
-                              <GitMerge size={9} /> Merge
-                            </button>
+                            <Tooltip content="Merge adjacent segments">
+                              <button
+                                onMouseDown={e => e.stopPropagation()}
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  setClipState(s => {
+                                    const a = s.clipRegions.find(c => c.id === seg.id)
+                                    const b = s.clipRegions.find(c => c.id === nextSeg.id)
+                                    if (!a || !b) return s
+                                    const merged: ClipRegion = { id: `seg-${uuidv4()}`, inPoint: a.inPoint, outPoint: b.outPoint }
+                                    return { ...s, clipRegions: s.clipRegions.filter(c => c.id !== seg.id && c.id !== nextSeg.id).concat(merged).sort((x, y) => x.inPoint - y.inPoint) }
+                                  })
+                                }}
+                                className="flex items-center gap-0.5 px-1 py-0.5 text-[10px] text-teal-300 bg-teal-950 border border-teal-500/50 rounded hover:bg-teal-900 transition-colors shadow-lg"
+                              >
+                                <GitMerge size={9} /> Merge
+                              </button>
+                            </Tooltip>
                           </div>
                         )}
                       </React.Fragment>
@@ -2284,70 +2303,84 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     className="w-24 shrink-0 text-xs text-purple-300 tabular-nums bg-transparent border-b border-purple-500 focus:outline-none"
                   />
                 ) : (
-                  <span
-                    className="text-xs text-gray-500 tabular-nums w-24 shrink-0 cursor-text hover:text-gray-300 transition-colors"
-                    title="Click to enter timecode"
-                    onClick={() => {
-                      if (!duration) return
-                      setTimecodeInput(formatViewTime(currentTime, videoInfo?.fps))
-                      setEditingTimecode(true)
-                      setTimeout(() => timecodeInputRef.current?.select(), 0)
-                    }}
-                  >
-                    {formatTime(currentTime, videoInfo?.fps)}
-                  </span>
+                  <Tooltip content="Click to enter timecode">
+                    <span
+                      className="text-xs text-gray-500 tabular-nums w-24 shrink-0 cursor-text hover:text-gray-300 transition-colors"
+                      onClick={() => {
+                        if (!duration) return
+                        setTimecodeInput(formatViewTime(currentTime, videoInfo?.fps))
+                        setEditingTimecode(true)
+                        setTimeout(() => timecodeInputRef.current?.select(), 0)
+                      }}
+                    >
+                      {formatTime(currentTime, videoInfo?.fps)}
+                    </span>
+                  </Tooltip>
                 )}
                 <div className="flex-1 flex items-center justify-center gap-1">
                 {/* Skip to start */}
-                <button onClick={() => seekRef.current(0)} title="Skip to start" className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
-                  <ChevronsLeft size={15} />
-                </button>
+                <Tooltip content="Skip to start">
+                  <button onClick={() => seekRef.current(0)} className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                    <ChevronsLeft size={15} />
+                  </button>
+                </Tooltip>
 
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
 
                 {/* Skip back */}
                 {[-10, -5, -1].map(s => (
-                  <button key={s} onClick={() => skip(s)} title={`${Math.abs(s)}s back`} className="px-1.5 py-1 rounded text-xs text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
-                    {s}
-                  </button>
+                  <Tooltip key={s} content={`${Math.abs(s)}s back`}>
+                    <button onClick={() => skip(s)} className="px-1.5 py-1 rounded text-xs text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
+                      {s}
+                    </button>
+                  </Tooltip>
                 ))}
 
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
 
                 {/* Prev frame */}
-                <button onClick={() => stepFrame(-1)} title="Previous frame" className="p-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
-                  <ChevronLeft size={16} />
-                </button>
+                <Tooltip content="Previous frame">
+                  <button onClick={() => stepFrame(-1)} className="p-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                    <ChevronLeft size={16} />
+                  </button>
+                </Tooltip>
 
                 {/* Play / Pause */}
-                <button
-                  onClick={effectiveTogglePlay}
-                  title={isPlaying ? 'Pause' : 'Play'}
-                  className="p-2 mx-1 rounded-full bg-purple-600 hover:bg-purple-500 text-white transition-colors"
-                >
-                  {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-                </button>
+                <Tooltip content={isPlaying ? 'Pause' : 'Play'}>
+                  <button
+                    onClick={effectiveTogglePlay}
+                    className="p-2 mx-1 rounded-full bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+                  >
+                    {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                  </button>
+                </Tooltip>
 
                 {/* Next frame */}
-                <button onClick={() => stepFrame(1)} title="Next frame" className="p-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
-                  <ChevronRight size={16} />
-                </button>
+                <Tooltip content="Next frame">
+                  <button onClick={() => stepFrame(1)} className="p-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                    <ChevronRight size={16} />
+                  </button>
+                </Tooltip>
 
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
 
                 {/* Skip forward */}
                 {[1, 5, 10].map(s => (
-                  <button key={s} onClick={() => skip(s)} title={`${s}s forward`} className="px-1.5 py-1 rounded text-xs text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
-                    +{s}
-                  </button>
+                  <Tooltip key={s} content={`${s}s forward`}>
+                    <button onClick={() => skip(s)} className="px-1.5 py-1 rounded text-xs text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
+                      +{s}
+                    </button>
+                  </Tooltip>
                 ))}
 
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
 
                 {/* Skip to end */}
-                <button onClick={() => seekRef.current(duration)} title="Skip to end" className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
-                  <ChevronsRight size={15} />
-                </button>
+                <Tooltip content="Skip to end">
+                  <button onClick={() => seekRef.current(duration)} className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                    <ChevronsRight size={15} />
+                  </button>
+                </Tooltip>
 
                 </div>
                 <span className="text-xs text-gray-500 tabular-nums w-24 shrink-0 text-right">{formatTime(duration, videoInfo?.fps)}</span>
@@ -2390,31 +2423,33 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     {videoInfo.fps && <span className="shrink-0">· {videoInfo.fps.toFixed(2)} fps</span>}
                     <span className="shrink-0">· {videoInfo.videoCodec}</span>
                     {state.filePath && (
-                      <button
-                        className="truncate hover:text-gray-300 transition-colors cursor-pointer"
-                        title={`Show in Explorer: ${state.filePath}`}
-                        onClick={() => window.api.openInExplorer(state.filePath!)}
-                      >
-                        · {state.filePath.split(/[\\/]/).pop()}
-                      </button>
+                      <Tooltip content={`Show in Explorer: ${state.filePath}`}>
+                        <button
+                          className="truncate hover:text-gray-300 transition-colors cursor-pointer"
+                          onClick={() => window.api.openInExplorer(state.filePath!)}
+                        >
+                          · {state.filePath.split(/[\\/]/).pop()}
+                        </button>
+                      </Tooltip>
                     )}
-                    <button
-                      onClick={() => {
-                        const hasClipWork = isClipMode && (
-                          clipState.clipRegions.length > 0 || clipState.bleepRegions.length > 0
-                        )
-                        if (hasClipWork) {
-                          setShowCloseVideoConfirm(true)
-                        } else {
-                          closeVideo()
-                        }
-                      }}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border ml-1 p-0.5 text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors shrink-0"
-                      title="Close video"
-                    >
-                      <X size={12} />
-                      Close Video
-                    </button>
+                    <Tooltip content="Close video">
+                      <button
+                        onClick={() => {
+                          const hasClipWork = isClipMode && (
+                            clipState.clipRegions.length > 0 || clipState.bleepRegions.length > 0
+                          )
+                          if (hasClipWork) {
+                            setShowCloseVideoConfirm(true)
+                          } else {
+                            closeVideo()
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border ml-1 p-0.5 text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors shrink-0"
+                      >
+                        <X size={12} />
+                        Close Video
+                      </button>
+                    </Tooltip>
                   </div>
                 )}
               </div>
@@ -2424,13 +2459,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
           {/* Audio tracks panel */}
           <div className={`relative bg-navy-800 border-l border-white/5 flex flex-col shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-6 overflow-hidden' : 'w-56 overflow-y-auto'}`}>
             {/* Collapse toggle — always visible on the left edge */}
-            <button
-              onClick={() => setPanelCollapsed(v => !v)}
-              title={panelCollapsed ? 'Expand panel' : 'Collapse panel'}
-              className="absolute left-0 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-4 h-8 bg-white/5 hover:bg-white/10 border border-white/[0.04] rounded-r text-gray-600 hover:text-gray-400 transition-colors"
-            >
-              {panelCollapsed ? <ChevronLeft size={10} /> : <ChevronRight size={10} />}
-            </button>
+            <Tooltip content={panelCollapsed ? 'Expand panel' : 'Collapse panel'} side="left">
+              <button
+                onClick={() => setPanelCollapsed(v => !v)}
+                className="absolute left-0 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-4 h-8 bg-white/5 hover:bg-white/10 border border-white/[0.04] rounded-r text-gray-600 hover:text-gray-400 transition-colors"
+              >
+                {panelCollapsed ? <ChevronLeft size={10} /> : <ChevronRight size={10} />}
+              </button>
+            </Tooltip>
             {!panelCollapsed && (<>
             <div className="px-4 py-3 border-b border-white/5">
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Audio Tracks</h3>

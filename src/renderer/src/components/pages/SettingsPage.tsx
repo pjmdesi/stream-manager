@@ -103,6 +103,7 @@ export function SettingsPage() {
 
   const save = async () => {
     await updateConfig(local)
+    await window.api.setStartupSettings(!!local.startWithWindows, !!local.startMinimized)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -335,6 +336,55 @@ export function SettingsPage() {
             </div>
             <p className="text-xs text-gray-500">Starting volume for bleep markers in clip mode. Can be adjusted per-session by dragging the line on a marker.</p>
           </div>
+        </section>
+
+        {/* Converter */}
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
+            Converter
+          </h2>
+          <Checkbox
+            checked={!!local.autoDeletePartialOnCancel}
+            onChange={v => set('autoDeletePartialOnCancel', v)}
+            label={
+              <div>
+                <div className="text-sm font-medium text-gray-200">Automatically delete partial files on cancel</div>
+                <div className="text-xs text-gray-500">When unchecked, you'll be asked each time a conversion is cancelled</div>
+              </div>
+            }
+          />
+        </section>
+
+        {/* System */}
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
+            System
+          </h2>
+          <Checkbox
+            checked={!!local.startWithWindows}
+            onChange={v => set('startWithWindows', v)}
+            disabled={import.meta.env.DEV}
+            label={
+              <div>
+                <div className="text-sm font-medium text-gray-200">
+                  Start with Windows
+                  {import.meta.env.DEV && <span className="ml-2 text-xs text-yellow-600 font-normal">(deployable builds only)</span>}
+                </div>
+                <div className="text-xs text-gray-500">Automatically launch Stream Manager when Windows starts</div>
+              </div>
+            }
+          />
+          <Checkbox
+            checked={!!local.startMinimized}
+            onChange={v => set('startMinimized', v)}
+            disabled={import.meta.env.DEV || !local.startWithWindows}
+            label={
+              <div>
+                <div className="text-sm font-medium text-gray-200">Start Minimized</div>
+                <div className="text-xs text-gray-500">Hide to tray on launch instead of opening the window</div>
+              </div>
+            }
+          />
         </section>
 
         {/* Behaviour */}

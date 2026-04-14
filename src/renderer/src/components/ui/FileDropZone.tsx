@@ -32,8 +32,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         if (item.kind === 'file') {
           const file = item.getAsFile()
           if (file) {
-            // In Electron, files have a path property
-            const path = (file as any).path
+            const path = window.api.getPathForFile(file)
             if (path) paths.push(path)
           }
         }

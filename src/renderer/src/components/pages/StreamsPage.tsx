@@ -5,16 +5,36 @@ import {
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
-  Film, Zap, Combine, Youtube, Twitch, ListFilter, Trash2, Tags
+  Film, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles
 } from 'lucide-react'
+
+// Inline SVG brand icons — lucide-react has deprecated all YouTube/Twitch exports
+function LucideYoutube({ size = 24, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+    </svg>
+  )
+}
+function LucideTwitch({ size = 24, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z" />
+    </svg>
+  )
+}
 import type { StreamFolder, StreamMeta, ConversionPreset, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast } from '../../types'
 import { useStore } from '../../hooks/useStore'
+import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
+import { GhostTextArea } from '../ui/GhostTextArea'
+import type { GhostTextAreaHandle } from '../ui/GhostTextArea'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { TagComboBox } from '../ui/TagComboBox'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { Checkbox } from '../ui/Checkbox'
-import { getTagColor, pickColorForNewTag } from '../../constants/tagColors'
+import { Tooltip } from '../ui/Tooltip'
+import { getTagColor, getTagTextureStyle, pickColorForNewTag, pickTextureForNewTag } from '../../constants/tagColors'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -105,7 +125,7 @@ function VideoCountTooltip({ videos, children }: { videos: string[]; children: R
                     ? <span className="text-gray-600 italic">cloud</span>
                     : v in durations
                       ? (dur !== null ? <span className="text-gray-500">{formatDuration(dur)}</span> : <span className="text-gray-600">—</span>)
-                      : <span className="text-gray-600">…</span>
+                      : <Loader2 size={10} className="animate-spin text-gray-600" />
                   }
                 </span>
               </div>
@@ -288,6 +308,8 @@ function ThumbnailCarousel({ thumbnails }: { thumbnails: string[] }) {
 interface MetaModalProps {
   mode: 'new' | 'edit' | 'add'
   initialMeta?: StreamMeta | null
+  /** Authoritative date from the folder name — overrides initialMeta.date in edit/add mode */
+  folderDate?: string
   detectedGames?: string[]
   allGames?: string[]
   allStreamTypes?: string[]
@@ -296,7 +318,9 @@ interface MetaModalProps {
   defaultTemplateName?: string
   thumbnails?: string[]
   tagColors?: Record<string, string>
+  tagTextures?: Record<string, string>
   onNewStreamType?: (tag: string) => void
+  claudeEnabled?: boolean
   onSave: (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => Promise<void>
   onClose: () => void
 }
@@ -305,11 +329,12 @@ function applyMergeFields(template: string, fields: Record<string, string>): str
   return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
 }
 
-function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string): number {
+function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, beforeDate?: string): number {
   if (!gameName) return 1
   const lower = gameName.toLowerCase()
   const matching = allFolders.filter(f =>
-    f.meta?.games?.some(g => g.toLowerCase() === lower)
+    f.meta?.games?.some(g => g.toLowerCase() === lower) &&
+    (!beforeDate || f.date < beforeDate)
   )
   return matching.length + 1
 }
@@ -327,10 +352,14 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[]): 
     .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
 }
 
-function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', thumbnails = [], tagColors = {}, onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', thumbnails = [], tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
 
-  const [date, setDate] = useState(initialMeta?.date ?? today())
+  // In edit/add mode the folder name is the authoritative date source — the stored meta.date
+  // may be wrong if the file was created with the wrong date (e.g. migration artefact).
+  const [date, setDate] = useState(
+    mode === 'new' ? (initialMeta?.date ?? today()) : (folderDate ?? initialMeta?.date ?? today())
+  )
   const [streamTypes, setStreamTypes] = useState<string[]>(
     normalizeStreamTypes(initialMeta?.streamType)
   )
@@ -362,8 +391,23 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
   const [ytDescTemplates, setYtDescTemplates] = useState<YTDescriptionTemplate[]>([])
   const [ytTagTemplates, setYtTagTemplates] = useState<YTTagTemplate[]>([])
   const [ytBroadcasts, setYtBroadcasts] = useState<LiveBroadcast[]>([])
+  const [ytVods, setYtVods] = useState<LiveBroadcast[]>([])
+  const [ytBroadcastsLoading, setYtBroadcastsLoading] = useState(false)
+  const [ytVodsLoaded, setYtVodsLoaded] = useState(false)
   const [ytBroadcastError, setYtBroadcastError] = useState('')
   const [ytSelectedBroadcastId, setYtSelectedBroadcastId] = useState('')
+  const [ytManualUrl, setYtManualUrl] = useState('')
+  const [ytManualLoading, setYtManualLoading] = useState(false)
+  const [ytManualError, setYtManualError] = useState('')
+
+  const isPastStream = date < today()
+  const isNextUpcomingStream = !isPastStream && (() => {
+    if (mode === 'new') return true
+    if (!folderDate) return false
+    const todayStr = today()
+    const earliestOther = allFolders.map(f => f.date).filter(d => d >= todayStr).sort()[0]
+    return !earliestOther || folderDate <= earliestOther
+  })()
   const [ytSelectedTitleId, setYtSelectedTitleId] = useState('')
   const [ytSelectedDescId, setYtSelectedDescId] = useState('')
   const [ytSelectedTagId, setYtSelectedTagId] = useState('')
@@ -371,13 +415,89 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
   const [ytDescription, setYtDescription] = useState(initialMeta?.ytDescription ?? '')
   const [ytGameTitle, setYtGameTitle] = useState(initialMeta?.ytGameTitle ?? '')
   const [ytTagsText, setYtTagsText] = useState(initialMeta?.ytTags?.join(', ') ?? '')
-  const [ytEpisode, setYtEpisode] = useState('1')
-  const [ytCatchyTitle, setYtCatchyTitle] = useState('')
-  const [ytPush, setYtPush] = useState(false)
+
+  // ── Claude AI suggestions ─────────────────────────────────────────────────
+  // Build context lazily so each fetch always uses the latest state values
+  const gamesRef = useRef(games)
+  const streamTypesRef = useRef(streamTypes)
+  const dateRef = useRef(date)
+  const ytTitleRef = useRef(ytTitle)
+  const ytDescriptionRef = useRef(ytDescription)
+  useEffect(() => { gamesRef.current = games }, [games])
+  useEffect(() => { streamTypesRef.current = streamTypes }, [streamTypes])
+  useEffect(() => { dateRef.current = date }, [date])
+  useEffect(() => { ytTitleRef.current = ytTitle }, [ytTitle])
+  useEffect(() => { ytDescriptionRef.current = ytDescription }, [ytDescription])
+
+  const buildContext = useCallback(() => ({
+    date: dateRef.current,
+    streamTypes: streamTypesRef.current,
+    games: gamesRef.current,
+    currentTitle: ytTitleRef.current || undefined,
+    currentDescription: ytDescriptionRef.current || undefined,
+  }), [])
+
+  const noop = useCallback((_pre: string, _suf: string) => Promise.resolve(null), [])
+  const fetchTitle = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('title', { ...buildContext(), prefix, suffix }), [buildContext])
+  const fetchDescription = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('description', { ...buildContext(), prefix, suffix }), [buildContext])
+  const fetchTags = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('tags', { ...buildContext(), prefix, suffix }), [buildContext])
+
+  const titleSg = useFieldSuggestion(ytTitle, setYtTitle, claudeEnabled ? fetchTitle : noop)
+  const tagsSg = useFieldSuggestion(ytTagsText, setYtTagsText, claudeEnabled ? fetchTags : noop)
+
+  // Description — uses GhostTextArea with inline suggestion state
+  const descRef = useRef<GhostTextAreaHandle>(null)
+  const [descSuggestion, setDescSuggestion] = useState('')
+  const [descInsertAt, setDescInsertAt] = useState(0)
+  const [descLoading, setDescLoading] = useState(false)
+  const descSuggestionRef = useRef('')
+  const descLoadingRef = useRef(false)
+  useEffect(() => { descSuggestionRef.current = descSuggestion }, [descSuggestion])
+  useEffect(() => { descLoadingRef.current = descLoading }, [descLoading])
+
+  const handleDescRequest = useCallback(async (prefix: string, suffix: string) => {
+    if (descSuggestionRef.current || descLoadingRef.current || !claudeEnabled) return
+    descLoadingRef.current = true
+    setDescLoading(true)
+    try {
+      const result = await fetchDescription(prefix, suffix)
+      if (result && !descSuggestionRef.current) {
+        setDescInsertAt(prefix.length)
+        setDescSuggestion(result)
+      }
+    } catch {
+      // best-effort
+    } finally {
+      descLoadingRef.current = false
+      setDescLoading(false)
+    }
+  }, [claudeEnabled, fetchDescription])
+
+  const descInsertAtRef = useRef(0)
+  useEffect(() => { descInsertAtRef.current = descInsertAt }, [descInsertAt])
+
+  const handleDescAccept = useCallback(() => {
+    const pos = descInsertAtRef.current
+    const sug = descSuggestionRef.current
+    const val = ytDescriptionRef.current
+    setYtDescription(val.slice(0, pos) + sug + val.slice(pos))
+    setDescSuggestion('')
+    requestAnimationFrame(() => descRef.current?.setCursorOffset(pos + sug.length))
+  }, [])
+
+  const handleDescDismiss = useCallback(() => setDescSuggestion(''), [])
+  const [ytEpisode, setYtEpisode] = useState(initialMeta?.ytEpisode ?? '1')
+  const ytEpisodeUserEdited = useRef(!!initialMeta?.ytEpisode)
+  const [ytCatchyTitle, setYtCatchyTitle] = useState(initialMeta?.ytCatchyTitle ?? '')
+  const [alsoUpdateTwitch, setAlsoUpdateTwitch] = useState(isNextUpcomingStream)
+  const [pushing, setPushing] = useState(false)
+  const [pushError, setPushError] = useState('')
+  const [pushSuccess, setPushSuccess] = useState(false)
+  const [ytQualifyingThumbnails, setYtQualifyingThumbnails] = useState<string[]>([])
+  const [ytSelectedThumbnail, setYtSelectedThumbnail] = useState<string | null>(null)
 
   // ── Twitch state ───────────────────────────────────────────────────────────
   const [twConnected, setTwConnected] = useState(false)
-  const [twPush, setTwPush] = useState(false)
   const [syncTitle, setSyncTitle] = useState(initialMeta?.syncTitle ?? true)
   const [twitchTitle, setTwitchTitle] = useState(initialMeta?.twitchTitle ?? '')
   const [twitchGameName, setTwitchGameName] = useState(initialMeta?.twitchGameName ?? '')
@@ -398,6 +518,69 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
     }).catch(() => {})
   }, [])
 
+  const parseYouTubeVideoId = (input: string): string | null => {
+    const s = input.trim()
+    // watch?v=ID
+    const watchMatch = s.match(/[?&]v=([a-zA-Z0-9_-]{11})/)
+    if (watchMatch) return watchMatch[1]
+    // studio.youtube.com/video/ID[/...]
+    const studioMatch = s.match(/studio\.youtube\.com\/video\/([a-zA-Z0-9_-]{11})/)
+    if (studioMatch) return studioMatch[1]
+    // youtu.be/ID or youtube.com/live/ID or youtube.com/shorts/ID
+    const pathMatch = s.match(/(?:youtu\.be|youtube\.com\/(?:live|shorts))\/([a-zA-Z0-9_-]{11})/)
+    if (pathMatch) return pathMatch[1]
+    // bare 11-char ID
+    if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s
+    return null
+  }
+
+  const utcToLocalDate = (isoString: string): string => {
+    const d = new Date(isoString)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  const handleManualUrlChange = async (value: string) => {
+    setYtManualUrl(value)
+    setYtManualError('')
+    if (!value.trim()) return
+    const videoId = parseYouTubeVideoId(value)
+    if (!videoId) { setYtManualError('Could not find a video ID in that URL.'); return }
+    setYtManualLoading(true)
+    try {
+      const video = await window.api.youtubeGetVideoById(videoId)
+      if (!video) { setYtManualError('Video not found or not accessible.'); return }
+      setYtVods(prev => prev.some(v => v.id === video.id) ? prev : [video, ...prev])
+      setYtSelectedBroadcastId(video.id)
+      setYtManualUrl('')
+    } catch (e: any) {
+      setYtManualError(e.message ?? 'Failed to fetch video info.')
+    } finally {
+      setYtManualLoading(false)
+    }
+  }
+
+  const loadAllVods = async () => {
+    if (ytVodsLoaded || ytBroadcastsLoading) return
+    setYtBroadcastsLoading(true)
+    setYtBroadcastError('')
+    try {
+      const items: LiveBroadcast[] = await window.api.youtubeGetCompletedBroadcasts()
+      setYtVods(items)
+      setYtVodsLoaded(true)
+      // If nothing is selected yet, try to match by date
+      if (!ytSelectedBroadcastId) {
+        const dateMatch = items.find(v =>
+          utcToLocalDate(v.snippet.actualStartTime ?? v.snippet.scheduledStartTime ?? '') === date
+        )
+        if (dateMatch) setYtSelectedBroadcastId(dateMatch.id)
+      }
+    } catch (e: any) {
+      setYtBroadcastError(e.message ?? 'Failed to load VODs')
+    } finally {
+      setYtBroadcastsLoading(false)
+    }
+  }
+
   useEffect(() => {
     window.api.youtubeGetStatus().then((s: { connected: boolean }) => {
       console.log('[YT renderer] getStatus:', s)
@@ -407,32 +590,67 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
         window.api.getYTTitleTemplates(),
         window.api.getYTDescriptionTemplates(),
         window.api.getYTTagTemplates(),
-        window.api.youtubeGetBroadcasts(),
-      ]).then(([titlesR, descsR, tagsR, broadcastsR]) => {
+      ]).then(([titlesR, descsR, tagsR]) => {
         if (titlesR.status === 'fulfilled') setYtTitleTemplates(titlesR.value)
         if (descsR.status === 'fulfilled') setYtDescTemplates(descsR.value)
         if (tagsR.status === 'fulfilled') setYtTagTemplates(tagsR.value)
-        if (broadcastsR.status === 'fulfilled') {
-          console.log('[YT renderer] broadcasts:', broadcastsR.value?.length ?? 0, broadcastsR.value?.map((b: any) => b.id))
-          setYtBroadcasts(broadcastsR.value)
-          if (broadcastsR.value.length > 0) setYtSelectedBroadcastId(broadcastsR.value[0].id)
-        } else {
-          console.error('[YT renderer] getBroadcasts failed:', broadcastsR.reason)
-          setYtBroadcastError((broadcastsR.reason as any)?.message ?? 'Failed to load broadcasts')
-        }
       })
+
+      if (!isPastStream) {
+        // Only the next upcoming stream gets the active broadcast auto-attached
+        if (!isNextUpcomingStream) return
+        setYtBroadcastsLoading(true)
+        window.api.youtubeGetBroadcasts().then((items: LiveBroadcast[]) => {
+          console.log('[YT renderer] broadcasts:', items.length, items.map((b: any) => b.id))
+          setYtBroadcasts(items)
+          if (items.length > 0) setYtSelectedBroadcastId(items[0].id)
+        }).catch((e: any) => {
+          setYtBroadcastError(e.message ?? 'Failed to load broadcasts')
+        }).finally(() => setYtBroadcastsLoading(false))
+      } else {
+        const savedId = initialMeta?.ytVideoId
+        if (savedId) {
+          // Already linked — fetch just that one video to show it; full list loads lazily on dropdown click
+          window.api.youtubeGetVideoById(savedId).then(video => {
+            if (video) { setYtVods([video]); setYtSelectedBroadcastId(savedId) }
+          }).catch(() => {})
+        } else {
+          // No saved video — run the automatic date-match check on mount
+          setYtBroadcastsLoading(true)
+          window.api.youtubeGetCompletedBroadcasts().then((items: LiveBroadcast[]) => {
+            setYtVods(items)
+            setYtVodsLoaded(true)
+            const dateMatch = items.find(v =>
+              utcToLocalDate(v.snippet.actualStartTime ?? v.snippet.scheduledStartTime ?? '') === date
+            )
+            setYtSelectedBroadcastId(dateMatch?.id ?? '')
+          }).catch((e: any) => {
+            setYtBroadcastError(e.message ?? 'Failed to load VODs')
+          }).finally(() => setYtBroadcastsLoading(false))
+        }
+      }
     }).catch((e: any) => { console.error('[YT renderer] getStatus failed:', e) })
   }, [])
+
+  // Fetch qualifying thumbnails for YouTube upload
+  useEffect(() => {
+    if (thumbnails.length === 0) return
+    window.api.youtubeGetQualifyingThumbnails(thumbnails).then(qualified => {
+      setYtQualifyingThumbnails(qualified)
+      setYtSelectedThumbnail(qualified[0] ?? null)
+    })
+  }, [thumbnails])
 
   // Auto-fill game title from first game
   useEffect(() => {
     if (games.length > 0) setYtGameTitle(games[0])
   }, [games])
 
-  // Auto-detect episode
+  // Auto-detect episode — skip if the user has manually edited the value
   useEffect(() => {
-    if (games.length > 0) setYtEpisode(String(detectEpisodeNumber(allFolders, games[0])))
-  }, [games, allFolders])
+    if (ytEpisodeUserEdited.current) return
+    if (games.length > 0) setYtEpisode(String(detectEpisodeNumber(allFolders, games[0], date)))
+  }, [games, allFolders, date])
 
   // Apply title template when selection or merge fields change
   useEffect(() => {
@@ -453,6 +671,45 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
     if (tmpl) setYtTagsText(tmpl.tags.join(', '))
   }, [ytSelectedTagId, ytTagTemplates])
 
+  // Find a tag template whose name matches one of the selected games
+  const gameMatchedTagTemplate = useMemo(() => {
+    if (!games.length || !ytTagTemplates.length) return null
+    for (const game of games) {
+      const match = ytTagTemplates.find(t => t.name.toLowerCase() === game.toLowerCase())
+      if (match) return match
+    }
+    return null
+  }, [games, ytTagTemplates])
+
+  const selectedBroadcast = useMemo(
+    () => (isPastStream ? ytVods : ytBroadcasts).find(b => b.id === ytSelectedBroadcastId) ?? null,
+    [isPastStream, ytVods, ytBroadcasts, ytSelectedBroadcastId]
+  )
+
+  const broadcastMismatch = useMemo(() => {
+    if (!selectedBroadcast) return false
+    if (selectedBroadcast.snippet.title !== ytTitle) return true
+    if (selectedBroadcast.snippet.description !== ytDescription) return true
+    if (selectedBroadcast.snippet.gameTitle && selectedBroadcast.snippet.gameTitle !== ytGameTitle) return true
+    const bcTags = selectedBroadcast.snippet.tags?.join(', ') ?? ''
+    if (bcTags && bcTags !== ytTagsText) return true
+    return false
+  }, [selectedBroadcast, ytTitle, ytDescription, ytGameTitle, ytTagsText])
+
+  const applyBroadcastToMeta = () => {
+    if (!selectedBroadcast) return
+    const newTitle = selectedBroadcast.snippet.title
+    const newGame = selectedBroadcast.snippet.gameTitle
+    setYtTitle(newTitle)
+    setYtDescription(selectedBroadcast.snippet.description)
+    if (newGame) setYtGameTitle(newGame)
+    if (selectedBroadcast.snippet.tags?.length) setYtTagsText(selectedBroadcast.snippet.tags.join(', '))
+    if (alsoUpdateTwitch && twConnected) {
+      if (syncTitle) setTwitchTitle(newTitle)
+      if (newGame) setTwitchGameName(newGame)
+    }
+  }
+
   const handleSave = async () => {
     if (!date) { setError('Date is required.'); return }
     setSaving(true)
@@ -465,10 +722,12 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
         {
           date, streamType: streamTypes, games, comments,
           archived: mode === 'edit' ? archived : undefined,
-          ytVideoId: (ytPush && ytConnected && ytSelectedBroadcastId) ? ytSelectedBroadcastId : undefined,
+          ytVideoId: ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined,
           ytTitle: ytTitle || undefined,
           ytDescription: ytDescription || undefined,
           ytGameTitle: ytGameTitle || undefined,
+          ytCatchyTitle: ytCatchyTitle || undefined,
+          ytEpisode: ytEpisode || undefined,
           ytTags: tags.length > 0 ? tags : undefined,
           twitchTitle: effectiveTwitchTitle || undefined,
           twitchGameName: twitchGameName || undefined,
@@ -478,22 +737,43 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
         mode === 'new' && !isPrevEpisode ? (selectedTemplatePath || undefined) : undefined,
         mode === 'new' && isPrevEpisode ? (prevEpisodeFolder?.folderPath ?? undefined) : undefined,
       )
-      console.log('[YT renderer] save — ytPush:', ytPush, '| ytConnected:', ytConnected, '| broadcastId:', ytSelectedBroadcastId || '(empty)')
-      if (ytPush && ytConnected && ytSelectedBroadcastId) {
+      onClose()
+    } catch (e: any) {
+      console.error('[YT debug] error during save:', e)
+      setError(e.message)
+      setSaving(false)
+    }
+  }
+
+  const handlePush = async () => {
+    if (!ytConnected || !ytSelectedBroadcastId) return
+    setPushing(true)
+    setPushError('')
+    setPushSuccess(false)
+    try {
+      const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
+      if (isPastStream) {
+        await window.api.youtubeUpdateVideo(ytSelectedBroadcastId, ytTitle, ytDescription, tags)
+      } else {
         await window.api.youtubeUpdateBroadcast(
           ytSelectedBroadcastId,
           { title: ytTitle, description: ytDescription, gameTitle: ytGameTitle || undefined },
           tags
         )
       }
-      if (twPush && twConnected) {
+      if (ytSelectedThumbnail) {
+        await window.api.youtubeUploadThumbnail(ytSelectedBroadcastId, ytSelectedThumbnail)
+      }
+      if (alsoUpdateTwitch && twConnected) {
+        const effectiveTwitchTitle = syncTitle ? ytTitle : twitchTitle
         await window.api.twitchUpdateChannel(effectiveTwitchTitle, twitchGameName || undefined)
       }
-      onClose()
+      setPushSuccess(true)
+      setTimeout(() => setPushSuccess(false), 4000)
     } catch (e: any) {
-      console.error('[YT debug] error during save:', e)
-      setError(e.message)
-      setSaving(false)
+      setPushError(e.message)
+    } finally {
+      setPushing(false)
     }
   }
 
@@ -505,8 +785,20 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
       onClose={onClose}
       title={title}
       width="2xl"
+      dismissible={false}
       footer={
         <>
+          {mode === 'edit' && isPastStream && (
+            <div className="mr-auto flex flex-col gap-1.5">
+              <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
+              {archived && !initialMeta?.archived && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-600/30 text-xs text-amber-300/90">
+                  <AlertTriangle size={13} className="shrink-0 mt-0.5 text-amber-400" />
+                  <span>This only marks the stream as archived. To compress and save storage space, use the <strong>Archive</strong> button on the streams page instead.</span>
+                </div>
+              )}
+            </div>
+          )}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={saving} onClick={handleSave}>
             {mode === 'new' ? 'Create Stream' : 'Save'}
@@ -523,13 +815,25 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
         {/* Date */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-300">Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            disabled={mode !== 'new'}
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 [color-scheme:dark]"
-          />
+          {!isPastStream && mode !== 'new' ? (
+            <Tooltip content='To change the date, use the "Reschedule" button in the stream item row.' side="bottom">
+              <input
+                type="date"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                disabled
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 [color-scheme:dark]"
+              />
+            </Tooltip>
+          ) : (
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              disabled={mode !== 'new'}
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 [color-scheme:dark]"
+            />
+          )}
         </div>
 
         {/* Stream type */}
@@ -542,6 +846,7 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
             placeholder="e.g. games, just chatting…"
             emptyLabel="No types added"
             tagColors={tagColors}
+            tagTextures={tagTextures}
             onNewTag={onNewStreamType}
           />
         </div>
@@ -599,179 +904,350 @@ function MetaModal({ mode, initialMeta, detectedGames = [], allGames = [], allSt
           />
         </div>
 
-        {/* Archived — only in edit mode */}
-        {mode === 'edit' && (
-          <div className="flex flex-col gap-1.5">
-            <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
-            {archived && !initialMeta?.archived && (
-              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-600/30 text-xs text-amber-300/90">
-                <AlertTriangle size={13} className="shrink-0 mt-0.5 text-amber-400" />
-                <span>This only marks the stream as archived. To compress and save storage space, use the <strong>Archive</strong> button on the streams page instead.</span>
-              </div>
-            )}
+        {/* ── Publishing Info ──────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-4 pt-1 border-t border-white/5">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Publishing Info</h3>
+
+          {/* Merge field inputs */}
+          <div className="grid grid-cols-[1fr_auto_1fr] gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">Game Title <span className="font-mono text-purple-400 font-normal">{'{game}'}</span><LucideYoutube size={11} className="text-red-400/70" /></label>
+              <input
+                value={ytGameTitle}
+                onChange={e => setYtGameTitle(e.target.value)}
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+                <span className="font-mono text-purple-400">{'{episode}'}</span>
+                <Tooltip content="Auto-detected by counting every preceding stream that shares the first Topic / Games tag of the current stream item. Only streams dated before this one are counted." side="top">
+                  <Info size={11} className="text-gray-500 cursor-default" />
+                </Tooltip>
+              </label>
+              <input
+                value={ytEpisode}
+                onChange={e => { ytEpisodeUserEdited.current = true; setYtEpisode(e.target.value) }}
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500"><span className="font-mono text-purple-400">{'{title}'}</span></label>
+              <input
+                value={ytCatchyTitle}
+                onChange={e => setYtCatchyTitle(e.target.value)}
+                placeholder="catchy title…"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 placeholder-gray-700"
+              />
+            </div>
           </div>
-        )}
+
+          {/* Title */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                Title
+                <LucideYoutube size={11} className="text-red-400/70" />
+                {(!twConnected || syncTitle) && <LucideTwitch size={11} className="text-purple-400/70" />}
+                <span className="text-gray-600 font-normal">(editable)</span>
+              </label>
+              <div className="flex items-center gap-3">
+                {twConnected && (
+                  <Checkbox checked={syncTitle} onChange={setSyncTitle} label="Sync with Twitch" size="sm" />
+                )}
+                <InlineTemplateSelect items={ytTitleTemplates} value={ytSelectedTitleId} onChange={setYtSelectedTitleId} />
+              </div>
+            </div>
+            <input
+              ref={titleSg.ref as React.RefObject<HTMLInputElement>}
+              value={ytTitle}
+              maxLength={100}
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+              {...titleSg.props}
+            />
+            <div className="flex items-center justify-between min-h-[16px]">
+              {claudeEnabled && titleSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-600" />}
+              {claudeEnabled && titleSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-600"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
+              {(!claudeEnabled || !titleSg.hint) && <span />}
+              <p className="text-xs text-gray-700">{ytTitle.length}/100</p>
+            </div>
+          </div>
+
+          {/* Separate Twitch title when not synced */}
+          {twConnected && !syncTitle && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                Twitch title
+                <LucideTwitch size={11} className="text-purple-400/70" />
+              </label>
+              <input
+                value={twitchTitle}
+                onChange={e => setTwitchTitle(e.target.value)}
+                maxLength={140}
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+              />
+              <p className="text-right text-xs text-gray-700">{twitchTitle.length}/140</p>
+            </div>
+          )}
+
+          {/* Description */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                Description
+                <LucideYoutube size={11} className="text-red-400/70" />
+              </label>
+              <InlineTemplateSelect items={ytDescTemplates} value={ytSelectedDescId} onChange={setYtSelectedDescId} />
+            </div>
+            <GhostTextArea
+              ref={descRef}
+              value={ytDescription}
+              onChange={setYtDescription}
+              suggestion={claudeEnabled ? descSuggestion : ''}
+              insertAt={descInsertAt}
+              onRequestSuggestion={claudeEnabled ? handleDescRequest : undefined}
+              onAccept={handleDescAccept}
+              onDismiss={handleDescDismiss}
+              rows={6}
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500/40"
+            />
+            <div className="flex items-center min-h-[16px]">
+              {claudeEnabled && descLoading && <Loader2 size={10} className="animate-spin text-gray-600" />}
+              {claudeEnabled && !descLoading && descSuggestion && <span className="flex items-center gap-1 text-[10px] text-gray-600"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
+            </div>
+          </div>
+
+          {/* Tags */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                Tags
+                <LucideYoutube size={11} className="text-red-400/70" />
+                <span className="text-gray-600 font-normal">(comma-separated)</span>
+              </label>
+              <div className="flex items-center gap-2">
+                {gameMatchedTagTemplate && (
+                  <button
+                    type="button"
+                    onClick={() => setYtTagsText(gameMatchedTagTemplate.tags.join(', '))}
+                    className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                  >
+                    Use &ldquo;{gameMatchedTagTemplate.name}&rdquo; tags
+                  </button>
+                )}
+                <InlineTemplateSelect items={ytTagTemplates} value={ytSelectedTagId} onChange={setYtSelectedTagId} />
+              </div>
+            </div>
+            <textarea
+              ref={tagsSg.ref as React.RefObject<HTMLTextAreaElement>}
+              value={ytTagsText}
+              rows={2}
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none"
+              {...tagsSg.props}
+            />
+            <div className="flex items-center justify-between min-h-[16px]">
+              {claudeEnabled && tagsSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-600" />}
+              {claudeEnabled && tagsSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-600"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
+              {(!claudeEnabled || !tagsSg.hint) && <span />}
+              <p className="text-xs text-gray-700">{ytTagsText.split(',').map(t => t.trim()).filter(Boolean).length} tags</p>
+            </div>
+          </div>
+
+          {/* Twitch category */}
+          {twConnected && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                Twitch category
+                <LucideTwitch size={11} className="text-purple-400/70" />
+              </label>
+              <input
+                value={twitchGameName}
+                onChange={e => setTwitchGameName(e.target.value)}
+                placeholder="e.g. Elden Ring"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 placeholder-gray-700"
+              />
+              <p className="text-xs text-gray-600">Searched against Twitch categories — closest match will be used.</p>
+            </div>
+          )}
+        </div>
 
         {/* ── YouTube ─────────────────────────────────────────────────────── */}
         {ytConnected && (
           <div className="flex flex-col gap-3 pt-1 border-t border-white/5">
-            <Checkbox
-              checked={ytPush}
-              onChange={setYtPush}
-              color="red"
-              label={<span className="flex items-center gap-1.5 font-medium"><Youtube size={13} className="text-red-400" />Update YouTube live stream info</span>}
-            />
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+              <LucideYoutube size={13} className="text-red-400" /> YouTube
+            </h3>
 
-            {ytPush && (
-              <div className="flex flex-col gap-3 pl-6">
-                {/* Broadcast picker */}
-                {ytBroadcastError ? (
-                  <p className="text-xs text-red-400 flex items-center gap-1.5">
-                    <AlertTriangle size={12} className="shrink-0" />
-                    {ytBroadcastError}
-                  </p>
-                ) : ytBroadcasts.length === 0 ? (
-                  <p className="text-xs text-gray-500 italic">No upcoming or active broadcasts found.</p>
-                ) : (
+            {/* Broadcast / VOD picker */}
+            {!isPastStream && !isNextUpcomingStream ? (
+              <p className="text-xs text-gray-500 italic">Only the next upcoming stream can be linked to a live broadcast.</p>
+            ) : ytBroadcastError ? (
+              <p className="text-xs text-red-400 flex items-center gap-1.5">
+                <AlertTriangle size={12} className="shrink-0" />
+                {ytBroadcastError}
+              </p>
+            ) : !isPastStream && ytBroadcasts.length === 0 && !ytBroadcastsLoading ? (
+              <p className="text-xs text-gray-500 italic">No upcoming or active broadcasts found.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-medium text-gray-400">
+                  {isPastStream ? 'VOD' : 'Broadcast'}
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex-1">
+                    <select
+                      value={ytSelectedBroadcastId}
+                      onChange={e => { setYtSelectedBroadcastId(e.target.value); setYtManualUrl(''); setYtManualError('') }}
+                      onMouseDown={() => isPastStream && loadAllVods()}
+                      disabled={ytBroadcastsLoading}
+                      className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 disabled:cursor-wait"
+                    >
+                      {!ytSelectedBroadcastId && (
+                        <option value="">— No video found for this date —</option>
+                      )}
+                      {(isPastStream ? ytVods : ytBroadcasts).map(b => {
+                        const startDate = utcToLocalDate(b.snippet.actualStartTime ?? b.snippet.scheduledStartTime ?? '')
+                        return (
+                          <option key={b.id} value={b.id}>
+                            {b.snippet.title}{isPastStream && startDate ? ` · ${startDate}` : ''}
+                          </option>
+                        )
+                      })}
+                    </select>
+                    {ytBroadcastsLoading
+                      ? <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 animate-spin pointer-events-none" />
+                      : <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                    }
+                  </div>
+                  {ytSelectedBroadcastId && (
+                    <button
+                      type="button"
+                      onClick={() => { setYtSelectedBroadcastId(''); setYtManualUrl(''); setYtManualError('') }}
+                      className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors shrink-0"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                {!ytSelectedBroadcastId && (
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-gray-400">Broadcast</label>
-                    <div className="relative">
-                      <select
-                        value={ytSelectedBroadcastId}
-                        onChange={e => setYtSelectedBroadcastId(e.target.value)}
-                        className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-red-500/40"
+                    <input
+                      value={ytManualUrl}
+                      onChange={e => handleManualUrlChange(e.target.value)}
+                      placeholder="Paste YouTube URL or video ID to link manually…"
+                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-600"
+                    />
+                    {ytManualLoading && (
+                      <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                        <Loader2 size={11} className="animate-spin shrink-0" />
+                        Looking up video…
+                      </p>
+                    )}
+                    {ytManualError && (
+                      <p className="text-xs text-red-400 flex items-center gap-1.5">
+                        <AlertTriangle size={11} className="shrink-0" />
+                        {ytManualError}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {(broadcastMismatch || ytSelectedBroadcastId) && (
+                  <div className="flex items-center gap-2">
+                    {broadcastMismatch && (
+                      <button
+                        type="button"
+                        onClick={applyBroadcastToMeta}
+                        className="flex items-center gap-1.5 text-xs text-yellow-300 bg-yellow-500/10 border border-yellow-500/30 hover:bg-yellow-500/20 transition-colors rounded-lg px-3 py-1.5"
                       >
-                        {ytBroadcasts.map(b => (
-                          <option key={b.id} value={b.id}>{b.snippet.title}</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-                    </div>
+                        <AlertTriangle size={11} className="shrink-0" />
+                        {isPastStream ? 'Update metadata to match YouTube VOD info' : 'Update metadata to match YouTube stream info'}
+                      </button>
+                    )}
+                    {ytSelectedBroadcastId && (
+                      <button
+                        type="button"
+                        onClick={() => window.api.openUrl(`https://studio.youtube.com/video/${ytSelectedBroadcastId}`)}
+                        className="flex items-center gap-1.5 text-xs text-gray-200 bg-surface-100 border border-white/10 hover:bg-surface-200 transition-colors rounded-lg px-3 py-1.5"
+                      >
+                        <LucideYoutube size={11} />
+                        Open in YouTube Studio
+                      </button>
+                    )}
                   </div>
                 )}
-
-                {/* Merge field inputs */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-gray-500"><span className="font-mono text-purple-400">{'{game}'}</span></label>
-                    <input
-                      value={ytGameTitle}
-                      onChange={e => setYtGameTitle(e.target.value)}
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-gray-500"><span className="font-mono text-purple-400">{'{episode}'}</span></label>
-                    <input
-                      value={ytEpisode}
-                      onChange={e => setYtEpisode(e.target.value)}
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-gray-500"><span className="font-mono text-purple-400">{'{title}'}</span></label>
-                    <input
-                      value={ytCatchyTitle}
-                      onChange={e => setYtCatchyTitle(e.target.value)}
-                      placeholder="catchy title…"
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-700"
-                    />
-                  </div>
-                </div>
-
-                {/* Editable title */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-gray-400">Title <span className="text-gray-600 font-normal">(editable)</span></label>
-                    <InlineTemplateSelect items={ytTitleTemplates} value={ytSelectedTitleId} onChange={setYtSelectedTitleId} />
-                  </div>
-                  <input
-                    value={ytTitle}
-                    onChange={e => setYtTitle(e.target.value)}
-                    maxLength={100}
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500/40"
-                  />
-                  <p className="text-right text-xs text-gray-700">{ytTitle.length}/100</p>
-                </div>
-
-                {/* Editable description */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-gray-400">Description <span className="text-gray-600 font-normal">(editable)</span></label>
-                    <InlineTemplateSelect items={ytDescTemplates} value={ytSelectedDescId} onChange={setYtSelectedDescId} />
-                  </div>
-                  <textarea
-                    value={ytDescription}
-                    onChange={e => setYtDescription(e.target.value)}
-                    rows={6}
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500/40 resize-y"
-                  />
-                </div>
-
-                {/* Editable tags */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-gray-400">Tags <span className="text-gray-600 font-normal">(comma-separated, editable)</span></label>
-                    <InlineTemplateSelect items={ytTagTemplates} value={ytSelectedTagId} onChange={setYtSelectedTagId} />
-                  </div>
-                  <textarea
-                    value={ytTagsText}
-                    onChange={e => setYtTagsText(e.target.value)}
-                    rows={2}
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500/40 resize-none"
-                  />
-                  <p className="text-right text-xs text-gray-700">{ytTagsText.split(',').map(t => t.trim()).filter(Boolean).length} tags</p>
-                </div>
               </div>
             )}
-          </div>
-        )}
 
-        {/* ── Twitch ──────────────────────────────────────────────────────── */}
-        {twConnected && (
-          <div className="flex flex-col gap-3 pt-1 border-t border-white/5">
-            <Checkbox
-              checked={twPush}
-              onChange={setTwPush}
-              label={<span className="flex items-center gap-1.5 font-medium"><Twitch size={13} className="text-purple-400" />Update Twitch channel info</span>}
-            />
-
-            {twPush && (
-              <div className="flex flex-col gap-3 pl-6">
-                {/* Sync toggle */}
-                <Checkbox checked={syncTitle} onChange={setSyncTitle} label="Sync title with YouTube" size="sm" />
-
-                {/* Separate title when not synced */}
-                {!syncTitle && (
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-gray-400">Twitch title</label>
-                    <input
-                      value={twitchTitle}
-                      onChange={e => setTwitchTitle(e.target.value)}
-                      maxLength={140}
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
-                    />
-                    <p className="text-right text-xs text-gray-700">{twitchTitle.length}/140</p>
-                  </div>
-                )}
-
-                {syncTitle && ytTitle && (
-                  <p className="text-xs text-gray-600 italic">Using YouTube title: <span className="text-gray-500 not-italic">{ytTitle}</span></p>
-                )}
-
-                {/* Game / category */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-gray-400">Category (game name)</label>
-                  <input
-                    value={twitchGameName}
-                    onChange={e => setTwitchGameName(e.target.value)}
-                    placeholder="e.g. Elden Ring"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 placeholder-gray-700"
-                  />
-                  <p className="text-xs text-gray-600">Searched against Twitch categories — closest match will be used.</p>
+            {/* Thumbnail picker */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-gray-400">Thumbnail to upload</label>
+              {ytQualifyingThumbnails.length === 0 ? (
+                <p className="text-xs text-gray-600 italic">
+                  {thumbnails.length === 0
+                    ? 'No images found in this stream folder.'
+                    : 'No images meet YouTube\'s requirements (JPG/PNG/GIF/WebP, max 2 MB).'}
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {ytQualifyingThumbnails.map(p => {
+                    const isSelected = p === ytSelectedThumbnail
+                    const name = p.split(/[\\/]/).pop() ?? ''
+                    return (
+                      <Tooltip key={p} content={name}>
+                        <button
+                          type="button"
+                          onClick={() => setYtSelectedThumbnail(isSelected ? null : p)}
+                          className={`relative w-20 h-14 rounded overflow-hidden border-2 transition-all shrink-0 ${isSelected ? 'border-red-400 ring-1 ring-red-400/50' : 'border-white/10 hover:border-white/30'}`}
+                        >
+                          <img src={toFileUrl(p)} alt={name} className="w-full h-full object-cover" />
+                          {isSelected && (
+                            <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
+                              <Check size={14} className="text-white drop-shadow" />
+                            </div>
+                          )}
+                        </button>
+                      </Tooltip>
+                    )
+                  })}
                 </div>
+              )}
+              <p className="text-[10px] text-gray-600">Recommended: 1280×720 or larger. Uploads when you click 'Update YouTube Info'.</p>
+            </div>
+
+            {/* Push action */}
+            <div className="flex flex-col gap-2">
+              {pushError && (
+                <p className="text-xs text-red-400 flex items-center gap-1.5">
+                  <AlertTriangle size={12} className="shrink-0" />
+                  {pushError}
+                </p>
+              )}
+              {pushSuccess && (
+                <p className="text-xs text-green-400 flex items-center gap-1.5">
+                  <CheckCircle2 size={12} className="shrink-0" />
+                  {isPastStream ? 'YouTube VOD updated.' : 'YouTube stream info updated.'}
+                  {alsoUpdateTwitch && twConnected && ' Twitch updated too.'}
+                </p>
+              )}
+              <div className="flex items-center gap-3 flex-wrap">
+                <Button
+                  variant="primary"
+                  icon={pushing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  onClick={handlePush}
+                  disabled={!ytSelectedBroadcastId || pushing}
+                >
+                  {pushing ? 'Updating…' : 'Update YouTube Info'}
+                </Button>
+                {twConnected && (
+                  <Checkbox
+                    checked={alsoUpdateTwitch}
+                    onChange={setAlsoUpdateTwitch}
+                    label="Also update Twitch"
+                    size="sm"
+                  />
+                )}
               </div>
-            )}
+            </div>
           </div>
         )}
 
@@ -958,6 +1434,7 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
 }) {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const selected = items.find(t => t.id === value)
 
   const close = () => setOpen(false)
@@ -965,7 +1442,11 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
-      if (anchorRef.current && !anchorRef.current.contains(e.target as Node)) close()
+      const target = e.target as Node
+      if (
+        anchorRef.current && !anchorRef.current.contains(target) &&
+        dropdownRef.current && !dropdownRef.current.contains(target)
+      ) close()
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -986,6 +1467,7 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
       </button>
       {open && rect && ReactDOM.createPortal(
         <div
+          ref={dropdownRef}
           style={{ position: 'fixed', top: rect.bottom + 4, right: window.innerWidth - rect.right, zIndex: 9999, minWidth: 160 }}
           className="bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden"
           onMouseDown={e => e.preventDefault()}
@@ -1257,6 +1739,7 @@ export function StreamsPage({
   const [modal, setModal] = useState<ModalState>({ mode: 'none' })
   const [showManageTags, setShowManageTags] = useState(false)
   const [tagColors, setTagColors] = useState<Record<string, string>>({})
+  const [tagTextures, setTagTextures] = useState<Record<string, string>>({})
   const [lightbox, setLightbox] = useState<{ thumbnails: string[]; index: number } | null>(null)
 
   // Startup warning: archive preset configured but missing
@@ -1267,6 +1750,23 @@ export function StreamsPage({
   const [orphanDismissed, setOrphanDismissed] = useState(false)
 
   // Delete confirmation
+  const [rescheduleTarget, setRescheduleTarget] = useState<StreamFolder | null>(null)
+  const [rescheduleDate, setRescheduleDate] = useState('')
+  const [reschedulePreview, setReschedulePreview] = useState<{ conflictExists: boolean; filesToRename: { oldName: string; newName: string }[] } | null>(null)
+  const [rescheduleLoading, setRescheduleLoading] = useState(false)
+  const [rescheduling, setRescheduling] = useState(false)
+
+  useEffect(() => {
+    if (!rescheduleTarget || !rescheduleDate || rescheduleDate === rescheduleTarget.date) {
+      setReschedulePreview(null)
+      return
+    }
+    setRescheduleLoading(true)
+    window.api.previewReschedule(rescheduleTarget.folderPath, rescheduleDate)
+      .then(setReschedulePreview)
+      .finally(() => setRescheduleLoading(false))
+  }, [rescheduleTarget, rescheduleDate])
+
   const [deleteTarget, setDeleteTarget] = useState<StreamFolder | null>(null)
   const [deleteTree, setDeleteTree] = useState<TreeNode[]>([])
   const [deleteFileList, setDeleteFileList] = useState<string[]>([])
@@ -1282,11 +1782,17 @@ export function StreamsPage({
 
   useEffect(() => {
     window.api.getStreamTypeTags().then(setTagColors)
+    window.api.getStreamTypeTextures().then(setTagTextures)
   }, [])
 
   const saveTagColors = useCallback((updated: Record<string, string>) => {
     setTagColors(updated)
     window.api.setStreamTypeTags(updated)
+  }, [])
+
+  const saveTagTextures = useCallback((updated: Record<string, string>) => {
+    setTagTextures(updated)
+    window.api.setStreamTypeTextures(updated)
   }, [])
 
   useEffect(() => {
@@ -1589,20 +2095,110 @@ export function StreamsPage({
   }, [folders, tagColors])
 
   const [filterGames, setFilterGames] = useState<Set<string>>(new Set())
-  const [filterType, setFilterType] = useState<string>('all')
+  const [filterTypes, setFilterTypes] = useState<Set<string>>(new Set())
+  const toggleTypeFilter = (t: string) => setFilterTypes(prev => {
+    const next = new Set(prev)
+    next.has(t) ? next.delete(t) : next.add(t)
+    return next
+  })
   const [openFilter, setOpenFilter] = useState<'type' | 'games' | null>(null)
+
+  const typeFilterAnchorRef = useRef<HTMLDivElement>(null)
+  const [typeFilterMaxHeight, setTypeFilterMaxHeight] = useState(600)
+  const updateTypeFilterMaxHeight = useCallback(() => {
+    if (typeFilterAnchorRef.current) {
+      const rect = typeFilterAnchorRef.current.getBoundingClientRect()
+      setTypeFilterMaxHeight(window.innerHeight - rect.bottom - 12)
+    }
+  }, [])
+  const openTypeFilter = useCallback(() => {
+    if (openFilter === 'type') { setOpenFilter(null); return }
+    updateTypeFilterMaxHeight()
+    setOpenFilter('type')
+  }, [openFilter, updateTypeFilterMaxHeight])
+  useEffect(() => {
+    if (openFilter !== 'type') return
+    window.addEventListener('resize', updateTypeFilterMaxHeight)
+    return () => window.removeEventListener('resize', updateTypeFilterMaxHeight)
+  }, [openFilter, updateTypeFilterMaxHeight])
+
+  const gameFilterAnchorRef = useRef<HTMLDivElement>(null)
+  const [gameFilterMaxHeight, setGameFilterMaxHeight] = useState(600)
+
+  const updateGameFilterMaxHeight = useCallback(() => {
+    if (gameFilterAnchorRef.current) {
+      const rect = gameFilterAnchorRef.current.getBoundingClientRect()
+      setGameFilterMaxHeight(window.innerHeight - rect.bottom - 12)
+    }
+  }, [])
+
+  const openGameFilter = useCallback(() => {
+    if (openFilter === 'games') { setOpenFilter(null); return }
+    updateGameFilterMaxHeight()
+    setOpenFilter('games')
+  }, [openFilter, updateGameFilterMaxHeight])
+
+  useEffect(() => {
+    if (openFilter !== 'games') return
+    window.addEventListener('resize', updateGameFilterMaxHeight)
+    return () => window.removeEventListener('resize', updateGameFilterMaxHeight)
+  }, [openFilter, updateGameFilterMaxHeight])
 
   const filteredFolders = useMemo(() => {
     return folders.filter(f => {
-      if (f.isMissing) return true // always show missing items regardless of filters
-      if (filterType !== 'all' && !normalizeStreamTypes(f.meta?.streamType).includes(filterType)) return false
+      if (f.isMissing) return true
+      if (filterTypes.size > 0 && !Array.from(filterTypes).every(t => normalizeStreamTypes(f.meta?.streamType).includes(t))) return false
       if (filterGames.size > 0) {
         const fGames = f.meta?.games?.length ? f.meta.games : f.detectedGames
         if (!Array.from(filterGames).every(g => fGames.includes(g))) return false
       }
       return true
     })
-  }, [folders, filterGames, filterType])
+  }, [folders, filterGames, filterTypes])
+
+  const viableTypeOptions = useMemo(() => {
+    return new Set(
+      allStreamTypes.filter(t => {
+        if (filterTypes.has(t)) return true
+        const candidate = new Set([...filterTypes, t])
+        return folders.some(f => {
+          if (f.isMissing) return false
+          if (!Array.from(candidate).every(c => normalizeStreamTypes(f.meta?.streamType).includes(c))) return false
+          if (filterGames.size > 0) {
+            const fGames = f.meta?.games?.length ? f.meta.games : f.detectedGames
+            if (!Array.from(filterGames).every(g => fGames.includes(g))) return false
+          }
+          return true
+        })
+      })
+    )
+  }, [allStreamTypes, filterTypes, filterGames, folders])
+
+  // Games that would still yield ≥1 result if added to the current filter set
+  const viableGameOptions = useMemo(() => {
+    return new Set(
+      allGames.filter(g => {
+        if (filterGames.has(g)) return true
+        const candidate = new Set([...filterGames, g])
+        return folders.some(f => {
+          if (f.isMissing) return false
+          if (filterTypes.size > 0 && !Array.from(filterTypes).every(t => normalizeStreamTypes(f.meta?.streamType).includes(t))) return false
+          const fGames = f.meta?.games?.length ? f.meta.games : f.detectedGames
+          return Array.from(candidate).every(c => fGames.includes(c))
+        })
+      })
+    )
+  }, [allGames, filterGames, filterTypes, folders])
+
+  const nextUpcomingFolderPath = useMemo(() => {
+    const todayStr = today()
+    const upcoming = folders.filter(f =>
+      !f.isMissing && !f.meta?.archived && f.date >= todayStr &&
+      !f.videos.some(v => (v.split(/[\\/]/).pop() ?? '').startsWith(f.date))
+    )
+    upcoming.sort((a, b) => a.date.localeCompare(b.date))
+    return upcoming[0]?.folderPath ?? null
+  }, [folders])
 
   const toggleGameFilter = (game: string) => {
     setFilterGames(prev => {
@@ -1638,22 +2234,24 @@ export function StreamsPage({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold">Live Streams</h1>
-            <button
-              onClick={() => loadFolders(streamsDir)}
-              disabled={loading}
-              className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors"
-              title="Reload"
-            >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            </button>
+            <Tooltip content="Reload">
+              <button
+                onClick={() => loadFolders(streamsDir)}
+                disabled={loading}
+                className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors"
+              >
+                <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </Tooltip>
           </div>
-          <button
-            className="text-xs text-gray-500 font-mono truncate mt-0.5 hover:text-gray-300 transition-colors text-left"
-            title={streamsDir}
-            onClick={() => window.api.openInExplorer(streamsDir)}
-          >
-            {streamsDir}
-          </button>
+          <Tooltip content={streamsDir} side="bottom" width="w-72">
+            <button
+              className="text-xs text-gray-500 font-mono truncate mt-0.5 hover:text-gray-300 transition-colors text-left"
+              onClick={() => window.api.openInExplorer(streamsDir)}
+            >
+              {streamsDir}
+            </button>
+          </Tooltip>
         </div>
         {selectMode ? (
           <>
@@ -1688,15 +2286,16 @@ export function StreamsPage({
             <Button variant="ghost" size="sm" icon={<FolderOpen size={14} />} onClick={pickDir}>
               Change
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Archive size={14} />}
-              onClick={stampArchiveFolder}
-              title="Stamp an existing archive folder — marks all YYYY-MM-DD subfolders as archived without converting"
-            >
-              Stamp Archive
-            </Button>
+            <Tooltip content="Marks all YYYY-MM-DD subfolders as archived without converting" side="bottom">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Archive size={14} />}
+                onClick={stampArchiveFolder}
+              >
+                Stamp Archive
+              </Button>
+            </Tooltip>
             <Button
               variant="ghost"
               size="sm"
@@ -1769,7 +2368,7 @@ export function StreamsPage({
 
       {/* Table */}
       <div className="flex-1 overflow-hidden pr-2">
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto [scrollbar-gutter:stable]">
         {loading && folders.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-gray-600 text-sm gap-2">
             <RefreshCw size={14} className="animate-spin" /> Loading…
@@ -1782,90 +2381,66 @@ export function StreamsPage({
             </Button>
           </div>
         ) : (
-          <table className="w-full text-sm border-collapse">
+          <table className="w-full text-sm border-collapse table-fixed">
             <thead className="sticky top-0 bg-navy-900 z-10">
               <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                {selectMode && <th className="pl-4 py-2.5 w-[40px]" />}
-                <th className="px-3 py-2.5 w-[88px]">Thumbnail</th>
-                <th className="px-3 py-2.5 w-[56px]"></th>
-                <th className="text-left px-4 py-2.5 w-[170px]">Date</th>
+                {selectMode && <th className="pl-4 py-2 w-[40px]" />}
+                <th className="p-0 w-[88px]">Thumbnail</th>
+                <th className="px-2 py-2 w-[44px]"></th>
+                <th className="text-left px-2 py-2 w-[130px]">Date</th>
                 {/* Type column with filter */}
-                <th className="text-left px-4 py-2.5 w-[110px]">
-                  <div className="relative flex items-center gap-1">
+                <th className="text-left px-2 py-2 min-w-[120px]">
+                  <div ref={typeFilterAnchorRef} className="relative flex items-center gap-1">
                     <span>Type</span>
-                    <button
-                      onClick={() => setOpenFilter(openFilter === 'type' ? null : 'type')}
-                      className={`p-0.5 rounded transition-colors ${filterType !== 'all' ? 'text-purple-400' : 'text-gray-600 hover:text-gray-400'}`}
-                      title="Filter by type"
-                    >
-                      <ListFilter size={12} />
-                    </button>
+                    <Tooltip content="Filter by type" side="bottom">
+                      <button
+                        onClick={openTypeFilter}
+                        className={`p-0.5 rounded transition-colors ${filterTypes.size > 0 ? 'text-purple-400' : 'text-gray-600 hover:text-gray-400'}`}
+                      >
+                        <ListFilter size={12} />
+                      </button>
+                    </Tooltip>
                     {openFilter === 'type' && (
                       <>
                         <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
-                        <div className="absolute top-full left-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[120px] max-h-60 overflow-y-auto">
-                          {['all', ...allStreamTypes].map(t => {
-                            const color = t !== 'all' ? getTagColor(tagColors[t]) : null
-                            const isActive = filterType === t
-                            return (
-                              <button
-                                key={t}
-                                onClick={() => { setFilterType(t); setOpenFilter(null) }}
-                                className={`flex items-center gap-2 w-full px-3 py-2 text-left text-xs capitalize hover:bg-white/5 transition-colors ${isActive ? (color?.text ?? 'text-purple-300') : 'text-gray-300'}`}
-                              >
-                                {color ? (
-                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color.swatch} ${isActive ? 'opacity-100' : 'opacity-30'}`} />
-                                ) : (
-                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-purple-400' : ''}`} />
-                                )}
-                                {t}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </th>
-                {/* Topics / Games column with filter */}
-                <th className="text-left px-4 py-2.5">
-                  <div className="relative flex items-center gap-1">
-                    <span>Topics / Games</span>
-                    <button
-                      onClick={() => setOpenFilter(openFilter === 'games' ? null : 'games')}
-                      className={`p-0.5 rounded transition-colors ${filterGames.size > 0 ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
-                      title="Filter by topic or game"
-                    >
-                      <ListFilter size={12} />
-                    </button>
-                    {openFilter === 'games' && (
-                      <>
-                        <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
-                        <div className="absolute top-full left-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] max-h-60 overflow-y-auto">
-                          {allGames.length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-gray-600">No games tagged yet</p>
+                        <div className="absolute top-full left-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] overflow-y-auto" style={{ maxHeight: typeFilterMaxHeight }}>
+                          {allStreamTypes.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-gray-600">No types tagged yet</p>
                           ) : (
                             <>
-                              {allGames.map(g => (
-                                <button
-                                  key={g}
-                                  onClick={() => toggleGameFilter(g)}
-                                  className={`flex items-center gap-2 w-full px-3 py-2 text-left text-xs hover:bg-white/5 transition-colors ${filterGames.has(g) ? 'text-blue-300' : 'text-gray-300'}`}
-                                >
-                                  <span className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${filterGames.has(g) ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
-                                    {filterGames.has(g) && <span className="text-white text-[9px] leading-none">✓</span>}
-                                  </span>
-                                  {g}
-                                </button>
-                              ))}
-                              {filterGames.size > 0 && (
-                                <button
-                                  onClick={() => { setFilterGames(new Set()); setOpenFilter(null) }}
-                                  className="w-full px-3 py-2 text-left text-xs text-gray-500 hover:text-gray-300 border-t border-white/5 hover:bg-white/5 transition-colors"
-                                >
-                                  Clear filter
-                                </button>
-                              )}
+                              <button
+                                onClick={() => { setFilterTypes(new Set()); setOpenFilter(null) }}
+                                disabled={filterTypes.size === 0}
+                                className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-purple-400 hover:text-purple-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-purple-400"
+                              >
+                                <X size={11} className="shrink-0" />
+                                Clear filters
+                              </button>
+                              {allStreamTypes.map(t => {
+                                const color = getTagColor(tagColors[t])
+                                const viable = viableTypeOptions.has(t)
+                                return (
+                                  <button
+                                    key={t}
+                                    onClick={() => viable && toggleTypeFilter(t)}
+                                    className={`flex items-center gap-2 w-full px-3 py-1 text-left text-xs capitalize transition-colors ${
+                                      !viable && !filterTypes.has(t)
+                                        ? 'opacity-30 cursor-default'
+                                        : filterTypes.has(t)
+                                          ? `${color.text} hover:bg-white/5`
+                                          : 'text-gray-300 hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <span
+                                      className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${filterTypes.has(t) ? `${color.highlight} border-transparent` : 'border-white/20'}`}
+                                      style={filterTypes.has(t) ? getTagTextureStyle(tagTextures[t]) : undefined}
+                                    >
+                                      {filterTypes.has(t) && <span className={`text-[9px] leading-none ${color.text}`}>✓</span>}
+                                    </span>
+                                    {t}
+                                  </button>
+                                )
+                              })}
                             </>
                           )}
                         </div>
@@ -1873,21 +2448,84 @@ export function StreamsPage({
                     )}
                   </div>
                 </th>
-                <th className="text-left px-4 py-2.5 w-[200px]">Comments</th>
-                <th className="px-4 py-2.5 w-[160px]"></th>
+                {/* Topics / Games column with filter */}
+                <th className="text-left px-2 py-2 min-w-[120px]">
+                  <div ref={gameFilterAnchorRef} className="relative flex items-center gap-1">
+                    <span>Topics / Games</span>
+                    <Tooltip content="Filter by topic or game" side="bottom">
+                      <button
+                        onClick={openGameFilter}
+                        className={`p-0.5 rounded transition-colors ${filterGames.size > 0 ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
+                      >
+                        <ListFilter size={12} />
+                      </button>
+                    </Tooltip>
+                    {openFilter === 'games' && (
+                      <>
+                        <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                        <div className="absolute top-full left-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] overflow-y-auto" style={{ maxHeight: gameFilterMaxHeight }}>
+                          {allGames.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-gray-600">No games tagged yet</p>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => { setFilterGames(new Set()); setOpenFilter(null) }}
+                                disabled={filterGames.size === 0}
+                                className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-blue-400 hover:text-blue-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-blue-400"
+                              >
+                                <X size={11} className="shrink-0" />
+                                Clear filters
+                              </button>
+                              {allGames.map(g => {
+                                const viable = viableGameOptions.has(g)
+                                return (
+                                  <button
+                                    key={g}
+                                    onClick={() => viable && toggleGameFilter(g)}
+                                    className={`flex items-center gap-2 w-full px-3 py-1 text-left text-xs transition-colors ${
+                                      !viable && !filterGames.has(g)
+                                        ? 'opacity-30 cursor-default'
+                                        : filterGames.has(g)
+                                          ? 'text-blue-300 hover:bg-white/5'
+                                          : 'text-gray-300 hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <span className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${filterGames.has(g) ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
+                                      {filterGames.has(g) && <span className="text-white text-[9px] leading-none">✓</span>}
+                                    </span>
+                                    {g}
+                                  </button>
+                                )
+                              })}
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </th>
+                <th className="text-left px-2 py-2 min-w-[100px] hidden xl:table-cell">Comments</th>
+                <th className="text-right px-2 py-2 min-w-[160px]">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredFolders.length === 0 ? (
                 <tr><td colSpan={selectMode ? 8 : 7} className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</td></tr>
-              ) : filteredFolders.map((folder, i) => (
+              ) : filteredFolders.map((folder, i) => {
+                const todayStr = today()
+                const pending = !folder.isMissing && folder.date >= todayStr && !folder.meta?.archived
+                  && !folder.videos.some(v => (v.split(/[\\/]/).pop() ?? '').startsWith(folder.date))
+return (
+                <React.Fragment key={isDumpMode ? folder.date : folder.folderPath}>
                 <StreamRow
-                  key={isDumpMode ? folder.date : folder.folderPath}
                   folder={folder}
                   zebra={i % 2 === 0}
                   selectMode={selectMode}
                   selected={selectedPaths.has(selectionKey(folder))}
+                  isNextUpcoming={folder.folderPath === nextUpcomingFolderPath}
+                  isPending={pending}
                   tagColors={tagColors}
+                  tagTextures={tagTextures}
                   onToggleSelect={(shiftKey) => {
                     if (dragMoved.current) { dragMoved.current = false; return }
                     toggleSelected(selectionKey(folder), shiftKey, i)
@@ -1896,6 +2534,7 @@ export function StreamsPage({
                   onDragEnter={() => updateDrag(i)}
                   onEdit={() => setModal({ mode: 'edit', folder })}
                   onAdd={() => setModal({ mode: 'add', folder })}
+                  onReschedule={() => { setRescheduleTarget(folder); setRescheduleDate(folder.date) }}
                   onOpen={() => isDumpMode && folder.videos.length > 0
                     ? window.api.openInExplorer(folder.videos[0])
                     : window.api.openInExplorer(folder.folderPath)}
@@ -1907,7 +2546,9 @@ export function StreamsPage({
                     ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i })
                     : undefined}
                 />
-              ))}
+                </React.Fragment>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -1926,6 +2567,93 @@ export function StreamsPage({
       )}
 
       {/* Delete confirmation modal */}
+      {rescheduleTarget && (
+        <Modal
+          isOpen
+          onClose={() => { setRescheduleTarget(null); setReschedulePreview(null) }}
+          title="Reschedule stream"
+          width="sm"
+          footer={
+            <>
+              <Button variant="ghost" size="sm" onClick={() => { setRescheduleTarget(null); setReschedulePreview(null) }}>Cancel</Button>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={rescheduling}
+                disabled={!reschedulePreview || reschedulePreview.conflictExists || rescheduleDate === rescheduleTarget.date || rescheduling}
+                onClick={async () => {
+                  if (!rescheduleTarget || !rescheduleDate) return
+                  setRescheduling(true)
+                  try {
+                    await window.api.rescheduleStream(rescheduleTarget.folderPath, rescheduleDate)
+                    setRescheduleTarget(null)
+                    setReschedulePreview(null)
+                    loadFolders(streamsDir)
+                  } finally {
+                    setRescheduling(false)
+                  }
+                }}
+              >
+                Confirm reschedule
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-gray-400">New date</label>
+              <input
+                type="date"
+                value={rescheduleDate}
+                onChange={e => setRescheduleDate(e.target.value)}
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+              />
+            </div>
+
+            {rescheduleDate === rescheduleTarget.date && (
+              <p className="text-xs text-gray-500 italic">Choose a different date to reschedule.</p>
+            )}
+
+            {rescheduleDate !== rescheduleTarget.date && rescheduleLoading && (
+              <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                <Loader2 size={11} className="animate-spin shrink-0" />
+                Checking…
+              </p>
+            )}
+
+            {reschedulePreview && rescheduleDate !== rescheduleTarget.date && !rescheduleLoading && (
+              <>
+                {reschedulePreview.conflictExists ? (
+                  <p className="text-xs text-red-400 flex items-center gap-1.5">
+                    <AlertTriangle size={11} className="shrink-0" />
+                    A stream folder already exists for {rescheduleDate}. Choose a different date.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-gray-400">
+                      The following will be renamed from <span className="font-mono text-gray-300">{rescheduleTarget.date}</span> to <span className="font-mono text-gray-300">{rescheduleDate}</span>:
+                    </p>
+                    <ul className="flex flex-col gap-0.5 max-h-48 overflow-y-auto">
+                      <li className="text-xs font-mono text-gray-400 bg-navy-900 rounded px-2 py-1">
+                        📁 {rescheduleTarget.date}/ → {rescheduleDate}/
+                      </li>
+                      {reschedulePreview.filesToRename.map(f => (
+                        <li key={f.oldName} className="text-xs font-mono text-gray-500 px-2 py-0.5">
+                          {f.oldName} → {f.newName}
+                        </li>
+                      ))}
+                      {reschedulePreview.filesToRename.length === 0 && (
+                        <li className="text-xs text-gray-600 italic px-2 py-0.5">No files to rename inside folder.</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
+
       {deleteTarget && (
         <Modal
           isOpen
@@ -2026,18 +2754,26 @@ export function StreamsPage({
         <MetaModal
           mode={modal.mode}
           initialMeta={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta : null}
+          folderDate={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.date : undefined}
           detectedGames={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.detectedGames : []}
           thumbnails={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnails : []}
           allGames={allGames}
           allStreamTypes={allStreamTypes}
-          allFolders={folders}
+          allFolders={modal.mode === 'edit' ? folders.filter(f => f.folderPath !== modal.folder.folderPath) : folders}
           templates={templates}
           defaultTemplateName={config.defaultThumbnailTemplate}
+          claudeEnabled={!!config.claudeApiKey}
           tagColors={tagColors}
+          tagTextures={tagTextures}
           onNewStreamType={tag => {
             setTagColors(prev => {
               const updated = { ...prev, [tag]: pickColorForNewTag(prev) }
               window.api.setStreamTypeTags(updated)
+              return updated
+            })
+            setTagTextures(prev => {
+              const updated = { ...prev, [tag]: pickTextureForNewTag(prev) }
+              window.api.setStreamTypeTextures(updated)
               return updated
             })
           }}
@@ -2089,13 +2825,18 @@ export function StreamsPage({
         <ManageTagsModal
           tags={allStreamTypes}
           tagColors={tagColors}
+          tagTextures={tagTextures}
           games={allGames}
           folders={folders}
           onColorChange={(tag, colorKey) => {
             saveTagColors({ ...tagColors, [tag]: colorKey })
           }}
-          onAddTag={(name, colorKey) => {
+          onTextureChange={(tag, textureKey) => {
+            saveTagTextures({ ...tagTextures, [tag]: textureKey })
+          }}
+          onAddTag={(name, colorKey, textureKey) => {
             saveTagColors({ ...tagColors, [name]: colorKey })
+            saveTagTextures({ ...tagTextures, [name]: textureKey })
           }}
           onDeleteTag={tag => {
             const affected = folders.filter(f =>
@@ -2109,9 +2850,12 @@ export function StreamsPage({
                 })
               )
             ).then(() => {
-              const updated = { ...tagColors }
-              delete updated[tag]
-              saveTagColors(updated)
+              const updatedColors = { ...tagColors }
+              delete updatedColors[tag]
+              saveTagColors(updatedColors)
+              const updatedTextures = { ...tagTextures }
+              delete updatedTextures[tag]
+              saveTagTextures(updatedTextures)
               loadFolders(streamsDir)
             })
           }}
@@ -2129,9 +2873,11 @@ export function StreamsPage({
                 return window.api.writeStreamMeta(f.folderPath, { ...f.meta!, streamType: merged })
               })
             ).then(() => {
-              const updated = { ...tagColors }
-              for (const d of dying) delete updated[d]
-              saveTagColors(updated)
+              const updatedColors = { ...tagColors }
+              const updatedTextures = { ...tagTextures }
+              for (const d of dying) { delete updatedColors[d]; delete updatedTextures[d] }
+              saveTagColors(updatedColors)
+              saveTagTextures(updatedTextures)
               loadFolders(streamsDir)
             })
           }}
@@ -2224,6 +2970,36 @@ function TreeView({ nodes, depth, rootName }: { nodes: TreeNode[]; depth: number
   )
 }
 
+// ─── Clamped tooltip ─────────────────────────────────────────────────────────
+// Only renders the Tooltip when the text is actually truncated by line-clamp.
+
+function ClampedComment({ text }: { text: string }) {
+  const spanRef = useRef<HTMLSpanElement>(null)
+  const [clamped, setClamped] = useState(false)
+
+  useEffect(() => {
+    const el = spanRef.current
+    if (el) setClamped(el.scrollHeight > el.clientHeight)
+  }, [text])
+
+  const span = (
+    <span ref={spanRef} className="text-[10px] leading-tight text-gray-400 line-clamp-3">
+      {text}
+    </span>
+  )
+
+  // Always render a block-level wrapper so both clamped and non-clamped states
+  // stay out of inline formatting context — prevents the Tooltip's inline-flex
+  // wrapper from adding descender space and making the row taller.
+  return (
+    <div className="leading-[0]">
+      {clamped ? (
+        <Tooltip content={text} side="left" width="w-72">{span}</Tooltip>
+      ) : span}
+    </div>
+  )
+}
+
 // ─── Stream row ──────────────────────────────────────────────────────────────
 
 interface StreamRowProps {
@@ -2231,13 +3007,17 @@ interface StreamRowProps {
   zebra: boolean
   selectMode: boolean
   selected: boolean
+  isNextUpcoming: boolean
+  isPending: boolean
   tagColors: Record<string, string>
+  tagTextures: Record<string, string>
   onToggleSelect: (shiftKey: boolean) => void
   onDragStart: () => void
   onDragEnter: () => void
   onEdit: () => void
   onAdd: () => void
   onOpen: () => void
+  onReschedule: () => void
   onDelete: () => void
   onSendToPlayer: () => void
   onSendToConverter: () => void
@@ -2245,23 +3025,23 @@ interface StreamRowProps {
   onThumbClick?: (index: number) => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
         {selectMode && <td className="pl-4 align-middle" />}
-        <td className="px-3 py-2 align-middle w-[88px]">
-          <div className="w-[72px] h-[40px] rounded bg-red-900/20 flex items-center justify-center">
+        <td className="p-0 align-middle w-[88px]">
+          <div className="w-full h-[48px] bg-red-900/20 flex items-center justify-center">
             <AlertTriangle size={14} className="text-red-700" />
           </div>
         </td>
-        <td colSpan={selectMode ? 6 : 5} className="px-3 py-3 align-middle">
+        <td colSpan={selectMode ? 6 : 5} className="px-2 py-2 align-middle">
           <div className="flex items-center gap-3">
             <span className="text-sm font-mono text-red-400">{folder.folderName}</span>
             <span className="text-xs text-red-700 italic">Folder not found on disk</span>
           </div>
         </td>
-        <td className="px-4 py-3 align-middle w-[160px]" />
+        <td className="px-2 py-2 align-middle w-[160px]" />
       </tr>
     )
   }
@@ -2271,16 +3051,13 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
   const firstThumb = thumbnails[0]
   const extraCount = thumbnails.length - 1
 
-  const todayStr = today()
-  const isPending = date >= todayStr && !meta?.archived
-    && !videos.some(v => {
-      const base = v.split(/[\\/]/).pop() ?? ''
-      return base.startsWith(date)
-    })
-
   return (
     <tr
-      className={`border-b border-white/5 group transition-colors hover:bg-white/[0.03] ${zebra ? 'bg-white/[0.02]' : ''} ${selected ? 'bg-purple-900/10' : ''}`}
+      className={`border-b group transition-colors ${
+        isPending
+          ? `border-amber-900/30 hover:bg-amber-950/40 ${zebra ? 'bg-amber-950/30' : 'bg-amber-950/20'}`
+          : `border-white/5 hover:bg-white/[0.03] ${zebra ? 'bg-white/[0.02]' : ''}`
+      } ${selected ? 'bg-purple-900/10' : ''}`}
       onClick={selectMode ? (e) => onToggleSelect(e.shiftKey) : undefined}
       onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart() } : undefined}
       onMouseEnter={selectMode ? onDragEnter : undefined}
@@ -2297,9 +3074,9 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
       )}
 
       {/* Thumbnail */}
-      <td className="px-3 py-2 align-middle w-[88px]">
+      <td className="p-0 align-middle">
         <div
-          className={`relative w-[72px] h-[40px] rounded overflow-hidden shrink-0 ${onThumbClick ? 'cursor-zoom-in' : ''}`}
+          className={`relative h-[48px] aspect-video overflow-hidden shrink-0 ${onThumbClick ? 'cursor-zoom-in' : ''}`}
           onClick={() => onThumbClick?.(0)}
         >
           {firstThumb ? (
@@ -2312,8 +3089,8 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
               />
               {/* Hover overlay with expand icon */}
               {onThumbClick && (
-                <div className="absolute inset-0 bg-black/0 hover:bg-black/35 transition-colors flex items-center justify-center">
-                  <Expand size={14} className="text-white opacity-0 hover:opacity-100 transition-opacity drop-shadow" />
+                <div className="absolute inset-0 bg-black/0 hover:bg-black/35 transition-colors flex items-center justify-center group/thumb">
+                  <Expand size={14} className="text-white opacity-0 group-hover/thumb:opacity-100 transition-opacity drop-shadow" />
                 </div>
               )}
               {extraCount > 0 && (
@@ -2332,9 +3109,9 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
       </td>
 
       {/* Video count */}
-      <td className="px-3 py-3 align-middle w-[56px]">
+      <td className="px-2 py-2 align-middle w-[44px]">
         <VideoCountTooltip videos={videos}>
-          <div className={`flex items-center gap-1 text-xs font-mono cursor-default ${videoCount > 0 ? 'text-gray-400' : 'text-gray-700'}`}>
+          <div className={`flex items-center justify-center gap-1 text-xs font-mono cursor-default ${videoCount > 0 ? 'text-gray-400' : 'text-gray-700'}`}>
             <Film size={11} className="shrink-0" />
             <span>{videoCount}</span>
           </div>
@@ -2342,31 +3119,56 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
       </td>
 
       {/* Date */}
-      <td className="px-4 py-3 align-middle">
+      <td className="px-2 py-2 align-middle min-w-[130px]">
         <div className="flex items-center gap-1.5">
+          <span className="font-mono text-sm text-gray-200">{date}</span>
           {meta?.archived && (
-            <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30 shrink-0" title="Archived">
-              <Archive size={10} />
-            </span>
+            <Tooltip content="Archived">
+              <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30 shrink-0">
+                <Archive size={10} />
+              </span>
+            </Tooltip>
           )}
           {isPending && (
-            <span className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 shrink-0" title="Pending — stream hasn't happened yet">
-              <Radio size={10} />
-            </span>
+            isNextUpcoming && meta?.ytVideoId ? (
+              <Tooltip content="Open in YouTube Studio">
+                <button
+                  onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
+                  className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 hover:bg-yellow-900/50 hover:text-yellow-300 transition-colors shrink-0"
+                >
+                  <Radio size={12} />
+                </button>
+              </Tooltip>
+            ) : (
+              <Tooltip content={isNextUpcoming ? 'Upcoming — stream hasn\'t happened yet' : 'Scheduled upcoming stream'}>
+                <span className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 shrink-0">
+                  <Radio size={12} />
+                </span>
+              </Tooltip>
+            )
           )}
-          <span className="font-mono text-sm text-gray-200">{date}</span>
+          {!isPending && meta?.ytVideoId && (
+            <Tooltip content="Edit on YouTube">
+              <button
+                onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
+                className="inline-flex items-center p-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
+              >
+                <LucideYoutube size={12} />
+              </button>
+            </Tooltip>
+          )}
         </div>
         <div className="text-xs text-gray-600 mt-0.5">{friendlyDate(date)}</div>
       </td>
 
       {/* Type */}
-      <td className="px-4 py-3 align-middle">
+      <td className="px-2 py-2 align-middle">
         {meta ? (
           <div className="flex flex-wrap gap-1">
             {normalizeStreamTypes(meta.streamType).map(t => {
               const color = getTagColor(tagColors[t])
               return (
-                <span key={t} className={`inline-block text-xs px-2 py-0.5 rounded-full border ${color.chip}`}>
+                <span key={t} className={`inline-block text-xs px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
                   {t}
                 </span>
               )
@@ -2378,22 +3180,25 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
       </td>
 
       {/* Games */}
-      <td className="px-4 py-3 align-middle max-w-[240px]">
+      <td className="px-2 py-2 align-middle max-w-[240px]">
         {displayGames.length > 0 ? (
           <div className="flex flex-wrap gap-1">
-            {displayGames.map(g => (
-              <span
-                key={g}
-                className={`text-xs px-2 py-0.5 rounded-full ${
-                  meta?.games?.includes(g)
-                    ? 'bg-purple-900/20 text-purple-300 border border-purple-800/20'
-                    : 'bg-white/5 text-gray-500 border border-white/10 italic'
-                }`}
-                title={!meta?.games?.includes(g) ? 'Detected from filename' : undefined}
-              >
-                {g}
-              </span>
-            ))}
+            {displayGames.map(g =>
+              meta?.games?.includes(g) ? (
+                <span
+                  key={g}
+                  className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-800/20"
+                >
+                  {g}
+                </span>
+              ) : (
+                <Tooltip key={g} content="Detected from filename">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 border border-white/10 italic">
+                    {g}
+                  </span>
+                </Tooltip>
+              )
+            )}
           </div>
         ) : (
           <span className="text-xs text-gray-700">—</span>
@@ -2401,16 +3206,16 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
       </td>
 
       {/* Comments */}
-      <td className="px-4 py-3 align-middle">
+      <td className="px-2 py-2 align-middle hidden xl:table-cell">
         {meta?.comments ? (
-          <span className="text-xs text-gray-400 line-clamp-2">{meta.comments}</span>
+          <ClampedComment text={meta.comments} />
         ) : (
           <span className="text-xs text-gray-700">—</span>
         )}
       </td>
 
       {/* Actions */}
-      <td className="px-4 py-3 align-middle">
+      <td className="px-2 py-2 align-middle">
         <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
           {!hasMeta && (
             <span className="flex items-center gap-1 text-xs text-yellow-600 mr-1 shrink-0">
@@ -2418,28 +3223,36 @@ function StreamRow({ folder, zebra, selectMode, selected, tagColors, onToggleSel
               No meta
             </span>
           )}
-          {videoCount > 0 && <Button variant="ghost" size="sm" icon={<Film size={12} />} onClick={onSendToPlayer} title="Send to Player" />}
-          {videoCount > 0 && <Button variant="ghost" size="sm" icon={<Zap size={12} />} onClick={onSendToConverter} title="Send to Converter" />}
+          {videoCount > 0 && <Tooltip content="Send to Player"><Button variant="ghost" size="sm" icon={<Film size={12} />} onClick={onSendToPlayer} /></Tooltip>}
+          {videoCount > 0 && <Tooltip content="Send to Converter"><Button variant="ghost" size="sm" icon={<Zap size={12} />} onClick={onSendToConverter} /></Tooltip>}
           {videoCount > 1 && (
-            <Button variant="ghost" size="sm" icon={<Combine size={12} />} onClick={onSendToCombine} title="Send to Combine" />
+            <Tooltip content="Send to Combine"><Button variant="ghost" size="sm" icon={<Combine size={12} />} onClick={onSendToCombine} /></Tooltip>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={hasMeta ? <PencilLine size={12} /> : <FilePlus size={12} />}
-            onClick={hasMeta ? onEdit : onAdd}
-          >
-            {hasMeta ? 'Edit' : 'Add'}
-          </Button>
-          <Button variant="ghost" size="sm" icon={<FolderOpen size={12} />} onClick={onOpen} />
+          <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={hasMeta ? <PencilLine size={12} /> : <FilePlus size={12} />}
+              onClick={hasMeta ? onEdit : onAdd}
+            />
+          </Tooltip>
+          <Tooltip content="Open folder">
+            <Button variant="ghost" size="sm" icon={<FolderOpen size={12} />} onClick={onOpen} />
+          </Tooltip>
+          {isPending && (
+            <Tooltip content="Reschedule">
+              <Button variant="ghost" size="sm" icon={<CalendarClock size={12} />} onClick={onReschedule} />
+            </Tooltip>
+          )}
           <div className="w-px h-3.5 bg-white/10 mx-0.5" />
-          <button
-            onClick={onDelete}
-            className="p-1.5 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            title="Delete folder"
-          >
-            <Trash2 size={12} />
-          </button>
+          <Tooltip content="Delete folder">
+            <button
+              onClick={onDelete}
+              className="p-1.5 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 size={12} />
+            </button>
+          </Tooltip>
         </div>
       </td>
     </tr>
