@@ -206,7 +206,7 @@ export function useThumbnailStrip(
         if (cancelled) { destroy(); return }
 
         const timecodes = Array.from({ length: ZOOM_COUNT }, (_, i) =>
-          ZOOM_COUNT === 1 ? genStart : genStart + (i / (ZOOM_COUNT - 1)) * genSpan
+          genStart + (i / (ZOOM_COUNT - 1)) * genSpan
         )
 
         for (let i = 0; i < ZOOM_COUNT; i++) {

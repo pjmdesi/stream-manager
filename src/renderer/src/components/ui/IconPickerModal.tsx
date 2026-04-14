@@ -80,7 +80,7 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
             <>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-1">
                 {filtered.map(({ name, pascal }) => {
-                  const Icon = (LucideIcons as Record<string, React.ComponentType<{ size?: number }>>)[pascal]
+                  const Icon = ((LucideIcons as unknown) as Record<string, React.ComponentType<{ size?: number }>>)[pascal]
                   const isSelected = value === name
                   return (
                     <button

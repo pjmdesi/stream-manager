@@ -111,6 +111,7 @@ export interface AppConfig {
   twitchClientSecret: string
   startWithWindows: boolean
   startMinimized: boolean
+  autoDeletePartialOnCancel: boolean
   claudeApiKey: string
   claudeSystemPrompt: string
   launcherWidgetGroupId: string

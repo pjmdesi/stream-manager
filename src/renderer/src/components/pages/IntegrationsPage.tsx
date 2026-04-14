@@ -250,7 +250,7 @@ export function IntegrationsPage() {
       setYtConnected(true)
       setYtTokenValid(true)
       setYtTokenError(null)
-      setExpandedSection('yt-titles')
+      setExpandedSections(prev => { const s = new Set(prev); s.delete('yt-credentials'); s.add('yt-titles'); return s })
     }
     catch (e: any) { setYtError(e.message) }
     finally { setYtConnecting(false) }

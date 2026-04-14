@@ -23,6 +23,7 @@ const defaultConfig: AppConfig = {
   twitchClientSecret: '',
   startWithWindows: false,
   startMinimized: false,
+  autoDeletePartialOnCancel: false,
   claudeApiKey: '',
   claudeSystemPrompt: '',
   launcherWidgetGroupId: '',

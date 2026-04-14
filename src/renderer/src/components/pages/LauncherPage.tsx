@@ -16,7 +16,7 @@ function toPascal(name: string) {
 
 function GroupIcon({ name, size = 14 }: { name?: string; size?: number }) {
   const Icon = name
-    ? ((LucideIcons as Record<string, React.ComponentType<{ size?: number }>>)[toPascal(name)] ?? Rocket)
+    ? (((LucideIcons as unknown) as Record<string, React.ComponentType<{ size?: number }>>)[toPascal(name)] ?? Rocket)
     : Rocket
   return <Icon size={size} />
 }
