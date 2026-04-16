@@ -514,7 +514,22 @@ export function registerConverterIPC(): void {
     pausers.delete(jobId)
     resumers.delete(jobId)
     const j = jobs.get(jobId)
-    if (j) jobs.set(jobId, { ...j, status: 'cancelled' })
+    if (j) {
+      jobs.set(jobId, { ...j, status: 'cancelled' })
+      const config = getStore().get('config')
+      if (config.autoDeletePartialOnCancel && j.outputFile) {
+        const outputFile = j.outputFile
+        // SIGKILL is async — retry deletion until the process releases the handle
+        const tryDelete = (attemptsLeft: number) => {
+          try {
+            fs.unlinkSync(outputFile)
+          } catch (_) {
+            if (attemptsLeft > 1) setTimeout(() => tryDelete(attemptsLeft - 1), 500)
+          }
+        }
+        setTimeout(() => tryDelete(6), 250) // up to ~3 seconds total
+      }
+    }
   })
 
   ipcMain.handle('converter:pauseJob', async (_event, jobId: string) => {

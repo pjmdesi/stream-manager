@@ -13,6 +13,8 @@
 7. Add a more visual distinction between upcoming streams and past streams.
 8. Maybe an alternative view for the streams page, such as a grid view instead of a table view.
 9. Maaaaaaaybe a thumbnail creator / editor??? Would that even be possible without reinventing canva / illustrator?
+10. Implement animations in the UI to improve user experience.
+11. Add shorts view & upload functionality. Will need to enhance clipping feature to save shorts more fully. Will need to build a place to manage them. Might need to be a separate shorts page or upgrade the streams page to be able to handle both streams and their related shorts.
 
 ## Bugs
 
