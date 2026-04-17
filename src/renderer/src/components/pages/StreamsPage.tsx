@@ -1654,7 +1654,7 @@ function CloudDownloadModal({
   return (
     <Modal
       isOpen
-      onClose={stage === 'confirm' ? onCancel : undefined}
+      onClose={onCancel}
       title="File Not Available Locally"
       width="sm"
       footer={
@@ -2735,7 +2735,7 @@ return (
                     folderPath: folder.folderPath,
                     date: folder.date,
                     title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
-                    meta: folder.meta,
+                    meta: folder.meta ?? undefined,
                   })}
                   onThumbClick={folder.thumbnails.length > 0
                     ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i })

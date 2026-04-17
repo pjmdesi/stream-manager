@@ -1226,12 +1226,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     try {
       await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl)
       // Update the stream meta flags so the streams list knows this thumbnail exists
-      const existingMeta = currentStream?.meta ?? {}
+      const existingMeta = currentStream?.meta ?? {} as any
       await window.api.writeStreamMeta(folderPath, {
         ...existingMeta,
         smThumbnail: true,
         smThumbnailTemplate: templateId,
-      })
+      } as any)
       setIsDirty(false)
     } catch (err) {
       console.error('Auto-save failed:', err)
@@ -1488,9 +1488,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.png`),
     ])
     // Clear the meta flags so the streams list reflects the deletion
-    const existingMeta = currentStream.meta ?? {}
+    const existingMeta = (currentStream.meta ?? {}) as any
     const { smThumbnail: _a, smThumbnailTemplate: _b, ...metaWithoutThumb } = existingMeta
-    await window.api.writeStreamMeta(folderPath, metaWithoutThumb).catch(() => {})
+    await window.api.writeStreamMeta(folderPath, metaWithoutThumb as any).catch(() => {})
     // Remove from persisted recents store and sync local state
     window.api.thumbnailRemoveRecent(folderPath, date).then(setRecents).catch(() => {
       setRecents(prev => prev.filter(r => !(r.folderPath === folderPath && r.date === date)))
