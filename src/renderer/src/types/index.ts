@@ -214,7 +214,7 @@ export type Page = 'streams' | 'player' | 'templates' | 'rules' | 'converter' | 
 export interface ThumbnailLayer {
   id: string
   name: string
-  type: 'image' | 'text'
+  type: 'image' | 'text' | 'shape'
   visible: boolean
   opacity: number       // 0–100
   x: number
@@ -229,10 +229,14 @@ export interface ThumbnailLayer {
   fontFamily?: string
   fontSize?: number
   fontStyle?: string    // 'normal' | 'bold' | 'italic' | 'bold italic'
+  align?: 'left' | 'center' | 'right'
+  // Shape
+  shapeType?: 'rect' | 'ellipse' | 'triangle'
+  cornerRadius?: number
+  // Shared (text + shape)
   fill?: string
   stroke?: string
   strokeWidth?: number
-  align?: 'left' | 'center' | 'right'
 }
 
 export interface ThumbnailCanvasFile {

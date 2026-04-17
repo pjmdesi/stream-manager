@@ -1739,6 +1739,7 @@ export function StreamsPage({
   const { config, updateConfig, loading: configLoading } = useStore()
   const { openEditor: openThumbnailEditor } = useThumbnailEditor()
   const [folders, setFolders] = useState<StreamFolder[]>([])
+  const [thumbsKey, setThumbsKey] = useState(() => Date.now())
   const [loading, setLoading] = useState(false)
   const [modal, setModal] = useState<ModalState>({ mode: 'none' })
   const [showManageTags, setShowManageTags] = useState(false)
@@ -1849,6 +1850,7 @@ export function StreamsPage({
     try {
       const result = await window.api.listStreams(dir, streamMode as any)
       setFolders(result)
+      setThumbsKey(Date.now())
       const hasMissing = result.some(f => f.isMissing)
       if (hasMissing) {
         setOrphanDismissed(prev => {
@@ -2598,10 +2600,12 @@ return (
                     folderPath: folder.folderPath,
                     date: folder.date,
                     title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
+                    meta: folder.meta,
                   })}
                   onThumbClick={folder.thumbnails.length > 0
                     ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i })
                     : undefined}
+                  thumbsKey={thumbsKey}
                 />
                 </React.Fragment>
                 )
@@ -3090,9 +3094,10 @@ interface StreamRowProps {
   onSendToCombine: () => void
   onOpenThumbnails: () => void
   onThumbClick?: (index: number) => void
+  thumbsKey: number
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -3117,6 +3122,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
   const displayGames = meta?.games?.length ? meta.games : detectedGames
   const firstThumb = thumbnails[0]
   const extraCount = thumbnails.length - 1
+  const hasSMThumbnail = thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
 
   return (
     <tr
@@ -3149,7 +3155,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
           {firstThumb ? (
             <>
               <img
-                src={toFileUrl(firstThumb)}
+                src={`${toFileUrl(firstThumb)}?t=${thumbsKey}`}
                 alt="thumbnail"
                 className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                 draggable={false}
@@ -3311,7 +3317,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
           {videoCount > 1 && (
             <Tooltip content="Send to Combine"><Button variant="ghost" size="sm" icon={<Combine size={12} />} onClick={onSendToCombine} /></Tooltip>
           )}
-          <Tooltip content="Open Thumbnail Editor">
+          <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
             <Button variant="ghost" size="sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
           </Tooltip>
           <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>

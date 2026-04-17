@@ -1,20 +1,21 @@
 import React, {
   useState, useEffect, useRef, useCallback, useMemo
 } from 'react'
-import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, RegularPolygon as KonvaRegularPolygon } from 'react-konva'
 import useImage from 'use-image'
 import Konva from 'konva'
 import {
   ArrowLeft, Plus, Trash2, Eye, EyeOff, ChevronUp, ChevronDown,
-  Image as ImageIcon, Type, Undo2, Redo2, Save, Download,
+  Image as ImageIcon, Type, Undo2, Redo2, Download,
   BookMarked, FolderOpen, LayoutTemplate, Sliders, RotateCcw, Copy,
-  Magnet, Grid3x3, Check, X
+  Magnet, Grid3x3, Check, X, AlertTriangle, Pencil,
+  Square, Circle, Triangle
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useStore } from '../../hooks/useStore'
-import type { ThumbnailLayer, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry } from '../../types'
+import type { ThumbnailLayer, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta } from '../../types'
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
 const CANVAS_W = 1280
@@ -138,6 +139,33 @@ function newId() { return Math.random().toString(36).slice(2) }
 
 function cloneLayer(layer: ThumbnailLayer): ThumbnailLayer { return { ...layer } }
 
+/** Maps a font variant style name (from queryLocalFonts) to a CSS-compatible fontStyle prefix for Konva */
+function styleNameToCSSFont(name: string): string {
+  const l = name.toLowerCase()
+  const italic = /italic|oblique/.test(l)
+  let w = 400
+  if (/thin|hairline/.test(l)) w = 100
+  else if (/extra\s*light|ultra\s*light/.test(l)) w = 200
+  else if (/light/.test(l)) w = 300
+  else if (/medium/.test(l)) w = 500
+  else if (/demi\s*bold|semi\s*bold/.test(l)) w = 600
+  else if (/extra\s*bold|ultra\s*bold/.test(l)) w = 800
+  else if (/black|heavy/.test(l)) w = 900
+  else if (/bold/.test(l)) w = 700
+  const parts: string[] = []
+  if (italic) parts.push('italic')
+  if (w !== 400) parts.push(String(w))
+  return parts.length ? parts.join(' ') : 'normal'
+}
+
+/** Returns numeric weight from a CSS fontStyle string */
+function cssToWeight(css: string): number {
+  const m = css.match(/\b(\d{3})\b/)
+  if (m) return parseInt(m[1])
+  if (css.includes('bold')) return 700
+  return 400
+}
+
 // ── Konva node rendering ──────────────────────────────────────────────────────
 
 interface KonvaLayerNodeProps {
@@ -184,7 +212,8 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCl
         opacity={layer.opacity / 100}
         visible={layer.visible}
         draggable
-        onClick={e => onSelect(layer.id, e.evt.shiftKey)}
+        onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
+        onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
         onTap={() => onSelect(layer.id, false)}
         onDragMove={onSnapDragMove}
         onDragEnd={e => {
@@ -234,11 +263,13 @@ function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCle
         fontSize={layer.fontSize ?? 48}
         fontStyle={layer.fontStyle ?? 'normal'}
         fill={layer.fill ?? '#ffffff'}
-        stroke={layer.stroke}
-        strokeWidth={layer.strokeWidth}
+        stroke={layer.stroke ?? '#000000'}
+        strokeWidth={layer.strokeWidth ?? 0}
+        fillAfterStrokeEnabled
         align={layer.align ?? 'left'}
         draggable
-        onClick={e => onSelect(layer.id, e.evt.shiftKey)}
+        onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
+        onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
         onTap={() => onSelect(layer.id, false)}
         onDragMove={onSnapDragMove}
         onDragEnd={e => {
@@ -261,6 +292,88 @@ function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCle
           rotateEnabled
           enabledAnchors={['middle-left', 'middle-right']}
           boundBoxFunc={(oldBox, newBox) => ({ ...newBox, height: oldBox.height })}
+        />
+      )}
+    </>
+  )
+}
+
+function ShapeNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+  const nodeRef = useRef<any>(null)
+  const trRef = useRef<Konva.Transformer>(null)
+  const w = layer.width ?? 200
+  const h = layer.height ?? 200
+  const shapeType = layer.shapeType ?? 'rect'
+  // Ellipse and triangle are centered on x/y in Konva; we store top-left
+  const isCentered = shapeType === 'ellipse' || shapeType === 'triangle'
+
+  useEffect(() => {
+    if (isSelected && trRef.current && nodeRef.current) {
+      trRef.current.nodes([nodeRef.current])
+      trRef.current.getLayer()?.batchDraw()
+    }
+  }, [isSelected])
+
+  const sharedProps = {
+    ref: nodeRef,
+    name: 'snap-target',
+    x: isCentered ? layer.x + w / 2 : layer.x,
+    y: isCentered ? layer.y + h / 2 : layer.y,
+    rotation: layer.rotation,
+    opacity: layer.opacity / 100,
+    visible: layer.visible,
+    fill: layer.fill ?? '#6366f1',
+    stroke: layer.stroke ?? '#000000',
+    strokeWidth: layer.strokeWidth ?? 0,
+    fillAfterStrokeEnabled: true,
+    draggable: true,
+    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button !== 0) e.target.stopDrag() },
+    onClick: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) },
+    onTap: () => onSelect(layer.id, false),
+    onDragMove: onSnapDragMove,
+    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
+      onClearGuides()
+      const nx = isCentered ? e.target.x() - w / 2 : e.target.x()
+      const ny = isCentered ? e.target.y() - h / 2 : e.target.y()
+      onChange({ ...layer, x: Math.round(nx), y: Math.round(ny) })
+    },
+    onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
+      const node = e.target
+      const sx = Math.abs(node.scaleX())
+      const sy = Math.abs(node.scaleY())
+      let newW = Math.round(w * sx)
+      let newH = Math.round(h * sy)
+      if (gridSnapEnabled) { newW = snapGrid(newW); newH = snapGrid(newH) }
+      // node.x/y is center for centered shapes
+      const nx = isCentered ? Math.round(node.x() - newW / 2) : Math.round(node.x())
+      const ny = isCentered ? Math.round(node.y() - newH / 2) : Math.round(node.y())
+      onChange({ ...layer, x: nx, y: ny, width: newW, height: newH, rotation: node.rotation() })
+      node.scaleX(1)
+      node.scaleY(1)
+    },
+  }
+
+  return (
+    <>
+      {shapeType === 'rect' && (
+        <KonvaRect {...sharedProps} width={w} height={h} cornerRadius={layer.cornerRadius ?? 0} />
+      )}
+      {shapeType === 'ellipse' && (
+        <KonvaEllipse {...sharedProps} radiusX={w / 2} radiusY={h / 2} />
+      )}
+      {shapeType === 'triangle' && (
+        <KonvaRegularPolygon {...sharedProps} sides={3} radius={Math.min(w, h) / 2} />
+      )}
+      {isSelected && (
+        <Transformer
+          ref={trRef}
+          rotateEnabled
+          keepRatio={shapeType === 'triangle'}
+          boundBoxFunc={(_, newBox) => ({
+            ...newBox,
+            width: Math.max(10, newBox.width),
+            height: Math.max(10, newBox.height),
+          })}
         />
       )}
     </>
@@ -312,6 +425,26 @@ function useUndoRedo(initial: ThumbnailLayer[]) {
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
+function TemplatePreview({ streamsDir, templateId, name }: { streamsDir: string; templateId: string; name: string }) {
+  const [imgError, setImgError] = useState(false)
+  const src = `file://${streamsDir}/_thumbnail-assets/templates/${templateId}.png`
+  return (
+    <div className="aspect-video bg-navy-900 flex items-center justify-center overflow-hidden">
+      {!imgError ? (
+        <img
+          key={src}
+          src={src}
+          alt={name}
+          className="w-full h-full object-cover"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <LayoutTemplate size={28} className="text-gray-600" />
+      )}
+    </div>
+  )
+}
+
 interface OverviewProps {
   streamsDir: string
   templates: ThumbnailTemplate[]
@@ -323,7 +456,7 @@ interface OverviewProps {
   loading: boolean
 }
 
-function Overview({ templates, recents, onNewBlank, onOpenTemplate, onOpenRecent, onDeleteTemplate, loading }: OverviewProps) {
+function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, onOpenRecent, onDeleteTemplate, loading }: OverviewProps) {
   return (
     <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-8 min-h-0">
       {/* Templates */}
@@ -346,17 +479,25 @@ function Overview({ templates, recents, onNewBlank, onOpenTemplate, onOpenRecent
                 className="group relative bg-navy-800 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-purple-500/50 transition-colors"
                 onClick={() => onOpenTemplate(t)}
               >
-                <div className="aspect-video bg-navy-900 flex items-center justify-center">
-                  <LayoutTemplate size={28} className="text-gray-600" />
-                </div>
+                <TemplatePreview streamsDir={streamsDir} templateId={t.id} name={t.name} />
                 <div className="p-2 flex items-center justify-between gap-1">
                   <span className="text-xs text-gray-300 truncate">{t.name}</span>
-                  <button
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-all shrink-0"
-                    onClick={e => { e.stopPropagation(); onDeleteTemplate(t.id) }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-all shrink-0">
+                    <button
+                      className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-200 transition-colors"
+                      onClick={e => { e.stopPropagation(); onOpenTemplate(t) }}
+                      title="Edit template"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                    <button
+                      className="p-1 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors"
+                      onClick={e => { e.stopPropagation(); onDeleteTemplate(t.id) }}
+                      title="Delete template"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -396,9 +537,10 @@ interface PropsPanelProps {
   layer: ThumbnailLayer | null
   onChange: (updated: ThumbnailLayer) => void
   systemFonts: string[]
+  fontVariantMap: Record<string, { name: string; css: string }[]>
 }
 
-function PropertiesPanel({ layer, onChange, systemFonts }: PropsPanelProps) {
+function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: PropsPanelProps) {
   if (!layer) {
     return (
       <div className="p-4 text-xs text-gray-600 text-center">
@@ -458,7 +600,7 @@ function PropertiesPanel({ layer, onChange, systemFonts }: PropsPanelProps) {
                 className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full"
               />
             </label>
-            {layer.type === 'image' && layer.height !== undefined && (
+            {(layer.type === 'image' || layer.type === 'shape') && layer.height !== undefined && (
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-500">Height</span>
                 <input
@@ -489,7 +631,18 @@ function PropertiesPanel({ layer, onChange, systemFonts }: PropsPanelProps) {
             <div className="flex flex-col gap-1.5">
               <select
                 value={layer.fontFamily ?? 'Arial'}
-                onChange={e => update({ fontFamily: e.target.value })}
+                onChange={e => {
+                  const fam = e.target.value
+                  const variants = fontVariantMap[fam]
+                  if (variants && variants.length > 0) {
+                    // Try to preserve current weight; fall back to first variant
+                    const cur = layer.fontStyle ?? 'normal'
+                    const match = variants.find(v => v.css === cur) ?? variants.find(v => v.css === 'normal') ?? variants[0]
+                    update({ fontFamily: fam, fontStyle: match.css })
+                  } else {
+                    update({ fontFamily: fam })
+                  }
+                }}
                 className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full"
                 style={{ fontFamily: layer.fontFamily ?? 'Arial' }}
               >
@@ -511,16 +664,36 @@ function PropertiesPanel({ layer, onChange, systemFonts }: PropsPanelProps) {
                 </label>
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] text-gray-500">Style</span>
-                  <select
-                    value={layer.fontStyle ?? 'normal'}
-                    onChange={e => update({ fontStyle: e.target.value })}
-                    className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
-                  >
-                    <option value="normal">Normal</option>
-                    <option value="bold">Bold</option>
-                    <option value="italic">Italic</option>
-                    <option value="bold italic">Bold Italic</option>
-                  </select>
+                  {(() => {
+                    const variants = fontVariantMap[layer.fontFamily ?? 'Arial'] ?? []
+                    if (variants.length > 0) {
+                      const cur = layer.fontStyle ?? 'normal'
+                      const matched = variants.find(v => v.css === cur) ?? variants[0]
+                      return (
+                        <select
+                          value={matched.css}
+                          onChange={e => update({ fontStyle: e.target.value })}
+                          className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                        >
+                          {variants.map(v => (
+                            <option key={v.name} value={v.css}>{v.name}</option>
+                          ))}
+                        </select>
+                      )
+                    }
+                    return (
+                      <select
+                        value={layer.fontStyle ?? 'normal'}
+                        onChange={e => update({ fontStyle: e.target.value })}
+                        className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                      >
+                        <option value="normal">Normal</option>
+                        <option value="bold">Bold</option>
+                        <option value="italic">Italic</option>
+                        <option value="bold italic">Bold Italic</option>
+                      </select>
+                    )
+                  })()}
                 </label>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
@@ -583,6 +756,41 @@ function PropertiesPanel({ layer, onChange, systemFonts }: PropsPanelProps) {
           </section>
         </>
       )}
+
+      {layer.type === 'shape' && (
+        <section>
+          <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2">Fill & Stroke</p>
+          <div className="flex flex-col gap-1.5">
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-500">Fill</span>
+              <div className="flex items-center gap-1.5">
+                <input type="color" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
+                  className="h-7 w-10 rounded border border-white/10 bg-transparent cursor-pointer" />
+                <input type="text" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
+                  className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+              </div>
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-500">Stroke</span>
+              <div className="flex items-center gap-1.5">
+                <input type="color" value={layer.stroke ?? '#000000'} onChange={e => update({ stroke: e.target.value })}
+                  className="h-7 w-10 rounded border border-white/10 bg-transparent cursor-pointer" />
+                <input type="number" min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
+                  onChange={e => update({ strokeWidth: Number(e.target.value) })}
+                  className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+              </div>
+            </label>
+            {layer.shapeType === 'rect' && (
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-500">Corner radius</span>
+                <input type="number" min={0} max={999} value={layer.cornerRadius ?? 0}
+                  onChange={e => update({ cornerRadius: Number(e.target.value) })}
+                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
+              </label>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
@@ -602,7 +810,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [overviewLoading, setOverviewLoading] = useState(false)
 
   // ── Editor state ──────────────────────────────────────────────────────────
-  const [currentStream, setCurrentStream] = useState<{ folderPath: string; date: string; title?: string } | null>(null)
+  const [currentStream, setCurrentStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta } | null>(null)
   const [currentTemplateId, setCurrentTemplateId] = useState<string | undefined>(undefined)
   const { layers, commit, set: setLayersDirect, undo, redo, reset: resetLayers, canUndo, canRedo } = useUndoRedo([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -610,6 +818,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [saveTemplateName, setSaveTemplateName] = useState('')
   const saveTemplateInputRef = useRef<HTMLInputElement>(null)
+  const [deleteThumbOpen, setDeleteThumbOpen] = useState(false)
+  // Clipboard persists across stream navigations (component stays mounted)
+  const [clipboardLayers, setClipboardLayers] = useState<ThumbnailLayer[]>([])
+
+  // ── Template picker (shown when opening a new stream with no existing canvas) ─
+  const [templatePickerStream, setTemplatePickerStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta } | null>(null)
 
   // ── Container / zoom / pan ────────────────────────────────────────────────
   const canvasContainerRef = useRef<HTMLDivElement>(null)
@@ -657,16 +871,38 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   // ── System fonts ─────────────────────────────────────────────────────────
   const [systemFonts, setSystemFonts] = useState<string[]>(['Arial', 'Georgia', 'Impact', 'Times New Roman', 'Verdana'])
+  const [fontVariantMap, setFontVariantMap] = useState<Record<string, { name: string; css: string }[]>>({})
 
   // ── Auto-save timer ───────────────────────────────────────────────────────
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ─── Load system fonts ─────────────────────────────────────────────────
+  // ─── Load system fonts + variants ─────────────────────────────────────────
   useEffect(() => {
     if (!(window as any).queryLocalFonts) return
     ;(window as any).queryLocalFonts().then((fonts: any[]) => {
       const names = Array.from(new Set(fonts.map((f: any) => f.family as string))).sort()
       if (names.length > 0) setSystemFonts(names)
+
+      // Build per-family variant list
+      const variantMap: Record<string, { name: string; css: string }[]> = {}
+      for (const font of fonts) {
+        const family = font.family as string
+        const styleName = font.style as string
+        if (!variantMap[family]) variantMap[family] = []
+        const css = styleNameToCSSFont(styleName)
+        if (!variantMap[family].some(v => v.name === styleName)) {
+          variantMap[family].push({ name: styleName, css })
+        }
+      }
+      // Sort each family's variants by weight then italic
+      for (const fam of Object.keys(variantMap)) {
+        variantMap[fam].sort((a, b) => {
+          const wa = cssToWeight(a.css), wb = cssToWeight(b.css)
+          if (wa !== wb) return wa - wb
+          return (a.css.includes('italic') ? 1 : 0) - (b.css.includes('italic') ? 1 : 0)
+        })
+      }
+      setFontVariantMap(variantMap)
     }).catch(() => {})
   }, [])
 
@@ -677,16 +913,29 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     Promise.all([
       window.api.thumbnailListTemplates(config.streamsDir),
       window.api.thumbnailGetRecents(),
-    ]).then(([tmpl, rec]) => {
+    ]).then(async ([tmpl, rec]) => {
       setTemplates(tmpl)
-      setRecents(rec)
+
+      // Filter out recents whose canvas file no longer exists on disk
+      const existsFlags = await Promise.all(
+        rec.map(r => window.api.fileExists(`${r.folderPath}/${r.date}_sm-thumbnail.json`))
+      )
+      const valid = rec.filter((_, i) => existsFlags[i])
+      const stale = rec.filter((_, i) => !existsFlags[i])
+
+      // Persist removals so they don't reappear next time
+      await Promise.allSettled(
+        stale.map(r => window.api.thumbnailRemoveRecent(r.folderPath, r.date))
+      )
+
+      setRecents(valid)
     }).catch(() => {}).finally(() => setOverviewLoading(false))
   }, [isVisible, config.streamsDir])
 
   // ── Handle pending stream navigation ─────────────────────────────────────
   useEffect(() => {
     if (!pendingStream || !isVisible) return
-    openStreamEditor(pendingStream.folderPath, pendingStream.date, pendingStream.title)
+    openStreamEditor(pendingStream.folderPath, pendingStream.date, pendingStream.title, pendingStream.meta)
     clearPendingStream()
   }, [pendingStream, isVisible])
 
@@ -801,7 +1050,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   // ── Auto-save ─────────────────────────────────────────────────────────────
   const triggerAutoSave = useCallback((newLayers: ThumbnailLayer[]) => {
-    if (!currentStream) return
+    if (!currentStream) {
+      // No stream — mark dirty so "Update template" button activates, but don't auto-save
+      if (currentTemplateId) setIsDirty(true)
+      return
+    }
     setIsDirty(true)
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(() => {
@@ -844,11 +1097,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const pngDataUrl = getCanvasDataUrl()
     try {
       await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl)
+      // Update the stream meta flags so the streams list knows this thumbnail exists
+      const existingMeta = currentStream?.meta ?? {}
+      await window.api.writeStreamMeta(folderPath, {
+        ...existingMeta,
+        smThumbnail: true,
+        smThumbnailTemplate: templateId,
+      })
       setIsDirty(false)
     } catch (err) {
       console.error('Auto-save failed:', err)
     }
-  }, [getCanvasDataUrl])
+  }, [getCanvasDataUrl, currentStream])
 
   // ── Layer mutations ────────────────────────────────────────────────────────
   const commitLayers = useCallback((next: ThumbnailLayer[]) => {
@@ -891,7 +1151,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Add layers ────────────────────────────────────────────────────────────
   const addImageLayer = useCallback(async () => {
     let defaultPath: string | undefined
-    if (config.streamsDir) {
+    if (currentStream) {
+      defaultPath = currentStream.folderPath
+    } else if (config.streamsDir) {
       await window.api.thumbnailEnsureAssetsDir(config.streamsDir).catch(() => {})
       defaultPath = `${config.streamsDir}/_thumbnail-assets`
     }
@@ -922,18 +1184,30 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     commitLayers([...layers, layer])
     setSelectedIds([layer.id])
-  }, [layers, commitLayers, config.streamsDir])
+  }, [layers, commitLayers, config.streamsDir, currentStream])
 
   const addTextLayer = useCallback(() => {
     const layer: ThumbnailLayer = {
       id: newId(), name: 'Text', type: 'text', visible: true, opacity: 100,
       x: 100, y: 100, rotation: 0, text: 'New Text',
       fontFamily: systemFonts[0] ?? 'Arial', fontSize: 72, fontStyle: 'bold',
-      fill: '#ffffff', strokeWidth: 0, align: 'left',
+      fill: '#ffffff', stroke: '#000000', strokeWidth: 0, align: 'left',
     }
     commitLayers([...layers, layer])
     setSelectedIds([layer.id])
   }, [layers, commitLayers, systemFonts])
+
+  const addShapeLayer = useCallback((shapeType: 'rect' | 'ellipse' | 'triangle') => {
+    const names = { rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle' }
+    const layer: ThumbnailLayer = {
+      id: newId(), name: names[shapeType], type: 'shape', shapeType, visible: true, opacity: 100,
+      x: Math.round(CANVAS_W / 2 - 100), y: Math.round(CANVAS_H / 2 - 100),
+      rotation: 0, width: 200, height: 200,
+      fill: '#6366f1', stroke: '#000000', strokeWidth: 0, cornerRadius: 0,
+    }
+    commitLayers([...layers, layer])
+    setSelectedIds([layer.id])
+  }, [layers, commitLayers])
 
   // ── Handle select on stage (deselect) ─────────────────────────────────────
   const handleStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -950,31 +1224,60 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   }, [])
 
   // ── Open editor for a stream ───────────────────────────────────────────────
-  const openStreamEditor = useCallback(async (folderPath: string, date: string, title?: string) => {
-    setCurrentStream({ folderPath, date, title })
+  const openStreamEditor = useCallback(async (folderPath: string, date: string, title?: string, meta?: StreamMeta) => {
+    // Load canvas + fresh template list in parallel (avoids race with isVisible effect)
+    const [canvas, freshTemplates] = await Promise.all([
+      window.api.thumbnailLoadCanvas(folderPath, date),
+      window.api.thumbnailListTemplates(config.streamsDir).catch(() => [] as ThumbnailTemplate[]),
+    ])
+    setTemplates(freshTemplates)
+
+    if (!canvas && freshTemplates.length > 0) {
+      // No existing canvas but templates exist → ask user to pick one first
+      setTemplatePickerStream({ folderPath, date, title, meta })
+      setMode('overview')
+      return
+    }
+
+    setCurrentStream({ folderPath, date, title, meta })
     setSelectedIds([])
-    try {
-      const canvas = await window.api.thumbnailLoadCanvas(folderPath, date)
-      if (canvas) {
-        resetLayers(canvas.layers)
-        setCurrentTemplateId(canvas.templateId)
-      } else {
-        resetLayers([])
-        setCurrentTemplateId(undefined)
-      }
-    } catch {
+    if (canvas) {
+      resetLayers(canvas.layers)
+      setCurrentTemplateId(canvas.templateId)
+    } else {
       resetLayers([])
+      setCurrentTemplateId(undefined)
     }
     setIsDirty(false)
     setMode('editor')
     // Add to recents
     const entry: ThumbnailRecentEntry = { folderPath, date, title, updatedAt: Date.now() }
     window.api.thumbnailAddRecent(entry).then(setRecents).catch(() => {})
-  }, [resetLayers])
+  }, [resetLayers, config.streamsDir])
 
   const openFromRecent = useCallback((entry: ThumbnailRecentEntry) => {
     openStreamEditor(entry.folderPath, entry.date, entry.title)
   }, [openStreamEditor])
+
+  // ── Confirm template picker choice ────────────────────────────────────────
+  const confirmPickTemplate = useCallback((t: ThumbnailTemplate | null) => {
+    if (!templatePickerStream) return
+    const { folderPath, date, title, meta } = templatePickerStream
+    setTemplatePickerStream(null)
+    setCurrentStream({ folderPath, date, title, meta })
+    setSelectedIds([])
+    if (t) {
+      resetLayers(t.layers.map(l => ({ ...l, id: newId() })))
+      setCurrentTemplateId(t.id)
+    } else {
+      resetLayers([])
+      setCurrentTemplateId(undefined)
+    }
+    setIsDirty(false)
+    setMode('editor')
+    const entry: ThumbnailRecentEntry = { folderPath, date, title, updatedAt: Date.now() }
+    window.api.thumbnailAddRecent(entry).then(setRecents).catch(() => {})
+  }, [templatePickerStream, resetLayers])
 
   const openFromTemplate = useCallback((t: ThumbnailTemplate) => {
     // Open editor with template layers but no stream association
@@ -1010,9 +1313,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       id: newId(), name, createdAt: Date.now(), updatedAt: Date.now(), layers: layers.map(cloneLayer),
     }
     await window.api.thumbnailEnsureAssetsDir(config.streamsDir)
-    const saved = await window.api.thumbnailSaveTemplate(config.streamsDir, template)
+    const pngDataUrl = getCanvasDataUrl()
+    const saved = await window.api.thumbnailSaveTemplate(config.streamsDir, template, pngDataUrl || undefined)
     setTemplates(prev => [saved, ...prev.filter(t => t.id !== saved.id)])
-  }, [saveTemplateName, layers, config.streamsDir])
+  }, [saveTemplateName, layers, config.streamsDir, getCanvasDataUrl])
 
   const deleteTemplate = useCallback(async (id: string) => {
     if (!config.streamsDir) return
@@ -1020,12 +1324,55 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setTemplates(prev => prev.filter(t => t.id !== id))
   }, [config.streamsDir])
 
+  // ── Update existing template in place ─────────────────────────────────────
+  const updateCurrentTemplate = useCallback(async () => {
+    if (!currentTemplateId || !config.streamsDir) return
+    const existing = templates.find(t => t.id === currentTemplateId)
+    if (!existing) return
+    const updated: ThumbnailTemplate = {
+      ...existing,
+      layers: layers.map(cloneLayer),
+      updatedAt: Date.now(),
+    }
+    const pngDataUrl = getCanvasDataUrl()
+    const saved = await window.api.thumbnailSaveTemplate(config.streamsDir, updated, pngDataUrl || undefined)
+    setTemplates(prev => prev.map(t => t.id === saved.id ? saved : t))
+    setIsDirty(false)
+  }, [currentTemplateId, templates, layers, config.streamsDir, getCanvasDataUrl])
+
   // ── Manual save ───────────────────────────────────────────────────────────
   const manualSave = useCallback(async () => {
     if (!currentStream) return
     if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
     await doSave(layers, currentStream.folderPath, currentStream.date, currentTemplateId)
   }, [currentStream, layers, currentTemplateId, doSave])
+
+  // ── Delete thumbnail files ────────────────────────────────────────────────
+  const confirmDeleteThumbnail = useCallback(async () => {
+    if (!currentStream) return
+    setDeleteThumbOpen(false)
+    const { folderPath, date } = currentStream
+    // Cancel any pending auto-save first
+    if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
+    // Delete both files; ignore errors if a file doesn't exist yet
+    await Promise.allSettled([
+      window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.json`),
+      window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.png`),
+    ])
+    // Clear the meta flags so the streams list reflects the deletion
+    const existingMeta = currentStream.meta ?? {}
+    const { smThumbnail: _a, smThumbnailTemplate: _b, ...metaWithoutThumb } = existingMeta
+    await window.api.writeStreamMeta(folderPath, metaWithoutThumb).catch(() => {})
+    // Remove from persisted recents store and sync local state
+    window.api.thumbnailRemoveRecent(folderPath, date).then(setRecents).catch(() => {
+      setRecents(prev => prev.filter(r => !(r.folderPath === folderPath && r.date === date)))
+    })
+    setCurrentStream(null)
+    resetLayers([])
+    setCurrentTemplateId(undefined)
+    setIsDirty(false)
+    setMode('overview')
+  }, [currentStream, resetLayers])
 
   // ── Export PNG ────────────────────────────────────────────────────────────
   const exportPng = useCallback(async () => {
@@ -1046,12 +1393,23 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo() }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); manualSave() }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        const copied = layers.filter(l => selectedIds.includes(l.id)).map(cloneLayer)
+        if (copied.length > 0) setClipboardLayers(copied)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        if (clipboardLayers.length > 0) {
+          const pasted = clipboardLayers.map(l => ({ ...cloneLayer(l), id: newId() }))
+          commitLayers([...layers, ...pasted])
+          setSelectedIds(pasted.map(l => l.id))
+        }
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
       if (e.key === 'g' || e.key === 'G') setGridSnapEnabled(v => !v)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled])
+  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds])
 
   // ── Selected layer ────────────────────────────────────────────────────────
   const selectedLayer = useMemo(() => {
@@ -1067,7 +1425,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   return (
     <div className="flex flex-col h-full bg-navy-900">
       {mode === 'overview' ? (
-        <>
+        <div className="flex flex-col flex-1 min-h-0 relative">
           <div className="flex items-center justify-between px-5 py-3 border-b border-white/5 shrink-0">
             <h1 className="text-sm font-semibold text-gray-200">Thumbnail Editor</h1>
           </div>
@@ -1081,7 +1439,49 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             onDeleteTemplate={deleteTemplate}
             loading={overviewLoading}
           />
-        </>
+          {/* Template picker — shown when navigating from a stream with no existing canvas */}
+          {templatePickerStream && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="bg-navy-800 border border-white/10 rounded-xl shadow-2xl w-[640px] max-h-[80vh] flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+                  <div>
+                    <h2 className="text-sm font-semibold text-gray-200">Choose a starting template</h2>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate max-w-xs">
+                      {templatePickerStream.title ?? templatePickerStream.date}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setTemplatePickerStream(null)}
+                    className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+                <div className="overflow-y-auto p-5 flex flex-col gap-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    {templates.map(t => (
+                      <div
+                        key={t.id}
+                        className="group bg-navy-900 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-purple-500/60 transition-colors"
+                        onClick={() => confirmPickTemplate(t)}
+                      >
+                        <TemplatePreview streamsDir={config.streamsDir} templateId={t.id} name={t.name} />
+                        <div className="px-2 py-1.5">
+                          <span className="text-xs text-gray-300 truncate block">{t.name}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="px-5 py-3 border-t border-white/10 shrink-0 flex justify-end">
+                  <Button variant="ghost" size="sm" onClick={() => confirmPickTemplate(null)}>
+                    Start blank
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <>
           {/* Top bar */}
@@ -1099,6 +1499,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <span className="text-xs text-gray-400 truncate">
                   {currentStream.title ?? currentStream.date}
                   <span className="text-gray-600 ml-2">{currentStream.date}</span>
+                </span>
+              ) : currentTemplateId ? (
+                <span className="text-xs text-gray-400 truncate">
+                  {templates.find(t => t.id === currentTemplateId)?.name ?? 'Template'}
+                  <span className="text-gray-600 ml-1.5">template</span>
                 </span>
               ) : (
                 <span className="text-xs text-gray-500 italic">Unsaved canvas</span>
@@ -1189,9 +1594,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Download size={14} />
                 </button>
               </Tooltip>
+              {currentTemplateId && !currentStream && (
+                <Button variant="primary" size="sm" icon={<Check size={12} />} onClick={updateCurrentTemplate} disabled={!isDirty}>
+                  Update template
+                </Button>
+              )}
               {currentStream && (
-                <Button variant="primary" size="sm" icon={<Save size={12} />} onClick={manualSave} disabled={!isDirty}>
-                  Save
+                <Button variant="ghost" size="sm" icon={<Trash2 size={12} />} onClick={() => setDeleteThumbOpen(true)}
+                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                >
+                  Delete Thumbnail
                 </Button>
               )}
             </div>
@@ -1215,6 +1627,22 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   className="p-2 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
                 >
                   <Type size={16} />
+                </button>
+              </Tooltip>
+              <div className="w-6 h-px bg-white/10 my-1" />
+              <Tooltip content="Add rectangle" side="right">
+                <button onClick={() => addShapeLayer('rect')} className="p-2 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
+                  <Square size={16} />
+                </button>
+              </Tooltip>
+              <Tooltip content="Add ellipse" side="right">
+                <button onClick={() => addShapeLayer('ellipse')} className="p-2 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
+                  <Circle size={16} />
+                </button>
+              </Tooltip>
+              <Tooltip content="Add triangle" side="right">
+                <button onClick={() => addShapeLayer('triangle')} className="p-2 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
+                  <Triangle size={16} />
                 </button>
               </Tooltip>
             </div>
@@ -1263,9 +1691,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       onClearGuides: clearSnapGuides,
                       gridSnapEnabled,
                     }
-                    return layer.type === 'image'
-                      ? <ImageNode key={layer.id} {...props} />
-                      : <TextNode key={layer.id} {...props} />
+                    if (layer.type === 'image') return <ImageNode key={layer.id} {...props} />
+                    if (layer.type === 'shape') return <ShapeNode key={layer.id} {...props} />
+                    return <TextNode key={layer.id} {...props} />
                   })}
                 </Layer>
                 <Layer ref={guideLayerRef} listening={false} />
@@ -1335,10 +1763,50 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Sliders size={11} className="text-gray-500" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Properties</span>
                 </div>
-                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} systemFonts={systemFonts} />
+                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} />
               </div>
             </div>
           </div>
+
+          {/* Delete thumbnail confirmation modal */}
+          {deleteThumbOpen && currentStream && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="bg-navy-800 border border-white/10 rounded-xl shadow-2xl w-[420px] flex flex-col overflow-hidden">
+                <div className="flex items-start gap-3 px-5 pt-5 pb-4">
+                  <div className="shrink-0 mt-0.5 p-2 rounded-lg bg-red-500/15">
+                    <AlertTriangle size={18} className="text-red-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-gray-200 mb-1">Delete Stream Manager Thumbnail?</h2>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      This will permanently delete the thumbnail canvas and exported image for{' '}
+                      <span className="text-gray-200">{currentStream.title ?? currentStream.date}</span>.
+                    </p>
+                    <ul className="mt-2 flex flex-col gap-0.5">
+                      <li className="text-[11px] text-gray-500 font-mono truncate">
+                        {currentStream.date}_sm-thumbnail.json
+                      </li>
+                      <li className="text-[11px] text-gray-500 font-mono truncate">
+                        {currentStream.date}_sm-thumbnail.png
+                      </li>
+                    </ul>
+                    <p className="text-xs text-gray-500 mt-2">This cannot be undone.</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/10">
+                  <Button variant="ghost" size="sm" onClick={() => setDeleteThumbOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" size="sm" icon={<Trash2 size={12} />}
+                    onClick={confirmDeleteThumbnail}
+                    className="bg-red-600 hover:bg-red-500 border-red-600 hover:border-red-500"
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

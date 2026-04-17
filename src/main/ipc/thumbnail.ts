@@ -79,17 +79,21 @@ export function registerThumbnailIPC(): void {
     return templates.sort((a, b) => b.updatedAt - a.updatedAt)
   })
 
-  ipcMain.handle('thumbnail:saveTemplate', async (_e, streamsDir: string, template: ThumbnailTemplate) => {
+  ipcMain.handle('thumbnail:saveTemplate', async (_e, streamsDir: string, template: ThumbnailTemplate, pngDataUrl?: string) => {
     const dir = templatesDir(streamsDir)
     await fs.promises.mkdir(dir, { recursive: true })
-    const filePath = path.join(dir, `${template.id}.json`)
-    await fs.promises.writeFile(filePath, JSON.stringify(template, null, 2), 'utf-8')
+    await fs.promises.writeFile(path.join(dir, `${template.id}.json`), JSON.stringify(template, null, 2), 'utf-8')
+    if (pngDataUrl) {
+      const base64 = pngDataUrl.replace(/^data:image\/png;base64,/, '')
+      await fs.promises.writeFile(path.join(dir, `${template.id}.png`), Buffer.from(base64, 'base64'))
+    }
     return template
   })
 
   ipcMain.handle('thumbnail:deleteTemplate', async (_e, streamsDir: string, templateId: string) => {
-    const filePath = path.join(templatesDir(streamsDir), `${templateId}.json`)
-    await fs.promises.rm(filePath, { force: true })
+    const dir = templatesDir(streamsDir)
+    await fs.promises.rm(path.join(dir, `${templateId}.json`), { force: true })
+    await fs.promises.rm(path.join(dir, `${templateId}.png`), { force: true })
   })
 
   // ── Canvas (per-stream) ───────────────────────────────────────────────────
@@ -138,6 +142,12 @@ export function registerThumbnailIPC(): void {
   ipcMain.handle('thumbnail:addRecent', (_e, entry: ThumbnailRecentEntry) => {
     const recents = getRecents().filter(r => !(r.folderPath === entry.folderPath && r.date === entry.date))
     const updated = [entry, ...recents].slice(0, 20)
+    setRecents(updated)
+    return updated
+  })
+
+  ipcMain.handle('thumbnail:removeRecent', (_e, folderPath: string, date: string) => {
+    const updated = getRecents().filter(r => !(r.folderPath === folderPath && r.date === date))
     setRecents(updated)
     return updated
   })

@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useState, useCallback } from 'react'
+import type { StreamMeta } from '../types'
 
 export interface PendingThumbnailStream {
   folderPath: string
   date: string
   title?: string
+  meta?: StreamMeta
 }
 
 interface ThumbnailEditorContextValue {

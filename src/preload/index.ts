@@ -388,8 +388,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:ensureAssetsDir', streamsDir),
   thumbnailListTemplates: (streamsDir: string) =>
     ipcRenderer.invoke('thumbnail:listTemplates', streamsDir),
-  thumbnailSaveTemplate: (streamsDir: string, template: any) =>
-    ipcRenderer.invoke('thumbnail:saveTemplate', streamsDir, template),
+  thumbnailSaveTemplate: (streamsDir: string, template: any, pngDataUrl?: string) =>
+    ipcRenderer.invoke('thumbnail:saveTemplate', streamsDir, template, pngDataUrl),
   thumbnailDeleteTemplate: (streamsDir: string, templateId: string) =>
     ipcRenderer.invoke('thumbnail:deleteTemplate', streamsDir, templateId),
   thumbnailLoadCanvas: (folderPath: string, date: string) =>
@@ -402,6 +402,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:getRecents'),
   thumbnailAddRecent: (entry: any) =>
     ipcRenderer.invoke('thumbnail:addRecent', entry),
+  thumbnailRemoveRecent: (folderPath: string, date: string) =>
+    ipcRenderer.invoke('thumbnail:removeRecent', folderPath, date),
   thumbnailGetLastFont: () =>
     ipcRenderer.invoke('thumbnail:getLastFont'),
   thumbnailSetLastFont: (font: string) =>

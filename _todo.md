@@ -15,5 +15,8 @@
 11. For the launcher widget, update the button text to be specific: "Launch X Apps", also maybe list the apps in a tooltip on hover.
 12. Maybe add a button to a completed conversion task to send the source and output files to my other app ClpChk if it's detected on the user's machine. Since it's a deployable app, I may need to update it to add a registry key or something to indicate its location for other apps to find it. This button would send the current stream item or video file to ClpChk for checking and fixing any issues with the clips before uploading.
 13. The man nav sideabar is collapsing too small, it should still show the icons.
+14. Add a check to the thumbnail usage from streams. When I thumbnail has been edited, show a mild warning to the user that the thumbnail has been updated but never updated to the streaming platform (YouTube), then they can choose to go to the edit metadata modal to upload the new thumbnail to YouTube. This is because the app will update the thumbnail in the local stream folder.
 
 ## Bugs
+
+1. It looks like the app is not updating the "Game title" field on YouTube with the game of the stream item when I click the "Update YouTube Info" button in the edit metadata modal.

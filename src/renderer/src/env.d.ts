@@ -164,13 +164,14 @@ declare global {
       // ── Thumbnail Editor ─────────────────────────────────────────────────────
       thumbnailEnsureAssetsDir(streamsDir: string): Promise<void>
       thumbnailListTemplates(streamsDir: string): Promise<ThumbnailTemplate[]>
-      thumbnailSaveTemplate(streamsDir: string, template: ThumbnailTemplate): Promise<ThumbnailTemplate>
+      thumbnailSaveTemplate(streamsDir: string, template: ThumbnailTemplate, pngDataUrl?: string): Promise<ThumbnailTemplate>
       thumbnailDeleteTemplate(streamsDir: string, templateId: string): Promise<void>
       thumbnailLoadCanvas(folderPath: string, date: string): Promise<ThumbnailCanvasFile | null>
       thumbnailSaveCanvas(folderPath: string, date: string, canvasFile: ThumbnailCanvasFile, pngDataUrl: string): Promise<void>
       thumbnailCacheAsset(streamsDir: string, srcPath: string): Promise<string>
       thumbnailGetRecents(): Promise<ThumbnailRecentEntry[]>
       thumbnailAddRecent(entry: ThumbnailRecentEntry): Promise<ThumbnailRecentEntry[]>
+      thumbnailRemoveRecent(folderPath: string, date: string): Promise<ThumbnailRecentEntry[]>
       thumbnailGetLastFont(): Promise<string>
       thumbnailSetLastFont(font: string): Promise<void>
 
