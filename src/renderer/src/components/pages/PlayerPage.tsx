@@ -184,10 +184,11 @@ function getCropGeometry(vcW: number, vcH: number, videoW: number, videoH: numbe
   return { contentLeft, contentTop, contentW, contentH, cropW, cropLeft, availableRange }
 }
 
-/** Clamp video pan so that no edge of the video can travel past the center of the container.
- *  When zoom <= 1 the pan is forced to (0, 0). */
+/** Clamp video pan.
+ *  When zoom <= 1 the video is centered in the container.
+ *  When zoom > 1 no edge of the video can travel past the center of the container. */
 function clampVideoPan(x: number, y: number, zoom: number, w: number, h: number): { x: number; y: number } {
-  if (zoom <= 1) return { x: 0, y: 0 }
+  if (zoom <= 1) return { x: w * (1 - zoom) / 2, y: h * (1 - zoom) / 2 }
   return {
     x: Math.max(w / 2 - w * zoom, Math.min(w / 2, x)),
     y: Math.max(h / 2 - h * zoom, Math.min(h / 2, y)),
@@ -552,6 +553,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const videoZoomRef = useRef(1)
   const videoPanRef = useRef({ x: 0, y: 0 })
   const [isVideoPanning, setIsVideoPanning] = useState(false)
+  const lastMiddleClickRef = useRef(0)
 
   // Wheel-to-zoom on the video area
   useEffect(() => {
@@ -777,9 +779,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   // Middle-click drag to pan the zoomed video.
   const startVideoPanDrag = useCallback((e: React.MouseEvent) => {
     if (e.button !== 1) return
-    if (videoZoomRef.current <= 1) return
     e.preventDefault()
     e.stopPropagation()
+
+    // Double-middle-click: reset zoom to fit
+    const now = Date.now()
+    const isDouble = now - lastMiddleClickRef.current < 300
+    lastMiddleClickRef.current = now
+    if (isDouble) {
+      setVideoZoom(1); setVideoPan({ x: 0, y: 0 })
+      videoZoomRef.current = 1; videoPanRef.current = { x: 0, y: 0 }
+      return
+    }
+
+    if (videoZoomRef.current <= 1) return
     setIsVideoPanning(true)
     const startX = e.clientX
     const startY = e.clientY

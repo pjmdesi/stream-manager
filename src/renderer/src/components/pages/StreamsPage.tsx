@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
-  Globe, EyeOff, Lock
+  Globe, EyeOff, Lock, Image as ImageIcon
 } from 'lucide-react'
 
 // Inline SVG brand icons — lucide-react has deprecated all YouTube/Twitch exports
@@ -26,6 +26,7 @@ function LucideTwitch({ size = 24, className }: { size?: number; className?: str
 }
 import type { StreamFolder, StreamMeta, ConversionPreset, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast } from '../../types'
 import { useStore } from '../../hooks/useStore'
+import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { GhostTextArea } from '../ui/GhostTextArea'
 import type { GhostTextAreaHandle } from '../ui/GhostTextArea'
@@ -1736,6 +1737,7 @@ export function StreamsPage({
   onSendToCombine: (files: string[]) => void
 }) {
   const { config, updateConfig, loading: configLoading } = useStore()
+  const { openEditor: openThumbnailEditor } = useThumbnailEditor()
   const [folders, setFolders] = useState<StreamFolder[]>([])
   const [loading, setLoading] = useState(false)
   const [modal, setModal] = useState<ModalState>({ mode: 'none' })
@@ -2592,6 +2594,11 @@ return (
                   onSendToPlayer={() => sendVideo(folder, 'player')}
                   onSendToConverter={() => sendVideo(folder, 'converter')}
                   onSendToCombine={() => sendToCombine(folder)}
+                  onOpenThumbnails={() => openThumbnailEditor({
+                    folderPath: folder.folderPath,
+                    date: folder.date,
+                    title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
+                  })}
                   onThumbClick={folder.thumbnails.length > 0
                     ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i })
                     : undefined}
@@ -2965,17 +2972,7 @@ return (
       <TemplatesModal
         isOpen={showTemplatesModal}
         onClose={() => setShowTemplatesModal(false)}
-        onSaved={() => {
-          Promise.all([
-            window.api.getYTTitleTemplates(),
-            window.api.getYTDescriptionTemplates(),
-            window.api.getYTTagTemplates(),
-          ]).then(([t, d, g]) => {
-            setYtTitleTemplates(t)
-            setYtDescTemplates(d)
-            setYtTagTemplates(g)
-          }).catch(() => {})
-        }}
+        onSaved={() => {}}
       />
 
       {/* Bulk tag */}
@@ -3091,10 +3088,11 @@ interface StreamRowProps {
   onSendToPlayer: () => void
   onSendToConverter: () => void
   onSendToCombine: () => void
+  onOpenThumbnails: () => void
   onThumbClick?: (index: number) => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -3313,6 +3311,9 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
           {videoCount > 1 && (
             <Tooltip content="Send to Combine"><Button variant="ghost" size="sm" icon={<Combine size={12} />} onClick={onSendToCombine} /></Tooltip>
           )}
+          <Tooltip content="Open Thumbnail Editor">
+            <Button variant="ghost" size="sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
+          </Tooltip>
           <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
             <Button
               variant="ghost"

@@ -49,9 +49,12 @@ export interface FileInfo {
 export function registerFilesIPC(): void {
   ipcMain.handle('files:openFileDialog', async (event, options: Electron.OpenDialogOptions) => {
     const win = BrowserWindow.fromWebContents(event.sender)
+    const normalizedOptions = options?.defaultPath
+      ? { ...options, defaultPath: path.normalize(options.defaultPath) }
+      : options
     const result = await dialog.showOpenDialog(win!, {
       properties: ['openFile'],
-      ...options
+      ...normalizedOptions
     })
     return result.filePaths
   })

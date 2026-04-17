@@ -109,6 +109,9 @@ function filesForDate(dir: string, date: string): string[] {
 function thumbnailSortKey(filename: string): [number, string] {
   const base = path.basename(filename, path.extname(filename))
 
+  // SM-generated thumbnail has highest priority
+  if (/sm-thumbnail$/i.test(base)) return [-1, base]
+
   const numbered = base.match(/thumbnail\s*[-–]\s*(\d+)/i)
   if (numbered) return [parseInt(numbered[1]), base]
 

@@ -383,6 +383,30 @@ contextBridge.exposeInMainWorld('api', {
   claudeTestKey: (apiKey: string) =>
     ipcRenderer.invoke('claude:testKey', apiKey),
 
+  // ── Thumbnail Editor ──────────────────────────────────────────────────────
+  thumbnailEnsureAssetsDir: (streamsDir: string) =>
+    ipcRenderer.invoke('thumbnail:ensureAssetsDir', streamsDir),
+  thumbnailListTemplates: (streamsDir: string) =>
+    ipcRenderer.invoke('thumbnail:listTemplates', streamsDir),
+  thumbnailSaveTemplate: (streamsDir: string, template: any) =>
+    ipcRenderer.invoke('thumbnail:saveTemplate', streamsDir, template),
+  thumbnailDeleteTemplate: (streamsDir: string, templateId: string) =>
+    ipcRenderer.invoke('thumbnail:deleteTemplate', streamsDir, templateId),
+  thumbnailLoadCanvas: (folderPath: string, date: string) =>
+    ipcRenderer.invoke('thumbnail:loadCanvas', folderPath, date),
+  thumbnailSaveCanvas: (folderPath: string, date: string, canvasFile: any, pngDataUrl: string) =>
+    ipcRenderer.invoke('thumbnail:saveCanvas', folderPath, date, canvasFile, pngDataUrl),
+  thumbnailCacheAsset: (streamsDir: string, srcPath: string) =>
+    ipcRenderer.invoke('thumbnail:cacheAsset', streamsDir, srcPath),
+  thumbnailGetRecents: () =>
+    ipcRenderer.invoke('thumbnail:getRecents'),
+  thumbnailAddRecent: (entry: any) =>
+    ipcRenderer.invoke('thumbnail:addRecent', entry),
+  thumbnailGetLastFont: () =>
+    ipcRenderer.invoke('thumbnail:getLastFont'),
+  thumbnailSetLastFont: (font: string) =>
+    ipcRenderer.invoke('thumbnail:setLastFont', font),
+
   // ── File utilities ────────────────────────────────────────────────────────
   // File.prototype.path was removed in Electron 34; use webUtils instead.
   getPathForFile: (file: File): string => webUtils.getPathForFile(file)

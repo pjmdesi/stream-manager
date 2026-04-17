@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, AlertCircle, RefreshCw, Pause, Rocket } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -16,10 +16,13 @@ import { CombinePage } from './components/pages/CombinePage'
 import { IntegrationsPage } from './components/pages/IntegrationsPage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { LauncherPage } from './components/pages/LauncherPage'
+import { ThumbnailPage } from './components/pages/ThumbnailPage'
 import { useConversionJobs } from './context/ConversionContext'
 import { useWatcher } from './context/WatcherContext'
 import { useStore } from './hooks/useStore'
 import { OnboardingModal } from './components/OnboardingModal'
+import { ThumbnailEditorProvider, useThumbnailEditor } from './context/ThumbnailEditorContext'
+import type { PendingThumbnailStream } from './context/ThumbnailEditorContext'
 
 class PageErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: { children: React.ReactNode }) {
@@ -263,16 +266,17 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
 }
 
 const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
-  { id: 'streams',   label: 'Streams',      icon: <Radio size={18} /> },
-  { id: 'player',    label: 'Player',       icon: <Film size={18} /> },
-  { id: 'converter', label: 'Converter',    icon: <Zap size={18} /> },
-  { id: 'combine',   label: 'Combine',      icon: <Combine size={18} /> },
-  { id: 'launcher',  label: 'Launcher',     icon: <Rocket size={18} /> },
-  { id: 'integrations',   label: 'Integrations', icon: <Plug size={18} /> },
-  { id: 'settings',  label: 'Settings',     icon: <Settings size={18} /> },
+  { id: 'streams',      label: 'Streams',      icon: <Radio size={18} /> },
+  { id: 'player',       label: 'Player',       icon: <Film size={18} /> },
+  { id: 'converter',    label: 'Converter',    icon: <Zap size={18} /> },
+  { id: 'combine',      label: 'Combine',      icon: <Combine size={18} /> },
+  { id: 'thumbnails',   label: 'Thumbnails',   icon: <ImageIcon size={18} /> },
+  { id: 'launcher',     label: 'Launcher',     icon: <Rocket size={18} /> },
+  { id: 'integrations', label: 'Integrations', icon: <Plug size={18} /> },
+  { id: 'settings',     label: 'Settings',     icon: <Settings size={18} /> },
 ]
 
-export default function App() {
+function AppInner() {
   const [page, setPage] = useState<Page>('streams')
   const [aboutOpen, setAboutOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
@@ -280,6 +284,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const { config, loading, refreshConfig } = useStore()
   const { refreshRules } = useWatcher()
+  const { _setNavigate } = useThumbnailEditor()
 
   const checkIntegrationAlert = () => {
     window.api.youtubeValidateToken?.().then(r => {
@@ -321,6 +326,13 @@ export default function App() {
     setPendingCombine(prev => ({ paths: filePaths, token: (prev?.token ?? 0) + 1 }))
     setPage('combine')
   }
+
+  // Wire up thumbnail navigation
+  useEffect(() => {
+    _setNavigate((_stream: PendingThumbnailStream) => {
+      setPage('thumbnails')
+    })
+  }, [_setNavigate])
 
   return (
     <div className="flex flex-col h-screen bg-navy-900 text-gray-200 overflow-hidden">
@@ -369,7 +381,7 @@ export default function App() {
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <nav className={`relative ${sidebarCollapsed ? 'w-2' : 'w-48'} bg-navy-800 flex flex-col shrink-0 transition-[width] duration-200 overflow-hidden`}>
+        <nav className={`relative ${sidebarCollapsed ? 'w-12' : 'w-48'} bg-navy-800 flex flex-col shrink-0 transition-[width] duration-200 overflow-hidden`}>
           {/* Right edge — collapse/expand handle */}
           <Tooltip content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right" triggerClassName="group/edge absolute right-0 inset-y-0 w-2 z-20">
             <button
@@ -435,6 +447,9 @@ export default function App() {
           <div className={`h-full ${page === 'converter' ? '' : 'hidden'}`}>
             <ConverterPage initialFile={pendingConverter} />
           </div>
+          <div className={`h-full ${page === 'thumbnails' ? '' : 'hidden'}`}>
+            <ThumbnailPage isVisible={page === 'thumbnails'} />
+          </div>
           {page === 'streams'   && <StreamsPage onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} />}
           {page === 'templates' && <TemplatesPage />}
           {page === 'rules'     && <RulesPage />}
@@ -473,5 +488,13 @@ export default function App() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <ThumbnailEditorProvider>
+      <AppInner />
+    </ThumbnailEditorProvider>
   )
 }

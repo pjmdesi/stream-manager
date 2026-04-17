@@ -77,6 +77,8 @@ type StoreShape = {
   metaMigrated: boolean
   streamTypeTags: Record<string, string>
   streamTypeTextures: Record<string, string>
+  thumbnailRecents: any[]
+  thumbnailLastFont: string
 }
 
 let store: Store<StoreShape> | null = null
@@ -95,6 +97,8 @@ export function getStore(): Store<StoreShape> {
         metaMigrated: false,
         streamTypeTags: {},
         streamTypeTextures: {},
+        thumbnailRecents: [],
+        thumbnailLastFont: '',
       }
     })
   }

@@ -49,6 +49,7 @@ import { registerTwitchIPC } from './ipc/twitch'
 import { registerVideoPopupIPC } from './ipc/videoPopup'
 import { registerLauncherIPC } from './ipc/launcher'
 import { registerClaudeIPC } from './ipc/claude'
+import { registerThumbnailIPC } from './ipc/thumbnail'
 import { tempManager } from './services/tempManager'
 import { fileWatcher } from './services/fileWatcher'
 
@@ -256,6 +257,7 @@ app.whenReady().then(() => {
     registerVideoPopupIPC()
     registerLauncherIPC()
     registerClaudeIPC()
+    registerThumbnailIPC()
   })
 
   app.on('activate', function () {

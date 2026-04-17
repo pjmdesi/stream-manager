@@ -136,6 +136,9 @@ export interface StreamMeta {
   twitchGameName?: string
   // Sync flag: when true, twitchTitle mirrors ytTitle
   syncTitle?: boolean
+  // Thumbnail
+  smThumbnail?: boolean
+  smThumbnailTemplate?: string
 }
 
 export interface StreamFolder {
@@ -204,7 +207,56 @@ export interface LiveBroadcast {
   }
 }
 
-export type Page = 'streams' | 'player' | 'templates' | 'rules' | 'converter' | 'combine' | 'integrations' | 'settings' | 'launcher'
+export type Page = 'streams' | 'player' | 'templates' | 'rules' | 'converter' | 'combine' | 'integrations' | 'settings' | 'launcher' | 'thumbnails'
+
+// ── Thumbnail Editor ──────────────────────────────────────────────────────────
+
+export interface ThumbnailLayer {
+  id: string
+  name: string
+  type: 'image' | 'text'
+  visible: boolean
+  opacity: number       // 0–100
+  x: number
+  y: number
+  rotation: number
+  // Image
+  src?: string          // absolute path on disk
+  width?: number
+  height?: number
+  // Text
+  text?: string
+  fontFamily?: string
+  fontSize?: number
+  fontStyle?: string    // 'normal' | 'bold' | 'italic' | 'bold italic'
+  fill?: string
+  stroke?: string
+  strokeWidth?: number
+  align?: 'left' | 'center' | 'right'
+}
+
+export interface ThumbnailCanvasFile {
+  version: 1
+  templateId?: string
+  updatedAt: number
+  layers: ThumbnailLayer[]
+}
+
+export interface ThumbnailTemplate {
+  id: string            // filename without extension
+  name: string
+  createdAt: number
+  updatedAt: number
+  layers: ThumbnailLayer[]
+}
+
+export interface ThumbnailRecentEntry {
+  folderPath: string
+  date: string
+  title?: string
+  templateId?: string
+  updatedAt: number
+}
 
 export interface LauncherApp {
   id: string
