@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
-import { Play, Pause, FolderOpen, Info, Layers, CheckSquare, Square, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera, X, Loader2, Scissors, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, Trash2, GitMerge } from 'lucide-react'
+import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera, X, Loader2, Scissors, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, Trash2, GitMerge, Film } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useStore } from '../../hooks/useStore'
@@ -341,6 +341,129 @@ function waitForIceComplete(pc: RTCPeerConnection): Promise<void> {
 
 interface PendingFile { path: string; token: number }
 
+// ── Session Videos panel ─────────────────────────────────────────────────────
+
+const SESSION_VIDEO_EXTS = new Set([
+  '.mkv', '.mp4', '.mov', '.avi', '.ts', '.flv', '.webm',
+  '.wmv', '.m4v', '.mpg', '.mpeg', '.m2ts', '.mts',
+])
+
+interface SiblingFile {
+  path: string
+  name: string
+  isLocal: boolean
+}
+
+function SiblingVideoItem({
+  item,
+  isActive,
+  onClick,
+}: {
+  item: SiblingFile
+  isActive: boolean
+  onClick: () => void
+}) {
+  const [thumbnail, setThumbnail] = useState<string | null>(null)
+  const [duration, setDuration] = useState<number | null>(null)
+  const [aspectRatio, setAspectRatio] = useState<number>(16 / 9)
+
+  useEffect(() => {
+    if (!item.isLocal) return
+    const videoUrl = `file://${item.path.replace(/\\/g, '/')}`
+    const vid = document.createElement('video')
+    vid.src = videoUrl
+    vid.muted = true
+    vid.preload = 'metadata'
+    let sought = false
+
+    const cleanup = () => {
+      vid.removeEventListener('loadedmetadata', onMeta)
+      vid.removeEventListener('seeked', onSeeked)
+      vid.removeEventListener('error', onErr)
+      vid.src = ''
+    }
+
+    const onMeta = () => {
+      const dur = vid.duration
+      if (isFinite(dur) && dur > 0) {
+        setDuration(dur)
+        if (vid.videoWidth > 0 && vid.videoHeight > 0) {
+          setAspectRatio(vid.videoWidth / vid.videoHeight)
+        }
+        if (!sought) { sought = true; vid.currentTime = dur * 0.5 }
+      } else { cleanup() }
+    }
+
+    const onSeeked = () => {
+      const vw = vid.videoWidth || 80
+      const vh = vid.videoHeight || 45
+      const canvas = document.createElement('canvas')
+      canvas.height = 45
+      canvas.width = Math.round(45 * (vw / vh))
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        try {
+          ctx.drawImage(vid, 0, 0, canvas.width, canvas.height)
+          setThumbnail(canvas.toDataURL('image/jpeg', 0.7))
+        } catch { /* decode error */ }
+      }
+      cleanup()
+    }
+
+    const onErr = () => cleanup()
+
+    vid.addEventListener('loadedmetadata', onMeta)
+    vid.addEventListener('seeked', onSeeked)
+    vid.addEventListener('error', onErr)
+
+    return cleanup
+  }, [item.path, item.isLocal])
+
+  const thumbWidth = Math.round(32 * aspectRatio)
+
+  return (
+    <button
+      onClick={onClick}
+      title={item.name}
+      className={`group/item w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${
+        isActive
+          ? 'bg-purple-600/20'
+          : 'hover:bg-white/5'
+      }`}
+    >
+      {/* Thumbnail */}
+      <div className="relative shrink-0 h-8 rounded overflow-hidden bg-white/5" style={{ width: thumbWidth }}>
+        {thumbnail ? (
+          <img
+            src={thumbnail}
+            className="w-full h-full object-cover transition-transform duration-200 group-hover/item:scale-110"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-gray-700">
+            {item.isLocal
+              ? <Film size={11} />
+              : <span className="text-[9px] leading-tight text-center px-1 text-gray-600">Cloud</span>
+            }
+          </div>
+        )}
+      </div>
+
+      {/* Info */}
+      <div className="min-w-0 flex-1">
+        <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
+          {item.name}
+        </div>
+        <div className="text-[10px] text-gray-500 tabular-nums mt-0.5">
+          {duration !== null
+            ? formatTime(duration)
+            : item.isLocal ? '…' : 'Cloud sync'
+          }
+        </div>
+      </div>
+    </button>
+  )
+}
+
 export function PlayerPage({ initialFile, onNavigateToConverter }: {
   initialFile?: PendingFile | null
   onNavigateToConverter?: () => void
@@ -419,6 +542,28 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [showCloseVideoConfirm, setShowCloseVideoConfirm] = useState(false)
   // Right panel collapsed state
   const [panelCollapsed, setPanelCollapsed] = useState(false)
+
+  // Session Videos: sibling video files in the same folder
+  const [siblingFiles, setSiblingFiles] = useState<SiblingFile[]>([])
+  useEffect(() => {
+    const fp = state.filePath
+    if (!fp) { setSiblingFiles([]); return }
+    const dir = fp.replace(/[\\/][^\\/]+$/, '')
+    let cancelled = false
+    window.api.listFiles(dir)
+      .then(async files => {
+        if (cancelled) return
+        const videoFiles = files
+          .filter(f => !f.isDirectory && SESSION_VIDEO_EXTS.has(f.extension.toLowerCase()))
+          .sort((a, b) => a.name.localeCompare(b.name))
+        if (videoFiles.length <= 1) { setSiblingFiles([]); return }
+        const localFlags = await window.api.checkLocalFiles(videoFiles.map(f => f.path))
+        if (cancelled) return
+        setSiblingFiles(videoFiles.map((f, i) => ({ path: f.path, name: f.name, isLocal: localFlags[i] })))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [state.filePath])
 
   // Multi-track warning modal before entering clip mode
   const [clipModeModal, setClipModeModal] = useState<'warn' | 'merge' | null>(null)
@@ -2417,232 +2562,278 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   </button>
                 )}
                 {videoInfo && (
-                  <div className="ml-auto flex items-center gap-1 text-xs text-gray-500 min-w-0">
+                  <div className="ml-auto flex items-center gap-1 text-xs text-gray-500 min-w-0 overflow-hidden">
                     <Info size={12} className="shrink-0" />
-                    <span className="shrink-0">{videoInfo.width}×{videoInfo.height}</span>
-                    {videoInfo.fps && <span className="shrink-0">· {videoInfo.fps.toFixed(2)} fps</span>}
-                    <span className="shrink-0">· {videoInfo.videoCodec}</span>
-                    {state.filePath && (
-                      <Tooltip content={`Show in Explorer: ${state.filePath}`}>
-                        <button
-                          className="truncate hover:text-gray-300 transition-colors cursor-pointer"
-                          onClick={() => window.api.openInExplorer(state.filePath!)}
-                        >
-                          · {state.filePath.split(/[\\/]/).pop()}
-                        </button>
-                      </Tooltip>
-                    )}
-                    <Tooltip content="Close video">
+                    <Tooltip
+                      content={state.filePath ? `Show in Explorer: ${state.filePath}` : ''}
+                      triggerClassName="min-w-0 overflow-hidden inline-flex"
+                    >
                       <button
-                        onClick={() => {
-                          const hasClipWork = isClipMode && (
-                            clipState.clipRegions.length > 0 || clipState.bleepRegions.length > 0
-                          )
-                          if (hasClipWork) {
-                            setShowCloseVideoConfirm(true)
-                          } else {
-                            closeVideo()
-                          }
-                        }}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border ml-1 p-0.5 text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors shrink-0"
+                        className="truncate hover:text-gray-300 transition-colors cursor-pointer min-w-0 max-w-full"
+                        onClick={() => state.filePath && window.api.openInExplorer(state.filePath)}
                       >
-                        <X size={12} />
-                        Close Video
+                        {videoInfo.width}×{videoInfo.height}
+                        {videoInfo.fps && ` · ${videoInfo.fps.toFixed(2)} fps`}
+                        {` · ${videoInfo.videoCodec}`}
+                        {state.filePath && ` · ${state.filePath.split(/[\\/]/).pop()}`}
                       </button>
                     </Tooltip>
                   </div>
+                )}
+                {videoInfo && (
+                  <Tooltip content="Close video" triggerClassName="inline-flex shrink-0">
+                    <button
+                      onClick={() => {
+                        const hasClipWork = isClipMode && (
+                          clipState.clipRegions.length > 0 || clipState.bleepRegions.length > 0
+                        )
+                        if (hasClipWork) {
+                          setShowCloseVideoConfirm(true)
+                        } else {
+                          closeVideo()
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors"
+                    >
+                      <X size={12} />
+                      Close Video
+                    </button>
+                  </Tooltip>
                 )}
               </div>
             </div>
           </div>
 
           {/* Audio tracks panel */}
-          <div className={`relative bg-navy-800 border-l border-white/5 flex flex-col shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-6 overflow-hidden' : 'w-56 overflow-y-auto'}`}>
-            {/* Collapse toggle — always visible on the left edge */}
-            <Tooltip content={panelCollapsed ? 'Expand panel' : 'Collapse panel'} side="left">
+          <div className={`relative bg-navy-800 flex flex-col shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-2 overflow-hidden' : 'w-56 overflow-hidden'}`}>
+            {/* Left edge — collapse/expand handle */}
+            <Tooltip content={panelCollapsed ? 'Expand panel' : 'Collapse panel'} side="left" triggerClassName="group/edge absolute left-0 inset-y-0 w-2 z-20">
               <button
                 onClick={() => setPanelCollapsed(v => !v)}
-                className="absolute left-0 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-4 h-8 bg-white/5 hover:bg-white/10 border border-white/[0.04] rounded-r text-gray-600 hover:text-gray-400 transition-colors"
-              >
-                {panelCollapsed ? <ChevronLeft size={10} /> : <ChevronRight size={10} />}
-              </button>
+                className="absolute inset-0 cursor-col-resize"
+                aria-label={panelCollapsed ? 'Expand panel' : 'Collapse panel'}
+              />
+              <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-purple-500 transition-all duration-150" />
             </Tooltip>
-            {!panelCollapsed && (<>
-            <div className="px-4 py-3 border-b border-white/5">
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Audio Tracks</h3>
-            </div>
+            {!panelCollapsed && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 
-            {/* Pre-merge: track selector */}
-            {multiTrack && !tracksExtracted && !isExtracting && (
-              <div className="px-4 py-4 flex flex-col gap-3">
-                <div className="flex items-start gap-2 text-xs text-gray-400 leading-relaxed">
-                  <Layers size={13} className="text-purple-400 mt-0.5 shrink-0" />
-                  <span>
-                    {videoInfo!.audioTracks.length} tracks detected. Only Track 1 is audible until merged. Select which tracks to include.
-                  </span>
+              {/* Audio Tracks section */}
+              <div className="shrink-0 overflow-y-auto">
+                <div className="px-4 py-2.5 border-b border-white/5">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Audio Tracks</h3>
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  {videoInfo!.audioTracks.map((t, i) => {
-                    const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
-                    const checked = selectedIndices.has(i)
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => toggleIndex(i)}
-                        className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
-                          checked
-                            ? 'bg-purple-600/20 border-purple-600/40 text-purple-200'
-                            : 'bg-white/[0.03] border-white/5 text-gray-400 hover:bg-white/[0.06] hover:text-gray-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          {checked
-                            ? <CheckSquare size={13} className="text-purple-400 shrink-0" />
-                            : <Square size={13} className="text-gray-600 shrink-0" />
-                          }
-                          <span className="text-xs font-medium">{label}</span>
-                        </div>
-                        <div className="text-[10px] text-gray-600 mt-0.5 pl-5">
-                          {t.codec} · {t.channels}ch{t.language ? ` · ${t.language}` : ''}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
+                {/* Pre-merge: track selector */}
+                {multiTrack && !tracksExtracted && !isExtracting && (
+                  <div className="px-4 py-2.5 flex flex-col gap-2">
+                    <div className="flex items-start gap-2 text-[11px] text-gray-400 leading-relaxed">
+                      <Layers size={12} className="text-purple-400 mt-0.5 shrink-0" />
+                      <span>
+                        {videoInfo!.audioTracks.length} tracks detected. Only <span className="text-gray-300">{videoInfo!.audioTracks[0]?.title || TRACK_LABELS[0] || 'Track 1'}</span> will be audible. Select tracks to merge.
+                      </span>
+                    </div>
 
-                <button
-                  onClick={() => extractTracks(Array.from(selectedIndices).sort())}
-                  disabled={selectedIndices.size < 1}
-                  className="w-full text-xs font-medium py-2 px-3 rounded-lg bg-purple-600/20 hover:bg-purple-600/35 text-purple-300 border border-purple-600/30 transition-colors text-left disabled:opacity-40 disabled:pointer-events-none"
-                >
-                  Merge audio tracks
-                  <div className="text-[10px] text-purple-500 font-normal mt-0.5">Takes a moment to process</div>
-                </button>
-              </div>
-            )}
-
-            {/* During merge: progress bars */}
-            {multiTrack && isExtracting && (
-              <div className="px-4 py-4 flex flex-col gap-3">
-                <div className="flex items-center gap-2 text-xs text-purple-300 font-medium">
-                  <Loader2 size={12} className="animate-spin shrink-0" />
-                  Merging audio tracks…
-                </div>
-                <div className="flex flex-col gap-3">
-                  {videoInfo!.audioTracks.map((t, i) => {
-                    const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
-                    const selected = selectedIndices.has(i)
-                    const progress = extractProgress[i] ?? 0
-                    return (
-                      <div key={i} className={`flex flex-col gap-1 ${selected ? '' : 'opacity-35'}`}>
-                        <div className="flex items-center justify-between">
-                          <span className={`text-[11px] text-gray-400 truncate ${selected ? '' : 'line-through'}`}>
-                            {label}
-                          </span>
-                          {selected && (
-                            <span className="text-[11px] tabular-nums text-gray-500 shrink-0 ml-2">
-                              {progress >= 100 ? <span className="text-green-400">✓</span> : `${progress}%`}
-                            </span>
-                          )}
-                        </div>
-                        <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-                          {selected
-                            ? <div
-                                className={`h-full rounded-full transition-all duration-300 ${progress >= 100 ? 'bg-green-500' : 'bg-purple-500'}`}
-                                style={{ width: `${progress}%` }}
-                              />
-                            : null
-                          }
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <button
-                  onClick={cancelExtraction}
-                  className="text-xs text-gray-600 hover:text-gray-400 transition-colors text-left"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-
-            {/* Post-merge: merged + skipped tracks, undo button */}
-            {tracksExtracted && (() => {
-              const merged = tracks.filter(t => t.audioEl !== null)
-              const skipped = tracks.filter(t => t.audioEl === null)
-              return (
-                <div className="px-4 py-4 flex flex-col gap-3">
-                  {/* Merged */}
-                  <div className="flex flex-col gap-1.5">
-                    <p className="text-[10px] text-gray-600 uppercase tracking-wider font-semibold">Merged tracks</p>
-                    {merged.map((track) => {
-                      const info = videoInfo?.audioTracks[track.index]
-                      const label = info?.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
-                      return (
-                        <div key={track.index} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-600/10 border border-purple-600/20">
-                          <div className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-                          <div className="min-w-0">
-                            <div className="text-xs font-medium text-purple-200">
-                              {label} <span className="text-purple-600 font-normal">(Track {track.index + 1})</span>
-                            </div>
-                            {info && (
-                              <div className="text-[10px] text-gray-600">
-                                {info.codec} · {info.channels}ch{info.language ? ` · ${info.language}` : ''}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  {/* Skipped */}
-                  {skipped.length > 0 && (
-                    <div className="flex flex-col gap-1.5">
-                      <p className="text-[10px] text-gray-600 uppercase tracking-wider font-semibold">Tracks not merged</p>
-                      {skipped.map((track) => {
-                        const info = videoInfo?.audioTracks[track.index]
-                        const label = info?.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
+                    <div className="flex flex-col gap-1">
+                      {videoInfo!.audioTracks.map((t, i) => {
+                        const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
+                        const checked = selectedIndices.has(i)
                         return (
-                          <div key={track.index} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
-                            <div className="w-1.5 h-1.5 rounded-full bg-gray-700 shrink-0" />
-                            <div className="min-w-0">
-                              <div className="text-xs font-medium text-gray-500 line-through">
-                                {label} <span className="text-gray-700 font-normal">(Track {track.index + 1})</span>
+                          <button
+                            key={i}
+                            onClick={() => toggleIndex(i)}
+                            className={`w-full text-left px-3 py-1.5 rounded-lg border transition-colors ${
+                              checked
+                                ? 'bg-purple-600/20 border-purple-600/40'
+                                : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
+                                checked ? 'bg-purple-500 border-purple-500' : 'border-gray-600'
+                              }`}>
+                                {checked && <Check size={10} className="text-white" strokeWidth={3} />}
                               </div>
-                              {info && (
-                                <div className="text-[10px] text-gray-700">
-                                  {info.codec} · {info.channels}ch{info.language ? ` · ${info.language}` : ''}
-                                </div>
+                              <div className="flex flex-col min-w-0">
+                                <span className={`text-xs font-medium leading-tight ${checked ? 'text-purple-200' : 'text-gray-300'}`}>{label}</span>
+                                <span className="text-[11px] text-gray-400 leading-tight mt-0.5">
+                                  {t.codec} · {t.channels}ch{t.language ? ` · ${t.language}` : ''}
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <button
+                      onClick={() => extractTracks(Array.from(selectedIndices).sort())}
+                      disabled={selectedIndices.size < 1}
+                      className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg bg-purple-600 hover:bg-purple-500 active:bg-purple-700 text-white transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      <GitMerge size={12} />
+                      Merge audio tracks
+                    </button>
+                  </div>
+                )}
+
+                {/* During merge: progress bars */}
+                {multiTrack && isExtracting && (
+                  <div className="px-4 py-2.5 flex flex-col gap-2.5">
+                    <div className="flex items-center gap-2 text-xs text-purple-300 font-medium">
+                      <Loader2 size={12} className="animate-spin shrink-0" />
+                      Merging audio tracks…
+                    </div>
+                    <div className="flex flex-col gap-2.5">
+                      {videoInfo!.audioTracks.map((t, i) => {
+                        const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
+                        const selected = selectedIndices.has(i)
+                        const progress = extractProgress[i] ?? 0
+                        return (
+                          <div key={i} className={`flex flex-col gap-1 ${selected ? '' : 'opacity-35'}`}>
+                            <div className="flex items-center justify-between">
+                              <span className={`text-[11px] text-gray-400 truncate ${selected ? '' : 'line-through'}`}>
+                                {label}
+                              </span>
+                              {selected && (
+                                <span className="text-[11px] tabular-nums text-gray-500 shrink-0 ml-2">
+                                  {progress >= 100 ? <span className="text-green-400">✓</span> : `${progress}%`}
+                                </span>
                               )}
+                            </div>
+                            <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                              {selected
+                                ? <div
+                                    className={`h-full rounded-full transition-all duration-300 ${progress >= 100 ? 'bg-green-500' : 'bg-purple-500'}`}
+                                    style={{ width: `${progress}%` }}
+                                  />
+                                : null
+                              }
                             </div>
                           </div>
                         )
                       })}
                     </div>
-                  )}
+                    <button
+                      onClick={cancelExtraction}
+                      className="text-xs text-gray-600 hover:text-gray-400 transition-colors text-left"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
 
-                  {/* Undo */}
-                  <button
-                    onClick={() => {
-                      resetExtraction()
-                      if (videoInfo) setSelectedIndices(new Set(videoInfo.audioTracks.map((_, i) => i)))
-                    }}
-                    className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-300 transition-colors mt-1"
-                  >
-                    <RotateCcw size={11} />
-                    Undo merge
-                  </button>
+                {/* Post-merge: merged + skipped tracks, undo button */}
+                {tracksExtracted && (() => {
+                  const merged = tracks.filter(t => t.audioEl !== null)
+                  const skipped = tracks.filter(t => t.audioEl === null)
+                  return (
+                    <div className="px-4 py-2.5 flex flex-col gap-2.5">
+                      {/* Merged */}
+                      <div className="flex flex-col gap-1.5">
+                        <p className="text-[10px] text-gray-600 uppercase tracking-wider font-semibold">Merged tracks</p>
+                        {merged.map((track) => {
+                          const info = videoInfo?.audioTracks[track.index]
+                          const label = info?.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
+                          return (
+                            <div key={track.index} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600/10 border border-purple-600/20">
+                              <div className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                              <div className="min-w-0">
+                                <div className="text-xs font-medium text-purple-200">
+                                  {label} <span className="text-purple-600 font-normal">(Track {track.index + 1})</span>
+                                </div>
+                                {info && (
+                                  <div className="text-[10px] text-gray-600">
+                                    {info.codec} · {info.channels}ch{info.language ? ` · ${info.language}` : ''}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Skipped */}
+                      {skipped.length > 0 && (
+                        <div className="flex flex-col gap-1.5">
+                          <p className="text-[10px] text-gray-600 uppercase tracking-wider font-semibold">Tracks not merged</p>
+                          {skipped.map((track) => {
+                            const info = videoInfo?.audioTracks[track.index]
+                            const label = info?.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
+                            return (
+                              <div key={track.index} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/5">
+                                <div className="w-1.5 h-1.5 rounded-full bg-gray-700 shrink-0" />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-medium text-gray-500 line-through">
+                                    {label} <span className="text-gray-700 font-normal">(Track {track.index + 1})</span>
+                                  </div>
+                                  {info && (
+                                    <div className="text-[10px] text-gray-700">
+                                      {info.codec} · {info.channels}ch{info.language ? ` · ${info.language}` : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      {/* Undo */}
+                      <button
+                        onClick={() => {
+                          resetExtraction()
+                          if (videoInfo) setSelectedIndices(new Set(videoInfo.audioTracks.map((_, i) => i)))
+                        }}
+                        className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-300 transition-colors mt-1"
+                      >
+                        <RotateCcw size={11} />
+                        Undo merge
+                      </button>
+                    </div>
+                  )
+                })()}
+
+                {!multiTrack && !tracksExtracted && !isExtracting && (
+                  <div className="px-4 py-4 text-center text-xs text-gray-600 leading-relaxed">
+                    {(videoInfo?.audioTracks.length ?? 0) === 0
+                      ? 'No audio tracks found.'
+                      : 'Only 1 audio track — audio merge not available.'
+                    }
+                  </div>
+                )}
+              </div>
+
+              {/* Session Videos panel */}
+              {siblingFiles.length > 0 && (
+                <div className="max-h-[50%] overflow-hidden pr-2 border-t border-white/5">
+                  <div className="max-h-full overflow-y-auto">
+                    <div className="sticky top-0 z-10 bg-navy-800 px-4 py-2.5 border-b border-white/5 flex items-center gap-2">
+                      <Film size={12} className="text-gray-600 shrink-0" />
+                      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Session Videos</h3>
+                    </div>
+                    {isClipMode ? (
+                      <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">Locked during clip mode</div>
+                    ) : isExtracting ? (
+                      <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">Available once merge is complete or cancelled</div>
+                    ) : (
+                      <div className="px-1 py-1.5 flex flex-col gap-0.5">
+                        {siblingFiles.map(item => (
+                          <SiblingVideoItem
+                            key={item.path}
+                            item={item}
+                            isActive={item.path === state.filePath}
+                            onClick={() => loadFile(item.path)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )
-            })()}
+              )}
 
-            {!multiTrack && !tracksExtracted && !isExtracting && (
-              <div className="px-4 py-6 text-center text-xs text-gray-600">No audio tracks found</div>
+            </div>
             )}
-            </>)}
           </div>
         </div>
       )}
@@ -2764,19 +2955,22 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         onClick={() => toggleIndex(i)}
                         className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
                           checked
-                            ? 'bg-purple-600/20 border-purple-600/40 text-purple-200'
-                            : 'bg-white/[0.03] border-white/5 text-gray-400 hover:bg-white/[0.06] hover:text-gray-200'
+                            ? 'bg-purple-600/20 border-purple-600/40'
+                            : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06]'
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          {checked
-                            ? <CheckSquare size={13} className="text-purple-400 shrink-0" />
-                            : <Square size={13} className="text-gray-600 shrink-0" />
-                          }
-                          <span className="text-xs font-medium">{label}</span>
-                        </div>
-                        <div className="text-[10px] text-gray-600 mt-0.5 pl-5">
-                          {t.codec} · {t.channels}ch{t.language ? ` · ${t.language}` : ''}
+                          <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
+                            checked ? 'bg-purple-500 border-purple-500' : 'border-gray-600'
+                          }`}>
+                            {checked && <Check size={10} className="text-white" strokeWidth={3} />}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className={`text-xs font-medium leading-tight ${checked ? 'text-purple-200' : 'text-gray-300'}`}>{label}</span>
+                            <span className="text-[11px] text-gray-500 leading-tight mt-0.5">
+                              {t.codec} · {t.channels}ch{t.language ? ` · ${t.language}` : ''}
+                            </span>
+                          </div>
                         </div>
                       </button>
                     )

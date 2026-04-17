@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, ChevronLeft, ChevronRight, AlertCircle, RefreshCw, Pause, Rocket } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, AlertCircle, RefreshCw, Pause, Rocket } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -369,15 +369,15 @@ export default function App() {
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <nav className={`relative ${sidebarCollapsed ? 'w-14' : 'w-48'} bg-navy-800 border-r border-white/5 flex flex-col shrink-0 transition-[width] duration-200 overflow-hidden`}>
-          {/* Collapse toggle — always visible on the right edge */}
-          <Tooltip content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right">
+        <nav className={`relative ${sidebarCollapsed ? 'w-2' : 'w-48'} bg-navy-800 flex flex-col shrink-0 transition-[width] duration-200 overflow-hidden`}>
+          {/* Right edge — collapse/expand handle */}
+          <Tooltip content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right" triggerClassName="group/edge absolute right-0 inset-y-0 w-2 z-20">
             <button
               onClick={() => setSidebarCollapsed(c => !c)}
-              className="absolute right-0 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-4 h-8 bg-white/5 hover:bg-white/10 border border-white/[0.04] rounded-l text-gray-600 hover:text-gray-400 transition-colors"
-            >
-              {sidebarCollapsed ? <ChevronRight size={10} /> : <ChevronLeft size={10} />}
-            </button>
+              className="absolute inset-0 cursor-col-resize"
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            />
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-purple-500 transition-all duration-150" />
           </Tooltip>
 
           <div className="flex-1">
