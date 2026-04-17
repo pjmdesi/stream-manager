@@ -92,10 +92,20 @@ export function registerYouTubeIPC(): void {
     videoId: string,
     title: string,
     description: string,
-    tags: string[]
+    tags: string[],
+    gameTitle?: string
   ) => {
     const { clientId, clientSecret } = getCreds()
     await updateVideoTags(videoId, tags, clientId, clientSecret, title, description)
+    // Also attempt to update gameTitle via the broadcast resource — it persists after
+    // completion and YouTube may still accept gameTitle updates on completed broadcasts.
+    if (gameTitle) {
+      try {
+        await updateBroadcastSnippet(videoId, { title, description, gameTitle }, clientId, clientSecret)
+      } catch {
+        // Silently ignore — YouTube may reject liveBroadcasts.update for some completed states
+      }
+    }
   })
 
   ipcMain.handle('youtube:getQualifyingThumbnails', (_event, paths: string[]) => {

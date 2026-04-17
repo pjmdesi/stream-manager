@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
-  Globe, EyeOff, Lock, Image as ImageIcon
+  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff
 } from 'lucide-react'
 
 // Inline SVG brand icons — lucide-react has deprecated all YouTube/Twitch exports
@@ -756,7 +756,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
     try {
       const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
       if (isPastStream) {
-        await window.api.youtubeUpdateVideo(ytSelectedBroadcastId, ytTitle, ytDescription, tags)
+        await window.api.youtubeUpdateVideo(ytSelectedBroadcastId, ytTitle, ytDescription, tags, ytGameTitle || undefined)
       } else {
         await window.api.youtubeUpdateBroadcast(
           ytSelectedBroadcastId,
@@ -1636,23 +1636,89 @@ function BulkTagModal({
   )
 }
 
+// ─── Cloud download modal ─────────────────────────────────────────────────────
+
+function CloudDownloadModal({
+  fileName,
+  filePath,
+  stage,
+  onConfirm,
+  onCancel,
+}: {
+  fileName: string
+  filePath: string
+  stage: 'confirm' | 'downloading'
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <Modal
+      isOpen
+      onClose={stage === 'confirm' ? onCancel : undefined}
+      title="File Not Available Locally"
+      width="sm"
+      footer={
+        stage === 'confirm' ? (
+          <div className="flex gap-2 justify-end w-full">
+            <Button variant="ghost" onClick={onCancel}>Dismiss</Button>
+            <Button variant="primary" icon={<CloudOff size={13} />} onClick={onConfirm}>
+              Download
+            </Button>
+          </div>
+        ) : (
+          <div className="flex gap-2 justify-end w-full">
+            <Button variant="ghost" onClick={onCancel}>Cancel Download</Button>
+          </div>
+        )
+      }
+    >
+      {stage === 'confirm' ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-gray-300">
+            <span className="font-medium text-gray-100">{fileName}</span> is stored in cloud storage and is not available on this device.
+          </p>
+          <p className="text-sm text-gray-400">
+            Download it now? The file will be sent to the player automatically once it's ready.
+          </p>
+          <p className="text-xs text-gray-600 font-mono truncate" title={filePath}>{filePath}</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <Loader2 size={16} className="shrink-0 text-purple-400 animate-spin" />
+            <p className="text-sm text-gray-300">
+              Downloading <span className="font-medium text-gray-100">{fileName}</span>…
+            </p>
+          </div>
+          <p className="text-xs text-gray-500">
+            The file will be sent automatically once the download is complete.
+          </p>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 // ─── Video picker modal ───────────────────────────────────────────────────────
 
 function VideoPickerModal({
   files,
   action,
+  offlineFiles,
   onPick,
   onPickAll,
   onClose,
 }: {
   files: string[]
   action: 'player' | 'converter' | 'combine'
+  offlineFiles?: Set<string>
   onPick: (file: string) => void
   onPickAll?: (files: string[]) => void
   onClose: () => void
 }) {
   const isCombine = action === 'combine'
   const title = isCombine ? 'Send to Combine' : `Send to ${action === 'player' ? 'Player' : 'Converter'}`
+  const localFiles = offlineFiles ? files.filter(f => !offlineFiles.has(f)) : files
 
   return (
     <Modal
@@ -1663,7 +1729,7 @@ function VideoPickerModal({
       footer={
         <div className="flex gap-2 justify-end w-full">
           {isCombine && onPickAll && (
-            <Button variant="primary" icon={<Combine size={13} />} onClick={() => { onPickAll(files); onClose() }}>
+            <Button variant="primary" icon={<Combine size={13} />} onClick={() => { onPickAll(localFiles); onClose() }}>
               Combine All
             </Button>
           )}
@@ -1677,7 +1743,18 @@ function VideoPickerModal({
         </p>
         {files.map(f => {
           const name = f.split(/[\\/]/).pop() ?? f
-          return (
+          const isOffline = offlineFiles?.has(f) ?? false
+          return isOffline ? (
+            <div
+              key={f}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-white/5 opacity-50 cursor-not-allowed"
+              title="Not available locally — sync from cloud first"
+            >
+              <CloudOff size={13} className="text-gray-600 shrink-0" />
+              <span className="text-sm text-gray-500 font-mono truncate">{name}</span>
+              <span className="ml-auto text-[10px] text-gray-600 shrink-0">cloud only</span>
+            </div>
+          ) : (
             <button
               key={f}
               onClick={() => { onPick(f); onClose() }}
@@ -1902,6 +1979,21 @@ export function StreamsPage({
     return unsub
   }, [])
 
+  // Cloud download completion listener
+  useEffect(() => {
+    const unsub = window.api.onCloudDownloadDone((filePath: string) => {
+      setCloudDownload(prev => {
+        if (!prev || prev.filePath !== filePath) return prev
+        const { action } = prev
+        if (action === 'player') onSendToPlayer(filePath)
+        else if (action === 'converter') onSendToConverter(filePath)
+        else onSendToCombine([filePath])
+        return null
+      })
+    })
+    return unsub
+  }, [onSendToPlayer, onSendToConverter, onSendToCombine])
+
   const pickDir = async () => {
     const dir = await window.api.openDirectoryDialog()
     if (!dir) return
@@ -1909,7 +2001,13 @@ export function StreamsPage({
     loadFolders(dir) // immediate load without waiting for effect
   }
 
-  const [videoPicker, setVideoPicker] = useState<{ files: string[]; action: 'player' | 'converter' | 'combine' } | null>(null)
+  const [videoPicker, setVideoPicker] = useState<{ files: string[]; action: 'player' | 'converter' | 'combine'; offlineFiles?: Set<string> } | null>(null)
+  const [cloudDownload, setCloudDownload] = useState<{
+    filePath: string
+    fileName: string
+    action: 'player' | 'converter' | 'combine'
+    stage: 'confirm' | 'downloading'
+  } | null>(null)
 
   const VIDEO_EXTS_RENDERER = new Set([
     '.mkv', '.mp4', '.mov', '.avi', '.ts', '.flv', '.webm',
@@ -1928,20 +2026,38 @@ export function StreamsPage({
   const sendVideo = async (folder: StreamFolder, action: 'player' | 'converter') => {
     const videos = await getVideosForFolder(folder)
     if (videos.length === 0) return
-    if (videos.length === 1) {
-      action === 'player' ? onSendToPlayer(videos[0]) : onSendToConverter(videos[0])
+    // Check which files are actually present on disk (not just cloud placeholders)
+    const localFlags = await window.api.checkLocalFiles(videos)
+    const localVideos = videos.filter((_, i) => localFlags[i])
+    if (localVideos.length === 0) {
+      const filePath = videos[0]
+      setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action, stage: 'confirm' })
+      return
+    }
+    if (localVideos.length === 1) {
+      action === 'player' ? onSendToPlayer(localVideos[0]) : onSendToConverter(localVideos[0])
     } else {
-      setVideoPicker({ files: videos, action })
+      // Pass all files + offline set so the picker can mark unavailable ones
+      const offline = new Set(videos.filter((_, i) => !localFlags[i]))
+      setVideoPicker({ files: videos, action, offlineFiles: offline })
     }
   }
 
   const sendToCombine = async (folder: StreamFolder) => {
     const videos = await getVideosForFolder(folder)
     if (videos.length === 0) return
-    if (videos.length === 1) {
-      onSendToCombine(videos)
+    const localFlags = await window.api.checkLocalFiles(videos)
+    const localVideos = videos.filter((_, i) => localFlags[i])
+    if (localVideos.length === 0) {
+      const filePath = videos[0]
+      setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'combine', stage: 'confirm' })
+      return
+    }
+    if (localVideos.length === 1) {
+      onSendToCombine(localVideos)
     } else {
-      setVideoPicker({ files: videos, action: 'combine' })
+      const offline = new Set(videos.filter((_, i) => !localFlags[i]))
+      setVideoPicker({ files: videos, action: 'combine', offlineFiles: offline })
     }
   }
 
@@ -2392,6 +2508,25 @@ export function StreamsPage({
             </span>
           )}
         </div>
+      )}
+
+      {/* Cloud download modal */}
+      {cloudDownload && (
+        <CloudDownloadModal
+          fileName={cloudDownload.fileName}
+          filePath={cloudDownload.filePath}
+          stage={cloudDownload.stage}
+          onConfirm={async () => {
+            setCloudDownload(prev => prev ? { ...prev, stage: 'downloading' } : null)
+            await window.api.startCloudDownload(cloudDownload.filePath)
+          }}
+          onCancel={async () => {
+            if (cloudDownload.stage === 'downloading') {
+              await window.api.cancelCloudDownload(cloudDownload.filePath)
+            }
+            setCloudDownload(null)
+          }}
+        />
       )}
 
       {/* Missing folders warning banner (shown after user dismisses the confirm modal) */}
@@ -2848,6 +2983,7 @@ return (
         <VideoPickerModal
           files={videoPicker.files}
           action={videoPicker.action}
+          offlineFiles={videoPicker.offlineFiles}
           onPick={file => {
             if (videoPicker.action === 'player') onSendToPlayer(file)
             else if (videoPicker.action === 'converter') onSendToConverter(file)
@@ -3305,42 +3441,42 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
 
       {/* Actions */}
       <td className="px-2 py-2 align-middle">
-        <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
           {!hasMeta && (
             <span className="flex items-center gap-1 text-xs text-yellow-600 mr-1 shrink-0">
               <AlertTriangle size={11} />
               No meta
             </span>
           )}
-          {videoCount > 0 && <Tooltip content="Send to Player"><Button variant="ghost" size="sm" icon={<Film size={12} />} onClick={onSendToPlayer} /></Tooltip>}
-          {videoCount > 0 && <Tooltip content="Send to Converter"><Button variant="ghost" size="sm" icon={<Zap size={12} />} onClick={onSendToConverter} /></Tooltip>}
+          {videoCount > 0 && <Tooltip content="Send to Player"><Button variant="ghost" size="icon-sm" icon={<Film size={12} />} onClick={onSendToPlayer} /></Tooltip>}
+          {videoCount > 0 && <Tooltip content="Send to Converter"><Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} /></Tooltip>}
           {videoCount > 1 && (
-            <Tooltip content="Send to Combine"><Button variant="ghost" size="sm" icon={<Combine size={12} />} onClick={onSendToCombine} /></Tooltip>
+            <Tooltip content="Send to Combine"><Button variant="ghost" size="icon-sm" icon={<Combine size={12} />} onClick={onSendToCombine} /></Tooltip>
           )}
           <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
-            <Button variant="ghost" size="sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
+            <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
           </Tooltip>
           <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
             <Button
               variant="ghost"
-              size="sm"
+              size="icon-sm"
               icon={hasMeta ? <PencilLine size={12} /> : <FilePlus size={12} />}
               onClick={hasMeta ? onEdit : onAdd}
             />
           </Tooltip>
           <Tooltip content="Open folder">
-            <Button variant="ghost" size="sm" icon={<FolderOpen size={12} />} onClick={onOpen} />
+            <Button variant="ghost" size="icon-sm" icon={<FolderOpen size={12} />} onClick={onOpen} />
           </Tooltip>
           {isPending && (
             <Tooltip content="Reschedule">
-              <Button variant="ghost" size="sm" icon={<CalendarClock size={12} />} onClick={onReschedule} />
+              <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} />
             </Tooltip>
           )}
-          <div className="w-px h-3.5 bg-white/10 mx-0.5" />
+          <div className="w-px h-3.5 bg-white/10" />
           <Tooltip content="Delete folder">
             <button
               onClick={onDelete}
-              className="p-1.5 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              className="p-2 rounded-lg text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors"
             >
               <Trash2 size={12} />
             </button>

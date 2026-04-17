@@ -87,6 +87,18 @@ contextBridge.exposeInMainWorld('api', {
   checkLocalFiles: (filePaths: string[]) =>
     ipcRenderer.invoke('files:checkLocalFiles', filePaths),
 
+  startCloudDownload: (filePath: string) =>
+    ipcRenderer.invoke('files:startCloudDownload', filePath),
+
+  cancelCloudDownload: (filePath: string) =>
+    ipcRenderer.invoke('files:cancelCloudDownload', filePath),
+
+  onCloudDownloadDone: (callback: (filePath: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, filePath: string) => callback(filePath)
+    ipcRenderer.on('files:cloudDownloadDone', handler)
+    return () => ipcRenderer.removeListener('files:cloudDownloadDone', handler)
+  },
+
   listFileNames: (dirPath: string) =>
     ipcRenderer.invoke('files:listNames', dirPath),
 
@@ -278,8 +290,8 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetVideoById: (videoId: string) =>
     ipcRenderer.invoke('youtube:getVideoById', videoId),
 
-  youtubeUpdateVideo: (videoId: string, title: string, description: string, tags: string[]) =>
-    ipcRenderer.invoke('youtube:updateVideo', videoId, title, description, tags),
+  youtubeUpdateVideo: (videoId: string, title: string, description: string, tags: string[], gameTitle?: string) =>
+    ipcRenderer.invoke('youtube:updateVideo', videoId, title, description, tags, gameTitle),
 
   youtubeValidateToken: () =>
     ipcRenderer.invoke('youtube:validateToken'),

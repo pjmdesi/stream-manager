@@ -1,12 +1,35 @@
 import { ipcMain, dialog, BrowserWindow, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import { spawnSync } from 'child_process'
+import { spawnSync, spawn, ChildProcess } from 'child_process'
 import { fileWatcher, WatchRule, WatchEvent } from '../services/fileWatcher'
 import { getStore } from './store'
 
 // FILE_ATTRIBUTE_OFFLINE = 0x1000, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
 const OFFLINE_MASK = 0x1000 | 0x400000
+
+const activeDownloadPollers = new Map<string, ReturnType<typeof setInterval>>()
+
+/**
+ * Like checkLocalFiles but returns false (not local) on any error or uncertainty.
+ * Used in download polling where a false-positive "file is ready" would be harmful.
+ */
+function isFileConfirmedLocal(filePath: string): boolean {
+  if (process.platform !== 'win32') return true
+  try {
+    const escaped = filePath.replace(/'/g, "''")
+    const script = `try { [int][System.IO.File]::GetAttributes('${escaped}') } catch { -1 }`
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command', script
+    ], { encoding: 'utf8', timeout: 5000 })
+    if (result.status !== 0 || !result.stdout) return false
+    const val = parseInt(result.stdout.trim(), 10)
+    if (isNaN(val) || val === -1) return false
+    return (val & OFFLINE_MASK) === 0
+  } catch {
+    return false
+  }
+}
 
 /**
  * Returns a boolean per path: true = file data is local, false = offline/cloud placeholder.
@@ -154,6 +177,39 @@ export function registerFilesIPC(): void {
 
   ipcMain.handle('files:checkLocalFiles', async (_event, filePaths: string[]): Promise<boolean[]> => {
     return checkLocalFiles(filePaths)
+  })
+
+  ipcMain.handle('files:startCloudDownload', async (event, filePath: string) => {
+    if (process.platform !== 'win32') return
+    // Opening the file for reading triggers Windows cloud provider (OneDrive etc.) to hydrate it
+    fs.open(filePath, 'r', (err, fd) => {
+      if (!err) {
+        const buf = Buffer.alloc(1)
+        fs.read(fd, buf, 0, 1, 0, () => fs.close(fd, () => {}))
+      }
+    })
+    const win = BrowserWindow.fromWebContents(event.sender)
+    // Clear any existing poller for this file before starting a new one
+    const existing = activeDownloadPollers.get(filePath)
+    if (existing) clearInterval(existing)
+    const t = setInterval(() => {
+      if (isFileConfirmedLocal(filePath)) {
+        clearInterval(t)
+        activeDownloadPollers.delete(filePath)
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('files:cloudDownloadDone', filePath)
+        }
+      }
+    }, 2000)
+    activeDownloadPollers.set(filePath, t)
+  })
+
+  ipcMain.handle('files:cancelCloudDownload', async (_event, filePath: string) => {
+    const t = activeDownloadPollers.get(filePath)
+    if (t) {
+      clearInterval(t)
+      activeDownloadPollers.delete(filePath)
+    }
   })
 
   // Lightweight directory listing — names and type only, no stat() calls, safe for cloud-synced folders

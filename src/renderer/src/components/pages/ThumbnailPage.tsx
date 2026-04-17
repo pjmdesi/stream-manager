@@ -44,6 +44,7 @@ const SNAP_THRESHOLD = 5 // canvas pixels
 const GRID_SIZE = 8      // canvas pixels
 
 interface SnapGuide { lineGuide: number; orientation: 'V' | 'H' }
+type KonvaBox = { x: number; y: number; width: number; height: number; rotation: number }
 
 function getSnapResult(
   node: Konva.Node,
@@ -175,13 +176,14 @@ interface KonvaLayerNodeProps {
   onChange: (updated: ThumbnailLayer) => void
   scale: number
   onSnapDragMove: (e: Konva.KonvaEventObject<DragEvent>) => void
+  onSnapTransformBoundBox: (oldBox: KonvaBox, newBox: KonvaBox) => KonvaBox
   onClearGuides: () => void
   gridSnapEnabled: boolean
 }
 
 function snapGrid(v: number) { return Math.round(v / GRID_SIZE) * GRID_SIZE }
 
-function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
   const [img] = useImage(layer.src ? `file://${layer.src}` : '', 'anonymous')
   const nodeRef = useRef<Konva.Image>(null)
   const trRef = useRef<Konva.Transformer>(null)
@@ -202,6 +204,7 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCl
     <>
       <KonvaImage
         ref={nodeRef}
+        id={layer.id}
         name="snap-target"
         image={img}
         x={layer.x}
@@ -221,6 +224,7 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCl
           onChange({ ...layer, x: e.target.x(), y: e.target.y() })
         }}
         onTransformEnd={e => {
+          onClearGuides()
           const node = e.target
           let x = node.x(), y = node.y()
           let w2 = Math.round(node.width() * node.scaleX())
@@ -231,12 +235,12 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCl
           node.scaleY(1)
         }}
       />
-      {isSelected && <Transformer ref={trRef} rotateEnabled keepRatio={false} boundBoxFunc={(_, newBox) => newBox} />}
+      {isSelected && <Transformer ref={trRef} rotateEnabled keepRatio={false} boundBoxFunc={onSnapTransformBoundBox} />}
     </>
   )
 }
 
-function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
   const nodeRef = useRef<Konva.Text>(null)
   const trRef = useRef<Konva.Transformer>(null)
 
@@ -251,6 +255,7 @@ function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCle
     <>
       <KonvaText
         ref={nodeRef}
+        id={layer.id}
         name="snap-target"
         text={layer.text ?? ''}
         x={layer.x}
@@ -277,6 +282,7 @@ function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCle
           onChange({ ...layer, x: e.target.x(), y: e.target.y() })
         }}
         onTransformEnd={e => {
+          onClearGuides()
           const node = e.target
           let x = node.x(), y = node.y()
           let w2 = Math.round(node.width() * node.scaleX())
@@ -291,14 +297,14 @@ function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCle
           ref={trRef}
           rotateEnabled
           enabledAnchors={['middle-left', 'middle-right']}
-          boundBoxFunc={(oldBox, newBox) => ({ ...newBox, height: oldBox.height })}
+          boundBoxFunc={(oldBox, newBox) => onSnapTransformBoundBox(oldBox, { ...newBox, height: oldBox.height })}
         />
       )}
     </>
   )
 }
 
-function ShapeNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function ShapeNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
   const nodeRef = useRef<any>(null)
   const trRef = useRef<Konva.Transformer>(null)
   const w = layer.width ?? 200
@@ -316,6 +322,7 @@ function ShapeNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCl
 
   const sharedProps = {
     ref: nodeRef,
+    id: layer.id,
     name: 'snap-target',
     x: isCentered ? layer.x + w / 2 : layer.x,
     y: isCentered ? layer.y + h / 2 : layer.y,
@@ -338,6 +345,7 @@ function ShapeNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCl
       onChange({ ...layer, x: Math.round(nx), y: Math.round(ny) })
     },
     onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
+      onClearGuides()
       const node = e.target
       const sx = Math.abs(node.scaleX())
       const sy = Math.abs(node.scaleY())
@@ -369,7 +377,7 @@ function ShapeNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onCl
           ref={trRef}
           rotateEnabled
           keepRatio={shapeType === 'triangle'}
-          boundBoxFunc={(_, newBox) => ({
+          boundBoxFunc={(oldBox, newBox) => onSnapTransformBoundBox(oldBox, {
             ...newBox,
             width: Math.max(10, newBox.width),
             height: Math.max(10, newBox.height),
@@ -425,9 +433,25 @@ function useUndoRedo(initial: ThumbnailLayer[]) {
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
-function TemplatePreview({ streamsDir, templateId, name }: { streamsDir: string; templateId: string; name: string }) {
+function RecentThumb({ folderPath, date, updatedAt }: { folderPath: string; date: string; updatedAt: number }) {
+  const [err, setErr] = useState(false)
+  const src = `file://${folderPath}/${date}_sm-thumbnail.png?t=${updatedAt}`
+  useEffect(() => { setErr(false) }, [src])
+  return (
+    <div className="w-20 shrink-0 self-stretch bg-navy-900 rounded-l-lg overflow-hidden flex items-center justify-center">
+      {!err
+        ? <img src={src} className="w-full h-full object-cover" onError={() => setErr(true)} />
+        : <ImageIcon size={12} className="text-gray-600" />
+      }
+    </div>
+  )
+}
+
+function TemplatePreview({ streamsDir, templateId, name, cacheKey }: { streamsDir: string; templateId: string; name: string; cacheKey?: number }) {
   const [imgError, setImgError] = useState(false)
-  const src = `file://${streamsDir}/_thumbnail-assets/templates/${templateId}.png`
+  const src = `file://${streamsDir}/_thumbnail-assets/templates/${templateId}.png${cacheKey ? `?t=${cacheKey}` : ''}`
+  // Reset error state when cacheKey changes (template was re-saved)
+  useEffect(() => { setImgError(false) }, [cacheKey])
   return (
     <div className="aspect-video bg-navy-900 flex items-center justify-center overflow-hidden">
       {!imgError ? (
@@ -479,7 +503,7 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
                 className="group relative bg-navy-800 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-purple-500/50 transition-colors"
                 onClick={() => onOpenTemplate(t)}
               >
-                <TemplatePreview streamsDir={streamsDir} templateId={t.id} name={t.name} />
+                <TemplatePreview streamsDir={streamsDir} templateId={t.id} name={t.name} cacheKey={t.updatedAt} />
                 <div className="p-2 flex items-center justify-between gap-1">
                   <span className="text-xs text-gray-300 truncate">{t.name}</span>
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-all shrink-0">
@@ -514,14 +538,14 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
               <button
                 key={i}
                 onClick={() => onOpenRecent(entry)}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 text-left transition-colors"
+                className="flex items-center gap-3 pr-3 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 text-left transition-colors overflow-hidden"
               >
-                <ImageIcon size={14} className="text-gray-500 shrink-0" />
-                <div className="flex-1 min-w-0">
+                <RecentThumb folderPath={entry.folderPath} date={entry.date} updatedAt={entry.updatedAt} />
+                <div className="flex-1 min-w-0 py-2">
                   <p className="text-xs text-gray-300 truncate">{entry.title ?? entry.date}</p>
-                  <p className="text-[10px] text-gray-600 truncate">{entry.folderPath}</p>
+                  <p className="text-[10px] text-gray-500 truncate">{entry.folderPath}</p>
                 </div>
-                <span className="text-[10px] text-gray-600 shrink-0">{entry.date}</span>
+                <span className="text-[10px] text-gray-500 shrink-0 py-2">{entry.date}</span>
               </button>
             ))}
           </div>
@@ -814,6 +838,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [currentTemplateId, setCurrentTemplateId] = useState<string | undefined>(undefined)
   const { layers, commit, set: setLayersDirect, undo, redo, reset: resetLayers, canUndo, canRedo } = useUndoRedo([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const selectedIdsRef = useRef<string[]>([])
+  useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
   const [isDirty, setIsDirty] = useState(false)
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [saveTemplateName, setSaveTemplateName] = useState('')
@@ -861,6 +887,104 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (snap.x !== undefined) node.x(snap.x)
     if (snap.y !== undefined) node.y(snap.y)
     renderSnapGuides(snap.guides, guideLayerRef.current, viewZoomRef.current)
+  }, [smartSnapEnabled, gridSnapEnabled])
+
+  const handleSnapTransformBoundBox = useCallback((oldBox: KonvaBox, newBox: KonvaBox): KonvaBox => {
+    if (!stageRef.current || !guideLayerRef.current) return newBox
+    if (!smartSnapEnabled && !gridSnapEnabled) return newBox
+
+    const stage = stageRef.current
+    const excluded = selectedIdsRef.current
+    const zoom = viewZoomRef.current
+    const pan = viewPanRef.current
+    const guides: SnapGuide[] = []
+
+    // boundBoxFunc boxes are in absolute/screen coordinates (include stage zoom+pan).
+    // All snap logic uses canvas coordinates (0–CANVAS_W, 0–CANVAS_H), so convert first.
+    const toCanvas = (b: KonvaBox): KonvaBox => ({
+      x: (b.x - pan.x) / zoom,
+      y: (b.y - pan.y) / zoom,
+      width: b.width / zoom,
+      height: b.height / zoom,
+      rotation: b.rotation,
+    })
+    const toScreen = (b: KonvaBox): KonvaBox => ({
+      x: b.x * zoom + pan.x,
+      y: b.y * zoom + pan.y,
+      width: b.width * zoom,
+      height: b.height * zoom,
+      rotation: b.rotation,
+    })
+
+    const cOld = toCanvas(oldBox)
+    const cNew = toCanvas(newBox)
+    const result = { ...cNew }
+
+    // Determine which edges are moving (larger delta = that side is being dragged)
+    const leftDelta = Math.abs(cNew.x - cOld.x)
+    const rightDelta = Math.abs((cNew.x + cNew.width) - (cOld.x + cOld.width))
+    const topDelta = Math.abs(cNew.y - cOld.y)
+    const botDelta = Math.abs((cNew.y + cNew.height) - (cOld.y + cOld.height))
+    const leftMoving = leftDelta > rightDelta
+    const topMoving = topDelta > botDelta
+
+    if (smartSnapEnabled) {
+      const vStops: number[] = [0, CANVAS_W / 2, CANVAS_W]
+      const hStops: number[] = [0, CANVAS_H / 2, CANVAS_H]
+      // getClientRect({ relativeTo: stage }) returns canvas-space coords — matches our stops
+      stage.find('.snap-target').forEach((other: Konva.Node) => {
+        if (excluded.includes(other.id())) return
+        const b = other.getClientRect({ relativeTo: stage })
+        vStops.push(b.x, b.x + b.width / 2, b.x + b.width)
+        hStops.push(b.y, b.y + b.height / 2, b.y + b.height)
+      })
+
+      const movingVEdge = leftMoving ? result.x : result.x + result.width
+      const movingHEdge = topMoving ? result.y : result.y + result.height
+
+      let bestVDist = SNAP_THRESHOLD + 1, bestVStop: number | undefined
+      for (const stop of vStops) {
+        const d = Math.abs(movingVEdge - stop)
+        if (d < bestVDist) { bestVDist = d; bestVStop = stop }
+      }
+      if (bestVDist <= SNAP_THRESHOLD && bestVStop !== undefined) {
+        const delta = bestVStop - movingVEdge
+        if (leftMoving) { result.x += delta; result.width -= delta }
+        else { result.width += delta }
+        guides.push({ lineGuide: bestVStop, orientation: 'V' })
+      }
+
+      let bestHDist = SNAP_THRESHOLD + 1, bestHStop: number | undefined
+      for (const stop of hStops) {
+        const d = Math.abs(movingHEdge - stop)
+        if (d < bestHDist) { bestHDist = d; bestHStop = stop }
+      }
+      if (bestHDist <= SNAP_THRESHOLD && bestHStop !== undefined) {
+        const delta = bestHStop - movingHEdge
+        if (topMoving) { result.y += delta; result.height -= delta }
+        else { result.height += delta }
+        guides.push({ lineGuide: bestHStop, orientation: 'H' })
+      }
+    } else if (gridSnapEnabled) {
+      // Grid snap: snap the moving edge to the nearest grid line (canvas coords)
+      const rightEdge = result.x + result.width
+      const botEdge = result.y + result.height
+      if (leftMoving) {
+        result.x = snapGrid(result.x)
+        result.width = Math.max(GRID_SIZE, rightEdge - result.x)
+      } else {
+        result.width = Math.max(GRID_SIZE, snapGrid(rightEdge) - result.x)
+      }
+      if (topMoving) {
+        result.y = snapGrid(result.y)
+        result.height = Math.max(GRID_SIZE, botEdge - result.y)
+      } else {
+        result.height = Math.max(GRID_SIZE, snapGrid(botEdge) - result.y)
+      }
+    }
+
+    renderSnapGuides(guides, guideLayerRef.current!, zoom)
+    return toScreen(result)
   }, [smartSnapEnabled, gridSnapEnabled])
 
   const clearSnapGuides = useCallback(() => {
@@ -1068,6 +1192,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (!stage) return ''
     bgLayerRef.current?.hide()
     guideLayerRef.current?.hide()
+    // Hide selection handles so they don't appear in the saved image
+    const transformers = stage.find('Transformer')
+    transformers.forEach(t => t.hide())
     const prevX = stage.x(), prevY = stage.y()
     const prevSX = stage.scaleX(), prevSY = stage.scaleY()
     const prevW = stage.width(), prevH = stage.height()
@@ -1076,6 +1203,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const dataUrl = stage.toDataURL({ pixelRatio: 1 })
     stage.x(prevX); stage.y(prevY); stage.scaleX(prevSX); stage.scaleY(prevSY)
     stage.width(prevW); stage.height(prevH)
+    transformers.forEach(t => t.show())
     bgLayerRef.current?.show()
     guideLayerRef.current?.show()
     return dataUrl
@@ -1465,7 +1593,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                         className="group bg-navy-900 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-purple-500/60 transition-colors"
                         onClick={() => confirmPickTemplate(t)}
                       >
-                        <TemplatePreview streamsDir={config.streamsDir} templateId={t.id} name={t.name} />
+                        <TemplatePreview streamsDir={config.streamsDir} templateId={t.id} name={t.name} cacheKey={t.updatedAt} />
                         <div className="px-2 py-1.5">
                           <span className="text-xs text-gray-300 truncate block">{t.name}</span>
                         </div>
@@ -1688,6 +1816,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       onChange: updateLayer,
                       scale: viewZoom,
                       onSnapDragMove: handleSnapDragMove,
+                      onSnapTransformBoundBox: handleSnapTransformBoundBox,
                       onClearGuides: clearSnapGuides,
                       gridSnapEnabled,
                     }

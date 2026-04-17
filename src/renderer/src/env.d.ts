@@ -51,6 +51,9 @@ declare global {
       readFile(filePath: string): Promise<string>
       saveScreenshot(destPath: string, base64Data: string): Promise<string>
       checkLocalFiles(filePaths: string[]): Promise<boolean[]>
+      startCloudDownload(filePath: string): Promise<void>
+      cancelCloudDownload(filePath: string): Promise<void>
+      onCloudDownloadDone(cb: (filePath: string) => void): () => void
 
       // ── File Watcher ─────────────────────────────────────────────────────────
       startWatcher(rules: WatchRule[]): Promise<void>
@@ -132,7 +135,7 @@ declare global {
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
-      youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[]): Promise<void>
+      youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[], gameTitle?: string): Promise<void>
       youtubeValidateToken(): Promise<{ valid: boolean; error?: string }>
       youtubeGetQualifyingThumbnails(paths: string[]): Promise<string[]>
       youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>

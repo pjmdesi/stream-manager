@@ -227,9 +227,19 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
     }
   }
 
+  const appCount = group.apps.length
+  const appListContent = (
+    <div className="flex flex-col gap-0.5">
+      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">{group.name}</p>
+      {group.apps.map(a => (
+        <p key={a.id} className="text-xs text-gray-200">{a.name}</p>
+      ))}
+    </div>
+  )
+
   if (collapsed) {
     return (
-      <Tooltip content={`Launch: ${group.name}`} side="right" triggerClassName="block w-full">
+      <Tooltip content={appListContent} side="right" triggerClassName="block w-full">
         <button
           onClick={launch}
           className="w-full flex items-center justify-center py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors text-gray-400 hover:text-gray-200"
@@ -250,16 +260,18 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
         <span className="flex-1 text-left truncate">{group.name}</span>
       </button>
       <div className="px-3 pb-2">
-        <Button
-          variant="primary"
-          size="sm"
-          icon={<Rocket size={12} />}
-          className="w-full"
-          disabled={launching || group.apps.length === 0}
-          onClick={launch}
-        >
-          {feedback != null ? `Launched ${feedback}` : 'Launch'}
-        </Button>
+        <Tooltip content={appListContent} side="right" triggerClassName="block w-full">
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Rocket size={12} />}
+            className="w-full"
+            disabled={launching || appCount === 0}
+            onClick={launch}
+          >
+            {feedback != null ? `Launched ${feedback}` : `Launch ${appCount} app${appCount === 1 ? '' : 's'}`}
+          </Button>
+        </Tooltip>
       </div>
     </div>
   )
