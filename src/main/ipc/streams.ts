@@ -404,42 +404,6 @@ export function registerStreamsIPC(): void {
     }
   })
 
-  ipcMain.handle('streams:stampArchived', async (_event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'): Promise<number> => {
-    if (!dir || !fs.existsSync(dir)) return 0
-    const allMeta = readAllMeta(dir)
-    const entries = fs.readdirSync(dir, { withFileTypes: true })
-    let count = 0
-
-    if (mode === 'dump-folder') {
-      // Collect unique dates from filenames
-      const dates = new Set<string>()
-      for (const entry of entries) {
-        if (entry.isDirectory()) continue
-        const match = entry.name.match(DATE_IN_FILENAME_RE)
-        if (match) dates.add(match[1])
-      }
-      for (const date of dates) {
-        allMeta[date] = {
-          ...(allMeta[date] ?? { date, streamType: ['games'], games: [], comments: '' }),
-          archived: true
-        }
-        count++
-      }
-    } else {
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        if (!DATE_FOLDER_RE.test(entry.name)) continue
-        allMeta[entry.name] = {
-          ...(allMeta[entry.name] ?? { date: entry.name, streamType: ['games'], games: [], comments: '' }),
-          archived: true
-        }
-        count++
-      }
-    }
-
-    if (count > 0) writeAllMeta(dir, allMeta)
-    return count
-  })
 
   let archiveCancelFn: (() => void) | null = null
 

@@ -5,7 +5,8 @@ import {
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
-  Film, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles
+  Film, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
+  Globe, EyeOff, Lock
 } from 'lucide-react'
 
 // Inline SVG brand icons — lucide-react has deprecated all YouTube/Twitch exports
@@ -32,6 +33,7 @@ import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { TagComboBox } from '../ui/TagComboBox'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
+import { TemplatesModal } from '../ui/TemplatesModal'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
 import { getTagColor, getTagTextureStyle, pickColorForNewTag, pickTextureForNewTag } from '../../constants/tagColors'
@@ -1738,9 +1740,19 @@ export function StreamsPage({
   const [loading, setLoading] = useState(false)
   const [modal, setModal] = useState<ModalState>({ mode: 'none' })
   const [showManageTags, setShowManageTags] = useState(false)
+  const [showTemplatesModal, setShowTemplatesModal] = useState(false)
   const [tagColors, setTagColors] = useState<Record<string, string>>({})
   const [tagTextures, setTagTextures] = useState<Record<string, string>>({})
   const [lightbox, setLightbox] = useState<{ thumbnails: string[]; index: number } | null>(null)
+
+  // ── YouTube live detection ─────────────────────────────────────────────────
+  const [ytConnectedOuter, setYtConnectedOuter] = useState(false)
+  const [ytIsLive, setYtIsLive] = useState(false)
+  const [ytPrivacyMap, setYtPrivacyMap] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    window.api.youtubeGetStatus().then((s: { connected: boolean }) => setYtConnectedOuter(s.connected)).catch(() => {})
+  }, [])
 
   // Startup warning: archive preset configured but missing
   const [archivePresetWarning, setArchivePresetWarning] = useState(false)
@@ -1929,13 +1941,7 @@ export function StreamsPage({
     }
   }
 
-  const stampArchiveFolder = async () => {
-    const dir = await window.api.openDirectoryDialog()
-    if (!dir) return
-    const count = await window.api.stampArchived(dir, streamMode as any)
-    if (count > 0) await loadFolders(streamsDir)
-    // brief feedback via title attribute is enough; no modal needed
-  }
+
 
   const toggleSelectMode = () => {
     setSelectMode(m => !m)
@@ -2200,6 +2206,31 @@ export function StreamsPage({
     return upcoming[0]?.folderPath ?? null
   }, [folders])
 
+  // Bulk-fetch privacy statuses for all linked videos whenever the folder list or connection changes
+  useEffect(() => {
+    if (!ytConnectedOuter) return
+    const ids = folders.map(f => f.meta?.ytVideoId).filter(Boolean) as string[]
+    if (ids.length === 0) return
+    window.api.youtubeGetPrivacyStatuses(ids).then(setYtPrivacyMap).catch(() => {})
+  }, [ytConnectedOuter, folders])
+
+  // Poll the upcoming broadcast every 60s to detect if it's live
+  useEffect(() => {
+    if (!ytConnectedOuter || !nextUpcomingFolderPath) { setYtIsLive(false); return }
+    const nextFolder = folders.find(f => f.folderPath === nextUpcomingFolderPath)
+    if (!nextFolder || nextFolder.date !== today() || !nextFolder.meta?.ytVideoId) { setYtIsLive(false); return }
+    const broadcastId = nextFolder.meta.ytVideoId
+    const check = () => window.api.youtubeCheckBroadcastIsLive(broadcastId)
+      .then(r => {
+        setYtIsLive(r.isLive)
+        if (r.privacyStatus) setYtPrivacyMap(prev => ({ ...prev, [broadcastId]: r.privacyStatus! }))
+      })
+      .catch(() => {})
+    check()
+    const interval = setInterval(check, 60_000)
+    return () => clearInterval(interval)
+  }, [ytConnectedOuter, nextUpcomingFolderPath, folders])
+
   const toggleGameFilter = (game: string) => {
     setFilterGames(prev => {
       const next = new Set(prev)
@@ -2255,71 +2286,88 @@ export function StreamsPage({
         </div>
         {selectMode ? (
           <>
-            <span className="text-xs text-gray-400">{selectedPaths.size} selected</span>
-            <Button variant="ghost" size="sm" onClick={selectedPaths.size === filteredFolders.length ? clearSelection : selectAll}>
-              {selectedPaths.size === filteredFolders.length ? 'Deselect All' : 'Select All'}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Tags size={14} />}
-              onClick={() => setShowBulkTag(true)}
-              disabled={selectedPaths.size === 0}
-            >
-              Edit Tags {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<Archive size={14} />}
-              onClick={clickArchive}
-              disabled={selectedPaths.size === 0}
-            >
-              Archive {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}
-            </Button>
-            <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode}>
-              Stop Selecting
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button variant="ghost" size="sm" icon={<FolderOpen size={14} />} onClick={pickDir}>
-              Change
-            </Button>
-            <Tooltip content="Marks all YYYY-MM-DD subfolders as archived without converting" side="bottom">
+            <span className="text-xs text-gray-400 shrink-0">{selectedPaths.size} selected</span>
+            <Tooltip content={selectedPaths.size === filteredFolders.length ? 'Deselect all streams' : 'Select all streams'} side="bottom">
+              <Button variant="ghost" size="sm" icon={selectedPaths.size === filteredFolders.length ? <Square size={14} /> : <CheckCheck size={14} />} onClick={selectedPaths.size === filteredFolders.length ? clearSelection : selectAll}>
+                <span className="hidden wide:inline">{selectedPaths.size === filteredFolders.length ? 'Deselect All' : 'Select All'}</span>
+              </Button>
+            </Tooltip>
+            <Tooltip content="Edit tags for selected streams" side="bottom">
               <Button
                 variant="ghost"
                 size="sm"
-                icon={<Archive size={14} />}
-                onClick={stampArchiveFolder}
+                icon={<Tags size={14} />}
+                onClick={() => setShowBulkTag(true)}
+                disabled={selectedPaths.size === 0}
               >
-                Stamp Archive
+                <span className="hidden wide:inline">Edit Tags {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
               </Button>
             </Tooltip>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Tags size={14} />}
-              onClick={() => setShowManageTags(true)}
-            >
-              Manage Tags
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<CheckSquare size={14} />}
-              onClick={toggleSelectMode}
-            >
-              Select
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<Plus size={14} />}
-              onClick={() => setModal({ mode: 'new' })}
-            >
-              New Stream
-            </Button>
+            <Tooltip content="Archive selected streams" side="bottom">
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<Archive size={14} />}
+                onClick={clickArchive}
+                disabled={selectedPaths.size === 0}
+              >
+                <span className="hidden wide:inline">Archive {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
+              </Button>
+            </Tooltip>
+            <Tooltip content="Exit selection mode" side="bottom">
+              <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode}>
+                <span className="hidden wide:inline">Stop Selecting</span>
+              </Button>
+            </Tooltip>
+          </>
+        ) : (
+          <>
+            <Tooltip content="Change streams folder" side="bottom">
+              <Button variant="ghost" size="sm" icon={<FolderOpen size={14} />} onClick={pickDir}>
+                <span className="hidden wide:inline">Change</span>
+              </Button>
+            </Tooltip>
+
+            <Tooltip content="Manage title, description, and tag templates" side="bottom">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<LayoutTemplate size={14} />}
+                onClick={() => setShowTemplatesModal(true)}
+              >
+                <span className="hidden wide:inline">Templates</span>
+              </Button>
+            </Tooltip>
+            <Tooltip content="Manage stream type tags" side="bottom">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Tags size={14} />}
+                onClick={() => setShowManageTags(true)}
+              >
+                <span className="hidden wide:inline">Manage Tags</span>
+              </Button>
+            </Tooltip>
+            <Tooltip content="Select streams" side="bottom">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<CheckSquare size={14} />}
+                onClick={toggleSelectMode}
+              >
+                <span className="hidden wide:inline">Select</span>
+              </Button>
+            </Tooltip>
+            <Tooltip content="Create a new stream entry" side="bottom">
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<Plus size={14} />}
+                onClick={() => setModal({ mode: 'new' })}
+              >
+                <span className="hidden wide:inline">New Stream</span>
+              </Button>
+            </Tooltip>
           </>
         )}
       </div>
@@ -2387,7 +2435,7 @@ export function StreamsPage({
                 {selectMode && <th className="pl-4 py-2 w-[40px]" />}
                 <th className="p-0 w-[88px]">Thumbnail</th>
                 <th className="px-2 py-2 w-[44px]"></th>
-                <th className="text-left px-2 py-2 w-[130px]">Date</th>
+                <th className="text-left px-2 py-2 w-[148px]">Date</th>
                 {/* Type column with filter */}
                 <th className="text-left px-2 py-2 min-w-[120px]">
                   <div ref={typeFilterAnchorRef} className="relative flex items-center gap-1">
@@ -2524,6 +2572,8 @@ return (
                   selected={selectedPaths.has(selectionKey(folder))}
                   isNextUpcoming={folder.folderPath === nextUpcomingFolderPath}
                   isPending={pending}
+                  isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
+                  privacyStatus={folder.meta?.ytVideoId ? ytPrivacyMap[folder.meta.ytVideoId] ?? null : null}
                   tagColors={tagColors}
                   tagTextures={tagTextures}
                   onToggleSelect={(shiftKey) => {
@@ -2911,6 +2961,23 @@ return (
         />
       )}
 
+      {/* Templates */}
+      <TemplatesModal
+        isOpen={showTemplatesModal}
+        onClose={() => setShowTemplatesModal(false)}
+        onSaved={() => {
+          Promise.all([
+            window.api.getYTTitleTemplates(),
+            window.api.getYTDescriptionTemplates(),
+            window.api.getYTTagTemplates(),
+          ]).then(([t, d, g]) => {
+            setYtTitleTemplates(t)
+            setYtDescTemplates(d)
+            setYtTagTemplates(g)
+          }).catch(() => {})
+        }}
+      />
+
       {/* Bulk tag */}
       {showBulkTag && (() => {
         const selectedFolders = folders.filter(f => selectedPaths.has(selectionKey(f)))
@@ -3009,6 +3076,8 @@ interface StreamRowProps {
   selected: boolean
   isNextUpcoming: boolean
   isPending: boolean
+  isLive: boolean
+  privacyStatus?: string | null
   tagColors: Record<string, string>
   tagTextures: Record<string, string>
   onToggleSelect: (shiftKey: boolean) => void
@@ -3025,7 +3094,7 @@ interface StreamRowProps {
   onThumbClick?: (index: number) => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onThumbClick }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -3119,7 +3188,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
       </td>
 
       {/* Date */}
-      <td className="px-2 py-2 align-middle min-w-[130px]">
+      <td className="px-2 py-2 align-middle min-w-[148px]">
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-sm text-gray-200">{date}</span>
           {meta?.archived && (
@@ -3130,16 +3199,27 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             </Tooltip>
           )}
           {isPending && (
-            isNextUpcoming && meta?.ytVideoId ? (
-              <Tooltip content="Open in YouTube Studio">
-                <button
-                  onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
-                  className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 hover:bg-yellow-900/50 hover:text-yellow-300 transition-colors shrink-0"
-                >
-                  <Radio size={12} />
-                </button>
-              </Tooltip>
-            ) : (
+            isNextUpcoming && meta?.ytVideoId ? (() => {
+              const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
+              const liveLabel = isLive ? 'Live now' : 'Open in YouTube Studio'
+              const tooltipText = privacyLabel ? `${liveLabel} · ${privacyLabel}` : liveLabel
+              const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
+              return (
+                <Tooltip content={tooltipText}>
+                  <button
+                    onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
+                    className={`inline-flex items-center gap-0.5 p-0.5 rounded border transition-colors shrink-0 ${
+                      isLive
+                        ? 'bg-green-900/30 text-green-400 border-green-800/30 hover:bg-green-900/50 hover:text-green-300'
+                        : 'bg-yellow-900/30 text-yellow-400 border-yellow-800/30 hover:bg-yellow-900/50 hover:text-yellow-300'
+                    }`}
+                  >
+                    <Radio size={12} />
+                    {PrivacyIcon && <PrivacyIcon size={9} />}
+                  </button>
+                </Tooltip>
+              )
+            })() : (
               <Tooltip content={isNextUpcoming ? 'Upcoming — stream hasn\'t happened yet' : 'Scheduled upcoming stream'}>
                 <span className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 shrink-0">
                   <Radio size={12} />
@@ -3147,16 +3227,21 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
               </Tooltip>
             )
           )}
-          {!isPending && meta?.ytVideoId && (
-            <Tooltip content="Edit on YouTube">
-              <button
-                onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
-                className="inline-flex items-center p-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
-              >
-                <LucideYoutube size={12} />
-              </button>
-            </Tooltip>
-          )}
+          {!isPending && meta?.ytVideoId && (() => {
+            const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
+            const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
+            return (
+              <Tooltip content={privacyLabel ? `Edit on YouTube · ${privacyLabel}` : 'Edit on YouTube'}>
+                <button
+                  onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
+                  className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
+                >
+                  <LucideYoutube size={12} />
+                  {PrivacyIcon && <PrivacyIcon size={9} />}
+                </button>
+              </Tooltip>
+            )
+          })()}
         </div>
         <div className="text-xs text-gray-600 mt-0.5">{friendlyDate(date)}</div>
       </td>

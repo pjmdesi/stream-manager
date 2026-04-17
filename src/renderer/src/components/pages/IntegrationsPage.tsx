@@ -1,161 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { Youtube, Twitch, Plus, Trash2, ChevronDown, ChevronUp, CheckCircle2, AlertCircle, Loader2, Bot } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Youtube, Twitch, CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { useStore } from '../../hooks/useStore'
-import type { YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate } from '../../types'
-import { v4 as uuid } from 'uuid'
 
-// ─── Generic template list ────────────────────────────────────────────────────
-
-function TemplateList<T extends { id: string; name: string }>({
-  items, subtitle, onEdit, onDelete, onNew, newLabel,
-}: {
-  items: T[]
-  subtitle: (t: T) => React.ReactNode
-  onEdit: (t: T) => void
-  onDelete: (id: string) => void
-  onNew: () => void
-  newLabel: string
-}) {
-  return (
-    <div className="flex flex-col gap-3">
-      {items.length === 0 && <p className="text-xs text-gray-600 italic">No templates yet.</p>}
-      {items.map(t => (
-        <div key={t.id} className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-white/[0.03] border border-white/5">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-gray-200">{t.name}</p>
-            <div className="mt-0.5">{subtitle(t)}</div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <Button variant="ghost" size="sm" onClick={() => onEdit(t)}>Edit</Button>
-            <button onClick={() => onDelete(t.id)} className="p-1.5 rounded text-gray-700 hover:text-red-400 transition-colors">
-              <Trash2 size={13} />
-            </button>
-          </div>
-        </div>
-      ))}
-      <div>
-        <Button variant="secondary" size="sm" icon={<Plus size={13} />} onClick={onNew}>{newLabel}</Button>
-      </div>
-    </div>
-  )
-}
-
-// ─── Template modals ──────────────────────────────────────────────────────────
-
-function TitleTemplateModal({ initial, onSave, onClose }: { initial?: YTTitleTemplate; onSave: (t: YTTitleTemplate) => void; onClose: () => void }) {
-  const [name, setName] = useState(initial?.name ?? '')
-  const [template, setTemplate] = useState(initial?.template ?? '')
-  const [error, setError] = useState('')
-  const handleSave = () => {
-    if (!name.trim()) { setError('Name is required.'); return }
-    if (!template.trim()) { setError('Template is required.'); return }
-    onSave({ id: initial?.id ?? uuid(), name: name.trim(), template: template.trim() })
-    onClose()
-  }
-  return (
-    <Modal isOpen onClose={onClose} title={initial ? 'Edit Title Template' : 'New Title Template'} width="md"
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={handleSave}>Save</Button></>}>
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-300">Template name</label>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Gaming — Standard"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-300">Title template</label>
-          <p className="text-xs text-gray-600">
-            Merge fields: <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span>
-          </p>
-          <input value={template} onChange={e => setTemplate(e.target.value)} placeholder="{game} — Part {episode} | {title}"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
-        </div>
-        {error && <p className="text-xs text-red-400">{error}</p>}
-      </div>
-    </Modal>
-  )
-}
-
-function DescriptionTemplateModal({ initial, onSave, onClose }: { initial?: YTDescriptionTemplate; onSave: (t: YTDescriptionTemplate) => void; onClose: () => void }) {
-  const [name, setName] = useState(initial?.name ?? '')
-  const [description, setDescription] = useState(initial?.description ?? '')
-  const [error, setError] = useState('')
-  const handleSave = () => {
-    if (!name.trim()) { setError('Name is required.'); return }
-    onSave({ id: initial?.id ?? uuid(), name: name.trim(), description })
-    onClose()
-  }
-  return (
-    <Modal isOpen onClose={onClose} title={initial ? 'Edit Description Template' : 'New Description Template'} width="lg"
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={handleSave}>Save</Button></>}>
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-300">Template name</label>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Standard stream description"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-300">Description</label>
-          <p className="text-xs text-gray-600">Static text — edit per-stream before publishing.</p>
-          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={8} placeholder="Stream description…"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none" />
-        </div>
-        {error && <p className="text-xs text-red-400">{error}</p>}
-      </div>
-    </Modal>
-  )
-}
-
-function TagTemplateModal({ initial, onSave, onClose }: { initial?: YTTagTemplate; onSave: (t: YTTagTemplate) => void; onClose: () => void }) {
-  const [name, setName] = useState(initial?.name ?? '')
-  const [tagsText, setTagsText] = useState(initial?.tags.join(', ') ?? '')
-  const [error, setError] = useState('')
-  const tagCount = tagsText.split(',').map(t => t.trim()).filter(Boolean).length
-  const handleSave = () => {
-    if (!name.trim()) { setError('Name is required.'); return }
-    onSave({ id: initial?.id ?? uuid(), name: name.trim(), tags: tagsText.split(',').map(t => t.trim()).filter(Boolean) })
-    onClose()
-  }
-  return (
-    <Modal isOpen onClose={onClose} title={initial ? 'Edit Tag Template' : 'New Tag Template'} width="lg"
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={handleSave}>Save</Button></>}>
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-300">Template name</label>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Elden Ring tags"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-300">Tags</label>
-          <p className="text-xs text-gray-600">Comma-separated.</p>
-          <textarea value={tagsText} onChange={e => setTagsText(e.target.value)} rows={6} placeholder="gaming, lets play, elden ring, …"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-2 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none" />
-          <p className="text-xs text-gray-600 text-right">{tagCount} tags</p>
-        </div>
-        {error && <p className="text-xs text-red-400">{error}</p>}
-      </div>
-    </Modal>
-  )
-}
-
-// ─── Shared section accordion ─────────────────────────────────────────────────
-
-type Section = 'yt-credentials' | 'yt-titles' | 'yt-descriptions' | 'yt-tags' | 'twitch-credentials' | 'claude' | null
-
-function SectionHeader({ id, label, expanded, onToggle, icon }: {
-  id: Section; label: string; expanded: boolean; onToggle: () => void; icon?: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onToggle}
-      className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-medium text-gray-200 hover:bg-white/[0.03] transition-colors"
-    >
-      <span className="flex items-center gap-2">{icon}{label}</span>
-      {expanded ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
-    </button>
-  )
-}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -187,18 +35,25 @@ export function IntegrationsPage() {
   const [claudeTesting, setClaudeTesting] = useState(false)
   const [claudeTestResult, setClaudeTestResult] = useState<{ valid: boolean; error?: string } | null>(null)
 
-  // ── Templates ─────────────────────────────────────────────────────────────
-  const [titleTemplates, setTitleTemplates] = useState<YTTitleTemplate[]>([])
-  const [descTemplates, setDescTemplates] = useState<YTDescriptionTemplate[]>([])
-  const [tagTemplates, setTagTemplates] = useState<YTTagTemplate[]>([])
+  // ── YouTube instructions toggle ───────────────────────────────────────────
+  const [ytInstructionsExpanded, setYtInstructionsExpanded] = useState(false)
 
-  const [expandedSections, setExpandedSections] = useState<Set<Section>>(new Set(['yt-credentials']))
-  type EditingState =
-    | { type: 'title'; item?: YTTitleTemplate }
-    | { type: 'description'; item?: YTDescriptionTemplate }
-    | { type: 'tag'; item?: YTTagTemplate }
-    | null
-  const [editing, setEditing] = useState<EditingState>(null)
+  // ── Secret reveal ─────────────────────────────────────────────────────────
+  type RevealField = 'yt-secret' | 'tw-secret' | 'claude-key'
+  const [revealed, setRevealed] = useState<Set<RevealField>>(new Set())
+  const [pendingReveal, setPendingReveal] = useState<RevealField | null>(null)
+
+  const requestReveal = (field: RevealField) => {
+    if (revealed.has(field)) {
+      setRevealed(prev => { const s = new Set(prev); s.delete(field); return s })
+    } else {
+      setPendingReveal(field)
+    }
+  }
+  const confirmReveal = () => {
+    if (pendingReveal) setRevealed(prev => new Set(prev).add(pendingReveal))
+    setPendingReveal(null)
+  }
 
   useEffect(() => {
     setYtClientId(config.youtubeClientId ?? '')
@@ -219,24 +74,12 @@ export function IntegrationsPage() {
       window.api.youtubeValidateToken().then(r => {
         setYtTokenValid(r.valid)
         setYtTokenError(r.valid ? null : (r.error ?? 'Token is invalid'))
-        if (r.valid) setExpandedSections(prev => { const s = new Set(prev); s.delete('yt-credentials'); s.add('yt-titles'); return s })
       }).catch(() => {})
     }).catch(() => {})
     window.api.twitchGetStatus().then((s: { connected: boolean }) => {
       setTwConnected(s.connected)
     }).catch(() => {})
-    Promise.all([
-      window.api.getYTTitleTemplates(),
-      window.api.getYTDescriptionTemplates(),
-      window.api.getYTTagTemplates(),
-    ]).then(([t, d, g]) => { setTitleTemplates(t); setDescTemplates(d); setTagTemplates(g) }).catch(() => {})
   }, [])
-
-  const toggle = (id: Section) => setExpandedSections(prev => {
-    const s = new Set(prev)
-    s.has(id) ? s.delete(id) : s.add(id)
-    return s
-  })
 
   // ── YouTube actions ───────────────────────────────────────────────────────
   const saveYtCredentials = async () => {
@@ -250,7 +93,6 @@ export function IntegrationsPage() {
       setYtConnected(true)
       setYtTokenValid(true)
       setYtTokenError(null)
-      setExpandedSections(prev => { const s = new Set(prev); s.delete('yt-credentials'); s.add('yt-titles'); return s })
     }
     catch (e: any) { setYtError(e.message) }
     finally { setYtConnecting(false) }
@@ -266,6 +108,12 @@ export function IntegrationsPage() {
   const saveClaudeSettings = async () => {
     await updateConfig({ claudeApiKey: claudeApiKey.trim(), claudeSystemPrompt: claudeSystemPrompt.trim() })
     setClaudeSaved(true); setTimeout(() => setClaudeSaved(false), 2000)
+    setClaudeTestResult(null)
+  }
+  const disconnectClaude = async () => {
+    await updateConfig({ claudeApiKey: '', claudeSystemPrompt: '' })
+    setClaudeApiKey('')
+    setClaudeSystemPrompt('')
     setClaudeTestResult(null)
   }
   const testClaudeKey = async () => {
@@ -289,16 +137,6 @@ export function IntegrationsPage() {
   }
   const disconnectTw = async () => { await window.api.twitchDisconnect(); setTwConnected(false) }
 
-  // ── Template helpers ──────────────────────────────────────────────────────
-  const saveTitles = useCallback(async (v: YTTitleTemplate[]) => { setTitleTemplates(v); await window.api.setYTTitleTemplates(v) }, [])
-  const saveDescs = useCallback(async (v: YTDescriptionTemplate[]) => { setDescTemplates(v); await window.api.setYTDescriptionTemplates(v) }, [])
-  const saveTags = useCallback(async (v: YTTagTemplate[]) => { setTagTemplates(v); await window.api.setYTTagTemplates(v) }, [])
-  const upsert = <T extends { id: string }>(list: T[], item: T, save: (v: T[]) => void) => {
-    const idx = list.findIndex(x => x.id === item.id)
-    const next = [...list]; if (idx >= 0) next[idx] = item; else next.push(item)
-    save(next)
-  }
-
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -307,63 +145,93 @@ export function IntegrationsPage() {
           <h1 className="text-lg font-semibold">Integrations</h1>
           <p className="text-xs text-gray-500 mt-0.5">Connect and manage your streaming platform accounts.</p>
         </div>
-        <div className="ml-auto flex items-center gap-4">
-          <span className={`flex items-center gap-1.5 text-xs ${
-            ytConnected && ytTokenValid ? 'text-green-400' :
-            ytConnected && !ytTokenValid ? 'text-amber-400' :
-            'text-gray-600'
-          }`}>
-            <Youtube size={18} />
-            {ytConnected && ytTokenValid ? 'Connected' :
-             ytConnected && !ytTokenValid ? 'Token expired' :
-             'Not connected'}
-          </span>
-          <span className={`flex items-center gap-1.5 text-xs ${twConnected ? 'text-purple-400' : 'text-gray-600'}`}>
-            <Twitch size={18} />
-            {twConnected ? 'Connected' : 'Not connected'}
-          </span>
-          <span className={`flex items-center gap-1.5 text-xs ${config.claudeApiKey ? 'text-orange-400' : 'text-gray-600'}`}>
-            <Bot size={18} />
-            {config.claudeApiKey ? 'Connected' : 'Not connected'}
-          </span>
-        </div>
       </div>
 
       <div className="flex-1 overflow-hidden pr-2">
       <div className="h-full overflow-y-auto">
-      <div className="flex flex-col divide-y divide-white/5">
+      <div className="flex flex-col gap-6 p-4">
 
         {/* ── YouTube ─────────────────────────────────────────────────────── */}
-        <div className="px-6 pt-4 pb-1">
-          <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <Youtube size={12} className="text-red-400" />
-            YouTube
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 px-1">
+            <Youtube size={16} className="text-red-400 shrink-0" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">YouTube</span>
+            <span className={`ml-auto text-xs font-medium ${
+              ytConnected && ytTokenValid ? 'text-green-400' :
+              ytConnected && !ytTokenValid ? 'text-amber-400' :
+              'text-gray-600'
+            }`}>
+              {ytConnected && ytTokenValid ? 'Connected' :
+               ytConnected && !ytTokenValid ? 'Token expired' :
+               'Not connected'}
+            </span>
           </div>
-        </div>
 
-        {/* Token expired banner */}
-        {ytConnected && !ytTokenValid && (
-          <div className="mx-6 mb-1 flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
-            <AlertCircle size={15} className="text-amber-400 shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-amber-300">YouTube token expired</p>
-              <p className="text-xs text-amber-400/70 mt-0.5">{ytTokenError ?? 'The stored token is no longer valid.'} Reconnect to restore access.</p>
+          {/* Token expired banner */}
+          {ytConnected && !ytTokenValid && (
+            <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+              <AlertCircle size={15} className="text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-amber-300">YouTube token expired</p>
+                <p className="text-xs text-amber-400/70 mt-0.5">{ytTokenError ?? 'The stored token is no longer valid.'} Reconnect to restore access.</p>
+              </div>
+              <Button variant="primary" size="sm" onClick={connectYt} disabled={ytConnecting}
+                icon={ytConnecting ? <Loader2 size={13} className="animate-spin" /> : <Youtube size={13} />}>
+                {ytConnecting ? 'Connecting…' : 'Reconnect'}
+              </Button>
             </div>
-            <Button variant="primary" size="sm" onClick={connectYt} disabled={ytConnecting}
-              icon={ytConnecting ? <Loader2 size={13} className="animate-spin" /> : <Youtube size={13} />}>
-              {ytConnecting ? 'Connecting…' : 'Reconnect'}
-            </Button>
-          </div>
-        )}
+          )}
 
-        {/* YT Credentials */}
-        <div>
-          <SectionHeader id="yt-credentials" label="Google API Credentials" expanded={expandedSections.has('yt-credentials')} onToggle={() => toggle('yt-credentials')} />
-          {expandedSections.has('yt-credentials') && (
-            <div className="px-6 pb-5 flex flex-col gap-4">
-              <p className="text-xs text-gray-500 leading-relaxed">
-                Enter your OAuth 2.0 Client ID and Secret from Google Cloud Console. Stored locally only.
-              </p>
+          {/* YT Credentials */}
+          <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-white/5">
+              <span className="text-xs font-medium text-gray-400">Google API Credentials</span>
+            </div>
+            <div className="px-4 py-4 flex flex-col gap-4">
+              <div className="flex flex-col gap-2.5 text-xs text-gray-400 leading-relaxed">
+                <p>
+                  To connect YouTube, you need OAuth 2.0 credentials from the{' '}
+                  <button onClick={() => window.api.openUrl('https://console.cloud.google.com')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">Google Cloud Console</button>.
+                  Credentials are stored locally only and never shared.
+                  See Google's{' '}
+                  <button onClick={() => window.api.openUrl('https://developers.google.com/youtube/registering_an_application')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">registration guide</button>
+                  {' '}for more detail.
+                </p>
+                {(!ytConnected || !ytTokenValid || ytInstructionsExpanded) && (
+                  <ol className="flex flex-col gap-1.5 list-decimal list-inside marker:text-gray-500">
+                    <li>In the Cloud Console, create a new project (or select an existing one).</li>
+                    <li>
+                      Go to{' '}
+                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/library/youtube.googleapis.com')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">APIs &amp; Services → Library</button>
+                      , search for <span className="text-gray-300">YouTube Data API v3</span>, and enable it.
+                    </li>
+                    <li>
+                      Go to{' '}
+                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/credentials/consent')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">OAuth consent screen</button>.
+                      Set User Type to <span className="text-gray-300">External</span>, fill in the required app name and email fields, then add your Google account as a <span className="text-gray-300">Test user</span>. You do not need to submit for verification.
+                    </li>
+                    <li>
+                      Go to{' '}
+                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/credentials')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">Credentials</button>
+                      {' '}→ <span className="text-gray-300">Create Credentials → OAuth client ID</span>. Set Application type to <span className="text-gray-300">Web application</span>.
+                    </li>
+                    <li>
+                      Under <span className="text-gray-300">Authorised redirect URIs</span>, add:{' '}
+                      <span className="font-mono text-gray-300 select-all">http://localhost:42813/oauth2callback</span>
+                    </li>
+                    <li>Copy the generated Client ID and Client Secret into the fields below.</li>
+                  </ol>
+                )}
+                {ytConnected && ytTokenValid && (
+                  <button
+                    onClick={() => setYtInstructionsExpanded(v => !v)}
+                    className="flex items-center gap-1.5 text-gray-500 hover:text-gray-300 transition-colors self-start"
+                  >
+                    <ChevronDown size={13} className={`transition-transform duration-150 ${ytInstructionsExpanded ? 'rotate-180' : ''}`} />
+                    {ytInstructionsExpanded ? 'Hide setup instructions' : 'Show setup instructions'}
+                  </button>
+                )}
+              </div>
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-400">Client ID</label>
@@ -372,8 +240,13 @@ export function IntegrationsPage() {
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-400">Client Secret</label>
-                  <input type="password" value={ytClientSecret} onChange={e => setYtClientSecret(e.target.value)} placeholder="GOCSPX-…"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+                  <div className="relative">
+                    <input type={revealed.has('yt-secret') ? 'text' : 'password'} value={ytClientSecret} onChange={e => setYtClientSecret(e.target.value)} placeholder="GOCSPX-…"
+                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+                    <button onClick={() => requestReveal('yt-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors">
+                      {revealed.has('yt-secret') ? <EyeOff size={13} /> : <Eye size={13} />}
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -397,74 +270,27 @@ export function IntegrationsPage() {
               )}
               {ytError && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{ytError}</p>}
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* YT Title Templates */}
-        <div>
-          <SectionHeader id="yt-titles" label={`Title Templates (${titleTemplates.length})`} expanded={expandedSections.has('yt-titles')} onToggle={() => toggle('yt-titles')} />
-          {expandedSections.has('yt-titles') && (
-            <div className="px-6 pb-5">
-              <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-                Use <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span> as merge fields.
-                Title templates are shared between YouTube and Twitch.
-              </p>
-              <TemplateList items={titleTemplates}
-                subtitle={t => <p className="text-xs text-gray-500 font-mono truncate">{t.template}</p>}
-                onEdit={t => setEditing({ type: 'title', item: t })}
-                onDelete={id => saveTitles(titleTemplates.filter(t => t.id !== id))}
-                onNew={() => setEditing({ type: 'title' })}
-                newLabel="New title template" />
-            </div>
-          )}
-        </div>
-
-        {/* YT Description Templates */}
-        <div>
-          <SectionHeader id="yt-descriptions" label={`Description Templates (${descTemplates.length})`} expanded={expandedSections.has('yt-descriptions')} onToggle={() => toggle('yt-descriptions')} />
-          {expandedSections.has('yt-descriptions') && (
-            <div className="px-6 pb-5">
-              <p className="text-xs text-gray-500 mb-3">Static text that gets pre-filled and can be edited before publishing.</p>
-              <TemplateList items={descTemplates}
-                subtitle={t => <p className="text-xs text-gray-500 line-clamp-2 whitespace-pre-wrap">{t.description || <em className="text-gray-700">No description</em>}</p>}
-                onEdit={t => setEditing({ type: 'description', item: t })}
-                onDelete={id => saveDescs(descTemplates.filter(t => t.id !== id))}
-                onNew={() => setEditing({ type: 'description' })}
-                newLabel="New description template" />
-            </div>
-          )}
-        </div>
-
-        {/* YT Tag Templates */}
-        <div>
-          <SectionHeader id="yt-tags" label={`Tag Templates (${tagTemplates.length})`} expanded={expandedSections.has('yt-tags')} onToggle={() => toggle('yt-tags')} />
-          {expandedSections.has('yt-tags') && (
-            <div className="px-6 pb-5">
-              <p className="text-xs text-gray-500 mb-3">Curated tag lists you can mix and match per stream.</p>
-              <TemplateList items={tagTemplates}
-                subtitle={t => <p className="text-xs text-gray-500">{t.tags.length} tags — <span className="text-gray-600 font-mono">{t.tags.slice(0, 5).join(', ')}{t.tags.length > 5 ? '…' : ''}</span></p>}
-                onEdit={t => setEditing({ type: 'tag', item: t })}
-                onDelete={id => saveTags(tagTemplates.filter(t => t.id !== id))}
-                onNew={() => setEditing({ type: 'tag' })}
-                newLabel="New tag template" />
-            </div>
-          )}
         </div>
 
         {/* ── Twitch ───────────────────────────────────────────────────────── */}
-        <div className="px-6 pt-4 pb-1">
-          <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <Twitch size={12} className="text-purple-400" />
-            Twitch
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 px-1">
+            <Twitch size={16} className="text-purple-400 shrink-0" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Twitch</span>
+            <span className={`ml-auto text-xs font-medium ${twConnected ? 'text-green-400' : 'text-gray-600'}`}>
+              {twConnected ? 'Connected' : 'Not connected'}
+            </span>
           </div>
-        </div>
 
-        {/* Twitch Credentials */}
-        <div>
-          <SectionHeader id="twitch-credentials" label="Twitch API Credentials" expanded={expandedSections.has('twitch-credentials')} onToggle={() => toggle('twitch-credentials')} />
-          {expandedSections.has('twitch-credentials') && (
-            <div className="px-6 pb-5 flex flex-col gap-4">
-              <p className="text-xs text-gray-500 leading-relaxed">
+          {/* Twitch Credentials */}
+          <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-white/5">
+              <span className="text-xs font-medium text-gray-400">Twitch API Credentials</span>
+            </div>
+            <div className="px-4 py-4 flex flex-col gap-4">
+              <p className="text-xs text-gray-400 leading-relaxed">
                 Create an application at{' '}
                 <button onClick={() => window.api.openUrl('https://dev.twitch.tv/console')}
                   className="font-mono text-purple-400 hover:text-purple-300 hover:underline transition-colors">
@@ -483,8 +309,13 @@ export function IntegrationsPage() {
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-400">Client Secret</label>
-                  <input type="password" value={twClientSecret} onChange={e => setTwClientSecret(e.target.value)} placeholder="Twitch Client Secret"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+                  <div className="relative">
+                    <input type={revealed.has('tw-secret') ? 'text' : 'password'} value={twClientSecret} onChange={e => setTwClientSecret(e.target.value)} placeholder="Twitch Client Secret"
+                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+                    <button onClick={() => requestReveal('tw-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors">
+                      {revealed.has('tw-secret') ? <EyeOff size={13} /> : <Eye size={13} />}
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -509,39 +340,47 @@ export function IntegrationsPage() {
               )}
               {twError && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{twError}</p>}
             </div>
-          )}
-        </div>
-
-        {/* ── Claude AI ───────────────────────────────────────────────────── */}
-        <div className="px-6 pt-4 pb-1">
-          <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <Bot size={12} className="text-purple-400" />
-            Claude AI
           </div>
         </div>
 
-        <div>
-          <SectionHeader id="claude" label="Claude API" expanded={expandedSections.has('claude')} onToggle={() => toggle('claude')} />
-          {expandedSections.has('claude') && (
-            <div className="px-6 pb-5 flex flex-col gap-4">
-              <p className="text-xs text-gray-500 leading-relaxed">
+        {/* ── Claude AI ───────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 px-1">
+            <Bot size={16} className="text-orange-400 shrink-0" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Claude AI</span>
+            <span className={`ml-auto text-xs font-medium ${config.claudeApiKey ? 'text-green-400' : 'text-gray-600'}`}>
+              {config.claudeApiKey ? 'Connected' : 'Not connected'}
+            </span>
+          </div>
+
+          <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-white/5">
+              <span className="text-xs font-medium text-gray-400">Claude API</span>
+            </div>
+            <div className="px-4 py-4 flex flex-col gap-4">
+              <p className="text-xs text-gray-400 leading-relaxed">
                 Connect your Anthropic API key to enable AI-generated suggestions for stream titles, descriptions, and tags.
                 Get a key at <button onClick={() => window.api.openUrl('https://console.anthropic.com')} className="text-purple-400 font-mono hover:text-purple-300 hover:underline transition-colors">console.anthropic.com</button>. Stored locally only.
               </p>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-400">API Key</label>
-                <input
-                  type="password"
-                  value={claudeApiKey}
-                  onChange={e => { setClaudeApiKey(e.target.value); setClaudeTestResult(null) }}
-                  placeholder="sk-ant-…"
-                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                />
+                <div className="relative">
+                  <input
+                    type={revealed.has('claude-key') ? 'text' : 'password'}
+                    value={claudeApiKey}
+                    onChange={e => { setClaudeApiKey(e.target.value); setClaudeTestResult(null) }}
+                    placeholder="sk-ant-…"
+                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  />
+                  <button onClick={() => requestReveal('claude-key')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors">
+                    {revealed.has('claude-key') ? <EyeOff size={13} /> : <Eye size={13} />}
+                  </button>
+                </div>
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-400">
                   Preferences / System Prompt
-                  <span className="text-gray-600 font-normal ml-1">(optional)</span>
+                  <span className="text-gray-500 font-normal ml-1">(optional)</span>
                 </label>
                 <textarea
                   value={claudeSystemPrompt}
@@ -550,7 +389,7 @@ export function IntegrationsPage() {
                   placeholder="e.g. I stream horror games. Keep titles under 60 characters. Always include the episode number. My channel tagline is …"
                   className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y"
                 />
-                <p className="text-xs text-gray-600">Tell Claude about your channel, content style, or any preferences for how suggestions should be worded.</p>
+                <p className="text-xs text-gray-400">Tell Claude about your channel, content style, or any preferences for how suggestions should be worded.</p>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 <Button variant="secondary" size="sm" onClick={saveClaudeSettings}
@@ -562,6 +401,9 @@ export function IntegrationsPage() {
                   icon={claudeTesting ? <Loader2 size={13} className="animate-spin" /> : undefined}>
                   {claudeTesting ? 'Testing…' : 'Test connection'}
                 </Button>
+                {config.claudeApiKey && (
+                  <Button variant="ghost" size="sm" onClick={disconnectClaude}>Disconnect</Button>
+                )}
                 {claudeTestResult && (
                   claudeTestResult.valid
                     ? <span className="flex items-center gap-1.5 text-xs text-green-400"><CheckCircle2 size={13} /> Connected</span>
@@ -569,23 +411,38 @@ export function IntegrationsPage() {
                 )}
               </div>
             </div>
-          )}
+          </div>
         </div>
 
       </div>
       </div>
       </div>
 
-      {/* Modals */}
-      {editing?.type === 'title' && (
-        <TitleTemplateModal initial={editing.item} onSave={t => upsert(titleTemplates, t, saveTitles)} onClose={() => setEditing(null)} />
-      )}
-      {editing?.type === 'description' && (
-        <DescriptionTemplateModal initial={editing.item} onSave={t => upsert(descTemplates, t, saveDescs)} onClose={() => setEditing(null)} />
-      )}
-      {editing?.type === 'tag' && (
-        <TagTemplateModal initial={editing.item} onSave={t => upsert(tagTemplates, t, saveTags)} onClose={() => setEditing(null)} />
-      )}
+      {/* Reveal warning */}
+      <Modal
+        isOpen={pendingReveal !== null}
+        onClose={() => setPendingReveal(null)}
+        title="Reveal sensitive value?"
+        width="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPendingReveal(null)}>Cancel</Button>
+            <Button variant="primary" onClick={confirmReveal}>Reveal</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-gray-300 leading-relaxed">
+            This value is sensitive and should be kept private.
+          </p>
+          <ul className="flex flex-col gap-1.5 text-xs text-gray-400 leading-relaxed list-disc list-inside marker:text-gray-600">
+            <li>Never share this with anyone.</li>
+            <li>Make sure you are not currently streaming or recording your screen.</li>
+            <li>Close this view when you are done.</li>
+          </ul>
+        </div>
+      </Modal>
+
     </div>
   )
 }

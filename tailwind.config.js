@@ -6,6 +6,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      screens: {
+        wide: '1200px',
+      },
       colors: {
         navy: {
           900: '#0d0d1a',

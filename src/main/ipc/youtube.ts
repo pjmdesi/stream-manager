@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastIsLive, fetchPrivacyStatuses } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -37,6 +37,25 @@ export function registerYouTubeIPC(): void {
       return { valid: true }
     } catch (e: any) {
       return { valid: false, error: e.message as string }
+    }
+  })
+
+  ipcMain.handle('youtube:getPrivacyStatuses', async (_event, videoIds: string[]) => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      const map = await fetchPrivacyStatuses(videoIds, clientId, clientSecret)
+      return Object.fromEntries(map)
+    } catch {
+      return {}
+    }
+  })
+
+  ipcMain.handle('youtube:checkBroadcastIsLive', async (_event, broadcastId: string) => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      return await checkBroadcastIsLive(broadcastId, clientId, clientSecret)
+    } catch {
+      return { isLive: false, privacyStatus: null }
     }
   })
 

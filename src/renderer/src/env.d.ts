@@ -103,7 +103,7 @@ declare global {
       writeStreamMeta(folderPath: string, meta: StreamMeta): Promise<void>
       listStreamTemplates(streamsDir: string): Promise<{ name: string; path: string }[]>
       createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<string>
-      stampArchived(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<number>
+
       listFilesForDate(dir: string, date: string): Promise<string[]>
       deleteStreamFiles(dir: string, date: string): Promise<void>
       watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
@@ -127,6 +127,8 @@ declare global {
       youtubeGetStatus(): Promise<{ connected: boolean; channelName?: string }>
       youtubeConnect(): Promise<void>
       youtubeDisconnect(): Promise<void>
+      youtubeGetPrivacyStatuses(videoIds: string[]): Promise<Record<string, string>>
+      youtubeCheckBroadcastIsLive(broadcastId: string): Promise<{ isLive: boolean; privacyStatus: string | null }>
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>

@@ -194,8 +194,6 @@ contextBridge.exposeInMainWorld('api', {
   createStreamFolder: (parentDir: string, date: string, meta?: any, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder') =>
     ipcRenderer.invoke('streams:createFolder', parentDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath, mode),
 
-  stampArchived: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
-    ipcRenderer.invoke('streams:stampArchived', dir, mode),
 
   listFilesForDate: (dir: string, date: string) =>
     ipcRenderer.invoke('streams:listFilesForDate', dir, date),
@@ -264,6 +262,12 @@ contextBridge.exposeInMainWorld('api', {
 
   youtubeDisconnect: () =>
     ipcRenderer.invoke('youtube:disconnect'),
+
+  youtubeGetPrivacyStatuses: (videoIds: string[]) =>
+    ipcRenderer.invoke('youtube:getPrivacyStatuses', videoIds),
+
+  youtubeCheckBroadcastIsLive: (broadcastId: string) =>
+    ipcRenderer.invoke('youtube:checkBroadcastIsLive', broadcastId),
 
   youtubeGetBroadcasts: () =>
     ipcRenderer.invoke('youtube:getBroadcasts'),

@@ -245,6 +245,49 @@ export async function getCompletedBroadcasts(
   return broadcasts
 }
 
+/** Fetch privacy statuses for a list of video IDs.
+ *  Chunks requests to stay within the API's 50-ID-per-request limit.
+ *  Returns a map of videoId → privacyStatus. */
+export async function fetchPrivacyStatuses(
+  ids: string[],
+  clientId: string,
+  clientSecret: string
+): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map()
+  const map = new Map<string, string>()
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50)
+    const data = await ytRequest(
+      `/videos?${new URLSearchParams({ part: 'status', id: chunk.join(','), maxResults: '50' })}`,
+      { method: 'GET' },
+      clientId, clientSecret
+    )
+    for (const item of (data?.items ?? [])) {
+      if (item.status?.privacyStatus) map.set(item.id, item.status.privacyStatus)
+    }
+  }
+  return map
+}
+
+/** Check whether a specific broadcast is currently live and return its privacy status.
+ *  Uses a minimal part=status query — costs 1 quota unit. */
+export async function checkBroadcastIsLive(
+  broadcastId: string,
+  clientId: string,
+  clientSecret: string
+): Promise<{ isLive: boolean; privacyStatus: string | null }> {
+  const data = await ytRequest(
+    `/liveBroadcasts?${new URLSearchParams({ part: 'status', id: broadcastId })}`,
+    { method: 'GET' },
+    clientId, clientSecret
+  )
+  const status = data?.items?.[0]?.status ?? null
+  return {
+    isLive: status?.lifeCycleStatus === 'live',
+    privacyStatus: status?.privacyStatus ?? null,
+  }
+}
+
 /** Update a broadcast's title, description, and gameTitle.
  *  Only writable snippet fields are sent; scheduledStartTime is preserved from
  *  the current snippet because the API requires it for non-persistent broadcasts. */

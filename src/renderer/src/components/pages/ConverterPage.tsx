@@ -549,6 +549,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             label="Drop video files here to convert"
             className="min-h-[100px]"
           />
+          <p className="text-xs text-gray-600 px-1">You can also send videos here from the Streams page using the action buttons on each row.</p>
         </div></div>
       </div>
     </div>

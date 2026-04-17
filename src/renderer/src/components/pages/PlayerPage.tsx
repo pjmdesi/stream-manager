@@ -184,6 +184,16 @@ function getCropGeometry(vcW: number, vcH: number, videoW: number, videoH: numbe
   return { contentLeft, contentTop, contentW, contentH, cropW, cropLeft, availableRange }
 }
 
+/** Clamp video pan so that no edge of the video can travel past the center of the container.
+ *  When zoom <= 1 the pan is forced to (0, 0). */
+function clampVideoPan(x: number, y: number, zoom: number, w: number, h: number): { x: number; y: number } {
+  if (zoom <= 1) return { x: 0, y: 0 }
+  return {
+    x: Math.max(w / 2 - w * zoom, Math.min(w / 2, x)),
+    y: Math.max(h / 2 - h * zoom, Math.min(h / 2, y)),
+  }
+}
+
 const TRACK_LABELS = ['Game', 'Mic', 'Discord', 'Music', 'SFX']
 
 // ── Export Clip Dialog ────────────────────────────────────────────────────────
@@ -536,6 +546,37 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     return () => ro.disconnect()
   }, [videoContainerEl])
 
+  // Video zoom / pan
+  const [videoZoom, setVideoZoom] = useState(1)
+  const [videoPan, setVideoPan] = useState({ x: 0, y: 0 })
+  const videoZoomRef = useRef(1)
+  const videoPanRef = useRef({ x: 0, y: 0 })
+  const [isVideoPanning, setIsVideoPanning] = useState(false)
+
+  // Wheel-to-zoom on the video area
+  useEffect(() => {
+    const el = videoContainerEl
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      if (e.deltaY === 0) return
+      const rect = el.getBoundingClientRect()
+      const cx = e.clientX - rect.left
+      const cy = e.clientY - rect.top
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+      const newZoom = Math.max(0.25, Math.min(6, videoZoomRef.current * factor))
+      const r = newZoom / videoZoomRef.current
+      const { x, y } = videoPanRef.current
+      const clamped = clampVideoPan(cx - (cx - x) * r, cy - (cy - y) * r, newZoom, rect.width, rect.height)
+      videoZoomRef.current = newZoom
+      videoPanRef.current = clamped
+      setVideoZoom(newZoom)
+      setVideoPan(clamped)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [videoContainerEl])
+
   // Confirm exit clip mode
   const [showExitClipConfirm, setShowExitClipConfirm] = useState(false)
   // Confirm close video while clip work is in progress
@@ -669,6 +710,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const { videoInfo, tracks, isExtracting, extractProgress, tracksExtracted, isPlaying, currentTime, duration, videoUrl, error } = state
   const multiTrack = (videoInfo?.audioTracks.length ?? 0) > 1
 
+  // Reset zoom when a new file loads
+  useEffect(() => {
+    setVideoZoom(1); setVideoPan({ x: 0, y: 0 })
+    videoZoomRef.current = 1; videoPanRef.current = { x: 0, y: 0 }
+  }, [videoUrl])
+
   // Keep stable refs current
   useEffect(() => { durationRef.current    = duration   }, [duration])
   useEffect(() => { currentTimeRef.current = currentTime }, [currentTime])
@@ -726,6 +773,37 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       setViewport({ viewStart: Math.max(0, ne - span), viewEnd: ne })
     }
   }, [currentTime, isClipMode, duration]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Middle-click drag to pan the zoomed video.
+  const startVideoPanDrag = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 1) return
+    if (videoZoomRef.current <= 1) return
+    e.preventDefault()
+    e.stopPropagation()
+    setIsVideoPanning(true)
+    const startX = e.clientX
+    const startY = e.clientY
+    const startPan = { ...videoPanRef.current }
+    const el = videoContainerEl
+    const onMove = (me: MouseEvent) => {
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const clamped = clampVideoPan(
+        startPan.x + (me.clientX - startX),
+        startPan.y + (me.clientY - startY),
+        videoZoomRef.current, rect.width, rect.height
+      )
+      videoPanRef.current = clamped
+      setVideoPan(clamped)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setIsVideoPanning(false)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [videoContainerEl])
 
   // Middle-click pan: captures drag start and applies delta against initial viewport.
   // Accepts native or React mouse events — only needs button, preventDefault, clientX.
@@ -1506,13 +1584,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     <div className="flex flex-col h-full overflow-hidden">
       {!videoUrl ? (
         /* Empty state */
-        <div className="flex-1 flex items-center justify-center p-8">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8">
           <FileDropZone
             onFiles={handleFiles}
             accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
             label="Drop a video file here or click to browse"
             className="w-full max-w-lg"
           />
+          <p className="text-xs text-gray-600">You can also send a video here from the Streams page using the action buttons on each row.</p>
         </div>
       ) : (
         <div className="flex flex-1 overflow-hidden">
@@ -1521,39 +1600,65 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
             {/* Video */}
             <FileDropZone onFiles={handleFiles} className="flex-1 relative bg-black min-h-0 group">
               {/* Container observed for crop overlay geometry */}
-              <div ref={setVideoContainerEl} className="absolute inset-0">
-                <video
-                  ref={videoRef}
-                  src={videoUrl ?? undefined}
-                  className="w-full h-full object-contain cursor-pointer"
-                  preload="auto"
-                  onClick={effectiveTogglePlay}
-                />
-                {/* 9:16 crop overlay */}
-                {isClipMode && clipState.cropMode === '9:16' && videoInfo && vcSize.w > 0 && (() => {
-                  const { contentLeft, contentTop, contentH, cropW, cropLeft } = getCropGeometry(
-                    vcSize.w, vcSize.h, videoInfo.width, videoInfo.height, clipState.cropX
-                  )
-                  const rightShadingLeft = cropLeft + cropW
-                  const rightShadingWidth = contentLeft + (vcSize.w - contentLeft * 2) - rightShadingLeft
-                  return (
-                    <>
-                      {/* Left darkened region */}
-                      <div className="absolute bg-black/60 pointer-events-none"
-                        style={{ left: contentLeft, top: contentTop, width: Math.max(0, cropLeft - contentLeft), height: contentH }} />
-                      {/* Right darkened region */}
-                      <div className="absolute bg-black/60 pointer-events-none"
-                        style={{ left: rightShadingLeft, top: contentTop, width: Math.max(0, rightShadingWidth), height: contentH }} />
-                      {/* Crop frame — draggable */}
-                      <div
-                        className="absolute border-2 border-white/80 cursor-ew-resize"
-                        style={{ left: cropLeft, top: contentTop, width: cropW, height: contentH }}
-                        onMouseDown={handleCropDrag}
-                      />
-                    </>
-                  )
-                })()}
+              <div ref={setVideoContainerEl} className="absolute inset-0 overflow-hidden">
+                {/* Zoom / pan wrapper */}
+                <div
+                  onMouseDown={startVideoPanDrag}
+                  style={{
+                    width: '100%', height: '100%',
+                    transformOrigin: '0 0',
+                    transform: `translate(${videoPan.x}px, ${videoPan.y}px) scale(${videoZoom})`,
+                    cursor: isVideoPanning ? 'grabbing' : undefined,
+                  }}
+                >
+                  <video
+                    ref={videoRef}
+                    src={videoUrl ?? undefined}
+                    className="w-full h-full object-contain cursor-pointer"
+                    preload="auto"
+                    onClick={effectiveTogglePlay}
+                  />
+                  {/* 9:16 crop overlay */}
+                  {isClipMode && clipState.cropMode === '9:16' && videoInfo && vcSize.w > 0 && (() => {
+                    const { contentLeft, contentTop, contentH, cropW, cropLeft } = getCropGeometry(
+                      vcSize.w, vcSize.h, videoInfo.width, videoInfo.height, clipState.cropX
+                    )
+                    const rightShadingLeft = cropLeft + cropW
+                    const rightShadingWidth = contentLeft + (vcSize.w - contentLeft * 2) - rightShadingLeft
+                    return (
+                      <>
+                        {/* Left darkened region */}
+                        <div className="absolute bg-black/60 pointer-events-none"
+                          style={{ left: contentLeft, top: contentTop, width: Math.max(0, cropLeft - contentLeft), height: contentH }} />
+                        {/* Right darkened region */}
+                        <div className="absolute bg-black/60 pointer-events-none"
+                          style={{ left: rightShadingLeft, top: contentTop, width: Math.max(0, rightShadingWidth), height: contentH }} />
+                        {/* Crop frame — draggable */}
+                        <div
+                          className="absolute border-2 border-white/80 cursor-ew-resize"
+                          style={{ left: cropLeft, top: contentTop, width: cropW, height: contentH }}
+                          onMouseDown={handleCropDrag}
+                        />
+                      </>
+                    )
+                  })()}
+                </div>
               </div>
+
+              {/* Zoom level indicator — click to reset */}
+              {videoZoom !== 1 && (
+                <Tooltip content="Click to reset zoom (scroll wheel to zoom, middle-click drag to pan)">
+                  <button
+                    onClick={() => {
+                      setVideoZoom(1); setVideoPan({ x: 0, y: 0 })
+                      videoZoomRef.current = 1; videoPanRef.current = { x: 0, y: 0 }
+                    }}
+                    className="absolute top-3 left-3 z-10 text-xs font-mono bg-black/70 text-white/80 hover:text-white hover:bg-black/90 px-2 py-1 rounded transition-colors"
+                  >
+                    {Math.round(videoZoom * 100)}%
+                  </button>
+                </Tooltip>
+              )}
 
               {/* Screenshot flash */}
               {screenshotFlash && (
