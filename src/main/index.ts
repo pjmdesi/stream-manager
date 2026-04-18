@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, globalShortcut, screen, Tray, Menu, MenuItem, nativeImage } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
 const is = { dev: process.env['NODE_ENV'] === 'development' || !!process.env['ELECTRON_RENDERER_URL'] }
@@ -91,6 +91,28 @@ function createWindow(): BrowserWindow {
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const { isEditable, selectionText, editFlags } = params
+    const hasSelection = selectionText.trim().length > 0
+    if (!isEditable && !hasSelection) return
+
+    const menu = new Menu()
+    if (isEditable) {
+      menu.append(new MenuItem({ role: 'undo', enabled: editFlags.canUndo }))
+      menu.append(new MenuItem({ role: 'redo', enabled: editFlags.canRedo }))
+      menu.append(new MenuItem({ type: 'separator' }))
+      menu.append(new MenuItem({ role: 'cut', enabled: editFlags.canCut }))
+    }
+    if (isEditable || hasSelection) {
+      menu.append(new MenuItem({ role: 'copy', enabled: editFlags.canCopy || hasSelection }))
+    }
+    if (isEditable) {
+      menu.append(new MenuItem({ role: 'paste', enabled: editFlags.canPaste }))
+      menu.append(new MenuItem({ role: 'selectAll', enabled: editFlags.canSelectAll }))
+    }
+    menu.popup({ window: mainWindow })
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

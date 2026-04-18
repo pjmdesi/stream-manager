@@ -68,6 +68,7 @@ declare global {
 
       // ── Converter ────────────────────────────────────────────────────────────
       getBuiltinPresets(): Promise<ConversionPreset[]>
+      checkEncoderAvailable(name: string): Promise<boolean>
       importPreset(filePath: string): Promise<ConversionPreset>
       getImportedPresets(): Promise<ConversionPreset[]>
       deleteImportedPreset(id: string): Promise<void>

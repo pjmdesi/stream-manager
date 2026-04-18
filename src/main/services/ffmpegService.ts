@@ -168,29 +168,37 @@ export async function extractAudioTracks(
 
 type GpuVendor = 'nvenc' | 'amf' | 'qsv' | null
 
+let _encodersOutput: string | undefined = undefined
 let _gpuVendorCache: GpuVendor | undefined = undefined
 
-async function detectGpuVendor(): Promise<GpuVendor> {
-  if (_gpuVendorCache !== undefined) return _gpuVendorCache
-
+function getEncodersOutput(): Promise<string> {
+  if (_encodersOutput !== undefined) return Promise.resolve(_encodersOutput)
   return new Promise(resolve => {
-    if (!ffmpegBin) { _gpuVendorCache = null; resolve(null); return }
-
+    if (!ffmpegBin) { _encodersOutput = ''; resolve(''); return }
     const proc = spawn(ffmpegBin, ['-hide_banner', '-encoders'], {
       stdio: ['ignore', 'pipe', 'ignore']
     })
     let out = ''
     proc.stdout!.on('data', (c: Buffer) => out += c.toString())
-    proc.on('close', () => {
-      const vendor: GpuVendor =
-        out.includes('h264_nvenc') ? 'nvenc' :
-        out.includes('h264_amf')   ? 'amf'   :
-        out.includes('h264_qsv')   ? 'qsv'   : null
-      _gpuVendorCache = vendor
-      resolve(vendor)
-    })
-    proc.on('error', () => { _gpuVendorCache = null; resolve(null) })
+    proc.on('close', () => { _encodersOutput = out; resolve(out) })
+    proc.on('error', () => { _encodersOutput = ''; resolve('') })
   })
+}
+
+export async function checkEncoderAvailable(name: string): Promise<boolean> {
+  const out = await getEncodersOutput()
+  return out.includes(name)
+}
+
+async function detectGpuVendor(): Promise<GpuVendor> {
+  if (_gpuVendorCache !== undefined) return _gpuVendorCache
+  const out = await getEncodersOutput()
+  const vendor: GpuVendor =
+    out.includes('h264_nvenc') ? 'nvenc' :
+    out.includes('h264_amf')   ? 'amf'   :
+    out.includes('h264_qsv')   ? 'qsv'   : null
+  _gpuVendorCache = vendor
+  return vendor
 }
 
 // CPU codec → GPU equivalent per vendor

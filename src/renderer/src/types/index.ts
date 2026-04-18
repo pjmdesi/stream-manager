@@ -139,6 +139,7 @@ export interface StreamMeta {
   // Thumbnail
   smThumbnail?: boolean
   smThumbnailTemplate?: string
+  preferredThumbnail?: string
 }
 
 export interface StreamFolder {

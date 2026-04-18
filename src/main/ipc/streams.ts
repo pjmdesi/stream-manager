@@ -13,6 +13,7 @@ export interface StreamMeta {
   comments: string
   archived?: boolean
   ytVideoId?: string
+  preferredThumbnail?: string
 }
 
 export interface ArchiveProgress {
@@ -222,6 +223,10 @@ export function registerStreamsIPC(): void {
           return nameA.localeCompare(nameB)
         })
         const meta = allMeta[date] ?? null
+        if (meta?.preferredThumbnail) {
+          const idx = sortedThumbnails.findIndex(t => path.basename(t) === meta.preferredThumbnail)
+          if (idx > 0) { const [item] = sortedThumbnails.splice(idx, 1); sortedThumbnails.unshift(item) }
+        }
         folders.push({
           folderName: date,
           folderPath: dir,
@@ -266,6 +271,10 @@ export function registerStreamsIPC(): void {
         const meta = allMeta[entry.name] ?? null
         const detectedGames = detectGamesFromFolder(folderPath)
         const thumbnails = detectThumbnails(folderPath)
+        if (meta?.preferredThumbnail) {
+          const idx = thumbnails.findIndex(t => path.basename(t) === meta.preferredThumbnail)
+          if (idx > 0) { const [item] = thumbnails.splice(idx, 1); thumbnails.unshift(item) }
+        }
 
         let videos: string[] = []
         try {

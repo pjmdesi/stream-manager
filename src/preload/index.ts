@@ -132,6 +132,9 @@ contextBridge.exposeInMainWorld('api', {
   getBuiltinPresets: () =>
     ipcRenderer.invoke('converter:getBuiltinPresets'),
 
+  checkEncoderAvailable: (name: string) =>
+    ipcRenderer.invoke('converter:checkEncoderAvailable', name),
+
   importPreset: (filePath: string) =>
     ipcRenderer.invoke('converter:importPreset', filePath),
 

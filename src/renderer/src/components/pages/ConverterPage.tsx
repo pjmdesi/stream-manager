@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
-import { X, XCircle, FolderOpen, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Upload, Trash2, Pencil, Archive, Ban, Pause, Play } from 'lucide-react'
+import { X, XCircle, FolderOpen, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Upload, Trash2, Pencil, Archive, Ban, Pause, Play, Star } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob } from '../../types'
 import { Button } from '../ui/Button'
@@ -63,6 +63,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   const [importedPresets, setImportedPresets] = useState<ConversionPreset[]>([])
   const [selectedPreset, setSelectedPreset] = useState<ConversionPreset | null>(null)
   const [archivePresetId, setArchivePresetId] = useState<string>('')
+  const [recommendedArchiveId, setRecommendedArchiveId] = useState<string | null>(null)
   const [outputDir, setOutputDir] = useState('')
   const { jobs, setJobs } = useConversionJobs()
   const [queuedFiles, setQueuedFiles] = useState<string[]>([])
@@ -90,12 +91,14 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
       window.api.getBuiltinPresets(),
       window.api.getImportedPresets(),
       window.api.getConfig(),
-    ]).then(([builtin, imported, config]) => {
+      window.api.checkEncoderAvailable('libsvtav1'),
+    ]).then(([builtin, imported, config, hasAv1]) => {
       setBuiltinPresets(builtin)
       setImportedPresets(imported)
       setArchivePresetId(config.archivePresetId ?? '')
       setAutoDeletePartial(!!config.autoDeletePartialOnCancel)
       setSelectedPreset(prev => prev ?? builtin[0] ?? null)
+      setRecommendedArchiveId(hasAv1 ? 'archive-av1' : 'archive-h265')
     })
   }, [])
 
@@ -250,6 +253,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   const PresetItem = ({ p, deletable }: { p: ConversionPreset; deletable?: boolean }) => {
     const isRenaming = renamingId === p.id
     const isArchiveDefault = archivePresetId === p.id
+    const isRecommended = recommendedArchiveId === p.id
     return (
       <div
         className={`group flex items-start border-b border-white/5 transition-colors ${
@@ -280,6 +284,11 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
               {isArchiveDefault && (
                 <Tooltip content="Default archive preset">
                   <span><Archive size={11} className="text-purple-400 shrink-0" /></span>
+                </Tooltip>
+              )}
+              {isRecommended && (
+                <Tooltip content="Recommended for your system">
+                  <span><Star size={11} className="text-amber-400 shrink-0 fill-amber-400" /></span>
                 </Tooltip>
               )}
             </div>

@@ -64,6 +64,22 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
     ffmpegArgs: '-c:v copy -c:a copy',
     outputExtension: 'mp4',
     isBuiltin: true
+  },
+  {
+    id: 'archive-av1',
+    name: 'Archive (SVT-AV1)',
+    description: 'Cold storage archive — CRF 32 SVT-AV1, excellent quality-to-size ratio. Requires a recent FFmpeg build.',
+    ffmpegArgs: '-c:v libsvtav1 -crf 32 -preset 6 -c:a aac -b:a 128k',
+    outputExtension: 'mkv',
+    isBuiltin: true
+  },
+  {
+    id: 'archive-h265',
+    name: 'Archive (H.265)',
+    description: 'Cold storage archive — CRF 26 H.265, widely compatible. GPU-accelerated automatically if available.',
+    ffmpegArgs: '-c:v libx265 -crf 26 -c:a aac -b:a 128k',
+    outputExtension: 'mkv',
+    isBuiltin: true
   }
 ]
 
@@ -224,6 +240,11 @@ export function getConverterStatus(): { active: boolean; percent: number; label:
 
 export function registerConverterIPC(): void {
   ipcMain.handle('converter:getBuiltinPresets', async () => BUILTIN_PRESETS)
+
+  ipcMain.handle('converter:checkEncoderAvailable', async (_event, name: string) => {
+    const { checkEncoderAvailable } = await import('../services/ffmpegService')
+    return checkEncoderAvailable(name)
+  })
 
   ipcMain.handle('converter:importPreset', async (_event, srcPath: string) => {
     const content = fs.readFileSync(srcPath, 'utf-8')

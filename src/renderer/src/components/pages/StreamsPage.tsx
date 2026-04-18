@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
-  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff
+  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, LayoutList, LayoutGrid
 } from 'lucide-react'
 
 // Inline SVG brand icons — lucide-react has deprecated all YouTube/Twitch exports
@@ -146,14 +146,21 @@ function VideoCountTooltip({ videos, children }: { videos: string[]; children: R
 interface LightboxProps {
   thumbnails: string[]
   index: number
+  thumbsKey?: number
+  preferredThumbnail?: string
+  onSetAsThumbnail?: (path: string) => void
   onClose: () => void
   onNavigate: (index: number) => void
 }
 
-function Lightbox({ thumbnails, index, onClose, onNavigate }: LightboxProps) {
+function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onClose, onNavigate }: LightboxProps) {
   const total = thumbnails.length
-  const src = toFileUrl(thumbnails[index])
-  const filename = thumbnails[index].split(/[\\/]/).pop() ?? ''
+  const currentPath = thumbnails[index]
+  const src = `${toFileUrl(currentPath)}${thumbsKey ? `?t=${thumbsKey}` : ''}`
+  const filename = currentPath.split(/[\\/]/).pop() ?? ''
+  const isPreferred = preferredThumbnail
+    ? filename === preferredThumbnail
+    : index === 0
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -204,7 +211,23 @@ function Lightbox({ thumbnails, index, onClose, onNavigate }: LightboxProps) {
           className="max-h-[75vh] max-w-[85vw] object-contain rounded-lg shadow-2xl shadow-black"
           draggable={false}
         />
-        <p className="mt-3 text-sm text-gray-400 font-mono">{filename}</p>
+        <div className="mt-3 flex items-center gap-3">
+          <p className="text-sm text-gray-400 font-mono">{filename}</p>
+          {onSetAsThumbnail && (
+            isPreferred ? (
+              <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-600/30 border border-purple-500/40 text-purple-300 text-xs font-medium">
+                <Check size={12} /> Currently shown
+              </span>
+            ) : (
+              <button
+                onClick={() => onSetAsThumbnail(currentPath)}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-purple-600/40 border border-white/20 hover:border-purple-500/50 text-gray-300 hover:text-purple-200 text-xs font-medium transition-colors"
+              >
+                <ImageIcon size={12} /> Set as item thumbnail
+              </button>
+            )
+          )}
+        </div>
       </div>
 
       {/* Next arrow */}
@@ -244,7 +267,14 @@ function Lightbox({ thumbnails, index, onClose, onNavigate }: LightboxProps) {
 
 // ─── Thumbnail carousel ──────────────────────────────────────────────────────
 
-function ThumbnailCarousel({ thumbnails }: { thumbnails: string[] }) {
+interface ThumbnailCarouselProps {
+  thumbnails: string[]
+  thumbsKey?: number
+  preferredThumbnail?: string
+  onSetAsThumbnail?: (path: string) => void
+}
+
+function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail }: ThumbnailCarouselProps) {
   const [index, setIndex] = useState(0)
   const [translateX, setTranslateX] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -261,7 +291,11 @@ function ThumbnailCarousel({ thumbnails }: { thumbnails: string[] }) {
 
   useLayoutEffect(() => { recenter() }, [recenter])
 
-  const filename = thumbnails[index].split(/[\\/]/).pop() ?? ''
+  const currentPath = thumbnails[index]
+  const filename = currentPath.split(/[\\/]/).pop() ?? ''
+  const isPreferred = preferredThumbnail
+    ? filename === preferredThumbnail
+    : index === 0
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -270,17 +304,20 @@ function ThumbnailCarousel({ thumbnails }: { thumbnails: string[] }) {
           className="flex items-center gap-2 h-full transition-transform duration-200"
           style={{ transform: `translateX(${translateX}px)` }}
         >
-          {thumbnails.map((t, i) => (
-            <img
-              key={t}
-              ref={el => { imgRefs.current[i] = el }}
-              src={toFileUrl(t)}
-              alt={`Thumbnail ${i + 1}`}
-              className={`h-full w-auto shrink-0 cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
-              onClick={() => setIndex(i)}
-              onLoad={recenter}
-            />
-          ))}
+          {thumbnails.map((t, i) => {
+            const src = `${toFileUrl(t)}${thumbsKey ? `?t=${thumbsKey}` : ''}`
+            return (
+              <img
+                key={t}
+                ref={el => { imgRefs.current[i] = el }}
+                src={src}
+                alt={`Thumbnail ${i + 1}`}
+                className={`h-full w-auto shrink-0 cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
+                onClick={() => setIndex(i)}
+                onLoad={recenter}
+              />
+            )
+          })}
         </div>
         {!single && (
           <>
@@ -299,9 +336,25 @@ function ThumbnailCarousel({ thumbnails }: { thumbnails: string[] }) {
           </>
         )}
       </div>
-      {!single && (
-        <p className="text-xs text-gray-500 text-center truncate px-8">{filename}</p>
-      )}
+      <div className="flex items-center justify-between px-1 min-h-[20px]">
+        {!single ? (
+          <p className="text-xs text-gray-500 truncate flex-1 text-center px-7">{filename}</p>
+        ) : <span />}
+        {onSetAsThumbnail && (
+          isPreferred ? (
+            <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-600/25 border border-purple-500/35 text-purple-300 text-xs font-medium whitespace-nowrap ml-2">
+              <Check size={11} /> Currently shown
+            </span>
+          ) : (
+            <button
+              onClick={() => onSetAsThumbnail(currentPath)}
+              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-purple-600/30 border border-white/15 hover:border-purple-500/45 text-gray-400 hover:text-purple-200 text-xs font-medium whitespace-nowrap ml-2 transition-colors"
+            >
+              <ImageIcon size={11} /> Set as item thumbnail
+            </button>
+          )
+        )}
+      </div>
     </div>
   )
 }
@@ -320,6 +373,9 @@ interface MetaModalProps {
   templates?: { name: string; path: string }[]
   defaultTemplateName?: string
   thumbnails?: string[]
+  thumbsKey?: number
+  preferredThumbnail?: string
+  onSetAsThumbnail?: (path: string) => void
   tagColors?: Record<string, string>
   tagTextures?: Record<string, string>
   onNewStreamType?: (tag: string) => void
@@ -355,7 +411,7 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[]): 
     .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
 }
 
-function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', thumbnails = [], tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', thumbnails = [], thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
 
   // In edit/add mode the folder name is the authoritative date source — the stored meta.date
@@ -812,7 +868,12 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
       <div className="flex flex-col gap-5">
         {/* Thumbnail carousel */}
         {thumbnails.length > 0 && (
-          <ThumbnailCarousel thumbnails={thumbnails} />
+          <ThumbnailCarousel
+            thumbnails={thumbnails}
+            thumbsKey={thumbsKey}
+            preferredThumbnail={preferredThumbnail}
+            onSetAsThumbnail={onSetAsThumbnail}
+          />
         )}
 
         {/* Date */}
@@ -1202,7 +1263,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                           onClick={() => setYtSelectedThumbnail(isSelected ? null : p)}
                           className={`relative w-20 h-14 rounded overflow-hidden border-2 transition-all shrink-0 ${isSelected ? 'border-red-400 ring-1 ring-red-400/50' : 'border-white/10 hover:border-white/30'}`}
                         >
-                          <img src={toFileUrl(p)} alt={name} className="w-full h-full object-cover" />
+                          <img src={`${toFileUrl(p)}${thumbsKey ? `?t=${thumbsKey}` : ''}`} alt={name} className="w-full h-full object-cover" />
                           {isSelected && (
                             <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
                               <Check size={14} className="text-white drop-shadow" />
@@ -1823,7 +1884,7 @@ export function StreamsPage({
   const [showTemplatesModal, setShowTemplatesModal] = useState(false)
   const [tagColors, setTagColors] = useState<Record<string, string>>({})
   const [tagTextures, setTagTextures] = useState<Record<string, string>>({})
-  const [lightbox, setLightbox] = useState<{ thumbnails: string[]; index: number } | null>(null)
+  const [lightbox, setLightbox] = useState<{ thumbnails: string[]; index: number; folderPath: string; folderDate: string; preferredThumbnail: string | undefined } | null>(null)
 
   // ── YouTube live detection ─────────────────────────────────────────────────
   const [ytConnectedOuter, setYtConnectedOuter] = useState(false)
@@ -2001,6 +2062,9 @@ export function StreamsPage({
     loadFolders(dir) // immediate load without waiting for effect
   }
 
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>(
+    () => (localStorage.getItem('streamsViewMode') as 'list' | 'grid') ?? 'list'
+  )
   const [videoPicker, setVideoPicker] = useState<{ files: string[]; action: 'player' | 'converter' | 'combine'; offlineFiles?: Set<string> } | null>(null)
   const [cloudDownload, setCloudDownload] = useState<{
     filePath: string
@@ -2230,6 +2294,8 @@ export function StreamsPage({
   const [openFilter, setOpenFilter] = useState<'type' | 'games' | null>(null)
 
   const typeFilterAnchorRef = useRef<HTMLDivElement>(null)
+  const gridTypeFilterAnchorRef = useRef<HTMLDivElement>(null)
+  const gridGameFilterAnchorRef = useRef<HTMLDivElement>(null)
   const [typeFilterMaxHeight, setTypeFilterMaxHeight] = useState(600)
   const updateTypeFilterMaxHeight = useCallback(() => {
     if (typeFilterAnchorRef.current) {
@@ -2468,6 +2534,24 @@ export function StreamsPage({
                 <span className="hidden wide:inline">Manage Tags</span>
               </Button>
             </Tooltip>
+            <div className="flex items-center rounded-lg border border-white/10 overflow-hidden shrink-0">
+              <Tooltip content="List view" side="bottom">
+                <button
+                  onClick={() => { setViewMode('list'); localStorage.setItem('streamsViewMode', 'list') }}
+                  className={`p-1.5 transition-colors ${viewMode === 'list' ? 'bg-white/10 text-gray-200' : 'text-gray-600 hover:text-gray-400 hover:bg-white/5'}`}
+                >
+                  <LayoutList size={14} />
+                </button>
+              </Tooltip>
+              <Tooltip content="Grid view" side="bottom">
+                <button
+                  onClick={() => { setViewMode('grid'); localStorage.setItem('streamsViewMode', 'grid') }}
+                  className={`p-1.5 transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-gray-200' : 'text-gray-600 hover:text-gray-400 hover:bg-white/5'}`}
+                >
+                  <LayoutGrid size={14} />
+                </button>
+              </Tooltip>
+            </div>
             <Tooltip content="Select streams" side="bottom">
               <Button
                 variant="ghost"
@@ -2506,6 +2590,83 @@ export function StreamsPage({
               <AlertTriangle size={11} />
               {missingMetaCount} missing metadata
             </span>
+          )}
+          {viewMode === 'grid' && (
+            <div className="ml-auto flex items-center gap-2">
+              {/* Type filter */}
+              <div ref={gridTypeFilterAnchorRef} className="relative">
+                <button
+                  onClick={openTypeFilter}
+                  className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors text-[11px] ${filterTypes.size > 0 ? 'border-purple-600/50 text-purple-400 bg-purple-900/20' : 'border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'}`}
+                >
+                  <ListFilter size={11} />
+                  Type{filterTypes.size > 0 && ` (${filterTypes.size})`}
+                </button>
+                {openFilter === 'type' && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                    <div className="absolute top-full right-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] overflow-y-auto" style={{ maxHeight: typeFilterMaxHeight }}>
+                      {allStreamTypes.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-gray-600">No types tagged yet</p>
+                      ) : (
+                        <>
+                          <button onClick={() => { setFilterTypes(new Set()); setOpenFilter(null) }} disabled={filterTypes.size === 0} className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-purple-400 hover:text-purple-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-purple-400">
+                            <X size={11} className="shrink-0" /> Clear filters
+                          </button>
+                          {allStreamTypes.map(t => {
+                            const color = getTagColor(tagColors[t])
+                            const viable = viableTypeOptions.has(t)
+                            return (
+                              <button key={t} onClick={() => viable && toggleTypeFilter(t)} className={`flex items-center gap-2 w-full px-3 py-1 text-left text-xs capitalize transition-colors ${!viable && !filterTypes.has(t) ? 'opacity-30 cursor-default' : filterTypes.has(t) ? `${color.text} hover:bg-white/5` : 'text-gray-300 hover:bg-white/5'}`}>
+                                <span className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${filterTypes.has(t) ? `${color.highlight} border-transparent` : 'border-white/20'}`} style={filterTypes.has(t) ? getTagTextureStyle(tagTextures[t]) : undefined}>
+                                  {filterTypes.has(t) && <span className={`text-[9px] leading-none ${color.text}`}>✓</span>}
+                                </span>
+                                {t}
+                              </button>
+                            )
+                          })}
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+              {/* Game filter */}
+              <div ref={gridGameFilterAnchorRef} className="relative">
+                <button
+                  onClick={openGameFilter}
+                  className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors text-[11px] ${filterGames.size > 0 ? 'border-blue-600/50 text-blue-400 bg-blue-900/20' : 'border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'}`}
+                >
+                  <ListFilter size={11} />
+                  Topic{filterGames.size > 0 && ` (${filterGames.size})`}
+                </button>
+                {openFilter === 'games' && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                    <div className="absolute top-full right-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] overflow-y-auto" style={{ maxHeight: gameFilterMaxHeight }}>
+                      {allGames.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-gray-600">No games tagged yet</p>
+                      ) : (
+                        <>
+                          <button onClick={() => { setFilterGames(new Set()); setOpenFilter(null) }} disabled={filterGames.size === 0} className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-blue-400 hover:text-blue-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-blue-400">
+                            <X size={11} className="shrink-0" /> Clear filters
+                          </button>
+                          {allGames.map(g => {
+                            const viable = viableGameOptions.has(g)
+                            return (
+                              <button key={g} onClick={() => viable && toggleGameFilter(g)} className={`flex items-center gap-2 w-full px-3 py-1 text-left text-xs transition-colors ${!viable && !filterGames.has(g) ? 'opacity-30 cursor-default' : filterGames.has(g) ? 'text-blue-300 hover:bg-white/5' : 'text-gray-300 hover:bg-white/5'}`}>
+                                <span className={`w-3.5 h-3.5 rounded border shrink-0 ${filterGames.has(g) ? 'bg-blue-500 border-transparent' : 'border-white/20'}`} />
+                                {g}
+                              </button>
+                            )
+                          })}
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -2553,7 +2714,7 @@ export function StreamsPage({
         </div>
       )}
 
-      {/* Table */}
+      {/* Content area */}
       <div className="flex-1 overflow-hidden pr-2">
       <div className="h-full overflow-y-auto [scrollbar-gutter:stable]">
         {loading && folders.length === 0 ? (
@@ -2566,6 +2727,61 @@ export function StreamsPage({
             <Button variant="primary" size="sm" icon={<Plus size={12} />} onClick={() => setModal({ mode: 'new' })}>
               Create First Stream
             </Button>
+          </div>
+        ) : viewMode === 'grid' ? (
+          <div className="p-4">
+            {filteredFolders.length === 0 ? (
+              <p className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</p>
+            ) : (
+              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))' }}>
+                {filteredFolders.map((folder, i) => {
+                  const todayStr = today()
+                  const pending = !folder.isMissing && folder.date >= todayStr && !folder.meta?.archived
+                    && !folder.videos.some(v => (v.split(/[\\/]/).pop() ?? '').startsWith(folder.date))
+                  return (
+                    <StreamCard
+                      key={isDumpMode ? folder.date : folder.folderPath}
+                      folder={folder}
+                      zebra={i % 2 === 0}
+                      selectMode={selectMode}
+                      selected={selectedPaths.has(selectionKey(folder))}
+                      isNextUpcoming={folder.folderPath === nextUpcomingFolderPath}
+                      isPending={pending}
+                      isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
+                      privacyStatus={folder.meta?.ytVideoId ? ytPrivacyMap[folder.meta.ytVideoId] ?? null : null}
+                      tagColors={tagColors}
+                      tagTextures={tagTextures}
+                      onToggleSelect={(shiftKey) => {
+                        if (dragMoved.current) { dragMoved.current = false; return }
+                        toggleSelected(selectionKey(folder), shiftKey, i)
+                      }}
+                      onDragStart={() => startDrag(i)}
+                      onDragEnter={() => updateDrag(i)}
+                      onEdit={() => setModal({ mode: 'edit', folder })}
+                      onAdd={() => setModal({ mode: 'add', folder })}
+                      onReschedule={() => { setRescheduleTarget(folder); setRescheduleDate(folder.date) }}
+                      onOpen={() => isDumpMode && folder.videos.length > 0
+                        ? window.api.openInExplorer(folder.videos[0])
+                        : window.api.openInExplorer(folder.folderPath)}
+                      onDelete={() => setDeleteTarget(folder)}
+                      onSendToPlayer={() => sendVideo(folder, 'player')}
+                      onSendToConverter={() => sendVideo(folder, 'converter')}
+                      onSendToCombine={() => sendToCombine(folder)}
+                      onOpenThumbnails={() => openThumbnailEditor({
+                        folderPath: folder.folderPath,
+                        date: folder.date,
+                        title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
+                        meta: folder.meta ?? undefined,
+                      })}
+                      onThumbClick={folder.thumbnails.length > 0
+                        ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
+                        : undefined}
+                      thumbsKey={thumbsKey}
+                    />
+                  )
+                })}
+              </div>
+            )}
           </div>
         ) : (
           <table className="w-full text-sm border-collapse table-fixed">
@@ -2738,7 +2954,7 @@ return (
                     meta: folder.meta ?? undefined,
                   })}
                   onThumbClick={folder.thumbnails.length > 0
-                    ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i })
+                    ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
                     : undefined}
                   thumbsKey={thumbsKey}
                 />
@@ -2757,6 +2973,17 @@ return (
         <Lightbox
           thumbnails={lightbox.thumbnails}
           index={lightbox.index}
+          thumbsKey={thumbsKey}
+          preferredThumbnail={lightbox.preferredThumbnail}
+          onSetAsThumbnail={async (filePath) => {
+            const basename = filePath.split(/[\\/]/).pop() ?? ''
+            const folder = folders.find(f => f.folderPath === lightbox.folderPath && f.date === lightbox.folderDate)
+            if (!folder) return
+            const meta: StreamMeta = { ...(folder.meta ?? { date: folder.date, streamType: [], games: [], comments: '' }), preferredThumbnail: basename }
+            await window.api.writeStreamMeta(folder.folderPath, meta)
+            setLightbox(prev => prev ? { ...prev, preferredThumbnail: basename } : null)
+            loadFolders(streamsDir)
+          }}
           onClose={() => setLightbox(null)}
           onNavigate={(i) => setLightbox(prev => prev ? { ...prev, index: i } : null)}
         />
@@ -2953,6 +3180,16 @@ return (
           folderDate={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.date : undefined}
           detectedGames={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.detectedGames : []}
           thumbnails={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnails : []}
+          thumbsKey={thumbsKey}
+          preferredThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta?.preferredThumbnail : undefined}
+          onSetAsThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? async (filePath) => {
+            if (modal.mode !== 'edit' && modal.mode !== 'add') return
+            const folder = modal.folder
+            const basename = filePath.split(/[\\/]/).pop() ?? ''
+            const meta: StreamMeta = { ...(folder.meta ?? { date: folder.date, streamType: [], games: [], comments: '' }), preferredThumbnail: basename }
+            await window.api.writeStreamMeta(folder.folderPath, meta)
+            loadFolders(streamsDir)
+          } : undefined}
           allGames={allGames}
           allStreamTypes={allStreamTypes}
           allFolders={modal.mode === 'edit' ? folders.filter(f => f.folderPath !== modal.folder.folderPath) : folders}
@@ -3204,6 +3441,224 @@ function ClampedComment({ text }: { text: string }) {
   )
 }
 
+// ─── Stream card (grid view) ─────────────────────────────────────────────────
+
+function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey }: StreamRowProps) {
+  const { meta, hasMeta, detectedGames, date, thumbnails, videoCount, videos } = folder
+  const displayGames = meta?.games?.length ? meta.games : detectedGames
+  const firstThumb = thumbnails[0]
+  const hasSMThumbnail = thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
+
+  if (folder.isMissing) {
+    return (
+      <div className="rounded-lg border border-red-900/30 bg-red-950/10 overflow-hidden">
+        <div className="aspect-video bg-red-900/20 flex items-center justify-center">
+          <AlertTriangle size={20} className="text-red-700" />
+        </div>
+        <div className="p-2">
+          <p className="text-xs font-mono text-red-400 truncate">{folder.folderName}</p>
+          <p className="text-[10px] text-red-700 italic mt-0.5">Folder not found on disk</p>
+        </div>
+      </div>
+    )
+  }
+
+  const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
+  const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
+
+  return (
+    <div
+      className={`group rounded-lg border overflow-hidden flex flex-col transition-colors ${
+        isPending
+          ? 'border-amber-900/40 bg-amber-950/20 hover:bg-amber-950/30'
+          : selected
+            ? 'border-purple-600/40 bg-purple-900/10'
+            : 'border-purple-900/25 bg-white/[0.02] hover:bg-white/[0.04] hover:border-purple-800/40'
+      }`}
+      onClick={selectMode ? () => onToggleSelect(false) : undefined}
+      style={selectMode ? { cursor: 'pointer', userSelect: 'none' } : undefined}
+    >
+      {/* Thumbnail */}
+      <div
+        className={`relative aspect-video bg-navy-900 overflow-hidden ${onThumbClick && !selectMode ? 'cursor-zoom-in' : ''}`}
+        onClick={!selectMode ? () => onThumbClick?.(0) : undefined}
+      >
+        {firstThumb ? (
+          <img
+            src={`${toFileUrl(firstThumb)}?t=${thumbsKey}`}
+            alt="thumbnail"
+            className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+            draggable={false}
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-1">
+            <ImageOff size={18} className="text-gray-700" />
+            <span className="text-[9px] text-gray-700">no thumbnail</span>
+          </div>
+        )}
+
+        {/* Select checkbox overlay */}
+        {selectMode && (
+          <div className={`absolute inset-0 flex items-center justify-center transition-colors ${selected ? 'bg-purple-900/40' : 'bg-black/20'}`}>
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-purple-500 border-purple-500' : 'border-white/60 bg-black/30'}`}>
+              {selected && <CheckCheck size={12} className="text-white" />}
+            </div>
+          </div>
+        )}
+
+        {/* Hover action overlay */}
+        {!selectMode && (
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+            {videoCount > 0 && (
+              <Tooltip content="Send to Player">
+                <button onClick={e => { e.stopPropagation(); onSendToPlayer() }} className="p-2 rounded-lg bg-white/10 hover:bg-purple-600 text-white transition-colors backdrop-blur-sm">
+                  <Film size={14} />
+                </button>
+              </Tooltip>
+            )}
+            {videoCount > 0 && (
+              <Tooltip content="Send to Converter">
+                <button onClick={e => { e.stopPropagation(); onSendToConverter() }} className="p-2 rounded-lg bg-white/10 hover:bg-purple-600 text-white transition-colors backdrop-blur-sm">
+                  <Zap size={14} />
+                </button>
+              </Tooltip>
+            )}
+            {videoCount > 1 && (
+              <Tooltip content="Combine videos">
+                <button onClick={e => { e.stopPropagation(); onSendToCombine() }} className="p-2 rounded-lg bg-white/10 hover:bg-purple-600 text-white transition-colors backdrop-blur-sm">
+                  <Combine size={14} />
+                </button>
+              </Tooltip>
+            )}
+          </div>
+        )}
+
+        {/* Pending badge */}
+        {isPending && (
+          <div className="absolute top-1.5 left-1.5">
+            {isNextUpcoming && meta?.ytVideoId ? (
+              <Tooltip content={isLive ? 'Live now' : 'Open in YouTube Studio'}>
+                <button
+                  onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
+                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${isLive ? 'bg-green-900/80 text-green-300' : 'bg-yellow-900/80 text-yellow-300'} backdrop-blur-sm`}
+                >
+                  <Radio size={10} className="mr-0.5" />
+                  {isLive ? 'Live' : 'Upcoming'}
+                </button>
+              </Tooltip>
+            ) : (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-900/80 text-yellow-300 backdrop-blur-sm">
+                <Radio size={10} className="mr-0.5" />
+                Upcoming
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Info */}
+      <div className="flex flex-col gap-1.5 p-2.5 flex-1">
+        <div className="flex items-start justify-between gap-1">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-sm font-medium text-gray-200">{date}</span>
+              {meta?.archived && (
+                <Tooltip content="Archived">
+                  <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30">
+                    <Archive size={9} />
+                  </span>
+                </Tooltip>
+              )}
+            </div>
+            <div className="text-[10px] text-gray-400 mt-0.5">{friendlyDate(date)}</div>
+          </div>
+          {/* YT link for past streams */}
+          {!isPending && meta?.ytVideoId && (
+            <Tooltip content={privacyLabel ? `YouTube · ${privacyLabel}` : 'YouTube'}>
+              <button
+                onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
+                className="inline-flex items-center gap-0.5 p-1 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 transition-colors shrink-0"
+              >
+                <LucideYoutube size={11} />
+                {PrivacyIcon && <PrivacyIcon size={8} />}
+              </button>
+            </Tooltip>
+          )}
+        </div>
+
+        {/* Stream types */}
+        {meta && normalizeStreamTypes(meta.streamType).length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {normalizeStreamTypes(meta.streamType).map(t => {
+              const color = getTagColor(tagColors[t])
+              return (
+                <span key={t} className={`inline-block text-[10px] px-1.5 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
+                  {t}
+                </span>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Games */}
+        {displayGames.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {displayGames.map(g =>
+              meta?.games?.includes(g) ? (
+                <span key={g} className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-800/20">{g}</span>
+              ) : (
+                <Tooltip key={g} content="Detected from filename">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 border border-white/10 italic">{g}</span>
+                </Tooltip>
+              )
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Footer actions */}
+      <div className="flex items-center gap-1 px-2 pb-2">
+        <div className={`flex items-center gap-1 text-xs font-mono mr-auto ${videoCount > 0 ? 'text-gray-500' : 'text-gray-700'}`}>
+          <Film size={10} className="shrink-0" />
+          <span>{videoCount}</span>
+        </div>
+        {!hasMeta && (
+          <Tooltip content="No metadata">
+            <span className="text-yellow-600"><AlertTriangle size={11} /></span>
+          </Tooltip>
+        )}
+        <Tooltip content={hasSMThumbnail ? 'Edit thumbnail' : 'Create thumbnail'}>
+          <button onClick={e => { e.stopPropagation(); onOpenThumbnails() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            <ImageIcon size={12} />
+          </button>
+        </Tooltip>
+        <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
+          <button onClick={e => { e.stopPropagation(); hasMeta ? onEdit() : onAdd() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            {hasMeta ? <PencilLine size={12} /> : <FilePlus size={12} />}
+          </button>
+        </Tooltip>
+        <Tooltip content="Open folder">
+          <button onClick={e => { e.stopPropagation(); onOpen() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            <FolderOpen size={12} />
+          </button>
+        </Tooltip>
+        {isPending && (
+          <Tooltip content="Reschedule">
+            <button onClick={e => { e.stopPropagation(); onReschedule() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+              <CalendarClock size={12} />
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip content="Delete">
+          <button onClick={e => { e.stopPropagation(); onDelete() }} className="p-1 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+            <Trash2 size={12} />
+          </button>
+        </Tooltip>
+      </div>
+    </div>
+  )
+}
+
 // ─── Stream row ──────────────────────────────────────────────────────────────
 
 interface StreamRowProps {
@@ -3383,7 +3838,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             )
           })()}
         </div>
-        <div className="text-xs text-gray-600 mt-0.5">{friendlyDate(date)}</div>
+        <div className="text-xs text-gray-400 mt-0.5">{friendlyDate(date)}</div>
       </td>
 
       {/* Type */}
