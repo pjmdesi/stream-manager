@@ -41,7 +41,7 @@ export interface StreamFolder {
   isMissing?: boolean
 }
 
-const DATE_FOLDER_RE = /^\d{4}-\d{2}-\d{2}$/
+const DATE_FOLDER_RE = /^\d{4}-\d{2}-\d{2}(-\d+)?$/
 const DATE_IN_FILENAME_RE = /(\d{4}-\d{2}-\d{2})/
 const META_FILENAME = '_meta.json'
 const OLD_META_FILENAME = 'stream-meta.json'
@@ -51,6 +51,33 @@ const VIDEO_EXTS = new Set([
   '.wmv', '.m4v', '.mpg', '.mpeg', '.m2ts', '.mts', '.vob',
   '.divx', '.3gp', '.ogv', '.asf', '.rmvb', '.f4v', '.hevc'
 ])
+
+/** Returns the YYYY-MM-DD portion of a folder name, stripping any -N suffix. */
+function calendarDate(folderName: string): string {
+  return folderName.slice(0, 10)
+}
+
+/** Returns the stream index: 1 for the base folder (no suffix), 2+ for -2, -3, etc. */
+function streamIndex(folderName: string): number {
+  const m = folderName.match(/^\d{4}-\d{2}-\d{2}-(\d+)$/)
+  return m ? parseInt(m[1], 10) : 1
+}
+
+/**
+ * Returns the next available folder name for a given calendar date.
+ * First stream on a day → 'YYYY-MM-DD', second → 'YYYY-MM-DD-2', etc.
+ */
+function nextFolderName(parentDir: string, calDate: string): string {
+  let siblings: string[] = []
+  try {
+    siblings = fs.readdirSync(parentDir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && calendarDate(e.name) === calDate && DATE_FOLDER_RE.test(e.name))
+      .map(e => e.name)
+  } catch {}
+  if (siblings.length === 0) return calDate
+  const maxIdx = Math.max(...siblings.map(streamIndex))
+  return `${calDate}-${maxIdx + 1}`
+}
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10)
@@ -286,7 +313,7 @@ export function registerStreamsIPC(): void {
         folders.push({
           folderName: entry.name,
           folderPath,
-          date: entry.name,
+          date: calendarDate(entry.name),
           meta,
           hasMeta: meta !== null,
           detectedGames,
@@ -299,11 +326,12 @@ export function registerStreamsIPC(): void {
       // Orphaned meta entries (folder gone) — always isMissing in folder mode
       for (const [folderName, meta] of Object.entries(allMeta)) {
         if (seenFolders.has(folderName)) continue
+        if (!DATE_FOLDER_RE.test(folderName)) continue
         const folderPath = path.join(dir, folderName)
         folders.push({
           folderName,
           folderPath,
-          date: folderName,
+          date: calendarDate(folderName),
           meta,
           hasMeta: true,
           detectedGames: [],
@@ -315,7 +343,12 @@ export function registerStreamsIPC(): void {
       }
     }
 
-    folders.sort((a, b) => b.date.localeCompare(a.date))
+    // Sort by calendar date descending; same-day streams descending by index (later streams first)
+    folders.sort((a, b) => {
+      const dateCmp = b.date.localeCompare(a.date)
+      if (dateCmp !== 0) return dateCmp
+      return streamIndex(b.folderName) - streamIndex(a.folderName)
+    })
     return folders
   })
 
@@ -378,12 +411,13 @@ export function registerStreamsIPC(): void {
       return parentDir
     }
 
-    // Folder-per-stream mode
-    const folderPath = path.join(parentDir, date)
+    // Folder-per-stream mode — auto-assign suffix for same-day streams
+    const folderName = nextFolderName(parentDir, date)
+    const folderPath = path.join(parentDir, folderName)
     fs.mkdirSync(folderPath, { recursive: true })
     if (meta) {
       const allMeta = readAllMeta(parentDir)
-      allMeta[date] = meta
+      allMeta[folderName] = meta
       writeAllMeta(parentDir, allMeta)
     }
     if (thumbnailTemplatePath && fs.existsSync(thumbnailTemplatePath)) {
@@ -546,13 +580,15 @@ export function registerStreamsIPC(): void {
     newDate: string
   ): Promise<{ conflictExists: boolean; filesToRename: { oldName: string; newName: string }[] }> => {
     const streamsDir = path.dirname(folderPath)
-    const oldDate = path.basename(folderPath)
-    const conflictExists = fs.existsSync(path.join(streamsDir, newDate))
+    const oldFolderName = path.basename(folderPath)
+    const oldCalDate = calendarDate(oldFolderName)
+    const newFolderName = nextFolderName(streamsDir, newDate)
+    const conflictExists = fs.existsSync(path.join(streamsDir, newFolderName))
     let filesToRename: { oldName: string; newName: string }[] = []
     try {
       filesToRename = fs.readdirSync(folderPath, { withFileTypes: true })
-        .filter(e => e.isFile() && e.name.startsWith(oldDate))
-        .map(e => ({ oldName: e.name, newName: newDate + e.name.slice(oldDate.length) }))
+        .filter(e => e.isFile() && e.name.startsWith(oldCalDate))
+        .map(e => ({ oldName: e.name, newName: newDate + e.name.slice(oldCalDate.length) }))
     } catch {}
     return { conflictExists, filesToRename }
   })
@@ -563,27 +599,29 @@ export function registerStreamsIPC(): void {
     newDate: string
   ): Promise<string> => {
     const streamsDir = path.dirname(folderPath)
-    const oldDate = path.basename(folderPath)
+    const oldFolderName = path.basename(folderPath)
+    const oldCalDate = calendarDate(oldFolderName)
+    const newFolderName = nextFolderName(streamsDir, newDate)
 
-    // Rename files whose names start with the old date
+    // Rename files whose names start with the old calendar date
     try {
       for (const entry of fs.readdirSync(folderPath, { withFileTypes: true })) {
-        if (!entry.isFile() || !entry.name.startsWith(oldDate)) continue
-        const newName = newDate + entry.name.slice(oldDate.length)
+        if (!entry.isFile() || !entry.name.startsWith(oldCalDate)) continue
+        const newName = newDate + entry.name.slice(oldCalDate.length)
         fs.renameSync(path.join(folderPath, entry.name), path.join(folderPath, newName))
       }
     } catch {}
 
-    // Update meta: move the key from oldDate to newDate
+    // Update meta: move the key from oldFolderName to newFolderName
     const allMeta = readAllMeta(streamsDir)
-    if (allMeta[oldDate]) {
-      allMeta[newDate] = { ...allMeta[oldDate], date: newDate }
-      delete allMeta[oldDate]
+    if (allMeta[oldFolderName]) {
+      allMeta[newFolderName] = { ...allMeta[oldFolderName], date: newDate }
+      delete allMeta[oldFolderName]
       writeAllMeta(streamsDir, allMeta)
     }
 
     // Rename the folder last (after files inside are done)
-    const newFolderPath = path.join(streamsDir, newDate)
+    const newFolderPath = path.join(streamsDir, newFolderName)
     fs.renameSync(folderPath, newFolderPath)
     return newFolderPath
   })

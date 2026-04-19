@@ -91,14 +91,20 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
       window.api.getBuiltinPresets(),
       window.api.getImportedPresets(),
       window.api.getConfig(),
-      window.api.checkEncoderAvailable('libsvtav1'),
-    ]).then(([builtin, imported, config, hasAv1]) => {
+      Promise.all([
+        window.api.checkEncoderAvailable('libsvtav1'),
+        window.api.checkEncoderAvailable('av1_nvenc'),
+        window.api.checkEncoderAvailable('av1_amf'),
+        window.api.checkEncoderAvailable('av1_qsv'),
+      ]),
+    ]).then(([builtin, imported, config, [hasSvt, hasNvenc, hasAmf, hasQsv]]) => {
       setBuiltinPresets(builtin)
       setImportedPresets(imported)
       setArchivePresetId(config.archivePresetId ?? '')
       setAutoDeletePartial(!!config.autoDeletePartialOnCancel)
       setSelectedPreset(prev => prev ?? builtin[0] ?? null)
-      setRecommendedArchiveId(hasAv1 ? 'archive-av1' : 'archive-h265')
+      const hasAnyAv1 = hasSvt || hasNvenc || hasAmf || hasQsv
+      setRecommendedArchiveId(hasAnyAv1 ? 'archive-av1' : 'archive-h265')
     })
   }, [])
 
@@ -294,7 +300,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             </div>
           )}
           {!isRenaming && p.description && (
-            <Tooltip content={p.description} side="right" width="w-64">
+            <Tooltip content={p.description} side="right" width="w-64" triggerClassName="block w-full">
               <div className="text-xs text-gray-500 mt-0.5 truncate">{p.description}</div>
             </Tooltip>
           )}

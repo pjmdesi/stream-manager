@@ -203,9 +203,14 @@ async function detectGpuVendor(): Promise<GpuVendor> {
 
 // CPU codec → GPU equivalent per vendor
 const GPU_CODEC_MAP: Record<string, Partial<Record<'nvenc' | 'amf' | 'qsv', string>>> = {
-  libx264: { nvenc: 'h264_nvenc', amf: 'h264_amf', qsv: 'h264_qsv' },
-  libx265: { nvenc: 'hevc_nvenc', amf: 'hevc_amf', qsv: 'hevc_qsv' },
+  libx264:   { nvenc: 'h264_nvenc',  amf: 'h264_amf',  qsv: 'h264_qsv'  },
+  libx265:   { nvenc: 'hevc_nvenc',  amf: 'hevc_amf',  qsv: 'hevc_qsv'  },
+  libsvtav1: { nvenc: 'av1_nvenc',   amf: 'av1_amf',   qsv: 'av1_qsv'   },
 }
+
+// AV1 GPU encoders use a different preset naming scheme (p1-p7) — drop any
+// numeric SVT-AV1 preset values rather than forwarding them verbatim.
+const AV1_GPU_ENCODERS = new Set(['av1_nvenc', 'av1_amf', 'av1_qsv'])
 
 // Presets valid for x264/x265 but meaningless/invalid on GPU encoders
 const SOFTWARE_PRESETS = new Set([
@@ -219,6 +224,7 @@ function substituteGpuArgs(args: string, vendor: GpuVendor): string {
   const tokens = parseArgsString(args)
   const out: string[] = []
   let replacedCodec = false
+  let gpuCodecName = ''
 
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i]
@@ -231,6 +237,7 @@ function substituteGpuArgs(args: string, vendor: GpuVendor): string {
         out.push('-c:v', gpuCodec)
         i++
         replacedCodec = true
+        gpuCodecName = gpuCodec
         continue
       }
     }
@@ -241,10 +248,15 @@ function substituteGpuArgs(args: string, vendor: GpuVendor): string {
       continue
     }
 
-    // Drop software-only preset values (e.g. ultrafast)
-    if (tok === '-preset' && i + 1 < tokens.length && SOFTWARE_PRESETS.has(tokens[i + 1])) {
-      i++ // skip preset value too
-      continue
+    // Drop software-only preset values (e.g. ultrafast) or numeric SVT-AV1
+    // presets (0-13 scale) when the codec was swapped to an AV1 GPU encoder.
+    if (tok === '-preset' && i + 1 < tokens.length) {
+      const val = tokens[i + 1]
+      const dropNumeric = AV1_GPU_ENCODERS.has(gpuCodecName) && /^\d+$/.test(val)
+      if (SOFTWARE_PRESETS.has(val) || dropNumeric) {
+        i++
+        continue
+      }
     }
 
     // -tune is not supported by GPU encoders

@@ -37,6 +37,10 @@ const iconPath = is.dev
   : join(process.resourcesPath, 'icon.png')
 const electronApp = { setAppUserModelId: (id: string) => app.setAppUserModelId(id) }
 const optimizer = { watchWindowShortcuts: (_win: BrowserWindow) => {} }
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.streammanager')
+}
 import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
@@ -211,8 +215,6 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.streammanager')
-
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })

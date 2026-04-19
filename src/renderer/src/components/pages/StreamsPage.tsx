@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react'
 import ReactDOM from 'react-dom'
 import {
-  Plus, FolderOpen, AlertTriangle, PencilLine, FilePlus,
+  Plus, FolderOpen, AlertTriangle, PencilLine,
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
@@ -48,11 +48,17 @@ function today(): string {
 function friendlyDate(iso: string): string {
   const [year, month, day] = iso.split('-')
   const d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
-  return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+  return d.toLocaleDateString(undefined, { weekday: 'long' })
 }
 
 function toFileUrl(absPath: string): string {
   return 'file:///' + absPath.replace(/\\/g, '/')
+}
+
+/** Returns the stream index from a folder name: 1 for base, 2+ for -N suffixed. */
+function streamIndex(folderName: string): number {
+  const m = folderName.match(/^\d{4}-\d{2}-\d{2}-(\d+)$/)
+  return m ? parseInt(m[1], 10) : 1
 }
 
 // Normalise legacy string streamType values from stored JSON to the new string[] format
@@ -441,6 +447,9 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   })
   const [comments, setComments] = useState(initialMeta?.comments ?? '')
   const [archived, setArchived] = useState(initialMeta?.archived ?? false)
+  const [localPreferredThumbnail, setLocalPreferredThumbnail] = useState<string | undefined>(
+    initialMeta?.preferredThumbnail
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -455,6 +464,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   const [ytVodsLoaded, setYtVodsLoaded] = useState(false)
   const [ytBroadcastError, setYtBroadcastError] = useState('')
   const [ytSelectedBroadcastId, setYtSelectedBroadcastId] = useState('')
+  const [ytVideoUnlinked, setYtVideoUnlinked] = useState(false)
   const [ytManualUrl, setYtManualUrl] = useState('')
   const [ytManualLoading, setYtManualLoading] = useState(false)
   const [ytManualError, setYtManualError] = useState('')
@@ -662,7 +672,15 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
         window.api.youtubeGetBroadcasts().then((items: LiveBroadcast[]) => {
           console.log('[YT renderer] broadcasts:', items.length, items.map((b: any) => b.id))
           setYtBroadcasts(items)
-          if (items.length > 0) setYtSelectedBroadcastId(items[0].id)
+          const savedId = initialMeta?.ytVideoId
+          if (savedId) {
+            setYtSelectedBroadcastId(savedId)
+          } else {
+            const dateMatch = items.find(v =>
+              utcToLocalDate(v.snippet.scheduledStartTime ?? '') === date
+            )
+            setYtSelectedBroadcastId(dateMatch?.id ?? '')
+          }
         }).catch((e: any) => {
           setYtBroadcastError(e.message ?? 'Failed to load broadcasts')
         }).finally(() => setYtBroadcastsLoading(false))
@@ -674,18 +692,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
             if (video) { setYtVods([video]); setYtSelectedBroadcastId(savedId) }
           }).catch(() => {})
         } else {
-          // No saved video — run the automatic date-match check on mount
-          setYtBroadcastsLoading(true)
-          window.api.youtubeGetCompletedBroadcasts().then((items: LiveBroadcast[]) => {
-            setYtVods(items)
-            setYtVodsLoaded(true)
-            const dateMatch = items.find(v =>
-              utcToLocalDate(v.snippet.actualStartTime ?? v.snippet.scheduledStartTime ?? '') === date
-            )
-            setYtSelectedBroadcastId(dateMatch?.id ?? '')
-          }).catch((e: any) => {
-            setYtBroadcastError(e.message ?? 'Failed to load VODs')
-          }).finally(() => setYtBroadcastsLoading(false))
+          // No saved video — leave blank; loadAllVods will date-match when the dropdown is opened
         }
       }
     }).catch((e: any) => { console.error('[YT renderer] getStatus failed:', e) })
@@ -781,7 +788,8 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
         {
           date, streamType: streamTypes, games, comments,
           archived: mode === 'edit' ? archived : undefined,
-          ytVideoId: ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined,
+          preferredThumbnail: localPreferredThumbnail,
+          ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
           ytTitle: ytTitle || undefined,
           ytDescription: ytDescription || undefined,
           ytGameTitle: ytGameTitle || undefined,
@@ -871,8 +879,11 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
           <ThumbnailCarousel
             thumbnails={thumbnails}
             thumbsKey={thumbsKey}
-            preferredThumbnail={preferredThumbnail}
-            onSetAsThumbnail={onSetAsThumbnail}
+            preferredThumbnail={localPreferredThumbnail ?? preferredThumbnail}
+            onSetAsThumbnail={onSetAsThumbnail ? (path) => {
+              setLocalPreferredThumbnail(path.split(/[\\/]/).pop() ?? '')
+              onSetAsThumbnail(path)
+            } : undefined}
           />
         )}
 
@@ -898,6 +909,15 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
               className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 [color-scheme:dark]"
             />
           )}
+          {mode === 'new' && date && (() => {
+            const sameDayCount = allFolders.filter(f => f.date === date).length
+            if (sameDayCount === 0) return null
+            return (
+              <p className="text-xs text-blue-400 mt-0.5">
+                A stream already exists on this date. This will be created as Stream {sameDayCount + 1}.
+              </p>
+            )
+          })()}
         </div>
 
         {/* Stream type */}
@@ -1186,7 +1206,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                   {ytSelectedBroadcastId && (
                     <button
                       type="button"
-                      onClick={() => { setYtSelectedBroadcastId(''); setYtManualUrl(''); setYtManualError('') }}
+                      onClick={() => { setYtSelectedBroadcastId(''); setYtVideoUnlinked(true); setYtManualUrl(''); setYtManualError('') }}
                       className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors shrink-0"
                     >
                       <X size={12} />
@@ -2270,6 +2290,22 @@ export function StreamsPage({
 
   const missingMetaCount = folders.filter(f => !f.hasMeta).length
 
+  // Maps folderPath → ordinal position among same-day streams (1-based, by folderName asc)
+  const sameDayIndexMap = useMemo(() => {
+    const result = new Map<string, number>()
+    const byDate = new Map<string, StreamFolder[]>()
+    for (const f of folders) {
+      if (!byDate.has(f.date)) byDate.set(f.date, [])
+      byDate.get(f.date)!.push(f)
+    }
+    for (const group of byDate.values()) {
+      [...group]
+        .sort((a, b) => a.folderName.localeCompare(b.folderName))
+        .forEach((f, i) => result.set(f.folderPath, i + 1))
+    }
+    return result
+  }, [folders])
+
   const allGames = useMemo(() => {
     const set = new Set<string>()
     folders.forEach(f => f.meta?.games?.forEach(g => set.add(g)))
@@ -2777,6 +2813,7 @@ export function StreamsPage({
                         ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
                         : undefined}
                       thumbsKey={thumbsKey}
+                      sameDayIndex={sameDayIndexMap.get(folder.folderPath)}
                     />
                   )
                 })}
@@ -2790,7 +2827,7 @@ export function StreamsPage({
                 {selectMode && <th className="pl-4 py-2 w-[40px]" />}
                 <th className="p-0 w-[88px]">Thumbnail</th>
                 <th className="px-2 py-2 w-[44px]"></th>
-                <th className="text-left px-2 py-2 w-[148px]">Date</th>
+                <th className="text-left px-2 py-2 w-[220px]">Date</th>
                 {/* Type column with filter */}
                 <th className="text-left px-2 py-2 min-w-[120px]">
                   <div ref={typeFilterAnchorRef} className="relative flex items-center gap-1">
@@ -2957,6 +2994,7 @@ return (
                     ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
                     : undefined}
                   thumbsKey={thumbsKey}
+                  sameDayIndex={sameDayIndexMap.get(folder.folderPath)}
                 />
                 </React.Fragment>
                 )
@@ -3443,7 +3481,7 @@ function ClampedComment({ text }: { text: string }) {
 
 // ─── Stream card (grid view) ─────────────────────────────────────────────────
 
-function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey }: StreamRowProps) {
+function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
   const { meta, hasMeta, detectedGames, date, thumbnails, videoCount, videos } = folder
   const displayGames = meta?.games?.length ? meta.games : detectedGames
   const firstThumb = thumbnails[0]
@@ -3561,7 +3599,12 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
         <div className="flex items-start justify-between gap-1">
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="font-mono text-sm font-medium text-gray-200">{date}</span>
+              <Tooltip content={friendlyDate(date)} side="top">
+                <span className="font-mono text-sm font-medium text-gray-200">{date}</span>
+              </Tooltip>
+              {sameDayIndex && sameDayIndex > 1 && (
+                <span className="font-mono text-sm font-medium text-purple-400/70">#{sameDayIndex}</span>
+              )}
               {meta?.archived && (
                 <Tooltip content="Archived">
                   <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30">
@@ -3570,7 +3613,11 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                 </Tooltip>
               )}
             </div>
-            <div className="text-[10px] text-gray-400 mt-0.5">{friendlyDate(date)}</div>
+            {(meta?.ytTitle || meta?.twitchTitle) && (
+              <Tooltip content={meta.ytTitle || meta.twitchTitle} side="bottom" triggerClassName="block mt-0.5">
+                <span className="text-[9px] leading-none text-gray-400 truncate">{meta.ytTitle || meta.twitchTitle}</span>
+              </Tooltip>
+            )}
           </div>
           {/* YT link for past streams */}
           {!isPending && meta?.ytVideoId && (
@@ -3634,7 +3681,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
         </Tooltip>
         <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
           <button onClick={e => { e.stopPropagation(); hasMeta ? onEdit() : onAdd() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
-            {hasMeta ? <PencilLine size={12} /> : <FilePlus size={12} />}
+            <PencilLine size={12} />
           </button>
         </Tooltip>
         <Tooltip content="Open folder">
@@ -3686,9 +3733,10 @@ interface StreamRowProps {
   onOpenThumbnails: () => void
   onThumbClick?: (index: number) => void
   thumbsKey: number
+  sameDayIndex?: number
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -3783,9 +3831,14 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
       </td>
 
       {/* Date */}
-      <td className="px-2 py-2 align-middle min-w-[148px]">
+      <td className="px-2 py-2 align-middle min-w-[220px]">
         <div className="flex items-center gap-1.5">
-          <span className="font-mono text-sm text-gray-200">{date}</span>
+          <Tooltip content={friendlyDate(date)} side="top">
+            <span className="font-mono text-sm text-gray-200">{date}</span>
+          </Tooltip>
+          {sameDayIndex && sameDayIndex > 1 && (
+            <span className="font-mono text-sm text-purple-400/70">#{sameDayIndex}</span>
+          )}
           {meta?.archived && (
             <Tooltip content="Archived">
               <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30 shrink-0">
@@ -3838,7 +3891,11 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             )
           })()}
         </div>
-        <div className="text-xs text-gray-400 mt-0.5">{friendlyDate(date)}</div>
+        {(meta?.ytTitle || meta?.twitchTitle) && (
+          <Tooltip content={meta.ytTitle || meta.twitchTitle} side="bottom" triggerClassName="block mt-0.5">
+            <div className="text-[10px] leading-none text-gray-400 truncate max-w-[204px]">{meta.ytTitle || meta.twitchTitle}</div>
+          </Tooltip>
+        )}
       </td>
 
       {/* Type */}
@@ -3915,7 +3972,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             <Button
               variant="ghost"
               size="icon-sm"
-              icon={hasMeta ? <PencilLine size={12} /> : <FilePlus size={12} />}
+              icon={<PencilLine size={12} />}
               onClick={hasMeta ? onEdit : onAdd}
             />
           </Tooltip>
