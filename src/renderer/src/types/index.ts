@@ -111,6 +111,8 @@ export interface AppConfig {
   twitchClientSecret: string
   startWithWindows: boolean
   startMinimized: boolean
+  disableAnimations: boolean
+  slowAnimations: boolean
   autoDeletePartialOnCancel: boolean
   claudeApiKey: string
   claudeSystemPrompt: string
@@ -129,6 +131,7 @@ export interface StreamMeta {
   ytDescription?: string
   ytGameTitle?: string
   ytCatchyTitle?: string
+  ytSeason?: string
   ytEpisode?: string
   ytTags?: string[]
   // Twitch

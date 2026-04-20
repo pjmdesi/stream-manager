@@ -30,9 +30,9 @@ function TitleForm({ initial, onSave, onCancel }: {
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Title template</label>
         <p className="text-xs text-gray-600">
-          Merge fields: <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span>
+          Merge fields: <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span>
         </p>
-        <input value={template} onChange={e => setTemplate(e.target.value)} placeholder="{game} — Part {episode} | {title}"
+        <input value={template} onChange={e => setTemplate(e.target.value)} placeholder="{game} S{season} — Part {episode} of {total_episodes} | {title}"
           className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -261,7 +261,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
       {tab === 'titles' && (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-gray-500 leading-relaxed">
-            Use <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span> as merge fields.
+            Use <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span> as merge fields.
             Title templates are shared between YouTube and Twitch.
           </p>
           <TemplateList

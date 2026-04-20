@@ -31,6 +31,8 @@ export interface AppConfig {
   twitchClientSecret: string
   startWithWindows: boolean
   startMinimized: boolean
+  disableAnimations: boolean
+  slowAnimations: boolean
   autoDeletePartialOnCancel: boolean
   claudeApiKey: string
   claudeSystemPrompt: string
@@ -60,6 +62,8 @@ function getDefaultConfig(): AppConfig {
     twitchClientSecret: '',
     startWithWindows: false,
     startMinimized: false,
+    disableAnimations: false,
+    slowAnimations: false,
     autoDeletePartialOnCancel: false,
     claudeApiKey: '',
     claudeSystemPrompt: '',

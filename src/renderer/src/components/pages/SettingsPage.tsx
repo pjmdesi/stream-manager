@@ -96,6 +96,8 @@ export function SettingsPage() {
     setClearingCache(false)
   }
 
+  const isDirty = JSON.stringify(local) !== JSON.stringify(config)
+
   const set = (key: keyof typeof config, value: any) => {
     setLocal(prev => ({ ...prev, [key]: value }))
     setSaved(false)
@@ -124,6 +126,8 @@ export function SettingsPage() {
           size="sm"
           icon={<Save size={14} />}
           onClick={save}
+          disabled={!isDirty && !saved}
+          className={isDirty ? 'save-attention' : ''}
         >
           {saved ? 'Saved!' : 'Save'}
         </Button>
@@ -355,6 +359,23 @@ export function SettingsPage() {
           />
         </section>
 
+        {/* Appearance */}
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
+            Appearance
+          </h2>
+          <Checkbox
+            checked={!!local.disableAnimations}
+            onChange={v => set('disableAnimations', v)}
+            label={
+              <div>
+                <div className="text-sm font-medium text-gray-200">Disable animations</div>
+                <div className="text-xs text-gray-500">Turn off motion animations throughout the app. Also applies automatically if your OS has "Reduce motion" enabled.</div>
+              </div>
+            }
+          />
+        </section>
+
         {/* System */}
         <section className="flex flex-col gap-4">
           <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
@@ -416,6 +437,14 @@ export function SettingsPage() {
                 Reset onboarding
               </Button>
               <p className="text-xs text-gray-600">Clears streamsDir and streamerName, then reloads the app to trigger the onboarding flow. Not visible in production builds.</p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Checkbox
+                label="Slow down animations (5×)"
+                checked={!!local.slowAnimations}
+                onChange={v => setLocal(prev => ({ ...prev, slowAnimations: v }))}
+              />
+              <p className="text-xs text-gray-600">Multiplies all motion animation durations by 10 to make transitions easier to inspect.</p>
             </div>
           </section>
         )}

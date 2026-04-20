@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react'
+import { flushSync } from 'react-dom'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import ReactDOM from 'react-dom'
 import {
   Plus, FolderOpen, AlertTriangle, PencilLine,
   RefreshCw, Radio, X, ChevronDown, ImageOff,
-  ChevronLeft, ChevronRight, Expand, Archive, CheckSquare,
+  ChevronLeft, ChevronRight, ChevronUp, ChevronsUp, ChevronsDown, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
   Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, LayoutList, LayoutGrid
@@ -394,28 +396,60 @@ function applyMergeFields(template: string, fields: Record<string, string>): str
   return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
 }
 
-function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, beforeDate?: string): number {
+function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, season: string, beforeDate?: string): number {
   if (!gameName) return 1
   const lower = gameName.toLowerCase()
+  const s = season || '1'
   const matching = allFolders.filter(f =>
     f.meta?.games?.some(g => g.toLowerCase() === lower) &&
+    (f.meta?.ytSeason ?? '1') === s &&
     (!beforeDate || f.date < beforeDate)
   )
   return matching.length + 1
 }
 
+// Counts all streams in the series+season including the current one (+1 because allFolders always excludes it)
+function detectTotalEpisodes(allFolders: StreamFolder[], gameName: string, season: string): number {
+  if (!gameName) return 1
+  const lower = gameName.toLowerCase()
+  const s = season || '1'
+  return allFolders.filter(f =>
+    f.meta?.games?.some(g => g.toLowerCase() === lower) &&
+    (f.meta?.ytSeason ?? '1') === s
+  ).length + 1
+}
+
+// Inherits the season from the most recent preceding stream in the same series
+function detectSeason(allFolders: StreamFolder[], gameName: string, beforeDate?: string): string {
+  if (!gameName) return '1'
+  const lower = gameName.toLowerCase()
+  const prev = allFolders
+    .filter(f =>
+      f.meta?.games?.some(g => g.toLowerCase() === lower) &&
+      (!beforeDate || f.date < beforeDate)
+    )
+    .sort((a, b) => b.date.localeCompare(a.date))[0]
+  return prev?.meta?.ytSeason ?? '1'
+}
+
 const PREV_EPISODE_SENTINEL = '__copy_prev_episode__'
 
-function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[]): StreamFolder | null {
+function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], season: string): StreamFolder | null {
   const mainGame = gamesList[0]
   if (!mainGame) return null
-  const episodeNum = detectEpisodeNumber(allFolders, mainGame)
+  const episodeNum = detectEpisodeNumber(allFolders, mainGame, season)
   if (episodeNum <= 1) return null
   const gameLower = mainGame.toLowerCase()
+  const s = season || '1'
   return allFolders
-    .filter(f => f.meta?.games?.some(g => g.toLowerCase() === gameLower))
+    .filter(f =>
+      f.meta?.games?.some(g => g.toLowerCase() === gameLower) &&
+      (f.meta?.ytSeason ?? '1') === s
+    )
     .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
 }
+
+// panelAnimate built inside StreamsPage so duration can react to slowAnimations setting
 
 function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', thumbnails = [], thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
@@ -431,17 +465,20 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   const [games, setGames] = useState<string[]>(
     initialMeta?.games?.length ? initialMeta.games : detectedGames
   )
+  const [ytSeason, setYtSeason] = useState(initialMeta?.ytSeason ?? '1')
+  const ytSeasonUserEdited = useRef(!!initialMeta?.ytSeason)
 
   const prevEpisodeFolder = useMemo(
-    () => mode === 'new' ? getPrevEpisodeFolder(games, allFolders) : null,
-    [mode, games, allFolders]
+    () => mode === 'new' ? getPrevEpisodeFolder(games, allFolders, ytSeason) : null,
+    [mode, games, allFolders, ytSeason]
   )
   // Only show the copy option if the previous folder actually has thumbnails
   const hasPrevThumbnails = (prevEpisodeFolder?.thumbnails.length ?? 0) > 0
 
   const [selectedTemplatePath, setSelectedTemplatePath] = useState<string>(() => {
     const initGames = initialMeta?.games?.length ? initialMeta.games : detectedGames
-    const initPrevFolder = mode === 'new' ? getPrevEpisodeFolder(initGames, allFolders) : null
+    const initSeason = initialMeta?.ytSeason ?? '1'
+    const initPrevFolder = mode === 'new' ? getPrevEpisodeFolder(initGames, allFolders, initSeason) : null
     const hasPrev = (initPrevFolder?.thumbnails.length ?? 0) > 0
     return hasPrev ? PREV_EPISODE_SENTINEL : (defaultTemplate?.path ?? '')
   })
@@ -557,6 +594,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   const handleDescDismiss = useCallback(() => setDescSuggestion(''), [])
   const [ytEpisode, setYtEpisode] = useState(initialMeta?.ytEpisode ?? '1')
   const ytEpisodeUserEdited = useRef(!!initialMeta?.ytEpisode)
+  const [ytTotalEpisodes, setYtTotalEpisodes] = useState(() => String(detectTotalEpisodes(allFolders, games[0] ?? '', ytSeason)))
   const [ytCatchyTitle, setYtCatchyTitle] = useState(initialMeta?.ytCatchyTitle ?? '')
   const [alsoUpdateTwitch, setAlsoUpdateTwitch] = useState(isNextUpcomingStream)
   const [pushing, setPushing] = useState(false)
@@ -570,6 +608,37 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   const [syncTitle, setSyncTitle] = useState(initialMeta?.syncTitle ?? true)
   const [twitchTitle, setTwitchTitle] = useState(initialMeta?.twitchTitle ?? '')
   const [twitchGameName, setTwitchGameName] = useState(initialMeta?.twitchGameName ?? '')
+
+  const [isDirty, setIsDirty] = useState(false)
+  const initialSnapshot = useRef(JSON.stringify({
+    streamTypes: normalizeStreamTypes(initialMeta?.streamType),
+    games: initialMeta?.games?.length ? initialMeta.games : detectedGames,
+    comments: initialMeta?.comments ?? '',
+    archived: initialMeta?.archived ?? false,
+    ytTitle: initialMeta?.ytTitle ?? '',
+    ytDescription: initialMeta?.ytDescription ?? '',
+    ytGameTitle: initialMeta?.ytGameTitle ?? '',
+    ytTagsText: initialMeta?.ytTags?.join(', ') ?? '',
+    ytSeason: initialMeta?.ytSeason ?? '1',
+    ytEpisode: initialMeta?.ytEpisode ?? '1',
+    ytCatchyTitle: initialMeta?.ytCatchyTitle ?? '',
+    twitchTitle: initialMeta?.twitchTitle ?? '',
+    twitchGameName: initialMeta?.twitchGameName ?? '',
+    syncTitle: initialMeta?.syncTitle ?? true,
+    ytVideoId: initialMeta?.ytVideoId,
+    preferredThumbnail: initialMeta?.preferredThumbnail,
+  }))
+  useEffect(() => {
+    const current = JSON.stringify({
+      streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
+      ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, syncTitle,
+      ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
+      preferredThumbnail: localPreferredThumbnail,
+    })
+    setIsDirty(current !== initialSnapshot.current)
+  }, [streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
+      ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, syncTitle,
+      ytVideoUnlinked, ytSelectedBroadcastId, localPreferredThumbnail])
 
   // Keep Twitch title in sync with YT title when syncTitle is on
   useEffect(() => {
@@ -712,23 +781,38 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
     if (games.length > 0) setYtGameTitle(games[0])
   }, [games])
 
+  // Auto-detect season — inherit from the most recent preceding stream in the same series
+  useEffect(() => {
+    if (ytSeasonUserEdited.current) return
+    if (games.length > 0) setYtSeason(detectSeason(allFolders, games[0], date))
+  }, [games, allFolders, date])
+
   // Auto-detect episode — skip if the user has manually edited the value
+  // Season is included as a dep so changing season triggers re-detection
   useEffect(() => {
     if (ytEpisodeUserEdited.current) return
-    if (games.length > 0) setYtEpisode(String(detectEpisodeNumber(allFolders, games[0], date)))
-  }, [games, allFolders, date])
+    if (games.length > 0) setYtEpisode(String(detectEpisodeNumber(allFolders, games[0], ytSeason, date)))
+  }, [games, allFolders, date, ytSeason])
+
+  // Auto-detect total episodes in the series+season; always at least as large as the current episode
+  useEffect(() => {
+    if (games.length === 0) return
+    const detected = detectTotalEpisodes(allFolders, games[0], ytSeason)
+    const ep = parseInt(ytEpisode, 10) || 1
+    setYtTotalEpisodes(String(Math.max(detected, ep)))
+  }, [games, allFolders, ytSeason, ytEpisode])
 
   // Apply title template when selection or merge fields change
   useEffect(() => {
     const tmpl = ytTitleTemplates.find(t => t.id === ytSelectedTitleId)
     if (!tmpl) return
-    setYtTitle(applyMergeFields(tmpl.template, { game: ytGameTitle, episode: ytEpisode, title: ytCatchyTitle }))
-  }, [ytSelectedTitleId, ytTitleTemplates, ytGameTitle, ytEpisode, ytCatchyTitle])
+    setYtTitle(applyMergeFields(tmpl.template, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes }))
+  }, [ytSelectedTitleId, ytTitleTemplates, ytGameTitle, ytSeason, ytEpisode, ytCatchyTitle, ytTotalEpisodes])
 
   // Apply description template
   useEffect(() => {
     const tmpl = ytDescTemplates.find(t => t.id === ytSelectedDescId)
-    if (tmpl) setYtDescription(tmpl.description)
+    if (tmpl) setYtDescription(applyMergeFields(tmpl.description, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes }))
   }, [ytSelectedDescId, ytDescTemplates])
 
   // Apply tag template
@@ -794,6 +878,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
           ytDescription: ytDescription || undefined,
           ytGameTitle: ytGameTitle || undefined,
           ytCatchyTitle: ytCatchyTitle || undefined,
+          ytSeason: ytSeason !== '1' ? ytSeason : undefined,
           ytEpisode: ytEpisode || undefined,
           ytTags: tags.length > 0 ? tags : undefined,
           twitchTitle: effectiveTwitchTitle || undefined,
@@ -804,7 +889,15 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
         mode === 'new' && !isPrevEpisode ? (selectedTemplatePath || undefined) : undefined,
         mode === 'new' && isPrevEpisode ? (prevEpisodeFolder?.folderPath ?? undefined) : undefined,
       )
-      onClose()
+      initialSnapshot.current = JSON.stringify({
+        streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
+        ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, syncTitle,
+        ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
+        preferredThumbnail: localPreferredThumbnail,
+      })
+      setIsDirty(false)
+      setSaving(false)
+      if (mode === 'new') onClose()
     } catch (e: any) {
       console.error('[YT debug] error during save:', e)
       setError(e.message)
@@ -849,6 +942,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   return (
     <Modal
       isOpen
+      noOverlay
       onClose={onClose}
       title={title}
       width="2xl"
@@ -866,7 +960,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
               )}
             </div>
           )}
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} className={isDirty ? 'text-red-400 hover:text-red-300' : ''}>{isDirty ? 'Cancel' : 'Close'}</Button>
           <Button variant="primary" loading={saving} onClick={handleSave}>
             {mode === 'new' ? 'Create Stream' : 'Save'}
           </Button>
@@ -993,7 +1087,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Publishing Info</h3>
 
           {/* Merge field inputs */}
-          <div className="grid grid-cols-[1fr_auto_1fr] gap-2">
+          <div className="grid grid-cols-[1fr_auto_auto_1fr] gap-2">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">Game Title <span className="font-mono text-purple-400 font-normal">{'{game}'}</span><LucideYoutube size={11} className="text-red-400/70" /></label>
               <input
@@ -1004,16 +1098,45 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
-                <span className="font-mono text-purple-400">{'{episode}'}</span>
-                <Tooltip content="Auto-detected by counting every preceding stream that shares the first Topic / Games tag of the current stream item. Only streams dated before this one are counted." side="top">
+                <span className="font-mono text-purple-400">{'{season}'}</span>
+                <Tooltip content="Auto-inherited from the most recent preceding stream in the same series. Change it to start a new season — episode numbering will restart from 1." side="top">
                   <Info size={11} className="text-gray-500 cursor-default" />
                 </Tooltip>
               </label>
               <input
-                value={ytEpisode}
-                onChange={e => { ytEpisodeUserEdited.current = true; setYtEpisode(e.target.value) }}
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                value={ytSeason}
+                onChange={e => { ytSeasonUserEdited.current = true; ytEpisodeUserEdited.current = false; setYtSeason(e.target.value) }}
+                className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
               />
+            </div>
+            <div className="flex items-end gap-1.5">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+                  <span className="font-mono text-purple-400">{'{episode}'}</span>
+                  <Tooltip content="Auto-detected by counting preceding streams with the same game and season. Resets to 1 when season changes. Can be overridden manually." side="top">
+                    <Info size={11} className="text-gray-500 cursor-default" />
+                  </Tooltip>
+                </label>
+                <input
+                  value={ytEpisode}
+                  onChange={e => { ytEpisodeUserEdited.current = true; setYtEpisode(e.target.value) }}
+                  className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                />
+              </div>
+              <span className="text-gray-600 text-xs pb-1.5 shrink-0">/</span>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+                  <span className="font-mono text-purple-400">{'{total_episodes}'}</span>
+                  <Tooltip content="Total episodes in this season. Auto-counted from all streams sharing the same game and season, including this one. Can be overridden manually." side="top">
+                    <Info size={11} className="text-gray-500 cursor-default" />
+                  </Tooltip>
+                </label>
+                <input
+                  value={ytTotalEpisodes}
+                  onChange={e => setYtTotalEpisodes(e.target.value)}
+                  className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                />
+              </div>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500"><span className="font-mono text-purple-400">{'{title}'}</span></label>
@@ -1895,11 +2018,16 @@ export function StreamsPage({
   onSendToCombine: (files: string[]) => void
 }) {
   const { config, updateConfig, loading: configLoading } = useStore()
+  const osReducedMotion = useReducedMotion()
+  const noAnimation = osReducedMotion || !!config.disableAnimations
+  const animMult = config.slowAnimations ? 5 : 1
+  const panelAnimate = { opacity: 1, y: 0, transition: { duration: 0.22 * animMult, ease: 'easeOut' as const } }
   const { openEditor: openThumbnailEditor } = useThumbnailEditor()
   const [folders, setFolders] = useState<StreamFolder[]>([])
   const [thumbsKey, setThumbsKey] = useState(() => Date.now())
   const [loading, setLoading] = useState(false)
   const [modal, setModal] = useState<ModalState>({ mode: 'none' })
+  const [slideDirection, setSlideDirection] = useState<'up' | 'down' | null>(null)
   const [showManageTags, setShowManageTags] = useState(false)
   const [showTemplatesModal, setShowTemplatesModal] = useState(false)
   const [tagColors, setTagColors] = useState<Record<string, string>>({})
@@ -3210,48 +3338,106 @@ return (
         </p>
       </Modal>
 
-      {/* Meta modal */}
+      {/* Meta modal — backdrop (not animated, always behind the panel) */}
       {modal.mode !== 'none' && (
-        <MetaModal
-          mode={modal.mode}
-          initialMeta={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta : null}
-          folderDate={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.date : undefined}
-          detectedGames={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.detectedGames : []}
-          thumbnails={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnails : []}
-          thumbsKey={thumbsKey}
-          preferredThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta?.preferredThumbnail : undefined}
-          onSetAsThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? async (filePath) => {
-            if (modal.mode !== 'edit' && modal.mode !== 'add') return
-            const folder = modal.folder
-            const basename = filePath.split(/[\\/]/).pop() ?? ''
-            const meta: StreamMeta = { ...(folder.meta ?? { date: folder.date, streamType: [], games: [], comments: '' }), preferredThumbnail: basename }
-            await window.api.writeStreamMeta(folder.folderPath, meta)
-            loadFolders(streamsDir)
-          } : undefined}
-          allGames={allGames}
-          allStreamTypes={allStreamTypes}
-          allFolders={modal.mode === 'edit' ? folders.filter(f => f.folderPath !== modal.folder.folderPath) : folders}
-          templates={templates}
-          defaultTemplateName={config.defaultThumbnailTemplate}
-          claudeEnabled={!!config.claudeApiKey}
-          tagColors={tagColors}
-          tagTextures={tagTextures}
-          onNewStreamType={tag => {
-            setTagColors(prev => {
-              const updated = { ...prev, [tag]: pickColorForNewTag(prev) }
-              window.api.setStreamTypeTags(updated)
-              return updated
-            })
-            setTagTextures(prev => {
-              const updated = { ...prev, [tag]: pickTextureForNewTag(prev) }
-              window.api.setStreamTypeTextures(updated)
-              return updated
-            })
-          }}
-          onSave={handleSave}
-          onClose={() => setModal({ mode: 'none' })}
-        />
+        <div className="fixed inset-x-0 bottom-0 top-10 bg-black/60 backdrop-blur-sm z-[49]" onClick={() => { setModal({ mode: 'none' }); setSlideDirection(null) }} />
       )}
+
+      {/* Meta modal — nav buttons (fixed at z-[60], outside the animated panel so transforms don't affect positioning) */}
+      {(modal.mode === 'edit' || modal.mode === 'add') && (() => {
+        const navigableFolders = filteredFolders.filter(f => !f.isMissing)
+        const modalIdx = navigableFolders.findIndex(f => f.folderPath === modal.folder.folderPath)
+        const prevFolder = modalIdx >= 0 && modalIdx < navigableFolders.length - 1 ? navigableFolders[modalIdx + 1] : undefined
+        const nextFolder = modalIdx > 0 ? navigableFolders[modalIdx - 1] : undefined
+        const primaryGame = (modal.folder.meta?.games?.length ? modal.folder.meta.games : modal.folder.detectedGames)[0] ?? null
+        const seriesFolders = primaryGame
+          ? folders
+              .filter(f => !f.isMissing && (f.meta?.games?.includes(primaryGame) || f.detectedGames?.includes(primaryGame)))
+              .sort((a, b) => {
+                const epA = parseInt(a.meta?.ytEpisode ?? '', 10)
+                const epB = parseInt(b.meta?.ytEpisode ?? '', 10)
+                return (isNaN(epA) ? Infinity : epA) - (isNaN(epB) ? Infinity : epB)
+              })
+          : []
+        const seriesIdx = seriesFolders.findIndex(f => f.folderPath === modal.folder.folderPath)
+        const prevSeriesFolder = seriesIdx > 0 ? seriesFolders[seriesIdx - 1] : undefined
+        const nextSeriesFolder = seriesIdx >= 0 && seriesIdx < seriesFolders.length - 1 ? seriesFolders[seriesIdx + 1] : undefined
+        return (
+          <div className="fixed inset-x-0 bottom-0 top-10 z-[60] flex items-center justify-center p-4 pointer-events-none">
+            <div className="relative w-full max-w-4xl">
+              <div className="absolute right-full top-1/2 -translate-y-1/2 pr-3 flex flex-row gap-2 items-center pointer-events-auto">
+                <Tooltip content="Previous in series" side="right">
+                  <button onClick={() => { flushSync(() => setSlideDirection('up')); setModal({ mode: 'edit', folder: prevSeriesFolder! }) }} disabled={!prevSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-500 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsDown size={16} /></button>
+                </Tooltip>
+                <Tooltip content="Previous stream" side="right">
+                  <button onClick={() => { flushSync(() => setSlideDirection('up')); setModal({ mode: 'edit', folder: prevFolder! }) }} disabled={!prevFolder} className="p-3 rounded-full bg-navy-700/80 border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-navy-600 transition-colors shadow-lg disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/80 disabled:hover:text-gray-400"><ChevronDown size={22} /></button>
+                </Tooltip>
+              </div>
+              <div className="absolute left-full top-1/2 -translate-y-1/2 pl-3 flex flex-row gap-2 items-center pointer-events-auto">
+                <Tooltip content="Next stream" side="left">
+                  <button onClick={() => { flushSync(() => setSlideDirection('down')); setModal({ mode: 'edit', folder: nextFolder! }) }} disabled={!nextFolder} className="p-3 rounded-full bg-navy-700/80 border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-navy-600 transition-colors shadow-lg disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/80 disabled:hover:text-gray-400"><ChevronUp size={22} /></button>
+                </Tooltip>
+                <Tooltip content="Next in series" side="left">
+                  <button onClick={() => { flushSync(() => setSlideDirection('down')); setModal({ mode: 'edit', folder: nextSeriesFolder! }) }} disabled={!nextSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-500 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsUp size={16} /></button>
+                </Tooltip>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Meta modal — animated panel (motion.div is the direct AnimatePresence child so exit animations work) */}
+      <AnimatePresence mode="wait">
+        {modal.mode !== 'none' && (
+          <motion.div
+            key={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.folderPath : 'new'}
+            className="fixed inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center p-4"
+            initial={noAnimation ? false : { opacity: 0, y: slideDirection === 'up' ? 60 : slideDirection === 'down' ? -60 : 0 }}
+            animate={noAnimation ? {} : panelAnimate}
+            exit={noAnimation ? {} : { opacity: 0, y: slideDirection === 'up' ? -60 : slideDirection === 'down' ? 60 : 0, transition: { duration: 0.18 * animMult, ease: 'easeIn' as const } }}
+          >
+            <MetaModal
+              mode={modal.mode}
+              initialMeta={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta : null}
+              folderDate={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.date : undefined}
+              detectedGames={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.detectedGames : []}
+              thumbnails={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnails : []}
+              thumbsKey={thumbsKey}
+              preferredThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta?.preferredThumbnail : undefined}
+              onSetAsThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? async (filePath) => {
+                if (modal.mode !== 'edit' && modal.mode !== 'add') return
+                const folder = modal.folder
+                const basename = filePath.split(/[\\/]/).pop() ?? ''
+                const meta: StreamMeta = { ...(folder.meta ?? { date: folder.date, streamType: [], games: [], comments: '' }), preferredThumbnail: basename }
+                await window.api.writeStreamMeta(folder.folderPath, meta)
+                loadFolders(streamsDir)
+              } : undefined}
+              allGames={allGames}
+              allStreamTypes={allStreamTypes}
+              allFolders={modal.mode === 'edit' ? folders.filter(f => f.folderPath !== modal.folder.folderPath) : folders}
+              templates={templates}
+              defaultTemplateName={config.defaultThumbnailTemplate}
+              claudeEnabled={!!config.claudeApiKey}
+              tagColors={tagColors}
+              tagTextures={tagTextures}
+              onNewStreamType={tag => {
+                setTagColors(prev => {
+                  const updated = { ...prev, [tag]: pickColorForNewTag(prev) }
+                  window.api.setStreamTypeTags(updated)
+                  return updated
+                })
+                setTagTextures(prev => {
+                  const updated = { ...prev, [tag]: pickTextureForNewTag(prev) }
+                  window.api.setStreamTypeTextures(updated)
+                  return updated
+                })
+              }}
+              onSave={handleSave}
+              onClose={() => { setModal({ mode: 'none' }); setSlideDirection(null) }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Video picker */}
       {videoPicker && (
@@ -3832,7 +4018,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
 
       {/* Date */}
       <td className="px-2 py-2 align-middle min-w-[220px]">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between gap-1.5 w-full">
           <Tooltip content={friendlyDate(date)} side="top">
             <span className="font-mono text-sm text-gray-200">{date}</span>
           </Tooltip>
@@ -3882,7 +4068,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
               <Tooltip content={privacyLabel ? `Edit on YouTube · ${privacyLabel}` : 'Edit on YouTube'}>
                 <button
                   onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
-                  className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
+                  className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0 mb-[2px]"
                 >
                   <LucideYoutube size={12} />
                   {PrivacyIcon && <PrivacyIcon size={9} />}

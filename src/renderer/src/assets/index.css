@@ -65,18 +65,23 @@ input[type=range]::-webkit-slider-runnable-track {
   border-radius: 2px;
 }
 
-/* Survivor pulse — used in combine-tags mode to highlight the tag that will survive the merge.
+/* Shared outline-pulse keyframe. Color is controlled per-class via --pulse-color.
    Uses outline (not box-shadow) so it is never clipped by overflow:auto/hidden containers. */
-@keyframes survivor-pulse {
+@keyframes outline-pulse {
   0%, 100% {
-    outline: 2px solid rgba(250, 204, 21, 0.0);
+    outline: 2px solid transparent;
     outline-offset: 1px;
   }
   50% {
-    outline: 2px solid rgba(250, 204, 21, 0.65);
+    outline: 2px solid var(--pulse-color);
     outline-offset: 1px;
   }
 }
 .survivor-pulse {
-  animation: survivor-pulse 1.8s ease-in-out infinite;
+  --pulse-color: rgba(250, 204, 21, 0.65);
+  animation: outline-pulse 1.8s ease-in-out infinite;
+}
+.save-attention {
+  --pulse-color: rgba(255, 255, 255, 0.45);
+  animation: outline-pulse 1.8s ease-in-out infinite;
 }
