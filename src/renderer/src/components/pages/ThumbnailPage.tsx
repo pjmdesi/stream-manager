@@ -1392,7 +1392,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     // If meta carries a pre-selected built-in template (set during stream creation)
     // and there's no saved canvas yet, auto-load that template — skip the picker.
     const presetTemplate = !canvas && meta?.smThumbnailTemplate
-      ? freshTemplates.find(t => t.id === meta.smThumbnailTemplate)
+      ? freshTemplates.find((t: ThumbnailTemplate) => t.id === meta.smThumbnailTemplate)
       : null
 
     if (!canvas && !presetTemplate && freshTemplates.length > 0) {
@@ -1408,7 +1408,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       resetLayers(canvas.layers)
       setCurrentTemplateId(canvas.templateId)
     } else if (presetTemplate) {
-      resetLayers(presetTemplate.layers.map(l => ({ ...l, id: newId() })))
+      resetLayers(presetTemplate.layers.map((l: ThumbnailLayer) => ({ ...l, id: newId() })))
       setCurrentTemplateId(presetTemplate.id)
     } else {
       resetLayers([])

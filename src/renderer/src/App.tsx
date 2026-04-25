@@ -356,7 +356,7 @@ function AppInner() {
 
   // Wire up thumbnail navigation
   useEffect(() => {
-    _setNavigate((_stream: PendingThumbnailStream) => {
+    _setNavigate((_stream: PendingThumbnailStream | null) => {
       setPage('thumbnails')
     })
   }, [_setNavigate])
