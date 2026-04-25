@@ -45,12 +45,14 @@ export interface WatchRule {
   enabled: boolean
   watchPath: string
   pattern: string
-  action: 'move' | 'copy' | 'rename'
-  destinationMode?: 'static' | 'auto'
+  action: 'move' | 'copy' | 'rename' | 'convert'
+  destinationMode?: 'static' | 'auto' | 'next-to-original'
   destination?: string
   autoMatchDate?: boolean
   namePattern?: string
   onlyNewFiles?: boolean
+  conversionPresetId?: string
+  startImmediately?: boolean
 }
 
 export interface WatchEvent {
@@ -114,9 +116,39 @@ export interface AppConfig {
   disableAnimations: boolean
   slowAnimations: boolean
   autoDeletePartialOnCancel: boolean
+  clipDurationThreshold: number  // seconds; videos ≤ this length classified as clips
   claudeApiKey: string
   claudeSystemPrompt: string
   launcherWidgetGroupId: string
+  listThumbWidth: number
+}
+
+export type VideoCategory = 'full' | 'short' | 'clip'
+
+export interface VideoEntry {
+  size: number          // bytes
+  mtime: number         // ms epoch — used to invalidate cache
+  duration?: number     // seconds — absent for cloud placeholders
+  width?: number
+  height?: number
+  fps?: number
+  codec?: string
+  category: VideoCategory
+  // When this file was produced by the clip exporter, these capture how it was made so the
+  // user can re-open the source video with the same clip state via the Session Videos panel.
+  clipOf?: string       // source filename (same folder)
+  clipState?: ClipState // snapshot of the clip state at export time
+}
+
+/** In-progress clip work. Saved per-stream-folder under `StreamMeta.clipDrafts`, keyed by draft id. */
+export interface ClipDraft {
+  id: string            // "{sourceFilename}-clip-{N}" — stable, used for auto-numbering new drafts
+  sourceName: string    // source video filename (same folder)
+  state: ClipState
+  thumbnailDataUrl?: string
+  name?: string         // user-chosen display name (optional; defaults to "Clip N" from id)
+  createdAt: number     // ms epoch
+  updatedAt: number     // ms epoch
 }
 
 export interface StreamMeta {
@@ -125,6 +157,8 @@ export interface StreamMeta {
   games: string[]
   comments: string
   archived?: boolean
+  videoMap?: Record<string, VideoEntry>  // key = filename (not full path)
+  clipDrafts?: Record<string, ClipDraft> // key = draft id
   // YouTube
   ytVideoId?: string
   ytTitle?: string
@@ -281,7 +315,9 @@ export interface LauncherGroup {
 
 // ── Clip mode ─────────────────────────────────────────────────────────────────
 
-export type CropMode = 'none' | '9:16'
+export type CropAspect = 'off' | 'original' | '16:9' | '1:1' | '9:16'
+// Retained for back-compat; prefer CropAspect
+export type CropMode = CropAspect
 
 export interface BleepRegion {
   id: string
@@ -293,11 +329,15 @@ export interface ClipRegion {
   id: string
   inPoint: number   // seconds
   outPoint: number  // seconds
+  // Per-region 9:16 crop overrides. Undefined = fall back to defaults (0.5, 0.5, 1.0).
+  cropX?: number    // 0–1; horizontal centre (0 = left, 1 = right)
+  cropY?: number    // 0–1; vertical centre (only meaningful when cropScale < 1)
+  cropScale?: number // 0.2–1.0; 1.0 = crop fills full video height, smaller = zoomed in
 }
 
 export interface ClipState {
   clipRegions: ClipRegion[]   // sorted by inPoint; no overlaps
-  cropMode: CropMode
+  cropAspect: CropAspect
   cropX: number               // 0–1; horizontal center of the 9:16 crop region (0 = left, 0.5 = centre, 1 = right)
   bleepRegions: BleepRegion[]
   bleepVolume: number         // 0–1; shared across all bleep markers

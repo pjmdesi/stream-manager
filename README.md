@@ -14,6 +14,7 @@
   - [Features](#features)
     - [Streams](#streams)
     - [Video Player](#video-player)
+    - [Thumbnail Editor](#thumbnail-editor)
     - [Converter](#converter)
     - [Auto-Rules](#auto-rules)
     - [Launcher](#launcher)
@@ -61,34 +62,50 @@
 
 ## Features
 
+Stream Manager is built around keeping everything about your stream sessions in one place — the recording, metadata, clips, and publishing destinations all collected and organized.
+
 ### Streams
 
 ![Stream Manager screenshot](resources/Screenshot%202026-04-14%20051329.png)
 
 The main hub for browsing and managing local recordings of your stream sessions. Video files, thumbnails, and other related assets in your designated folder are scanned and grouped automatically:
 
-- Auto-detection of stream files (video and thumbnails) from date-based naming conventions (the default OBS format).
-- Custom tagging and metadata — games played, stream type, and freeform comments. Stream types support custom color and texture theming so you can visually distinguish categories at a glance. Add and style tags to work for you. Tags are fully customizable and can be applied to multiple streams for easy organization.
-- Batch archive processing — multi-select sessions and compress the video files inside in bulk using a conversion preset.
-- Cloud-sync aware — offline files (Synology Drive, OneDrive, DropBox, Google Drive, etc.) are detected and certain features are skipped to prevent unwanted bulk downloads.
+- **Auto-detection of stream files** (video and thumbnails) from date-based naming conventions (the default OBS format).
+- **Custom tagging and metadata** — games played, stream type, and freeform comments. Stream types support custom color and texture theming so you can visually distinguish categories at a glance. Add and style tags to work for you.
+- **Episode series tracking** — group related streams into seasons and episodes so series playthroughs are numbered correctly. Season, episode, total-episode merge fields become available in stream titles and description templates.
+- **Batch archive processing** — multi-select sessions and compress the video files inside in bulk using a conversion preset.
+- **Cloud-sync aware** — offline files (Synology Drive, OneDrive, DropBox, Google Drive, etc.) are detected and certain features are adapted to prevent unwanted bulk downloads.
+- **Reusable templates** for titles, descriptions, and tags with merge fields including `{game}`, `{season}`, `{episode}`, `{total_episodes}`, and `{title}`. Save new templates quickly from any stream's metadata editor.
 
-**Metadata** is stored in a single `_meta.json` file at the root of your streams directory, so stream info is maintained and validated separately from the files themselves. Missing folders are detected on load and the user is prompted to confirm updates (in case you made changes outside of the app).
+**Metadata** is stored in a single `_meta.json` file at the root of your streams directory, so stream info is maintained and validated separately from the files themselves allowing easy movement of your library and the location of the app.
 
-**AI-assisted metadata** — if you have a Claude API key configured in Integrations, press **Ctrl+Space** in any YouTube title, description, or tags field while editing a stream to get an inline suggestion generated at the cursor position. The suggestion appears as ghost text; press **Tab** to accept or **Esc** to dismiss. The model uses the stream's date, games, and type tags as context.
+**LLM-assisted metadata** — if you have a Claude API key configured in Integrations, press **Ctrl+Space** in any YouTube title, description, or tags field while editing a stream to get an inline suggestion generated at the cursor position. The suggestion appears as ghost text; press **Tab** to accept or **Esc** to dismiss. The model uses the stream's date, games, and type tags as context.
 
 ### Video Player
 
 ![Stream Manager screenshot](resources/Screenshot%202026-04-14%20051353.png)
 
-Drop or browse to any video file and play it back with a visual thumbnail and waveform track for rich scrubbing info. Multi-track audio (common in OBS recordings) is explicitly supported. Review, clip, and export stream sessions with precision using these tools:
+Open your stream videos and clips (or drop in any video file) and play it back with thumbnail and waveform tracks. Multi-track audio (common in OBS recordings) is supported. Review, clip, and export stream sessions with precision using these tools:
 
 - **Single-click screenshot capture** — capture a screenshot at the current playback position and save it as a PNG file. The file is named with the original video filename plus the timestamp and saved to the same folder as the video for easy reference or making thumbnails.
 - **Multi-track audio support** — if multiple audio tracks are detected, the user can choose to merge them into a single track for easier playback and clipping (Chromium limits audio playback from a video file to only one track at a time). Merged audio is temporary, so it won't clutter your folders.
-- **Thumbnail strip** — extracted from the video at 10-second intervals to provide visual cues while scrubbing. Cached to disk for performance and persistence across sessions.
+- **Thumbnail strip** — extracted from the video at intervals to provide visual cues while scrubbing.
 - **Waveform display** — full-file audio waveform rendered as a zoomable strip. Raw PCM is sampled at 200 Hz and cached to disk; the visible range is re-bucketed to 1,200 peaks on the fly so detail stays sharp at any zoom level.
-- **Clip mode** — set multiple clip regions points and export a clip directly from the player using the built-in converter.
-- **Bleep markers (clip mode)** — mark regions to be bleeped (censored) or silenced while clipping and in the exported file. Bleep volume can be controlled and includes a silent setting which mutes all audio for the duration.
-- **Video pop-out for OBS** — pop the video into a dedicated frameless window sized to the video's native resolution. Streaming software like OBS can then capture that window independently. The pop-out locks its aspect ratio on resize and has no rounded corners. Use the precision playback controls to go frame-by-frame forward AND BACKWARD (I'm looking at you VLC!) or seek to a specific timecode directly from the pop-out window
+- **Clip mode with auto-saved drafts** — split a recording into any number of segments and export a polished clip directly from the player. Your work autosaves to the stream folder as you go, so closing the video, switching streams, or coming back tomorrow all pick up exactly where you left off. Exported clips stay linked to their source and are one click away from being branched into a brand-new draft, so the original export always stays intact.
+- **Shape-aware cropping** — pick the export aspect (16:9, 1:1, 9:16, or the video's native ratio) and drag or scale the crop box independently for each segment. Repurpose the same highlight for widescreen, square, or vertical clips without re-editing — and clips exported with a 9:16 crop are automatically tagged as shorts.
+- **Bleep markers** — mark regions to be bleeped or silenced (censored) while clipping. Mutes all audio for the duration of the bleep marker.
+- **Session Videos panel** — every video, draft, and exported clip in the current stream folder shown in a live, hierarchical list. Exports and drafts nest under their source video.
+- **Video pop-out for OBS** — pop the video into a dedicated frameless window sized to the video's native resolution. Streaming software like OBS can then capture that window independently. The pop-out locks its aspect ratio on resize and has no rounded corners. Use the precision playback controls to go frame-by-frame forward AND BACKWARD (I'm looking at you VLC!) or seek to a specific timecode and immediately see it in the pop-up.
+
+### Thumbnail Editor
+
+A built-in canvas editor for designing stream and clip thumbnails without leaving the app. Save reusable templates, then pick one when you create a new stream to instantly get a finished thumbnail with your standard branding.
+
+- **Layered canvas** — drop in images, text, and shapes. Layers support drag, resize, rotate, opacity, ordering, and visibility toggles.
+- **Smart + grid snapping** — objects snap to canvas edges, each other's edges/centers, and an optional grid. Hold **Shift** while dragging to constrain to the dominant axis.
+- **Templates** — save a layout (minus the stream-specific content) as a reusable template. Pick a template when creating a new stream to seed its thumbnail automatically.
+- **Per-stream autosave** — thumbnails save to the stream folder as you edit and re-open to exactly where you left off; exported PNGs live alongside the source video so they're detected as stream thumbnails automatically.
+- **Undo/redo, recents, and keyboard shortcuts** for fast iteration.
 
 ### Converter
 
@@ -97,7 +114,6 @@ Drop or browse to any video file and play it back with a visual thumbnail and wa
 Queue video files for conversion using ffmpeg presets.
 
 - **Conversion presets** — Presets I've personally found useful are included out of the box. New presets can be imported from other apps such as HandBrake (JSON format) or created manually if you're adventurous.
-- **Batch processing** — add as many files to the queue as you want, and the app will process them one at a time. Progress is visualized in the sidebar widget, and you can continue using other features of the app while conversions are running in the background.
 - **Auto-archiving** — optionally send stream sessions to the converter with a selected "Archive" preset directly from the Streams page. This is a great way to quickly compress and organize stream recordings without having to manually add them to the converter.
 - **Remuxing support** — Like the OBS "Remux Recordings" feature, the app can quickly change a video's container format (e.g. from MKV to MP4) without re-encoding, as long as the video and audio codecs are compatible. This is great for making your recordings more widely compatible without losing quality or spending time on a full conversion or having to open OBS.
 - **Combine tool** — concatenate multiple video files into one with zero re-encoding using ffmpeg's concat demuxer. Files are auto-sorted by timestamp parsed from OBS-style filenames and can be manually reordered by drag-and-drop. Optionally deletes source files after a successful combine. This is useful for streamers who have their recordings split into multiple files due to file size limits or accidental stops/starts, and want to easily merge them back together without losing quality or having to open a full video editor.
@@ -105,15 +121,17 @@ Queue video files for conversion using ffmpeg presets.
 
 ### Auto-Rules
 
-File watcher rules that automatically move, copy, or rename files matching a glob pattern when they appear in a watched folder. Rules can be individually enabled/disabled. The watcher can be configured to start automatically on launch and is always accessible via the sidebar widget. This is useful for streamers who want to automate the organization of their recordings as soon as they are created by their streaming software, without having to manually move files around or run batch processes.
+File watcher rules that can automatically **move, copy, rename, or convert** files matching a glob pattern when they appear in a watched folder. Rules can be individually enabled/disabled. The watcher can be configured to start automatically on launch and is always accessible via the sidebar widget. This is useful for streamers who want to automate the organization of their recordings as soon as they are created by their streaming software, without having to manually move files around or run batch processes.
 
-For instance if you drop your recordings into a "Raw Recordings" folder, you can set up a rule to automatically move them to your main "Streams" folder and rename them to match the OBS date-based format that the app recognizes. The app will then automatically pick them up and add them to your stream library with the correct metadata.
+For instance, if you record directly to a "Raw Recordings" folder, you can set up a rule to automatically move them to your main "Streams" folder and rename them to match the OBS date-based format that the app recognizes. The app will then automatically pick them up and add them to your stream library with in the correct location.
+
+The **convert** action takes this one step further: matched files can be queued into the converter with your chosen preset and routed to a destination (static, auto-detected stream folder, or next to the original). Combine it with the watcher and you get end-to-end pipelines like "drop a raw MKV here → end up with a compressed MP4 in the right stream folder, ready to upload." Start immediately or leave conversions queued for a manual start.
 
 ### Launcher
 
 ![Stream Manager screenshot](resources/Screenshot%202026-04-14%20052116.png)
 
-Create named groups of apps that can be launched together with a single click — useful for spinning up your full streaming setup (OBS, Discord, game launchers, browser profiles, and any other apps that help you stream) all at once.
+Create named groups of apps that can be launched together with a single click — useful for spinning up your full streaming setup (OBS, chat apps, Discord, game launchers, browser profiles, and any other apps that help you stream) all at once.
 
 - **Launch groups** — organize apps into named groups, each with a custom icon (chosen from the full Lucide icon library) and a reorderable app list. Apps can be `.exe` files or `.lnk` shortcuts, and can be browsed or dragged directly from Explorer.
 - **Individual launch** — launch a single app from a group without firing the rest.
@@ -124,15 +142,14 @@ Create named groups of apps that can be launched together with a single click �
 #### YouTube
 
 - OAuth connection — authorize once and the app manages token refresh automatically. Connection status is shown in the sidebar.
-- Update title, thumbnail, description, tags, and category directly from Stream Manager. This works for upcoming livestreams, past VODs, and regular videos. For instance, if you had to re-upload a video, you can connect it to the stream item in the app to update its details with the stored stream info in the app, directly from the app.
-- Reusable templates for titles, descriptions, and tags with merge fields.
+- Update title, thumbnail, description, and tags, directly from Stream Manager (but not category or game titles, boo YouTube...). This works for upcoming livestreams, past VODs, and regular videos. For instance, if you had to re-upload a video, you can connect it to the stream item in the app to update its details with the stored stream info in the app, directly from the app.
 
 _You will need a google cloud project and OAuth 2.0 credentials to connect your YouTube account._
 
 #### Twitch
 
 - OAuth connection with automatic token refresh.
-- Update your Twitch channel title and category from the same metadata dialogs as YouTube.
+- Update your Twitch channel title and category from the same stream item metadata dialogs as YouTube.
 - Optionally sync the Twitch title with your YouTube title, or manage them independently.
 
 #### Claude AI
@@ -140,7 +157,7 @@ _You will need a google cloud project and OAuth 2.0 credentials to connect your 
 - Connect your [Anthropic API key](https://console.anthropic.com/) to enable AI-assisted YouTube details generation, powered by [Claude Haiku](https://www.anthropic.com/claude/haiku).
 - Press **Ctrl+Space** in the title, description, or tags field while editing stream metadata to request a suggestion at the cursor position. Suggestions appear as inline ghost text — **Tab** to accept, **Esc** to dismiss.
 - An optional system prompt lets you give the model standing instructions about your channel's style and tone.
-- The API key is stored locally and never sent to any server other than Anthropic's.
+- The API key is stored locally and never sent to any servers other than Anthropic's.
 
 ---
 
@@ -172,18 +189,20 @@ Outputs a single portable `.exe` to `dist/` — no installation required, runs f
 
 ## Tech Stack
 
-| Layer         | Technology                                                                     |
-| ------------- | ------------------------------------------------------------------------------ |
-| Framework     | [Electron](https://www.electronjs.org/) 34                                     |
-| UI            | [React](https://react.dev/) 18 + [TypeScript](https://www.typescriptlang.org/) |
-| Styling       | [Tailwind CSS](https://tailwindcss.com/) 3                                     |
-| Icons         | [Lucide React](https://lucide.dev/)                                            |
-| Video         | [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static)                   |
-|               | [fluent-ffmpeg](https://github.com/fluent-ffmpeg/node-fluent-ffmpeg)           |
-| Persistence   | [electron-store](https://github.com/sindresorhus/electron-store)               |
-| File watching | [chokidar](https://github.com/paulmillr/chokidar)                              |
-| Bundler       | [electron-vite](https://electron-vite.github.io/)                              |
-| Packaging     | [electron-builder](https://www.electron.build/)                                |
+| Layer            | Technology                                                                     |
+| ---------------- | ------------------------------------------------------------------------------ |
+| Framework        | [Electron](https://www.electronjs.org/) 34                                     |
+| UI               | [React](https://react.dev/) 18 + [TypeScript](https://www.typescriptlang.org/) |
+| Styling          | [Tailwind CSS](https://tailwindcss.com/) 3                                     |
+| Icons            | [Lucide React](https://lucide.dev/)                                            |
+| Animation        | [motion](https://motion.dev/)                                                  |
+| Thumbnail canvas | [Konva](https://konvajs.org/) + [react-konva](https://konvajs.org/docs/react/) |
+| Video            | [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static)                   |
+|                  | [fluent-ffmpeg](https://github.com/fluent-ffmpeg/node-fluent-ffmpeg)           |
+| Persistence      | [electron-store](https://github.com/sindresorhus/electron-store)               |
+| File watching    | [chokidar](https://github.com/paulmillr/chokidar)                              |
+| Bundler          | [electron-vite](https://electron-vite.github.io/)                              |
+| Packaging        | [electron-builder](https://www.electron.build/)                                |
 
 ---
 
@@ -195,12 +214,13 @@ src/
 │   ├── ipc/
 │   │   ├── claude.ts           # Claude AI metadata generation
 │   │   ├── combine.ts          # Concat-demux pipeline
-│   │   ├── converter.ts        # ffmpeg conversion queue
+│   │   ├── converter.ts        # ffmpeg conversion queue + clip export tagging
 │   │   ├── files.ts            # File system operations
 │   │   ├── launcher.ts         # App launch groups
 │   │   ├── store.ts            # App config persistence
-│   │   ├── streams.ts          # Stream folder management
+│   │   ├── streams.ts          # Stream folder management + clip drafts
 │   │   ├── templates.ts        # Folder template engine
+│   │   ├── thumbnail.ts        # Thumbnail editor templates & canvas persistence
 │   │   ├── twitch.ts           # Twitch API integration
 │   │   ├── video.ts            # Playback, waveform, thumbnails
 │   │   ├── videoPopup.ts       # OBS pop-out window (frameless, aspect-locked)
@@ -225,17 +245,18 @@ src/
         ├── components/
         │   ├── OnboardingModal.tsx
         │   ├── pages/
-        │   │   ├── PlayerPage.tsx        # Video player, waveform, clip mode, bleep markers
+        │   │   ├── PlayerPage.tsx        # Video player, waveform, clip mode with drafts, shape-aware crop, bleep markers, Session Videos panel
         │   │   ├── StreamsPage.tsx       # Stream session browser
         │   │   ├── ConverterPage.tsx
         │   │   ├── CombinePage.tsx
-        │   │   ├── RulesPage.tsx         # Auto-rules / file watcher
+        │   │   ├── RulesPage.tsx         # Auto-rules / file watcher (move/copy/rename/convert)
         │   │   ├── SettingsPage.tsx
         │   │   ├── TemplatesPage.tsx
+        │   │   ├── ThumbnailPage.tsx     # Konva-based thumbnail editor w/ templates, snapping, undo/redo
         │   │   ├── LauncherPage.tsx      # App launch groups
         │   │   └── IntegrationsPage.tsx  # YouTube, Twitch, Claude AI
         │   └── ui/             # Button, Modal, Slider, Tooltip, GhostTextArea, …
-        ├── context/            # ConversionContext, WatcherContext
+        ├── context/            # ConversionContext, WatcherContext, StoreContext, ThumbnailEditorContext
         ├── hooks/
         │   ├── useVideoPlayer.ts       # Playback, seek throttling, multi-track sync
         │   ├── useWaveform.ts          # PCM re-bucketing, SVG path generation

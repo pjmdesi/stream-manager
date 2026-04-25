@@ -1,9 +1,9 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
-import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera, X, Loader2, Scissors, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, Trash2, GitMerge, Film } from 'lucide-react'
+import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useStore } from '../../hooks/useStore'
-import type { BleepRegion, ClipRegion, ClipState, CropMode, TimelineViewport } from '../../types'
+import type { BleepRegion, ClipRegion, ClipState, CropAspect, TimelineViewport } from '../../types'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
 import { useWaveform } from '../../hooks/useWaveform'
@@ -169,7 +169,20 @@ function getBleepFreeInterval(
 }
 
 /** Compute the pixel geometry for the 9:16 crop overlay over an object-contain video. */
-function getCropGeometry(vcW: number, vcH: number, videoW: number, videoH: number, cropX: number) {
+/** Convert a CropAspect to a numeric width/height ratio. Returns the video's native ratio for 'original'. */
+function aspectRatio(aspect: import('../../types').CropAspect, videoW: number, videoH: number): number {
+  if (aspect === '16:9') return 16 / 9
+  if (aspect === '9:16') return 9 / 16
+  if (aspect === '1:1')  return 1
+  return videoW / videoH // 'original' / 'off' — the native ratio
+}
+
+function getCropGeometry(
+  vcW: number, vcH: number,
+  videoW: number, videoH: number,
+  cropX: number, cropY: number = 0.5, cropScale: number = 1,
+  cropAspectRatio?: number  // width/height; defaults to 9/16 for back-compat with callers that pre-date per-aspect support
+) {
   const videoAspect = videoW / videoH
   const containerAspect = vcW / vcH
   let contentW: number, contentH: number, contentLeft: number, contentTop: number
@@ -178,10 +191,22 @@ function getCropGeometry(vcW: number, vcH: number, videoW: number, videoH: numbe
   } else {
     contentH = vcH; contentW = vcH * videoAspect; contentLeft = (vcW - contentW) / 2; contentTop = 0
   }
-  const cropW = contentH * (9 / 16)
-  const availableRange = Math.max(0, contentW - cropW)
-  const cropLeft = contentLeft + cropX * availableRange
-  return { contentLeft, contentTop, contentW, contentH, cropW, cropLeft, availableRange }
+  const ar = cropAspectRatio ?? (9 / 16)
+  // At scale=1 the crop fits snugly within the content box. Whichever dim is the limit
+  // depends on whether the target aspect is wider or taller than the video.
+  let maxCropW: number, maxCropH: number
+  if (ar > videoAspect) {
+    maxCropW = contentW; maxCropH = contentW / ar
+  } else {
+    maxCropH = contentH; maxCropW = contentH * ar
+  }
+  const cropW = maxCropW * cropScale
+  const cropH = maxCropH * cropScale
+  const availableRangeX = Math.max(0, contentW - cropW)
+  const availableRangeY = Math.max(0, contentH - cropH)
+  const cropLeft = contentLeft + cropX * availableRangeX
+  const cropTop  = contentTop  + cropY * availableRangeY
+  return { contentLeft, contentTop, contentW, contentH, cropW, cropH, cropLeft, cropTop, availableRangeX, availableRangeY }
 }
 
 /** Clamp video pan.
@@ -201,6 +226,7 @@ const TRACK_LABELS = ['Game', 'Mic', 'Discord', 'Music', 'SFX']
 
 interface ExportClipDialogProps {
   defaultPresetId: string
+  defaultSuffix?: string
   filePath: string
   hasBleepsOutsideRegions: boolean
   onConfirm: (opts: ExportClipOptions) => void
@@ -214,12 +240,12 @@ export interface ExportClipOptions {
   suffix: string
 }
 
-function ExportClipDialog({ defaultPresetId, filePath, hasBleepsOutsideRegions, onConfirm, onClose }: ExportClipDialogProps) {
+function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsOutsideRegions, onConfirm, onClose }: ExportClipDialogProps) {
   const [presets, setPresets] = useState<{ id: string; name: string }[]>([])
   const [presetId, setPresetId] = useState(defaultPresetId)
   const [saveNextToSource, setSaveNextToSource] = useState(true)
   const [outputDir, setOutputDir] = useState('')
-  const [suffix, setSuffix] = useState('_clip')
+  const [suffix, setSuffix] = useState(defaultSuffix || '_clip')
 
   useEffect(() => {
     Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
@@ -281,17 +307,25 @@ function ExportClipDialog({ defaultPresetId, filePath, hasBleepsOutsideRegions, 
             <span className="text-sm text-gray-300">Save next to source</span>
           </label>
           {!saveNextToSource && (
-            <div className="flex gap-2">
-              <input
-                className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                value={outputDir}
-                readOnly
-                placeholder="Select output folder…"
-              />
-              <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={pickDir}>
-                Browse
-              </Button>
-            </div>
+            <>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  value={outputDir}
+                  readOnly
+                  placeholder="Select output folder…"
+                />
+                <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={pickDir}>
+                  Browse
+                </Button>
+              </div>
+              <div className="flex items-start gap-2 bg-yellow-950/40 border border-yellow-600/30 rounded-lg px-3 py-2">
+                <span className="text-yellow-400 text-xs mt-0.5">⚠</span>
+                <p className="text-xs text-yellow-300/80">
+                  Saving outside the source folder means the app won't detect the export as a session video. The draft will stay in the Session Videos panel as a draft instead of being replaced by the exported clip.
+                </p>
+              </div>
+            </>
           )}
           {saveNextToSource && (
             <p className="text-xs text-gray-500 break-all">{sourceDir}</p>
@@ -354,6 +388,13 @@ interface PendingFile { path: string; token: number }
 
 // ── Session Videos panel ─────────────────────────────────────────────────────
 
+const SESSION_CATEGORY_LABEL: Record<string, string> = { full: 'vid', short: 'short', clip: 'clip' }
+const SESSION_CATEGORY_STYLES: Record<string, string> = {
+  full:  'text-purple-400 border-purple-400/50',
+  short: 'text-blue-400 border-blue-400/50',
+  clip:  'text-gray-400 border-gray-600',
+}
+
 const SESSION_VIDEO_EXTS = new Set([
   '.mkv', '.mp4', '.mov', '.avi', '.ts', '.flv', '.webm',
   '.wmv', '.m4v', '.mpg', '.mpeg', '.m2ts', '.mts',
@@ -363,16 +404,24 @@ interface SiblingFile {
   path: string
   name: string
   isLocal: boolean
+  category?: 'full' | 'short' | 'clip'
+  fps?: number              // frames per second (from videoMap) — used for timecode display
+  clipOf?: string           // source filename if this was produced by the clip exporter
+  clipState?: ClipState     // saved clip state for reopening in the editor
 }
 
 function SiblingVideoItem({
   item,
   isActive,
   onClick,
+  onReopenAsClip,
+  indented = false,
 }: {
   item: SiblingFile
   isActive: boolean
   onClick: () => void
+  onReopenAsClip?: () => void
+  indented?: boolean
 }) {
   const [thumbnail, setThumbnail] = useState<string | null>(null)
   const [duration, setDuration] = useState<number | null>(null)
@@ -433,10 +482,10 @@ function SiblingVideoItem({
   const thumbWidth = Math.round(32 * aspectRatio)
 
   return (
-    <button
+    <div
       onClick={onClick}
       title={item.name}
-      className={`group/item w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${
+      className={`group/item w-full text-left flex items-center gap-2 ${indented ? 'pl-6 pr-2' : 'px-2'} py-1.5 rounded-lg transition-colors cursor-pointer ${
         isActive
           ? 'bg-purple-600/20'
           : 'hover:bg-white/5'
@@ -464,14 +513,230 @@ function SiblingVideoItem({
         <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
           {item.name}
         </div>
-        <div className="text-[10px] text-gray-500 tabular-nums mt-0.5">
-          {duration !== null
-            ? formatTime(duration)
-            : item.isLocal ? '…' : 'Cloud sync'
-          }
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="text-[10px] text-gray-500 tabular-nums">
+            {duration !== null
+              ? formatTime(duration)
+              : item.isLocal ? '…' : 'Cloud sync'
+            }
+          </span>
+          {item.category && (
+            <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${SESSION_CATEGORY_STYLES[item.category] ?? ''}`}>
+              {SESSION_CATEGORY_LABEL[item.category] ?? item.category}
+            </span>
+          )}
         </div>
       </div>
-    </button>
+      {onReopenAsClip && item.clipOf && (
+        <Tooltip content="Start new clipping draft based on this clip" side="left" triggerClassName="shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+          <button
+            onClick={e => { e.stopPropagation(); onReopenAsClip() }}
+            className="p-1 text-blue-400/60 hover:text-blue-300 transition-colors"
+          >
+            <Scissors size={12} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  )
+}
+
+function DraftSessionItem({
+  draft,
+  displayName,
+  sourceFps,
+  isActive,
+  isExporting,
+  onClick,
+  onDelete,
+  onRename,
+}: {
+  draft: import('../../types').ClipDraft
+  displayName: string
+  sourceFps?: number
+  isActive: boolean
+  isExporting?: boolean
+  onClick: () => void
+  onDelete: () => void
+  onRename: (newName: string) => Promise<boolean>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draftName, setDraftName] = useState(displayName)
+  const [error, setError] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { if (editing) { inputRef.current?.focus(); inputRef.current?.select() } }, [editing])
+  useEffect(() => { if (!editing) setDraftName(displayName) }, [displayName, editing])
+
+  const segmentCount = draft.state.clipRegions.length
+  const totalDuration = draft.state.clipRegions.reduce((acc, r) => acc + (r.outPoint - r.inPoint), 0)
+
+  const commit = async () => {
+    const trimmed = draftName.trim()
+    if (!trimmed || trimmed === displayName) { setEditing(false); setError(false); setDraftName(displayName); return }
+    const ok = await onRename(trimmed)
+    if (!ok) { setError(true); return }
+    setError(false)
+    setEditing(false)
+  }
+  const cancel = () => { setDraftName(displayName); setError(false); setEditing(false) }
+
+  return (
+    <div
+      className={`group/item w-full text-left flex items-center gap-2 pl-6 pr-2 py-1.5 rounded-lg transition-colors ${editing ? '' : isExporting ? 'cursor-not-allowed' : 'cursor-pointer'} ${
+        isActive ? 'bg-purple-600/20' : isExporting ? 'opacity-60' : 'hover:bg-white/5'
+      }`}
+      onClick={editing || isExporting ? undefined : onClick}
+      title={editing ? undefined : isExporting ? 'This clip is currently exporting. Wait for the conversion to finish (or cancel it) before editing.' : `Open clip draft for ${draft.sourceName}`}
+    >
+      <div className="shrink-0 w-8 h-8 rounded flex items-center justify-center bg-blue-950/40 border border-blue-500/20 text-blue-400">
+        <Scissors size={14} />
+      </div>
+      <div className="min-w-0 flex-1" onClick={editing ? e => e.stopPropagation() : undefined}>
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draftName}
+            onChange={e => { setDraftName(e.target.value); if (error) setError(false) }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); commit() }
+              else if (e.key === 'Escape') { e.preventDefault(); cancel() }
+            }}
+            onBlur={commit}
+            onClick={e => e.stopPropagation()}
+            className={`w-full text-[11px] font-medium bg-navy-900 border rounded px-1.5 py-0.5 text-gray-200 focus:outline-none focus:ring-1 ${
+              error ? 'border-red-500/60 focus:ring-red-500/40' : 'border-white/15 focus:ring-purple-500/40'
+            }`}
+            title={error ? 'Name already in use by another clip draft' : undefined}
+            spellCheck={false}
+          />
+        ) : (
+          <div className="flex items-center gap-1 min-w-0">
+            <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
+              {displayName}
+            </div>
+            <Tooltip content="Rename draft" side="top" triggerClassName="ml-auto shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+              <button
+                onClick={e => { e.stopPropagation(); setEditing(true) }}
+                className="p-0.5 text-gray-600 hover:text-gray-300 transition-colors"
+              >
+                <PencilLine size={11} />
+              </button>
+            </Tooltip>
+          </div>
+        )}
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${isExporting ? 'text-blue-300 border-blue-400/50' : 'text-amber-400 border-amber-400/50'}`}>
+            {isExporting ? 'exporting…' : 'draft'}
+          </span>
+          <span className="text-[10px] text-gray-500 tabular-nums">
+            {segmentCount} seg{segmentCount === 1 ? '' : 's'}
+            {totalDuration > 0 && ` · ${formatTime(totalDuration, sourceFps)}`}
+          </span>
+        </div>
+      </div>
+      {!editing && (
+        <Tooltip content="Delete draft" side="left" triggerClassName="shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+          <button
+            onClick={e => { e.stopPropagation(); onDelete() }}
+            className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+          >
+            <Trash2 size={12} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  )
+}
+
+// Crop aspect dropdown: Off + Original (when video doesn't match a preset) + 16:9 / 1:1 / 9:16
+function CropAspectSelector({ value, onChange, videoW, videoH }: {
+  value: import('../../types').CropAspect
+  onChange: (v: import('../../types').CropAspect) => void
+  videoW?: number
+  videoH?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Hide 'Original' if the video's aspect ratio matches one of the presets (within 1%)
+  const nativeRatio = videoW && videoH ? videoW / videoH : undefined
+  const matchesPreset = nativeRatio !== undefined && (
+    Math.abs(nativeRatio - 16/9) < 0.01 ||
+    Math.abs(nativeRatio - 1) < 0.01 ||
+    Math.abs(nativeRatio - 9/16) < 0.01
+  )
+  const options: Array<{ value: import('../../types').CropAspect; label: string }> = [
+    { value: 'off', label: 'Off' },
+    ...(!matchesPreset ? [{ value: 'original' as const, label: 'Original' }] : []),
+    { value: '16:9', label: '16:9 Widescreen' },
+    { value: '1:1', label: '1:1 Square' },
+    { value: '9:16', label: '9:16 Portrait' },
+  ]
+  const current = options.find(o => o.value === value) ?? options[0]
+  const isOn = value !== 'off'
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node
+      // Keep open if the click is inside the anchor OR the dropdown itself
+      if (anchorRef.current?.contains(target) || dropdownRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  return (
+    <div className="relative">
+      {/* Tooltip only wraps the button so it doesn't obscure the dropdown when open */}
+      {open ? (
+        <button
+          ref={anchorRef}
+          onClick={() => setOpen(false)}
+          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors ${
+            isOn
+              ? 'text-blue-300 border-blue-400/60 bg-blue-950/60'
+              : 'text-gray-400 border-white/20 hover:text-blue-300 hover:border-blue-400/40'
+          }`}
+        >
+          <Crop size={11} /> {isOn ? current.label.replace(/ .*$/, '') : 'Crop'}
+          <ChevronDown size={9} className="rotate-180 transition-transform" />
+        </button>
+      ) : (
+        <Tooltip content="Crop aspect ratio">
+          <button
+            ref={anchorRef}
+            onClick={() => setOpen(true)}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors ${
+              isOn
+                ? 'text-blue-300 border-blue-400/60 bg-blue-950/60'
+                : 'text-gray-400 border-white/20 hover:text-blue-300 hover:border-blue-400/40'
+            }`}
+          >
+            <Crop size={11} /> {isOn ? current.label.replace(/ .*$/, '') : 'Crop'}
+            <ChevronDown size={9} className="transition-transform" />
+          </button>
+        </Tooltip>
+      )}
+      {open && (
+        <div ref={dropdownRef} className="absolute bottom-full mb-1 left-0 z-50 bg-navy-800 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[150px]">
+          {options.map(o => (
+            <button
+              key={o.value}
+              onClick={() => { onChange(o.value); setOpen(false) }}
+              className={`w-full text-left px-3 py-1.5 text-[11px] transition-colors ${
+                o.value === value ? 'text-blue-300 bg-blue-950/40' : 'text-gray-300 hover:bg-white/5'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -490,11 +755,17 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [isClipMode, setIsClipMode] = useState(false)
   const [clipState, setClipState] = useState<ClipState>({
     clipRegions: [],
-    cropMode: 'none' as CropMode,
+    cropAspect: 'off' as CropAspect,
     cropX: 0.5,
     bleepRegions: [],
     bleepVolume: config.defaultBleepVolume ?? 0.25,
   })
+  // Draft id this clipState is bound to. Null = clip mode entered but no content yet (no draft saved).
+  // The draft is created lazily on the first meaningful edit (first clip region / bleep / crop change)
+  // and updated on every subsequent change until clip mode is exited or the video is closed.
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
+  const activeDraftIdRef = useRef<string | null>(null)
+  useEffect(() => { activeDraftIdRef.current = activeDraftId }, [activeDraftId])
 
   // Viewport for zoom/pan — always kept in sync; only applied in clip mode
   const [viewport, setViewport] = useState<TimelineViewport>({ viewStart: 0, viewEnd: 0 })
@@ -536,6 +807,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   // Video container size — tracked to compute crop overlay geometry
   const [videoContainerEl, setVideoContainerEl] = useState<HTMLDivElement | null>(null)
+  const videoContainerRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => { videoContainerRef.current = videoContainerEl }, [videoContainerEl])
   const [vcSize, setVcSize] = useState({ w: 0, h: 0 })
   const vcSizeRef = useRef({ w: 0, h: 0 })
   useEffect(() => {
@@ -579,34 +852,329 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     return () => el.removeEventListener('wheel', onWheel)
   }, [videoContainerEl])
 
-  // Confirm exit clip mode
-  const [showExitClipConfirm, setShowExitClipConfirm] = useState(false)
-  // Confirm close video while clip work is in progress
-  const [showCloseVideoConfirm, setShowCloseVideoConfirm] = useState(false)
   // Right panel collapsed state
   const [panelCollapsed, setPanelCollapsed] = useState(false)
 
-  // Session Videos: sibling video files in the same folder
+  // Session Videos: sibling video files + clip drafts in the same folder
   const [siblingFiles, setSiblingFiles] = useState<SiblingFile[]>([])
-  useEffect(() => {
-    const fp = state.filePath
-    if (!fp) { setSiblingFiles([]); return }
+  const [folderDrafts, setFolderDrafts] = useState<import('../../types').ClipDraft[]>([])
+  const [folderPath, setFolderPath] = useState<string | null>(null)
+  // If the currently-loaded video is a known clip output, this holds the info needed for the
+  // "New clip from current" action. Null otherwise.
+  const [currentVideoClip, setCurrentVideoClip] = useState<{ clipOf: string; clipState: ClipState; sourceExists: boolean } | null>(null)
+  const folderPathRef = useRef<string | null>(null)
+  useEffect(() => { folderPathRef.current = folderPath }, [folderPath])
+  const folderDraftsRef = useRef<import('../../types').ClipDraft[]>([])
+  useEffect(() => { folderDraftsRef.current = folderDrafts }, [folderDrafts])
+
+  const reloadSessionPanel = useCallback(async (fp: string | null) => {
+    if (!fp) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); return }
     const dir = fp.replace(/[\\/][^\\/]+$/, '')
-    let cancelled = false
-    window.api.listFiles(dir)
-      .then(async files => {
-        if (cancelled) return
-        const videoFiles = files
-          .filter(f => !f.isDirectory && SESSION_VIDEO_EXTS.has(f.extension.toLowerCase()))
-          .sort((a, b) => a.name.localeCompare(b.name))
-        if (videoFiles.length <= 1) { setSiblingFiles([]); return }
-        const localFlags = await window.api.checkLocalFiles(videoFiles.map(f => f.path))
-        if (cancelled) return
-        setSiblingFiles(videoFiles.map((f, i) => ({ path: f.path, name: f.name, isLocal: localFlags[i] })))
+    const streamsDir = dir.replace(/[\\/][^\\/]+$/, '')
+    const folderName = dir.replace(/.*[\\/]/, '')
+    const currentName = fp.replace(/.*[\\/]/, '')
+    setFolderPath(dir)
+    try {
+      const [files, meta] = await Promise.all([
+        window.api.listFiles(dir),
+        window.api.readFile(`${streamsDir}/_meta.json`).then(raw => JSON.parse(raw)).catch(() => null),
+      ])
+      const folderMeta = meta?.[folderName] ?? {}
+      const videoMap: Record<string, { category?: string; fps?: number; clipOf?: string; clipState?: ClipState }> = folderMeta.videoMap ?? {}
+      const drafts: Record<string, import('../../types').ClipDraft> = folderMeta.clipDrafts ?? {}
+      setFolderDrafts(Object.values(drafts))
+      const videoFiles = files
+        .filter(f => !f.isDirectory && SESSION_VIDEO_EXTS.has(f.extension.toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name))
+      // Detect whether the currently-loaded file is a known clip output
+      const currentEntry = videoMap[currentName]
+      if (currentEntry?.clipOf && currentEntry?.clipState) {
+        const sourceExists = videoFiles.some(f => f.name === currentEntry.clipOf)
+        setCurrentVideoClip({ clipOf: currentEntry.clipOf, clipState: currentEntry.clipState, sourceExists })
+      } else {
+        setCurrentVideoClip(null)
+      }
+      const localFlags = await window.api.checkLocalFiles(videoFiles.map(f => f.path))
+      setSiblingFiles(videoFiles.map((f, i) => ({
+        path: f.path,
+        name: f.name,
+        isLocal: localFlags[i],
+        category: videoMap[f.name]?.category as SiblingFile['category'] | undefined,
+        fps: videoMap[f.name]?.fps,
+        clipOf: videoMap[f.name]?.clipOf,
+        clipState: videoMap[f.name]?.clipState,
+      })))
+    } catch { /* swallow */ }
+  }, [])
+
+  useEffect(() => {
+    reloadSessionPanel(state.filePath)
+  }, [state.filePath, reloadSessionPanel])
+
+  // Any time the source video changes, drop the draft binding so a fresh clip session starts fresh.
+  useEffect(() => { setActiveDraftId(null) }, [state.filePath])
+
+  // Pending "open in clip editor" — applied once the requested source video finishes loading.
+  // draftId=null means start a fresh draft on the first edit (e.g. reopening a clip output).
+  const [pendingClipOpen, setPendingClipOpen] = useState<{ sourceName: string; state: ClipState; draftId: string | null } | null>(null)
+  const loadDraft = useCallback((draft: import('../../types').ClipDraft) => {
+    const dir = folderPathRef.current
+    if (!dir) return
+    const sep = dir.includes('\\') ? '\\' : '/'
+    const sourcePath = `${dir}${sep}${draft.sourceName}`
+    if (state.filePath === sourcePath) {
+      setActiveDraftId(draft.id)
+      setClipState(draft.state)
+      setIsClipMode(true)
+    } else {
+      setPendingClipOpen({ sourceName: draft.sourceName, state: draft.state, draftId: draft.id })
+      loadFile(sourcePath)
+    }
+  }, [state.filePath, loadFile])
+
+  // Reopen an already-exported clip in the editor using its saved state. Does NOT bind to the
+  // exported file's entry — a brand-new draft is created on the first edit (if any).
+  const reopenClipOutput = useCallback((sourceName: string, savedState: ClipState) => {
+    const dir = folderPathRef.current
+    if (!dir) return
+    const sep = dir.includes('\\') ? '\\' : '/'
+    const sourcePath = `${dir}${sep}${sourceName}`
+    if (state.filePath === sourcePath) {
+      setActiveDraftId(null)
+      setClipState(savedState)
+      setIsClipMode(true)
+    } else {
+      setPendingClipOpen({ sourceName, state: savedState, draftId: null })
+      loadFile(sourcePath)
+    }
+  }, [state.filePath, loadFile])
+
+  useEffect(() => {
+    if (!pendingClipOpen) return
+    if (!state.filePath) return
+    if (!state.filePath.endsWith(pendingClipOpen.sourceName)) return
+    setActiveDraftId(pendingClipOpen.draftId)
+    setClipState(pendingClipOpen.state)
+    setIsClipMode(true)
+    setPendingClipOpen(null)
+  }, [pendingClipOpen, state.filePath])
+
+  // exitClipMode is declared later in the file; use a ref so deleteDraft can call it
+  // without hitting a TDZ reference and without listing it as a dep.
+  const exitClipModeRef = useRef<() => void>(() => {})
+
+  // Draft pending deletion — when set, a confirmation modal is shown.
+  const [draftPendingDelete, setDraftPendingDelete] = useState<import('../../types').ClipDraft | null>(null)
+
+  const requestDeleteDraft = useCallback((draft: import('../../types').ClipDraft) => {
+    setDraftPendingDelete(draft)
+  }, [])
+
+  const confirmDeleteDraft = useCallback(async () => {
+    const draft = draftPendingDelete
+    if (!draft) return
+    setDraftPendingDelete(null)
+    const dir = folderPathRef.current
+    if (!dir) return
+    const wasActive = activeDraftIdRef.current === draft.id
+    if (wasActive && draftSaveTimerRef.current) {
+      clearTimeout(draftSaveTimerRef.current)
+      draftSaveTimerRef.current = null
+    }
+    await window.api.deleteClipDraft(dir, draft.id).catch(() => {})
+    // Sync the ref immediately so any flushDraftSave triggered by exitClipMode sees the
+    // post-delete list and doesn't resurrect the draft.
+    folderDraftsRef.current = folderDraftsRef.current.filter(d => d.id !== draft.id)
+    setFolderDrafts(prev => prev.filter(d => d.id !== draft.id))
+    if (wasActive) {
+      // The user deleted the draft they're currently editing — exit clip mode so they
+      // "bounce back" to plain playback on the source video.
+      exitClipModeRef.current()
+    }
+  }, [draftPendingDelete])
+
+  // Derive a draft's display name: explicit user-set name, or "Clip N" from the id.
+  const draftDisplayName = useCallback((draft: import('../../types').ClipDraft): string => {
+    if (draft.name && draft.name.trim()) return draft.name.trim()
+    const clipNum = Number(draft.id.match(/-clip-(\d+)$/)?.[1] ?? 0)
+    return `Clip ${clipNum}`
+  }, [])
+
+  // Rename a draft. Rejects empties or names that would collide with another draft in the folder.
+  const renameDraft = useCallback(async (draftId: string, newName: string): Promise<boolean> => {
+    const dir = folderPathRef.current
+    if (!dir) return false
+    const trimmed = newName.trim()
+    if (!trimmed) return false
+    const existing = folderDraftsRef.current
+    const target = existing.find(d => d.id === draftId)
+    if (!target) return false
+    // Reject if another draft already uses this effective display name
+    const collision = existing.some(d => d.id !== draftId && draftDisplayName(d).toLowerCase() === trimmed.toLowerCase())
+    if (collision) return false
+    const updated: import('../../types').ClipDraft = { ...target, name: trimmed, updatedAt: Date.now() }
+    await window.api.saveClipDraft(dir, updated).catch(() => {})
+    setFolderDrafts(prev => prev.map(d => d.id === draftId ? updated : d))
+    return true
+  }, [draftDisplayName])
+
+  const { jobs: conversionJobs, setJobs } = useConversionJobs()
+
+  // Pending clip exports keyed by job id — populated in exportClips, consumed in onJobComplete.
+  const pendingExportsRef = useRef<Map<string, {
+    sourceName: string
+    clipStateSnapshot: ClipState
+    draftId: string | null
+    outputFilename: string
+    outputFolder: string
+  }>>(new Map())
+
+  // Draft ids whose export is currently in flight (queued/running/paused). Used to lock the
+  // draft item in the Session Videos panel so the user can't spawn a duplicate job for the
+  // same draft while one is already going.
+  const [exportingDraftIds, setExportingDraftIds] = useState<Set<string>>(new Set())
+  const clearExportingDraftId = useCallback((draftId: string | null) => {
+    if (!draftId) return
+    setExportingDraftIds(prev => {
+      if (!prev.has(draftId)) return prev
+      const next = new Set(prev); next.delete(draftId); return next
+    })
+  }, [])
+
+  useEffect(() => {
+    const unsub = window.api.onJobComplete(async ({ jobId }: { jobId: string }) => {
+      const pending = pendingExportsRef.current.get(jobId)
+      if (!pending) return
+      pendingExportsRef.current.delete(jobId)
+      clearExportingDraftId(pending.draftId)
+      await window.api.clipTagExport(
+        pending.outputFolder,
+        pending.outputFilename,
+        pending.sourceName,
+        pending.clipStateSnapshot,
+        pending.draftId,
+      ).catch(() => {})
+      // If the exported draft is still bound to the active clip session, clear the binding so
+      // future edits create a new draft instead of re-saving the now-deleted one.
+      if (pending.draftId && activeDraftIdRef.current === pending.draftId) {
+        setActiveDraftId(null)
+        activeDraftIdRef.current = null
+      }
+      // If the tagged folder is the one currently displayed, refresh the Session Videos panel
+      // so the new file appears with its "reopen in clip editor" button and the draft disappears.
+      const normalize = (p: string | null) => p ? p.replace(/\\/g, '/').replace(/\/$/, '') : ''
+      if (normalize(pending.outputFolder) === normalize(folderPathRef.current)) {
+        reloadSessionPanel(state.filePath)
+      }
+    })
+    return unsub
+  }, [reloadSessionPanel, state.filePath, clearExportingDraftId])
+
+  // Cover error/cancel paths: if the job failed or was cancelled, release the draft lock so the
+  // user can retry. (onJobError is broadcast; cancels surface via the jobs context state.)
+  useEffect(() => {
+    const unsub = window.api.onJobError(({ jobId }: { jobId: string }) => {
+      const pending = pendingExportsRef.current.get(jobId)
+      if (!pending) return
+      pendingExportsRef.current.delete(jobId)
+      clearExportingDraftId(pending.draftId)
+    })
+    return unsub
+  }, [clearExportingDraftId])
+
+  // Watch the converter jobs list for cancels (no IPC broadcast for cancels — only local state).
+  useEffect(() => {
+    for (const job of conversionJobs) {
+      if (job.status !== 'cancelled') continue
+      const pending = pendingExportsRef.current.get(job.id)
+      if (!pending) continue
+      pendingExportsRef.current.delete(job.id)
+      clearExportingDraftId(pending.draftId)
+    }
+  }, [conversionJobs, clearExportingDraftId])
+
+  // ── Clip draft autosave ────────────────────────────────────────────────────
+  // Drafts are created lazily the first time the user adds meaningful content while in clip mode
+  // (a region, bleep, or a non-default crop setting). They are saved to the folder's _meta.json
+  // and re-opened via the Session Videos panel. Removing all content deletes the draft.
+  const clipStateHasContent = useCallback((s: ClipState) => (
+    s.clipRegions.length > 0 ||
+    s.bleepRegions.length > 0 ||
+    s.cropAspect !== 'off'
+  ), [])
+
+  const nextDraftIdFor = useCallback((sourceName: string, existing: import('../../types').ClipDraft[]) => {
+    const prefix = `${sourceName}-clip-`
+    let n = 1
+    const taken = new Set(existing.filter(d => d.id.startsWith(prefix)).map(d => d.id))
+    while (taken.has(`${prefix}${n}`)) n++
+    return `${prefix}${n}`
+  }, [])
+
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const persistDraftState = useCallback(async (stateToSave: ClipState, sourceFilePath: string | null, dir: string | null) => {
+    if (!sourceFilePath || !dir) return
+    const sourceName = sourceFilePath.replace(/.*[\\/]/, '')
+    const hasContent = clipStateHasContent(stateToSave)
+    const currentId = activeDraftIdRef.current
+    if (hasContent) {
+      const now = Date.now()
+      let id = currentId
+      const existing = id ? folderDraftsRef.current.find(d => d.id === id) : null
+      // Guard against resurrection: if we have an id bound but the draft is no longer in the
+      // folder (e.g. user just deleted it or it was cleared after export), don't recreate it.
+      if (id && !existing) return
+      if (!id) {
+        id = nextDraftIdFor(sourceName, folderDraftsRef.current)
+        setActiveDraftId(id)
+        activeDraftIdRef.current = id // sync so immediate reads (e.g. in exportClips flush) see the new id
+      }
+      // Preserve user-set fields (name, thumbnailDataUrl) and original createdAt across autosaves.
+      const draft: import('../../types').ClipDraft = {
+        ...(existing ?? {}),
+        id,
+        sourceName,
+        state: stateToSave,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      }
+      await window.api.saveClipDraft(dir, draft).catch(() => {})
+      setFolderDrafts(prev => {
+        const idx = prev.findIndex(d => d.id === id)
+        if (idx >= 0) { const copy = [...prev]; copy[idx] = draft; return copy }
+        return [...prev, draft]
       })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [state.filePath])
+    } else if (currentId) {
+      await window.api.deleteClipDraft(dir, currentId).catch(() => {})
+      setFolderDrafts(prev => prev.filter(d => d.id !== currentId))
+      setActiveDraftId(null)
+    }
+  }, [clipStateHasContent, nextDraftIdFor])
+
+  // Debounced autosave while in clip mode
+  useEffect(() => {
+    if (!isClipMode) return
+    if (!state.filePath || !folderPathRef.current) return
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+    draftSaveTimerRef.current = setTimeout(() => {
+      persistDraftState(clipState, state.filePath, folderPathRef.current)
+    }, 500)
+    return () => {
+      if (draftSaveTimerRef.current) { clearTimeout(draftSaveTimerRef.current); draftSaveTimerRef.current = null }
+    }
+  }, [clipState, isClipMode, state.filePath, persistDraftState])
+
+  // Flush any pending draft save. Await to ensure the draft is persisted and `activeDraftIdRef`
+  // is up to date before proceeding (e.g. before capturing the draft id in a pending export).
+  const flushDraftSave = useCallback(async () => {
+    if (draftSaveTimerRef.current) { clearTimeout(draftSaveTimerRef.current); draftSaveTimerRef.current = null }
+    if (!isClipModeRef.current) return
+    const fp = state.filePath
+    const dir = folderPathRef.current
+    if (!fp || !dir) return
+    await persistDraftState(clipState, fp, dir)
+  }, [clipState, state.filePath, persistDraftState])
 
   // Multi-track warning modal before entering clip mode
   const [clipModeModal, setClipModeModal] = useState<'warn' | 'merge' | null>(null)
@@ -620,6 +1188,16 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   useEffect(() => { lockedRegionIdsRef.current = lockedRegionIds }, [lockedRegionIds])
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null)
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null)
+  const selectedRegionIdRef = useRef<string | null>(null)
+  useEffect(() => { selectedRegionIdRef.current = selectedRegionId }, [selectedRegionId])
+
+  // Immutable helper: update crop fields on a specific region within clipState.
+  const updateRegionCrop = useCallback((regionId: string, patch: { cropX?: number; cropY?: number; cropScale?: number }) => {
+    setClipState(s => ({
+      ...s,
+      clipRegions: s.clipRegions.map(r => r.id === regionId ? { ...r, ...patch } : r),
+    }))
+  }, [])
   const isPlayingRef = useRef(false)
 
   // Bleep markers
@@ -648,15 +1226,19 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const popupRtcCleanupRef  = useRef<(() => void) | null>(null)
 
   const exitClipMode = useCallback(() => {
+    flushDraftSave()
     setIsClipMode(false)
     setActiveBleepId(null)
-    setClipState({ clipRegions: [], cropMode: 'none', cropX: 0.5, bleepRegions: [], bleepVolume: 0.25 })
+    setActiveDraftId(null)
+    setClipState({ clipRegions: [], cropAspect: 'off', cropX: 0.5, bleepRegions: [], bleepVolume: 0.25 })
     setViewport({ viewStart: 0, viewEnd: durationRef.current })
     setHandlePopup(null)
     setEditingDurationId(null)
     setClipFocus(false)
     setAddSegmentError(null)
-  }, [])
+  }, [flushDraftSave])
+  // Keep the forward ref from deleteDraft in sync
+  exitClipModeRef.current = exitClipMode
 
   // Shared zoom/pan handler — uses refs to avoid stale closures in non-passive listeners.
   // Horizontal scroll (|deltaX| dominant) pans the timeline; vertical scroll zooms.
@@ -711,6 +1293,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   const { videoInfo, tracks, isExtracting, extractProgress, tracksExtracted, isPlaying, currentTime, duration, videoUrl, error } = state
   const multiTrack = (videoInfo?.audioTracks.length ?? 0) > 1
+
+  // Default crop values used when a region has no override yet, or when no region is active.
+  const DEFAULT_CROP_X = 0.5
+  const DEFAULT_CROP_Y = 0.5
+  const DEFAULT_CROP_SCALE = 1
+  const MIN_CROP_SCALE = 0.2
+
+  // The region whose crop is currently shown/edited: whichever region the playhead is inside.
+  // Selection is intentionally ignored so the crop preview tracks playback naturally.
+  const activeCropRegion = useMemo(() => {
+    return clipState.clipRegions.find(r => currentTime >= r.inPoint && currentTime < r.outPoint) ?? null
+  }, [clipState.clipRegions, currentTime])
+  const activeCropRegionRef = useRef(activeCropRegion)
+  useEffect(() => { activeCropRegionRef.current = activeCropRegion }, [activeCropRegion])
 
   // Reset zoom when a new file loads
   useEffect(() => {
@@ -927,6 +1523,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
     const onUp = () => {
       isDraggingHandleRef.current = false
+      ;(document.activeElement as HTMLElement)?.blur()
       if (!hasMoved) {
         // Click (no drag): leave video at handle position, jump playhead there too
         setHandleDragDisplayTime(null)
@@ -1041,20 +1638,81 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  // Drag the 9:16 crop region horizontally
+  // Corner resize: scales the crop rect around the opposite corner (which stays pinned).
+  const handleCropCornerResize = useCallback((e: React.MouseEvent, corner: 'tl' | 'tr' | 'bl' | 'br') => {
+    e.preventDefault()
+    e.stopPropagation()
+    const region = activeCropRegionRef.current
+    if (!region) return
+    const { w: vcW, h: vcH } = vcSizeRef.current
+    const vi = videoInfoRef.current
+    const containerEl = videoContainerRef.current
+    const aspect = clipStateRef.current.cropAspect
+    if (!vi || vcW === 0 || !containerEl || aspect === 'off') return
+    const ar = aspectRatio(aspect, vi.width, vi.height)
+
+    const cropX = region.cropX ?? 0.5
+    const cropY = region.cropY ?? 0.5
+    const startScale = region.cropScale ?? 1
+    const { contentLeft, contentTop, contentH, cropLeft, cropTop, cropW, cropH } = getCropGeometry(vcW, vcH, vi.width, vi.height, cropX, cropY, startScale, ar)
+    // maxCropH at scale=1 (for scale derivation below)
+    const { cropH: maxCropH } = getCropGeometry(vcW, vcH, vi.width, vi.height, 0, 0, 1, ar)
+    // Opposite corner stays anchored
+    const anchorX = corner === 'tl' || corner === 'bl' ? cropLeft + cropW : cropLeft
+    const anchorY = corner === 'tl' || corner === 'tr' ? cropTop + cropH : cropTop
+    const containerRect = containerEl.getBoundingClientRect()
+
+    const onMove = (me: MouseEvent) => {
+      const mx = me.clientX - containerRect.left
+      const my = me.clientY - containerRect.top
+      const dx = Math.abs(mx - anchorX)
+      const dy = Math.abs(my - anchorY)
+      // Aspect constraint: cropH/cropW = 1/ar. Use whichever dimension limits the rect.
+      const newCropH = Math.min(dy, dx / ar)
+      let newScale = newCropH / maxCropH
+      newScale = Math.max(MIN_CROP_SCALE, Math.min(1, newScale))
+      const { availableRangeX, availableRangeY, cropW: newCropW, cropH: resolvedCropH } = getCropGeometry(vcW, vcH, vi.width, vi.height, 0, 0, newScale, ar)
+      // New rect position so the anchor stays fixed
+      const newCropLeft = (corner === 'tl' || corner === 'bl') ? anchorX - newCropW : anchorX
+      const newCropTop  = (corner === 'tl' || corner === 'tr') ? anchorY - resolvedCropH : anchorY
+      const newCropX = availableRangeX > 0 ? Math.max(0, Math.min(1, (newCropLeft - contentLeft) / availableRangeX)) : 0.5
+      const newCropY = availableRangeY > 0 ? Math.max(0, Math.min(1, (newCropTop  - contentTop)  / availableRangeY)) : 0.5
+      updateRegionCrop(region.id, { cropX: newCropX, cropY: newCropY, cropScale: newScale })
+    }
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [updateRegionCrop])
+
+  // Drag the crop rect to pan (horizontal/vertical as the active aspect allows) within the active region.
   const handleCropDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    const region = activeCropRegionRef.current
+    if (!region) return
+    const aspect = clipStateRef.current.cropAspect
+    if (aspect === 'off') return
     const startX = e.clientX
-    const startCropX = clipStateRef.current.cropX
+    const startY = e.clientY
+    const startCropX = region.cropX ?? 0.5
+    const startCropY = region.cropY ?? 0.5
+    const startScale = region.cropScale ?? 1
     const onMove = (me: MouseEvent) => {
       const { w: vcW, h: vcH } = vcSizeRef.current
       const vi = videoInfoRef.current
       if (!vi || vcW === 0) return
-      const { availableRange } = getCropGeometry(vcW, vcH, vi.width, vi.height, 0)
-      if (availableRange <= 0) return
-      const newCropX = Math.max(0, Math.min(1, startCropX + (me.clientX - startX) / availableRange))
-      setClipState(s => ({ ...s, cropX: newCropX }))
+      const ar = aspectRatio(aspect, vi.width, vi.height)
+      const { availableRangeX, availableRangeY } = getCropGeometry(vcW, vcH, vi.width, vi.height, 0, 0, startScale, ar)
+      const newCropX = availableRangeX > 0
+        ? Math.max(0, Math.min(1, startCropX + (me.clientX - startX) / availableRangeX))
+        : startCropX
+      const newCropY = availableRangeY > 0
+        ? Math.max(0, Math.min(1, startCropY + (me.clientY - startY) / availableRangeY))
+        : startCropY
+      setClipState(s => ({
+        ...s,
+        clipRegions: s.clipRegions.map(r => r.id === region.id ? { ...r, cropX: newCropX, cropY: newCropY } : r),
+      }))
     }
     const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
     window.addEventListener('mousemove', onMove)
@@ -1353,8 +2011,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     vEnd
   )
 
-  const { setJobs } = useConversionJobs()
-
   const [showExportDialog, setShowExportDialog] = useState(false)
 
   // Add a new segment centered on the playhead, sized to ~10% of the visible span.
@@ -1408,6 +2064,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     if (!state.filePath || !videoInfo || clipState.clipRegions.length === 0) return
     setShowExportDialog(false)
 
+    // Flush the debounced draft save so activeDraftIdRef is current when we capture the pending export.
+    // Without this, a user who exports within 500ms of their last edit would capture draftId=null,
+    // and the post-export tag wouldn't know which draft to clear.
+    await flushDraftSave()
+
     let clipPreset: { id: string; name: string; ffmpegArgs: string; outputExtension: string; isBuiltin: boolean } | null = null
     if (opts.presetId) {
       const [builtin, imported] = await Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
@@ -1436,10 +2097,35 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
     setJobs(prev => [...prev, job])
 
+    // Register the pending export so onJobComplete can tag the output file with clipOf + clipState
+    // (enabling the "reopen in clip editor" button) and drop the corresponding draft.
+    const sourceName = state.filePath.replace(/.*[\\/]/, '')
+    const outputFilename = outPath.replace(/.*\//, '')
+    const outputFolder = outPath.substring(0, outPath.lastIndexOf('/'))
+    pendingExportsRef.current.set(job.id, {
+      sourceName,
+      clipStateSnapshot: clipState,
+      draftId: activeDraftIdRef.current,
+      outputFilename,
+      outputFolder,
+    })
+    // Mark the draft as exporting so the panel can lock it until the job finishes.
+    if (activeDraftIdRef.current) {
+      const lockedId = activeDraftIdRef.current
+      setExportingDraftIds(prev => new Set(prev).add(lockedId))
+    }
+
     await window.api.addClipToQueue({
       job,
-      clipRegions:  clipState.clipRegions,
-      cropMode:     clipState.cropMode,
+      clipRegions:  clipState.clipRegions.map(r => ({
+        id: r.id,
+        inPoint: r.inPoint,
+        outPoint: r.outPoint,
+        cropX: r.cropX ?? clipState.cropX,
+        cropY: r.cropY ?? 0.5,
+        cropScale: r.cropScale ?? 1,
+      })),
+      cropAspect:   clipState.cropAspect,
       cropX:        clipState.cropX,
       videoWidth:   videoInfo.width,
       videoHeight:  videoInfo.height,
@@ -1447,8 +2133,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       bleepVolume:  clipState.bleepVolume,
     })
 
+    // The clip is now in the converter's hands; close the editor so returning to the player
+    // later doesn't resurrect the draft as a fresh editing session.
+    exitClipModeRef.current()
     onNavigateToConverter?.()
-  }, [state.filePath, videoInfo, clipState, setJobs, onNavigateToConverter])
+  }, [state.filePath, videoInfo, clipState, setJobs, onNavigateToConverter, flushDraftSave])
 
   const [screenshotFlash, setScreenshotFlash] = useState(false)
   const [isPopupOpen, setIsPopupOpen] = useState(false)
@@ -1547,22 +2236,24 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       setIsPopupOpen(true)
     })
 
-    // Open popup window, passing the offer SDP so the popup can answer immediately
+    // Open popup window, passing the offer SDP so the popup can answer immediately.
+    // cropX source: active region's cropX if present, else the session default.
+    // Popup currently only honors '9:16' crops; other aspects are ignored visually.
+    const popupCropX = activeCropRegion?.cropX ?? clipState.cropX
     window.api.openVideoPopup(
       offerSdp,
       videoInfo.width, videoInfo.height,
-      clipState.cropMode === '9:16' ? '9:16' : undefined,
-      clipState.cropMode === '9:16' ? clipState.cropX : undefined,
+      clipState.cropAspect === '9:16' ? '9:16' : undefined,
+      clipState.cropAspect === '9:16' ? popupCropX : undefined,
     )
-  }, [videoInfo, clipState.cropMode, clipState.cropX])
+  }, [videoInfo, clipState.cropAspect, clipState.cropX, activeCropRegion])
 
-  // Push live crop changes to popup when mode or position changes while it's open.
-  // isPopupOpen is intentionally excluded — crop is already sent during popup:open,
-  // and including it here would trigger a resize that overrides the saved window size.
+  // Push live crop changes to popup when the active region's crop changes.
   useEffect(() => {
     if (!isPopupOpen || !videoInfo) return
-    window.api.setCropPopup?.(videoInfo.width, videoInfo.height, clipState.cropMode, clipState.cropX)
-  }, [clipState.cropMode, clipState.cropX, videoInfo]) // eslint-disable-line react-hooks/exhaustive-deps
+    const popupCropX = activeCropRegion?.cropX ?? clipState.cropX
+    window.api.setCropPopup?.(videoInfo.width, videoInfo.height, clipState.cropAspect, popupCropX)
+  }, [clipState.cropAspect, clipState.cropX, activeCropRegion, videoInfo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const effectiveTogglePlay = useCallback(() => {
     togglePlay()
@@ -1631,27 +2322,57 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     preload="auto"
                     onClick={effectiveTogglePlay}
                   />
-                  {/* 9:16 crop overlay */}
-                  {isClipMode && clipState.cropMode === '9:16' && videoInfo && vcSize.w > 0 && (() => {
-                    const { contentLeft, contentTop, contentH, cropW, cropLeft } = getCropGeometry(
-                      vcSize.w, vcSize.h, videoInfo.width, videoInfo.height, clipState.cropX
+                  {/* Crop overlay — values come from the active clip region + selected aspect */}
+                  {isClipMode && clipState.cropAspect !== 'off' && videoInfo && vcSize.w > 0 && (() => {
+                    const rCropX = activeCropRegion?.cropX ?? DEFAULT_CROP_X
+                    const rCropY = activeCropRegion?.cropY ?? DEFAULT_CROP_Y
+                    const rCropScale = activeCropRegion?.cropScale ?? DEFAULT_CROP_SCALE
+                    const ar = aspectRatio(clipState.cropAspect, videoInfo.width, videoInfo.height)
+                    const { contentLeft, contentTop, contentW, contentH, cropW, cropH, cropLeft, cropTop, availableRangeX, availableRangeY } = getCropGeometry(
+                      vcSize.w, vcSize.h, videoInfo.width, videoInfo.height, rCropX, rCropY, rCropScale, ar
                     )
-                    const rightShadingLeft = cropLeft + cropW
-                    const rightShadingWidth = contentLeft + (vcSize.w - contentLeft * 2) - rightShadingLeft
+                    const canX = availableRangeX > 0.5
+                    const canY = availableRangeY > 0.5
+                    const dragCursor = canX && canY ? 'move' : canX ? 'ew-resize' : canY ? 'ns-resize' : 'default'
+                    const handleClass = 'absolute w-3 h-3 border-2 border-white/90 bg-black/50 rounded-sm'
+                    const inactive = !activeCropRegion
                     return (
                       <>
-                        {/* Left darkened region */}
+                        {/* Top darkened region */}
                         <div className="absolute bg-black/60 pointer-events-none"
-                          style={{ left: contentLeft, top: contentTop, width: Math.max(0, cropLeft - contentLeft), height: contentH }} />
+                          style={{ left: contentLeft, top: contentTop, width: contentW, height: Math.max(0, cropTop - contentTop) }} />
+                        {/* Bottom darkened region */}
+                        <div className="absolute bg-black/60 pointer-events-none"
+                          style={{ left: contentLeft, top: cropTop + cropH, width: contentW, height: Math.max(0, contentTop + contentH - (cropTop + cropH)) }} />
+                        {/* Left darkened region (between top and bottom) */}
+                        <div className="absolute bg-black/60 pointer-events-none"
+                          style={{ left: contentLeft, top: cropTop, width: Math.max(0, cropLeft - contentLeft), height: cropH }} />
                         {/* Right darkened region */}
                         <div className="absolute bg-black/60 pointer-events-none"
-                          style={{ left: rightShadingLeft, top: contentTop, width: Math.max(0, rightShadingWidth), height: contentH }} />
-                        {/* Crop frame — draggable */}
+                          style={{ left: cropLeft + cropW, top: cropTop, width: Math.max(0, contentLeft + contentW - (cropLeft + cropW)), height: cropH }} />
+                        {/* Crop frame — draggable (disabled when no active region) */}
                         <div
-                          className="absolute border-2 border-white/80 cursor-ew-resize"
-                          style={{ left: cropLeft, top: contentTop, width: cropW, height: contentH }}
-                          onMouseDown={handleCropDrag}
+                          className={`absolute border-2 ${inactive ? 'border-white/30' : 'border-white/80'}`}
+                          style={{ left: cropLeft, top: cropTop, width: cropW, height: cropH, cursor: inactive ? 'default' : dragCursor }}
+                          onMouseDown={inactive ? undefined : handleCropDrag}
                         />
+                        {/* Corner resize handles — only when there's an active region */}
+                        {!inactive && (
+                          <>
+                            <div className={`${handleClass} cursor-nwse-resize`}
+                              style={{ left: cropLeft - 6, top: cropTop - 6 }}
+                              onMouseDown={e => handleCropCornerResize(e, 'tl')} />
+                            <div className={`${handleClass} cursor-nesw-resize`}
+                              style={{ left: cropLeft + cropW - 6, top: cropTop - 6 }}
+                              onMouseDown={e => handleCropCornerResize(e, 'tr')} />
+                            <div className={`${handleClass} cursor-nesw-resize`}
+                              style={{ left: cropLeft - 6, top: cropTop + cropH - 6 }}
+                              onMouseDown={e => handleCropCornerResize(e, 'bl')} />
+                            <div className={`${handleClass} cursor-nwse-resize`}
+                              style={{ left: cropLeft + cropW - 6, top: cropTop + cropH - 6 }}
+                              onMouseDown={e => handleCropCornerResize(e, 'br')} />
+                          </>
+                        )}
                       </>
                     )
                   })()}
@@ -1718,8 +2439,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               {isClipMode && (
                 <div className="flex flex-col gap-0 -mx-1">
                   <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-t-lg bg-blue-950/40 border border-blue-500/20">
-                    <Scissors size={12} className="text-blue-400 shrink-0" />
-                    <span className="text-[11px] font-semibold text-blue-400 tracking-wide shrink-0">Clip Mode</span>
+                    <button
+                      onClick={exitClipMode}
+                      className="flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded text-[11px] font-medium text-gray-300 border border-white/15 bg-white/5 hover:bg-white/10 transition-colors"
+                    >
+                      <X size={12} />
+                      Stop Clipping
+                    </button>
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
 
                     {/* Add Segment / Split Segment button */}
@@ -1734,13 +2460,15 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         const canSplit = playheadTime > insideSeg.inPoint + frameTime && playheadTime < insideSeg.outPoint - frameTime
                         return (
                           <div className="relative group">
-                            <button
-                              onClick={splitSegment}
-                              disabled={!canSplit}
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-purple-400 border border-purple-500/30 hover:bg-purple-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              <Scissors size={11} /> Split Segment
-                            </button>
+                            <Tooltip content="Split the current segment into 2 at the playhead" side="top">
+                              <button
+                                onClick={splitSegment}
+                                disabled={!canSplit}
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-purple-400 border border-purple-500/30 hover:bg-purple-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                <Scissors size={11} /> Split Segment
+                              </button>
+                            </Tooltip>
                             {!canSplit && (
                               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity">
                                 Too close to segment edge
@@ -1784,18 +2512,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
 
-                    <Tooltip content="Toggle 9:16 crop">
-                      <button
-                        onClick={() => setClipState(s => ({ ...s, cropMode: s.cropMode === '9:16' ? 'none' : '9:16', cropX: 0.5 }))}
-                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors ${
-                          clipState.cropMode === '9:16'
-                            ? 'text-blue-300 border-blue-400/60 bg-blue-950/60'
-                            : 'text-gray-400 border-white/20 hover:text-blue-300 hover:border-blue-400/40'
-                        }`}
-                      >
-                        <Crop size={11} /> Crop
-                      </button>
-                    </Tooltip>
+                    <CropAspectSelector
+                      value={clipState.cropAspect}
+                      onChange={a => setClipState(s => ({ ...s, cropAspect: a }))}
+                      videoW={videoInfo?.width}
+                      videoH={videoInfo?.height}
+                    />
                     <Tooltip content="Add a bleep at the current playhead position">
                       <button
                         onClick={() => {
@@ -2434,7 +3156,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               {duration > 0 && (
                 <div
                   ref={scrollbarRef}
-                  className="relative h-3 w-full select-none mt-1"
+                  className="relative h-3 w-full select-none mt-4"
                 >
                   {/* Track */}
                   <div className="absolute inset-y-1 inset-x-0 bg-white/5 rounded-full" />
@@ -2651,36 +3373,42 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
               {/* Secondary controls row */}
               <div className="flex items-center gap-3 min-w-0">
-                <Button variant="ghost" size="sm" icon={<FolderOpen size={14} />} onClick={handleBrowse} className="shrink-0">
-                  Open video file
-                </Button>
-                {videoUrl && (
-                  <button
-                    onClick={() => {
-                      if (!isClipMode) {
-                        // Warn if multi-track and not yet merged
+                {videoUrl && !isClipMode && (() => {
+                  const isClipFile = !!currentVideoClip
+                  const sourceMissing = isClipFile && !currentVideoClip.sourceExists
+                  const tooltip = sourceMissing
+                    ? `Source video "${currentVideoClip.clipOf}" is missing from this folder`
+                    : ''
+                  const currentName = state.filePath?.replace(/.*[\\/]/, '') ?? ''
+                  // A source already has clips if there's a draft or an exported clip output for it
+                  const hasExistingClips = !isClipFile && (
+                    folderDrafts.some(d => d.sourceName === currentName) ||
+                    siblingFiles.some(f => f.clipOf === currentName)
+                  )
+                  return (
+                    <button
+                      disabled={sourceMissing}
+                      title={tooltip}
+                      onClick={() => {
+                        if (isClipFile) {
+                          // Exported clips are immutable; branch a new clip from the saved state.
+                          reopenClipOutput(currentVideoClip.clipOf, currentVideoClip.clipState)
+                          return
+                        }
                         if (multiTrack && !tracksExtracted) { setClipModeModal('warn'); return }
                         setIsClipMode(true)
-                        return
-                      }
-                      if (clipState.clipRegions.length > 0) {
-                        setShowExitClipConfirm(true)
-                      } else {
-                        exitClipMode()
-                      }
-                    }}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border transition-colors shrink-0 ${
-                      isClipMode
-                        ? 'bg-red-900/30 border-red-600/40 text-red-400 hover:bg-red-900/50'
-                        : 'bg-blue-950/40 border-blue-500/30 text-blue-400 hover:bg-blue-950/60'
-                    }`}
-                  >
-                    <Scissors size={12} />
-                    {isClipMode ? 'Stop Clipping' : 'Start Clipping'}
-                  </button>
-                )}
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed bg-blue-950/40 border-blue-500/30 text-blue-400 hover:bg-blue-950/60"
+                    >
+                      <Scissors size={12} />
+                      {isClipFile
+                        ? 'New clip from current'
+                        : hasExistingClips ? 'Start New Clip' : 'Start Clipping'}
+                    </button>
+                  )
+                })()}
                 {videoInfo && (
-                  <div className="ml-auto flex items-center gap-1 text-xs text-gray-500 min-w-0 overflow-hidden">
+                  <div className="flex items-center gap-1 text-xs text-gray-500 min-w-0 overflow-hidden">
                     <Info size={12} className="shrink-0" />
                     <Tooltip
                       content={state.filePath ? `Show in Explorer: ${state.filePath}` : ''}
@@ -2698,32 +3426,24 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     </Tooltip>
                   </div>
                 )}
+                <Button variant="ghost" size="sm" icon={<FolderOpen size={14} />} onClick={handleBrowse} className="ml-auto shrink-0">
+                  Open Video File
+                </Button>
                 {videoInfo && (
-                  <Tooltip content="Close video" triggerClassName="inline-flex shrink-0">
-                    <button
-                      onClick={() => {
-                        const hasClipWork = isClipMode && (
-                          clipState.clipRegions.length > 0 || clipState.bleepRegions.length > 0
-                        )
-                        if (hasClipWork) {
-                          setShowCloseVideoConfirm(true)
-                        } else {
-                          closeVideo()
-                        }
-                      }}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors"
-                    >
-                      <X size={12} />
-                      Close Video
-                    </button>
-                  </Tooltip>
+                  <button
+                    onClick={() => closeVideo()}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors shrink-0"
+                  >
+                    <X size={12} />
+                    Close Session
+                  </button>
                 )}
               </div>
             </div>
           </div>
 
           {/* Audio tracks panel */}
-          <div className={`relative bg-navy-800 flex flex-col shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-2 overflow-hidden' : 'w-56 overflow-hidden'}`}>
+          <div className={`relative bg-navy-800 flex flex-col shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-2 overflow-hidden' : 'w-64 overflow-hidden'}`}>
             {/* Left edge — collapse/expand handle */}
             <Tooltip content={panelCollapsed ? 'Expand panel' : 'Collapse panel'} side="left" triggerClassName="group/edge absolute left-0 inset-y-0 w-2 z-20">
               <button
@@ -2736,8 +3456,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
             {!panelCollapsed && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 
-              {/* Audio Tracks section */}
-              <div className="shrink-0 overflow-y-auto">
+              {/* Audio Tracks section — absorbs variable height so Session Videos stays pinned to the bottom */}
+              <div className="flex-1 min-h-0 overflow-y-auto">
                 <div className="px-4 py-2.5 border-b border-white/5">
                   <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Audio Tracks</h3>
                 </div>
@@ -2922,30 +3642,94 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 )}
               </div>
 
-              {/* Session Videos panel */}
-              {siblingFiles.length > 0 && (
-                <div className="max-h-[50%] overflow-hidden pr-2 border-t border-white/5">
+              {/* Session Videos panel — hide when there's only one video and nothing derived from it.
+                  Pinned to the bottom of the sidebar with a 50% cap so it never dominates and doesn't
+                  shift around as the Audio Tracks section grows/shrinks. */}
+              {(siblingFiles.length > 1 || folderDrafts.length > 0) && (
+                <div className="shrink-0 max-h-[50%] overflow-hidden pr-2 border-t border-white/5">
                   <div className="max-h-full overflow-y-auto">
                     <div className="sticky top-0 z-10 bg-navy-800 px-4 py-2.5 border-b border-white/5 flex items-center gap-2">
                       <Film size={12} className="text-gray-600 shrink-0" />
                       <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Session Videos</h3>
                     </div>
-                    {isClipMode ? (
-                      <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">Locked during clip mode</div>
-                    ) : isExtracting ? (
+                    {isExtracting ? (
                       <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">Available once merge is complete or cancelled</div>
-                    ) : (
-                      <div className="px-1 py-1.5 flex flex-col gap-0.5">
-                        {siblingFiles.map(item => (
-                          <SiblingVideoItem
-                            key={item.path}
-                            item={item}
-                            isActive={item.path === state.filePath}
-                            onClick={() => loadFile(item.path)}
-                          />
-                        ))}
-                      </div>
-                    )}
+                    ) : (() => {
+                      // Group drafts by source filename so each source video shows its drafts underneath.
+                      const draftsBySource = folderDrafts.reduce<Record<string, import('../../types').ClipDraft[]>>((acc, d) => {
+                        (acc[d.sourceName] ||= []).push(d)
+                        return acc
+                      }, {})
+                      const seenNames = new Set(siblingFiles.map(v => v.name))
+                      // Group clip-output siblings under their source video so they nest like drafts do.
+                      // If a clip's source isn't in the folder, it falls through to the top level as an orphan.
+                      const clipChildren: Record<string, SiblingFile[]> = {}
+                      const topLevelSiblings: SiblingFile[] = []
+                      for (const s of siblingFiles) {
+                        if (s.clipOf && seenNames.has(s.clipOf)) {
+                          (clipChildren[s.clipOf] ||= []).push(s)
+                        } else {
+                          topLevelSiblings.push(s)
+                        }
+                      }
+                      // Any drafts whose source isn't in the folder (e.g., renamed/deleted) appear at the bottom.
+                      const orphanDrafts = Object.entries(draftsBySource)
+                        .filter(([name]) => !seenNames.has(name))
+                        .flatMap(([, list]) => list)
+                      return (
+                        <div className="px-1 py-1.5 flex flex-col gap-0.5">
+                          {topLevelSiblings.map(item => (
+                            <React.Fragment key={item.path}>
+                              <SiblingVideoItem
+                                item={item}
+                                isActive={item.path === state.filePath}
+                                onClick={() => loadFile(item.path)}
+                                onReopenAsClip={item.clipOf && item.clipState
+                                  ? () => reopenClipOutput(item.clipOf!, item.clipState!)
+                                  : undefined}
+                              />
+                              {(draftsBySource[item.name] ?? []).map(draft => (
+                                <DraftSessionItem
+                                  key={draft.id}
+                                  draft={draft}
+                                  displayName={draftDisplayName(draft)}
+                                  sourceFps={item.fps}
+                                  isActive={activeDraftId === draft.id}
+                                  isExporting={exportingDraftIds.has(draft.id)}
+                                  onClick={() => loadDraft(draft)}
+                                  onDelete={() => requestDeleteDraft(draft)}
+                                  onRename={name => renameDraft(draft.id, name)}
+                                />
+                              ))}
+                              {(clipChildren[item.name] ?? []).map(child => (
+                                <SiblingVideoItem
+                                  key={child.path}
+                                  item={child}
+                                  isActive={child.path === state.filePath}
+                                  indented
+                                  onClick={() => loadFile(child.path)}
+                                  onReopenAsClip={child.clipOf && child.clipState
+                                    ? () => reopenClipOutput(child.clipOf!, child.clipState!)
+                                    : undefined}
+                                />
+                              ))}
+                            </React.Fragment>
+                          ))}
+                          {orphanDrafts.map(draft => (
+                            <DraftSessionItem
+                              key={draft.id}
+                              draft={draft}
+                              displayName={draftDisplayName(draft)}
+                              sourceFps={siblingFiles.find(f => f.name === draft.sourceName)?.fps}
+                              isActive={activeDraftId === draft.id}
+                              onClick={() => loadDraft(draft)}
+                              onDelete={() => requestDeleteDraft(draft)}
+                              onRename={name => renameDraft(draft.id, name)}
+                            />
+                          ))}
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               )}
@@ -2964,6 +3748,30 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
           </button>
         </div>
       )}
+
+      {/* ── Confirm delete clip draft ─────────────────────────────────────────── */}
+      <Modal
+        isOpen={draftPendingDelete !== null}
+        onClose={() => setDraftPendingDelete(null)}
+        title="Delete clip draft?"
+        width="sm"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setDraftPendingDelete(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmDeleteDraft}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        {draftPendingDelete && (
+          <p className="text-sm text-gray-300 leading-relaxed">
+            Delete <span className="text-gray-100 font-medium">{draftDisplayName(draftPendingDelete)}</span>? This can't be undone.
+          </p>
+        )}
+      </Modal>
 
       {/* ── Multi-track warning / merge modal before entering clip mode ────── */}
       <Modal
@@ -3100,70 +3908,23 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         )}
       </Modal>
 
-      <Modal
-        isOpen={showExitClipConfirm}
-        onClose={() => setShowExitClipConfirm(false)}
-        title="Discard clip points?"
-        width="sm"
-        footer={
-          <>
-            <Button variant="ghost" size="sm" onClick={() => setShowExitClipConfirm(false)}>
-              Keep editing
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => { setShowExitClipConfirm(false); exitClipMode() }}
-            >
-              Discard &amp; exit
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-gray-300 leading-relaxed">
-          You've set in and out points for this clip. Exiting clip mode will discard them.
-        </p>
-      </Modal>
 
-      <Modal
-        isOpen={showCloseVideoConfirm}
-        onClose={() => setShowCloseVideoConfirm(false)}
-        title="Close video?"
-        width="sm"
-        footer={
-          <>
-            <Button variant="ghost" size="sm" onClick={() => setShowCloseVideoConfirm(false)}>
-              Keep editing
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => { setShowCloseVideoConfirm(false); closeVideo() }}
-            >
-              Discard &amp; close
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-gray-300 leading-relaxed">
-          You have unsaved clip work — {[
-            clipState.clipRegions.length > 0 && `${clipState.clipRegions.length} clip segment${clipState.clipRegions.length !== 1 ? 's' : ''}`,
-            clipState.bleepRegions.length > 0 && `${clipState.bleepRegions.length} bleep marker${clipState.bleepRegions.length !== 1 ? 's' : ''}`,
-          ].filter(Boolean).join(' and ')}. Closing the video will discard them.
-        </p>
-      </Modal>
-
-      {showExportDialog && state.filePath && (
-        <ExportClipDialog
-          defaultPresetId={config.clipPresetId ?? ''}
-          filePath={state.filePath}
-          hasBleepsOutsideRegions={clipState.bleepRegions.some(b =>
-            !clipState.clipRegions.some(r => b.start >= r.inPoint && b.end <= r.outPoint)
-          )}
-          onConfirm={runExport}
-          onClose={() => setShowExportDialog(false)}
-        />
-      )}
+      {showExportDialog && state.filePath && (() => {
+        const activeDraft = activeDraftId ? folderDrafts.find(d => d.id === activeDraftId) : null
+        const suffix = activeDraft ? `-${draftDisplayName(activeDraft)}` : undefined
+        return (
+          <ExportClipDialog
+            defaultPresetId={config.clipPresetId ?? ''}
+            defaultSuffix={suffix}
+            filePath={state.filePath}
+            hasBleepsOutsideRegions={clipState.bleepRegions.some(b =>
+              !clipState.clipRegions.some(r => b.start >= r.inPoint && b.end <= r.outPoint)
+            )}
+            onConfirm={runExport}
+            onClose={() => setShowExportDialog(false)}
+          />
+        )
+      })()}
     </div>
   )
 }

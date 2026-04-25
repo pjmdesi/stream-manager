@@ -39,12 +39,14 @@ export interface WatchRule {
   enabled: boolean
   watchPath: string
   pattern: string
-  action: 'move' | 'copy' | 'rename'
-  destinationMode?: 'static' | 'auto'
+  action: 'move' | 'copy' | 'rename' | 'convert'
+  destinationMode?: 'static' | 'auto' | 'next-to-original'
   destination?: string
   autoMatchDate?: boolean
   namePattern?: string
   onlyNewFiles?: boolean
+  conversionPresetId?: string
+  startImmediately?: boolean
 }
 
 export interface WatchEvent {
@@ -253,7 +255,9 @@ class FileWatcher {
     if (rule.action === 'move' || rule.action === 'copy') {
       const rawDestination = rule.destinationMode === 'auto'
         ? this.resolveAutoDestination(rule, filePath)
-        : (rule.destination ?? null)
+        : rule.destinationMode === 'next-to-original'
+          ? path.dirname(filePath)
+          : (rule.destination ?? null)
 
       const destination = rawDestination
         ? this.resolveFolderPerStreamDestination(rawDestination, filePath)
@@ -294,6 +298,39 @@ class FileWatcher {
         } else {
           throw err
         }
+      }
+    } else if (rule.action === 'convert') {
+      if (!rule.conversionPresetId) throw new Error('No conversion preset configured')
+      const { getPresetById, startConversionJob, addPendingJob } = await import('../ipc/converter')
+      const preset = getPresetById(rule.conversionPresetId)
+      if (!preset) throw new Error(`Conversion preset not found: ${rule.conversionPresetId}`)
+
+      const rawDestination = rule.destinationMode === 'auto'
+        ? this.resolveAutoDestination(rule, filePath)
+        : rule.destinationMode === 'next-to-original'
+          ? path.dirname(filePath)
+          : (rule.destination ?? null)
+      const destination = rawDestination
+        ? this.resolveFolderPerStreamDestination(rawDestination, filePath)
+        : rawDestination
+      if (!destination) throw new Error(
+        rule.destinationMode === 'auto'
+          ? 'Could not find a matching stream folder for the date in the filename'
+          : 'No destination configured'
+      )
+      await fs.promises.mkdir(destination, { recursive: true })
+
+      // Replace the matched file's extension with the preset's output extension
+      const baseName = path.basename(newName, path.extname(newName))
+      const outputPath = path.join(destination, `${baseName}.${preset.outputExtension}`)
+      const jobStub = { id: '', inputFile: filePath, outputFile: outputPath, preset, status: 'queued' as const, progress: 0 }
+
+      if (rule.startImmediately) {
+        const { done } = await startConversionJob(jobStub, onProgress)
+        await done
+      } else {
+        // Add to converter queue for manual start; rule is 'applied' as soon as the job is queued.
+        addPendingJob(jobStub)
       }
     }
   }

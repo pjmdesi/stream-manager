@@ -124,7 +124,11 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     const unsubError = window.api.onJobError(({ jobId, error }: { jobId: string; error: string }) => {
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'error', error } : j))
     })
-    return () => { unsubProgress(); unsubComplete(); unsubError() }
+    // Jobs added by auto-rules (background) — append if not already in local state.
+    const unsubAdded = window.api.onJobAdded((job: ConversionJob) => {
+      setJobs(prev => prev.some(j => j.id === job.id) ? prev : [...prev, job])
+    })
+    return () => { unsubProgress(); unsubComplete(); unsubError(); unsubAdded() }
   }, [])
 
   useEffect(() => { jobsRef.current = jobs }, [jobs])
@@ -522,6 +526,16 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
 
                     {/* Right: action buttons column */}
                     <div className="flex flex-row items-center justify-center gap-1 shrink-0">
+                      {job.status === 'queued' && (
+                        <Tooltip content="Start conversion">
+                          <button
+                            onClick={() => window.api.startQueuedJob(job.id)}
+                            className="p-1.5 text-gray-600 hover:text-green-400 transition-colors"
+                          >
+                            <Play size={14} />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isActive && (
                         <Tooltip content={job.status === 'paused' ? 'Resume' : 'Pause'}>
                           <button

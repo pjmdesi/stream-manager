@@ -175,6 +175,7 @@ interface KonvaLayerNodeProps {
   onSelect: (id: string, multi: boolean) => void
   onChange: (updated: ThumbnailLayer) => void
   scale: number
+  onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void
   onSnapDragMove: (e: Konva.KonvaEventObject<DragEvent>) => void
   onSnapTransformBoundBox: (oldBox: KonvaBox, newBox: KonvaBox) => KonvaBox
   onClearGuides: () => void
@@ -183,7 +184,7 @@ interface KonvaLayerNodeProps {
 
 function snapGrid(v: number) { return Math.round(v / GRID_SIZE) * GRID_SIZE }
 
-function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
   const [img] = useImage(layer.src ? `file://${layer.src}` : '', 'anonymous')
   const nodeRef = useRef<Konva.Image>(null)
   const trRef = useRef<Konva.Transformer>(null)
@@ -218,6 +219,7 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSn
         onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
         onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
         onTap={() => onSelect(layer.id, false)}
+        onDragStart={onDragStart}
         onDragMove={onSnapDragMove}
         onDragEnd={e => {
           onClearGuides()
@@ -240,7 +242,7 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSn
   )
 }
 
-function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function TextNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
   const nodeRef = useRef<Konva.Text>(null)
   const trRef = useRef<Konva.Transformer>(null)
 
@@ -276,6 +278,7 @@ function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSna
         onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
         onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
         onTap={() => onSelect(layer.id, false)}
+        onDragStart={onDragStart}
         onDragMove={onSnapDragMove}
         onDragEnd={e => {
           onClearGuides()
@@ -304,7 +307,7 @@ function TextNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSna
   )
 }
 
-function ShapeNode({ layer, isSelected, onSelect, onChange, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function ShapeNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
   const nodeRef = useRef<any>(null)
   const trRef = useRef<Konva.Transformer>(null)
   const w = layer.width ?? 200
@@ -879,10 +882,25 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [smartSnapEnabled, setSmartSnapEnabled] = useState(true)
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false)
 
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null)
+
+  const handleDragStart = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
+    dragStartPosRef.current = { x: e.target.x(), y: e.target.y() }
+  }, [])
+
   const handleSnapDragMove = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
     if (!stageRef.current || !guideLayerRef.current) return
-    if (!smartSnapEnabled && !gridSnapEnabled) return
     const node = e.target
+
+    // Axis constraint: Shift locks movement to the dominant axis from drag start
+    if (e.evt.shiftKey && dragStartPosRef.current) {
+      const dx = Math.abs(node.x() - dragStartPosRef.current.x)
+      const dy = Math.abs(node.y() - dragStartPosRef.current.y)
+      if (dx >= dy) node.y(dragStartPosRef.current.y)
+      else node.x(dragStartPosRef.current.x)
+    }
+
+    if (!smartSnapEnabled && !gridSnapEnabled) return
     const snap = getSnapResult(node, stageRef.current, smartSnapEnabled, gridSnapEnabled)
     if (snap.x !== undefined) node.x(snap.x)
     if (snap.y !== undefined) node.y(snap.y)
@@ -1225,13 +1243,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const pngDataUrl = getCanvasDataUrl()
     try {
       await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl)
-      // Update the stream meta flags so the streams list knows this thumbnail exists
-      const existingMeta = currentStream?.meta ?? {} as any
-      await window.api.writeStreamMeta(folderPath, {
-        ...existingMeta,
+      // Merge only the thumbnail flags — prevents closure-stale `currentStream.meta` from
+      // clobbering fields edited concurrently in other UI (e.g. MetaModal).
+      await window.api.updateStreamMeta(folderPath, {
         smThumbnail: true,
         smThumbnailTemplate: templateId,
-      } as any)
+      })
       setIsDirty(false)
     } catch (err) {
       console.error('Auto-save failed:', err)
@@ -1487,10 +1504,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.json`),
       window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.png`),
     ])
-    // Clear the meta flags so the streams list reflects the deletion
-    const existingMeta = (currentStream.meta ?? {}) as any
-    const { smThumbnail: _a, smThumbnailTemplate: _b, ...metaWithoutThumb } = existingMeta
-    await window.api.writeStreamMeta(folderPath, metaWithoutThumb as any).catch(() => {})
+    // Clear only the thumbnail flags via merge — preserves any other fields edited concurrently.
+    await window.api.updateStreamMeta(folderPath, {
+      smThumbnail: undefined,
+      smThumbnailTemplate: undefined,
+    } as any).catch(() => {})
     // Remove from persisted recents store and sync local state
     window.api.thumbnailRemoveRecent(folderPath, date).then(setRecents).catch(() => {
       setRecents(prev => prev.filter(r => !(r.folderPath === folderPath && r.date === date)))
@@ -1815,6 +1833,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       onSelect: handleLayerSelect,
                       onChange: updateLayer,
                       scale: viewZoom,
+                      onDragStart: handleDragStart,
                       onSnapDragMove: handleSnapDragMove,
                       onSnapTransformBoundBox: handleSnapTransformBoundBox,
                       onClearGuides: clearSnapGuides,

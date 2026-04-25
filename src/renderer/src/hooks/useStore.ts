@@ -26,6 +26,7 @@ const defaultConfig: AppConfig = {
   disableAnimations: false,
   slowAnimations: false,
   autoDeletePartialOnCancel: false,
+  clipDurationThreshold: 300,
   claudeApiKey: '',
   claudeSystemPrompt: '',
   launcherWidgetGroupId: '',

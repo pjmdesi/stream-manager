@@ -92,20 +92,10 @@ export function registerYouTubeIPC(): void {
     videoId: string,
     title: string,
     description: string,
-    tags: string[],
-    gameTitle?: string
+    tags: string[]
   ) => {
     const { clientId, clientSecret } = getCreds()
     await updateVideoTags(videoId, tags, clientId, clientSecret, title, description)
-    // Also attempt to update gameTitle via the broadcast resource — it persists after
-    // completion and YouTube may still accept gameTitle updates on completed broadcasts.
-    if (gameTitle) {
-      try {
-        await updateBroadcastSnippet(videoId, { title, description, gameTitle }, clientId, clientSecret)
-      } catch {
-        // Silently ignore — YouTube may reject liveBroadcasts.update for some completed states
-      }
-    }
   })
 
   ipcMain.handle('youtube:getQualifyingThumbnails', (_event, paths: string[]) => {
@@ -120,19 +110,13 @@ export function registerYouTubeIPC(): void {
   ipcMain.handle('youtube:updateBroadcast', async (
     _event,
     broadcastId: string,
-    snippet: { title: string; description: string; gameTitle?: string },
+    snippet: { title: string; description: string },
     tags: string[]
   ) => {
-    console.log('[YT main] updateBroadcast received — broadcastId:', broadcastId)
-    console.log('[YT main] snippet:', JSON.stringify(snippet))
-    console.log('[YT main] tags:', tags)
     const { clientId, clientSecret } = getCreds()
-    console.log('[YT main] clientId set:', !!clientId, '| clientSecret set:', !!clientSecret)
     await updateBroadcastSnippet(broadcastId, snippet, clientId, clientSecret)
-    console.log('[YT main] snippet updated OK')
     if (tags.length > 0) {
       await updateVideoTags(broadcastId, tags, clientId, clientSecret, snippet.title, snippet.description)
-      console.log('[YT main] tags updated OK')
     }
   })
 }

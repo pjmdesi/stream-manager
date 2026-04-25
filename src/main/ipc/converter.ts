@@ -228,6 +228,88 @@ function getPresetsDir(): string {
 
 // ── IPC handlers ───────────────────────────────────────────────────────────
 
+/** Broadcast a job-added event so any renderer window (e.g. ConverterPage) appends it to local state. */
+function broadcastJobAdded(job: ConversionJob): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('converter:jobAdded', job)
+  }
+}
+
+/** Add a job in the queued state WITHOUT running it. Used by auto-rules when the user has
+ * opted out of "start immediately" — the user manually starts it from the ConverterPage. */
+export function addPendingJob(job: ConversionJob): string {
+  const id = job.id || uuidv4()
+  const queuedJob: ConversionJob = { ...job, id, status: 'queued', progress: 0 }
+  jobs.set(id, queuedJob)
+  broadcastJobAdded(queuedJob)
+  return id
+}
+
+/** Resolve a preset by id from builtins or the user's imported presets store. */
+export function getPresetById(id: string): ConversionPreset | null {
+  const builtin = BUILTIN_PRESETS.find(p => p.id === id)
+  if (builtin) return builtin
+  const imported = getStore().get('importedPresets', []) as ConversionPreset[]
+  return imported.find(p => p.id === id) ?? null
+}
+
+/** Start a conversion job. Broadcasts progress/complete/error events to all renderer windows so
+ * the ConversionWidget stays in sync regardless of which process triggered the job. Returns the
+ * job id immediately and a `done` promise that resolves on completion (or rejects on error).
+ * Used by both the `converter:addToQueue` IPC and auto-rules (fileWatcher). */
+export async function startConversionJob(
+  job: ConversionJob,
+  onProgress?: (pct: number) => void
+): Promise<{ id: string; done: Promise<void> }> {
+  const id = job.id || uuidv4()
+  const newJob: ConversionJob = { ...job, id, status: 'running', progress: 0 }
+  jobs.set(id, newJob)
+
+  const notifyAll = (channel: string, data: any) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send(channel, data)
+    }
+  }
+  notifyAll('converter:jobProgress', { jobId: id, percent: 0 })
+
+  const handleProgress = (percent: number) => {
+    const j = jobs.get(id)
+    if (j) jobs.set(id, { ...j, progress: percent })
+    notifyAll('converter:jobProgress', { jobId: id, percent })
+    onProgress?.(percent)
+  }
+
+  const done = new Promise<void>((resolve, reject) => {
+    const handleComplete = () => {
+      jobs.set(id, { ...jobs.get(id)!, status: 'done', progress: 100 })
+      cancellers.delete(id)
+      notifyAll('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
+      resolve()
+    }
+    const handleError = (err: Error) => {
+      jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
+      cancellers.delete(id)
+      notifyAll('converter:jobError', { jobId: id, error: err.message })
+      reject(err)
+    }
+    ;(async () => {
+      try {
+        const { runConversion, applyGpuAcceleration, probeFile } = await import('../services/ffmpegService')
+        const gpuArgs = await applyGpuAcceleration(job.preset.ffmpegArgs)
+        const duration = await probeFile(job.inputFile).then(info => info.duration).catch(() => 0)
+        const result = runConversion(job.inputFile, job.outputFile, gpuArgs, duration, handleProgress, handleComplete, handleError)
+        cancellers.set(id, result.cancel)
+        pausers.set(id, result.pause)
+        resumers.set(id, result.resume)
+      } catch (err: any) {
+        handleError(err instanceof Error ? err : new Error(String(err)))
+      }
+    })()
+  })
+
+  return { id, done }
+}
+
 export function getConverterStatus(): { active: boolean; percent: number; label: string } {
   const running = [...jobs.values()].filter(j => j.status === 'running' || j.status === 'queued')
   if (running.length === 0) return { active: false, percent: 0, label: 'Idle' }
@@ -306,62 +388,38 @@ export function registerConverterIPC(): void {
     store.set('importedPresets', presets.map(p => p.id === id ? { ...p, name: newName.trim() } : p))
   })
 
-  ipcMain.handle('converter:addToQueue', async (event, job: ConversionJob) => {
-    const id = job.id || uuidv4()
-    const newJob: ConversionJob = { ...job, id, status: 'running', progress: 0 }
-    jobs.set(id, newJob)
-
-    const win = BrowserWindow.fromWebContents(event.sender)
-    win?.webContents.send('converter:jobProgress', { jobId: id, percent: 0 })
-
-    const onProgress = (percent: number) => {
-      const j = jobs.get(id)
-      if (j) jobs.set(id, { ...j, progress: percent })
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('converter:jobProgress', { jobId: id, percent })
-      }
-    }
-    const onComplete = () => {
-      jobs.set(id, { ...jobs.get(id)!, status: 'done', progress: 100 })
-      cancellers.delete(id)
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
-      }
-    }
-    const onError = (err: Error) => {
-      jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
-      cancellers.delete(id)
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('converter:jobError', { jobId: id, error: err.message })
-      }
-    }
-
-    const { runConversion, applyGpuAcceleration, probeFile } = await import('../services/ffmpegService')
-    const gpuArgs = await applyGpuAcceleration(job.preset.ffmpegArgs)
-    const duration = await probeFile(job.inputFile).then(info => info.duration).catch(() => 0)
-    const result = runConversion(job.inputFile, job.outputFile, gpuArgs, duration, onProgress, onComplete, onError)
-    cancellers.set(id, result.cancel)
-    pausers.set(id, result.pause)
-    resumers.set(id, result.resume)
+  ipcMain.handle('converter:addToQueue', async (_event, job: ConversionJob) => {
+    const { id, done } = await startConversionJob(job)
+    // Don't await `done` — the renderer gets completion via the broadcast 'converter:jobComplete' event.
+    done.catch(() => { /* error broadcast separately */ })
     return id
+  })
+
+  // Start a job that was previously added in the 'queued' state (e.g. from an auto-rule
+  // with "Start conversion immediately" unchecked).
+  ipcMain.handle('converter:startQueued', async (_event, jobId: string) => {
+    const existing = jobs.get(jobId)
+    if (!existing || existing.status !== 'queued') return
+    const { done } = await startConversionJob(existing)
+    done.catch(() => { /* error broadcast separately */ })
   })
 
   ipcMain.handle('converter:addClipToQueue', async (event, params: {
     job: ConversionJob
-    clipRegions: Array<{ id: string; inPoint: number; outPoint: number }>
-    cropMode: 'none' | '9:16'
+    clipRegions: Array<{ id: string; inPoint: number; outPoint: number; cropX?: number; cropY?: number; cropScale?: number }>
+    cropAspect: 'off' | 'original' | '16:9' | '1:1' | '9:16'
     cropX: number
     videoWidth: number
     videoHeight: number
     bleepRegions: Array<{ id: string; start: number; end: number }>
     bleepVolume: number
   }) => {
-    const { job, clipRegions, cropMode, cropX, videoWidth, videoHeight, bleepRegions, bleepVolume } = params
+    const { job, clipRegions, cropAspect, cropX, videoWidth, videoHeight, bleepRegions, bleepVolume } = params
     if (clipRegions.length === 0) return
     const id = job.id || uuidv4()
 
     const totalDuration = clipRegions.reduce((acc, r) => acc + (r.outPoint - r.inPoint), 0)
-    const hasCrop  = cropMode === '9:16'
+    const hasCrop  = cropAspect !== 'off'
     const hasBleep = bleepRegions.length > 0
     const n = clipRegions.length
 
@@ -370,8 +428,34 @@ export function registerConverterIPC(): void {
     const audioTrackCount = fileInfo?.audioTracks?.length ?? 1
     const hasMultiTrack = audioTrackCount > 1
 
-    const cropW       = hasCrop ? Math.floor(videoHeight * 9 / 16 / 2) * 2 : 0
-    const cropOffsetX = hasCrop ? Math.floor(cropX * (videoWidth - cropW) / 2) * 2 : 0
+    // Resolve the target aspect ratio (width / height). 'original' uses the video's native ratio.
+    const videoAspect = videoWidth / videoHeight
+    const ar =
+      cropAspect === '16:9' ? 16 / 9 :
+      cropAspect === '9:16' ? 9 / 16 :
+      cropAspect === '1:1'  ? 1 :
+      videoAspect  // 'original' / 'off'
+
+    // Max crop box at scale=1 — snugly fits within the video, limited by whichever dim matches the aspect.
+    let maxCropW: number, maxCropH: number
+    if (ar > videoAspect) { maxCropW = videoWidth;  maxCropH = videoWidth / ar }
+    else                  { maxCropH = videoHeight; maxCropW = videoHeight * ar }
+
+    // Compute per-region crop geometry.
+    const regionCrops = clipRegions.map(r => {
+      const rCropX = r.cropX ?? cropX
+      const rCropY = r.cropY ?? 0.5
+      const rScale = r.cropScale ?? 1
+      const rCropW = Math.floor(maxCropW * rScale / 2) * 2
+      const rCropH = Math.floor(maxCropH * rScale / 2) * 2
+      const rOffsetX = Math.floor(rCropX * (videoWidth - rCropW) / 2) * 2
+      const rOffsetY = Math.floor(rCropY * (videoHeight - rCropH) / 2) * 2
+      return { cropW: rCropW, cropH: rCropH, offsetX: rOffsetX, offsetY: rOffsetY }
+    })
+    // Unified output dims = largest cropped size (i.e. scale=1 region if any exists). Other segments
+    // get upscaled to match. This keeps all segments the same resolution for concat.
+    const outW = regionCrops.length > 0 ? Math.max(...regionCrops.map(c => c.cropW)) : Math.floor(maxCropW / 2) * 2
+    const outH = regionCrops.length > 0 ? Math.max(...regionCrops.map(c => c.cropH)) : Math.floor(maxCropH / 2) * 2
     const sampleRate  = fileInfo?.audioTracks?.[0]?.sampleRate ?? 48000
 
     // -bf 0: disable B-frames — prevents DTS/PTS ordering confusion at concat boundaries
@@ -470,7 +554,17 @@ export function registerConverterIPC(): void {
       const trimEnd   = outPoint - ts
 
       let vChain = `[${i}:v]trim=start=${trimStart}:end=${trimEnd},setpts=PTS-STARTPTS`
-      if (hasCrop) vChain += `,crop=${cropW}:${videoHeight}:${cropOffsetX}:0`
+      if (hasCrop) {
+        const rc = regionCrops[i]
+        vChain += `,crop=${rc.cropW}:${rc.cropH}:${rc.offsetX}:${rc.offsetY}`
+        // Normalize all segments to the same output dims so the concat filter accepts them
+        if (rc.cropW !== outW || rc.cropH !== outH) {
+          vChain += `,scale=${outW}:${outH}`
+        }
+        // Force square pixels — scale/crop can leave inherited SAR values that don't match
+        // between segments, which would fail concat even when width/height agree.
+        vChain += ',setsar=1'
+      }
       fcParts.push(`${vChain}[v${i}]`)
 
       let audioIn = `[${i}:a:0]`

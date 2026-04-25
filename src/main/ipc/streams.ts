@@ -5,6 +5,34 @@ import { spawnSync } from 'child_process'
 import chokidar, { FSWatcher } from 'chokidar'
 import { getStore } from './store'
 import type { ConversionPreset } from './converter'
+import { checkLocalFiles } from './files'
+import { probeFile } from '../services/ffmpegService'
+
+export type VideoCategory = 'full' | 'short' | 'clip'
+
+export interface VideoEntry {
+  size: number
+  mtime: number
+  duration?: number
+  width?: number
+  height?: number
+  fps?: number
+  codec?: string
+  category: VideoCategory
+  // Set when this file was produced by the clip exporter. Enables "reopen in clip editor".
+  clipOf?: string
+  clipState?: unknown
+}
+
+export interface ClipDraft {
+  id: string
+  sourceName: string
+  state: unknown  // ClipState — opaque on the main side (main never inspects it)
+  thumbnailDataUrl?: string
+  name?: string
+  createdAt: number
+  updatedAt: number
+}
 
 export interface StreamMeta {
   date: string
@@ -14,6 +42,8 @@ export interface StreamMeta {
   archived?: boolean
   ytVideoId?: string
   preferredThumbnail?: string
+  videoMap?: Record<string, VideoEntry>
+  clipDrafts?: Record<string, ClipDraft>
 }
 
 export interface ArchiveProgress {
@@ -211,6 +241,138 @@ function migrateMeta(streamsDir: string): void {
   store.set('metaMigrated', true)
 }
 
+// ─── Video classification ─────────────────────────────────────────────────────
+
+const CLOUD_SIZE_THRESHOLD = 2 * 1024 * 1024 * 1024  // 2 GB
+
+function classifyVideo(
+  duration: number | undefined,
+  width: number | undefined,
+  height: number | undefined,
+  size: number,
+  isLocal: boolean,
+  clipThresholdSecs: number
+): VideoCategory {
+  if (isLocal && width !== undefined && height !== undefined) {
+    if (height > width) return 'short'
+    if (duration !== undefined && duration <= clipThresholdSecs) return 'clip'
+    return 'full'
+  }
+  return size < CLOUD_SIZE_THRESHOLD ? 'clip' : 'full'
+}
+
+/**
+ * Probes uncached/stale video files and updates allMeta in-place.
+ * Returns true if anything changed (so the caller can decide to persist).
+ */
+async function refreshVideoMaps(
+  entries: Array<{ key: string; videos: string[] }>,
+  allMeta: Record<string, StreamMeta>,
+  clipThresholdSecs: number
+): Promise<boolean> {
+  const allPaths: string[] = []
+  const pathKey: Map<string, string> = new Map()
+
+  for (const { key, videos } of entries) {
+    for (const v of videos) {
+      allPaths.push(v)
+      pathKey.set(v, key)
+    }
+  }
+  if (allPaths.length === 0) return false
+
+  const localFlags = await checkLocalFiles(allPaths)
+
+  // Stat all files for size + mtime
+  const stats = allPaths.map(p => { try { return fs.statSync(p) } catch { return null } })
+
+  let changed = false
+  const toProbe: Array<{ p: string; idx: number }> = []
+
+  for (let i = 0; i < allPaths.length; i++) {
+    const p = allPaths[i]
+    const key = pathKey.get(p)!
+    const filename = path.basename(p)
+    const stat = stats[i]
+    if (!stat) continue
+
+    const existing = allMeta[key]?.videoMap?.[filename]
+    const isLocal = localFlags[i]
+
+    if (isLocal) {
+      // Re-probe if missing or mtime changed
+      if (!existing || existing.mtime !== stat.mtimeMs) {
+        toProbe.push({ p, idx: i })
+      }
+    } else if (!existing) {
+      // Cloud placeholder — record size-only entry immediately
+      const entry: VideoEntry = {
+        size: stat.size,
+        mtime: stat.mtimeMs,
+        category: classifyVideo(undefined, undefined, undefined, stat.size, false, clipThresholdSecs),
+      }
+      if (!allMeta[key].videoMap) allMeta[key].videoMap = {}
+      allMeta[key].videoMap![filename] = entry
+      changed = true
+    }
+  }
+
+  if (toProbe.length > 0) {
+    await Promise.all(toProbe.map(async ({ p, idx }) => {
+      const key = pathKey.get(p)!
+      const filename = path.basename(p)
+      const stat = stats[idx]!
+      try {
+        const info = await probeFile(p)
+        const prev = allMeta[key].videoMap?.[filename]
+        // App-produced clips (have clipOf) keep a hard-coded category based on their saved crop,
+        // overriding the automatic classifier so 'vid' can't leak back in after a re-probe.
+        let category: VideoEntry['category']
+        if (prev?.clipOf) {
+          const cropAspect = (prev.clipState as { cropAspect?: string } | undefined)?.cropAspect
+          category = cropAspect === '9:16' ? 'short' : 'clip'
+        } else {
+          category = classifyVideo(info.duration, info.width, info.height, stat.size, true, clipThresholdSecs)
+        }
+        const entry: VideoEntry = {
+          size: stat.size,
+          mtime: stat.mtimeMs,
+          duration: info.duration,
+          width: info.width,
+          height: info.height,
+          fps: info.fps,
+          codec: info.videoCodec,
+          category,
+          // Preserve clip-export tagging across re-probes
+          clipOf: prev?.clipOf,
+          clipState: prev?.clipState,
+        }
+        if (!allMeta[key].videoMap) allMeta[key].videoMap = {}
+        allMeta[key].videoMap![filename] = entry
+        changed = true
+      } catch { /* skip unreadable files */ }
+    }))
+  }
+
+  // Prune stale entries: remove videoMap keys whose files are no longer in the folder.
+  // Handles renames and deletes that happened outside the app (or via converter rename).
+  for (const { key, videos } of entries) {
+    const map = allMeta[key]?.videoMap
+    if (!map) continue
+    const currentNames = new Set(videos.map(v => path.basename(v)))
+    for (const name of Object.keys(map)) {
+      if (!currentNames.has(name)) {
+        delete map[name]
+        changed = true
+      }
+    }
+  }
+
+  return changed
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function registerStreamsIPC(): void {
   ipcMain.handle('streams:list', async (_event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'): Promise<StreamFolder[]> => {
     if (!dir || !fs.existsSync(dir)) return []
@@ -349,6 +511,34 @@ export function registerStreamsIPC(): void {
       if (dateCmp !== 0) return dateCmp
       return streamIndex(b.folderName) - streamIndex(a.folderName)
     })
+
+    // Attach cached videoMap immediately so the response isn't blocked
+    for (const folder of folders) {
+      if (allMeta[folder.folderName]?.videoMap && folder.meta) {
+        folder.meta.videoMap = allMeta[folder.folderName].videoMap
+      }
+    }
+
+    // Only refresh video maps if the set of video files has changed since last cache
+    const clipThreshold = (getStore().get('config', {}) as any).clipDurationThreshold ?? 300
+    const videoEntries = folders
+      .filter(f => f.videos.length > 0 && !f.isMissing)
+      .map(f => ({ key: f.folderName, videos: f.videos }))
+    const videoSetChanged = videoEntries.some(({ key, videos }) => {
+      const cached = allMeta[key]?.videoMap
+      if (!cached) return videos.length > 0
+      const cachedNames = new Set(Object.keys(cached))
+      const currentNames = new Set(videos.map(v => path.basename(v)))
+      if (cachedNames.size !== currentNames.size) return true
+      for (const name of currentNames) if (!cachedNames.has(name)) return true
+      return false
+    })
+    if (videoSetChanged) {
+      refreshVideoMaps(videoEntries, allMeta, clipThreshold).then(changed => {
+        if (changed) writeAllMeta(dir, allMeta)
+      })
+    }
+
     return folders
   })
 
@@ -357,6 +547,73 @@ export function registerStreamsIPC(): void {
     const folderName = path.basename(folderPath)
     const allMeta = readAllMeta(streamsDir)
     allMeta[folderName] = meta
+    writeAllMeta(streamsDir, allMeta)
+  })
+
+  // Merge a partial meta update into the existing entry. Safe for callers that only own a subset
+  // of fields (e.g. the thumbnail editor's smThumbnail flags) — preserves any fields edited
+  // concurrently from other UI paths.
+  ipcMain.handle('streams:updateMeta', async (_event, folderPath: string, partial: Partial<StreamMeta>) => {
+    const streamsDir = path.dirname(folderPath)
+    const folderName = path.basename(folderPath)
+    const allMeta = readAllMeta(streamsDir)
+    const existing = allMeta[folderName] ?? ({} as StreamMeta)
+    allMeta[folderName] = { ...existing, ...partial }
+    writeAllMeta(streamsDir, allMeta)
+  })
+
+  // Insert or update a single clip draft in the folder's meta, preserving other drafts.
+  // Server-side merge avoids races between concurrent draft edits on different videos in the folder.
+  ipcMain.handle('clipDraft:save', async (_event, folderPath: string, draft: ClipDraft) => {
+    const streamsDir = path.dirname(folderPath)
+    const folderName = path.basename(folderPath)
+    const allMeta = readAllMeta(streamsDir)
+    const existing = allMeta[folderName] ?? ({} as StreamMeta)
+    const drafts = { ...(existing.clipDrafts ?? {}), [draft.id]: draft }
+    allMeta[folderName] = { ...existing, clipDrafts: drafts }
+    writeAllMeta(streamsDir, allMeta)
+  })
+
+  ipcMain.handle('clipDraft:delete', async (_event, folderPath: string, draftId: string) => {
+    const streamsDir = path.dirname(folderPath)
+    const folderName = path.basename(folderPath)
+    const allMeta = readAllMeta(streamsDir)
+    const existing = allMeta[folderName]
+    if (!existing?.clipDrafts?.[draftId]) return
+    const drafts = { ...existing.clipDrafts }
+    delete drafts[draftId]
+    allMeta[folderName] = { ...existing, clipDrafts: drafts }
+    writeAllMeta(streamsDir, allMeta)
+  })
+
+  // Tag an exported clip's videoMap entry with clipOf + clipState so the user can reopen it
+  // in the clip editor later. Also removes the originating draft if provided. Server-side merge
+  // keeps concurrent edits (e.g. refreshVideoMaps) safe.
+  ipcMain.handle('clip:tagExport', async (_event, folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null) => {
+    const streamsDir = path.dirname(folderPath)
+    const folderName = path.basename(folderPath)
+    const allMeta = readAllMeta(streamsDir)
+    const existing = allMeta[folderName] ?? ({} as StreamMeta)
+    const videoMap = { ...(existing.videoMap ?? {}) }
+    const outputPath = path.join(folderPath, outputFilename)
+    let stat: fs.Stats | null = null
+    try { stat = fs.statSync(outputPath) } catch { /* file not written yet — create minimal entry */ }
+    const current = videoMap[outputFilename]
+    // App-produced clips always get their category forced: '9:16' crop → 'short', otherwise 'clip'.
+    // Overrides anything refreshVideoMaps/classifyVideo may have written.
+    const cropAspect = (clipState as { cropAspect?: string } | null)?.cropAspect
+    const forcedCategory: VideoEntry['category'] = cropAspect === '9:16' ? 'short' : 'clip'
+    videoMap[outputFilename] = {
+      size: current?.size ?? stat?.size ?? 0,
+      mtime: current?.mtime ?? stat?.mtimeMs ?? Date.now(),
+      ...current,
+      category: forcedCategory,
+      clipOf: sourceName,
+      clipState: clipState as any,
+    } as VideoEntry
+    const clipDrafts = { ...(existing.clipDrafts ?? {}) }
+    if (draftId && clipDrafts[draftId]) delete clipDrafts[draftId]
+    allMeta[folderName] = { ...existing, videoMap, clipDrafts }
     writeAllMeta(streamsDir, allMeta)
   })
 

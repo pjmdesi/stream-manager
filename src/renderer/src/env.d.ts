@@ -11,6 +11,7 @@ import type {
   FileInfo,
   StreamMeta,
   StreamFolder,
+  ClipDraft,
   YTTitleTemplate,
   YTDescriptionTemplate,
   YTTagTemplate,
@@ -76,8 +77,8 @@ declare global {
       addToQueue(job: ConversionJob): Promise<string>
       addClipToQueue(params: {
         job: ConversionJob
-        clipRegions: Array<{ id: string; inPoint: number; outPoint: number }>
-        cropMode: 'none' | '9:16'
+        clipRegions: Array<{ id: string; inPoint: number; outPoint: number; cropX?: number; cropY?: number; cropScale?: number }>
+        cropAspect: 'off' | 'original' | '16:9' | '1:1' | '9:16'
         videoWidth: number
         videoHeight: number
         cropX: number
@@ -87,10 +88,12 @@ declare global {
       cancelJob(jobId: string): Promise<void>
       pauseJob(jobId: string): Promise<void>
       resumeJob(jobId: string): Promise<void>
+      startQueuedJob(jobId: string): Promise<void>
       getJobs(): Promise<ConversionJob[]>
       onJobProgress(cb: (data: { jobId: string; percent: number; status?: string }) => void): () => void
       onJobComplete(cb: (data: { jobId: string; outputPath: string }) => void): () => void
       onJobError(cb: (data: { jobId: string; error: string }) => void): () => void
+      onJobAdded(cb: (job: ConversionJob) => void): () => void
 
       // ── Store ────────────────────────────────────────────────────────────────
       getConfig(): Promise<AppConfig>
@@ -105,6 +108,10 @@ declare global {
       // ── Streams ──────────────────────────────────────────────────────────────
       listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
       writeStreamMeta(folderPath: string, meta: StreamMeta): Promise<void>
+      updateStreamMeta(folderPath: string, partial: Partial<StreamMeta>): Promise<void>
+      saveClipDraft(folderPath: string, draft: ClipDraft): Promise<void>
+      deleteClipDraft(folderPath: string, draftId: string): Promise<void>
+      clipTagExport(folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null): Promise<void>
       listStreamTemplates(streamsDir: string): Promise<{ name: string; path: string }[]>
       createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<string>
 
@@ -136,11 +143,11 @@ declare global {
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
-      youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[], gameTitle?: string): Promise<void>
+      youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[]): Promise<void>
       youtubeValidateToken(): Promise<{ valid: boolean; error?: string }>
       youtubeGetQualifyingThumbnails(paths: string[]): Promise<string[]>
       youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>
-      youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string; gameTitle?: string }, tags: string[]): Promise<void>
+      youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string }, tags: string[]): Promise<void>
       getYTTitleTemplates(): Promise<YTTitleTemplate[]>
       setYTTitleTemplates(v: YTTitleTemplate[]): Promise<void>
       getYTDescriptionTemplates(): Promise<YTDescriptionTemplate[]>
@@ -187,6 +194,8 @@ declare global {
       windowMaximize(): void
       windowClose(): void
       windowMinimizeToTray(): void
+      windowIsMaximized(): Promise<boolean>
+      onMaximizeChange(cb: (maximized: boolean) => void): () => void
       getStartupSettings(): Promise<{ startWithWindows: boolean; startMinimized: boolean }>
       setStartupSettings(startWithWindows: boolean, startMinimized: boolean): Promise<void>
       resetOnboarding(): Promise<void>

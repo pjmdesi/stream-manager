@@ -134,12 +134,12 @@ function createWindow(): BrowserWindow {
   // Window control IPC
   ipcMain.on('window:minimize', () => mainWindow.minimize())
   ipcMain.on('window:maximize', () => {
-    if (mainWindow.isMaximized()) {
-      mainWindow.restore()
-    } else {
-      mainWindow.maximize()
-    }
+    if (mainWindow.isMaximized()) mainWindow.restore()
+    else mainWindow.maximize()
   })
+  ipcMain.handle('window:isMaximized', () => mainWindow.isMaximized())
+  mainWindow.on('maximize',   () => mainWindow.webContents.send('window:maximizeChange', true))
+  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:maximizeChange', false))
   ipcMain.on('window:close', () => mainWindow.close())
 
   return mainWindow

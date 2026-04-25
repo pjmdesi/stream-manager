@@ -288,6 +288,19 @@ export function SettingsPage() {
             onChange={v => set('checkEpisodeIteration', v)}
             label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration</div><div className="text-xs text-gray-500">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game</div></div>}
           />
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">
+              Clip duration threshold — <span className="text-purple-400 tabular-nums">{Math.round((local.clipDurationThreshold ?? 300) / 60)} min</span>
+            </label>
+            <input
+              type="range"
+              min={1} max={30} step={1}
+              value={Math.round((local.clipDurationThreshold ?? 300) / 60)}
+              onChange={e => set('clipDurationThreshold', parseInt(e.target.value) * 60)}
+            />
+            <p className="text-xs text-gray-500">Videos at or under this length are classified as clips in the stream video map. Default is 5 minutes.</p>
+          </div>
         </section>
 
         {/* Video Player */}

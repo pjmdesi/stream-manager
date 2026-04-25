@@ -34,30 +34,30 @@ function isFileConfirmedLocal(filePath: string): boolean {
 /**
  * Returns a boolean per path: true = file data is local, false = offline/cloud placeholder.
  * Falls back to true (assume local) on non-Windows or any error so behaviour is unchanged.
+ * Uses async spawn so it never blocks the main thread.
  */
-function checkLocalFiles(filePaths: string[]): boolean[] {
-  if (process.platform !== 'win32' || filePaths.length === 0) return filePaths.map(() => true)
+export function checkLocalFiles(filePaths: string[]): Promise<boolean[]> {
+  if (process.platform !== 'win32' || filePaths.length === 0) return Promise.resolve(filePaths.map(() => true))
 
-  try {
+  return new Promise(resolve => {
     const escaped = filePaths.map(p => p.replace(/'/g, "''"))
     const pathsLiteral = escaped.map(p => `'${p}'`).join(',')
     const script = `@(${pathsLiteral}) | ForEach-Object { try { [int][System.IO.File]::GetAttributes($_) } catch { -1 } }`
 
-    const result = spawnSync('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-Command', script
-    ], { encoding: 'utf8', timeout: 5000 })
-
-    if (result.status !== 0 || !result.stdout) return filePaths.map(() => true)
-
-    const lines = result.stdout.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean)
-    return filePaths.map((_, i) => {
-      const val = parseInt(lines[i] ?? '-1', 10)
-      if (isNaN(val) || val === -1) return true
-      return (val & OFFLINE_MASK) === 0
+    let stdout = ''
+    const proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script])
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    proc.on('close', () => {
+      if (!stdout) return resolve(filePaths.map(() => true))
+      const lines = stdout.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+      resolve(filePaths.map((_, i) => {
+        const val = parseInt(lines[i] ?? '-1', 10)
+        if (isNaN(val) || val === -1) return true
+        return (val & OFFLINE_MASK) === 0
+      }))
     })
-  } catch {
-    return filePaths.map(() => true)
-  }
+    proc.on('error', () => resolve(filePaths.map(() => true)))
+  })
 }
 
 export interface FileInfo {

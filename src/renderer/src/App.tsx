@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -291,6 +291,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
 function AppInner() {
   const [page, setPage] = useState<Page>('streams')
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [integrationAlert, setIntegrationAlert] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -321,6 +322,12 @@ function AppInner() {
       setTimeout(() => splash.remove(), 400)
     }
   }, [loading])
+  const [isMaximized, setIsMaximized] = useState(false)
+  useEffect(() => {
+    window.api.windowIsMaximized().then(setIsMaximized)
+    return window.api.onMaximizeChange(setIsMaximized)
+  }, [])
+
   const [pendingPlayer, setPendingPlayer] = useState<PendingFile | null>(null)
   const [pendingConverter, setPendingConverter] = useState<PendingConverterFile | null>(null)
   const [pendingCombine, setPendingCombine] = useState<PendingFiles | null>(null)
@@ -379,7 +386,7 @@ function AppInner() {
             onClick={() => window.api.windowMaximize()}
             className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
           >
-            <Square size={12} />
+            {isMaximized ? <Minimize2 size={12} /> : <Square size={12} />}
           </button>
           <button
             onClick={() => window.api.windowClose()}
@@ -441,12 +448,21 @@ function AppInner() {
           {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} collapsed={sidebarCollapsed} />}
           <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
-          <button
-            onClick={() => setAboutOpen(true)}
-            className="py-1 flex justify-center w-full hover:text-gray-500 transition-colors"
-          >
-            <span className="text-[10px] text-gray-700">v{appVersion}</span>
-          </button>
+          <div className="py-1 flex justify-center gap-2 w-full">
+            <button
+              onClick={() => setHelpOpen(true)}
+              className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              How to use
+            </button>
+            <span className="text-[10px] text-gray-600">·</span>
+            <button
+              onClick={() => setAboutOpen(true)}
+              className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              v{appVersion}
+            </button>
+          </div>
         </nav>
 
         {/* Page content */}
@@ -462,7 +478,9 @@ function AppInner() {
           <div className={`h-full ${page === 'thumbnails' ? '' : 'hidden'}`}>
             <ThumbnailPage isVisible={page === 'thumbnails'} />
           </div>
-          {page === 'streams'   && <StreamsPage onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} />}
+          <div className={`h-full ${page === 'streams' ? '' : 'hidden'}`}>
+            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} />
+          </div>
           {page === 'templates' && <TemplatesPage />}
           {page === 'rules'     && <RulesPage />}
           {page === 'combine'   && <CombinePage initialFiles={pendingCombine} />}
@@ -473,6 +491,12 @@ function AppInner() {
         </main>
       </div>
       <OnboardingModal isOpen={onboardingOpen} onComplete={() => { setOnboardingOpen(false); refreshConfig(); refreshRules() }} />
+
+      <Modal isOpen={helpOpen} onClose={() => setHelpOpen(false)} title="How to use Stream Manager" width="xl">
+        <div className="py-4 text-sm text-gray-400 text-center">
+          Help content coming soon.
+        </div>
+      </Modal>
 
       <Modal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} title="About Stream Manager" width="sm">
         <div className="flex flex-col items-center gap-4 py-2 text-center">

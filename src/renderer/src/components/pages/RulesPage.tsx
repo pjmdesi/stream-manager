@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, Trash2, FolderOpen, CheckCircle, AlertCircle, Clock } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
-import type { WatchRule, WatchEvent } from '../../types'
+import type { WatchRule, WatchEvent, ConversionPreset } from '../../types'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Input, Select } from '../ui/Input'
@@ -20,11 +20,20 @@ function RuleModal({
   const [watchPath, setWatchPath] = useState(rule?.watchPath || '')
   const [pattern, setPattern] = useState(rule?.pattern || '*.mkv')
   const [action, setAction] = useState<WatchRule['action']>(rule?.action || 'move')
-  const [destinationMode, setDestinationMode] = useState<'static' | 'auto'>(rule?.destinationMode || 'static')
+  const [destinationMode, setDestinationMode] = useState<'static' | 'auto' | 'next-to-original'>(rule?.destinationMode || 'static')
   const [destination, setDestination] = useState(rule?.destination || '')
   const [autoMatchDate, setAutoMatchDate] = useState(rule?.autoMatchDate ?? true)
   const [namePattern, setNamePattern] = useState(rule?.namePattern || '')
   const [onlyNewFiles, setOnlyNewFiles] = useState(rule?.onlyNewFiles ?? false)
+  const [conversionPresetId, setConversionPresetId] = useState(rule?.conversionPresetId || '')
+  const [startImmediately, setStartImmediately] = useState(rule?.startImmediately ?? false)
+  const [presets, setPresets] = useState<ConversionPreset[]>([])
+
+  useEffect(() => {
+    Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
+      .then(([builtin, imported]) => setPresets([...builtin, ...imported]))
+      .catch(() => {})
+  }, [])
 
   const pickDir = async (setter: (v: string) => void) => {
     const dir = await window.api.openDirectoryDialog()
@@ -43,6 +52,8 @@ function RuleModal({
       autoMatchDate: action !== 'rename' && destinationMode === 'auto' ? autoMatchDate : undefined,
       namePattern: namePattern || undefined,
       onlyNewFiles: onlyNewFiles || undefined,
+      conversionPresetId: action === 'convert' ? (conversionPresetId || undefined) : undefined,
+      startImmediately: action === 'convert' ? startImmediately : undefined,
     })
   }
 
@@ -91,18 +102,49 @@ function RuleModal({
             { value: 'move', label: 'Move' },
             { value: 'copy', label: 'Copy' },
             { value: 'rename', label: 'Rename only' },
+            { value: 'convert', label: 'Convert (send to converter)' },
           ]}
         />
+
+        {action === 'convert' && (
+          <div className="flex flex-col gap-3">
+            <Select
+              label="Conversion Preset"
+              value={conversionPresetId}
+              onChange={e => setConversionPresetId(e.target.value)}
+              options={[
+                { value: '', label: 'Select a preset…' },
+                ...presets.map(p => ({ value: p.id, label: p.name })),
+              ]}
+            />
+            <Checkbox
+              checked={startImmediately}
+              onChange={setStartImmediately}
+              label="Start conversion immediately"
+            />
+            {startImmediately ? (
+              <div className="flex items-start gap-2 pl-6 -mt-2 text-xs text-yellow-500/90">
+                <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                <span>Encoding is CPU/GPU-intensive. Make sure this rule only matches files you actually want to convert right away.</span>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 pl-6 -mt-2">
+                Matched files are added to the converter queue. Start them manually from the Converter page.
+              </p>
+            )}
+          </div>
+        )}
 
         {action !== 'rename' && (
           <div className="flex flex-col gap-3">
             <Select
               label="Destination"
               value={destinationMode}
-              onChange={e => setDestinationMode(e.target.value as 'static' | 'auto')}
+              onChange={e => setDestinationMode(e.target.value as 'static' | 'auto' | 'next-to-original')}
               options={[
                 { value: 'auto', label: 'Automatically detect location' },
                 { value: 'static', label: 'Static location' },
+                { value: 'next-to-original', label: 'Next to original' },
               ]}
             />
 
@@ -129,6 +171,12 @@ function RuleModal({
                   </p>
                 )}
               </div>
+            )}
+
+            {destinationMode === 'next-to-original' && (
+              <p className="text-xs text-gray-500 pl-1">
+                The output file is placed next to the original in the same folder.
+              </p>
             )}
           </div>
         )}
@@ -231,6 +279,7 @@ export function RulesPage() {
                   <span className={`text-xs px-2 py-0.5 rounded ${
                     rule.action === 'move' ? 'bg-blue-900/30 text-blue-300' :
                     rule.action === 'copy' ? 'bg-green-900/30 text-green-300' :
+                    rule.action === 'convert' ? 'bg-purple-900/30 text-purple-300' :
                     'bg-yellow-900/30 text-yellow-300'
                   }`}>{rule.action}</span>
                 </div>
@@ -239,6 +288,8 @@ export function RulesPage() {
                     → <span className="text-purple-400">auto</span>
                     {rule.autoMatchDate && <span className="text-gray-600"> · match date in filename</span>}
                   </div>
+                ) : rule.destinationMode === 'next-to-original' ? (
+                  <div className="text-xs text-gray-500 mt-1">→ <span className="text-purple-400">next to original</span></div>
                 ) : rule.destination ? (
                   <div className="text-xs text-gray-500 mt-1 truncate">→ {rule.destination}</div>
                 ) : null}

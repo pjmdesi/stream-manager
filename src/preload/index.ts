@@ -156,6 +156,9 @@ contextBridge.exposeInMainWorld('api', {
   cancelJob: (jobId: string) =>
     ipcRenderer.invoke('converter:cancelJob', jobId),
 
+  startQueuedJob: (jobId: string) =>
+    ipcRenderer.invoke('converter:startQueued', jobId),
+
   pauseJob: (jobId: string) =>
     ipcRenderer.invoke('converter:pauseJob', jobId),
 
@@ -183,6 +186,12 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('converter:jobError', handler)
   },
 
+  onJobAdded: (callback: (job: any) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('converter:jobAdded', handler)
+    return () => ipcRenderer.removeListener('converter:jobAdded', handler)
+  },
+
   // ── Store ─────────────────────────────────────────────────────────────────
   getConfig: () =>
     ipcRenderer.invoke('store:getConfig'),
@@ -202,6 +211,18 @@ contextBridge.exposeInMainWorld('api', {
 
   writeStreamMeta: (folderPath: string, meta: any) =>
     ipcRenderer.invoke('streams:writeMeta', folderPath, meta),
+
+  updateStreamMeta: (folderPath: string, partial: any) =>
+    ipcRenderer.invoke('streams:updateMeta', folderPath, partial),
+
+  saveClipDraft: (folderPath: string, draft: any) =>
+    ipcRenderer.invoke('clipDraft:save', folderPath, draft),
+
+  deleteClipDraft: (folderPath: string, draftId: string) =>
+    ipcRenderer.invoke('clipDraft:delete', folderPath, draftId),
+
+  clipTagExport: (folderPath: string, outputFilename: string, sourceName: string, clipState: any, draftId?: string | null) =>
+    ipcRenderer.invoke('clip:tagExport', folderPath, outputFilename, sourceName, clipState, draftId),
 
   listStreamTemplates: (streamsDir: string) =>
     ipcRenderer.invoke('streams:listTemplates', streamsDir),
@@ -293,8 +314,8 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetVideoById: (videoId: string) =>
     ipcRenderer.invoke('youtube:getVideoById', videoId),
 
-  youtubeUpdateVideo: (videoId: string, title: string, description: string, tags: string[], gameTitle?: string) =>
-    ipcRenderer.invoke('youtube:updateVideo', videoId, title, description, tags, gameTitle),
+  youtubeUpdateVideo: (videoId: string, title: string, description: string, tags: string[]) =>
+    ipcRenderer.invoke('youtube:updateVideo', videoId, title, description, tags),
 
   youtubeValidateToken: () =>
     ipcRenderer.invoke('youtube:validateToken'),
@@ -307,7 +328,7 @@ contextBridge.exposeInMainWorld('api', {
 
   youtubeUpdateBroadcast: (
     broadcastId: string,
-    snippet: { title: string; description: string; gameTitle?: string },
+    snippet: { title: string; description: string },
     tags: string[]
   ) => ipcRenderer.invoke('youtube:updateBroadcast', broadcastId, snippet, tags),
 
@@ -366,6 +387,12 @@ contextBridge.exposeInMainWorld('api', {
   windowMaximize: () => ipcRenderer.send('window:maximize'),
   windowClose: () => ipcRenderer.send('window:close'),
   windowMinimizeToTray: () => ipcRenderer.send('window:minimizeToTray'),
+  windowIsMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:isMaximized'),
+  onMaximizeChange: (cb: (maximized: boolean) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, val: boolean) => cb(val)
+    ipcRenderer.on('window:maximizeChange', handler)
+    return () => ipcRenderer.removeListener('window:maximizeChange', handler)
+  },
 
   // ── Startup settings ──────────────────────────────────────────────────────
   getStartupSettings: (): Promise<{ startWithWindows: boolean; startMinimized: boolean }> =>

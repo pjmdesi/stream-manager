@@ -7,7 +7,7 @@ import {
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, ChevronUp, ChevronsUp, ChevronsDown, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
-  Film, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
+  Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
   Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, LayoutList, LayoutGrid
 } from 'lucide-react'
 
@@ -57,6 +57,57 @@ function toFileUrl(absPath: string): string {
   return 'file:///' + absPath.replace(/\\/g, '/')
 }
 
+// ─── ThumbImage ──────────────────────────────────────────────────────────────
+// Renders a thumbnail image with cloud-sync recovery: on load error it starts a
+// cloud download and shows a spinner overlay until the file is available locally.
+
+function ThumbImage({ path, thumbsKey, className, draggable, iconSize = 14, onLoad }: {
+  path: string
+  thumbsKey: number
+  className?: string
+  draggable?: boolean
+  iconSize?: number
+  onLoad?: () => void
+}) {
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'syncing'>('loading')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => { setStatus('loading') }, [path, thumbsKey])
+
+  useEffect(() => {
+    if (status !== 'syncing') return
+    window.api.startCloudDownload(path).catch(() => {})
+    const unsub = window.api.onCloudDownloadDone(done => {
+      if (done === path) { setReloadKey(k => k + 1); setStatus('loading') }
+    })
+    return unsub
+  }, [status, path])
+
+  const src = `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
+
+  return (
+    <>
+      <img
+        src={src}
+        className={className}
+        draggable={draggable}
+        onLoad={() => { setStatus('loaded'); onLoad?.() }}
+        onError={() => setStatus('syncing')}
+      />
+      {status !== 'loaded' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-navy-900">
+          {status === 'syncing' && (
+            <>
+              <Loader2 size={iconSize} className="text-gray-600 animate-spin" />
+              <span className="text-[9px] text-gray-600 leading-none">Syncing…</span>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
 /** Returns the stream index from a folder name: 1 for base, 2+ for -N suffixed. */
 function streamIndex(folderName: string): number {
   const m = folderName.match(/^\d{4}-\d{2}-\d{2}-(\d+)$/)
@@ -79,7 +130,20 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-function VideoCountTooltip({ videos, children }: { videos: string[]; children: React.ReactNode }) {
+function formatBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
+  return `${(bytes / 1e3).toFixed(0)} KB`
+}
+
+const CATEGORY_LABEL: Record<string, string> = { full: 'vid', short: 'short', clip: 'clip' }
+const CATEGORY_STYLES: Record<string, string> = {
+  full:  'text-purple-400 border-purple-400/50',
+  short: 'text-blue-400 border-blue-400/50',
+  clip:  'text-gray-400 border-gray-600',
+}
+
+function VideoCountTooltip({ videos, videoMap, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; children: React.ReactNode }) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const [durations, setDurations] = useState<Record<string, number | null>>({})
@@ -120,23 +184,35 @@ function VideoCountTooltip({ videos, children }: { videos: string[]; children: R
       {visible && ReactDOM.createPortal(
         <div
           style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
-          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1.5 min-w-[220px] max-w-[380px]"
+          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1.5 min-w-[260px] max-w-[420px]"
           onMouseEnter={() => setVisible(true)}
           onMouseLeave={() => setVisible(false)}
         >
           {videos.map(v => {
             const name = v.split(/[\\/]/).pop() ?? v
-            const dur = durations[v]
+            const entry = videoMap?.[name]
+            const dur = entry?.duration ?? durations[v]
             const isOffline = offlineFiles.has(v)
+            const category = entry?.category
             return (
-              <div key={v} className="flex items-center justify-between gap-4 px-3 py-1.5">
-                <span className="text-xs text-gray-300 truncate" title={name}>{name}</span>
+              <div key={v} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-2 px-3 py-1.5">
+                <span className="text-xs text-gray-300 truncate min-w-0" title={name}>{name}</span>
+                <span className="shrink-0">
+                  {category
+                    ? <span className={`inline-block -translate-y-0.5 text-[10px] font-mono border rounded px-1 ${CATEGORY_STYLES[category] ?? ''}`}>{CATEGORY_LABEL[category] ?? category}</span>
+                    : null}
+                </span>
+                <span className="text-xs text-gray-400 shrink-0 tabular-nums">
+                  {entry?.size !== undefined ? formatBytes(entry.size) : ''}
+                </span>
                 <span className="text-xs font-mono shrink-0">
                   {isOffline
-                    ? <span className="text-gray-600 italic">cloud</span>
-                    : v in durations
-                      ? (dur !== null ? <span className="text-gray-500">{formatDuration(dur)}</span> : <span className="text-gray-600">—</span>)
-                      : <Loader2 size={10} className="animate-spin text-gray-600" />
+                    ? <span className="text-gray-400 italic">cloud</span>
+                    : dur !== undefined
+                      ? (dur !== null ? <span className="text-gray-400">{formatDuration(dur)}</span> : <span className="text-gray-500">—</span>)
+                      : v in durations
+                        ? <span className="text-gray-500">—</span>
+                        : <Loader2 size={10} className="animate-spin text-gray-500" />
                   }
                 </span>
               </div>
@@ -286,7 +362,7 @@ function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsT
   const [index, setIndex] = useState(0)
   const [translateX, setTranslateX] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
-  const imgRefs = useRef<(HTMLImageElement | null)[]>([])
+  const imgRefs = useRef<(HTMLElement | null)[]>([])
   const single = thumbnails.length === 1
 
   const recenter = useCallback(() => {
@@ -312,20 +388,17 @@ function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsT
           className="flex items-center gap-2 h-full transition-transform duration-200"
           style={{ transform: `translateX(${translateX}px)` }}
         >
-          {thumbnails.map((t, i) => {
-            const src = `${toFileUrl(t)}${thumbsKey ? `?t=${thumbsKey}` : ''}`
-            return (
-              <img
-                key={t}
-                ref={el => { imgRefs.current[i] = el }}
-                src={src}
-                alt={`Thumbnail ${i + 1}`}
-                className={`h-full w-auto shrink-0 cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
-                onClick={() => setIndex(i)}
+          {thumbnails.map((t, i) => (
+            <div key={t} ref={el => { imgRefs.current[i] = el }} className="relative h-full shrink-0" onClick={() => setIndex(i)}>
+              <ThumbImage
+                path={t}
+                thumbsKey={thumbsKey ?? 0}
+                className={`h-full w-auto cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
+                iconSize={14}
                 onLoad={recenter}
               />
-            )
-          })}
+            </div>
+          ))}
         </div>
         {!single && (
           <>
@@ -430,6 +503,10 @@ function detectSeason(allFolders: StreamFolder[], gameName: string, beforeDate?:
     )
     .sort((a, b) => b.date.localeCompare(a.date))[0]
   return prev?.meta?.ytSeason ?? '1'
+}
+
+function folderMetaBase(folder: StreamFolder): StreamMeta {
+  return folder.meta ?? { date: folder.date, streamType: [], games: [], comments: '' }
 }
 
 const PREV_EPISODE_SENTINEL = '__copy_prev_episode__'
@@ -548,8 +625,23 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   const fetchDescription = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('description', { ...buildContext(), prefix, suffix }), [buildContext])
   const fetchTags = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('tags', { ...buildContext(), prefix, suffix }), [buildContext])
 
-  const titleSg = useFieldSuggestion(ytTitle, setYtTitle, claudeEnabled ? fetchTitle : noop)
-  const tagsSg = useFieldSuggestion(ytTagsText, setYtTagsText, claudeEnabled ? fetchTags : noop)
+  // User-input setters — clear the template selection so the dropdown shows the current
+  // field as custom (and lets the user re-pick the same template to reset).
+  const handleTitleUserChange = useCallback((v: string) => {
+    setYtTitle(v)
+    setYtSelectedTitleId(prev => prev ? '' : prev)
+  }, [])
+  const handleTagsUserChange = useCallback((v: string) => {
+    setYtTagsText(v)
+    setYtSelectedTagId(prev => prev ? '' : prev)
+  }, [])
+  const handleDescUserChange = useCallback((v: string) => {
+    setYtDescription(v)
+    setYtSelectedDescId(prev => prev ? '' : prev)
+  }, [])
+
+  const titleSg = useFieldSuggestion(ytTitle, handleTitleUserChange, claudeEnabled ? fetchTitle : noop)
+  const tagsSg = useFieldSuggestion(ytTagsText, handleTagsUserChange, claudeEnabled ? fetchTags : noop)
 
   // Description — uses GhostTextArea with inline suggestion state
   const descRef = useRef<GhostTextAreaHandle>(null)
@@ -587,6 +679,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
     const sug = descSuggestionRef.current
     const val = ytDescriptionRef.current
     setYtDescription(val.slice(0, pos) + sug + val.slice(pos))
+    setYtSelectedDescId(prev => prev ? '' : prev)
     setDescSuggestion('')
     requestAnimationFrame(() => descRef.current?.setCursorOffset(pos + sug.length))
   }, [])
@@ -806,19 +899,36 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   useEffect(() => {
     const tmpl = ytTitleTemplates.find(t => t.id === ytSelectedTitleId)
     if (!tmpl) return
-    setYtTitle(applyMergeFields(tmpl.template, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes }))
+    const rendered = applyMergeFields(tmpl.template, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes })
+    setYtTitle(rendered)
+    requestAnimationFrame(() => {
+      const el = titleSg.ref.current as HTMLInputElement | null
+      if (el) { el.focus(); el.setSelectionRange(rendered.length, rendered.length) }
+    })
   }, [ytSelectedTitleId, ytTitleTemplates, ytGameTitle, ytSeason, ytEpisode, ytCatchyTitle, ytTotalEpisodes])
 
   // Apply description template
   useEffect(() => {
     const tmpl = ytDescTemplates.find(t => t.id === ytSelectedDescId)
-    if (tmpl) setYtDescription(applyMergeFields(tmpl.description, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes }))
+    if (!tmpl) return
+    const rendered = applyMergeFields(tmpl.description, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes })
+    setYtDescription(rendered)
+    requestAnimationFrame(() => {
+      descRef.current?.focus()
+      descRef.current?.setCursorOffset(rendered.length)
+    })
   }, [ytSelectedDescId, ytDescTemplates])
 
   // Apply tag template
   useEffect(() => {
     const tmpl = ytTagTemplates.find(t => t.id === ytSelectedTagId)
-    if (tmpl) setYtTagsText(tmpl.tags.join(', '))
+    if (!tmpl) return
+    const rendered = tmpl.tags.join(', ')
+    setYtTagsText(rendered)
+    requestAnimationFrame(() => {
+      const el = tagsSg.ref.current as HTMLTextAreaElement | null
+      if (el) { el.focus(); el.setSelectionRange(rendered.length, rendered.length) }
+    })
   }, [ytSelectedTagId, ytTagTemplates])
 
   // Find a tag template whose name matches one of the selected games
@@ -830,6 +940,47 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
     }
     return null
   }, [games, ytTagTemplates])
+
+  // "Save as template" availability — only show when current value doesn't match any existing template
+  const canSaveTitleTemplate = useMemo(
+    () => ytTitle.trim().length > 0 && !ytTitleTemplates.some(t => t.template === ytTitle),
+    [ytTitle, ytTitleTemplates]
+  )
+  const canSaveDescTemplate = useMemo(
+    () => ytDescription.trim().length > 0 && !ytDescTemplates.some(t => t.description === ytDescription),
+    [ytDescription, ytDescTemplates]
+  )
+  const canSaveTagsTemplate = useMemo(() => {
+    const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
+    if (tags.length === 0) return false
+    const currentKey = [...tags].sort().join('|').toLowerCase()
+    return !ytTagTemplates.some(t => [...t.tags].sort().join('|').toLowerCase() === currentKey)
+  }, [ytTagsText, ytTagTemplates])
+
+  const saveTitleAsTemplate = useCallback(async (name: string) => {
+    const tpl: YTTitleTemplate = { id: crypto.randomUUID(), name, template: ytTitle }
+    const next = [...ytTitleTemplates, tpl]
+    setYtTitleTemplates(next)
+    await window.api.setYTTitleTemplates(next)
+    setYtSelectedTitleId(tpl.id)
+  }, [ytTitle, ytTitleTemplates])
+
+  const saveDescAsTemplate = useCallback(async (name: string) => {
+    const tpl: YTDescriptionTemplate = { id: crypto.randomUUID(), name, description: ytDescription }
+    const next = [...ytDescTemplates, tpl]
+    setYtDescTemplates(next)
+    await window.api.setYTDescriptionTemplates(next)
+    setYtSelectedDescId(tpl.id)
+  }, [ytDescription, ytDescTemplates])
+
+  const saveTagsAsTemplate = useCallback(async (name: string) => {
+    const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
+    const tpl: YTTagTemplate = { id: crypto.randomUUID(), name, tags }
+    const next = [...ytTagTemplates, tpl]
+    setYtTagTemplates(next)
+    await window.api.setYTTagTemplates(next)
+    setYtSelectedTagId(tpl.id)
+  }, [ytTagsText, ytTagTemplates])
 
   const selectedBroadcast = useMemo(
     () => (isPastStream ? ytVods : ytBroadcasts).find(b => b.id === ytSelectedBroadcastId) ?? null,
@@ -913,11 +1064,11 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
     try {
       const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
       if (isPastStream) {
-        await window.api.youtubeUpdateVideo(ytSelectedBroadcastId, ytTitle, ytDescription, tags, ytGameTitle || undefined)
+        await window.api.youtubeUpdateVideo(ytSelectedBroadcastId, ytTitle, ytDescription, tags)
       } else {
         await window.api.youtubeUpdateBroadcast(
           ytSelectedBroadcastId,
-          { title: ytTitle, description: ytDescription, gameTitle: ytGameTitle || undefined },
+          { title: ytTitle, description: ytDescription },
           tags
         )
       }
@@ -928,6 +1079,14 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
         const effectiveTwitchTitle = syncTitle ? ytTitle : twitchTitle
         await window.api.twitchUpdateChannel(effectiveTwitchTitle, twitchGameName || undefined)
       }
+      // Update the local broadcast/VOD entry so the dropdown reflects the new info
+      const updater = (items: LiveBroadcast[]) => items.map(b =>
+        b.id === ytSelectedBroadcastId
+          ? { ...b, snippet: { ...b.snippet, title: ytTitle, description: ytDescription } }
+          : b
+      )
+      if (isPastStream) setYtVods(updater)
+      else setYtBroadcasts(updater)
       setPushSuccess(true)
       setTimeout(() => setPushSuccess(false), 4000)
     } catch (e: any) {
@@ -1087,7 +1246,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Publishing Info</h3>
 
           {/* Merge field inputs */}
-          <div className="grid grid-cols-[1fr_auto_auto_1fr] gap-2">
+          <div className="grid grid-cols-[1fr_auto_auto_1fr] gap-2 items-start">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">Game Title <span className="font-mono text-purple-400 font-normal">{'{game}'}</span><LucideYoutube size={11} className="text-red-400/70" /></label>
               <input
@@ -1095,13 +1254,14 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                 onChange={e => setYtGameTitle(e.target.value)}
                 className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
               />
+              <span className="text-[10px] text-gray-500">Set manually in YouTube Studio</span>
             </div>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 items-center">
               <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
-                <span className="font-mono text-purple-400">{'{season}'}</span>
                 <Tooltip content="Auto-inherited from the most recent preceding stream in the same series. Change it to start a new season — episode numbering will restart from 1." side="top">
                   <Info size={11} className="text-gray-500 cursor-default" />
                 </Tooltip>
+                <span className="font-mono text-purple-400">{'{season}'}</span>
               </label>
               <input
                 value={ytSeason}
@@ -1110,12 +1270,12 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
               />
             </div>
             <div className="flex items-end gap-1.5">
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 items-end">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
-                  <span className="font-mono text-purple-400">{'{episode}'}</span>
                   <Tooltip content="Auto-detected by counting preceding streams with the same game and season. Resets to 1 when season changes. Can be overridden manually." side="top">
                     <Info size={11} className="text-gray-500 cursor-default" />
                   </Tooltip>
+                  <span className="font-mono text-purple-400">{'{episode}'}</span>
                 </label>
                 <input
                   value={ytEpisode}
@@ -1162,6 +1322,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                 {twConnected && (
                   <Checkbox checked={syncTitle} onChange={setSyncTitle} label="Sync with Twitch" size="sm" />
                 )}
+                {canSaveTitleTemplate && <SaveAsTemplateButton onSave={saveTitleAsTemplate} />}
                 <InlineTemplateSelect items={ytTitleTemplates} value={ytSelectedTitleId} onChange={setYtSelectedTitleId} />
               </div>
             </div>
@@ -1176,7 +1337,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
               {claudeEnabled && titleSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-600" />}
               {claudeEnabled && titleSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-600"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
               {(!claudeEnabled || !titleSg.hint) && <span />}
-              <p className="text-xs text-gray-700">{ytTitle.length}/100</p>
+              <p className="text-xs text-gray-500">{ytTitle.length}/100</p>
             </div>
           </div>
 
@@ -1204,12 +1365,15 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                 Description
                 <LucideYoutube size={11} className="text-red-400/70" />
               </label>
-              <InlineTemplateSelect items={ytDescTemplates} value={ytSelectedDescId} onChange={setYtSelectedDescId} />
+              <div className="flex items-center gap-3">
+                {canSaveDescTemplate && <SaveAsTemplateButton onSave={saveDescAsTemplate} />}
+                <InlineTemplateSelect items={ytDescTemplates} value={ytSelectedDescId} onChange={setYtSelectedDescId} />
+              </div>
             </div>
             <GhostTextArea
               ref={descRef}
               value={ytDescription}
-              onChange={setYtDescription}
+              onChange={handleDescUserChange}
               suggestion={claudeEnabled ? descSuggestion : ''}
               insertAt={descInsertAt}
               onRequestSuggestion={claudeEnabled ? handleDescRequest : undefined}
@@ -1232,7 +1396,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                 <LucideYoutube size={11} className="text-red-400/70" />
                 <span className="text-gray-600 font-normal">(comma-separated)</span>
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 {gameMatchedTagTemplate && (
                   <button
                     type="button"
@@ -1242,6 +1406,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                     Use &ldquo;{gameMatchedTagTemplate.name}&rdquo; tags
                   </button>
                 )}
+                {canSaveTagsTemplate && <SaveAsTemplateButton onSave={saveTagsAsTemplate} />}
                 <InlineTemplateSelect items={ytTagTemplates} value={ytSelectedTagId} onChange={setYtSelectedTagId} />
               </div>
             </div>
@@ -1708,6 +1873,72 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
   )
 }
 
+/** Inline "Save as template" text-link that expands into a name input with save/cancel. */
+function SaveAsTemplateButton({ onSave }: { onSave: (name: string) => Promise<void> | void }) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus()
+  }, [editing])
+
+  const cancel = () => { setEditing(false); setName('') }
+  const save = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || saving) return
+    setSaving(true)
+    try { await onSave(trimmed); setEditing(false); setName('') }
+    finally { setSaving(false) }
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+      >
+        Save as template
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        ref={inputRef}
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); save() }
+          else if (e.key === 'Escape') { e.preventDefault(); cancel() }
+        }}
+        placeholder="Template name…"
+        className="text-xs bg-navy-900 border border-white/10 text-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500/40 w-32"
+      />
+      <button
+        type="button"
+        onClick={save}
+        disabled={!name.trim() || saving}
+        className="p-0.5 text-green-400 hover:text-green-300 disabled:text-gray-600 disabled:cursor-default transition-colors"
+        title="Save"
+      >
+        <Check size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={cancel}
+        className="p-0.5 text-gray-500 hover:text-gray-300 transition-colors"
+        title="Cancel"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  )
+}
+
 // ─── Bulk tag modal ───────────────────────────────────────────────────────────
 
 function BulkTagModal({
@@ -2009,21 +2240,63 @@ async function buildTree(dirPath: string): Promise<TreeNode[]> {
 }
 
 export function StreamsPage({
+  isVisible: _isVisible,
   onSendToPlayer,
   onSendToConverter,
   onSendToCombine,
 }: {
+  isVisible: boolean
   onSendToPlayer: (file: string) => void
   onSendToConverter: (file: string) => void
   onSendToCombine: (files: string[]) => void
 }) {
   const { config, updateConfig, loading: configLoading } = useStore()
+
+  const MIN_THUMB_WIDTH = 85
+  const MAX_THUMB_WIDTH = 170
+  const [thumbWidth, setThumbWidth] = useState(() => config.listThumbWidth ?? MIN_THUMB_WIDTH)
+  const dragThumbWidthRef = useRef(thumbWidth)
+  const listScrollRef = useRef<HTMLDivElement>(null)
+  const dragThumbElRef = useRef<HTMLElement | null>(null)
+  const dragStartThumbTopRef = useRef<number>(0)
+  useLayoutEffect(() => {
+    const thumbEl = dragThumbElRef.current
+    const scrollEl = listScrollRef.current
+    if (!thumbEl || !scrollEl) return
+    const drift = thumbEl.getBoundingClientRect().top - dragStartThumbTopRef.current
+    if (Math.abs(drift) > 0.1) scrollEl.scrollTop += drift
+  })
+  const startThumbResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startWidth = dragThumbWidthRef.current
+    // Store the dragged element and its current visual top — useLayoutEffect corrects drift after each render
+    const thumbEl = (e.currentTarget as HTMLElement).closest('td') as HTMLElement | null
+    dragThumbElRef.current = thumbEl
+    dragStartThumbTopRef.current = thumbEl?.getBoundingClientRect().top ?? 0
+    const onMove = (me: MouseEvent) => {
+      const newWidth = Math.round(Math.max(MIN_THUMB_WIDTH, Math.min(MAX_THUMB_WIDTH, startWidth + me.clientX - startX)))
+      dragThumbWidthRef.current = newWidth
+      setThumbWidth(newWidth)
+    }
+    const onUp = () => {
+      dragThumbElRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      updateConfig({ listThumbWidth: dragThumbWidthRef.current })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [updateConfig])
+
   const osReducedMotion = useReducedMotion()
   const noAnimation = osReducedMotion || !!config.disableAnimations
   const animMult = config.slowAnimations ? 5 : 1
   const panelAnimate = { opacity: 1, y: 0, transition: { duration: 0.22 * animMult, ease: 'easeOut' as const } }
   const { openEditor: openThumbnailEditor } = useThumbnailEditor()
   const [folders, setFolders] = useState<StreamFolder[]>([])
+  const suppressNextReload = useRef(false)
   const [thumbsKey, setThumbsKey] = useState(() => Date.now())
   const [loading, setLoading] = useState(false)
   const [modal, setModal] = useState<ModalState>({ mode: 'none' })
@@ -2162,7 +2435,10 @@ export function StreamsPage({
 
   // Auto-refresh when external changes are detected in the streams directory
   useEffect(() => {
-    const unsub = window.api.onStreamsChanged(() => loadFolders(streamsDir))
+    const unsub = window.api.onStreamsChanged(() => {
+      if (suppressNextReload.current) { suppressNextReload.current = false; return }
+      loadFolders(streamsDir)
+    })
     return unsub
   }, [streamsDir, loadFolders])
 
@@ -2388,7 +2664,7 @@ export function StreamsPage({
     const removingGames = new Set(editGames)
     let done = 0
     for (const f of selectedFolders) {
-      const existing = f.meta ?? { date: f.date, streamType: [], games: [], comments: '' }
+      const existing = folderMetaBase(f)
       const merged: StreamMeta = mode === 'add'
         ? {
             ...existing,
@@ -2407,14 +2683,34 @@ export function StreamsPage({
     await loadFolders(streamsDir)
   }
 
+  const updateFolderMeta = useCallback(async (folderPath: string, meta: StreamMeta) => {
+    await window.api.writeStreamMeta(folderPath, meta)
+    suppressNextReload.current = true
+    setFolders(prev => prev.map(f =>
+      f.folderPath === folderPath
+        ? { ...f, meta, hasMeta: true, detectedGames: meta.games?.length ? meta.games : f.detectedGames }
+        : f
+    ))
+  }, [])
+
   const handleSave = useCallback(async (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => {
     if (modal.mode === 'new') {
       await window.api.createStreamFolder(streamsDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath, streamMode as any)
+      await loadFolders(streamsDir)
     } else if (modal.mode === 'edit' || modal.mode === 'add') {
-      await window.api.writeStreamMeta(modal.folder.folderPath, meta)
+      await updateFolderMeta(modal.folder.folderPath, meta)
     }
-    await loadFolders(streamsDir)
-  }, [modal, streamsDir, loadFolders])
+  }, [modal, streamsDir, loadFolders, updateFolderMeta])
+
+  const navigateModal = useCallback((folder: StreamFolder, dir: 'up' | 'down') => {
+    flushSync(() => setSlideDirection(dir))
+    setModal({ mode: 'edit', folder })
+  }, [])
+
+  const openFolderInExplorer = useCallback((folder: StreamFolder) => {
+    if (isDumpMode && folder.videos.length > 0) window.api.openInExplorer(folder.videos[0])
+    else window.api.openInExplorer(folder.folderPath)
+  }, [isDumpMode])
 
   const missingMetaCount = folders.filter(f => !f.hasMeta).length
 
@@ -2880,7 +3176,7 @@ export function StreamsPage({
 
       {/* Content area */}
       <div className="flex-1 overflow-hidden pr-2">
-      <div className="h-full overflow-y-auto [scrollbar-gutter:stable]">
+      <div ref={listScrollRef} className="h-full overflow-y-auto [scrollbar-gutter:stable]">
         {loading && folders.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-gray-600 text-sm gap-2">
             <RefreshCw size={14} className="animate-spin" /> Loading…
@@ -2924,9 +3220,7 @@ export function StreamsPage({
                       onEdit={() => setModal({ mode: 'edit', folder })}
                       onAdd={() => setModal({ mode: 'add', folder })}
                       onReschedule={() => { setRescheduleTarget(folder); setRescheduleDate(folder.date) }}
-                      onOpen={() => isDumpMode && folder.videos.length > 0
-                        ? window.api.openInExplorer(folder.videos[0])
-                        : window.api.openInExplorer(folder.folderPath)}
+                      onOpen={() => openFolderInExplorer(folder)}
                       onDelete={() => setDeleteTarget(folder)}
                       onSendToPlayer={() => sendVideo(folder, 'player')}
                       onSendToConverter={() => sendVideo(folder, 'converter')}
@@ -2953,7 +3247,7 @@ export function StreamsPage({
             <thead className="sticky top-0 bg-navy-900 z-10">
               <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 {selectMode && <th className="pl-4 py-2 w-[40px]" />}
-                <th className="p-0 w-[88px]">Thumbnail</th>
+                <th className="p-0" style={{ width: thumbWidth }}>Thumbnail</th>
                 <th className="px-2 py-2 w-[44px]"></th>
                 <th className="text-left px-2 py-2 w-[220px]">Date</th>
                 {/* Type column with filter */}
@@ -3123,6 +3417,8 @@ return (
                     : undefined}
                   thumbsKey={thumbsKey}
                   sameDayIndex={sameDayIndexMap.get(folder.folderPath)}
+                  thumbWidth={thumbWidth}
+                  onThumbResizeStart={startThumbResize}
                 />
                 </React.Fragment>
                 )
@@ -3145,10 +3441,9 @@ return (
             const basename = filePath.split(/[\\/]/).pop() ?? ''
             const folder = folders.find(f => f.folderPath === lightbox.folderPath && f.date === lightbox.folderDate)
             if (!folder) return
-            const meta: StreamMeta = { ...(folder.meta ?? { date: folder.date, streamType: [], games: [], comments: '' }), preferredThumbnail: basename }
-            await window.api.writeStreamMeta(folder.folderPath, meta)
+            const meta: StreamMeta = { ...folderMetaBase(folder), preferredThumbnail: basename }
+            await updateFolderMeta(folder.folderPath, meta)
             setLightbox(prev => prev ? { ...prev, preferredThumbnail: basename } : null)
-            loadFolders(streamsDir)
           }}
           onClose={() => setLightbox(null)}
           onNavigate={(i) => setLightbox(prev => prev ? { ...prev, index: i } : null)}
@@ -3350,9 +3645,14 @@ return (
         const prevFolder = modalIdx >= 0 && modalIdx < navigableFolders.length - 1 ? navigableFolders[modalIdx + 1] : undefined
         const nextFolder = modalIdx > 0 ? navigableFolders[modalIdx - 1] : undefined
         const primaryGame = (modal.folder.meta?.games?.length ? modal.folder.meta.games : modal.folder.detectedGames)[0] ?? null
+        const currentSeason = modal.folder.meta?.ytSeason ?? '1'
         const seriesFolders = primaryGame
           ? folders
-              .filter(f => !f.isMissing && (f.meta?.games?.includes(primaryGame) || f.detectedGames?.includes(primaryGame)))
+              .filter(f =>
+                !f.isMissing &&
+                (f.meta?.games?.includes(primaryGame) || f.detectedGames?.includes(primaryGame)) &&
+                (f.meta?.ytSeason ?? '1') === currentSeason
+              )
               .sort((a, b) => {
                 const epA = parseInt(a.meta?.ytEpisode ?? '', 10)
                 const epB = parseInt(b.meta?.ytEpisode ?? '', 10)
@@ -3367,18 +3667,18 @@ return (
             <div className="relative w-full max-w-4xl">
               <div className="absolute right-full top-1/2 -translate-y-1/2 pr-3 flex flex-row gap-2 items-center pointer-events-auto">
                 <Tooltip content="Previous in series" side="right">
-                  <button onClick={() => { flushSync(() => setSlideDirection('up')); setModal({ mode: 'edit', folder: prevSeriesFolder! }) }} disabled={!prevSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-500 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsDown size={16} /></button>
+                  <button onClick={() => navigateModal(prevSeriesFolder!, 'up')} disabled={!prevSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-500 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsDown size={16} /></button>
                 </Tooltip>
                 <Tooltip content="Previous stream" side="right">
-                  <button onClick={() => { flushSync(() => setSlideDirection('up')); setModal({ mode: 'edit', folder: prevFolder! }) }} disabled={!prevFolder} className="p-3 rounded-full bg-navy-700/80 border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-navy-600 transition-colors shadow-lg disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/80 disabled:hover:text-gray-400"><ChevronDown size={22} /></button>
+                  <button onClick={() => navigateModal(prevFolder!, 'up')} disabled={!prevFolder} className="p-3 rounded-full bg-navy-700/80 border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-navy-600 transition-colors shadow-lg disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/80 disabled:hover:text-gray-400"><ChevronDown size={22} /></button>
                 </Tooltip>
               </div>
               <div className="absolute left-full top-1/2 -translate-y-1/2 pl-3 flex flex-row gap-2 items-center pointer-events-auto">
                 <Tooltip content="Next stream" side="left">
-                  <button onClick={() => { flushSync(() => setSlideDirection('down')); setModal({ mode: 'edit', folder: nextFolder! }) }} disabled={!nextFolder} className="p-3 rounded-full bg-navy-700/80 border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-navy-600 transition-colors shadow-lg disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/80 disabled:hover:text-gray-400"><ChevronUp size={22} /></button>
+                  <button onClick={() => navigateModal(nextFolder!, 'down')} disabled={!nextFolder} className="p-3 rounded-full bg-navy-700/80 border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-navy-600 transition-colors shadow-lg disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/80 disabled:hover:text-gray-400"><ChevronUp size={22} /></button>
                 </Tooltip>
                 <Tooltip content="Next in series" side="left">
-                  <button onClick={() => { flushSync(() => setSlideDirection('down')); setModal({ mode: 'edit', folder: nextSeriesFolder! }) }} disabled={!nextSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-500 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsUp size={16} /></button>
+                  <button onClick={() => navigateModal(nextSeriesFolder!, 'down')} disabled={!nextSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-500 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsUp size={16} /></button>
                 </Tooltip>
               </div>
             </div>
@@ -3408,9 +3708,8 @@ return (
                 if (modal.mode !== 'edit' && modal.mode !== 'add') return
                 const folder = modal.folder
                 const basename = filePath.split(/[\\/]/).pop() ?? ''
-                const meta: StreamMeta = { ...(folder.meta ?? { date: folder.date, streamType: [], games: [], comments: '' }), preferredThumbnail: basename }
-                await window.api.writeStreamMeta(folder.folderPath, meta)
-                loadFolders(streamsDir)
+                const meta: StreamMeta = { ...folderMetaBase(folder), preferredThumbnail: basename }
+                await updateFolderMeta(folder.folderPath, meta)
               } : undefined}
               allGames={allGames}
               allStreamTypes={allStreamTypes}
@@ -3648,7 +3947,7 @@ function ClampedComment({ text }: { text: string }) {
   }, [text])
 
   const span = (
-    <span ref={spanRef} className="text-[10px] leading-tight text-gray-400 line-clamp-3">
+    <span ref={spanRef} className="text-[10px] leading-tight text-gray-400 line-clamp-3 whitespace-pre-wrap">
       {text}
     </span>
   )
@@ -3659,7 +3958,7 @@ function ClampedComment({ text }: { text: string }) {
   return (
     <div className="leading-[0]">
       {clamped ? (
-        <Tooltip content={text} side="left" width="w-72">{span}</Tooltip>
+        <Tooltip content={<span className="whitespace-pre-wrap">{text}</span>} side="left" width="w-72">{span}</Tooltip>
       ) : span}
     </div>
   )
@@ -3708,11 +4007,12 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
         onClick={!selectMode ? () => onThumbClick?.(0) : undefined}
       >
         {firstThumb ? (
-          <img
-            src={`${toFileUrl(firstThumb)}?t=${thumbsKey}`}
-            alt="thumbnail"
+          <ThumbImage
+            path={firstThumb}
+            thumbsKey={thumbsKey}
             className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
             draggable={false}
+            iconSize={18}
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-1">
@@ -3920,15 +4220,17 @@ interface StreamRowProps {
   onThumbClick?: (index: number) => void
   thumbsKey: number
   sameDayIndex?: number
+  thumbWidth?: number
+  onThumbResizeStart?: (e: React.MouseEvent) => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
         {selectMode && <td className="pl-4 align-middle" />}
-        <td className="p-0 align-middle w-[88px]">
-          <div className="w-full h-[48px] bg-red-900/20 flex items-center justify-center">
+        <td className="p-0 align-middle" style={{ width: thumbWidth }}>
+          <div className="w-full bg-red-900/20 flex items-center justify-center" style={{ height: thumbWidth * (9 / 16) }}>
             <AlertTriangle size={14} className="text-red-700" />
           </div>
         </td>
@@ -3972,20 +4274,21 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
       )}
 
       {/* Thumbnail */}
-      <td className="p-0 align-middle">
+      <td className="p-0 align-middle relative" style={{ width: thumbWidth }}>
         <div
-          className={`relative h-[48px] aspect-video overflow-hidden shrink-0 ${onThumbClick ? 'cursor-zoom-in' : ''}`}
+          className={`relative overflow-hidden shrink-0 ${onThumbClick ? 'cursor-zoom-in' : ''}`}
+          style={{ width: thumbWidth, height: thumbWidth * (9 / 16) }}
           onClick={() => onThumbClick?.(0)}
         >
           {firstThumb ? (
             <>
-              <img
-                src={`${toFileUrl(firstThumb)}?t=${thumbsKey}`}
-                alt="thumbnail"
+              <ThumbImage
+                path={firstThumb}
+                thumbsKey={thumbsKey}
                 className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                 draggable={false}
+                iconSize={12}
               />
-              {/* Hover overlay with expand icon */}
               {onThumbClick && (
                 <div className="absolute inset-0 bg-black/0 hover:bg-black/35 transition-colors flex items-center justify-center group/thumb">
                   <Expand size={14} className="text-white opacity-0 group-hover/thumb:opacity-100 transition-opacity drop-shadow" />
@@ -4004,15 +4307,37 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             </div>
           )}
         </div>
+        {/* Resize handle */}
+        <div
+          className="group/resize absolute top-0 right-0 w-2 h-full cursor-ew-resize z-10"
+          onMouseDown={onThumbResizeStart}
+        >
+          <div className="absolute top-0 right-0 w-px h-full bg-purple-500 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
+        </div>
       </td>
 
       {/* Video count */}
       <td className="px-2 py-2 align-middle w-[44px]">
-        <VideoCountTooltip videos={videos}>
-          <div className={`flex items-center justify-center gap-1 text-xs font-mono cursor-default ${videoCount > 0 ? 'text-gray-400' : 'text-gray-700'}`}>
-            <Film size={11} className="shrink-0" />
-            <span>{videoCount}</span>
-          </div>
+        <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined}>
+          {(() => {
+            const vm = meta?.videoMap
+            const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount
+            const shortClipCount = vm ? Object.values(vm).filter(e => e.category === 'short' || e.category === 'clip').length : 0
+            return (
+              <div className="flex flex-col items-center gap-0.5 cursor-default">
+                <div className={`flex items-center gap-1 text-xs font-mono ${fullCount > 0 ? 'text-gray-400' : 'text-gray-700'}`}>
+                  <Film size={11} className="shrink-0" />
+                  <span>{fullCount}</span>
+                </div>
+                {shortClipCount > 0 && (
+                  <div className="flex items-center gap-1 text-xs font-mono text-blue-400">
+                    <Scissors size={11} className="shrink-0" />
+                    <span>{shortClipCount}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </VideoCountTooltip>
       </td>
 

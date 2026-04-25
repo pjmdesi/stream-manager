@@ -34,6 +34,7 @@ export interface AppConfig {
   disableAnimations: boolean
   slowAnimations: boolean
   autoDeletePartialOnCancel: boolean
+  clipDurationThreshold: number
   claudeApiKey: string
   claudeSystemPrompt: string
   launcherWidgetGroupId: string
@@ -65,6 +66,7 @@ function getDefaultConfig(): AppConfig {
     disableAnimations: false,
     slowAnimations: false,
     autoDeletePartialOnCancel: false,
+    clipDurationThreshold: 300,
     claudeApiKey: '',
     claudeSystemPrompt: '',
     launcherWidgetGroupId: '',

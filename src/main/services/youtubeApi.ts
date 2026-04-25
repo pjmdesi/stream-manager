@@ -293,7 +293,7 @@ export async function checkBroadcastIsLive(
  *  the current snippet because the API requires it for non-persistent broadcasts. */
 export async function updateBroadcastSnippet(
   broadcastId: string,
-  updates: { title: string; description: string; gameTitle?: string },
+  updates: { title: string; description: string },
   clientId: string,
   clientSecret: string
 ): Promise<void> {
@@ -310,7 +310,6 @@ export async function updateBroadcastSnippet(
   const snippet: Record<string, any> = {
     title: updates.title,
     description: updates.description,
-    gameTitle: updates.gameTitle ?? currentSnippet.gameTitle ?? '',
   }
   if (currentSnippet.scheduledStartTime) {
     snippet.scheduledStartTime = currentSnippet.scheduledStartTime
