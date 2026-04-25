@@ -3001,20 +3001,33 @@ export function StreamsPage({
     return upcoming[0]?.folderPath ?? null
   }, [folders])
 
-  // Bulk-fetch privacy statuses for all linked videos whenever the folder list or connection changes
+  // Bulk-fetch privacy statuses for all linked videos whenever the set of linked
+  // YouTube IDs changes. Depending on `folders` directly would re-fire the batch
+  // every time loadFolders produces a new array reference, even with identical
+  // content — costly on large libraries.
+  const linkedYtIdsKey = useMemo(() => {
+    return folders.map(f => f.meta?.ytVideoId).filter(Boolean).sort().join(',')
+  }, [folders])
   useEffect(() => {
-    if (!ytConnectedOuter) return
-    const ids = folders.map(f => f.meta?.ytVideoId).filter(Boolean) as string[]
-    if (ids.length === 0) return
+    if (!ytConnectedOuter || !linkedYtIdsKey) return
+    const ids = linkedYtIdsKey.split(',')
     window.api.youtubeGetPrivacyStatuses(ids).then(setYtPrivacyMap).catch(() => {})
-  }, [ytConnectedOuter, folders])
+  }, [ytConnectedOuter, linkedYtIdsKey])
+
+  // Resolve the broadcast id to poll for the live indicator. Derived as a stable
+  // string so the polling effect below doesn't tear down + re-fire whenever the
+  // `folders` array reference changes with identical content.
+  const nextUpcomingBroadcastId = useMemo(() => {
+    if (!ytConnectedOuter || !nextUpcomingFolderPath) return null
+    const f = folders.find(f => f.folderPath === nextUpcomingFolderPath)
+    if (!f || f.date !== today() || !f.meta?.ytVideoId) return null
+    return f.meta.ytVideoId
+  }, [ytConnectedOuter, nextUpcomingFolderPath, folders])
 
   // Poll the upcoming broadcast every 60s to detect if it's live
   useEffect(() => {
-    if (!ytConnectedOuter || !nextUpcomingFolderPath) { setYtIsLive(false); return }
-    const nextFolder = folders.find(f => f.folderPath === nextUpcomingFolderPath)
-    if (!nextFolder || nextFolder.date !== today() || !nextFolder.meta?.ytVideoId) { setYtIsLive(false); return }
-    const broadcastId = nextFolder.meta.ytVideoId
+    if (!nextUpcomingBroadcastId) { setYtIsLive(false); return }
+    const broadcastId = nextUpcomingBroadcastId
     const check = () => window.api.youtubeCheckBroadcastIsLive(broadcastId)
       .then(r => {
         setYtIsLive(r.isLive)
@@ -3024,7 +3037,7 @@ export function StreamsPage({
     check()
     const interval = setInterval(check, 60_000)
     return () => clearInterval(interval)
-  }, [ytConnectedOuter, nextUpcomingFolderPath, folders])
+  }, [nextUpcomingBroadcastId])
 
   const toggleGameFilter = (game: string) => {
     setFilterGames(prev => {

@@ -1034,6 +1034,11 @@ export function registerStreamsIPC(): void {
       ignoreInitial: true,
       persistent: true,
       awaitWriteFinish: { stabilityThreshold: 1000, pollInterval: 300 },
+      // Ignore our own metadata file. We write _meta.json from the renderer's
+      // save flow and from refreshVideoMaps; without this guard, chokidar fires
+      // 'change' on those writes and the renderer re-runs loadFolders, which
+      // re-runs refreshVideoMaps and may re-write _meta.json — feedback loop.
+      ignored: (p: string) => p.endsWith('_meta.json'),
     })
 
     const onChange = () => notifyChange(win)
