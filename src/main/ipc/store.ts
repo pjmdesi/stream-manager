@@ -38,6 +38,7 @@ export interface AppConfig {
   claudeApiKey: string
   claudeSystemPrompt: string
   launcherWidgetGroupId: string
+  listThumbWidth: number
 }
 
 function getDefaultConfig(): AppConfig {
@@ -70,6 +71,7 @@ function getDefaultConfig(): AppConfig {
     claudeApiKey: '',
     claudeSystemPrompt: '',
     launcherWidgetGroupId: '',
+    listThumbWidth: 85,
   }
 }
 

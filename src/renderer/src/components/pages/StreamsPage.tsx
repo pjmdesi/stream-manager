@@ -145,12 +145,14 @@ const CATEGORY_STYLES: Record<string, string> = {
 
 function VideoCountTooltip({ videos, videoMap, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; children: React.ReactNode }) {
   const [visible, setVisible] = useState(false)
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number }>({ top: 0, left: 0 })
   const [durations, setDurations] = useState<Record<string, number | null>>({})
   const [offlineFiles, setOfflineFiles] = useState<Set<string>>(new Set())
   const anchorRef = useRef<HTMLDivElement>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
   const probedRef = useRef(false)
 
+  // Initial position: just below the anchor. useLayoutEffect repositions if it overflows.
   const show = async () => {
     if (!anchorRef.current) return
     const rect = anchorRef.current.getBoundingClientRect()
@@ -174,6 +176,32 @@ function VideoCountTooltip({ videos, videoMap, children }: { videos: string[]; v
     }
   }
 
+  // After the tooltip renders, check whether it fits below the anchor. If not, flip to above.
+  // If neither side fits, pick whichever has more room and cap height with internal scroll.
+  useLayoutEffect(() => {
+    if (!visible || !anchorRef.current || !tooltipRef.current) return
+    const anchor = anchorRef.current.getBoundingClientRect()
+    const tip = tooltipRef.current.getBoundingClientRect()
+    const vh = window.innerHeight
+    const GAP = 6
+    const PAD = 8
+    const spaceBelow = vh - anchor.bottom - GAP - PAD
+    const spaceAbove = anchor.top - GAP - PAD
+    const next: { top: number; left: number; maxHeight?: number } = { top: anchor.bottom + GAP, left: anchor.left }
+    if (tip.height <= spaceBelow) {
+      next.top = anchor.bottom + GAP
+    } else if (tip.height <= spaceAbove) {
+      next.top = anchor.top - tip.height - GAP
+    } else if (spaceBelow >= spaceAbove) {
+      next.top = anchor.bottom + GAP
+      next.maxHeight = Math.max(80, spaceBelow)
+    } else {
+      next.maxHeight = Math.max(80, spaceAbove)
+      next.top = anchor.top - next.maxHeight - GAP
+    }
+    if (next.top !== pos.top || next.maxHeight !== pos.maxHeight) setPos(next)
+  }, [visible, videos.length, durations, offlineFiles, pos.top, pos.maxHeight])
+
   if (videos.length === 0) return <>{children}</>
 
   return (
@@ -183,7 +211,8 @@ function VideoCountTooltip({ videos, videoMap, children }: { videos: string[]; v
       </div>
       {visible && ReactDOM.createPortal(
         <div
-          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
+          ref={tooltipRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999, maxHeight: pos.maxHeight, overflowY: pos.maxHeight ? 'auto' : undefined }}
           className="bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1.5 min-w-[260px] max-w-[420px]"
           onMouseEnter={() => setVisible(true)}
           onMouseLeave={() => setVisible(false)}
@@ -245,6 +274,7 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
   const isPreferred = preferredThumbnail
     ? filename === preferredThumbnail
     : index === 0
+  const filmstripBtnRefs = useRef<(HTMLButtonElement | null)[]>([])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -256,9 +286,14 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
     return () => window.removeEventListener('keydown', handler)
   }, [index, total, onClose, onNavigate])
 
+  // Keep the active filmstrip thumbnail in view as the user navigates.
+  useEffect(() => {
+    filmstripBtnRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [index])
+
   return (
     <div
-      className="fixed inset-x-0 bottom-0 top-10 z-50 flex flex-col items-center justify-center bg-black/92 select-none"
+      className="fixed inset-x-0 bottom-0 top-10 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm select-none"
       onClick={onClose}
     >
       {/* Close */}
@@ -292,7 +327,7 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
           key={src}
           src={src}
           alt={filename}
-          className="max-h-[75vh] max-w-[85vw] object-contain rounded-lg shadow-2xl shadow-black"
+          className="max-h-[75vh] max-w-[85vw] object-contain shadow-2xl shadow-black"
           draggable={false}
         />
         <div className="mt-3 flex items-center gap-3">
@@ -327,14 +362,15 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
       {/* Filmstrip */}
       {total > 1 && (
         <div
-          className="absolute bottom-5 flex gap-2 px-4 py-2 bg-black/60 rounded-xl"
+          className="absolute left-5 right-5 bottom-5 flex gap-2 px-4 py-2 bg-black/60 rounded-xl w-auto overflow-x-scroll"
           onClick={e => e.stopPropagation()}
         >
           {thumbnails.map((t, i) => (
             <button
               key={t}
+              ref={el => { filmstripBtnRefs.current[i] = el }}
               onClick={() => onNavigate(i)}
-              className={`w-16 h-10 rounded overflow-hidden border-2 transition-all ${
+              className={`shrink-0 h-10 rounded overflow-hidden border-2 transition-all ${
                 i === index
                   ? 'border-purple-500 opacity-100 scale-105'
                   : 'border-transparent opacity-40 hover:opacity-75'
@@ -582,6 +618,9 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   const [ytManualUrl, setYtManualUrl] = useState('')
   const [ytManualLoading, setYtManualLoading] = useState(false)
   const [ytManualError, setYtManualError] = useState('')
+  const [ytNewPrivacy, setYtNewPrivacy] = useState<'public' | 'unlisted' | 'private'>('public')
+  const [ytCreatingBroadcast, setYtCreatingBroadcast] = useState(false)
+  const [ytCreateError, setYtCreateError] = useState('')
 
   const isPastStream = date < today()
   const isNextUpcomingStream = !isPastStream && (() => {
@@ -1109,18 +1148,18 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
       footer={
         <>
           {mode === 'edit' && isPastStream && (
-            <div className="mr-auto flex flex-col gap-1.5">
+            <div className="mr-auto flex flex-row gap-3">
               <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
               {archived && !initialMeta?.archived && (
-                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-600/30 text-xs text-amber-300/90">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-600/30 text-xs text-amber-300/90">
                   <AlertTriangle size={13} className="shrink-0 mt-0.5 text-amber-400" />
-                  <span>This only marks the stream as archived. To compress and save storage space, use the <strong>Archive</strong> button on the streams page instead.</span>
+                  <span>This marks the stream as archived. Use the <strong>Archive</strong> process for a complete archive.</span>
                 </div>
               )}
             </div>
           )}
           <Button variant="ghost" onClick={onClose} className={isDirty ? 'text-red-400 hover:text-red-300' : ''}>{isDirty ? 'Cancel' : 'Close'}</Button>
-          <Button variant="primary" loading={saving} onClick={handleSave}>
+          <Button variant="primary" loading={saving} onClick={handleSave} disabled={!isDirty}>
             {mode === 'new' ? 'Create Stream' : 'Save'}
           </Button>
         </>
@@ -1459,7 +1498,61 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                 {ytBroadcastError}
               </p>
             ) : !isPastStream && ytBroadcasts.length === 0 && !ytBroadcastsLoading ? (
-              <p className="text-xs text-gray-500 italic">No upcoming or active broadcasts found.</p>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-gray-500 italic">No upcoming or active broadcasts found.</p>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-400 shrink-0">Privacy</label>
+                  <div className="relative">
+                    <select
+                      value={ytNewPrivacy}
+                      onChange={e => setYtNewPrivacy(e.target.value as 'public' | 'unlisted' | 'private')}
+                      disabled={ytCreatingBroadcast}
+                      className="appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-7 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50"
+                    >
+                      <option value="public">Public</option>
+                      <option value="unlisted">Unlisted</option>
+                      <option value="private">Private</option>
+                    </select>
+                    <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={ytCreatingBroadcast}
+                    onClick={async () => {
+                      setYtCreatingBroadcast(true)
+                      setYtCreateError('')
+                      try {
+                        // Use the stream's date at noon local, or now+5min if that's already past
+                        const noon = new Date(`${date}T12:00:00`).getTime()
+                        const future = Date.now() + 5 * 60 * 1000
+                        const scheduledStartTime = new Date(Math.max(noon, future)).toISOString()
+                        const created = await window.api.youtubeCreateBroadcast({
+                          title: ytTitle || 'Untitled stream',
+                          description: ytDescription || '',
+                          scheduledStartTime,
+                          privacyStatus: ytNewPrivacy,
+                        })
+                        setYtBroadcasts(prev => [created, ...prev])
+                        setYtSelectedBroadcastId(created.id)
+                        setYtVideoUnlinked(false)
+                      } catch (err: any) {
+                        setYtCreateError(err?.message ?? 'Failed to create broadcast')
+                      } finally {
+                        setYtCreatingBroadcast(false)
+                      }
+                    }}
+                  >
+                    Create broadcast
+                  </Button>
+                </div>
+                {ytCreateError && (
+                  <p className="text-xs text-red-400 flex items-center gap-1.5">
+                    <AlertTriangle size={12} className="shrink-0" />
+                    {ytCreateError}
+                  </p>
+                )}
+              </div>
             ) : (
               <div className="flex flex-col gap-2">
                 <label className="text-xs font-medium text-gray-400">
@@ -2686,11 +2779,19 @@ export function StreamsPage({
   const updateFolderMeta = useCallback(async (folderPath: string, meta: StreamMeta) => {
     await window.api.writeStreamMeta(folderPath, meta)
     suppressNextReload.current = true
-    setFolders(prev => prev.map(f =>
-      f.folderPath === folderPath
-        ? { ...f, meta, hasMeta: true, detectedGames: meta.games?.length ? meta.games : f.detectedGames }
-        : f
-    ))
+    setFolders(prev => prev.map(f => {
+      if (f.folderPath !== folderPath) return f
+      // If preferredThumbnail changed, optimistically reorder the thumbnails array so the
+      // visible thumbnail updates immediately without waiting for a full reload.
+      let thumbnails = f.thumbnails
+      if (meta.preferredThumbnail && thumbnails.length > 1) {
+        const idx = thumbnails.findIndex(t => (t.split(/[\\/]/).pop() ?? '') === meta.preferredThumbnail)
+        if (idx > 0) {
+          thumbnails = [thumbnails[idx], ...thumbnails.slice(0, idx), ...thumbnails.slice(idx + 1)]
+        }
+      }
+      return { ...f, meta, hasMeta: true, thumbnails, detectedGames: meta.games?.length ? meta.games : f.detectedGames }
+    }))
   }, [])
 
   const handleSave = useCallback(async (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => {
@@ -3193,7 +3294,7 @@ export function StreamsPage({
             {filteredFolders.length === 0 ? (
               <p className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</p>
             ) : (
-              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))' }}>
+              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                 {filteredFolders.map((folder, i) => {
                   const todayStr = today()
                   const pending = !folder.isMissing && folder.date >= todayStr && !folder.meta?.archived
@@ -3970,6 +4071,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
   const { meta, hasMeta, detectedGames, date, thumbnails, videoCount, videos } = folder
   const displayGames = meta?.games?.length ? meta.games : detectedGames
   const firstThumb = thumbnails[0]
+  const extraThumbs = thumbnails.length - 1
   const hasSMThumbnail = thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
 
   if (folder.isMissing) {
@@ -4007,13 +4109,20 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
         onClick={!selectMode ? () => onThumbClick?.(0) : undefined}
       >
         {firstThumb ? (
-          <ThumbImage
-            path={firstThumb}
-            thumbsKey={thumbsKey}
-            className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-            draggable={false}
-            iconSize={18}
-          />
+          <>
+            <ThumbImage
+              path={firstThumb}
+              thumbsKey={thumbsKey}
+              className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+              draggable={false}
+              iconSize={18}
+            />
+            {extraThumbs > 0 && (
+              <span className="absolute bottom-0.5 right-0.5 bg-black/70 text-white text-[10px] font-medium px-1 rounded leading-4 pointer-events-none">
+                +{extraThumbs}
+              </span>
+            )}
+          </>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-1">
             <ImageOff size={18} className="text-gray-700" />
@@ -4030,93 +4139,70 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
           </div>
         )}
 
-        {/* Hover action overlay */}
-        {!selectMode && (
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
-            {videoCount > 0 && (
-              <Tooltip content="Send to Player">
-                <button onClick={e => { e.stopPropagation(); onSendToPlayer() }} className="p-2 rounded-lg bg-white/10 hover:bg-purple-600 text-white transition-colors backdrop-blur-sm">
-                  <Film size={14} />
-                </button>
-              </Tooltip>
-            )}
-            {videoCount > 0 && (
-              <Tooltip content="Send to Converter">
-                <button onClick={e => { e.stopPropagation(); onSendToConverter() }} className="p-2 rounded-lg bg-white/10 hover:bg-purple-600 text-white transition-colors backdrop-blur-sm">
-                  <Zap size={14} />
-                </button>
-              </Tooltip>
-            )}
-            {videoCount > 1 && (
-              <Tooltip content="Combine videos">
-                <button onClick={e => { e.stopPropagation(); onSendToCombine() }} className="p-2 rounded-lg bg-white/10 hover:bg-purple-600 text-white transition-colors backdrop-blur-sm">
-                  <Combine size={14} />
-                </button>
-              </Tooltip>
-            )}
-          </div>
-        )}
-
-        {/* Pending badge */}
-        {isPending && (
-          <div className="absolute top-1.5 left-1.5">
-            {isNextUpcoming && meta?.ytVideoId ? (
-              <Tooltip content={isLive ? 'Live now' : 'Open in YouTube Studio'}>
-                <button
-                  onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
-                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${isLive ? 'bg-green-900/80 text-green-300' : 'bg-yellow-900/80 text-yellow-300'} backdrop-blur-sm`}
-                >
-                  <Radio size={10} className="mr-0.5" />
-                  {isLive ? 'Live' : 'Upcoming'}
-                </button>
-              </Tooltip>
-            ) : (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-900/80 text-yellow-300 backdrop-blur-sm">
-                <Radio size={10} className="mr-0.5" />
-                Upcoming
-              </span>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Info */}
       <div className="flex flex-col gap-1.5 p-2.5 flex-1">
-        <div className="flex items-start justify-between gap-1">
-          <div>
-            <div className="flex items-center gap-1.5">
+        <div className="flex flex-col">
+          <div className='flex items-center justify-between'>
+            <div className="flex items-center gap-1.5 mt-0.5">
               <Tooltip content={friendlyDate(date)} side="top">
                 <span className="font-mono text-sm font-medium text-gray-200">{date}</span>
               </Tooltip>
               {sameDayIndex && sameDayIndex > 1 && (
                 <span className="font-mono text-sm font-medium text-purple-400/70">#{sameDayIndex}</span>
               )}
-              {meta?.archived && (
-                <Tooltip content="Archived">
-                  <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30">
-                    <Archive size={9} />
-                  </span>
-                </Tooltip>
-              )}
+              </div>
+            <div className="inline-flex gap-1">
+                {meta?.archived && (
+                    <Tooltip content="Archived">
+                        <span className="inline-flex items-center p-1 rounded bg-green-900/30 text-green-400 border border-green-800/30">
+                        <Archive size={11} />
+                        </span>
+                    </Tooltip>
+                )}
+                {isPending && (
+                  isNextUpcoming && meta?.ytVideoId ? (
+                    <Tooltip content={isLive ? 'Live now' : (privacyLabel ? `Open in YouTube Studio · ${privacyLabel}` : 'Open in YouTube Studio')}>
+                      <button
+                        onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
+                        className={`inline-flex items-center gap-0.5 p-1 rounded border transition-colors shrink-0 ${
+                          isLive
+                            ? 'bg-green-900/30 text-green-400 border-green-800/30 hover:bg-green-900/50 hover:text-green-300'
+                            : 'bg-yellow-900/30 text-yellow-400 border-yellow-800/30 hover:bg-yellow-900/50 hover:text-yellow-300'
+                        }`}
+                      >
+                        <Radio size={11} />
+                        {PrivacyIcon && <PrivacyIcon size={11} />}
+                      </button>
+                    </Tooltip>
+                  ) : (
+                    <Tooltip content={isNextUpcoming ? "Upcoming — stream hasn't happened yet" : 'Scheduled upcoming stream'}>
+                      <span className="inline-flex items-center p-1 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 shrink-0">
+                        <Radio size={11} />
+                      </span>
+                    </Tooltip>
+                  )
+                )}
+                {/* YT link for past streams */}
+                {!isPending && meta?.ytVideoId && (
+                    <Tooltip content={privacyLabel ? `YouTube · ${privacyLabel}` : 'YouTube'}>
+                      <button
+                        onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
+                        className="inline-flex items-center gap-0.5 p-1 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 transition-colors shrink-0"
+                      >
+                        <LucideYoutube size={11} />
+                        {PrivacyIcon && <PrivacyIcon size={11} />}
+                      </button>
+                    </Tooltip>
+                  )}
+            </div>
             </div>
             {(meta?.ytTitle || meta?.twitchTitle) && (
               <Tooltip content={meta.ytTitle || meta.twitchTitle} side="bottom" triggerClassName="block mt-0.5">
-                <span className="text-[9px] leading-none text-gray-400 truncate">{meta.ytTitle || meta.twitchTitle}</span>
+                <span className="text-[10px] leading-normal text-gray-400 line-clamp-2">{meta.ytTitle || meta.twitchTitle}</span>
               </Tooltip>
             )}
-          </div>
-          {/* YT link for past streams */}
-          {!isPending && meta?.ytVideoId && (
-            <Tooltip content={privacyLabel ? `YouTube · ${privacyLabel}` : 'YouTube'}>
-              <button
-                onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
-                className="inline-flex items-center gap-0.5 p-1 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 transition-colors shrink-0"
-              >
-                <LucideYoutube size={11} />
-                {PrivacyIcon && <PrivacyIcon size={8} />}
-              </button>
-            </Tooltip>
-          )}
         </div>
 
         {/* Stream types */}
@@ -4125,7 +4211,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
             {normalizeStreamTypes(meta.streamType).map(t => {
               const color = getTagColor(tagColors[t])
               return (
-                <span key={t} className={`inline-block text-[10px] px-1.5 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
+                <span key={t} className={`inline-block text-xs px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
                   {t}
                 </span>
               )
@@ -4147,46 +4233,93 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
             )}
           </div>
         )}
+
+        {/* Comments */}
+        {meta?.comments && (
+          <ClampedComment text={meta.comments} />
+        )}
       </div>
 
       {/* Footer actions */}
       <div className="flex items-center gap-1 px-2 pb-2">
-        <div className={`flex items-center gap-1 text-xs font-mono mr-auto ${videoCount > 0 ? 'text-gray-500' : 'text-gray-700'}`}>
-          <Film size={10} className="shrink-0" />
-          <span>{videoCount}</span>
+        <div className="mr-auto">
+          <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined}>
+            {(() => {
+              const vm = meta?.videoMap
+              const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount
+              const shortClipCount = vm ? Object.values(vm).filter(e => e.category === 'short' || e.category === 'clip').length : 0
+              return (
+                <div className="flex items-center gap-2 cursor-default">
+                  <div className={`flex items-center gap-1 text-xs font-mono ${fullCount > 0 ? 'text-gray-400' : 'text-gray-700'}`}>
+                    <Film size={11} className="shrink-0" />
+                    <span>{fullCount}</span>
+                  </div>
+                  {shortClipCount > 0 && (
+                    <div className="flex items-center gap-1 text-xs font-mono text-blue-400">
+                      <Scissors size={11} className="shrink-0" />
+                      <span>{shortClipCount}</span>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+          </VideoCountTooltip>
         </div>
-        {!hasMeta && (
-          <Tooltip content="No metadata">
-            <span className="text-yellow-600"><AlertTriangle size={11} /></span>
-          </Tooltip>
-        )}
-        <Tooltip content={hasSMThumbnail ? 'Edit thumbnail' : 'Create thumbnail'}>
-          <button onClick={e => { e.stopPropagation(); onOpenThumbnails() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
-            <ImageIcon size={12} />
-          </button>
-        </Tooltip>
-        <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
-          <button onClick={e => { e.stopPropagation(); hasMeta ? onEdit() : onAdd() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
-            <PencilLine size={12} />
-          </button>
-        </Tooltip>
-        <Tooltip content="Open folder">
-          <button onClick={e => { e.stopPropagation(); onOpen() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
-            <FolderOpen size={12} />
-          </button>
-        </Tooltip>
-        {isPending && (
-          <Tooltip content="Reschedule">
-            <button onClick={e => { e.stopPropagation(); onReschedule() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
-              <CalendarClock size={12} />
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!hasMeta && (
+            <Tooltip content="No metadata">
+              <span className="text-yellow-600"><AlertTriangle size={11} /></span>
+            </Tooltip>
+          )}
+          {videoCount > 0 && (
+            <Tooltip content="Send to Player">
+              <button onClick={e => { e.stopPropagation(); onSendToPlayer() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+                <Film size={12} />
+              </button>
+            </Tooltip>
+          )}
+          {videoCount > 0 && (
+            <Tooltip content="Send to Converter">
+              <button onClick={e => { e.stopPropagation(); onSendToConverter() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+                <Zap size={12} />
+              </button>
+            </Tooltip>
+          )}
+          {videoCount > 1 && (
+            <Tooltip content="Combine videos">
+              <button onClick={e => { e.stopPropagation(); onSendToCombine() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+                <Combine size={12} />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip content={hasSMThumbnail ? 'Edit thumbnail' : 'Create thumbnail'}>
+            <button onClick={e => { e.stopPropagation(); onOpenThumbnails() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+              <ImageIcon size={12} />
             </button>
           </Tooltip>
-        )}
-        <Tooltip content="Delete">
-          <button onClick={e => { e.stopPropagation(); onDelete() }} className="p-1 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors">
-            <Trash2 size={12} />
-          </button>
-        </Tooltip>
+          <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
+            <button onClick={e => { e.stopPropagation(); hasMeta ? onEdit() : onAdd() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+              <PencilLine size={12} />
+            </button>
+          </Tooltip>
+          <Tooltip content="Open folder">
+            <button onClick={e => { e.stopPropagation(); onOpen() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+              <FolderOpen size={12} />
+            </button>
+          </Tooltip>
+          {isPending && (
+            <Tooltip content="Reschedule">
+              <button onClick={e => { e.stopPropagation(); onReschedule() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+                <CalendarClock size={12} />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip content="Delete">
+            <button onClick={e => { e.stopPropagation(); onDelete() }} className="p-1 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+              <Trash2 size={12} />
+            </button>
+          </Tooltip>
+        </div>
       </div>
     </div>
   )
@@ -4342,69 +4475,73 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
       </td>
 
       {/* Date */}
-      <td className="px-2 py-2 align-middle min-w-[220px]">
+      <td className="p-1 align-middle min-w-[220px]">
         <div className="flex items-center justify-between gap-1.5 w-full">
-          <Tooltip content={friendlyDate(date)} side="top">
-            <span className="font-mono text-sm text-gray-200">{date}</span>
-          </Tooltip>
-          {sameDayIndex && sameDayIndex > 1 && (
-            <span className="font-mono text-sm text-purple-400/70">#{sameDayIndex}</span>
-          )}
-          {meta?.archived && (
-            <Tooltip content="Archived">
-              <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30 shrink-0">
-                <Archive size={10} />
-              </span>
+          <div className="inline-flex gap-1 mt-0.5">
+            <Tooltip content={friendlyDate(date)} side="top">
+                <span className="font-mono text-sm text-gray-200">{date}</span>
             </Tooltip>
-          )}
-          {isPending && (
-            isNextUpcoming && meta?.ytVideoId ? (() => {
-              const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
-              const liveLabel = isLive ? 'Live now' : 'Open in YouTube Studio'
-              const tooltipText = privacyLabel ? `${liveLabel} · ${privacyLabel}` : liveLabel
-              const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
-              return (
-                <Tooltip content={tooltipText}>
-                  <button
-                    onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
-                    className={`inline-flex items-center gap-0.5 p-0.5 rounded border transition-colors shrink-0 ${
-                      isLive
-                        ? 'bg-green-900/30 text-green-400 border-green-800/30 hover:bg-green-900/50 hover:text-green-300'
-                        : 'bg-yellow-900/30 text-yellow-400 border-yellow-800/30 hover:bg-yellow-900/50 hover:text-yellow-300'
-                    }`}
-                  >
-                    <Radio size={12} />
-                    {PrivacyIcon && <PrivacyIcon size={9} />}
-                  </button>
+            {sameDayIndex && sameDayIndex > 1 && (
+                <span className="font-mono text-sm text-purple-400/70 font-semibold">#{sameDayIndex}</span>
+            )}
+          </div>
+          <div className="inline-flex gap-1">
+              {meta?.archived && (
+                <Tooltip content="Archived">
+                  <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30 shrink-0">
+                    <Archive size={12} />
+                  </span>
                 </Tooltip>
-              )
-            })() : (
-              <Tooltip content={isNextUpcoming ? 'Upcoming — stream hasn\'t happened yet' : 'Scheduled upcoming stream'}>
-                <span className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 shrink-0">
-                  <Radio size={12} />
-                </span>
-              </Tooltip>
-            )
-          )}
-          {!isPending && meta?.ytVideoId && (() => {
-            const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
-            const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
-            return (
-              <Tooltip content={privacyLabel ? `Edit on YouTube · ${privacyLabel}` : 'Edit on YouTube'}>
-                <button
-                  onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
-                  className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0 mb-[2px]"
-                >
-                  <LucideYoutube size={12} />
-                  {PrivacyIcon && <PrivacyIcon size={9} />}
-                </button>
-              </Tooltip>
-            )
-          })()}
+              )}
+              {isPending && (
+                isNextUpcoming && meta?.ytVideoId ? (() => {
+                  const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
+                  const liveLabel = isLive ? 'Live now' : 'Open in YouTube Studio'
+                  const tooltipText = privacyLabel ? `${liveLabel} · ${privacyLabel}` : liveLabel
+                  const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
+                  return (
+                    <Tooltip content={tooltipText}>
+                      <button
+                        onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
+                        className={`inline-flex items-center gap-0.5 p-0.5 rounded border transition-colors shrink-0 ${
+                          isLive
+                            ? 'bg-green-900/30 text-green-400 border-green-800/30 hover:bg-green-900/50 hover:text-green-300'
+                            : 'bg-yellow-900/30 text-yellow-400 border-yellow-800/30 hover:bg-yellow-900/50 hover:text-yellow-300'
+                        }`}
+                      >
+                        <Radio size={12} />
+                        {PrivacyIcon && <PrivacyIcon size={12} />}
+                      </button>
+                    </Tooltip>
+                  )
+                })() : (
+                  <Tooltip content={isNextUpcoming ? 'Upcoming — stream hasn\'t happened yet' : 'Scheduled upcoming stream'}>
+                    <span className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 shrink-0">
+                      <Radio size={12} />
+                    </span>
+                  </Tooltip>
+                )
+              )}
+            {!isPending && meta?.ytVideoId && (() => {
+                const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
+                const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
+                return (
+                <Tooltip content={privacyLabel ? `Edit on YouTube · ${privacyLabel}` : 'Edit on YouTube'}>
+                    <button
+                    onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
+                    className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
+                    >
+                    <LucideYoutube size={12} />
+                    {PrivacyIcon && <PrivacyIcon size={12} />}
+                    </button>
+                </Tooltip>
+                )
+            })()}
+          </div>
         </div>
         {(meta?.ytTitle || meta?.twitchTitle) && (
-          <Tooltip content={meta.ytTitle || meta.twitchTitle} side="bottom" triggerClassName="block mt-0.5">
-            <div className="text-[10px] leading-none text-gray-400 truncate max-w-[204px]">{meta.ytTitle || meta.twitchTitle}</div>
+          <Tooltip content={meta.ytTitle || meta.twitchTitle} side="bottom" triggerClassName="block">
+            <div className="text-[10px] leading-normal text-gray-400 truncate max-w-[204px] overflow-auto">{meta.ytTitle || meta.twitchTitle}</div>
           </Tooltip>
         )}
       </td>

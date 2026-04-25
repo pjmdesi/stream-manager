@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastIsLive, fetchPrivacyStatuses } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastIsLive, fetchPrivacyStatuses, createBroadcast } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -68,6 +68,19 @@ export function registerYouTubeIPC(): void {
       return result
     } catch (e: any) {
       console.error('[YT main] getBroadcasts — error:', e.message)
+      throw e
+    }
+  })
+
+  ipcMain.handle('youtube:createBroadcast', async (
+    _event,
+    params: { title: string; description: string; scheduledStartTime: string; privacyStatus: 'public' | 'unlisted' | 'private' },
+  ) => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      return await createBroadcast(params, clientId, clientSecret)
+    } catch (e: any) {
+      console.error('[YT main] createBroadcast — error:', e.message)
       throw e
     }
   })

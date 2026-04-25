@@ -308,6 +308,9 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetBroadcasts: () =>
     ipcRenderer.invoke('youtube:getBroadcasts'),
 
+  youtubeCreateBroadcast: (params: { title: string; description: string; scheduledStartTime: string; privacyStatus: 'public' | 'unlisted' | 'private' }) =>
+    ipcRenderer.invoke('youtube:createBroadcast', params),
+
   youtubeGetCompletedBroadcasts: () =>
     ipcRenderer.invoke('youtube:getCompletedBroadcasts'),
 

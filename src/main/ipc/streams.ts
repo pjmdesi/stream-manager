@@ -209,9 +209,22 @@ function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
 
 function writeAllMeta(streamsDir: string, allMeta: Record<string, StreamMeta>): void {
   const filePath = metaFilePath(streamsDir)
+  // On Windows, fs.writeFileSync fails with EPERM when overwriting a hidden file (CREATE_ALWAYS
+  // on a hidden file returns ACCESS_DENIED). Unhide before writing, write, then re-hide.
+  const isWin = process.platform === 'win32'
+  if (isWin && fs.existsSync(filePath)) {
+    try { spawnSync('attrib', ['-H', filePath], { timeout: 2000 }) } catch {}
+  }
   fs.writeFileSync(filePath, JSON.stringify(allMeta, null, 2), 'utf-8')
-  if (process.platform === 'win32') {
-    try { spawnSync('attrib', ['+H', filePath], { shell: true, timeout: 2000 }) } catch {}
+  if (isWin) {
+    try {
+      const result = spawnSync('attrib', ['+H', filePath], { timeout: 2000 })
+      if (result.status !== 0) {
+        console.warn('[writeAllMeta] attrib +H failed', { status: result.status, stderr: result.stderr?.toString() })
+      }
+    } catch (err) {
+      console.warn('[writeAllMeta] attrib +H threw', err)
+    }
   }
 }
 
@@ -300,8 +313,9 @@ async function refreshVideoMaps(
     const isLocal = localFlags[i]
 
     if (isLocal) {
-      // Re-probe if missing or mtime changed
-      if (!existing || existing.mtime !== stat.mtimeMs) {
+      // Re-probe if missing, mtime changed, or the cached entry is a stat-only fallback
+      // (no duration) from a previous probe failure — gives it a chance to upgrade on retry.
+      if (!existing || existing.mtime !== stat.mtimeMs || existing.duration === undefined) {
         toProbe.push({ p, idx: i })
       }
     } else if (!existing) {
@@ -318,13 +332,21 @@ async function refreshVideoMaps(
   }
 
   if (toProbe.length > 0) {
-    await Promise.all(toProbe.map(async ({ p, idx }) => {
+    // Cap parallelism — too many concurrent ffprobe child processes can hit Windows resource
+    // limits and cause silent failures on a subset of files.
+    const PROBE_CONCURRENCY = 4
+    const PROBE_TIMEOUT_MS = 20_000
+    const probeOne = async ({ p, idx }: { p: string; idx: number }) => {
       const key = pathKey.get(p)!
       const filename = path.basename(p)
       const stat = stats[idx]!
+      const prev = allMeta[key].videoMap?.[filename]
       try {
-        const info = await probeFile(p)
-        const prev = allMeta[key].videoMap?.[filename]
+        // Wrap probeFile in a timeout — a single hanging ffprobe shouldn't stall the whole batch.
+        const info = await Promise.race([
+          probeFile(p),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('probe timeout')), PROBE_TIMEOUT_MS)),
+        ])
         // App-produced clips (have clipOf) keep a hard-coded category based on their saved crop,
         // overriding the automatic classifier so 'vid' can't leak back in after a re-probe.
         let category: VideoEntry['category']
@@ -350,8 +372,27 @@ async function refreshVideoMaps(
         if (!allMeta[key].videoMap) allMeta[key].videoMap = {}
         allMeta[key].videoMap![filename] = entry
         changed = true
-      } catch { /* skip unreadable files */ }
-    }))
+      } catch (err) {
+        // Probe failed (corrupt file, locked by another process, ffprobe timeout, etc.).
+        // Record a stat-only entry so the file isn't invisible to the count and tooltip;
+        // a future load will retry the probe (mtime check) and upgrade the entry.
+        console.warn(`[refreshVideoMaps] probe failed for ${p}:`, err)
+        if (!prev) {
+          const entry: VideoEntry = {
+            size: stat.size,
+            mtime: stat.mtimeMs,
+            category: classifyVideo(undefined, undefined, undefined, stat.size, true, clipThresholdSecs),
+          }
+          if (!allMeta[key].videoMap) allMeta[key].videoMap = {}
+          allMeta[key].videoMap![filename] = entry
+          changed = true
+        }
+      }
+    }
+    // Run probes in batches of PROBE_CONCURRENCY to avoid overwhelming ffprobe.
+    for (let i = 0; i < toProbe.length; i += PROBE_CONCURRENCY) {
+      await Promise.all(toProbe.slice(i, i + PROBE_CONCURRENCY).map(probeOne))
+    }
   }
 
   // Prune stale entries: remove videoMap keys whose files are no longer in the folder.
@@ -520,7 +561,7 @@ export function registerStreamsIPC(): void {
     }
 
     // Only refresh video maps if the set of video files has changed since last cache
-    const clipThreshold = (getStore().get('config', {}) as any).clipDurationThreshold ?? 300
+    const clipThreshold = ((getStore().get('config') as any)?.clipDurationThreshold) ?? 300
     const videoEntries = folders
       .filter(f => f.videos.length > 0 && !f.isMissing)
       .map(f => ({ key: f.folderName, videos: f.videos }))
@@ -534,9 +575,14 @@ export function registerStreamsIPC(): void {
       return false
     })
     if (videoSetChanged) {
-      refreshVideoMaps(videoEntries, allMeta, clipThreshold).then(changed => {
-        if (changed) writeAllMeta(dir, allMeta)
-      })
+      refreshVideoMaps(videoEntries, allMeta, clipThreshold)
+        .then(changed => {
+          if (changed) {
+            try { writeAllMeta(dir, allMeta) }
+            catch (err) { console.error('[streams:list] writeAllMeta failed:', err) }
+          }
+        })
+        .catch(err => console.error('[streams:list] refreshVideoMaps failed:', err))
     }
 
     return folders
@@ -603,10 +649,15 @@ export function registerStreamsIPC(): void {
     // Overrides anything refreshVideoMaps/classifyVideo may have written.
     const cropAspect = (clipState as { cropAspect?: string } | null)?.cropAspect
     const forcedCategory: VideoEntry['category'] = cropAspect === '9:16' ? 'short' : 'clip'
+    // Base: existing entry if present, otherwise minimal stat-derived entry so the VideoEntry
+    // contract (size/mtime/category required) is always satisfied.
+    const base: VideoEntry = current ?? {
+      size: stat?.size ?? 0,
+      mtime: stat?.mtimeMs ?? Date.now(),
+      category: forcedCategory,
+    }
     videoMap[outputFilename] = {
-      size: current?.size ?? stat?.size ?? 0,
-      mtime: current?.mtime ?? stat?.mtimeMs ?? Date.now(),
-      ...current,
+      ...base,
       category: forcedCategory,
       clipOf: sourceName,
       clipState: clipState as any,

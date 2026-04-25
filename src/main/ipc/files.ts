@@ -36,9 +36,23 @@ function isFileConfirmedLocal(filePath: string): boolean {
  * Falls back to true (assume local) on non-Windows or any error so behaviour is unchanged.
  * Uses async spawn so it never blocks the main thread.
  */
-export function checkLocalFiles(filePaths: string[]): Promise<boolean[]> {
-  if (process.platform !== 'win32' || filePaths.length === 0) return Promise.resolve(filePaths.map(() => true))
+export async function checkLocalFiles(filePaths: string[]): Promise<boolean[]> {
+  if (process.platform !== 'win32' || filePaths.length === 0) return filePaths.map(() => true)
 
+  // Windows caps spawn argv at ~32k chars. With many or long paths the single-shot script
+  // hits ENAMETOOLONG and the whole call rejects. Chunk into smaller batches that each
+  // stay well under the limit, then concatenate results.
+  const CHUNK_SIZE = 40
+  const results: boolean[] = []
+  for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
+    const chunk = filePaths.slice(i, i + CHUNK_SIZE)
+    const chunkResult = await runChunk(chunk)
+    results.push(...chunkResult)
+  }
+  return results
+}
+
+function runChunk(filePaths: string[]): Promise<boolean[]> {
   return new Promise(resolve => {
     const escaped = filePaths.map(p => p.replace(/'/g, "''"))
     const pathsLiteral = escaped.map(p => `'${p}'`).join(',')

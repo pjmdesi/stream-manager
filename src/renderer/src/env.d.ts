@@ -141,6 +141,7 @@ declare global {
       youtubeGetPrivacyStatuses(videoIds: string[]): Promise<Record<string, string>>
       youtubeCheckBroadcastIsLive(broadcastId: string): Promise<{ isLive: boolean; privacyStatus: string | null }>
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>
+      youtubeCreateBroadcast(params: { title: string; description: string; scheduledStartTime: string; privacyStatus: 'public' | 'unlisted' | 'private' }): Promise<LiveBroadcast>
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
       youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[]): Promise<void>

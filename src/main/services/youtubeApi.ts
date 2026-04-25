@@ -291,6 +291,36 @@ export async function checkBroadcastIsLive(
 /** Update a broadcast's title, description, and gameTitle.
  *  Only writable snippet fields are sent; scheduledStartTime is preserved from
  *  the current snippet because the API requires it for non-persistent broadcasts. */
+/** Create a new live broadcast via liveBroadcasts.insert. Mirrors what visiting YouTube
+ * Studio's "Go Live" page does — reserves a broadcast that the user can later bind to a
+ * stream key in OBS. Returns the newly-created broadcast resource. */
+export async function createBroadcast(
+  params: { title: string; description: string; scheduledStartTime: string; privacyStatus: 'public' | 'unlisted' | 'private' },
+  clientId: string,
+  clientSecret: string
+): Promise<{ id: string; snippet: any; status: any }> {
+  const body = {
+    snippet: {
+      title: params.title || 'Untitled stream',
+      description: params.description || '',
+      scheduledStartTime: params.scheduledStartTime,
+    },
+    status: {
+      privacyStatus: params.privacyStatus,
+      selfDeclaredMadeForKids: false,
+    },
+    contentDetails: {
+      enableAutoStart: false,
+      enableAutoStop: false,
+    },
+  }
+  return ytRequest(
+    `/liveBroadcasts?part=snippet,status,contentDetails`,
+    { method: 'POST', body: JSON.stringify(body) },
+    clientId, clientSecret
+  )
+}
+
 export async function updateBroadcastSnippet(
   broadcastId: string,
   updates: { title: string; description: string },
