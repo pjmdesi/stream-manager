@@ -2,9 +2,7 @@
 
 <img src="resources/icon.png" width="48" alt="Stream Manager icon" /> A desktop app for streamers to manage, review, and process their local recording files. Yet another app built with Electron + React. Windows only (for now), feel free to adapt this to other platforms if you're so inclined. Contributions are welcome.
 
-![Stream Manager screenshot](resources/Screenshot%202026-04-14%20051329.png)
-
-> Vibe-coded with [Claude](https://claude.ai) (Anthropic) — this project was written through conversation with Claude Code (I made the crappy logo though). Think of that what you will, but the result is a fully functional Electron app that meets my requirements for a personal stream management tool. I'm sharing it here in case it can be useful to other streamers with similar needs. I hope it can save other streamers time and money by providing a free and robust solution for managing their streams.
+![Stream Manager screenshot](resources/sm-streams.png)
 
 ---
 
@@ -66,7 +64,7 @@ Stream Manager is built around keeping everything about your stream sessions in 
 
 ### Streams
 
-![Stream Manager screenshot](resources/Screenshot%202026-04-14%20051329.png)
+![Stream Manager screenshot](resources/sm-streams.png)
 
 The main hub for browsing and managing local recordings of your stream sessions. Video files, thumbnails, and other related assets in your designated folder are scanned and grouped automatically:
 
@@ -83,7 +81,7 @@ The main hub for browsing and managing local recordings of your stream sessions.
 
 ### Video Player
 
-![Stream Manager screenshot](resources/Screenshot%202026-04-14%20051353.png)
+![Stream Manager screenshot](resources/sm-player.png)
 
 Open your stream videos and clips (or drop in any video file) and play it back with thumbnail and waveform tracks. Multi-track audio (common in OBS recordings) is supported. Review, clip, and export stream sessions with precision using these tools:
 
@@ -99,6 +97,8 @@ Open your stream videos and clips (or drop in any video file) and play it back w
 
 ### Thumbnail Editor
 
+![Stream Manager screenshot](resources/sm-thumbnails.png)
+
 A built-in canvas editor for designing stream and clip thumbnails without leaving the app. Save reusable templates, then pick one when you create a new stream to instantly get a finished thumbnail with your standard branding.
 
 - **Layered canvas** — drop in images, text, and shapes. Layers support drag, resize, rotate, opacity, ordering, and visibility toggles.
@@ -109,7 +109,7 @@ A built-in canvas editor for designing stream and clip thumbnails without leavin
 
 ### Converter
 
-![Stream Manager screenshot](resources/Screenshot%202026-04-14%20054124.png)
+![Stream Manager screenshot](resources/sm-converter.png)
 
 Queue video files for conversion using ffmpeg presets.
 
@@ -121,6 +121,8 @@ Queue video files for conversion using ffmpeg presets.
 
 ### Auto-Rules
 
+![Stream Manager screenshot](resources/sm-auto-rules.png)
+
 File watcher rules that can automatically **move, copy, rename, or convert** files matching a glob pattern when they appear in a watched folder. Rules can be individually enabled/disabled. The watcher can be configured to start automatically on launch and is always accessible via the sidebar widget. This is useful for streamers who want to automate the organization of their recordings as soon as they are created by their streaming software, without having to manually move files around or run batch processes.
 
 For instance, if you record directly to a "Raw Recordings" folder, you can set up a rule to automatically move them to your main "Streams" folder and rename them to match the OBS date-based format that the app recognizes. The app will then automatically pick them up and add them to your stream library with in the correct location.
@@ -129,7 +131,7 @@ The **convert** action takes this one step further: matched files can be queued 
 
 ### Launcher
 
-![Stream Manager screenshot](resources/Screenshot%202026-04-14%20052116.png)
+![Stream Manager screenshot](resources/sm-launcher.png)
 
 Create named groups of apps that can be launched together with a single click — useful for spinning up your full streaming setup (OBS, chat apps, Discord, game launchers, browser profiles, and any other apps that help you stream) all at once.
 
@@ -138,6 +140,8 @@ Create named groups of apps that can be launched together with a single click �
 - **Sidebar widget** — pin one group to the sidebar for one-click access without navigating to the Launcher page.
 
 ### Integrations
+
+![Stream Manager screenshot](resources/sm-integrations.png)
 
 #### YouTube
 

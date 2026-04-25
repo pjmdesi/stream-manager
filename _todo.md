@@ -46,3 +46,4 @@
    1. **NEED TO TEST ON NEXT STREAM**
 3. We missed adding the clip counter to the cards layout, and need to make sure to update the text styling to match the list design.
 4. The _meta.json file isn't actually marked as hidden in windows explorer. We need to discourage users from opening and modifying that, so we need to make sure it's a hidden file.
+5. This isn't a bug in the app, but maybe the app could solve it. On YouTube, when a stream has completed, the app can't see a new "next" stream ID because it hasn't been created yet. The user hsa to go into the YouTube studio "Go Live" page to initialize it. Maybe there's a way the app could do that? Maybe a button that appears if the app does not detect an upcoming stream?
