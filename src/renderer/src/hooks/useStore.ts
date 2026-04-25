@@ -30,6 +30,7 @@ const defaultConfig: AppConfig = {
   claudeApiKey: '',
   claudeSystemPrompt: '',
   launcherWidgetGroupId: '',
+  listThumbWidth: 85,
 }
 
 interface StoreContextValue {
