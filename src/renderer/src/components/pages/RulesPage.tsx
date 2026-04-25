@@ -17,6 +17,7 @@ function RuleModal({
   onClose: () => void
   onSave: (r: WatchRule) => void
 }) {
+  const [name, setName] = useState(rule?.name || '')
   const [watchPath, setWatchPath] = useState(rule?.watchPath || '')
   const [pattern, setPattern] = useState(rule?.pattern || '*.mkv')
   const [action, setAction] = useState<WatchRule['action']>(rule?.action || 'move')
@@ -44,6 +45,7 @@ function RuleModal({
     onSave({
       id: rule?.id || uuidv4(),
       enabled: rule?.enabled ?? true,
+      name: name.trim() || undefined,
       watchPath,
       pattern,
       action,
@@ -71,6 +73,13 @@ function RuleModal({
       }
     >
       <div className="flex flex-col gap-4">
+        <Input
+          label="Name (optional)"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="e.g. Archive Barotrauma streams"
+          hint="Helps tell similar rules apart in the list"
+        />
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-300">Watch Path</label>
           <div className="flex gap-2">
@@ -269,10 +278,13 @@ export function RulesPage() {
           {rules.map(rule => (
             <div
               key={rule.id}
-              className={`bg-navy-800 border rounded-lg p-4 flex items-start gap-3 ${rule.enabled ? 'border-white/5' : 'border-white/5 opacity-50'}`}
+              className={`bg-navy-800 border rounded-lg p-4 flex items-center gap-3 ${rule.enabled ? 'border-white/5' : 'border-white/5 opacity-50'}`}
             >
               <Checkbox checked={rule.enabled} onChange={() => toggleRule(rule.id)} />
               <div className="flex-1 min-w-0">
+                {rule.name && (
+                  <div className="text-sm font-medium text-gray-200 truncate mb-1">{rule.name}</div>
+                )}
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-mono text-gray-300 truncate">{rule.watchPath}</span>
                   <span className="text-xs bg-surface-100 text-purple-300 px-2 py-0.5 rounded">{rule.pattern}</span>

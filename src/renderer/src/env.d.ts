@@ -197,6 +197,8 @@ declare global {
       windowMinimizeToTray(): void
       windowIsMaximized(): Promise<boolean>
       onMaximizeChange(cb: (maximized: boolean) => void): () => void
+      onConfirmQuit(cb: (data: { running: number; queued: number }) => void): () => void
+      proceedQuit(): void
       getStartupSettings(): Promise<{ startWithWindows: boolean; startMinimized: boolean }>
       setStartupSettings(startWithWindows: boolean, startMinimized: boolean): Promise<void>
       resetOnboarding(): Promise<void>

@@ -12,17 +12,20 @@ interface ThumbnailEditorContextValue {
   pendingStream: PendingThumbnailStream | null
   clearPendingStream: () => void
   openEditor: (stream: PendingThumbnailStream) => void
+  /** Navigate to the thumbnails page without binding to a specific stream
+   *  (e.g. user wants to author a new built-in template). */
+  navigateToEditor: () => void
   /** Set by App.tsx — navigates to the thumbnails page */
-  _setNavigate: (fn: (stream: PendingThumbnailStream) => void) => void
+  _setNavigate: (fn: (stream: PendingThumbnailStream | null) => void) => void
 }
 
 const ThumbnailEditorContext = createContext<ThumbnailEditorContextValue | null>(null)
 
 export function ThumbnailEditorProvider({ children }: { children: React.ReactNode }) {
   const [pendingStream, setPendingStream] = useState<PendingThumbnailStream | null>(null)
-  const [navigateFn, setNavigateFn] = useState<((s: PendingThumbnailStream) => void) | null>(null)
+  const [navigateFn, setNavigateFn] = useState<((s: PendingThumbnailStream | null) => void) | null>(null)
 
-  const _setNavigate = useCallback((fn: (stream: PendingThumbnailStream) => void) => {
+  const _setNavigate = useCallback((fn: (stream: PendingThumbnailStream | null) => void) => {
     setNavigateFn(() => fn)
   }, [])
 
@@ -31,10 +34,15 @@ export function ThumbnailEditorProvider({ children }: { children: React.ReactNod
     navigateFn?.(stream)
   }, [navigateFn])
 
+  const navigateToEditor = useCallback(() => {
+    setPendingStream(null)
+    navigateFn?.(null)
+  }, [navigateFn])
+
   const clearPendingStream = useCallback(() => setPendingStream(null), [])
 
   return (
-    <ThumbnailEditorContext.Provider value={{ pendingStream, clearPendingStream, openEditor, _setNavigate }}>
+    <ThumbnailEditorContext.Provider value={{ pendingStream, clearPendingStream, openEditor, navigateToEditor, _setNavigate }}>
       {children}
     </ThumbnailEditorContext.Provider>
   )

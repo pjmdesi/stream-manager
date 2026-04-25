@@ -37,6 +37,7 @@ async function copyWithProgress(
 export interface WatchRule {
   id: string
   enabled: boolean
+  name?: string
   watchPath: string
   pattern: string
   action: 'move' | 'copy' | 'rename' | 'convert'
@@ -162,7 +163,7 @@ class FileWatcher {
       const event: WatchEvent = {
         id: eventId,
         ruleId: rule.id,
-        ruleName: rule.watchPath,
+        ruleName: rule.name || rule.watchPath,
         filePath,
         action: rule.action,
         destination: resolvedDestination,

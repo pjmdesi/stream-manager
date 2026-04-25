@@ -43,6 +43,7 @@ export interface FolderTemplate {
 export interface WatchRule {
   id: string
   enabled: boolean
+  name?: string
   watchPath: string
   pattern: string
   action: 'move' | 'copy' | 'rename' | 'convert'
@@ -104,6 +105,8 @@ export interface AppConfig {
   archivePresetId: string
   clipPresetId: string
   defaultThumbnailTemplate: string
+  defaultBuiltinThumbnailTemplate: string
+  useBuiltinThumbnailByDefault: boolean
   checkEpisodeIteration: boolean
   audioCacheLimit: number
   defaultBleepVolume: number

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { FolderOpen, CheckCircle, MoveRight, HelpCircle } from 'lucide-react'
+import { FolderOpen, CheckCircle, MoveRight, HelpCircle, Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
@@ -81,6 +81,18 @@ function Step1({ selectedMode, onSelect }: Step1Props) {
   )
 }
 
+function FeatureCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-navy-800/60 border border-white/5">
+      <div className="flex items-center gap-1.5 text-gray-200">
+        <span className="text-purple-400">{icon}</span>
+        <span className="text-xs font-semibold">{title}</span>
+      </div>
+      <p className="text-[11px] text-gray-500 leading-relaxed">{children}</p>
+    </div>
+  )
+}
+
 // ── Step 1.5: Convert dump folder ─────────────────────────────────────────────
 
 type ConvertStatus = 'idle' | 'converting' | 'done' | 'undoing' | 'undone'
@@ -141,6 +153,40 @@ function Step1_5({ dir, onDirChange, onResult }: Step1_5Props) {
       <p className="text-sm text-gray-400">
         If not, simply move on to the next step!
       </p>
+
+      {/* What folder-per-stream unlocks across the app */}
+      <div className="flex flex-col gap-2">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">What this enables</h3>
+        <div className="grid grid-cols-2 gap-2">
+          <FeatureCard icon={<Radio size={14} />} title="Streams">
+            Each stream gets its own row/card with a thumbnail, comments, episode tracking, and per-session metadata.
+            Clips, drafts, and exports stay grouped with their source recording.
+          </FeatureCard>
+          <FeatureCard icon={<Film size={14} />} title="Player & Clipping">
+            Open a stream and the player loads every related video as a session, including clip drafts.
+            Bleeps, crop regions, and clip exports live next to the original file.
+          </FeatureCard>
+          <FeatureCard icon={<ImageIcon size={14} />} title="Thumbnail Editor">
+            Built-in templates render a thumbnail saved alongside the stream so it picks up automatically wherever the stream appears.
+          </FeatureCard>
+          <FeatureCard icon={<Shuffle size={14} />} title="Auto-Rules">
+            Watch your recordings folder and automatically move new files into the matching dated stream folder — no manual sorting.
+          </FeatureCard>
+          <FeatureCard icon={<Zap size={14} />} title="Converter">
+            Convert and archive a whole stream's worth of files in one batch.
+            Outputs land back in the same folder with a clear naming convention.
+          </FeatureCard>
+          <FeatureCard icon={<Combine size={14} />} title="Combine">
+            Merge multi-part recordings (mid-stream OBS splits, separate audio tracks) into a single file with the original timeline preserved.
+          </FeatureCard>
+          <FeatureCard icon={<Rocket size={14} />} title="Launcher">
+            Save app/window groups (OBS, Discord, browser, capture cards) and open them all in one click before you go live.
+          </FeatureCard>
+          <FeatureCard icon={<Plug size={14} />} title="Integrations">
+            Pull YouTube broadcast data and Twitch metadata directly onto each stream — titles, descriptions, tags, thumbnails — and push updates back when you publish.
+          </FeatureCard>
+        </div>
+      </div>
 
       <div className="flex flex-col gap-2">
         <div className="flex gap-2">
@@ -449,6 +495,13 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
     setStreamsDir(dir)
   }
 
+  const handleBack = () => {
+    if (step === 'convert') setStep('mode')
+    else if (step === 'streams-dir') setStep(selectedMode === 'dump-folder' ? 'convert' : 'mode')
+    else if (step === 'auto-rule') setStep('streams-dir')
+    else if (step === 'done') setStep('auto-rule')
+  }
+
   const handleNext = async () => {
     if (step === 'mode') {
       if (!selectedMode) return
@@ -519,7 +572,9 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
               Close Stream Manager
             </Button>
           ) : (
-            <div />
+            <Button variant="ghost" onClick={handleBack}>
+              Back
+            </Button>
           )}
           <Button variant="primary" onClick={handleNext} disabled={nextDisabled}>
             {nextLabel}

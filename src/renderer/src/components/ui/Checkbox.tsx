@@ -12,7 +12,7 @@ interface CheckboxProps {
 }
 
 const COLOR_MAP = {
-  purple: 'bg-purple-500 border-purple-500',
+  purple: 'bg-purple-700 border-purple-700',
   red:    'bg-red-500 border-red-500',
   green:  'bg-green-600 border-green-600',
   blue:   'bg-blue-500 border-blue-500',

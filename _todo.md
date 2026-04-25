@@ -19,7 +19,8 @@
 15. lighten up the waveform in the waveform track in the player for non-merged audio so its easier to see.
 16. In the thumbnail editor. The work area doesn't clip the items to its boundaries, so items coming off of it show completely. This makes it difficult to determine what the actual thumbnail will look like. Would it be possible to have the parts of a layer that fall outside of the work area have some transparency (so they essentially darken/look faded). If not, just have it crop, showing nothing that falls outside of the boundary.
 17. Add a series of inputs in the player clipping mode so the user can finely control the properties of the crop region. located next to the crop dropdown, it should have x, y, w, h (left position, right position, width, height). The x, y will indicate the different in the position from the center of the video to the center of the crop region (if it's to the left, x will be negative, if it's higher up, y will be negative. also add a reset button which will reset the crop to the default position: x: 0, y: 0, width/height: whatever it should be).
-18. Implement a recreation of the OBS stream picker for YouTube, to allow selection of scheduled streams through OBS. The ultimate goal would be to create a new stream item in the app, and when it's time to stream, the app automatically sends OBS the details for the YouTube connection. Here is what Claude recommended:
+18. Rename the comments feature in the stream items to "Notes" instead. Also update the How to Use section.
+19. Implement a recreation of the OBS stream picker for YouTube, to allow selection of scheduled streams through OBS. The ultimate goal would be to create a new stream item in the app, and when it's time to stream, the app automatically sends OBS the details for the YouTube connection. Here is what Claude recommended:
     ```
     Option 3: Build the event picker yourself as a custom dock (the real answer)
     OBS supports custom browser docks, and YouTube's Live Streaming API exposes liveBroadcasts.list which returns exactly what OBS's native picker shows — your scheduled events with their bound stream keys. You build a small local web page that:
@@ -42,4 +43,19 @@
 
 ## Bugs
 
-_None at the moment._
+1. The app seems to freeze briefly at certain increments. It seems to correspond to YouTube API calls that appear in the VS Code console. These calls seem to happen at certain increments no matter where I am or what I'm doing in the app. Are these calls necessary?:
+    ```
+    [YT api] GET https://www.googleapis.com/youtube/v3/liveBroadcasts?part=status&id=pbVyDEd1PmY
+[YT api] response status: 200
+[YT api] GET https://www.googleapis.com/youtube/v3/videos?part=status&id=yHAC7g0vt4g%2CU9g0pa69xJY%2CfukEY6yFBe4%2CNIlhJR3w09E%2CPKE1wlykxo4%2CjxT2WKf1lH0%2CnxoJx3RSGZY%2CwrSg7ONmils%2Ch5ugJ0UknwM%2C2V4-VjT9Xcs%2C0RK9BNcgFXg%2CAq85kRIicI4%2CP8nrfWRFAtw%2CE2vBWYhl7l8%2Ct2NAACYQPnA%2CCstkQlZxof0%2CVtKEDaCiOyY%2C_fa4VUkA4SU%2CLhbxKnRajyc%2CLrl6rvw4cvI%2C1Pqn5mjhF94%2CprHlm9mr3CI%2C6sH90qQaOUI%2CIdTnQRunRaQ%2CCrk0B2bH-Z8%2CdFRVcqptACU%2CAJaCRqQ-BPk%2Cevc1q-qspk0%2CnNai3GByqO4%2Cjr0DXk2SMos%2CQcHTyjknyPI%2CLhbxKnRajyc%2CsIyZEP5rnDQ%2CT9v4ng_WiQ8%2CZqOTExYuSzE%2C8RvhogkNHRE%2CSaoololDjmk%2CMGIf-EJRf9k%2CD36E3I1qFdM%2CapT0hZazF50%2CTShDKiNcdXM%2C-J99CCcuffE%2C-fg4z2Byvps%2CFvgECkEG8GE%2CdsbI6O4rWRM%2Cu_w9NFkv574%2CSWVhv26-7zs%2CQSflFYZ6Fhg%2CtKkwreHiTsg%2CMWSf0YIR3d0&maxResults=50
+[YT api] response status: 200
+[YT api] response status: 200
+[YT api] GET https://www.googleapis.com/youtube/v3/videos?part=status&id=LhbxKnRajyc%2Cbv0mcR79W6E%2C_5XJRDSFr4c%2CD8SIgjdtUc4%2CuHOXV2FvccU%2CVwc5y7SQv58%2CEVZlZ03GE2I%2Cw184P79fxYg%2C_pjsd7iIp6s%2C3gD0HB5ucSU%2CHZKwgP4qVzA%2CHhNnQetGvLU%2Cs0qPsZsR8vY%2C925PeEGOH1A%2CMurblLYRp1o%2CZXMH2b1ZvzQ%2C24x3uKh96ak%2CpIwrEQPA5FA%2CYYgpPbge33g%2CZvnqGJp8P78%2CAbbzHCydCRY%2CVx7k_fMB21Y%2CsVAuZyHuPdM%2Clv5XRjr_bPg%2CluH_gcgU_Rk%2ClKJZr91ChGI%2CCLFvK8BdpvY%2CzpcXlmDPTkk%2C-4djo432YkU%2ChycqBmw3xK0%2CJk3uD5NXANo%2CeVPyt08kTxs%2CkDtjOC7N69M%2CzixuIh6XbAM%2CPwQAWRP2B_0%2CbUPAX7Otwng%2C3_Wxay9haCA%2Cxft1KuJnO9g%2C_kaaxFr6aUA%2CBLj3oODL1zA%2C7UZjQHKRApo%2Cdr7fcobyi2s%2CXyhyR-1OJk8%2Cklzz78Og0x0%2CLuwE26wUNrM%2C2lFbxbzUXxU%2CRo8wGJ1PwEQ%2CfBetSJ0jpzk%2CLhbxKnRajyc%2CEMyrysDIYG4&maxResults=50
+[YT api] response status: 200
+[YT api] GET https://www.googleapis.com/youtube/v3/videos?part=status&id=aaDO2qepnHE%2CYBoitTOLfFM%2CLhbxKnRajyc%2CQq4g3dbpx_k%2CfHtYBHoMhQI%2CV5V1oGJDg_U%2C8io-oarM_sc%2CWvqKcLjqisU%2CR7rTJrj9E0M%2CztAW1Zy6PN8%2C2fyyJgvmB68%2CN6E92-jkw-s%2CtGXhAKwOHZI%2CWVIAmoIrYag%2Cej2Cf9fp7u4%2C64EE03f_D9E%2C1c1WyoEFxM0%2CRP_1Pko5PYU%2CsDnmiNx7re8%2CqM2KGBvEgvc%2CYmHS4WMCrVc%2ChLnWfIqg0UQ%2Csgvd8BfaOB4%2C9Zd80sfZ8mo%2CmITWu_L7Lk4%2CcrE8hUY5FXA%2CB-XB0pcP2X4%2C-99bLribjBU%2CQYmc1-5bK50%2ClPe3f1uRsWI%2CdhQaYvcOQmg%2Cwl62QaXkjoA%2CFMQqEO-svG4%2CP_x-cnIvxjo%2CZrE5klq6e_4%2CMYimILVu8a4%2C1i269UKI8A8%2CfTUBllAeZEI%2CKyk4QIz5N0s%2COoIaUDL_Na0%2CvHM3i7dqQf0%2Cc70IOyHiz9I%2CFMQqEO-svG4%2CPQKPlxnjUaM%2CFOIVScAuMUY%2CpNkxIPfoiAc%2CGLbxFK3kGHY%2C0bYW-4sMR-g%2CEObvwlPx36c%2CsIlHpHUjE1Q&maxResults=50
+[YT api] response status: 200
+[YT api] GET https://www.googleapis.com/youtube/v3/videos?part=status&id=Rn3q5kvYaqw&maxResults=50
+[YT api] response status: 200
+[YT api] GET https://www.googleapis.com/youtube/v3/liveBroadcasts?part=status&id=pbVyDEd1PmY
+[YT api] response status: 200
+```

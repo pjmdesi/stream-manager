@@ -21,6 +21,7 @@ import { useConversionJobs } from './context/ConversionContext'
 import { useWatcher } from './context/WatcherContext'
 import { useStore } from './hooks/useStore'
 import { OnboardingModal } from './components/OnboardingModal'
+import { HelpModal } from './components/HelpModal'
 import { ThumbnailEditorProvider, useThumbnailEditor } from './context/ThumbnailEditorContext'
 import type { PendingThumbnailStream } from './context/ThumbnailEditorContext'
 
@@ -295,6 +296,7 @@ function AppInner() {
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [integrationAlert, setIntegrationAlert] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [quitConfirm, setQuitConfirm] = useState<{ running: number; queued: number } | null>(null)
   const { config, loading, refreshConfig } = useStore()
   const { refreshRules } = useWatcher()
   const { _setNavigate } = useThumbnailEditor()
@@ -312,6 +314,12 @@ function AppInner() {
   useEffect(() => {
     if (page === 'integrations') checkIntegrationAlert()
   }, [page])
+
+  useEffect(() => {
+    return window.api.onConfirmQuit(({ running, queued }) => {
+      setQuitConfirm({ running, queued })
+    })
+  }, [])
 
   useEffect(() => {
     if (loading) return
@@ -492,11 +500,37 @@ function AppInner() {
       </div>
       <OnboardingModal isOpen={onboardingOpen} onComplete={() => { setOnboardingOpen(false); refreshConfig(); refreshRules() }} />
 
-      <Modal isOpen={helpOpen} onClose={() => setHelpOpen(false)} title="How to use Stream Manager" width="xl">
-        <div className="py-4 text-sm text-gray-400 text-center">
-          Help content coming soon.
-        </div>
+      <Modal
+        isOpen={!!quitConfirm}
+        onClose={() => setQuitConfirm(null)}
+        title="Conversions in progress"
+        width="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setQuitConfirm(null)}>Cancel</Button>
+            <Button variant="danger" onClick={() => { setQuitConfirm(null); window.api.proceedQuit() }}>
+              Quit anyway
+            </Button>
+          </>
+        }
+      >
+        {quitConfirm && (
+          <div className="flex gap-3 py-1">
+            <AlertTriangle size={20} className="text-yellow-400 shrink-0 mt-0.5" />
+            <div className="flex flex-col gap-1.5 text-sm">
+              <p className="text-gray-200">
+                {quitConfirm.running} conversion{quitConfirm.running === 1 ? ' is' : 's are'} still running
+                {quitConfirm.queued > 0 ? ` (and ${quitConfirm.queued} queued)` : ''}.
+              </p>
+              <p className="text-gray-400">
+                Quitting now will cancel them and any progress will be lost.
+              </p>
+            </div>
+          </div>
+        )}
       </Modal>
+
+      <HelpModal isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <Modal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} title="About Stream Manager" width="sm">
         <div className="flex flex-col items-center gap-4 py-2 text-center">

@@ -1,7 +1,7 @@
 import React, {
-  useState, useEffect, useRef, useCallback, useMemo
+  useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo
 } from 'react'
-import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, RegularPolygon as KonvaRegularPolygon } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, RegularPolygon as KonvaRegularPolygon, Shape as KonvaShape } from 'react-konva'
 import useImage from 'use-image'
 import Konva from 'konva'
 import {
@@ -15,6 +15,7 @@ import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useStore } from '../../hooks/useStore'
+import { theme, rgba } from '../../theme'
 import type { ThumbnailLayer, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta } from '../../types'
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
@@ -113,7 +114,7 @@ function renderSnapGuides(guides: SnapGuide[], guideLayer: Konva.Layer, scale: n
   const dash = [4 / scale, 6 / scale]
   guides.forEach(g => {
     guideLayer.add(new Konva.Line({
-      stroke: '#a855f7',
+      stroke: theme.accent,
       strokeWidth: sw,
       dash,
       points: g.orientation === 'H'
@@ -843,6 +844,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
+
+  // Relocate any inline-mounted Transformers into the dedicated layer above the matte
+  useLayoutEffect(() => {
+    const stage = stageRef.current
+    const tLayer = transformerLayerRef.current
+    if (!stage || !tLayer) return
+    stage.find('Transformer').forEach(t => {
+      if (t.getLayer() !== tLayer) (t as Konva.Transformer).moveTo(tLayer)
+    })
+  })
   const [isDirty, setIsDirty] = useState(false)
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [saveTemplateName, setSaveTemplateName] = useState('')
@@ -877,6 +888,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const stageRef = useRef<Konva.Stage>(null)
   const bgLayerRef = useRef<Konva.Layer>(null)
   const guideLayerRef = useRef<Konva.Layer>(null)
+  const transformerLayerRef = useRef<Konva.Layer>(null)
 
   // ── Snapping ──────────────────────────────────────────────────────────────
   const [smartSnapEnabled, setSmartSnapEnabled] = useState(true)
@@ -1377,8 +1389,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     ])
     setTemplates(freshTemplates)
 
-    if (!canvas && freshTemplates.length > 0) {
-      // No existing canvas but templates exist → ask user to pick one first
+    // If meta carries a pre-selected built-in template (set during stream creation)
+    // and there's no saved canvas yet, auto-load that template — skip the picker.
+    const presetTemplate = !canvas && meta?.smThumbnailTemplate
+      ? freshTemplates.find(t => t.id === meta.smThumbnailTemplate)
+      : null
+
+    if (!canvas && !presetTemplate && freshTemplates.length > 0) {
+      // No existing canvas, no preselection, but templates exist → ask user to pick one first
       setTemplatePickerStream({ folderPath, date, title, meta })
       setMode('overview')
       return
@@ -1389,6 +1407,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (canvas) {
       resetLayers(canvas.layers)
       setCurrentTemplateId(canvas.templateId)
+    } else if (presetTemplate) {
+      resetLayers(presetTemplate.layers.map(l => ({ ...l, id: newId() })))
+      setCurrentTemplateId(presetTemplate.id)
     } else {
       resetLayers([])
       setCurrentTemplateId(undefined)
@@ -1797,7 +1818,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             <div
               ref={canvasContainerRef}
               className="flex-1 overflow-hidden relative min-w-0"
-              style={{ background: '#0d0d1a', cursor: isPanning ? 'grabbing' : undefined }}
+              style={{ background: 'var(--color-bg)', cursor: isPanning ? 'grabbing' : undefined }}
             >
               <Stage
                 ref={stageRef}
@@ -1844,6 +1865,39 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     return <TextNode key={layer.id} {...props} />
                   })}
                 </Layer>
+                {/* Off-canvas matte: darkens content that falls outside the work area */}
+                <Layer listening={false}>
+                  {(() => {
+                    const vx0 = -viewPan.x / viewZoom
+                    const vy0 = -viewPan.y / viewZoom
+                    const vx1 = (containerSize.w - viewPan.x) / viewZoom
+                    const vy1 = (containerSize.h - viewPan.y) / viewZoom
+                    return (
+                      <KonvaShape
+                        listening={false}
+                        fill={rgba.bg(0.9)}
+                        sceneFunc={(ctx, shape) => {
+                          ctx.beginPath()
+                          // Outer rect: visible viewport, clockwise in screen-Y-down space
+                          ctx.moveTo(vx0, vy0)
+                          ctx.lineTo(vx1, vy0)
+                          ctx.lineTo(vx1, vy1)
+                          ctx.lineTo(vx0, vy1)
+                          ctx.closePath()
+                          // Inner rect: canvas hole, counter-clockwise → punched out by nonzero winding
+                          ctx.moveTo(0, 0)
+                          ctx.lineTo(0, CANVAS_H)
+                          ctx.lineTo(CANVAS_W, CANVAS_H)
+                          ctx.lineTo(CANVAS_W, 0)
+                          ctx.closePath()
+                          ctx.fillStrokeShape(shape)
+                        }}
+                      />
+                    )
+                  })()}
+                </Layer>
+                {/* Transformer layer: hosts selection handles above the matte so they remain bright */}
+                <Layer ref={transformerLayerRef} />
                 <Layer ref={guideLayerRef} listening={false} />
               </Stage>
 

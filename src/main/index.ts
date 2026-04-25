@@ -44,7 +44,7 @@ if (process.platform === 'win32') {
 import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
-import { registerConverterIPC, getConverterStatus } from './ipc/converter'
+import { registerConverterIPC, getConverterStatus, getActiveConversionCounts } from './ipc/converter'
 import { registerStoreIPC, getStore } from './ipc/store'
 import { registerStreamsIPC } from './ipc/streams'
 import { registerCombineIPC } from './ipc/combine'
@@ -260,6 +260,26 @@ app.whenReady().then(() => {
   // Minimize-to-tray IPC — called by the title bar button
   ipcMain.on('window:minimizeToTray', () => {
     mainWindow.hide()
+  })
+
+  // Confirm before quitting if conversions are still running.
+  // Intercepts the window's 'close' event and asks the renderer to show its
+  // own styled modal; the renderer calls back via 'app:proceedQuit'.
+  let confirmedClose = false
+  mainWindow.on('close', (event) => {
+    if (confirmedClose) return
+    const { running, queued } = getActiveConversionCounts()
+    if (running === 0) return
+    event.preventDefault()
+    if (!mainWindow.isVisible()) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+    mainWindow.webContents.send('app:confirmQuit', { running, queued })
+  })
+  ipcMain.on('app:proceedQuit', () => {
+    confirmedClose = true
+    mainWindow.close()
   })
 
   // Start minimized: hide the window before it's shown if both flags are set

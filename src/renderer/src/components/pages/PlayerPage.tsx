@@ -2284,6 +2284,242 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     setTimeout(() => setScreenshotFlash(false), 150)
   }, [videoRef, state.filePath, videoInfo, currentTime])
 
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
+  // Build a flat session-videos list (matching display order in the panel) for
+  // Ctrl+Alt+Up/Down navigation.
+  const flatSessionItems = React.useMemo(() => {
+    const seenNames = new Set(siblingFiles.map(v => v.name))
+    const draftsBySource = folderDrafts.reduce<Record<string, import('../../types').ClipDraft[]>>((acc, d) => {
+      (acc[d.sourceName] ||= []).push(d); return acc
+    }, {})
+    const clipChildren: Record<string, SiblingFile[]> = {}
+    const topLevelSiblings: SiblingFile[] = []
+    for (const s of siblingFiles) {
+      if (s.clipOf && seenNames.has(s.clipOf)) (clipChildren[s.clipOf] ||= []).push(s)
+      else topLevelSiblings.push(s)
+    }
+    const out: Array<{ kind: 'video' | 'draft'; video?: SiblingFile; draft?: import('../../types').ClipDraft }> = []
+    for (const item of topLevelSiblings) {
+      out.push({ kind: 'video', video: item })
+      for (const d of draftsBySource[item.name] ?? []) out.push({ kind: 'draft', draft: d })
+      for (const c of clipChildren[item.name] ?? []) out.push({ kind: 'video', video: c })
+    }
+    for (const [name, list] of Object.entries(draftsBySource)) {
+      if (!seenNames.has(name)) for (const d of list) out.push({ kind: 'draft', draft: d })
+    }
+    return out
+  }, [siblingFiles, folderDrafts])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Don't fire while user is typing
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return
+      // Don't fire while a player modal is open
+      if (clipModeModal || draftPendingDelete || showExportDialog) return
+
+      const ctrl = e.ctrlKey || e.metaKey
+      const shift = e.shiftKey
+      const alt = e.altKey
+      const k = e.key
+
+      // Space — Play/Pause
+      if (e.code === 'Space' && !ctrl && !alt && !shift) {
+        e.preventDefault(); effectiveTogglePlay(); return
+      }
+
+      // Arrow keys — frame step / skip
+      if (k === 'ArrowLeft' || k === 'ArrowRight') {
+        if (ctrl && alt) return // reserve Ctrl+Alt for other future combos
+        const dir = k === 'ArrowRight' ? 1 : -1
+        e.preventDefault()
+        if (ctrl && shift) skip(dir * 10)
+        else if (ctrl) skip(dir * 5)
+        else if (shift) skip(dir * 1)
+        else stepFrame(dir as 1 | -1)
+        return
+      }
+
+      // Home / End
+      if (k === 'Home' && !ctrl && !alt && !shift) { e.preventDefault(); seekRef.current(0); return }
+      if (k === 'End'  && !ctrl && !alt && !shift) { e.preventDefault(); seekRef.current(durationRef.current); return }
+
+      // Ctrl+Alt+Up/Down — navigate session videos
+      if (ctrl && alt && !shift && (k === 'ArrowUp' || k === 'ArrowDown')) {
+        e.preventDefault()
+        if (flatSessionItems.length === 0) return
+        const currentIdx = flatSessionItems.findIndex(it =>
+          (it.kind === 'video' && it.video!.path === state.filePath && !activeDraftId) ||
+          (it.kind === 'draft' && it.draft!.id === activeDraftId)
+        )
+        const nextIdx = currentIdx < 0
+          ? (k === 'ArrowDown' ? 0 : flatSessionItems.length - 1)
+          : Math.max(0, Math.min(flatSessionItems.length - 1, currentIdx + (k === 'ArrowDown' ? 1 : -1)))
+        const target = flatSessionItems[nextIdx]
+        if (target.kind === 'video' && target.video) {
+          // If we're leaving a clip draft for a plain video, exit clip mode first so the
+          // autosave effect doesn't carry the previous draft's state onto the new file.
+          if (isClipModeRef.current && target.video.path !== state.filePath) exitClipMode()
+          loadFile(target.video.path)
+        } else if (target.kind === 'draft' && target.draft) {
+          loadDraft(target.draft)
+        }
+        return
+      }
+
+      // Ctrl+O — open file dialog
+      if (ctrl && !alt && !shift && (k === 'o' || k === 'O')) {
+        e.preventDefault(); handleBrowse(); return
+      }
+
+      // Ctrl+Shift+S — screenshot
+      if (ctrl && shift && !alt && (k === 's' || k === 'S')) {
+        e.preventDefault(); captureScreenshot(); return
+      }
+
+      // 0 — reset zoom
+      if (!ctrl && !alt && !shift && k === '0') {
+        e.preventDefault()
+        setViewport({ viewStart: 0, viewEnd: durationRef.current })
+        return
+      }
+
+      // Numpad +/- — zoom timeline anchored on playhead
+      if (!ctrl && !alt && !shift && (e.code === 'NumpadAdd' || e.code === 'NumpadSubtract')) {
+        e.preventDefault()
+        const { viewStart, viewEnd } = viewportRef.current
+        const span = viewEnd - viewStart
+        if (span <= 0) return
+        const factor = e.code === 'NumpadAdd' ? 0.7 : 1.4
+        const newSpan = Math.max(0.05, Math.min(durationRef.current, span * factor))
+        const t = currentTimeRef.current
+        // Anchor on playhead — keep its relative position within the viewport
+        const ratio = (t - viewStart) / span
+        let ns = t - ratio * newSpan
+        let ne = ns + newSpan
+        if (ns < 0) { ns = 0; ne = newSpan }
+        if (ne > durationRef.current) { ne = durationRef.current; ns = ne - newSpan }
+        setViewport({ viewStart: Math.max(0, ns), viewEnd: Math.min(durationRef.current, ne) })
+        return
+      }
+
+      // No-modifier letter shortcuts
+      if (!ctrl && !alt && !shift) {
+        // YouTube JKL — J/L = ±10s, K = play/pause
+        if (k === 'j' || k === 'J') { e.preventDefault(); skip(-10); return }
+        if (k === 'k' || k === 'K') { e.preventDefault(); effectiveTogglePlay(); return }
+        if (k === 'l' || k === 'L') { e.preventDefault(); skip(10);  return }
+
+        // C — toggle clip mode (mirror the toolbar button's logic)
+        if (k === 'c' || k === 'C') {
+          e.preventDefault()
+          if (isClipModeRef.current) exitClipMode()
+          else if (multiTrack && !tracksExtracted) setClipModeModal('warn')
+          else setIsClipMode(true)
+          return
+        }
+        // F — toggle clip focus
+        if (k === 'f' || k === 'F') { e.preventDefault(); setClipFocus(v => !v); return }
+        // P — toggle pop-out video
+        if (k === 'p' || k === 'P') {
+          e.preventDefault()
+          if (isPopupOpen) window.api.closeVideoPopup()
+          else openVideoPopup()
+          return
+        }
+        // T — focus playhead timecode input
+        if (k === 't' || k === 'T') {
+          if (!durationRef.current) return
+          e.preventDefault()
+          setTimecodeInput(formatViewTime(currentTimeRef.current, videoInfoRef.current?.fps))
+          setEditingTimecode(true)
+          setTimeout(() => timecodeInputRef.current?.select(), 0)
+          return
+        }
+        // Esc — close session
+        if (k === 'Escape') {
+          if (state.filePath) { e.preventDefault(); closeVideo() }
+          return
+        }
+      }
+
+      // ── Clip mode only ──────────────────────────────────────────────────
+      if (!isClipModeRef.current) return
+
+      if (!ctrl && !alt && !shift) {
+        // A — add segment at playhead
+        if (k === 'a' || k === 'A') { e.preventDefault(); addSegment(); return }
+        // S — split segment at playhead
+        if (k === 's' || k === 'S') { e.preventDefault(); splitSegment(); return }
+        // B — add bleep at playhead (mirrors the existing button)
+        if (k === 'b' || k === 'B') {
+          e.preventDefault()
+          const t = currentTimeRef.current
+          const dur = durationRef.current
+          const { lo, hi } = getBleepFreeInterval(clipStateRef.current.bleepRegions, t, dur)
+          let s = t - 0.25, end = t + 0.25
+          if (s < lo) { s = lo; end = s + 0.5 }
+          if (end > hi) { end = hi; s = end - 0.5 }
+          s = Math.max(lo, Math.max(0, s))
+          end = Math.min(hi, Math.min(dur, end))
+          if (end - s < 0.25) return
+          const newId = `bleep-${Date.now()}`
+          setClipState(cs => ({ ...cs, bleepRegions: [...cs.bleepRegions, { id: newId, start: s, end }] }))
+          setActiveBleepId(newId)
+          setBleepLengthInput((end - s).toFixed(2))
+          return
+        }
+        // Delete/Backspace — delete selected segment or active bleep
+        if (k === 'Delete' || k === 'Backspace') {
+          if (activeBleepId) {
+            e.preventDefault()
+            const idToDelete = activeBleepId
+            setClipState(cs => ({ ...cs, bleepRegions: cs.bleepRegions.filter(b => b.id !== idToDelete) }))
+            setActiveBleepId(null)
+          } else if (selectedRegionIdRef.current) {
+            e.preventDefault()
+            const idToDelete = selectedRegionIdRef.current
+            setClipState(cs => ({ ...cs, clipRegions: cs.clipRegions.filter(r => r.id !== idToDelete) }))
+            setSelectedRegionId(null)
+          }
+          return
+        }
+        // [ / ] — jump to prev/next clip region marker (in/out points, chronological)
+        if (k === '[' || k === ']') {
+          e.preventDefault()
+          const markers: number[] = []
+          for (const r of clipStateRef.current.clipRegions) { markers.push(r.inPoint, r.outPoint) }
+          if (markers.length === 0) return
+          markers.sort((a, b) => a - b)
+          const t = currentTimeRef.current
+          const eps = 0.001
+          let target: number | undefined
+          if (k === ']') target = markers.find(m => m > t + eps)
+          else { for (let i = markers.length - 1; i >= 0; i--) { if (markers[i] < t - eps) { target = markers[i]; break } } }
+          if (target !== undefined) seekRef.current(target)
+          return
+        }
+      }
+
+      // Ctrl+E — open Export Clip dialog (clip mode only)
+      if (ctrl && !alt && !shift && (k === 'e' || k === 'E')) {
+        e.preventDefault()
+        if (clipStateRef.current.clipRegions.length > 0) setShowExportDialog(true)
+        return
+      }
+    }
+
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [
+    clipModeModal, draftPendingDelete, showExportDialog,
+    effectiveTogglePlay, skip, stepFrame, multiTrack, tracksExtracted, exitClipMode,
+    setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
+    closeVideo, state.filePath, addSegment, splitSegment,
+    activeBleepId, flatSessionItems, loadFile, loadDraft, activeDraftId,
+  ])
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {!videoUrl ? (
@@ -2518,6 +2754,79 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       videoW={videoInfo?.width}
                       videoH={videoInfo?.height}
                     />
+                    {clipState.cropAspect !== 'off' && videoInfo && (() => {
+                      const ar = aspectRatio(clipState.cropAspect, videoInfo.width, videoInfo.height)
+                      const videoAspect = videoInfo.width / videoInfo.height
+                      const maxW = ar > videoAspect ? videoInfo.width : videoInfo.height * ar
+                      const maxH = ar > videoAspect ? videoInfo.width / ar : videoInfo.height
+                      const cx = activeCropRegion?.cropX ?? DEFAULT_CROP_X
+                      const cy = activeCropRegion?.cropY ?? DEFAULT_CROP_Y
+                      const cs = activeCropRegion?.cropScale ?? DEFAULT_CROP_SCALE
+                      const cropW = maxW * cs
+                      const cropH = maxH * cs
+                      const offsetX = Math.round((cx - 0.5) * (videoInfo.width - cropW))
+                      const offsetY = Math.round((cy - 0.5) * (videoInfo.height - cropH))
+                      const dispW = Math.round(cropW)
+                      const dispH = Math.round(cropH)
+                      const disabled = !activeCropRegion
+                      const apply = (patch: { cropX?: number; cropY?: number; cropScale?: number }) => {
+                        if (!activeCropRegion) return
+                        updateRegionCrop(activeCropRegion.id, patch)
+                      }
+                      const setOffsetX = (px: number) => {
+                        const range = videoInfo.width - cropW
+                        if (range <= 0) return
+                        const clamped = Math.max(-range / 2, Math.min(range / 2, px))
+                        apply({ cropX: clamped / range + 0.5 })
+                      }
+                      const setOffsetY = (px: number) => {
+                        const range = videoInfo.height - cropH
+                        if (range <= 0) return
+                        const clamped = Math.max(-range / 2, Math.min(range / 2, px))
+                        apply({ cropY: clamped / range + 0.5 })
+                      }
+                      const setWidth = (px: number) => {
+                        const newScale = Math.max(MIN_CROP_SCALE, Math.min(1, px / maxW))
+                        // Re-clamp position to keep crop inside the frame at the new size
+                        const newCropW = maxW * newScale
+                        const newCropH = maxH * newScale
+                        const rangeX = videoInfo.width - newCropW
+                        const rangeY = videoInfo.height - newCropH
+                        const newCx = rangeX > 0 ? Math.max(0, Math.min(1, (offsetX + rangeX / 2) / rangeX)) : 0.5
+                        const newCy = rangeY > 0 ? Math.max(0, Math.min(1, (offsetY + rangeY / 2) / rangeY)) : 0.5
+                        apply({ cropScale: newScale, cropX: newCx, cropY: newCy })
+                      }
+                      const setHeight = (px: number) => setWidth((px / maxH) * maxW)
+                      const reset = () => apply({ cropX: DEFAULT_CROP_X, cropY: DEFAULT_CROP_Y, cropScale: DEFAULT_CROP_SCALE })
+                      const inputCls = 'w-12 px-1 py-0.5 text-[10px] tabular-nums text-center bg-navy-800 border border-white/10 rounded text-gray-200 focus:outline-none focus:border-blue-400/40 disabled:opacity-40'
+                      const labelCls = 'text-[10px] text-gray-500 select-none'
+                      return (
+                        <Tooltip content={disabled ? 'Move the playhead inside a clip region to edit its crop' : 'Crop position (offset from center) and dimensions, in source pixels'}>
+                          <div className={`flex items-center gap-1 ${disabled ? 'opacity-50' : ''}`}>
+                            <span className={labelCls}>x</span>
+                            <input type="number" disabled={disabled} className={inputCls} value={offsetX}
+                              onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetX(v) }} />
+                            <span className={labelCls}>y</span>
+                            <input type="number" disabled={disabled} className={inputCls} value={offsetY}
+                              onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetY(v) }} />
+                            <span className={labelCls}>w</span>
+                            <input type="number" disabled={disabled} className={inputCls} value={dispW}
+                              onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setWidth(v) }} />
+                            <span className={labelCls}>h</span>
+                            <input type="number" disabled={disabled} className={inputCls} value={dispH}
+                              onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setHeight(v) }} />
+                            <button
+                              type="button"
+                              disabled={disabled}
+                              onClick={reset}
+                              className="flex items-center px-1 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <RotateCcw size={11} />
+                            </button>
+                          </div>
+                        </Tooltip>
+                      )
+                    })()}
                     <Tooltip content="Add a bleep at the current playhead position">
                       <button
                         onClick={() => {
@@ -2745,7 +3054,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               {/* Waveform strip */}
               <div
                 ref={waveformStripRef}
-                className="relative h-10 w-full cursor-pointer"
+                className="relative h-10 w-full cursor-pointer bg-black/30"
                 onClick={e => {
                   setSelectedRegionId(null)
                   const rect = e.currentTarget.getBoundingClientRect()
@@ -2774,7 +3083,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   >
                     <path
                       d={waveformPath}
-                      className={tracksExtracted ? 'fill-purple-500/50' : 'fill-gray-500/35'}
+                      className={tracksExtracted ? 'fill-purple-500/50' : 'fill-gray-300/60'}
                     />
                   </svg>
                 )}
@@ -3116,6 +3425,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                 setActiveBleepId(null)
                               }
                               if (e.key === 'Escape') setActiveBleepId(null)
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                e.preventDefault()
+                                const current = parseFloat(bleepLengthInput)
+                                if (isNaN(current)) return
+                                const delta = e.key === 'ArrowUp' ? 0.01 : -0.01
+                                const next = Math.max(0.25, Math.min(10, Math.round((current + delta) * 100) / 100))
+                                setBleepLengthInput(next.toFixed(2))
+                                setClipState(s => {
+                                  const r = s.bleepRegions.find(b => b.id === activeBleepId)
+                                  if (!r) return s
+                                  const newEnd = Math.min(durationRef.current, r.start + next)
+                                  return { ...s, bleepRegions: s.bleepRegions.map(b => b.id === activeBleepId ? { ...b, end: newEnd } : b) }
+                                })
+                              }
                             }}
                             onBlur={() => {
                               const v = parseFloat(bleepLengthInput)
@@ -3334,7 +3657,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 <Tooltip content={isPlaying ? 'Pause' : 'Play'}>
                   <button
                     onClick={effectiveTogglePlay}
-                    className="p-2 mx-1 rounded-full bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+                    className="p-2 mx-1 rounded-full bg-purple-800 hover:bg-purple-700 text-white transition-colors"
                   >
                     {isPlaying ? <Pause size={16} /> : <Play size={16} />}
                   </button>
@@ -3488,7 +3811,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           >
                             <div className="flex items-center gap-2">
                               <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
-                                checked ? 'bg-purple-500 border-purple-500' : 'border-gray-600'
+                                checked ? 'bg-purple-700 border-purple-700' : 'border-gray-600'
                               }`}>
                                 {checked && <Check size={10} className="text-white" strokeWidth={3} />}
                               </div>
@@ -3507,7 +3830,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     <button
                       onClick={() => extractTracks(Array.from(selectedIndices).sort())}
                       disabled={selectedIndices.size < 1}
-                      className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg bg-purple-600 hover:bg-purple-500 active:bg-purple-700 text-white transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                      className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg bg-purple-800 hover:bg-purple-700 active:bg-purple-900 text-white transition-colors disabled:opacity-40 disabled:pointer-events-none"
                     >
                       <GitMerge size={12} />
                       Merge audio tracks
@@ -3887,7 +4210,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       >
                         <div className="flex items-center gap-2">
                           <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
-                            checked ? 'bg-purple-500 border-purple-500' : 'border-gray-600'
+                            checked ? 'bg-purple-700 border-purple-700' : 'border-gray-600'
                           }`}>
                             {checked && <Check size={10} className="text-white" strokeWidth={3} />}
                           </div>

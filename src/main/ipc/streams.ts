@@ -1042,6 +1042,9 @@ export function registerStreamsIPC(): void {
     dirWatcher.on('addDir', onChange)
     dirWatcher.on('unlinkDir', onChange)
     dirWatcher.on('change', onChange)
+    // Swallow transient stat errors — e.g. EPERM when a file is being deleted
+    // (converter cancel → unlink) while chokidar's awaitWriteFinish is polling.
+    dirWatcher.on('error', err => console.warn('[streams:watchDir] watcher error:', err))
   })
 
   ipcMain.handle('streams:unwatchDir', async () => {

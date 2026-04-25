@@ -12,6 +12,12 @@
       rel="stylesheet"
     />
     <style>
+      /* Splash-only theme vars — duplicated from src/assets/index.css so the
+         splash paints with brand colors before the bundled CSS loads. */
+      :root {
+        --splash-bg-elevated: #131825;
+        --splash-accent-light: #c9d5e3;
+      }
       @keyframes splash-pulse {
         0%, 100% { opacity: 1; transform: scale(1); }
         50%       { opacity: 0.6; transform: scale(0.94); }
@@ -20,7 +26,7 @@
         position: fixed;
         inset: 0;
         z-index: 9999;
-        background: #1a1a2e;
+        background: var(--splash-bg-elevated);
         display: flex;
         flex-direction: column;
         transition: opacity 400ms ease;
@@ -46,7 +52,7 @@
         font-family: 'Recursive', system-ui, sans-serif;
         font-size: 14px;
         font-weight: 600;
-        color: #a78bfa;
+        color: var(--splash-accent-light);
         letter-spacing: 0.05em;
       }
       #splash-controls {

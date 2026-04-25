@@ -90,10 +90,11 @@ Open your stream videos and clips (or drop in any video file) and play it back w
 - **Thumbnail strip** — extracted from the video at intervals to provide visual cues while scrubbing.
 - **Waveform display** — full-file audio waveform rendered as a zoomable strip. Raw PCM is sampled at 200 Hz and cached to disk; the visible range is re-bucketed to 1,200 peaks on the fly so detail stays sharp at any zoom level.
 - **Clip mode with auto-saved drafts** — split a recording into any number of segments and export a polished clip directly from the player. Your work autosaves to the stream folder as you go, so closing the video, switching streams, or coming back tomorrow all pick up exactly where you left off. Exported clips stay linked to their source and are one click away from being branched into a brand-new draft, so the original export always stays intact.
-- **Shape-aware cropping** — pick the export aspect (16:9, 1:1, 9:16, or the video's native ratio) and drag or scale the crop box independently for each segment. Repurpose the same highlight for widescreen, square, or vertical clips without re-editing — and clips exported with a 9:16 crop are automatically tagged as shorts.
+- **Shape-aware cropping** — pick the export aspect (16:9, 1:1, 9:16, or the video's native ratio) and drag or scale the crop box independently for each segment. Repurpose the same highlight for widescreen, square, or vertical clips without re-editing — and clips exported with a 9:16 crop are automatically tagged as shorts. Fine-control inputs let you nudge the crop region's center offset (x/y) and dimensions (w/h) in source pixels, with a one-click reset.
 - **Bleep markers** — mark regions to be bleeped or silenced (censored) while clipping. Mutes all audio for the duration of the bleep marker.
 - **Session Videos panel** — every video, draft, and exported clip in the current stream folder shown in a live, hierarchical list. Exports and drafts nest under their source video.
 - **Video pop-out for OBS** — pop the video into a dedicated frameless window sized to the video's native resolution. Streaming software like OBS can then capture that window independently. The pop-out locks its aspect ratio on resize and has no rounded corners. Use the precision playback controls to go frame-by-frame forward AND BACKWARD (I'm looking at you VLC!) or seek to a specific timecode and immediately see it in the pop-up.
+- **Keyboard shortcuts** — editor-style shortcut suite covering playback (Space, J/K/L, arrow combos for frame and ±1/5/10s skip), session-video navigation (Ctrl+Alt+↑/↓), clip mode toggles, segment/split/bleep insertion, marker-to-marker jumps with `[` / `]`, timeline zoom anchored on the playhead, screenshot, file open, and clip export.
 
 ### Thumbnail Editor
 
@@ -103,7 +104,7 @@ A built-in canvas editor for designing stream and clip thumbnails without leavin
 
 - **Layered canvas** — drop in images, text, and shapes. Layers support drag, resize, rotate, opacity, ordering, and visibility toggles.
 - **Smart + grid snapping** — objects snap to canvas edges, each other's edges/centers, and an optional grid. Hold **Shift** while dragging to constrain to the dominant axis.
-- **Templates** — save a layout (minus the stream-specific content) as a reusable template. Pick a template when creating a new stream to seed its thumbnail automatically.
+- **Templates** — save a layout (minus the stream-specific content) as a reusable template. Pick a built-in template right from the new-stream dialog (or set a default in Settings) and it auto-loads on the first edit, so the work area opens pre-populated with your branding.
 - **Per-stream autosave** — thumbnails save to the stream folder as you edit and re-open to exactly where you left off; exported PNGs live alongside the source video so they're detected as stream thumbnails automatically.
 - **Undo/redo, recents, and keyboard shortcuts** for fast iteration.
 
@@ -117,13 +118,14 @@ Queue video files for conversion using ffmpeg presets.
 - **Auto-archiving** — optionally send stream sessions to the converter with a selected "Archive" preset directly from the Streams page. This is a great way to quickly compress and organize stream recordings without having to manually add them to the converter.
 - **Remuxing support** — Like the OBS "Remux Recordings" feature, the app can quickly change a video's container format (e.g. from MKV to MP4) without re-encoding, as long as the video and audio codecs are compatible. This is great for making your recordings more widely compatible without losing quality or spending time on a full conversion or having to open OBS.
 - **Combine tool** — concatenate multiple video files into one with zero re-encoding using ffmpeg's concat demuxer. Files are auto-sorted by timestamp parsed from OBS-style filenames and can be manually reordered by drag-and-drop. Optionally deletes source files after a successful combine. This is useful for streamers who have their recordings split into multiple files due to file size limits or accidental stops/starts, and want to easily merge them back together without losing quality or having to open a full video editor.
+- **Persistent queue** — auto-rule jobs queued without "Start immediately" survive app restarts and reappear in the converter on next launch.
 - **Sidebar widget** — Easily visualize progress with the sidebar widget while doing other tasks in-app.
 
 ### Auto-Rules
 
 ![Stream Manager screenshot](resources/sm-auto-rules.png)
 
-File watcher rules that can automatically **move, copy, rename, or convert** files matching a glob pattern when they appear in a watched folder. Rules can be individually enabled/disabled. The watcher can be configured to start automatically on launch and is always accessible via the sidebar widget. This is useful for streamers who want to automate the organization of their recordings as soon as they are created by their streaming software, without having to manually move files around or run batch processes.
+File watcher rules that can automatically **move, copy, rename, or convert** files matching a glob pattern when they appear in a watched folder. Rules can be individually enabled/disabled and given an optional name to distinguish similar setups in the rule list and activity log. The watcher can be configured to start automatically on launch and is always accessible via the sidebar widget. This is useful for streamers who want to automate the organization of their recordings as soon as they are created by their streaming software, without having to manually move files around or run batch processes.
 
 For instance, if you record directly to a "Raw Recordings" folder, you can set up a rule to automatically move them to your main "Streams" folder and rename them to match the OBS date-based format that the app recognizes. The app will then automatically pick them up and add them to your stream library with in the correct location.
 

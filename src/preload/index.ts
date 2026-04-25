@@ -397,6 +397,14 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('window:maximizeChange', handler)
   },
 
+  // ── Quit confirmation ─────────────────────────────────────────────────────
+  onConfirmQuit: (cb: (data: { running: number; queued: number }) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, data: { running: number; queued: number }) => cb(data)
+    ipcRenderer.on('app:confirmQuit', handler)
+    return () => ipcRenderer.removeListener('app:confirmQuit', handler)
+  },
+  proceedQuit: () => ipcRenderer.send('app:proceedQuit'),
+
   // ── Startup settings ──────────────────────────────────────────────────────
   getStartupSettings: (): Promise<{ startWithWindows: boolean; startMinimized: boolean }> =>
     ipcRenderer.invoke('app:getStartupSettings'),

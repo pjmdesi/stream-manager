@@ -39,6 +39,8 @@ export interface AppConfig {
   claudeSystemPrompt: string
   launcherWidgetGroupId: string
   listThumbWidth: number
+  defaultBuiltinThumbnailTemplate: string
+  useBuiltinThumbnailByDefault: boolean
 }
 
 function getDefaultConfig(): AppConfig {
@@ -72,6 +74,8 @@ function getDefaultConfig(): AppConfig {
     claudeSystemPrompt: '',
     launcherWidgetGroupId: '',
     listThumbWidth: 85,
+    defaultBuiltinThumbnailTemplate: '',
+    useBuiltinThumbnailByDefault: true,
   }
 }
 
@@ -87,6 +91,7 @@ type StoreShape = {
   streamTypeTextures: Record<string, string>
   thumbnailRecents: any[]
   thumbnailLastFont: string
+  pendingJobs: any[]
 }
 
 let store: Store<StoreShape> | null = null
@@ -107,6 +112,7 @@ export function getStore(): Store<StoreShape> {
         streamTypeTextures: {},
         thumbnailRecents: [],
         thumbnailLastFont: '',
+        pendingJobs: [],
       }
     })
   }

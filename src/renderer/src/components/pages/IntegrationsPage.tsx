@@ -277,7 +277,7 @@ export function IntegrationsPage() {
         {/* ── Twitch ───────────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 px-1">
-            <Twitch size={16} className="text-purple-400 shrink-0" />
+            <Twitch size={16} className="text-twitch-400 shrink-0" />
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Twitch</span>
             <span className={`ml-auto text-xs font-medium ${twConnected ? 'text-green-400' : 'text-gray-600'}`}>
               {twConnected ? 'Connected' : 'Not connected'}

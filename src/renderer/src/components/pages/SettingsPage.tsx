@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, Youtube, Twitch, AlertCircle } from 'lucide-react'
+import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, Youtube, Twitch, AlertCircle, Plus, Bot } from 'lucide-react'
 import { useStore } from '../../hooks/useStore'
+import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Input } from '../ui/Input'
-import type { ConversionPreset } from '../../types'
+import type { ConversionPreset, ThumbnailTemplate } from '../../types'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -55,6 +56,8 @@ export function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [allPresets, setAllPresets] = useState<ConversionPreset[]>([])
   const [thumbnailTemplates, setThumbnailTemplates] = useState<{ name: string; path: string }[]>([])
+  const [builtinTemplates, setBuiltinTemplates] = useState<ThumbnailTemplate[]>([])
+  const { navigateToEditor } = useThumbnailEditor()
   const [cacheSize, setCacheSize] = useState<number>(0)
   const [clearingCache, setClearingCache] = useState(false)
   const [ytStatus, setYtStatus] = useState<{ connected: boolean; valid: boolean } | null>(null)
@@ -70,8 +73,9 @@ export function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    if (!local.streamsDir) { setThumbnailTemplates([]); return }
+    if (!local.streamsDir) { setThumbnailTemplates([]); setBuiltinTemplates([]); return }
     window.api.listStreamTemplates(local.streamsDir).then(setThumbnailTemplates)
+    window.api.thumbnailListTemplates(local.streamsDir).then(setBuiltinTemplates).catch(() => setBuiltinTemplates([]))
   }, [local.streamsDir])
 
   useEffect(() => {
@@ -148,7 +152,7 @@ export function SettingsPage() {
             placeholder="Your channel name"
             hint="Used to pre-fill your name in stream metadata and integrations"
           />
-          {(ytStatus || twStatus) && (
+          {(ytStatus || twStatus || local.claudeApiKey !== undefined) && (
             <div className="flex items-center gap-4">
               {ytStatus && (
                 <span className={`flex items-center gap-1.5 text-xs ${
@@ -166,11 +170,15 @@ export function SettingsPage() {
                 </span>
               )}
               {twStatus && (
-                <span className={`flex items-center gap-1.5 text-xs ${twStatus.connected ? 'text-purple-400' : 'text-gray-600'}`}>
+                <span className={`flex items-center gap-1.5 text-xs ${twStatus.connected ? 'text-twitch-400' : 'text-gray-600'}`}>
                   <Twitch size={18} />
                   {twStatus.connected ? 'Connected' : 'Not connected'}
                 </span>
               )}
+              <span className={`flex items-center gap-1.5 text-xs ${local.claudeApiKey ? 'text-orange-400' : 'text-gray-600'}`}>
+                <Bot size={18} />
+                {local.claudeApiKey ? 'Connected' : 'Not connected'}
+              </span>
             </div>
           )}
         </section>
@@ -241,8 +249,39 @@ export function SettingsPage() {
           <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
             Streams
           </h2>
+          <Checkbox
+            checked={local.useBuiltinThumbnailByDefault ?? true}
+            onChange={v => set('useBuiltinThumbnailByDefault', v)}
+            label="Use built-in thumbnail creator by default for new streams"
+          />
+
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default Thumbnail Template</label>
+            <label className="text-sm font-medium text-gray-300">Default Built-in Thumbnail Template</label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <select
+                  value={local.defaultBuiltinThumbnailTemplate ?? ''}
+                  onChange={e => set('defaultBuiltinThumbnailTemplate', e.target.value)}
+                  className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                >
+                  <option value="">— None —</option>
+                  {builtinTemplates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+              </div>
+              {builtinTemplates.length === 0 && (
+                <Button variant="secondary" size="sm" icon={<Plus size={13} />} onClick={navigateToEditor}>
+                  Create Template
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">Used when the "use built-in thumbnail creator" option is checked in the new-stream dialog.</p>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Default External Thumbnail Template</label>
             <div className="relative">
               <select
                 value={local.defaultThumbnailTemplate ?? ''}
@@ -256,7 +295,7 @@ export function SettingsPage() {
               </select>
               <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
             </div>
-            <p className="text-xs text-gray-500">Copied into new stream folders as <span className="font-mono">[date] thumbnail.af</span></p>
+            <p className="text-xs text-gray-500">Copied into new stream folders as <span className="font-mono">[date] thumbnail.af</span> when the built-in option is unchecked.</p>
           </div>
 
           <div className="flex flex-col gap-1">

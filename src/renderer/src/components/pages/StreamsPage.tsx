@@ -26,7 +26,7 @@ function LucideTwitch({ size = 24, className }: { size?: number; className?: str
     </svg>
   )
 }
-import type { StreamFolder, StreamMeta, ConversionPreset, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast } from '../../types'
+import type { StreamFolder, StreamMeta, ConversionPreset, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
@@ -489,6 +489,9 @@ interface MetaModalProps {
   allFolders?: StreamFolder[]
   templates?: { name: string; path: string }[]
   defaultTemplateName?: string
+  builtinTemplates?: ThumbnailTemplate[]
+  defaultBuiltinTemplateId?: string
+  useBuiltinByDefault?: boolean
   thumbnails?: string[]
   thumbsKey?: number
   preferredThumbnail?: string
@@ -497,7 +500,7 @@ interface MetaModalProps {
   tagTextures?: Record<string, string>
   onNewStreamType?: (tag: string) => void
   claudeEnabled?: boolean
-  onSave: (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => Promise<void>
+  onSave: (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, builtinTemplateId?: string) => Promise<void>
   onClose: () => void
 }
 
@@ -564,8 +567,10 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], s
 
 // panelAnimate built inside StreamsPage so duration can react to slowAnimations setting
 
-function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', thumbnails = [], thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
+  const defaultBuiltinTemplate = builtinTemplates.find(t => t.id === defaultBuiltinTemplateId) ?? builtinTemplates[0] ?? null
+  const { navigateToEditor } = useThumbnailEditor()
 
   // In edit/add mode the folder name is the authoritative date source — the stored meta.date
   // may be wrong if the file was created with the wrong date (e.g. migration artefact).
@@ -588,6 +593,8 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   // Only show the copy option if the previous folder actually has thumbnails
   const hasPrevThumbnails = (prevEpisodeFolder?.thumbnails.length ?? 0) > 0
 
+  const [useBuiltinThumbnail, setUseBuiltinThumbnail] = useState<boolean>(useBuiltinByDefault)
+  const [selectedBuiltinTemplateId, setSelectedBuiltinTemplateId] = useState<string>(defaultBuiltinTemplate?.id ?? '')
   const [selectedTemplatePath, setSelectedTemplatePath] = useState<string>(() => {
     const initGames = initialMeta?.games?.length ? initialMeta.games : detectedGames
     const initSeason = initialMeta?.ytSeason ?? '1'
@@ -1076,8 +1083,9 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
           syncTitle,
         },
         date,
-        mode === 'new' && !isPrevEpisode ? (selectedTemplatePath || undefined) : undefined,
+        mode === 'new' && !isPrevEpisode && !useBuiltinThumbnail ? (selectedTemplatePath || undefined) : undefined,
         mode === 'new' && isPrevEpisode ? (prevEpisodeFolder?.folderPath ?? undefined) : undefined,
+        mode === 'new' && !isPrevEpisode && useBuiltinThumbnail ? (selectedBuiltinTemplateId || undefined) : undefined,
       )
       initialSnapshot.current = JSON.stringify({
         streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
@@ -1246,25 +1254,56 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
         </div>
 
         {/* Thumbnail template — new streams only */}
-        {mode === 'new' && (templates.length > 0 || hasPrevThumbnails) && (
-          <div className="flex flex-col gap-1">
+        {mode === 'new' && (
+          <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-gray-300">Thumbnail Template</label>
-            <div className="relative">
-              <select
-                value={selectedTemplatePath}
-                onChange={e => setSelectedTemplatePath(e.target.value)}
-                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-              >
-                <option value="">— None —</option>
-                {hasPrevThumbnails && (
-                  <option value={PREV_EPISODE_SENTINEL}>* Copy Previous Episode Thumbnail *</option>
+            <Checkbox
+              checked={useBuiltinThumbnail}
+              onChange={setUseBuiltinThumbnail}
+              label="Use built-in thumbnail creator"
+            />
+            {useBuiltinThumbnail ? (
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <select
+                    value={selectedBuiltinTemplateId}
+                    onChange={e => setSelectedBuiltinTemplateId(e.target.value)}
+                    className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    disabled={builtinTemplates.length === 0}
+                  >
+                    <option value="">— None —</option>
+                    {builtinTemplates.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                </div>
+                {builtinTemplates.length === 0 && (
+                  <Button variant="secondary" size="sm" onClick={() => { onClose(); navigateToEditor() }}>
+                    Create Template
+                  </Button>
                 )}
-                {templates.map(t => (
-                  <option key={t.path} value={t.path}>{t.name}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-            </div>
+              </div>
+            ) : (
+              (templates.length > 0 || hasPrevThumbnails) && (
+                <div className="relative">
+                  <select
+                    value={selectedTemplatePath}
+                    onChange={e => setSelectedTemplatePath(e.target.value)}
+                    className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  >
+                    <option value="">— None —</option>
+                    {hasPrevThumbnails && (
+                      <option value={PREV_EPISODE_SENTINEL}>* Copy Previous Episode Thumbnail *</option>
+                    )}
+                    {templates.map(t => (
+                      <option key={t.path} value={t.path}>{t.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                </div>
+              )
+            )}
           </div>
         )}
 
@@ -1354,7 +1393,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
                 Title
                 <LucideYoutube size={11} className="text-red-400/70" />
-                {(!twConnected || syncTitle) && <LucideTwitch size={11} className="text-purple-400/70" />}
+                {(!twConnected || syncTitle) && <LucideTwitch size={11} className="text-twitch-400/70" />}
                 <span className="text-gray-600 font-normal">(editable)</span>
               </label>
               <div className="flex items-center gap-3">
@@ -1385,7 +1424,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
                 Twitch title
-                <LucideTwitch size={11} className="text-purple-400/70" />
+                <LucideTwitch size={11} className="text-twitch-400/70" />
               </label>
               <input
                 value={twitchTitle}
@@ -1469,7 +1508,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
                 Twitch category
-                <LucideTwitch size={11} className="text-purple-400/70" />
+                <LucideTwitch size={11} className="text-twitch-400/70" />
               </label>
               <input
                 value={twitchGameName}
@@ -2491,6 +2530,7 @@ export function StreamsPage({
   const [archiveDone, setArchiveDone] = useState(false)
 
   const [templates, setTemplates] = useState<{ name: string; path: string }[]>([])
+  const [builtinTemplates, setBuiltinTemplates] = useState<ThumbnailTemplate[]>([])
 
   const streamsDir = config.streamsDir
   const streamMode = config.streamMode || 'folder-per-stream'
@@ -2522,6 +2562,7 @@ export function StreamsPage({
     if (!streamsDir) return
     loadFolders(streamsDir)
     window.api.listStreamTemplates(streamsDir).then(setTemplates)
+    window.api.thumbnailListTemplates(streamsDir).then(setBuiltinTemplates).catch(() => setBuiltinTemplates([]))
     window.api.watchStreamsDir(streamsDir, streamMode as any)
     return () => { window.api.unwatchStreamsDir() }
   }, [streamsDir]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -2615,8 +2656,14 @@ export function StreamsPage({
       setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action, stage: 'confirm' })
       return
     }
+    // Player has a built-in Session Videos panel that lets users switch between videos in the
+    // same folder, so we don't need a picker modal — just open the first available video.
+    if (action === 'player') {
+      onSendToPlayer(localVideos[0])
+      return
+    }
     if (localVideos.length === 1) {
-      action === 'player' ? onSendToPlayer(localVideos[0]) : onSendToConverter(localVideos[0])
+      onSendToConverter(localVideos[0])
     } else {
       // Pass all files + offline set so the picker can mark unavailable ones
       const offline = new Set(videos.filter((_, i) => !localFlags[i]))
@@ -2794,9 +2841,10 @@ export function StreamsPage({
     }))
   }, [])
 
-  const handleSave = useCallback(async (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string) => {
+  const handleSave = useCallback(async (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, builtinTemplateId?: string) => {
     if (modal.mode === 'new') {
-      await window.api.createStreamFolder(streamsDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath, streamMode as any)
+      const finalMeta = builtinTemplateId ? { ...meta, smThumbnailTemplate: builtinTemplateId } : meta
+      await window.api.createStreamFolder(streamsDir, date, finalMeta, thumbnailTemplatePath, prevEpisodeFolderPath, streamMode as any)
       await loadFolders(streamsDir)
     } else if (modal.mode === 'edit' || modal.mode === 'add') {
       await updateFolderMeta(modal.folder.folderPath, meta)
@@ -3817,6 +3865,9 @@ return (
               allFolders={modal.mode === 'edit' ? folders.filter(f => f.folderPath !== modal.folder.folderPath) : folders}
               templates={templates}
               defaultTemplateName={config.defaultThumbnailTemplate}
+              builtinTemplates={builtinTemplates}
+              defaultBuiltinTemplateId={config.defaultBuiltinThumbnailTemplate}
+              useBuiltinByDefault={config.useBuiltinThumbnailByDefault}
               claudeEnabled={!!config.claudeApiKey}
               tagColors={tagColors}
               tagTextures={tagTextures}
@@ -4095,7 +4146,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
     <div
       className={`group rounded-lg border overflow-hidden flex flex-col transition-colors ${
         isPending
-          ? 'border-amber-900/40 bg-amber-950/20 hover:bg-amber-950/30'
+          ? 'border-teal-900/40 bg-teal-950/20 hover:bg-teal-950/30'
           : selected
             ? 'border-purple-600/40 bg-purple-900/10'
             : 'border-purple-900/25 bg-white/[0.02] hover:bg-white/[0.04] hover:border-purple-800/40'
@@ -4133,7 +4184,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
         {/* Select checkbox overlay */}
         {selectMode && (
           <div className={`absolute inset-0 flex items-center justify-center transition-colors ${selected ? 'bg-purple-900/40' : 'bg-black/20'}`}>
-            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-purple-500 border-purple-500' : 'border-white/60 bg-black/30'}`}>
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-purple-700 border-purple-700' : 'border-white/60 bg-black/30'}`}>
               {selected && <CheckCheck size={12} className="text-white" />}
             </div>
           </div>
@@ -4169,7 +4220,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                         className={`inline-flex items-center gap-0.5 p-1 rounded border transition-colors shrink-0 ${
                           isLive
                             ? 'bg-green-900/30 text-green-400 border-green-800/30 hover:bg-green-900/50 hover:text-green-300'
-                            : 'bg-yellow-900/30 text-yellow-400 border-yellow-800/30 hover:bg-yellow-900/50 hover:text-yellow-300'
+                            : 'bg-teal-900/30 text-teal-400 border-teal-800/30 hover:bg-teal-900/50 hover:text-teal-300'
                         }`}
                       >
                         <Radio size={11} />
@@ -4178,7 +4229,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                     </Tooltip>
                   ) : (
                     <Tooltip content={isNextUpcoming ? "Upcoming — stream hasn't happened yet" : 'Scheduled upcoming stream'}>
-                      <span className="inline-flex items-center p-1 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 shrink-0">
+                      <span className="inline-flex items-center p-1 rounded bg-teal-900/30 text-teal-400 border border-teal-800/30 shrink-0">
                         <Radio size={11} />
                       </span>
                     </Tooltip>
@@ -4211,7 +4262,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
             {normalizeStreamTypes(meta.streamType).map(t => {
               const color = getTagColor(tagColors[t])
               return (
-                <span key={t} className={`inline-block text-xs px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
+                <span key={t} className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
                   {t}
                 </span>
               )
@@ -4224,10 +4275,10 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
           <div className="flex flex-wrap gap-1">
             {displayGames.map(g =>
               meta?.games?.includes(g) ? (
-                <span key={g} className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-800/20">{g}</span>
+                <span key={g} className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30">{g}</span>
               ) : (
                 <Tooltip key={g} content="Detected from filename">
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 border border-white/10 italic">{g}</span>
+                  <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 border border-gray-500/30 italic">{g}</span>
                 </Tooltip>
               )
             )}
@@ -4388,7 +4439,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
     <tr
       className={`border-b group transition-colors ${
         isPending
-          ? `border-amber-900/30 hover:bg-amber-950/40 ${zebra ? 'bg-amber-950/30' : 'bg-amber-950/20'}`
+          ? `border-teal-900/30 hover:bg-teal-900/30 ${zebra ? 'bg-teal-900/20' : 'bg-teal-900/15'}`
           : `border-white/5 hover:bg-white/[0.03] ${zebra ? 'bg-white/[0.02]' : ''}`
       } ${selected ? 'bg-purple-900/10' : ''}`}
       onClick={selectMode ? (e) => onToggleSelect(e.shiftKey) : undefined}
@@ -4400,7 +4451,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
       {/* Checkbox */}
       {selectMode && (
         <td className="pl-4 align-middle" onClick={e => { e.stopPropagation(); onToggleSelect(e.shiftKey) }}>
-          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-purple-500 border-purple-500' : 'border-gray-600 hover:border-gray-400'}`}>
+          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-purple-700 border-purple-700' : 'border-gray-600 hover:border-gray-400'}`}>
             {selected && <CheckCheck size={10} className="text-white" />}
           </div>
         </td>
@@ -4506,7 +4557,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                         className={`inline-flex items-center gap-0.5 p-0.5 rounded border transition-colors shrink-0 ${
                           isLive
                             ? 'bg-green-900/30 text-green-400 border-green-800/30 hover:bg-green-900/50 hover:text-green-300'
-                            : 'bg-yellow-900/30 text-yellow-400 border-yellow-800/30 hover:bg-yellow-900/50 hover:text-yellow-300'
+                            : 'bg-teal-900/30 text-teal-400 border-teal-800/30 hover:bg-teal-900/50 hover:text-teal-300'
                         }`}
                       >
                         <Radio size={12} />
@@ -4516,7 +4567,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                   )
                 })() : (
                   <Tooltip content={isNextUpcoming ? 'Upcoming — stream hasn\'t happened yet' : 'Scheduled upcoming stream'}>
-                    <span className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/30 shrink-0">
+                    <span className="inline-flex items-center p-0.5 rounded bg-teal-900/30 text-teal-400 border border-teal-800/30 shrink-0">
                       <Radio size={12} />
                     </span>
                   </Tooltip>
@@ -4553,7 +4604,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             {normalizeStreamTypes(meta.streamType).map(t => {
               const color = getTagColor(tagColors[t])
               return (
-                <span key={t} className={`inline-block text-xs px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
+                <span key={t} className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
                   {t}
                 </span>
               )
@@ -4572,13 +4623,13 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
               meta?.games?.includes(g) ? (
                 <span
                   key={g}
-                  className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-800/20"
+                  className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30"
                 >
                   {g}
                 </span>
               ) : (
                 <Tooltip key={g} content="Detected from filename">
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 border border-white/10 italic">
+                  <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 border border-gray-500/30 italic">
                     {g}
                   </span>
                 </Tooltip>

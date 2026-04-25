@@ -15,6 +15,8 @@ const defaultConfig: AppConfig = {
   clipPresetId: '',
   defaultBleepVolume: 0.25,
   defaultThumbnailTemplate: '',
+  defaultBuiltinThumbnailTemplate: '',
+  useBuiltinThumbnailByDefault: true,
   checkEpisodeIteration: true,
   audioCacheLimit: 1_073_741_824,
   youtubeClientId: '',

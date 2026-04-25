@@ -89,6 +89,32 @@ const cancellers = new Map<string, () => void>()
 const pausers   = new Map<string, () => void>()
 const resumers  = new Map<string, () => void>()
 
+// ── Pending-queue persistence ─────────────────────────────────────────────
+// Only jobs with status 'queued' (auto-rules with start-immediately disabled)
+// survive across restarts. Running/paused/done/error/cancelled are dropped
+// because their underlying ffmpeg state isn't recoverable.
+const PENDING_JOBS_KEY = 'pendingJobs'
+
+function persistPendingJobs(): void {
+  const queued = [...jobs.values()].filter(j => j.status === 'queued')
+  getStore().set(PENDING_JOBS_KEY, queued)
+}
+
+export function restorePendingJobs(): void {
+  const persisted = (getStore().get(PENDING_JOBS_KEY, []) as ConversionJob[]) || []
+  let dropped = 0
+  for (const job of persisted) {
+    if (job.status !== 'queued') continue
+    // Drop entries whose source no longer exists — the job would fail anyway.
+    if (!fs.existsSync(job.inputFile)) { dropped++; continue }
+    jobs.set(job.id, { ...job, progress: 0 })
+  }
+  if (dropped > 0) {
+    console.warn(`[converter] dropped ${dropped} pending job(s) — input file missing`)
+    persistPendingJobs()
+  }
+}
+
 // ── HandBrake JSON → ffmpeg args translation ───────────────────────────────
 
 const VIDEO_CODEC_MAP: Record<string, string> = {
@@ -241,6 +267,7 @@ export function addPendingJob(job: ConversionJob): string {
   const id = job.id || uuidv4()
   const queuedJob: ConversionJob = { ...job, id, status: 'queued', progress: 0 }
   jobs.set(id, queuedJob)
+  persistPendingJobs()
   broadcastJobAdded(queuedJob)
   return id
 }
@@ -264,6 +291,8 @@ export async function startConversionJob(
   const id = job.id || uuidv4()
   const newJob: ConversionJob = { ...job, id, status: 'running', progress: 0 }
   jobs.set(id, newJob)
+  // If this job was previously queued, drop it from the persisted queue now that it's running.
+  persistPendingJobs()
 
   const notifyAll = (channel: string, data: any) => {
     for (const w of BrowserWindow.getAllWindows()) {
@@ -320,7 +349,19 @@ export function getConverterStatus(): { active: boolean; percent: number; label:
   return { active: true, percent: current.progress ?? 0, label }
 }
 
+export function getActiveConversionCounts(): { running: number; queued: number } {
+  let running = 0, queued = 0
+  for (const j of jobs.values()) {
+    if (j.status === 'running') running++
+    else if (j.status === 'queued') queued++
+  }
+  return { running, queued }
+}
+
 export function registerConverterIPC(): void {
+  // Restore queued jobs persisted from a previous session
+  restorePendingJobs()
+
   ipcMain.handle('converter:getBuiltinPresets', async () => BUILTIN_PRESETS)
 
   ipcMain.handle('converter:checkEncoderAvailable', async (_event, name: string) => {
@@ -630,7 +671,9 @@ export function registerConverterIPC(): void {
     resumers.delete(jobId)
     const j = jobs.get(jobId)
     if (j) {
+      const wasQueued = j.status === 'queued'
       jobs.set(jobId, { ...j, status: 'cancelled' })
+      if (wasQueued) persistPendingJobs()
       const config = getStore().get('config')
       if (config.autoDeletePartialOnCancel && j.outputFile) {
         const outputFile = j.outputFile
