@@ -706,7 +706,6 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], s
 function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
   const defaultBuiltinTemplate = builtinTemplates.find(t => t.id === defaultBuiltinTemplateId) ?? builtinTemplates[0] ?? null
-  const { navigateToEditor } = useThumbnailEditor()
 
   // In edit/add mode the folder name is the authoritative date source — the stored meta.date
   // may be wrong if the file was created with the wrong date (e.g. migration artefact).
@@ -1415,11 +1414,6 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
                   </select>
                   <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
                 </div>
-                {builtinTemplates.length === 0 && (
-                  <Button variant="secondary" size="sm" onClick={() => { onClose(); navigateToEditor() }}>
-                    Create Template
-                  </Button>
-                )}
               </div>
             ) : (
               (templates.length > 0 || hasPrevThumbnails) && (

@@ -762,7 +762,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                     type="color"
                     value={layer.fill ?? '#ffffff'}
                     onChange={e => update({ fill: e.target.value })}
-                    className="h-7 w-10 rounded border border-white/10 bg-transparent cursor-pointer"
+                    className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer"
                   />
                   <input
                     type="text"
@@ -779,7 +779,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                     type="color"
                     value={layer.stroke ?? '#000000'}
                     onChange={e => update({ stroke: e.target.value })}
-                    className="h-7 w-10 rounded border border-white/10 bg-transparent cursor-pointer"
+                    className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer"
                   />
                   <input
                     type="number"
@@ -805,7 +805,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               <span className="text-[10px] text-gray-500">Fill</span>
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
-                  className="h-7 w-10 rounded border border-white/10 bg-transparent cursor-pointer" />
+                  className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer" />
                 <input type="text" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
                   className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
               </div>
@@ -814,7 +814,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               <span className="text-[10px] text-gray-500">Stroke</span>
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.stroke ?? '#000000'} onChange={e => update({ stroke: e.target.value })}
-                  className="h-7 w-10 rounded border border-white/10 bg-transparent cursor-pointer" />
+                  className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer" />
                 <input type="number" min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
                   onChange={e => update({ strokeWidth: Number(e.target.value) })}
                   className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />

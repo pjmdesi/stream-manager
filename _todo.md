@@ -37,5 +37,3 @@
 
 ## Bugs
 
-1. The fill color selector in the thumbnail editor is rendering wrong.
-2. The create stream button in the MetaModal should be removed since it moves the user to the thumbnails page and closes the MetaModal, which causes the user to lose any unsaved changes they had in the MetaModal.
