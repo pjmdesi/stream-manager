@@ -247,7 +247,7 @@ export function TemplatesPage() {
                 {t.variables.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {t.variables.map(v => (
-                      <span key={v.key} className="text-xs bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-800/30">
+                      <span key={v.key} className="text-xs bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-300/40">
                         {'{' + v.key + '}'}
                       </span>
                     ))}

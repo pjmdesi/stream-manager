@@ -158,11 +158,17 @@ contextBridge.exposeInMainWorld('api', {
   addToQueue: (job: any) =>
     ipcRenderer.invoke('converter:addToQueue', job),
 
+  addQueuedGroup: (jobs: any[]) =>
+    ipcRenderer.invoke('converter:addQueuedGroup', jobs),
+
   addClipToQueue: (params: any) =>
     ipcRenderer.invoke('converter:addClipToQueue', params),
 
   cancelJob: (jobId: string) =>
     ipcRenderer.invoke('converter:cancelJob', jobId),
+
+  cancelJobGroup: (groupId: string) =>
+    ipcRenderer.invoke('converter:cancelGroup', groupId),
 
   startQueuedJob: (jobId: string) =>
     ipcRenderer.invoke('converter:startQueued', jobId),
@@ -198,6 +204,12 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('converter:jobAdded', handler)
     return () => ipcRenderer.removeListener('converter:jobAdded', handler)
+  },
+
+  onJobStatus: (callback: (data: { jobId: string; status: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('converter:jobStatus', handler)
+    return () => ipcRenderer.removeListener('converter:jobStatus', handler)
   },
 
   // ── Store ─────────────────────────────────────────────────────────────────
@@ -260,12 +272,6 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('streams:changed', handler)
   },
 
-  archiveFolders: (sessions: Array<{ folderPath: string; date: string; filePaths?: string[] }>, preset: any) =>
-    ipcRenderer.invoke('streams:archiveFolders', sessions, preset),
-
-  cancelArchive: () =>
-    ipcRenderer.invoke('streams:cancelArchive'),
-
   previewReschedule: (folderPath: string, oldDate: string, newDate: string) =>
     ipcRenderer.invoke('streams:previewReschedule', folderPath, oldDate, newDate),
 
@@ -283,12 +289,6 @@ contextBridge.exposeInMainWorld('api', {
 
   undoConvertDumpFolder: (manifest: { moves: { from: string; to: string }[]; createdFolders: string[] }) =>
     ipcRenderer.invoke('streams:undoConvertDumpFolder', manifest),
-
-  onArchiveProgress: (callback: (data: any) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('streams:archiveProgress', handler)
-    return () => ipcRenderer.removeListener('streams:archiveProgress', handler)
-  },
 
   // ── Combine ───────────────────────────────────────────────────────────────
   combineFiles: (files: string[], outputPath: string, totalDurationSec: number) =>

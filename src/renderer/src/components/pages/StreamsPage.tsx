@@ -26,7 +26,8 @@ function LucideTwitch({ size = 24, className }: { size?: number; className?: str
     </svg>
   )
 }
-import type { StreamFolder, StreamMeta, ConversionPreset, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
+import { v4 as uuidv4 } from 'uuid'
+import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
@@ -1911,23 +1912,36 @@ interface PresetPickerProps {
   onPick: (preset: ConversionPreset, setAsDefault: boolean) => void
   onClose: () => void
   isDumpMode: boolean
+  /** Pre-select this preset on open. When provided, the modal acts as a
+   *  "confirm or override" step rather than a first-time picker, so the
+   *  "save as default" checkbox starts unchecked. */
+  defaultPresetId?: string
+  /** Number of streams about to be archived — for the modal copy. */
+  selectionCount: number
 }
 
-function PresetPickerModal({ onPick, onClose, isDumpMode }: PresetPickerProps) {
+function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId, selectionCount }: PresetPickerProps) {
   const [presets, setPresets] = useState<ConversionPreset[]>([])
   const [selected, setSelected] = useState<string>('')
-  const [setAsDefault, setSetAsDefault] = useState(true)
+  // When there's an existing default the user is overriding for one run, don't
+  // try to overwrite their saved default unless they explicitly opt in.
+  const [setAsDefault, setSetAsDefault] = useState(!defaultPresetId)
   const [loading, setLoading] = useState(true)
+  const isOverride = !!defaultPresetId
 
   useEffect(() => {
     Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
       .then(([builtin, imported]) => {
         const all = [...builtin, ...imported]
         setPresets(all)
-        if (all.length > 0) setSelected(all[0].id)
+        // Prefer the configured default; fall back to the first preset.
+        const initial = (defaultPresetId && all.some(p => p.id === defaultPresetId))
+          ? defaultPresetId
+          : (all[0]?.id ?? '')
+        setSelected(initial)
         setLoading(false)
       })
-  }, [])
+  }, [defaultPresetId])
 
   const confirm = () => {
     const preset = presets.find(p => p.id === selected)
@@ -1938,19 +1952,23 @@ function PresetPickerModal({ onPick, onClose, isDumpMode }: PresetPickerProps) {
     <Modal
       isOpen
       onClose={onClose}
-      title="Choose Archive Preset"
+      title={isOverride ? 'Confirm archive preset' : 'Choose Archive Preset'}
       width="sm"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" onClick={confirm} disabled={!selected || loading}>
-            Archive
+            Archive {selectionCount} {selectionCount === 1 ? 'stream' : 'streams'}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-4">
-        <p className="text-sm text-gray-400">No default archive preset is set. Choose which converter preset to use for compression.</p>
+        <p className="text-sm text-gray-400">
+          {isOverride
+            ? 'Confirm the preset to use, or pick a different one for this run.'
+            : 'No default archive preset is set. Choose which converter preset to use for compression.'}
+        </p>
         {isDumpMode && (
           <p className="text-xs text-gray-500 italic">
             In dump-folder mode, archived files are converted in place — they replace the originals in the same folder.
@@ -1974,106 +1992,12 @@ function PresetPickerModal({ onPick, onClose, isDumpMode }: PresetPickerProps) {
             <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
           </div>
         )}
-        <Checkbox checked={setAsDefault} onChange={setSetAsDefault} label="Save as default archive preset" />
-      </div>
-    </Modal>
-  )
-}
-
-// ─── Archive progress modal ───────────────────────────────────────────────────
-
-interface FolderArchiveStatus {
-  folderPath: string
-  folderName: string
-  phase: 'queued' | 'converting' | 'replacing' | 'done' | 'error'
-  percent: number
-  currentFile: string
-  fileIndex: number
-  fileCount: number
-  error?: string
-}
-
-interface ArchiveProgressModalProps {
-  statuses: FolderArchiveStatus[]
-  isDumpMode: boolean
-  onCancel: () => void
-  onClose: () => void
-  done: boolean
-}
-
-function ArchiveProgressModal({ statuses, onCancel, onClose, done, isDumpMode }: ArchiveProgressModalProps) {
-  const total = statuses.length
-  const doneCount = statuses.filter(s => s.phase === 'done').length
-  const errorCount = statuses.filter(s => s.phase === 'error').length
-
-  return (
-    <Modal
-      isOpen
-      onClose={done ? onClose : () => {}}
-      title={done ? 'Archive Complete' : 'Archiving Streams…'}
-      width="md"
-      footer={
-        done ? (
-          <Button variant="primary" onClick={onClose}>Close</Button>
-        ) : (
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-        )
-      }
-    >
-      <div className="flex flex-col gap-3">
-        {!done && (
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <Loader2 size={14} className="animate-spin text-purple-400" />
-            Processing {doneCount + errorCount + 1} of {total}…
-          </div>
+        {selected !== defaultPresetId && (
+          <Checkbox checked={setAsDefault} onChange={setSetAsDefault} label="Save as default archive preset" />
         )}
-        {done && (
-          <div className="text-sm text-gray-400">
-            {doneCount} archived{errorCount > 0 ? `, ${errorCount} failed` : ''}.
-          </div>
-        )}
-        {isDumpMode && (
-          <p className="text-xs text-gray-500 italic">
-            Files are converted in place — they replace the originals in the same folder.
-          </p>
-        )}
-        <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
-          {statuses.map(s => (
-            <div key={s.folderPath} className="flex flex-col gap-1 p-2 rounded-lg bg-white/5">
-              <div className="flex items-center gap-2">
-                {s.phase === 'done' && <CheckCircle2 size={14} className="text-green-400 shrink-0" />}
-                {s.phase === 'error' && <XCircle size={14} className="text-red-400 shrink-0" />}
-                {(s.phase === 'converting' || s.phase === 'replacing') && <Loader2 size={14} className="animate-spin text-purple-400 shrink-0" />}
-                {s.phase === 'queued' && <Square size={14} className="text-gray-600 shrink-0" />}
-                <span className="text-sm text-gray-200 font-mono">{s.folderName}</span>
-                {s.phase !== 'queued' && s.fileCount > 0 && (
-                  <span className="text-xs text-gray-600 ml-auto">
-                    {s.fileIndex + 1}/{s.fileCount}
-                  </span>
-                )}
-              </div>
-              {s.phase === 'converting' && (
-                <>
-                  <div className="text-xs text-gray-500 truncate pl-5">{s.currentFile}</div>
-                  <div className="pl-5">
-                    <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-purple-500 rounded-full transition-all duration-300"
-                        style={{ width: `${s.percent}%` }}
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-              {s.phase === 'replacing' && (
-                <div className="text-xs text-gray-500 pl-5">Replacing original…</div>
-              )}
-              {s.phase === 'error' && s.error && (
-                <div className="text-xs text-red-400 pl-5">{s.error}</div>
-              )}
-            </div>
-          ))}
-        </div>
+        <p className="text-xs text-gray-500 italic leading-relaxed">
+          Test your preset on a few video files in the Converter page first to verify the output quality before archiving in bulk.
+        </p>
       </div>
     </Modal>
   )
@@ -2688,10 +2612,9 @@ export function StreamsPage({
   const preDragPaths = useRef<Set<string>>(new Set())
   const dragMoved = useRef(false)
 
-  // Archive
+  // Archive — preset picker only; the actual progress UI lives in the converter
+  // page now (archive jobs are submitted as a serial job-group).
   const [showPresetPicker, setShowPresetPicker] = useState(false)
-  const [archiveStatuses, setArchiveStatuses] = useState<FolderArchiveStatus[] | null>(null)
-  const [archiveDone, setArchiveDone] = useState(false)
 
   const [templates, setTemplates] = useState<{ name: string; path: string }[]>([])
   const [builtinTemplates, setBuiltinTemplates] = useState<ThumbnailTemplate[]>([])
@@ -2739,28 +2662,6 @@ export function StreamsPage({
     })
     return unsub
   }, [streamsDir, loadFolders])
-
-  // Archive progress listener
-  useEffect(() => {
-    const unsub = window.api.onArchiveProgress((data: any) => {
-      setArchiveStatuses(prev => {
-        if (!prev) return prev
-        return prev.map(s => {
-          if (s.folderPath !== data.folderPath) return s
-          return {
-            ...s,
-            phase: data.phase,
-            percent: data.percent,
-            currentFile: data.fileName,
-            fileIndex: data.fileIndex,
-            fileCount: data.fileCount,
-            error: data.error,
-          }
-        })
-      })
-    })
-    return unsub
-  }, [])
 
   // Cloud download completion listener
   useEffect(() => {
@@ -2920,39 +2821,98 @@ export function StreamsPage({
   const startArchive = async (preset: ConversionPreset, setAsDefault: boolean) => {
     if (setAsDefault) await updateConfig({ archivePresetId: preset.id })
     setShowPresetPicker(false)
+    if (!streamsDir) return
 
     const selectedFolders = folders.filter(f => selectedPaths.has(f.folderPath) || selectedPaths.has(f.date))
 
-    const sessions = selectedFolders.map(f => isDumpMode
-      ? { folderPath: f.folderPath, date: f.date, filePaths: f.videos }
-      : { folderPath: f.folderPath, date: f.date }
-    )
-
-    const initialStatuses: FolderArchiveStatus[] = sessions.map(s => ({
-      folderPath: s.folderPath,
-      folderName: s.date,
-      phase: 'queued',
-      percent: 0,
-      currentFile: '',
-      fileIndex: 0,
-      fileCount: 0,
+    // Pre-flight: bulk-check every input file across every selected folder for
+    // cloud-placeholder status, then reorder so local files queue first within
+    // each folder (and folders with any local content queue ahead of all-cloud
+    // ones). The cloud-aware wait happens inside the converter pipeline now;
+    // this just gives users responsive starts on whatever's already on disk.
+    //
+    // Filter to category === 'full' (the "vid" tag) — only full recordings are
+    // worth archive-encoding. Clips and shorts are typically already small
+    // enough that the encoding time outweighs the savings. Format-agnostic:
+    // any container marked 'full' qualifies.
+    const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '')
+    const fullVideos = (f: StreamFolder): string[] => {
+      const map = f.meta?.videoMap
+      if (!map) return []
+      const root = norm(f.folderPath)
+      return f.videos.filter(v => {
+        const n = norm(v)
+        const relKey = n.startsWith(root + '/') ? n.slice(root.length + 1) : n.split('/').pop() ?? n
+        return map[relKey]?.category === 'full'
+      })
+    }
+    const sessionsRaw = selectedFolders.map(f => ({
+      folderPath: f.folderPath,
+      date: f.date,
+      filePaths: fullVideos(f),
     }))
-    setArchiveStatuses(initialStatuses)
-    setArchiveDone(false)
+    const allFiles = sessionsRaw.flatMap(s => s.filePaths)
+    const allLocal = allFiles.length > 0 ? await window.api.checkLocalFiles(allFiles) : []
+    let cursor = 0
+    const enriched = sessionsRaw.map(s => {
+      const flags = allLocal.slice(cursor, cursor + s.filePaths.length)
+      cursor += s.filePaths.length
+      const pairs = s.filePaths.map((p, i) => ({ p, isLocal: flags[i] }))
+      pairs.sort((a, b) => Number(b.isLocal) - Number(a.isLocal))
+      return { ...s, filePaths: pairs.map(x => x.p), anyLocal: flags.some(Boolean) }
+    })
+    enriched.sort((a, b) => Number(b.anyLocal) - Number(a.anyLocal))
 
-    await window.api.archiveFolders(sessions, preset)
+    // Build one ConversionJob per file. Each folder becomes a group with
+    // serial in-group execution + a main-process completion hook that marks
+    // the date as archived once every file in the group succeeds.
+    const ext = preset.outputExtension || 'mkv'
+    const allJobs: ConversionJob[] = []
+    for (const e of enriched) {
+      if (e.filePaths.length === 0) continue
+      const groupId = uuidv4()
+      const groupLabel = `Archive · ${e.date}`
+      for (const inputFile of e.filePaths) {
+        // Strip any path separators for the temp filename, then rebuild path.
+        const sep = inputFile.includes('\\') ? '\\' : '/'
+        const dirSepIdx = Math.max(inputFile.lastIndexOf('\\'), inputFile.lastIndexOf('/'))
+        const dir = inputFile.slice(0, dirSepIdx)
+        const fileName = inputFile.slice(dirSepIdx + 1)
+        const baseName = fileName.replace(/\.[^.]+$/, '')
+        const tempFile = `${dir}${sep}${baseName}__arc_tmp.${ext}`
+        allJobs.push({
+          id: uuidv4(),
+          inputFile,
+          outputFile: tempFile,
+          preset,
+          status: 'queued',
+          progress: 0,
+          groupId,
+          groupLabel,
+          replaceInput: true,
+          groupCompletionHook: { type: 'archiveMarkAsArchived', streamsDir, date: e.date },
+        })
+      }
+    }
+    if (allJobs.length === 0) return
 
-    setArchiveDone(true)
-    await loadFolders(streamsDir)
+    // Append to the local jobs state immediately so the converter UI shows the
+    // group right away, then fire the IPC. (The main process also broadcasts
+    // converter:jobAdded events that the converter page subscribes to, but
+    // beating that by a tick keeps the UI snappy.)
+    await window.api.addQueuedGroup(allJobs)
+
+    // Drop selection so the user isn't left looking at "still selected" rows
+    // after the archive has been queued and the modal has dismissed.
+    setSelectMode(false)
+    setSelectedPaths(new Set())
   }
 
   const clickArchive = async () => {
     if (selectedPaths.size === 0) return
-    if (config.archivePresetId) {
-      const [builtin, imported] = await Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
-      const preset = [...builtin, ...imported].find((p: ConversionPreset) => p.id === config.archivePresetId)
-      if (preset) { startArchive(preset, false); return }
-    }
+    // Always show the picker so the user can override their saved default
+    // for this run. The modal pre-selects config.archivePresetId when set,
+    // so the common case is just one extra click on Confirm.
     setShowPresetPicker(true)
   }
 
@@ -4113,28 +4073,15 @@ return (
         />
       )}
 
-      {/* Preset picker */}
+      {/* Preset picker — archive jobs are submitted to the converter queue
+          on confirm, so there's no longer a separate progress modal here. */}
       {showPresetPicker && (
         <PresetPickerModal
           onPick={(preset, setAsDefault) => startArchive(preset, setAsDefault)}
           onClose={() => setShowPresetPicker(false)}
           isDumpMode={isDumpMode}
-        />
-      )}
-
-      {/* Archive progress */}
-      {archiveStatuses && (
-        <ArchiveProgressModal
-          statuses={archiveStatuses}
-          done={archiveDone}
-          isDumpMode={isDumpMode}
-          onCancel={() => window.api.cancelArchive()}
-          onClose={() => {
-            setArchiveStatuses(null)
-            setArchiveDone(false)
-            setSelectMode(false)
-            setSelectedPaths(new Set())
-          }}
+          defaultPresetId={config.archivePresetId}
+          selectionCount={selectedPaths.size}
         />
       )}
 
@@ -4418,7 +4365,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
             <div className="inline-flex gap-1">
                 {meta?.archived && (
                     <Tooltip content="Archived">
-                        <span className="inline-flex items-center p-1 rounded bg-green-900/30 text-green-400 border border-green-800/30">
+                        <span className="inline-flex items-center p-1 rounded bg-green-900/30 text-green-400 border border-green-400/40">
                         <Archive size={11} />
                         </span>
                     </Tooltip>
@@ -4430,8 +4377,8 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                         onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
                         className={`inline-flex items-center gap-0.5 p-1 rounded border transition-colors shrink-0 ${
                           isLive
-                            ? 'bg-green-900/30 text-green-400 border-green-800/30 hover:bg-green-900/50 hover:text-green-300'
-                            : 'bg-teal-900/30 text-teal-400 border-teal-800/30 hover:bg-teal-900/50 hover:text-teal-300'
+                            ? 'bg-green-900/30 text-green-400 border-green-400/40 hover:bg-green-900/50 hover:text-green-300'
+                            : 'bg-teal-900/30 text-teal-400 border-teal-400/40 hover:bg-teal-900/50 hover:text-teal-300'
                         }`}
                       >
                         <Radio size={11} />
@@ -4440,7 +4387,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                     </Tooltip>
                   ) : (
                     <Tooltip content={isNextUpcoming ? "Upcoming — stream hasn't happened yet" : 'Scheduled upcoming stream'}>
-                      <span className="inline-flex items-center p-1 rounded bg-teal-900/30 text-teal-400 border border-teal-800/30 shrink-0">
+                      <span className="inline-flex items-center p-1 rounded bg-teal-900/30 text-teal-400 border border-teal-400/40 shrink-0">
                         <Radio size={11} />
                       </span>
                     </Tooltip>
@@ -4451,7 +4398,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                     <Tooltip content={privacyLabel ? `YouTube · ${privacyLabel}` : 'YouTube'}>
                       <button
                         onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
-                        className="inline-flex items-center gap-0.5 p-1 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 transition-colors shrink-0"
+                        className="inline-flex items-center gap-0.5 p-1 rounded bg-red-900/30 text-red-400 border border-red-400/40 hover:bg-red-900/50 transition-colors shrink-0"
                       >
                         <LucideYoutube size={11} />
                         {PrivacyIcon && <PrivacyIcon size={11} />}
@@ -4752,7 +4699,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
           <div className="inline-flex gap-1">
               {meta?.archived && (
                 <Tooltip content="Archived">
-                  <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-800/30 shrink-0">
+                  <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-400/40 shrink-0">
                     <Archive size={12} />
                   </span>
                 </Tooltip>
@@ -4769,8 +4716,8 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                         onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
                         className={`inline-flex items-center gap-0.5 p-0.5 rounded border transition-colors shrink-0 ${
                           isLive
-                            ? 'bg-green-900/30 text-green-400 border-green-800/30 hover:bg-green-900/50 hover:text-green-300'
-                            : 'bg-teal-900/30 text-teal-400 border-teal-800/30 hover:bg-teal-900/50 hover:text-teal-300'
+                            ? 'bg-green-900/30 text-green-400 border-green-400/40 hover:bg-green-900/50 hover:text-green-300'
+                            : 'bg-teal-900/30 text-teal-400 border-teal-400/40 hover:bg-teal-900/50 hover:text-teal-300'
                         }`}
                       >
                         <Radio size={12} />
@@ -4780,7 +4727,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                   )
                 })() : (
                   <Tooltip content={isNextUpcoming ? 'Upcoming — stream hasn\'t happened yet' : 'Scheduled upcoming stream'}>
-                    <span className="inline-flex items-center p-0.5 rounded bg-teal-900/30 text-teal-400 border border-teal-800/30 shrink-0">
+                    <span className="inline-flex items-center p-0.5 rounded bg-teal-900/30 text-teal-400 border border-teal-400/40 shrink-0">
                       <Radio size={12} />
                     </span>
                   </Tooltip>
@@ -4793,7 +4740,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                 <Tooltip content={privacyLabel ? `Edit on YouTube · ${privacyLabel}` : 'Edit on YouTube'}>
                     <button
                     onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
-                    className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-800/30 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
+                    className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-400/40 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
                     >
                     <LucideYoutube size={12} />
                     {PrivacyIcon && <PrivacyIcon size={12} />}

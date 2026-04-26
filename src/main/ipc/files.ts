@@ -19,8 +19,9 @@ const activeDownloadPollers = new Map<string, ReturnType<typeof setInterval>>()
 /**
  * Like checkLocalFiles but returns false (not local) on any error or uncertainty.
  * Used in download polling where a false-positive "file is ready" would be harmful.
+ * Exported so other main-process modules (e.g. archive) can poll cheaply.
  */
-function isFileConfirmedLocal(filePath: string): boolean {
+export function isFileConfirmedLocal(filePath: string): boolean {
   if (process.platform !== 'win32') return true
   try {
     const escaped = filePath.replace(/'/g, "''")

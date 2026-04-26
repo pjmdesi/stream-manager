@@ -80,14 +80,34 @@ export interface ConversionPreset {
 }
 
 
+/** Hook fired by the converter once every job in a group has succeeded. The
+ *  main process owns this so it survives renderer reloads and isn't subject to
+ *  IPC race conditions. Each variant carries the data needed to do the action. */
+export type GroupCompletionHook =
+  | { type: 'archiveMarkAsArchived'; streamsDir: string; date: string }
+
 export interface ConversionJob {
   id: string
   inputFile: string
   outputFile: string
   preset: ConversionPreset
-  status: 'queued' | 'running' | 'paused' | 'done' | 'error' | 'cancelled'
+  status: 'queued' | 'downloading' | 'running' | 'replacing' | 'paused' | 'done' | 'error' | 'cancelled'
   progress: number
   error?: string
+  /** Optional logical grouping (used by archive — one group per stream folder).
+   *  Renderer renders these together with collective controls; main process
+   *  fires the completion hook when all jobs in the group succeed. */
+  groupId?: string
+  /** Display label for the group (e.g. "Archive · 2026-04-26"). Stored on each
+   *  job in the group; first-seen wins for the group header. */
+  groupLabel?: string
+  /** When true, the job's outputFile is a temp file alongside the input that
+   *  replaces the input on success (unlink original → rename temp). Used for
+   *  in-place archive operations. */
+  replaceInput?: boolean
+  /** Fired in the main process once every job sharing this groupId has reached
+   *  status 'done'. Skipped if any job in the group failed or was cancelled. */
+  groupCompletionHook?: GroupCompletionHook
 }
 
 export type StreamMode = 'folder-per-stream' | 'dump-folder' | ''

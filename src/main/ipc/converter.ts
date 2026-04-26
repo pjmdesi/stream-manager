@@ -14,14 +14,33 @@ export interface ConversionPreset {
   isBuiltin: boolean
 }
 
+/** Hook fired by the converter once every job in a group has succeeded. The
+ *  main process owns this so it survives renderer reloads and isn't subject to
+ *  IPC race conditions. Each variant carries the data needed to do the action. */
+export type GroupCompletionHook =
+  | { type: 'archiveMarkAsArchived'; streamsDir: string; date: string }
+
 export interface ConversionJob {
   id: string
   inputFile: string
   outputFile: string
   preset: ConversionPreset
-  status: 'queued' | 'running' | 'paused' | 'done' | 'error' | 'cancelled'
+  status: 'queued' | 'downloading' | 'running' | 'replacing' | 'paused' | 'done' | 'error' | 'cancelled'
   progress: number
   error?: string
+  /** Optional logical grouping (used by archive — one group per stream folder).
+   *  Renderer renders these together with collective controls; main process
+   *  fires the completion hook when all jobs in the group succeed. */
+  groupId?: string
+  /** Display label for the group (e.g. "Archive · 2026-04-26"). */
+  groupLabel?: string
+  /** When true, the job's outputFile is a temp file alongside the input that
+   *  replaces the input on success (unlink original → rename temp). Used for
+   *  in-place archive operations. */
+  replaceInput?: boolean
+  /** Fired in the main process once every job sharing this groupId has reached
+   *  status 'done'. Skipped if any job in the group failed or was cancelled. */
+  groupCompletionHook?: GroupCompletionHook
 }
 
 const BUILTIN_PRESETS: ConversionPreset[] = [
@@ -68,7 +87,7 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
   {
     id: 'archive-av1',
     name: 'Archive (SVT-AV1)',
-    description: 'Cold storage archive — CRF 28 SVT-AV1, preserves fine detail at a strong size ratio. Requires a recent FFmpeg build.',
+    description: 'Cold storage archive — CRF 28 SVT-AV1, preserves fine detail at a strong size ratio. Auto-swaps to a hardware AV1 encoder (NVENC / QSV / AMF) when one is available.',
     ffmpegArgs: '-c:v libsvtav1 -crf 28 -preset 6 -c:a aac -b:a 128k',
     outputExtension: 'mkv',
     isBuiltin: true
@@ -88,6 +107,9 @@ const jobs = new Map<string, ConversionJob>()
 const cancellers = new Map<string, () => void>()
 const pausers   = new Map<string, () => void>()
 const resumers  = new Map<string, () => void>()
+// Set when a job is in the cloud-download wait so the renderer-driven cancel
+// can flip the flag and let the poll loop exit promptly. Per job id.
+const downloadCancelFlags = new Map<string, { cancelled: boolean }>()
 
 // ── Pending-queue persistence ─────────────────────────────────────────────
 // Only jobs with status 'queued' (auto-rules with start-immediately disabled)
@@ -272,6 +294,51 @@ export function addPendingJob(job: ConversionJob): string {
   return id
 }
 
+/** Start the first queued job in a group. Used to serialize execution within
+ *  a group (archive batches) — kicked off when a group is submitted, then
+ *  re-fired on each job-end so the next one begins. */
+function startNextInGroup(groupId: string): void {
+  // Skip if any job in the group is already running/transitioning.
+  const groupJobs = [...jobs.values()].filter(j => j.groupId === groupId)
+  const inFlight = groupJobs.some(j =>
+    j.status === 'running' || j.status === 'downloading' ||
+    j.status === 'replacing' || j.status === 'paused'
+  )
+  if (inFlight) return
+  const next = groupJobs.find(j => j.status === 'queued')
+  if (!next) return
+  startConversionJob(next).catch(() => { /* error broadcast separately */ })
+}
+
+/** Best-effort delete of a file that may be temporarily locked. Aimed at temp
+ *  files left by killed/failed ffmpeg processes — Windows can take longer than
+ *  expected to release file handles after process termination, especially when
+ *  cloud-sync clients (Synology Drive, OneDrive) or AV products are scanning.
+ *
+ *  Strategy: ~30s window with a slowly-escalating retry. If after that the
+ *  file is still locked, log a warning so the user knows (we can't cleanly
+ *  recover — they'll need to remove it manually). */
+function deleteWithRetry(filePath: string, label: string): void {
+  if (!filePath) return
+  // Delays in ms — about 30s total before giving up.
+  const delays = [250, 500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 5000, 5000]
+  let attempt = 0
+  const tryOnce = () => {
+    if (!fs.existsSync(filePath)) return
+    try {
+      fs.unlinkSync(filePath)
+    } catch (err: any) {
+      attempt++
+      if (attempt < delays.length) {
+        setTimeout(tryOnce, delays[attempt])
+      } else {
+        console.warn(`[converter] could not delete ${label} after ${delays.length} attempts:`, filePath, err?.message)
+      }
+    }
+  }
+  setTimeout(tryOnce, delays[0])
+}
+
 /** Resolve a preset by id from builtins or the user's imported presets store. */
 export function getPresetById(id: string): ConversionPreset | null {
   const builtin = BUILTIN_PRESETS.find(p => p.id === id)
@@ -283,7 +350,18 @@ export function getPresetById(id: string): ConversionPreset | null {
 /** Start a conversion job. Broadcasts progress/complete/error events to all renderer windows so
  * the ConversionWidget stays in sync regardless of which process triggered the job. Returns the
  * job id immediately and a `done` promise that resolves on completion (or rejects on error).
- * Used by both the `converter:addToQueue` IPC and auto-rules (fileWatcher). */
+ * Used by both the `converter:addToQueue` IPC and auto-rules (fileWatcher).
+ *
+ * Now also handles two extra modes:
+ *   - cloud-placeholder inputs: detected via Windows attribute mask; the job
+ *     enters status='downloading', triggers the OS cloud-sync hydrate, and
+ *     polls until the file is local (or the cancel flag fires) before ffmpeg
+ *     starts. Avoids long ffmpeg blocking on a syscall that can't be cleanly
+ *     cancelled.
+ *   - replaceInput: the configured outputFile is treated as a temp path next
+ *     to the input; on successful encode we unlink the input and rename the
+ *     temp into place. Used by archive jobs.
+ */
 export async function startConversionJob(
   job: ConversionJob,
   onProgress?: (pct: number) => void
@@ -299,6 +377,12 @@ export async function startConversionJob(
       if (!w.isDestroyed()) w.webContents.send(channel, data)
     }
   }
+  const setStatus = (status: ConversionJob['status']) => {
+    const cur = jobs.get(id)
+    if (!cur) return
+    jobs.set(id, { ...cur, status })
+    notifyAll('converter:jobStatus', { jobId: id, status })
+  }
   notifyAll('converter:jobProgress', { jobId: id, percent: 0 })
 
   const handleProgress = (percent: number) => {
@@ -310,19 +394,90 @@ export async function startConversionJob(
 
   const done = new Promise<void>((resolve, reject) => {
     const handleComplete = () => {
-      jobs.set(id, { ...jobs.get(id)!, status: 'done', progress: 100 })
+      const cur = jobs.get(id)!
+      // For replaceInput jobs the output is a temp file — swap it into the
+      // input's place before declaring success. If the preset's output
+      // extension differs from the input's (e.g. archiving a .mp4 with an
+      // mkv-output preset), the final file takes the new extension so the
+      // container matches the actual content.
+      if (job.replaceInput) {
+        setStatus('replacing')
+        try {
+          const inputExt = (job.inputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
+          const outputExt = (job.outputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
+          const finalPath = inputExt === outputExt
+            ? job.inputFile
+            : job.inputFile.replace(/\.[^.]+$/, outputExt)
+          fs.unlinkSync(job.inputFile)
+          fs.renameSync(job.outputFile, finalPath)
+        } catch (e: any) {
+          try { if (fs.existsSync(job.outputFile)) fs.unlinkSync(job.outputFile) } catch {}
+          handleError(new Error(`Replace failed: ${e.message}`))
+          return
+        }
+      }
+      jobs.set(id, { ...cur, status: 'done', progress: 100 })
       cancellers.delete(id)
+      pausers.delete(id)
+      resumers.delete(id)
+      downloadCancelFlags.delete(id)
       notifyAll('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
+      // Group bookkeeping — fire completion hook if this is the last successful
+      // job in the group (and no group siblings have failed/cancelled).
+      maybeFireGroupHook(id)
+      // Advance the group: start the next queued job in the same group.
+      if (job.groupId) startNextInGroup(job.groupId)
       resolve()
     }
     const handleError = (err: Error) => {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
       cancellers.delete(id)
+      pausers.delete(id)
+      resumers.delete(id)
+      downloadCancelFlags.delete(id)
       notifyAll('converter:jobError', { jobId: id, error: err.message })
+      // For replaceInput jobs, clean up the temp output that ffmpeg wrote
+      // before failing — otherwise __arc_tmp.* files accumulate.
+      if (job.replaceInput && job.outputFile) {
+        deleteWithRetry(job.outputFile, 'archive temp file (error path)')
+      }
+      // Group bookkeeping — a failure short-circuits the hook for the whole group.
+      maybeFireGroupHook(id)
+      // Group continues despite errors (preserves the prior archive behaviour
+      // of trying every file in the folder even if some fail).
+      if (job.groupId) startNextInGroup(job.groupId)
       reject(err)
     }
     ;(async () => {
       try {
+        // ── Cloud-hydrate wait ──────────────────────────────────────────────
+        // If the input is a cloud placeholder, kick the OS into hydrating it
+        // and poll until it's local. Cancel-aware — the cancel IPC flips the
+        // flag, the next poll iteration sees it and aborts.
+        const { isFileConfirmedLocal } = await import('./files')
+        if (!isFileConfirmedLocal(job.inputFile)) {
+          setStatus('downloading')
+          const flag = { cancelled: false }
+          downloadCancelFlags.set(id, flag)
+          // Cancel handler available during the download wait — the cancel IPC
+          // looks up cancellers.get(id) and calls it.
+          cancellers.set(id, () => { flag.cancelled = true })
+          fs.open(job.inputFile, 'r', (err, fd) => {
+            if (err) return
+            const buf = Buffer.alloc(1)
+            fs.read(fd, buf, 0, 1, 0, () => fs.close(fd, () => {}))
+          })
+          while (!flag.cancelled && !isFileConfirmedLocal(job.inputFile)) {
+            await new Promise(r => setTimeout(r, 2000))
+          }
+          downloadCancelFlags.delete(id)
+          if (flag.cancelled) {
+            handleError(new Error('Cancelled'))
+            return
+          }
+          setStatus('running')
+        }
+
         const { runConversion, applyGpuAcceleration, probeFile } = await import('../services/ffmpegService')
         const gpuArgs = await applyGpuAcceleration(job.preset.ffmpegArgs)
         const duration = await probeFile(job.inputFile).then(info => info.duration).catch(() => 0)
@@ -337,6 +492,56 @@ export async function startConversionJob(
   })
 
   return { id, done }
+}
+
+/** Group-completion bookkeeping. When all jobs sharing a groupId have
+ *  finished AND every one succeeded, fire the configured hook. Any failure
+ *  or cancellation short-circuits the hook for the whole group. */
+function maybeFireGroupHook(jobId: string): void {
+  const job = jobs.get(jobId)
+  if (!job?.groupId) return
+  const groupJobs = [...jobs.values()].filter(j => j.groupId === job.groupId)
+  const finalStates: ConversionJob['status'][] = ['done', 'error', 'cancelled']
+  if (groupJobs.some(j => !finalStates.includes(j.status))) return
+  // All done — but only fire if every one succeeded.
+  const allSucceeded = groupJobs.every(j => j.status === 'done')
+  if (!allSucceeded) return
+  // Find the hook on any job in the group (we copy it onto every group job at
+  // submission, so any of them works).
+  const hook = groupJobs.find(j => j.groupCompletionHook)?.groupCompletionHook
+  if (!hook) return
+  fireGroupCompletionHook(hook).catch(err =>
+    console.error('[converter] group completion hook failed:', err)
+  )
+}
+
+async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void> {
+  if (hook.type === 'archiveMarkAsArchived') {
+    // Read + write _meta.json in the streams root, marking the date entry as
+    // archived. Mirrors the inline logic the old archiveFolders used to run.
+    const { streamsDir, date } = hook
+    const metaPath = path.join(streamsDir, '_meta.json')
+    let allMeta: Record<string, any> = {}
+    try { allMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) } catch {}
+    allMeta[date] = {
+      ...(allMeta[date] ?? { date, streamType: ['games'], games: [], comments: '' }),
+      archived: true,
+    }
+    // On Windows the _meta.json is hidden (+H attribute) — unhide before write,
+    // re-hide after.
+    const isWin = process.platform === 'win32'
+    if (isWin && fs.existsSync(metaPath)) {
+      try { (await import('child_process')).spawnSync('attrib', ['-H', metaPath], { timeout: 2000 }) } catch {}
+    }
+    fs.writeFileSync(metaPath, JSON.stringify(allMeta, null, 2), 'utf-8')
+    if (isWin) {
+      try { (await import('child_process')).spawnSync('attrib', ['+H', metaPath], { timeout: 2000 }) } catch {}
+    }
+    // Tell the renderer to refresh the streams page.
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send('streams:changed')
+    }
+  }
 }
 
 export function getConverterStatus(): { active: boolean; percent: number; label: string } {
@@ -434,6 +639,19 @@ export function registerConverterIPC(): void {
     // Don't await `done` — the renderer gets completion via the broadcast 'converter:jobComplete' event.
     done.catch(() => { /* error broadcast separately */ })
     return id
+  })
+
+  // Add a batch of jobs (all sharing a groupId) and start the first one. The
+  // rest enter 'queued' state and start one-by-one as each preceding one
+  // finishes (handleComplete/handleError → startNextInGroup). Used by the
+  // archive flow so multiple files in a folder don't fight for ffmpeg / GPU
+  // resources.
+  ipcMain.handle('converter:addQueuedGroup', async (_event, jobsList: ConversionJob[]): Promise<string[]> => {
+    const ids: string[] = []
+    for (const j of jobsList) ids.push(addPendingJob(j))
+    const groupIds = new Set(jobsList.map(j => j.groupId).filter(Boolean) as string[])
+    for (const gid of groupIds) startNextInGroup(gid)
+    return ids
   })
 
   // Start a job that was previously added in the 'queued' state (e.g. from an auto-rule
@@ -669,24 +887,52 @@ export function registerConverterIPC(): void {
     if (cancel) { cancel(); cancellers.delete(jobId) }
     pausers.delete(jobId)
     resumers.delete(jobId)
+    // Flip the download-wait flag too, in case the job is mid-cloud-hydrate.
+    const dlFlag = downloadCancelFlags.get(jobId)
+    if (dlFlag) dlFlag.cancelled = true
     const j = jobs.get(jobId)
     if (j) {
       const wasQueued = j.status === 'queued'
       jobs.set(jobId, { ...j, status: 'cancelled' })
       if (wasQueued) persistPendingJobs()
       const config = getStore().get('config')
-      if (config.autoDeletePartialOnCancel && j.outputFile) {
-        const outputFile = j.outputFile
-        // SIGKILL is async — retry deletion until the process releases the handle
-        const tryDelete = (attemptsLeft: number) => {
-          try {
-            fs.unlinkSync(outputFile)
-          } catch (_) {
-            if (attemptsLeft > 1) setTimeout(() => tryDelete(attemptsLeft - 1), 500)
-          }
-        }
-        setTimeout(() => tryDelete(6), 250) // up to ~3 seconds total
+      // For replaceInput jobs the temp output is internal — clean it up
+      // unconditionally so we don't leave __arc_tmp.* files behind.
+      if (j.replaceInput && j.outputFile) {
+        deleteWithRetry(j.outputFile, 'archive temp file (cancel)')
+      } else if (config.autoDeletePartialOnCancel && j.outputFile) {
+        deleteWithRetry(j.outputFile, 'cancelled output')
       }
+      maybeFireGroupHook(jobId)
+      // Cancellation of one job in a group shouldn't stop the others; advance.
+      if (j.groupId) startNextInGroup(j.groupId)
+    }
+  })
+
+  // Cancel every job belonging to a group. Useful for the archive-batch UI's
+  // single "Cancel all" button so the user doesn't have to hit cancel N times.
+  ipcMain.handle('converter:cancelGroup', async (_event, groupId: string) => {
+    const groupJobs = [...jobs.values()].filter(j => j.groupId === groupId)
+    for (const j of groupJobs) {
+      if (j.status === 'done' || j.status === 'cancelled' || j.status === 'error') continue
+      const cancel = cancellers.get(j.id)
+      if (cancel) { cancel(); cancellers.delete(j.id) }
+      pausers.delete(j.id)
+      resumers.delete(j.id)
+      const dlFlag = downloadCancelFlags.get(j.id)
+      if (dlFlag) dlFlag.cancelled = true
+      const wasQueued = j.status === 'queued'
+      jobs.set(j.id, { ...j, status: 'cancelled' })
+      if (wasQueued) persistPendingJobs()
+      if (j.replaceInput && j.outputFile) {
+        deleteWithRetry(j.outputFile, 'archive temp file (cancel-group)')
+      }
+      const notifyAll = (channel: string, data: any) => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          if (!w.isDestroyed()) w.webContents.send(channel, data)
+        }
+      }
+      notifyAll('converter:jobStatus', { jobId: j.id, status: 'cancelled' })
     }
   })
 

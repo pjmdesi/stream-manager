@@ -84,6 +84,7 @@ declare global {
       deleteImportedPreset(id: string): Promise<void>
       renameImportedPreset(id: string, newName: string): Promise<void>
       addToQueue(job: ConversionJob): Promise<string>
+      addQueuedGroup(jobs: ConversionJob[]): Promise<string[]>
       addClipToQueue(params: {
         job: ConversionJob
         clipRegions: Array<{ id: string; inPoint: number; outPoint: number; cropX?: number; cropY?: number; cropScale?: number }>
@@ -95,6 +96,7 @@ declare global {
         bleepVolume: number
       }): Promise<string>
       cancelJob(jobId: string): Promise<void>
+      cancelJobGroup(groupId: string): Promise<void>
       pauseJob(jobId: string): Promise<void>
       resumeJob(jobId: string): Promise<void>
       startQueuedJob(jobId: string): Promise<void>
@@ -103,6 +105,7 @@ declare global {
       onJobComplete(cb: (data: { jobId: string; outputPath: string }) => void): () => void
       onJobError(cb: (data: { jobId: string; error: string }) => void): () => void
       onJobAdded(cb: (job: ConversionJob) => void): () => void
+      onJobStatus(cb: (data: { jobId: string; status: ConversionJob['status'] }) => void): () => void
 
       // ── Store ────────────────────────────────────────────────────────────────
       getConfig(): Promise<AppConfig>
@@ -130,8 +133,6 @@ declare global {
       watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
       unwatchStreamsDir(): Promise<void>
       onStreamsChanged(cb: () => void): () => void
-      archiveFolders(sessions: Array<{ folderPath: string; date: string; filePaths?: string[] }>, preset: ConversionPreset): Promise<{ errors: string[] }>
-      cancelArchive(): Promise<void>
       previewReschedule(folderPath: string, oldDate: string, newDate: string): Promise<{
         isDump: boolean
         folderConflict: boolean
@@ -144,7 +145,6 @@ declare global {
       removeStreamOrphans(streamsDir: string, folderNames: string[]): Promise<void>
       convertDumpFolder(dirPath: string): Promise<{ moved: number; skipped: number; manifest: { moves: { from: string; to: string }[]; createdFolders: string[] } }>
       undoConvertDumpFolder(manifest: { moves: { from: string; to: string }[]; createdFolders: string[] }): Promise<void>
-      onArchiveProgress(cb: (data: any) => void): () => void
 
       // ── Combine ──────────────────────────────────────────────────────────────
       combineFiles(files: string[], outputPath: string, totalDurationSec: number): Promise<void>

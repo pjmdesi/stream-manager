@@ -5,7 +5,7 @@ import { spawnSync } from 'child_process'
 import chokidar, { FSWatcher } from 'chokidar'
 import { getStore } from './store'
 import type { ConversionPreset } from './converter'
-import { checkLocalFiles } from './files'
+import { checkLocalFiles, isFileConfirmedLocal } from './files'
 import { probeFile } from '../services/ffmpegService'
 
 export type VideoCategory = 'full' | 'short' | 'clip'
@@ -44,18 +44,6 @@ export interface StreamMeta {
   preferredThumbnail?: string
   videoMap?: Record<string, VideoEntry>
   clipDrafts?: Record<string, ClipDraft>
-}
-
-export interface ArchiveProgress {
-  folderPath: string
-  folderIndex: number
-  totalFolders: number
-  fileName: string
-  fileIndex: number
-  fileCount: number
-  percent: number
-  phase: 'converting' | 'replacing' | 'done' | 'error'
-  error?: string
 }
 
 export interface DetectedStructure {
@@ -1053,129 +1041,6 @@ export function registerStreamsIPC(): void {
     }
   })
 
-
-  let archiveCancelFn: (() => void) | null = null
-
-  interface ArchiveSession {
-    /** For folder mode: the session subfolder path. For dump mode: the dump dir root. */
-    folderPath: string
-    /** The date key (YYYY-MM-DD) used for meta lookup. */
-    date: string
-    /** Explicit MKV file paths. If provided, skip folder scanning. */
-    filePaths?: string[]
-  }
-
-  ipcMain.handle('streams:archiveFolders', async (
-    event,
-    sessions: ArchiveSession[],
-    preset: ConversionPreset
-  ): Promise<{ errors: string[] }> => {
-    const errors: string[] = []
-    let cancelled = false
-    archiveCancelFn = () => { cancelled = true }
-
-    for (let fi = 0; fi < sessions.length; fi++) {
-      if (cancelled) break
-      const { folderPath, date, filePaths: explicitFiles } = sessions[fi]
-
-      let files: string[]
-      if (explicitFiles) {
-        // Dump mode: use the explicitly provided MKV paths
-        files = explicitFiles.filter(f => f.toLowerCase().endsWith('.mkv'))
-      } else {
-        try {
-          files = fs.readdirSync(folderPath)
-            .filter(f => f.toLowerCase().endsWith('.mkv'))
-            .map(f => path.join(folderPath, f))
-        } catch (e: any) {
-          errors.push(`${date}: ${e.message}`)
-          continue
-        }
-      }
-
-      let folderSuccess = true
-
-      for (let i = 0; i < files.length; i++) {
-        if (cancelled) break
-        const inputFile = files[i]
-        const fileName = path.basename(inputFile)
-        const baseName = path.basename(fileName, path.extname(fileName))
-        const ext = preset.outputExtension || 'mkv'
-        // Temp file lives next to the input file
-        const tempFile = path.join(path.dirname(inputFile), `${baseName}__arc_tmp.${ext}`)
-
-        const sendProgress = (percent: number, phase: ArchiveProgress['phase'], error?: string) => {
-          if (event.sender.isDestroyed()) return
-          event.sender.send('streams:archiveProgress', {
-            folderPath, folderIndex: fi, totalFolders: sessions.length,
-            fileName, fileIndex: i, fileCount: files.length,
-            percent, phase, error
-          } as ArchiveProgress)
-        }
-
-        const { runConversion } = await import('../services/ffmpegService')
-        const success = await new Promise<boolean>((resolve) => {
-          let cancelJob: (() => void) | null = null
-          const prevCancel = archiveCancelFn
-          archiveCancelFn = () => { cancelled = true; cancelJob?.() }
-
-          const onProgress = (pct: number) => sendProgress(pct, 'converting')
-
-          const onComplete = () => {
-            archiveCancelFn = prevCancel
-            sendProgress(100, 'replacing')
-            try {
-              fs.unlinkSync(inputFile)
-              fs.renameSync(tempFile, inputFile)
-              resolve(true)
-            } catch (e: any) {
-              try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile) } catch (_) {}
-              sendProgress(0, 'error', `Replace failed: ${e.message}`)
-              resolve(false)
-            }
-          }
-
-          const onError = (err: Error) => {
-            archiveCancelFn = prevCancel
-            try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile) } catch (_) {}
-            sendProgress(0, 'error', err.message)
-            resolve(false)
-          }
-
-          const job = runConversion(inputFile, tempFile, preset.ffmpegArgs, 0, onProgress, onComplete, onError)
-          cancelJob = job.cancel
-        })
-
-        if (!success) folderSuccess = false
-      }
-
-      if (!cancelled && folderSuccess) {
-        // Determine the streamsDir: for folder mode it's the parent; for dump mode folderPath IS the streamsDir
-        const streamsDir = explicitFiles ? folderPath : path.dirname(folderPath)
-        const allMeta = readAllMeta(streamsDir)
-        allMeta[date] = {
-          ...(allMeta[date] ?? { date, streamType: ['games'], games: [], comments: '' }),
-          archived: true
-        }
-        writeAllMeta(streamsDir, allMeta)
-      }
-
-      if (!event.sender.isDestroyed()) {
-        event.sender.send('streams:archiveProgress', {
-          folderPath, folderIndex: fi, totalFolders: sessions.length,
-          fileName: '', fileIndex: files.length, fileCount: files.length,
-          percent: 100, phase: (cancelled || !folderSuccess) ? 'error' : 'done'
-        } as ArchiveProgress)
-      }
-    }
-
-    archiveCancelFn = null
-    return { errors }
-  })
-
-  ipcMain.handle('streams:cancelArchive', async () => {
-    archiveCancelFn?.()
-  })
 
   /** Substitute the FIRST occurrence of oldDate inside a basename. Returns null
    *  if oldDate isn't present (so callers can skip files that have nothing to

@@ -14,7 +14,7 @@ function normalizeStreamTypes(v: string | string[] | undefined): string[] {
   return Array.isArray(v) ? v : [v]
 }
 
-const TOPIC_CHIP = 'bg-purple-900/40 text-purple-300 border-purple-800/40'
+const TOPIC_CHIP = 'bg-purple-900/40 text-purple-300 border-purple-300/40'
 
 // ─── Swatch picker portal ─────────────────────────────────────────────────────
 
