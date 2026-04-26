@@ -189,6 +189,7 @@ export interface DetectedStructure {
   sessionCount: number
   samples: { date: string; relativePath: string; games: string[] }[]
   groupingHints: string[]
+  isEmpty: boolean
 }
 
 export interface StreamFolder {

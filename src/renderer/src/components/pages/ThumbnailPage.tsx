@@ -22,6 +22,18 @@ import type { ThumbnailLayer, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailR
 const CANVAS_W = 1280
 const CANVAS_H = 720
 
+/** Canonical _meta.json key for a stream the thumbnail editor is editing.
+ *  In folder-per-stream mode the key is the relative path from streamsDir.
+ *  In dump mode folderPath collapses to streamsDir, so fall back to date —
+ *  the dump-mode key in `_meta.json`. */
+function streamMetaKey(folderPath: string, date: string, streamsDir: string | undefined): string {
+  const root = (streamsDir || '').replace(/\\/g, '/').replace(/\/$/, '')
+  const fp = folderPath.replace(/\\/g, '/').replace(/\/$/, '')
+  if (root && fp === root) return date
+  if (root && fp.startsWith(root + '/')) return fp.slice(root.length + 1)
+  return fp.split('/').pop() ?? fp
+}
+
 // ── Pan / zoom ────────────────────────────────────────────────────────────────
 const SNAP_ZOOM_THRESHOLD = 0.05 // 5% — snap to 100% or fit
 
@@ -1257,13 +1269,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl)
       // Merge only the thumbnail flags — prevents closure-stale `currentStream.meta` from
       // clobbering fields edited concurrently in other UI (e.g. MetaModal).
-      const root = (config.streamsDir || '').replace(/\\/g, '/').replace(/\/$/, '')
-      const fpFwd = folderPath.replace(/\\/g, '/')
-      const metaKey = root && fpFwd.startsWith(root + '/') ? fpFwd.slice(root.length + 1) : (fpFwd.split('/').pop() ?? fpFwd)
       await window.api.updateStreamMeta(folderPath, {
         smThumbnail: true,
         smThumbnailTemplate: templateId,
-      }, metaKey)
+      }, streamMetaKey(folderPath, date, config.streamsDir))
       setIsDirty(false)
     } catch (err) {
       console.error('Auto-save failed:', err)
@@ -1529,13 +1538,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.png`),
     ])
     // Clear only the thumbnail flags via merge — preserves any other fields edited concurrently.
-    const root = (config.streamsDir || '').replace(/\\/g, '/').replace(/\/$/, '')
-    const fpFwd = folderPath.replace(/\\/g, '/')
-    const metaKey = root && fpFwd.startsWith(root + '/') ? fpFwd.slice(root.length + 1) : (fpFwd.split('/').pop() ?? fpFwd)
     await window.api.updateStreamMeta(folderPath, {
       smThumbnail: undefined,
       smThumbnailTemplate: undefined,
-    } as any, metaKey).catch(() => {})
+    } as any, streamMetaKey(folderPath, date, config.streamsDir)).catch(() => {})
     // Remove from persisted recents store and sync local state
     window.api.thumbnailRemoveRecent(folderPath, date).then(setRecents).catch(() => {
       setRecents(prev => prev.filter(r => !(r.folderPath === folderPath && r.date === date)))

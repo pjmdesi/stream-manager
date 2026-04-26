@@ -209,6 +209,27 @@ function videoMapKey(folderPath: string, videoPath: string): string {
   return vp.startsWith(fp + '/') ? vp.slice(fp.length + 1) : vp.split('/').pop() ?? vp
 }
 
+/** A stream is "pending" when it hasn't aired yet:
+ *   - missing or archived → never pending
+ *   - past date           → never pending
+ *   - future date         → always pending (don't second-guess pre-staged files)
+ *   - today               → pending until a full recording (category 'full', i.e. a
+ *                           "vid"-tagged file) dated today appears in the folder.
+ *                           Clips and shorts don't auto-flip the badge — those can
+ *                           legitimately be pre-staged for the upcoming session. */
+function isPendingStream(folder: import('../../types').StreamFolder, todayStr: string): boolean {
+  if (folder.isMissing || folder.meta?.archived) return false
+  if (folder.date < todayStr) return false
+  if (folder.date > todayStr) return true
+  const map = folder.meta?.videoMap
+  return !folder.videos.some(v => {
+    const name = v.split(/[\\/]/).pop() ?? ''
+    if (!name.startsWith(folder.date)) return false
+    const key = videoMapKey(folder.folderPath, v)
+    return map?.[key]?.category === 'full'
+  })
+}
+
 function VideoCountTooltip({ videos, videoMap, folderPath, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; folderPath: string; children: React.ReactNode }) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number }>({ top: 0, left: 0 })
@@ -1882,9 +1903,10 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
 interface PresetPickerProps {
   onPick: (preset: ConversionPreset, setAsDefault: boolean) => void
   onClose: () => void
+  isDumpMode: boolean
 }
 
-function PresetPickerModal({ onPick, onClose }: PresetPickerProps) {
+function PresetPickerModal({ onPick, onClose, isDumpMode }: PresetPickerProps) {
   const [presets, setPresets] = useState<ConversionPreset[]>([])
   const [selected, setSelected] = useState<string>('')
   const [setAsDefault, setSetAsDefault] = useState(true)
@@ -1922,6 +1944,11 @@ function PresetPickerModal({ onPick, onClose }: PresetPickerProps) {
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-gray-400">No default archive preset is set. Choose which converter preset to use for compression.</p>
+        {isDumpMode && (
+          <p className="text-xs text-gray-500 italic">
+            In dump-folder mode, archived files are converted in place — they replace the originals in the same folder.
+          </p>
+        )}
         {loading ? (
           <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 size={14} className="animate-spin" /> Loading presets…</div>
         ) : presets.length === 0 ? (
@@ -1961,12 +1988,13 @@ interface FolderArchiveStatus {
 
 interface ArchiveProgressModalProps {
   statuses: FolderArchiveStatus[]
+  isDumpMode: boolean
   onCancel: () => void
   onClose: () => void
   done: boolean
 }
 
-function ArchiveProgressModal({ statuses, onCancel, onClose, done }: ArchiveProgressModalProps) {
+function ArchiveProgressModal({ statuses, onCancel, onClose, done, isDumpMode }: ArchiveProgressModalProps) {
   const total = statuses.length
   const doneCount = statuses.filter(s => s.phase === 'done').length
   const errorCount = statuses.filter(s => s.phase === 'error').length
@@ -1996,6 +2024,11 @@ function ArchiveProgressModal({ statuses, onCancel, onClose, done }: ArchiveProg
           <div className="text-sm text-gray-400">
             {doneCount} archived{errorCount > 0 ? `, ${errorCount} failed` : ''}.
           </div>
+        )}
+        {isDumpMode && (
+          <p className="text-xs text-gray-500 italic">
+            Files are converted in place — they replace the originals in the same folder.
+          </p>
         )}
         <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
           {statuses.map(s => (
@@ -2574,17 +2607,25 @@ export function StreamsPage({
   // Delete confirmation
   const [rescheduleTarget, setRescheduleTarget] = useState<StreamFolder | null>(null)
   const [rescheduleDate, setRescheduleDate] = useState('')
-  const [reschedulePreview, setReschedulePreview] = useState<{ conflictExists: boolean; filesToRename: { oldName: string; newName: string }[] } | null>(null)
+  const [reschedulePreview, setReschedulePreview] = useState<{
+    isDump: boolean
+    folderConflict: boolean
+    folderRename: { from: string; to: string } | null
+    filesToRename: { from: string; to: string; collision: boolean }[]
+    hasCollisions: boolean
+  } | null>(null)
   const [rescheduleLoading, setRescheduleLoading] = useState(false)
   const [rescheduling, setRescheduling] = useState(false)
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null)
 
   useEffect(() => {
+    setRescheduleError(null)
     if (!rescheduleTarget || !rescheduleDate || rescheduleDate === rescheduleTarget.date) {
       setReschedulePreview(null)
       return
     }
     setRescheduleLoading(true)
-    window.api.previewReschedule(rescheduleTarget.folderPath, rescheduleDate)
+    window.api.previewReschedule(rescheduleTarget.folderPath, rescheduleTarget.date, rescheduleDate)
       .then(setReschedulePreview)
       .finally(() => setRescheduleLoading(false))
   }, [rescheduleTarget, rescheduleDate])
@@ -3111,10 +3152,7 @@ export function StreamsPage({
 
   const nextUpcomingFolderPath = useMemo(() => {
     const todayStr = today()
-    const upcoming = folders.filter(f =>
-      !f.isMissing && !f.meta?.archived && f.date >= todayStr &&
-      !f.videos.some(v => (v.split(/[\\/]/).pop() ?? '').startsWith(f.date))
-    )
+    const upcoming = folders.filter(f => isPendingStream(f, todayStr))
     upcoming.sort((a, b) => a.date.localeCompare(b.date))
     return upcoming[0]?.folderPath ?? null
   }, [folders])
@@ -3475,9 +3513,7 @@ export function StreamsPage({
             ) : (
               <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                 {filteredFolders.map((folder, i) => {
-                  const todayStr = today()
-                  const pending = !folder.isMissing && folder.date >= todayStr && !folder.meta?.archived
-                    && !folder.videos.some(v => (v.split(/[\\/]/).pop() ?? '').startsWith(folder.date))
+                  const pending = isPendingStream(folder, today())
                   return (
                     <StreamCard
                       key={isDumpMode ? folder.date : folder.folderPath}
@@ -3654,9 +3690,7 @@ export function StreamsPage({
               {filteredFolders.length === 0 ? (
                 <tr><td colSpan={selectMode ? 8 : 7} className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</td></tr>
               ) : filteredFolders.map((folder, i) => {
-                const todayStr = today()
-                const pending = !folder.isMissing && folder.date >= todayStr && !folder.meta?.archived
-                  && !folder.videos.some(v => (v.split(/[\\/]/).pop() ?? '').startsWith(folder.date))
+                const pending = isPendingStream(folder, today())
 return (
                 <React.Fragment key={isDumpMode ? folder.date : folder.folderPath}>
                 <StreamRow
@@ -3735,25 +3769,38 @@ return (
       {rescheduleTarget && (
         <Modal
           isOpen
-          onClose={() => { setRescheduleTarget(null); setReschedulePreview(null) }}
+          onClose={() => { setRescheduleTarget(null); setReschedulePreview(null); setRescheduleError(null) }}
           title="Reschedule stream"
           width="sm"
           footer={
             <>
-              <Button variant="ghost" size="sm" onClick={() => { setRescheduleTarget(null); setReschedulePreview(null) }}>Cancel</Button>
+              <Button variant="ghost" size="sm" onClick={() => { setRescheduleTarget(null); setReschedulePreview(null); setRescheduleError(null) }}>Cancel</Button>
               <Button
                 variant="primary"
                 size="sm"
                 loading={rescheduling}
-                disabled={!reschedulePreview || reschedulePreview.conflictExists || rescheduleDate === rescheduleTarget.date || rescheduling}
+                disabled={!reschedulePreview || reschedulePreview.folderConflict || reschedulePreview.hasCollisions || rescheduleDate === rescheduleTarget.date || rescheduling}
                 onClick={async () => {
                   if (!rescheduleTarget || !rescheduleDate) return
                   setRescheduling(true)
+                  setRescheduleError(null)
                   try {
-                    await window.api.rescheduleStream(rescheduleTarget.folderPath, rescheduleDate)
+                    await window.api.rescheduleStream(rescheduleTarget.folderPath, rescheduleTarget.date, rescheduleDate)
                     setRescheduleTarget(null)
                     setReschedulePreview(null)
                     loadFolders(streamsDir)
+                  } catch (err: any) {
+                    const msg: string = err?.message ?? String(err)
+                    // EPERM/EBUSY on Windows almost always means a cloud-sync client
+                    // (Synology Drive, OneDrive, Dropbox) is holding the folder open
+                    // for an in-flight upload. Friendlier prompt than the raw error.
+                    if (/EPERM|EBUSY/.test(msg) && /rename/.test(msg)) {
+                      setRescheduleError(
+                        "Couldn't rename the stream folder — your cloud sync client (Synology Drive, OneDrive, Dropbox, etc.) is probably holding it open while uploading the renamed files. Wait for the sync to finish, or pause it briefly, then try again. Your files have been rolled back to their original names."
+                      )
+                    } else {
+                      setRescheduleError(msg)
+                    }
                   } finally {
                     setRescheduling(false)
                   }
@@ -3788,7 +3835,7 @@ return (
 
             {reschedulePreview && rescheduleDate !== rescheduleTarget.date && !rescheduleLoading && (
               <>
-                {reschedulePreview.conflictExists ? (
+                {reschedulePreview.folderConflict ? (
                   <p className="text-xs text-red-400 flex items-center gap-1.5">
                     <AlertTriangle size={11} className="shrink-0" />
                     A stream folder already exists for {rescheduleDate}. Choose a different date.
@@ -3799,21 +3846,41 @@ return (
                       The following will be renamed from <span className="font-mono text-gray-300">{rescheduleTarget.date}</span> to <span className="font-mono text-gray-300">{rescheduleDate}</span>:
                     </p>
                     <ul className="flex flex-col gap-0.5 max-h-48 overflow-y-auto">
-                      <li className="text-xs font-mono text-gray-400 bg-navy-900 rounded px-2 py-1">
-                        📁 {rescheduleTarget.date}/ → {rescheduleDate}/
-                      </li>
+                      {reschedulePreview.folderRename && (
+                        <li className="text-xs font-mono text-gray-400 bg-navy-900 rounded px-2 py-1">
+                          📁 {reschedulePreview.folderRename.from}/ → {reschedulePreview.folderRename.to}/
+                        </li>
+                      )}
                       {reschedulePreview.filesToRename.map(f => (
-                        <li key={f.oldName} className="text-xs font-mono text-gray-500 px-2 py-0.5">
-                          {f.oldName} → {f.newName}
+                        <li
+                          key={f.from}
+                          className={`text-xs font-mono px-2 py-0.5 ${f.collision ? 'text-red-400' : 'text-gray-500'}`}
+                          title={f.collision ? 'Skipped: a file with that name already exists.' : undefined}
+                        >
+                          {f.collision && <AlertTriangle size={10} className="inline mr-1 mb-0.5" />}
+                          {f.from} → {f.to}
                         </li>
                       ))}
                       {reschedulePreview.filesToRename.length === 0 && (
                         <li className="text-xs text-gray-600 italic px-2 py-0.5">No files to rename inside folder.</li>
                       )}
                     </ul>
+                    {reschedulePreview.hasCollisions && (
+                      <p className="text-xs text-red-400 flex items-start gap-1.5">
+                        <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                        Some target filenames already exist. Resolve those conflicts before rescheduling.
+                      </p>
+                    )}
                   </div>
                 )}
               </>
+            )}
+
+            {rescheduleError && (
+              <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 leading-relaxed">
+                <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                <span>{rescheduleError}</span>
+              </div>
             )}
           </div>
         </Modal>
@@ -4044,6 +4111,7 @@ return (
         <PresetPickerModal
           onPick={(preset, setAsDefault) => startArchive(preset, setAsDefault)}
           onClose={() => setShowPresetPicker(false)}
+          isDumpMode={isDumpMode}
         />
       )}
 
@@ -4052,6 +4120,7 @@ return (
         <ArchiveProgressModal
           statuses={archiveStatuses}
           done={archiveDone}
+          isDumpMode={isDumpMode}
           onCancel={() => window.api.cancelArchive()}
           onClose={() => {
             setArchiveStatuses(null)

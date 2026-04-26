@@ -34,11 +34,11 @@
 
 1. Download the latest release for Windows from the [Releases](https://github.com/your-repo/Stream-Manager/releases) page.
 2. Extract the ZIP file and run `StreamManager.exe` (no installation required, runs from anywhere, can be moved freely. Data is stored on your machine in a safe place).
-3. On first launch, you'll be prompted to select your main "Streams" folder where your recordings are stored. This is where the app will automatically detect and organize your stream sessions. You can change this folder later if needed.
-   - You can choose between 2 modes: **Dump mode** (all files are stored in the root of the selected folder) or **Folder-per-stream mode** (each stream session gets its own subfolder).
+3. On first launch, you'll be prompted to select your main "Streams" folder where your recordings are stored. The app **scans the folder and auto-detects your layout** — flat folder-per-stream, nested under year/month groupings, dump-folder, or empty (fresh start) — and pre-selects the right mode. You can override the detected mode if needed, and you can change the folder later from Settings.
+   - You can choose between 2 modes: **Dump mode** (all files are stored in the root of the selected folder) or **Folder-per-stream mode** (each stream session gets its own subfolder, optionally with sub-folders for clips, recordings, exports, etc.).
    - I recommend **Folder-per-stream mode** for better organization and to avoid clutter, but the app supports both.
    - If you choose **Dump mode**, the app will still be able to detect and group your recordings based on their filenames, but all files will remain in a single folder.
-   - You can choose to update an existing **dump** folder structure to match the **folder-per-stream** format during setup.
+   - You can choose to convert an existing **dump** folder structure to **folder-per-stream** format during setup, or later via the **Convert to folder-per-stream** button in Settings.
 4. (optional) Connect the app to YouTube and/or Twitch to enable direct uploading and metadata synchronization for your streams.
 
 ---
@@ -69,6 +69,7 @@ Stream Manager is built around keeping everything about your stream sessions in 
 The main hub for browsing and managing local recordings of your stream sessions. Video files, thumbnails, and other related assets in your designated folder are scanned and grouped automatically:
 
 - **Auto-detection of stream files** (video and thumbnails) from date-based naming conventions (the default OBS format).
+- **Flexible folder layouts** — flat (all stream folders directly inside the streams root), nested (grouped under year/month/etc. up to 5 levels deep), or dump-folder (single shared directory). Each stream folder can also have its own sub-org (`clips/`, `recordings/`, `exports/`, etc.) that's recursively scanned.
 - **Custom tagging and metadata** — games played, stream type, and freeform comments. Stream types support custom color and texture theming so you can visually distinguish categories at a glance. Add and style tags to work for you.
 - **Episode series tracking** — group related streams into seasons and episodes so series playthroughs are numbered correctly. Season, episode, total-episode merge fields become available in stream titles and description templates.
 - **Batch archive processing** — multi-select sessions and compress the video files inside in bulk using a conversion preset.

@@ -247,7 +247,9 @@ class FileWatcher {
     if (!match) return null
     const date = match[1]
     if (!this.streamsDir) return null
-    // Walk recursively so nested layouts (year, year/month, …) work too.
+    // Dump mode: the streams root IS the destination — no per-date folders exist.
+    if (this.streamMode === 'dump-folder') return this.streamsDir
+    // Folder-per-stream: walk recursively so nested layouts (year, year/month, …) work too.
     return findDatedFolderRecursive(this.streamsDir, date)
   }
 

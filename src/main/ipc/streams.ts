@@ -75,6 +75,9 @@ export interface DetectedStructure {
   samples: { date: string; relativePath: string; games: string[] }[]
   /** Up to 3 example grouping prefixes (e.g. '2026/03-March') so the UI can describe the structure. */
   groupingHints: string[]
+  /** True when the folder has no user content at all (ignoring _-prefixed system files).
+   *  Lets the onboarding UI treat 'starting fresh' differently from 'unrecognised contents'. */
+  isEmpty: boolean
 }
 
 export interface StreamFolder {
@@ -865,14 +868,26 @@ export function registerStreamsIPC(): void {
   })
 
   ipcMain.handle('streams:detectStructure', async (_event, dir: string): Promise<DetectedStructure> => {
-    const empty: DetectedStructure = {
+    const blank = (isEmpty = false): DetectedStructure => ({
       suggestedMode: '', layoutKind: 'unknown', nestingDepth: 0,
-      sessionCount: 0, samples: [], groupingHints: [],
-    }
-    if (!dir || !fs.existsSync(dir)) return empty
+      sessionCount: 0, samples: [], groupingHints: [], isEmpty,
+    })
+    if (!dir || !fs.existsSync(dir)) return blank()
     let isDir = false
     try { isDir = fs.statSync(dir).isDirectory() } catch {}
-    if (!isDir) return empty
+    if (!isDir) return blank()
+
+    // Treat the folder as empty when it has no user-visible content (system/hidden
+    // entries prefixed with _ or . don't count). Lets the UI auto-apply the default
+    // mode for fresh-start folders instead of bothering the user with a picker.
+    let isEmpty = true
+    try {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name.startsWith('_') || e.name.startsWith('.')) continue
+        isEmpty = false
+        break
+      }
+    } catch {}
 
     const streamFolderPaths = findStreamFolders(dir)
 
@@ -905,6 +920,7 @@ export function registerStreamsIPC(): void {
         sessionCount: streamFolderPaths.length,
         samples,
         groupingHints: [...groupingSet].sort().slice(0, 3),
+        isEmpty: false,
       }
     }
 
@@ -940,10 +956,11 @@ export function registerStreamsIPC(): void {
         sessionCount: groups.size,
         samples,
         groupingHints: [],
+        isEmpty: false,
       }
     }
 
-    return empty
+    return blank(isEmpty)
   })
 
   ipcMain.handle('streams:listTemplates', async (
@@ -1160,65 +1177,214 @@ export function registerStreamsIPC(): void {
     archiveCancelFn?.()
   })
 
+  /** Substitute the FIRST occurrence of oldDate inside a basename. Returns null
+   *  if oldDate isn't present (so callers can skip files that have nothing to
+   *  do with this stream). Defensive: filenames like '…-2026-04-01-clip-of-
+   *  2026-03-15.mp4' have only their primary date bumped. */
+  const replaceFirstDate = (name: string, oldDate: string, newDate: string): string | null => {
+    const i = name.indexOf(oldDate)
+    if (i === -1) return null
+    return name.slice(0, i) + newDate + name.slice(i + oldDate.length)
+  }
+
+  /** Walk folderPath recursively. Each returned plan is one file's rename
+   *  intent — fromAbs/toAbs absolute paths, plus their videoMap-relative keys. */
+  const collectFileRenames = (
+    folderPath: string,
+    oldDate: string,
+    newDate: string,
+  ): { fromAbs: string; toAbs: string; fromRelKey: string; toRelKey: string }[] => {
+    const out: { fromAbs: string; toAbs: string; fromRelKey: string; toRelKey: string }[] = []
+    const walk = (dir: string) => {
+      let entries: fs.Dirent[]
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+      for (const e of entries) {
+        if (e.name.startsWith('_') || e.name.startsWith('.')) continue
+        const full = path.join(dir, e.name)
+        if (e.isDirectory()) { walk(full); continue }
+        const renamed = replaceFirstDate(e.name, oldDate, newDate)
+        if (renamed === null) continue
+        const toAbs = path.join(dir, renamed)
+        out.push({
+          fromAbs: full,
+          toAbs,
+          fromRelKey: videoRelKey(folderPath, full),
+          toRelKey: videoRelKey(folderPath, toAbs),
+        })
+      }
+    }
+    walk(folderPath)
+    return out
+  }
+
   ipcMain.handle('streams:previewReschedule', async (
     _event,
     folderPath: string,
-    newDate: string
-  ): Promise<{ conflictExists: boolean; filesToRename: { oldName: string; newName: string }[] }> => {
-    const streamsDir = path.dirname(folderPath)
-    const oldFolderName = path.basename(folderPath)
-    const oldCalDate = calendarDate(oldFolderName)
-    const newFolderName = nextFolderName(streamsDir, newDate)
-    const conflictExists = fs.existsSync(path.join(streamsDir, newFolderName))
-    let filesToRename: { oldName: string; newName: string }[] = []
-    try {
-      filesToRename = fs.readdirSync(folderPath, { withFileTypes: true })
-        .filter(e => e.isFile() && e.name.startsWith(oldCalDate))
-        .map(e => ({ oldName: e.name, newName: newDate + e.name.slice(oldCalDate.length) }))
-    } catch {}
-    return { conflictExists, filesToRename }
+    oldDate: string,
+    newDate: string,
+  ): Promise<{
+    isDump: boolean
+    folderConflict: boolean
+    folderRename: { from: string; to: string } | null
+    filesToRename: { from: string; to: string; collision: boolean }[]
+    hasCollisions: boolean
+  }> => {
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const isDump = path.resolve(folderPath) === path.resolve(streamsDir)
+
+    let folderConflict = false
+    let folderRename: { from: string; to: string } | null = null
+    if (!isDump) {
+      const oldFolderName = path.basename(folderPath)
+      const parent = path.dirname(folderPath)
+      const newFolderName = nextFolderName(parent, newDate)
+      folderConflict = fs.existsSync(path.join(parent, newFolderName))
+      folderRename = { from: oldFolderName, to: newFolderName }
+    }
+
+    const fileRenames = collectFileRenames(folderPath, oldDate, newDate)
+    // A "collision" is a target path that already exists AND isn't itself one of
+    // the sources we're about to rename away (otherwise A→B + B→C wouldn't
+    // chain through the temp state).
+    const sourceSet = new Set(fileRenames.map(r => r.fromAbs.toLowerCase()))
+    const filesToRename = fileRenames
+      .filter(r => r.fromAbs !== r.toAbs)
+      .map(r => ({
+        from: path.relative(folderPath, r.fromAbs).split(path.sep).join('/'),
+        to: path.relative(folderPath, r.toAbs).split(path.sep).join('/'),
+        collision: fs.existsSync(r.toAbs) && !sourceSet.has(r.toAbs.toLowerCase()),
+      }))
+    const hasCollisions = filesToRename.some(f => f.collision)
+
+    return { isDump, folderConflict, folderRename, filesToRename, hasCollisions }
   })
 
   ipcMain.handle('streams:reschedule', async (
     _event,
     folderPath: string,
-    newDate: string
-  ): Promise<string> => {
-    const streamsDir = path.dirname(folderPath)
-    const oldFolderName = path.basename(folderPath)
-    const oldCalDate = calendarDate(oldFolderName)
-    const newFolderName = nextFolderName(streamsDir, newDate)
+    oldDate: string,
+    newDate: string,
+  ): Promise<{ newFolderPath: string; renamedCount: number; skippedCount: number }> => {
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const isDump = path.resolve(folderPath) === path.resolve(streamsDir)
 
-    // Rename files whose names start with the old calendar date
-    try {
-      for (const entry of fs.readdirSync(folderPath, { withFileTypes: true })) {
-        if (!entry.isFile() || !entry.name.startsWith(oldCalDate)) continue
-        const newName = newDate + entry.name.slice(oldCalDate.length)
-        fs.renameSync(path.join(folderPath, entry.name), path.join(folderPath, newName))
+    // ── 1. File renames ─────────────────────────────────────────────────────
+    const plans = collectFileRenames(folderPath, oldDate, newDate)
+    const sourceSet = new Set(plans.map(r => r.fromAbs.toLowerCase()))
+    const performed: typeof plans = []
+    let skipped = 0
+    for (const r of plans) {
+      if (r.fromAbs === r.toAbs) continue
+      // Skip collisions: a target that exists and isn't itself a source we'll move first.
+      if (fs.existsSync(r.toAbs) && !sourceSet.has(r.toAbs.toLowerCase())) { skipped++; continue }
+      try {
+        fs.renameSync(r.fromAbs, r.toAbs)
+        performed.push(r)
+      } catch (err) {
+        console.warn(`[reschedule] rename failed ${r.fromAbs} → ${r.toAbs}:`, err)
+        skipped++
       }
-    } catch {}
+    }
 
-    // Update meta: move the key from oldFolderName to newFolderName
+    // ── 2. Rename the stream folder (folder-per-stream only) ────────────────
+    // Done BEFORE meta update so we can roll back the file renames cleanly if
+    // the folder rename fails. Pause our own chokidar watcher first — it holds
+    // a Windows ReadDirectoryChangesW handle on every watched subdirectory,
+    // which is enough on its own to make a directory rename fail with EPERM.
+    // Cloud-sync clients (Synology Drive, OneDrive) can also briefly lock the
+    // folder, so we still retry a few times.
+    const oldKey = isDump ? oldDate : path.basename(folderPath)
+    const newKey = isDump ? newDate : nextFolderName(path.dirname(folderPath), newDate)
+    const needsFolderRename = !isDump && oldKey !== newKey
+    let finalFolderPath = folderPath
+    if (needsFolderRename) {
+      const newFolderPath = path.join(path.dirname(folderPath), newKey)
+      const restartWatcher = await pauseDirWatcher()
+      let lastErr: unknown = null
+      try {
+        // Short escalating retries cover the cloud-sync window. Total ≈ 5s.
+        for (const delayMs of [200, 500, 1000, 1500, 2000]) {
+          await new Promise(r => setTimeout(r, delayMs))
+          try {
+            fs.renameSync(folderPath, newFolderPath)
+            finalFolderPath = newFolderPath
+            lastErr = null
+            break
+          } catch (err) {
+            lastErr = err
+            // EPERM/EBUSY are the lock cases; anything else (ENOENT, EEXIST)
+            // is permanent — abort the retry loop immediately.
+            const code = (err as { code?: string }).code
+            if (code !== 'EPERM' && code !== 'EBUSY') break
+          }
+        }
+      } finally {
+        restartWatcher()
+      }
+      if (lastErr) {
+        // Roll back file renames in reverse order so chained renames unwind safely.
+        console.warn('[reschedule] folder rename failed, rolling back file renames:', lastErr)
+        for (let i = performed.length - 1; i >= 0; i--) {
+          const r = performed[i]
+          try { fs.renameSync(r.toAbs, r.fromAbs) }
+          catch (rollbackErr) { console.error(`[reschedule] rollback failed ${r.toAbs} → ${r.fromAbs}:`, rollbackErr) }
+        }
+        throw lastErr
+      }
+    }
+
+    // ── 3. Update _meta.json ────────────────────────────────────────────────
+    // Only reached if the folder rename succeeded (or wasn't needed). Safe to
+    // commit the new key here knowing the folder name on disk matches.
     const allMeta = readAllMeta(streamsDir)
-    if (allMeta[oldFolderName]) {
-      allMeta[newFolderName] = { ...allMeta[oldFolderName], date: newDate }
-      delete allMeta[oldFolderName]
+    const entry = allMeta[oldKey]
+    if (entry) {
+      const updated: StreamMeta = { ...entry, date: newDate }
+      // Re-key videoMap entries for renamed files + repoint clipOf refs.
+      if (entry.videoMap) {
+        const remap = new Map(performed.map(r => [r.fromRelKey, r.toRelKey]))
+        const basenameRemap = new Map(performed.map(r => [path.basename(r.fromAbs), path.basename(r.toAbs)]))
+        const newVideoMap: NonNullable<StreamMeta['videoMap']> = {}
+        for (const [k, v] of Object.entries(entry.videoMap)) {
+          const targetKey = remap.get(k) ?? k
+          const newClipOf = v.clipOf && basenameRemap.get(v.clipOf)
+          newVideoMap[targetKey] = newClipOf ? { ...v, clipOf: newClipOf } : { ...v }
+        }
+        updated.videoMap = newVideoMap
+      }
+      if (oldKey !== newKey) delete allMeta[oldKey]
+      allMeta[newKey] = updated
       writeAllMeta(streamsDir, allMeta)
     }
 
-    // Rename the folder last (after files inside are done)
-    const newFolderPath = path.join(streamsDir, newFolderName)
-    fs.renameSync(folderPath, newFolderPath)
-    return newFolderPath
+    if (needsFolderRename) {
+      return { newFolderPath: finalFolderPath, renamedCount: performed.length, skippedCount: skipped }
+    }
+    return { newFolderPath: folderPath, renamedCount: performed.length, skippedCount: skipped }
   })
 
   ipcMain.handle('streams:deleteFolder', async (_event, folderPath: string) => {
-    const streamsDir = path.dirname(folderPath)
-    const folderName = path.basename(folderPath)
+    // path.dirname is wrong for nested layouts (streams root may be 2+ levels up);
+    // pull the canonical streams root from config so the meta key + write target
+    // resolve correctly.
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const key = metaKey(streamsDir, folderPath)
+
+    // Pause our chokidar watcher first — its ReadDirectoryChangesW handle on
+    // this folder will make shell.trashItem fail on Windows (IFileOperation
+    // needs exclusive access, same constraint as rename).
+    const restartWatcher = await pauseDirWatcher()
+    try {
+      await shell.trashItem(folderPath)
+    } finally {
+      restartWatcher()
+    }
+
+    // Only clear meta if the trash actually succeeded — keeps state consistent
+    // if e.g. a cloud-sync lock prevented the trash and the folder is still on disk.
     const allMeta = readAllMeta(streamsDir)
-    delete allMeta[folderName]
+    delete allMeta[key]
     writeAllMeta(streamsDir, allMeta)
-    await shell.trashItem(folderPath)
   })
 
   ipcMain.handle('streams:removeOrphans', async (_event, streamsDir: string, folderNames: string[]) => {
@@ -1289,6 +1455,11 @@ export function registerStreamsIPC(): void {
 
   // ── Directory watcher ──────────────────────────────────────────────────────
   let dirWatcher: FSWatcher | null = null
+  // Captured so the watcher can be transparently restarted with the same config
+  // after operations that need exclusive folder access (e.g. reschedule renames
+  // a stream folder; chokidar holds a Windows ReadDirectoryChangesW handle on
+  // every watched subdirectory, which would block the rename).
+  let currentWatchConfig: { dir: string; mode: 'folder-per-stream' | 'dump-folder'; win: BrowserWindow } | null = null
   // Debounce rapid bursts (e.g. multiple files landing at once) into one event
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   const DEBOUNCE_MS = 800
@@ -1300,13 +1471,7 @@ export function registerStreamsIPC(): void {
     }, DEBOUNCE_MS)
   }
 
-  ipcMain.handle('streams:watchDir', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream') => {
-    if (dirWatcher) { await dirWatcher.close(); dirWatcher = null }
-    if (!dir || !fs.existsSync(dir)) return
-
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return
-
+  function startDirWatcher(dir: string, mode: 'folder-per-stream' | 'dump-folder', win: BrowserWindow) {
     dirWatcher = chokidar.watch(dir, {
       // dump: root files only. folder: deep enough to cover year/month grouping
       // above the stream folder PLUS sub-org (clips/, recordings/, …) below it.
@@ -1328,13 +1493,39 @@ export function registerStreamsIPC(): void {
     dirWatcher.on('addDir', onChange)
     dirWatcher.on('unlinkDir', onChange)
     dirWatcher.on('change', onChange)
-    // Swallow transient stat errors — e.g. EPERM when a file is being deleted
-    // (converter cancel → unlink) while chokidar's awaitWriteFinish is polling.
     dirWatcher.on('error', err => console.warn('[streams:watchDir] watcher error:', err))
+  }
+
+  /** Briefly close the directory watcher so it doesn't hold ReadDirectoryChangesW
+   *  handles on the folder we're about to mutate. Returns a function to restart
+   *  the watcher with the original config (call it from a finally block). */
+  pauseDirWatcher = async (): Promise<() => void> => {
+    if (!dirWatcher || !currentWatchConfig) return () => {}
+    const config = currentWatchConfig
+    await dirWatcher.close()
+    dirWatcher = null
+    return () => { startDirWatcher(config.dir, config.mode, config.win) }
+  }
+
+  ipcMain.handle('streams:watchDir', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream') => {
+    if (dirWatcher) { await dirWatcher.close(); dirWatcher = null }
+    if (!dir || !fs.existsSync(dir)) { currentWatchConfig = null; return }
+
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+
+    currentWatchConfig = { dir, mode, win }
+    startDirWatcher(dir, mode, win)
   })
 
   ipcMain.handle('streams:unwatchDir', async () => {
     if (dirWatcher) { await dirWatcher.close(); dirWatcher = null }
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null }
+    currentWatchConfig = null
   })
 }
+
+// Set inside registerStreamsIPC so the reschedule handler can pause its own
+// chokidar watcher around the folder rename. Module-scoped so the assignment
+// inside the closure is visible to other handlers in the same module.
+let pauseDirWatcher: () => Promise<() => void> = async () => () => {}

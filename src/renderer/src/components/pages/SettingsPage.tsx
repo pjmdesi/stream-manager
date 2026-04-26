@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, Youtube, Twitch, AlertCircle, Plus, Bot } from 'lucide-react'
+import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, Youtube, Twitch, AlertCircle, Plus, Bot, FolderTree, CheckCircle } from 'lucide-react'
 import { useStore } from '../../hooks/useStore'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Input } from '../ui/Input'
+import { Modal } from '../ui/Modal'
+import { DumpConvertExplainer } from '../DumpConvertExplainer'
 import type { ConversionPreset, ThumbnailTemplate } from '../../types'
 
 function formatBytes(bytes: number): string {
@@ -62,6 +64,13 @@ export function SettingsPage() {
   const [clearingCache, setClearingCache] = useState(false)
   const [ytStatus, setYtStatus] = useState<{ connected: boolean; valid: boolean } | null>(null)
   const [twStatus, setTwStatus] = useState<{ connected: boolean } | null>(null)
+  // Convert dump → folder-per-stream modal state
+  const [convertModalOpen, setConvertModalOpen] = useState(false)
+  type ConvertManifest = { moves: { from: string; to: string }[]; createdFolders: string[] }
+  type ConvertResult = { moved: number; skipped: number; manifest: ConvertManifest }
+  const [convertStatus, setConvertStatus] = useState<'idle' | 'converting' | 'done' | 'undoing' | 'undone'>('idle')
+  const [convertResult, setConvertResult] = useState<ConvertResult | null>(null)
+  const [convertError, setConvertError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!loading) setLocal(config)
@@ -194,6 +203,24 @@ export function SettingsPage() {
             onChange={v => set('streamsDir', v)}
             hint="Root folder containing your YYYY-MM-DD stream session folders"
           />
+          {local.streamMode === 'dump-folder' && local.streamsDir && (
+            <div className="flex items-center gap-3 -mt-2 pl-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<FolderTree size={14} />}
+                onClick={() => {
+                  setConvertStatus('idle')
+                  setConvertResult(null)
+                  setConvertError(null)
+                  setConvertModalOpen(true)
+                }}
+              >
+                Convert to folder-per-stream
+              </Button>
+              <span className="text-xs text-gray-500">Currently using dump-folder mode.</span>
+            </div>
+          )}
           <DirInput
             label="Default Watch Directory"
             value={local.defaultWatchDir}
@@ -503,6 +530,91 @@ export function SettingsPage() {
       </div>
       </div>
       </div>
+
+      {/* Convert dump → folder-per-stream */}
+      {convertModalOpen && (
+        <Modal
+          isOpen
+          onClose={() => setConvertModalOpen(false)}
+          title="Convert to folder-per-stream"
+          width="2xl"
+          footer={
+            <div className="flex items-center justify-end gap-2 w-full">
+              <Button variant="ghost" onClick={() => setConvertModalOpen(false)}>
+                {convertStatus === 'done' ? 'Close' : 'Cancel'}
+              </Button>
+              {convertStatus === 'done' ? (
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    if (!convertResult) return
+                    setConvertStatus('undoing')
+                    setConvertError(null)
+                    try {
+                      await window.api.undoConvertDumpFolder(convertResult.manifest)
+                      await window.api.setConfig({ streamMode: 'dump-folder' })
+                      setConvertResult(null)
+                      setConvertStatus('undone')
+                    } catch (err: any) {
+                      setConvertError(err?.message ?? String(err))
+                      setConvertStatus('done')
+                    }
+                  }}
+                >
+                  Undo conversion
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={async () => {
+                    if (!local.streamsDir) return
+                    setConvertStatus('converting')
+                    setConvertError(null)
+                    try {
+                      const res = await window.api.convertDumpFolder(local.streamsDir)
+                      setConvertResult(res)
+                      await window.api.setConfig({ streamMode: 'folder-per-stream' })
+                      setConvertStatus('done')
+                    } catch (err: any) {
+                      setConvertError(err?.message ?? String(err))
+                      setConvertStatus('idle')
+                    }
+                  }}
+                  disabled={convertStatus === 'converting' || convertStatus === 'undoing'}
+                >
+                  {convertStatus === 'converting' ? 'Converting…' : convertStatus === 'undoing' ? 'Undoing…' : 'Update structure'}
+                </Button>
+              )}
+            </div>
+          }
+        >
+          <DumpConvertExplainer />
+
+          {convertStatus === 'done' && convertResult && (
+            <div className="mt-5 flex items-start gap-2 text-sm text-green-400 bg-green-400/10 border border-green-400/20 rounded-lg px-4 py-3">
+              <CheckCircle size={16} className="shrink-0 mt-0.5" />
+              <span>
+                Done — {convertResult.manifest.createdFolders.length} folder{convertResult.manifest.createdFolders.length !== 1 ? 's' : ''} created, {convertResult.moved} file{convertResult.moved !== 1 ? 's' : ''} organized.
+                {convertResult.skipped > 0 && ` ${convertResult.skipped} file${convertResult.skipped !== 1 ? 's' : ''} with no date in the filename were left in place.`}
+              </span>
+            </div>
+          )}
+
+          {convertStatus === 'undone' && (
+            <div className="mt-5 flex items-start gap-2 text-sm text-gray-400 bg-white/5 border border-white/10 rounded-lg px-4 py-3">
+              <CheckCircle size={16} className="shrink-0 mt-0.5" />
+              <span>Undone — files have been moved back to their original locations.</span>
+            </div>
+          )}
+
+          {convertError && (
+            <div className="mt-5 flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span>{convertError}</span>
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   )
 }

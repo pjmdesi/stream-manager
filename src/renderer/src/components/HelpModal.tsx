@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Youtube, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2 } from 'lucide-react'
 import { Modal } from './ui/Modal'
+import { useStore } from '../hooks/useStore'
 
 function ElementSection({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
@@ -27,7 +28,8 @@ interface HelpItem {
   body: React.ReactNode
 }
 
-const ITEMS: HelpItem[] = [
+function getItems(isDumpMode: boolean): HelpItem[] {
+  return [
   {
     id: 'streams',
     label: 'Streams',
@@ -37,7 +39,7 @@ const ITEMS: HelpItem[] = [
         <p>The Streams page is the home view — every stream session you've recorded shows up as a row or card. Each stream item is made up of the following elements:</p>
 
         <ElementSection icon={<ImageIcon size={14} />} title="Thumbnail">
-          <p>Stream Manager automatically detects images related to the stream and picks the best one to represent it (typically the first available). Click the thumbnail to view all images in the stream folder and select a different one. The same selection can be made while editing an item's metadata.</p>
+          <p>Stream Manager automatically detects images related to the stream and picks the best one to represent it (typically the first available). Click the thumbnail to view all images {isDumpMode ? 'matching this date in the dump folder' : 'in the stream folder'} and select a different one. The same selection can be made while editing an item's metadata.</p>
         </ElementSection>
 
         <ElementSection icon={<Film size={14} />} title="Video Counter">
@@ -159,23 +161,27 @@ const ITEMS: HelpItem[] = [
     icon: <Shuffle size={16} />,
     body: (
       <>
-        <p>Auto-Rules watch a folder and automatically move, copy, rename, or convert new files matching a glob pattern. Common setup: watch your OBS recordings folder and route files into the matching dated stream folder.</p>
+        <p>Auto-Rules watch a folder and automatically move, copy, rename, or convert new files matching a glob pattern. Common setup: watch your OBS recordings folder and route files {isDumpMode ? 'into your dump folder' : 'into the matching dated stream folder'}.</p>
         <p>Rules can also queue up conversions automatically (e.g. archive every new recording with an AV1 preset).</p>
       </>
     ),
   },
-]
+  ]
+}
 
 export function HelpModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [active, setActive] = useState<HelpKey>('streams')
-  const item = ITEMS.find(i => i.id === active) ?? ITEMS[0]
+  const { config } = useStore()
+  const isDumpMode = config.streamMode === 'dump-folder'
+  const items = getItems(isDumpMode)
+  const item = items.find(i => i.id === active) ?? items[0]
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="How to use Stream Manager" width="2xl">
       <div className="flex gap-4 items-stretch h-[65vh]">
         {/* Sidebar nav */}
         <nav className="w-44 shrink-0 flex flex-col gap-0.5 border-r border-white/5 pr-2 overflow-y-auto">
-          {ITEMS.map(i => {
+          {items.map(i => {
             const isActive = i.id === active
             return (
               <button

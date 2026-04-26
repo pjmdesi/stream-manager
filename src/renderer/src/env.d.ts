@@ -132,8 +132,14 @@ declare global {
       onStreamsChanged(cb: () => void): () => void
       archiveFolders(sessions: Array<{ folderPath: string; date: string; filePaths?: string[] }>, preset: ConversionPreset): Promise<{ errors: string[] }>
       cancelArchive(): Promise<void>
-      previewReschedule(folderPath: string, newDate: string): Promise<{ conflictExists: boolean; filesToRename: { oldName: string; newName: string }[] }>
-      rescheduleStream(folderPath: string, newDate: string): Promise<string>
+      previewReschedule(folderPath: string, oldDate: string, newDate: string): Promise<{
+        isDump: boolean
+        folderConflict: boolean
+        folderRename: { from: string; to: string } | null
+        filesToRename: { from: string; to: string; collision: boolean }[]
+        hasCollisions: boolean
+      }>
+      rescheduleStream(folderPath: string, oldDate: string, newDate: string): Promise<{ newFolderPath: string; renamedCount: number; skippedCount: number }>
       deleteStreamFolder(folderPath: string): Promise<void>
       removeStreamOrphans(streamsDir: string, folderNames: string[]): Promise<void>
       convertDumpFolder(dirPath: string): Promise<{ moved: number; skipped: number; manifest: { moves: { from: string; to: string }[]; createdFolders: string[] } }>

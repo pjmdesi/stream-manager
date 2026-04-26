@@ -266,11 +266,11 @@ contextBridge.exposeInMainWorld('api', {
   cancelArchive: () =>
     ipcRenderer.invoke('streams:cancelArchive'),
 
-  previewReschedule: (folderPath: string, newDate: string) =>
-    ipcRenderer.invoke('streams:previewReschedule', folderPath, newDate),
+  previewReschedule: (folderPath: string, oldDate: string, newDate: string) =>
+    ipcRenderer.invoke('streams:previewReschedule', folderPath, oldDate, newDate),
 
-  rescheduleStream: (folderPath: string, newDate: string) =>
-    ipcRenderer.invoke('streams:reschedule', folderPath, newDate),
+  rescheduleStream: (folderPath: string, oldDate: string, newDate: string) =>
+    ipcRenderer.invoke('streams:reschedule', folderPath, oldDate, newDate),
 
   deleteStreamFolder: (folderPath: string) =>
     ipcRenderer.invoke('streams:deleteFolder', folderPath),

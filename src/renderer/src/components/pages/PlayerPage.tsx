@@ -22,6 +22,8 @@ function resolveStreamContext(filePath: string, streamsRoot: string | undefined)
   dir: string         // stream folder path (or file's parent in dump mode)
   metaKey: string     // canonical _meta.json key
   streamsDir: string  // normalized streams root
+  isDump: boolean     // true when dir is the streams root (no date-named ancestor)
+  date: string | null // date in dump mode, used to scope sibling listing
 } {
   const DATE_FOLDER_RE = /^\d{4}-\d{2}-\d{2}(-\d+)?$/
   const streamsDir = (streamsRoot || '').replace(/[\\/]+$/, '')
@@ -38,7 +40,13 @@ function resolveStreamContext(filePath: string, streamsRoot: string | undefined)
   }
   const ancestorName = dirNorm.slice(dirNorm.lastIndexOf('/') + 1)
   if (DATE_FOLDER_RE.test(ancestorName) && rootNorm && dirNorm.startsWith(rootNorm + '/')) {
-    return { dir: dirNorm.replace(/\//g, '\\'), metaKey: dirNorm.slice(rootNorm.length + 1), streamsDir }
+    return {
+      dir: dirNorm.replace(/\//g, '\\'),
+      metaKey: dirNorm.slice(rootNorm.length + 1),
+      streamsDir,
+      isDump: false,
+      date: null,
+    }
   }
   // Dump mode (or no date-named ancestor) — derive the key from the filename.
   const fileName = fpNorm.slice(fpNorm.lastIndexOf('/') + 1)
@@ -46,7 +54,13 @@ function resolveStreamContext(filePath: string, streamsRoot: string | undefined)
   const dateKey = m ? m[1] : fileName.split('.')[0]
   // dir for dump mode = the file's actual parent (the dump dir itself).
   const parentDir = filePath.slice(0, Math.max(filePath.lastIndexOf('\\'), filePath.lastIndexOf('/')))
-  return { dir: parentDir, metaKey: dateKey, streamsDir }
+  return {
+    dir: parentDir,
+    metaKey: dateKey,
+    streamsDir,
+    isDump: true,
+    date: m ? m[1] : null,
+  }
 }
 
 function formatTime(seconds: number, fps?: number): string {
@@ -911,14 +925,16 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     if (!fp) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; return }
     // Find the stream folder (date-named ancestor or, in dump mode, derive
     // from filename) and compute the canonical _meta.json key for it.
-    const { dir, metaKey, streamsDir } = resolveStreamContext(fp, config.streamsDir)
+    const { dir, metaKey, streamsDir, isDump, date } = resolveStreamContext(fp, config.streamsDir)
     const currentName = fp.replace(/.*[\\/]/, '')
     setFolderPath(dir)
     folderMetaKeyRef.current = metaKey
     try {
       // Recursive listing: pull files from sub-folders (clips/, recordings/,
       // exports/, …) so the flat Session Videos panel includes all session
-      // content regardless of the user's sub-org layout.
+      // content regardless of the user's sub-org layout. In dump mode the dir
+      // IS the dump root, so we'd otherwise pull every dated file from every
+      // session — filter by the current file's date below.
       const [files, meta] = await Promise.all([
         window.api.listFilesRecursive(dir),
         window.api.readFile(`${streamsDir}/_meta.json`).then(raw => JSON.parse(raw)).catch(() => null),
@@ -929,6 +945,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       setFolderDrafts(Object.values(drafts))
       const videoFiles = files
         .filter(f => !f.isDirectory && SESSION_VIDEO_EXTS.has(f.extension.toLowerCase()))
+        .filter(f => !isDump || !date || f.name.includes(date))
         .sort((a, b) => a.name.localeCompare(b.name))
       // videoMap keys are forward-slash paths relative to the stream folder.
       // For top-level files this equals the basename; for nested files (e.g.

@@ -1,9 +1,10 @@
-import React, { useState } from 'react'
-import { FolderOpen, CheckCircle, MoveRight, HelpCircle, Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, AlertTriangle } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { FolderOpen, CheckCircle, MoveRight, HelpCircle, AlertTriangle, Info } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import { Tooltip } from './ui/Tooltip'
+import { DumpConvertExplainer } from './DumpConvertExplainer'
 import type { StreamMode, WatchRule, DetectedStructure } from '../types'
 import imgFolderPerStream from '../assets/onboarding/per-stream-folders.png'
 import imgDumpFolder from '../assets/onboarding/stream-dump-folder.png'
@@ -64,10 +65,12 @@ interface StepSetupProps {
   onModeChange: (mode: StreamMode) => void
 }
 
-function describeDetection(d: DetectedStructure): { icon: 'ok' | 'warn'; headline: string; detail: string } {
+type DetectionTone = 'ok' | 'info' | 'warn'
+
+function describeDetection(d: DetectedStructure): { tone: DetectionTone; headline: string; detail: string } {
   if (d.layoutKind === 'flat') {
     return {
-      icon: 'ok',
+      tone: 'ok',
       headline: `${d.sessionCount} stream${d.sessionCount === 1 ? '' : 's'} detected — folder per stream (flat)`,
       detail: 'Each stream is its own date-named folder directly inside the chosen directory.',
     }
@@ -76,33 +79,42 @@ function describeDetection(d: DetectedStructure): { icon: 'ok' | 'warn'; headlin
     const sample = d.groupingHints[0]
     const example = sample ? ` (e.g. ${sample}/)` : ''
     return {
-      icon: 'ok',
+      tone: 'info',
       headline: `${d.sessionCount} stream${d.sessionCount === 1 ? '' : 's'} detected — folder per stream (nested ${d.nestingDepth} level${d.nestingDepth === 1 ? '' : 's'} deep)`,
       detail: `Stream folders are grouped under intermediate directories${example}.`,
     }
   }
   if (d.layoutKind === 'dump') {
     return {
-      icon: 'ok',
+      tone: 'info',
       headline: `${d.sessionCount} stream${d.sessionCount === 1 ? '' : 's'} detected — dump folder`,
       detail: 'Files for multiple streams share a single folder, distinguished by the date in the filename.',
     }
   }
+  if (d.isEmpty) {
+    return {
+      tone: 'ok',
+      headline: 'Empty folder — setting you up with the default layout',
+      detail: 'Stream Manager will create one date-named folder per stream here, exactly the way the app is designed to work.',
+    }
+  }
   return {
-    icon: 'warn',
+    tone: 'warn',
     headline: 'Nothing recognisable in this folder',
-    detail: 'Stream Manager looks for date-named folders (YYYY-MM-DD) or files whose names include a date. Pick a folder that contains your streams or recordings, then choose the mode that fits below.',
+    detail: 'Stream Manager looks for date-named folders (YYYY-MM-DD) or files whose names include a date. This is usually a sign that the wrong folder was selected — try picking the folder where your streams actually live. If you have an unusual layout, you can choose a mode manually below.',
   }
 }
 
 function DetectionBanner({ detection }: { detection: DetectedStructure }) {
-  const { icon, headline, detail } = describeDetection(detection)
-  const colorClasses = icon === 'ok'
-    ? 'border-emerald-400/20 bg-emerald-400/5 text-emerald-200'
-    : 'border-yellow-500/20 bg-yellow-500/5 text-yellow-200'
+  const { tone, headline, detail } = describeDetection(detection)
+  const colorClasses =
+    tone === 'ok'   ? 'border-emerald-400/20 bg-emerald-400/5 text-emerald-200' :
+    tone === 'warn' ? 'border-yellow-500/20 bg-yellow-500/5 text-yellow-200' :
+                      'border-white/10 bg-white/5 text-gray-200'
+  const Icon = tone === 'ok' ? CheckCircle : tone === 'warn' ? AlertTriangle : Info
   return (
     <div className={`flex items-start gap-2.5 rounded-lg border px-4 py-3 ${colorClasses}`}>
-      {icon === 'ok' ? <CheckCircle size={16} className="shrink-0 mt-0.5" /> : <AlertTriangle size={16} className="shrink-0 mt-0.5" />}
+      <Icon size={16} className="shrink-0 mt-0.5" />
       <div className="flex flex-col gap-1">
         <p className="text-sm font-semibold">{headline}</p>
         <p className="text-xs text-gray-400 leading-relaxed">{detail}</p>
@@ -134,7 +146,19 @@ function SamplesList({ samples, total }: { samples: DetectedStructure['samples']
 }
 
 function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, onModeChange }: StepSetupProps) {
+  const [overrideOpen, setOverrideOpen] = useState(false)
+  // Reset the override toggle whenever the user picks a different folder.
+  useEffect(() => { setOverrideOpen(false) }, [streamsDir])
+
   const suggested = detection?.suggestedMode || ''
+  const detected = !!detection && detection.layoutKind !== 'unknown'
+  // Cards appear when:
+  //  - detection failed AND the folder isn't empty (genuine ambiguity — show fallback)
+  //  - the user explicitly opened the override
+  const showCards = !!detection && (
+    overrideOpen || (detection.layoutKind === 'unknown' && !detection.isEmpty)
+  )
+
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-gray-400 leading-relaxed">
@@ -161,6 +185,17 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
         <>
           <DetectionBanner detection={detection} />
 
+          {detection.layoutKind === 'nested' && (
+            <p className="rounded-lg border border-purple-400/30 bg-purple-500/10 px-4 py-3 text-sm text-purple-100 leading-relaxed">
+              New streams created in the app will land as flat <span className="font-mono text-white">YYYY-MM-DD</span> folders at the root of your streams directory, regardless of how existing streams are grouped.
+            </p>
+          )}
+          {detection.layoutKind === 'dump' && (
+            <p className="rounded-lg border border-purple-400/30 bg-purple-500/10 px-4 py-3 text-sm text-purple-100 leading-relaxed">
+              Some features are reduced in dump-folder mode. The next step can convert your dump folder into folder-per-stream for the full experience.
+            </p>
+          )}
+
           {detection.samples.length > 0 && (
             <div className="flex flex-col gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Sample sessions</h3>
@@ -168,29 +203,43 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
             </div>
           )}
 
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              {detection.layoutKind === 'unknown' ? 'Pick a mode' : 'Confirm or change the mode'}
-            </h3>
-            <div className="flex gap-4">
-              <ModeCard
-                selected={selectedMode === 'folder-per-stream'}
-                suggested={suggested === 'folder-per-stream'}
-                onSelect={() => onModeChange('folder-per-stream')}
-                title="Folder per stream"
-                flavor="Each stream and related items go into a folder specific to that stream"
-                image={imgFolderPerStream}
-              />
-              <ModeCard
-                selected={selectedMode === 'dump-folder'}
-                suggested={suggested === 'dump-folder'}
-                onSelect={() => onModeChange('dump-folder')}
-                title="Dump folder"
-                flavor="All streams and related items are all together in a single folder"
-                image={imgDumpFolder}
-              />
+          {/* Quiet escape hatch when detection succeeded — keep the default UX clean,
+              but let power users / mis-detections override the mode. */}
+          {detected && !overrideOpen && (
+            <button
+              type="button"
+              onClick={() => setOverrideOpen(true)}
+              className="self-start text-xs text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
+            >
+              Not what you expected? Choose mode manually
+            </button>
+          )}
+
+          {showCards && (
+            <div className="flex flex-col gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                {detected ? 'Override the detected mode' : 'Pick a mode'}
+              </h3>
+              <div className="flex gap-4">
+                <ModeCard
+                  selected={selectedMode === 'folder-per-stream'}
+                  suggested={suggested === 'folder-per-stream'}
+                  onSelect={() => onModeChange('folder-per-stream')}
+                  title="Folder per stream"
+                  flavor="Each stream and related items go into a folder specific to that stream"
+                  image={imgFolderPerStream}
+                />
+                <ModeCard
+                  selected={selectedMode === 'dump-folder'}
+                  suggested={suggested === 'dump-folder'}
+                  onSelect={() => onModeChange('dump-folder')}
+                  title="Dump folder"
+                  flavor="All streams and related items are all together in a single folder"
+                  image={imgDumpFolder}
+                />
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
     </div>
@@ -198,18 +247,6 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
 }
 
 // ── Step 2: Convert dump folder (only shown when mode is 'dump-folder') ───────
-
-function FeatureCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-navy-800/60 border border-white/5">
-      <div className="flex items-center gap-1.5 text-gray-200">
-        <span className="text-purple-400">{icon}</span>
-        <span className="text-xs font-semibold">{title}</span>
-      </div>
-      <p className="text-[11px] text-gray-500 leading-relaxed">{children}</p>
-    </div>
-  )
-}
 
 type ConvertStatus = 'idle' | 'converting' | 'done' | 'undoing' | 'undone'
 interface ConvertManifest { moves: { from: string; to: string }[]; createdFolders: string[] }
@@ -247,64 +284,17 @@ function StepConvert({ dir, result, onResult, onConverted }: StepConvertProps) {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2">
-        <p className="text-sm text-gray-400 leading-relaxed">
-          You picked a dump folder. It's recommended (but not required) that you convert it to the folder-per-stream structure.
-          It prevents certain ambiguity issues and helps organize related files. If you would like, this app can handle this for you —
-          click "Update structure" below. The app will detect each stream session and related assets based on the filename of your stream recording files.
-        </p>
-        <p className="text-xs text-gray-500 italic leading-relaxed">
-          Your recording files must include the full date in the filename with format YYYY-MM-DD (this is the default naming convention for OBS).
-          This process will not touch any subfolders in your selected directory.
-        </p>
-      </div>
+      <DumpConvertExplainer />
 
-      <p className="text-sm text-gray-400">
-        If not, simply move on to the next step!
-      </p>
-
-      <div className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">What this enables</h3>
-        <div className="grid grid-cols-2 gap-2">
-          <FeatureCard icon={<Radio size={14} />} title="Streams">
-            Each stream gets its own row/card with a thumbnail, comments, episode tracking, and per-session metadata.
-            Clips, drafts, and exports stay grouped with their source recording.
-          </FeatureCard>
-          <FeatureCard icon={<Film size={14} />} title="Player & Clipping">
-            Open a stream and the player loads every related video as a session, including clip drafts.
-            Bleeps, crop regions, and clip exports live next to the original file.
-          </FeatureCard>
-          <FeatureCard icon={<ImageIcon size={14} />} title="Thumbnail Editor">
-            Built-in templates render a thumbnail saved alongside the stream so it picks up automatically wherever the stream appears.
-          </FeatureCard>
-          <FeatureCard icon={<Shuffle size={14} />} title="Auto-Rules">
-            Watch your recordings folder and automatically move new files into the matching dated stream folder — no manual sorting.
-          </FeatureCard>
-          <FeatureCard icon={<Zap size={14} />} title="Converter">
-            Convert and archive a whole stream's worth of files in one batch.
-            Outputs land back in the same folder with a clear naming convention.
-          </FeatureCard>
-          <FeatureCard icon={<Combine size={14} />} title="Combine">
-            Merge multi-part recordings (mid-stream OBS splits, separate audio tracks) into a single file with the original timeline preserved.
-          </FeatureCard>
-          <FeatureCard icon={<Rocket size={14} />} title="Launcher">
-            Save app/window groups (OBS, Discord, browser, capture cards) and open them all in one click before you go live.
-          </FeatureCard>
-          <FeatureCard icon={<Plug size={14} />} title="Integrations">
-            Pull YouTube broadcast data and Twitch metadata directly onto each stream — titles, descriptions, tags, thumbnails — and push updates back when you publish.
-          </FeatureCard>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2">
+      <div className="flex justify-center">
         {status === 'done' ? (
-          <Button variant="secondary" size="sm" onClick={undo}>
+          <Button variant="secondary" size="lg" onClick={undo}>
             Undo structure update
           </Button>
         ) : (
           <Button
             variant="primary"
-            size="sm"
+            size="lg"
             onClick={convert}
             disabled={!dir || status === 'converting' || status === 'undoing'}
           >
@@ -352,10 +342,7 @@ function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChang
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-gray-400 leading-relaxed">
-        Many streamers save recordings to a separate folder — often kept off a cloud or NAS drive to avoid sync conflicts — and then move them into their organized streams folder afterward. Stream Manager can automate this for you with an <span className="font-semibold text-gray-200">Auto-rule</span>.
-      </p>
-      <p className="text-sm text-gray-400 leading-relaxed">
-        If this matches your workflow, enter the folder where your streaming software saves recordings. The rule will automatically move new files into your streams folder. You can adjust or disable this at any time from the <span className="font-semibold text-gray-200">Auto-rules</span> page.
+        If your streaming software saves recordings to a separate folder, Stream Manager can auto-move new files into your streams folder. Skip this step if it doesn't match your workflow — rules can be added or changed later on the <span className="font-semibold text-gray-200">Auto-rules</span> page.
       </p>
 
       <div className="flex flex-col gap-4">
@@ -501,9 +488,12 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
     try {
       const result = await window.api.detectStreamStructure(picked)
       setDetection(result)
+      // Detected layout wins. Empty folders auto-apply the canonical default
+      // (folder-per-stream) so the user can just hit Next without picking a mode.
       if (result.suggestedMode) setSelectedMode(result.suggestedMode)
+      else if (result.isEmpty) setSelectedMode('folder-per-stream')
     } catch {
-      setDetection({ suggestedMode: '', layoutKind: 'unknown', nestingDepth: 0, sessionCount: 0, samples: [], groupingHints: [] })
+      setDetection({ suggestedMode: '', layoutKind: 'unknown', nestingDepth: 0, sessionCount: 0, samples: [], groupingHints: [], isEmpty: false })
     } finally {
       setScanning(false)
     }
