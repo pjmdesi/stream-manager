@@ -72,7 +72,7 @@ The main hub for browsing and managing local recordings of your stream sessions.
 - **Flexible folder layouts** — flat (all stream folders directly inside the streams root), nested (grouped under year/month/etc. up to 5 levels deep), or dump-folder (single shared directory). Each stream folder can also have its own sub-org (`clips/`, `recordings/`, `exports/`, etc.) that's recursively scanned.
 - **Custom tagging and metadata** — games played, stream type, and freeform comments. Stream types support custom color and texture theming so you can visually distinguish categories at a glance. Add and style tags to work for you.
 - **Episode series tracking** — group related streams into seasons and episodes so series playthroughs are numbered correctly. Season, episode, total-episode merge fields become available in stream titles and description templates.
-- **Batch archive processing** — multi-select sessions and compress the video files inside in bulk using a conversion preset.
+- **Batch archive processing** — multi-select sessions and queue them in the Converter page as a serial batch.
 - **Cloud-sync aware** — offline files (Synology Drive, OneDrive, DropBox, Google Drive, etc.) are detected and certain features are adapted to prevent unwanted bulk downloads.
 - **Reusable templates** for titles, descriptions, and tags with merge fields including `{game}`, `{season}`, `{episode}`, `{total_episodes}`, and `{title}`. Save new templates quickly from any stream's metadata editor.
 
@@ -116,7 +116,7 @@ A built-in canvas editor for designing stream and clip thumbnails without leavin
 Queue video files for conversion using ffmpeg presets.
 
 - **Conversion presets** — Presets I've personally found useful are included out of the box. New presets can be imported from other apps such as HandBrake (JSON format) or created manually if you're adventurous.
-- **Auto-archiving** — optionally send stream sessions to the converter with a selected "Archive" preset directly from the Streams page. This is a great way to quickly compress and organize stream recordings without having to manually add them to the converter.
+- **Batch archiving** — send stream sessions to the converter directly from the Streams page.
 - **Remuxing support** — Like the OBS "Remux Recordings" feature, the app can quickly change a video's container format (e.g. from MKV to MP4) without re-encoding, as long as the video and audio codecs are compatible. This is great for making your recordings more widely compatible without losing quality or spending time on a full conversion or having to open OBS.
 - **Combine tool** — concatenate multiple video files into one with zero re-encoding using ffmpeg's concat demuxer. Files are auto-sorted by timestamp parsed from OBS-style filenames and can be manually reordered by drag-and-drop. Optionally deletes source files after a successful combine. This is useful for streamers who have their recordings split into multiple files due to file size limits or accidental stops/starts, and want to easily merge them back together without losing quality or having to open a full video editor.
 - **Persistent queue** — auto-rule jobs queued without "Start immediately" survive app restarts and reappear in the converter on next launch.
