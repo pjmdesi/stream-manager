@@ -94,9 +94,22 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
   )
   const [reloadKey, setReloadKey] = useState(0)
 
+  // Reset whenever the file identity (path / cache-key / local-ness) changes —
+  // a different file means the loaded image is stale.
   useEffect(() => {
     setStatus(isLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud'))
-  }, [path, thumbsKey, isLocal, hydrate])
+    // hydrate intentionally NOT in deps: it flips for every carousel slot when
+    // the active item changes, and resetting a local file to 'loading' would
+    // re-show the placeholder over a cached <img> whose onLoad never re-fires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, thumbsKey, isLocal])
+
+  // Hydrate transitions (cloud → syncing or back) only matter for non-local
+  // files that haven't loaded yet. Never disturb 'loaded'/'loading' here.
+  useEffect(() => {
+    if (isLocal) return
+    setStatus(prev => prev === 'loaded' || prev === 'loading' ? prev : (hydrate ? 'syncing' : 'cloud'))
+  }, [hydrate, isLocal])
 
   // Listen for cloud-download-done events whenever we're showing a placeholder.
   // The active hydrate instance kicks off the download; other instances of the
