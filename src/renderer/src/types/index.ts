@@ -185,11 +185,15 @@ export interface StreamMeta {
 export interface StreamFolder {
   folderName: string
   folderPath: string
+  /** Forward-slash relative path from the streams root. Same as folderName for flat layouts. */
+  relativePath: string
   date: string
   meta: StreamMeta | null
   hasMeta: boolean
   detectedGames: string[]
   thumbnails: string[]
+  /** Parallel to `thumbnails`; false → cloud placeholder, skip <img> render. */
+  thumbnailLocalFlags?: boolean[]
   videoCount: number
   videos: string[]
   isMissing?: boolean

@@ -34,6 +34,39 @@ async function copyWithProgress(
   onProgress(100)
 }
 
+/** Walk streamsDir recursively (capped depth) and return the absolute path
+ *  of the stream folder matching `date`. Handles arbitrary intermediate
+ *  layers (year, year/month, etc.) by recursing into any directory whose
+ *  name doesn't itself look like a stream folder.
+ *  Prefers the base folder (e.g. `2026-04-01`) over suffixed variants
+ *  (`2026-04-01-2`, …) so new files land with the day's primary stream. */
+function findDatedFolderRecursive(streamsDir: string, date: string, maxDepth = 5): string | null {
+  const matches: { path: string; idx: number }[] = []
+  const walk = (dir: string, depth: number) => {
+    if (depth > maxDepth) return
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      if (e.name.startsWith('_') || e.name.startsWith('.')) continue
+      const full = path.join(dir, e.name)
+      const m = e.name.match(/^(\d{4}-\d{2}-\d{2})(?:-(\d+))?$/)
+      if (m) {
+        if (m[1] === date) {
+          matches.push({ path: full, idx: m[2] ? parseInt(m[2], 10) : 1 })
+        }
+        // Don't recurse into stream folders looking for nested stream folders.
+        continue
+      }
+      walk(full, depth + 1)
+    }
+  }
+  walk(streamsDir, 0)
+  if (matches.length === 0) return null
+  matches.sort((a, b) => a.idx - b.idx)
+  return matches[0].path
+}
+
 export interface WatchRule {
   id: string
   enabled: boolean
@@ -214,15 +247,15 @@ class FileWatcher {
     if (!match) return null
     const date = match[1]
     if (!this.streamsDir) return null
-    const folderPath = path.join(this.streamsDir, date)
-    if (!fs.existsSync(folderPath)) return null
-    return folderPath
+    // Walk recursively so nested layouts (year, year/month, …) work too.
+    return findDatedFolderRecursive(this.streamsDir, date)
   }
 
   /**
    * When stream mode is folder-per-stream and the rule's destination points at the
-   * streams root directory, attempt to route the file into the dated subfolder instead.
-   * Falls back to the original destination if no date is found or no subfolder exists.
+   * streams root directory, attempt to route the file into the dated stream folder
+   * instead. Walks recursively so nested layouts work; falls back to the original
+   * destination if no matching folder exists.
    */
   private resolveFolderPerStreamDestination(destination: string, filePath: string): string {
     if (this.streamMode !== 'folder-per-stream') return destination
@@ -233,10 +266,7 @@ class FileWatcher {
     const fileName = path.basename(filePath)
     const match = fileName.match(/(\d{4}-\d{2}-\d{2})/)
     if (!match) return destination
-    const date = match[1]
-    const subFolder = path.join(this.streamsDir, date)
-    if (!fs.existsSync(subFolder)) return destination
-    return subFolder
+    return findDatedFolderRecursive(this.streamsDir, match[1]) ?? destination
   }
 
   private async applyRule(

@@ -1257,10 +1257,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl)
       // Merge only the thumbnail flags — prevents closure-stale `currentStream.meta` from
       // clobbering fields edited concurrently in other UI (e.g. MetaModal).
+      const root = (config.streamsDir || '').replace(/\\/g, '/').replace(/\/$/, '')
+      const fpFwd = folderPath.replace(/\\/g, '/')
+      const metaKey = root && fpFwd.startsWith(root + '/') ? fpFwd.slice(root.length + 1) : (fpFwd.split('/').pop() ?? fpFwd)
       await window.api.updateStreamMeta(folderPath, {
         smThumbnail: true,
         smThumbnailTemplate: templateId,
-      })
+      }, metaKey)
       setIsDirty(false)
     } catch (err) {
       console.error('Auto-save failed:', err)
@@ -1526,10 +1529,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.png`),
     ])
     // Clear only the thumbnail flags via merge — preserves any other fields edited concurrently.
+    const root = (config.streamsDir || '').replace(/\\/g, '/').replace(/\/$/, '')
+    const fpFwd = folderPath.replace(/\\/g, '/')
+    const metaKey = root && fpFwd.startsWith(root + '/') ? fpFwd.slice(root.length + 1) : (fpFwd.split('/').pop() ?? fpFwd)
     await window.api.updateStreamMeta(folderPath, {
       smThumbnail: undefined,
       smThumbnailTemplate: undefined,
-    } as any).catch(() => {})
+    } as any, metaKey).catch(() => {})
     // Remove from persisted recents store and sync local state
     window.api.thumbnailRemoveRecent(folderPath, date).then(setRecents).catch(() => {
       setRecents(prev => prev.filter(r => !(r.folderPath === folderPath && r.date === date)))

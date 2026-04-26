@@ -44,6 +44,7 @@ declare global {
       renameFile(filePath: string, newName: string): Promise<string>
       deleteFile(filePath: string): Promise<void>
       listFiles(dir: string): Promise<FileInfo[]>
+      listFilesRecursive(dir: string, maxDepth?: number): Promise<FileInfo[]>
       listFileNames(dirPath: string): Promise<{ name: string; isDirectory: boolean }[]>
       fileExists(filePath: string): Promise<boolean>
       mkdir(dirPath: string): Promise<void>
@@ -53,6 +54,13 @@ declare global {
       saveScreenshot(destPath: string, base64Data: string): Promise<string>
       checkLocalFiles(filePaths: string[]): Promise<boolean[]>
       startCloudDownload(filePath: string): Promise<void>
+      debugFileAttrs(filePath: string): Promise<{
+        exists: boolean
+        raw: number
+        hex: string
+        flags: Record<string, boolean>
+        isLocalByMask: boolean
+      }>
       cancelCloudDownload(filePath: string): Promise<void>
       onCloudDownloadDone(cb: (filePath: string) => void): () => void
 
@@ -107,11 +115,11 @@ declare global {
 
       // ── Streams ──────────────────────────────────────────────────────────────
       listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
-      writeStreamMeta(folderPath: string, meta: StreamMeta): Promise<void>
-      updateStreamMeta(folderPath: string, partial: Partial<StreamMeta>): Promise<void>
-      saveClipDraft(folderPath: string, draft: ClipDraft): Promise<void>
-      deleteClipDraft(folderPath: string, draftId: string): Promise<void>
-      clipTagExport(folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null): Promise<void>
+      writeStreamMeta(folderPath: string, meta: StreamMeta, metaKey?: string): Promise<void>
+      updateStreamMeta(folderPath: string, partial: Partial<StreamMeta>, metaKey?: string): Promise<void>
+      saveClipDraft(folderPath: string, draft: ClipDraft, metaKey?: string): Promise<void>
+      deleteClipDraft(folderPath: string, draftId: string, metaKey?: string): Promise<void>
+      clipTagExport(folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null, metaKey?: string): Promise<void>
       listStreamTemplates(streamsDir: string): Promise<{ name: string; path: string }[]>
       createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<string>
 

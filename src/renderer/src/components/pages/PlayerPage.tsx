@@ -12,6 +12,43 @@ import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 
+/** Given an absolute file path and the streams root, find the file's stream
+ *  folder and the canonical key used in _meta.json:
+ *  - In folder-per-stream mode (any depth): walks up from the file's parent
+ *    to the first date-named ancestor; key = relative path from streamsRoot.
+ *  - In dump mode (no date-named ancestor): key = the date in the filename.
+ *  Falls back to bare basename if everything else fails. */
+function resolveStreamContext(filePath: string, streamsRoot: string | undefined): {
+  dir: string         // stream folder path (or file's parent in dump mode)
+  metaKey: string     // canonical _meta.json key
+  streamsDir: string  // normalized streams root
+} {
+  const DATE_FOLDER_RE = /^\d{4}-\d{2}-\d{2}(-\d+)?$/
+  const streamsDir = (streamsRoot || '').replace(/[\\/]+$/, '')
+  const fpNorm = filePath.replace(/\\/g, '/')
+  const rootNorm = streamsDir.replace(/\\/g, '/')
+  let dirNorm = fpNorm.slice(0, fpNorm.lastIndexOf('/'))
+  // Walk up looking for a date-named ancestor (folder-per-stream layouts).
+  while (
+    rootNorm &&
+    dirNorm.length > rootNorm.length &&
+    !DATE_FOLDER_RE.test(dirNorm.slice(dirNorm.lastIndexOf('/') + 1))
+  ) {
+    dirNorm = dirNorm.slice(0, dirNorm.lastIndexOf('/'))
+  }
+  const ancestorName = dirNorm.slice(dirNorm.lastIndexOf('/') + 1)
+  if (DATE_FOLDER_RE.test(ancestorName) && rootNorm && dirNorm.startsWith(rootNorm + '/')) {
+    return { dir: dirNorm.replace(/\//g, '\\'), metaKey: dirNorm.slice(rootNorm.length + 1), streamsDir }
+  }
+  // Dump mode (or no date-named ancestor) — derive the key from the filename.
+  const fileName = fpNorm.slice(fpNorm.lastIndexOf('/') + 1)
+  const m = fileName.match(/(\d{4}-\d{2}-\d{2})/)
+  const dateKey = m ? m[1] : fileName.split('.')[0]
+  // dir for dump mode = the file's actual parent (the dump dir itself).
+  const parentDir = filePath.slice(0, Math.max(filePath.lastIndexOf('\\'), filePath.lastIndexOf('/')))
+  return { dir: parentDir, metaKey: dateKey, streamsDir }
+}
+
 function formatTime(seconds: number, fps?: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -864,30 +901,47 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [currentVideoClip, setCurrentVideoClip] = useState<{ clipOf: string; clipState: ClipState; sourceExists: boolean } | null>(null)
   const folderPathRef = useRef<string | null>(null)
   useEffect(() => { folderPathRef.current = folderPath }, [folderPath])
+  // Canonical _meta.json key for the current stream — needed to disambiguate
+  // dump-mode entries where folderPath is the same dump dir for every stream.
+  const folderMetaKeyRef = useRef<string | null>(null)
   const folderDraftsRef = useRef<import('../../types').ClipDraft[]>([])
   useEffect(() => { folderDraftsRef.current = folderDrafts }, [folderDrafts])
 
   const reloadSessionPanel = useCallback(async (fp: string | null) => {
-    if (!fp) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); return }
-    const dir = fp.replace(/[\\/][^\\/]+$/, '')
-    const streamsDir = dir.replace(/[\\/][^\\/]+$/, '')
-    const folderName = dir.replace(/.*[\\/]/, '')
+    if (!fp) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; return }
+    // Find the stream folder (date-named ancestor or, in dump mode, derive
+    // from filename) and compute the canonical _meta.json key for it.
+    const { dir, metaKey, streamsDir } = resolveStreamContext(fp, config.streamsDir)
     const currentName = fp.replace(/.*[\\/]/, '')
     setFolderPath(dir)
+    folderMetaKeyRef.current = metaKey
     try {
+      // Recursive listing: pull files from sub-folders (clips/, recordings/,
+      // exports/, …) so the flat Session Videos panel includes all session
+      // content regardless of the user's sub-org layout.
       const [files, meta] = await Promise.all([
-        window.api.listFiles(dir),
+        window.api.listFilesRecursive(dir),
         window.api.readFile(`${streamsDir}/_meta.json`).then(raw => JSON.parse(raw)).catch(() => null),
       ])
-      const folderMeta = meta?.[folderName] ?? {}
+      const folderMeta = meta?.[metaKey] ?? {}
       const videoMap: Record<string, { category?: string; fps?: number; clipOf?: string; clipState?: ClipState }> = folderMeta.videoMap ?? {}
       const drafts: Record<string, import('../../types').ClipDraft> = folderMeta.clipDrafts ?? {}
       setFolderDrafts(Object.values(drafts))
       const videoFiles = files
         .filter(f => !f.isDirectory && SESSION_VIDEO_EXTS.has(f.extension.toLowerCase()))
         .sort((a, b) => a.name.localeCompare(b.name))
+      // videoMap keys are forward-slash paths relative to the stream folder.
+      // For top-level files this equals the basename; for nested files (e.g.
+      // clips/highlight.mp4) it includes the sub-folder. Compute that key
+      // for each file so lookups match.
+      const dirNormForKey = dir.replace(/\\/g, '/').replace(/\/$/, '')
+      const relKey = (absPath: string): string => {
+        const p = absPath.replace(/\\/g, '/')
+        return p.startsWith(dirNormForKey + '/') ? p.slice(dirNormForKey.length + 1) : p.split('/').pop() ?? p
+      }
+      const currentRelKey = relKey(fp)
       // Detect whether the currently-loaded file is a known clip output
-      const currentEntry = videoMap[currentName]
+      const currentEntry = videoMap[currentRelKey] ?? videoMap[currentName]
       if (currentEntry?.clipOf && currentEntry?.clipState) {
         const sourceExists = videoFiles.some(f => f.name === currentEntry.clipOf)
         setCurrentVideoClip({ clipOf: currentEntry.clipOf, clipState: currentEntry.clipState, sourceExists })
@@ -895,17 +949,21 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         setCurrentVideoClip(null)
       }
       const localFlags = await window.api.checkLocalFiles(videoFiles.map(f => f.path))
-      setSiblingFiles(videoFiles.map((f, i) => ({
-        path: f.path,
-        name: f.name,
-        isLocal: localFlags[i],
-        category: videoMap[f.name]?.category as SiblingFile['category'] | undefined,
-        fps: videoMap[f.name]?.fps,
-        clipOf: videoMap[f.name]?.clipOf,
-        clipState: videoMap[f.name]?.clipState,
-      })))
+      setSiblingFiles(videoFiles.map((f, i) => {
+        const k = relKey(f.path)
+        const entry = videoMap[k] ?? videoMap[f.name]
+        return {
+          path: f.path,
+          name: f.name,
+          isLocal: localFlags[i],
+          category: entry?.category as SiblingFile['category'] | undefined,
+          fps: entry?.fps,
+          clipOf: entry?.clipOf,
+          clipState: entry?.clipState,
+        }
+      }))
     } catch { /* swallow */ }
-  }, [])
+  }, [config.streamsDir])
 
   useEffect(() => {
     reloadSessionPanel(state.filePath)
@@ -981,7 +1039,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       clearTimeout(draftSaveTimerRef.current)
       draftSaveTimerRef.current = null
     }
-    await window.api.deleteClipDraft(dir, draft.id).catch(() => {})
+    await window.api.deleteClipDraft(dir, draft.id, folderMetaKeyRef.current ?? undefined).catch(() => {})
     // Sync the ref immediately so any flushDraftSave triggered by exitClipMode sees the
     // post-delete list and doesn't resurrect the draft.
     folderDraftsRef.current = folderDraftsRef.current.filter(d => d.id !== draft.id)
@@ -1013,7 +1071,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     const collision = existing.some(d => d.id !== draftId && draftDisplayName(d).toLowerCase() === trimmed.toLowerCase())
     if (collision) return false
     const updated: import('../../types').ClipDraft = { ...target, name: trimmed, updatedAt: Date.now() }
-    await window.api.saveClipDraft(dir, updated).catch(() => {})
+    await window.api.saveClipDraft(dir, updated, folderMetaKeyRef.current ?? undefined).catch(() => {})
     setFolderDrafts(prev => prev.map(d => d.id === draftId ? updated : d))
     return true
   }, [draftDisplayName])
@@ -1053,6 +1111,9 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         pending.sourceName,
         pending.clipStateSnapshot,
         pending.draftId,
+        // Reuse the canonical key — outputFolder may equal the dump dir in
+        // dump mode, where derivation can't disambiguate streams.
+        resolveStreamContext(`${pending.outputFolder}\\${pending.outputFilename}`, config.streamsDir).metaKey,
       ).catch(() => {})
       // If the exported draft is still bound to the active clip session, clear the binding so
       // future edits create a new draft instead of re-saving the now-deleted one.
@@ -1139,14 +1200,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       }
-      await window.api.saveClipDraft(dir, draft).catch(() => {})
+      await window.api.saveClipDraft(dir, draft, folderMetaKeyRef.current ?? undefined).catch(() => {})
       setFolderDrafts(prev => {
         const idx = prev.findIndex(d => d.id === id)
         if (idx >= 0) { const copy = [...prev]; copy[idx] = draft; return copy }
         return [...prev, draft]
       })
     } else if (currentId) {
-      await window.api.deleteClipDraft(dir, currentId).catch(() => {})
+      await window.api.deleteClipDraft(dir, currentId, folderMetaKeyRef.current ?? undefined).catch(() => {})
       setFolderDrafts(prev => prev.filter(d => d.id !== currentId))
       setActiveDraftId(null)
     }

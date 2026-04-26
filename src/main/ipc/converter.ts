@@ -68,8 +68,8 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
   {
     id: 'archive-av1',
     name: 'Archive (SVT-AV1)',
-    description: 'Cold storage archive — CRF 32 SVT-AV1, excellent quality-to-size ratio. Requires a recent FFmpeg build.',
-    ffmpegArgs: '-c:v libsvtav1 -crf 32 -preset 6 -c:a aac -b:a 128k',
+    description: 'Cold storage archive — CRF 28 SVT-AV1, preserves fine detail at a strong size ratio. Requires a recent FFmpeg build.',
+    ffmpegArgs: '-c:v libsvtav1 -crf 28 -preset 6 -c:a aac -b:a 128k',
     outputExtension: 'mkv',
     isBuiltin: true
   },

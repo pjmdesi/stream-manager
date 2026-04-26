@@ -59,13 +59,25 @@ export interface ArchiveProgress {
 }
 
 export interface StreamFolder {
+  /** Last path segment of the stream folder. Same as relativePath for flat layouts. */
   folderName: string
+  /** Absolute filesystem path to the stream folder. */
   folderPath: string
+  /** Path from the streams root to this folder, forward-slash normalized.
+   *  Used as the canonical key in _meta.json so deeply-nested layouts
+   *  (e.g. year/month/stream-folder) and same-named folders in different
+   *  hierarchy branches stay distinct. */
+  relativePath: string
   date: string
   meta: StreamMeta | null
   hasMeta: boolean
   detectedGames: string[]
   thumbnails: string[]
+  /** Parallel to `thumbnails`. Each entry is true if the file's data is
+   *  resident on disk; false if it's a cloud-provider placeholder. The
+   *  renderer skips loading non-local thumbnails to avoid hanging on a bad
+   *  cloud-sync state, and offers an on-demand hydrate from the lightbox. */
+  thumbnailLocalFlags?: boolean[]
   videoCount: number
   videos: string[]
   isMissing?: boolean
@@ -111,25 +123,6 @@ function nextFolderName(parentDir: string, calDate: string): string {
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10)
-}
-
-/** Extract game names from MKV filenames like "2026-03-29 21-14-35 (Cult Of The Lamb).mkv" */
-function detectGamesFromFolder(folderPath: string): string[] {
-  try {
-    const files = fs.readdirSync(folderPath)
-    const games: string[] = []
-    for (const file of files) {
-      if (!file.toLowerCase().endsWith('.mkv')) continue
-      const match = file.match(/\(([^)]+)\)\.mkv$/i)
-      if (match) {
-        const game = match[1].trim()
-        if (!games.includes(game)) games.push(game)
-      }
-    }
-    return games
-  } catch (_) {
-    return []
-  }
 }
 
 /** Extract game names from a list of file paths (dump folder mode). */
@@ -178,25 +171,142 @@ function thumbnailSortKey(filename: string): [number, string] {
   return [Infinity, base]
 }
 
-/** Return absolute paths of image files in the folder, thumbnail-first. */
+/** Return absolute paths of image files in the folder, thumbnail-first.
+ *  Walks sub-folders so users can keep `thumbnails/` (or any other nested
+ *  layout) and still have the app find their thumbnails. */
 function detectThumbnails(folderPath: string): string[] {
-  try {
-    return fs.readdirSync(folderPath)
-      .filter(f => IMAGE_EXTS.has(path.extname(f).toLowerCase()))
-      .sort((a, b) => {
-        const [rankA, nameA] = thumbnailSortKey(a)
-        const [rankB, nameB] = thumbnailSortKey(b)
-        if (rankA !== rankB) return rankA - rankB
-        return nameA.localeCompare(nameB)
-      })
-      .map(f => path.join(folderPath, f))
-  } catch (_) {
-    return []
+  return collectStreamFiles(folderPath).thumbnails.sort((a, b) => {
+    const [rankA, nameA] = thumbnailSortKey(path.basename(a))
+    const [rankB, nameB] = thumbnailSortKey(path.basename(b))
+    if (rankA !== rankB) return rankA - rankB
+    return nameA.localeCompare(nameB)
+  })
+}
+
+/** Walk a directory recursively up to maxDepth, returning every video and
+ *  image file. Used to support nested layouts inside a stream folder
+ *  (e.g. clips/, recordings/, exports/, thumbnails/). */
+function collectStreamFiles(folderPath: string, maxDepth = 4): {
+  videos: string[]
+  thumbnails: string[]
+} {
+  const videos: string[] = []
+  const thumbnails: string[] = []
+  const walk = (dir: string, depth: number) => {
+    if (depth > maxDepth) return
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name.startsWith('_')) continue
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) { walk(full, depth + 1); continue }
+      const ext = path.extname(e.name).toLowerCase()
+      if (VIDEO_EXTS.has(ext)) videos.push(full)
+      else if (IMAGE_EXTS.has(ext)) thumbnails.push(full)
+    }
   }
+  walk(folderPath, 0)
+  return { videos, thumbnails }
+}
+
+/** Walk streamsDir recursively (up to maxDepth) and return absolute paths
+ *  of every directory whose name matches the date-folder pattern. These are
+ *  the user's stream folders — possibly nested under year/month/etc. */
+function findStreamFolders(streamsDir: string, maxDepth = 5): string[] {
+  const out: string[] = []
+  const walk = (dir: string, depth: number) => {
+    if (depth > maxDepth) return
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      if (e.name.startsWith('_') || e.name.startsWith('.')) continue
+      const full = path.join(dir, e.name)
+      if (DATE_FOLDER_RE.test(e.name)) {
+        out.push(full)
+        // Don't recurse into a stream folder — its contents (including any
+        // nested clips/recordings/exports/thumbnails) are gathered separately
+        // by collectStreamFiles when the stream is read.
+        continue
+      }
+      walk(full, depth + 1)
+    }
+  }
+  walk(streamsDir, 0)
+  return out
+}
+
+/** Path of `videoPath` relative to its stream folder, forward-slash normalized.
+ *  Used as the canonical videoMap key so sub-folder files (e.g. clips/x.mp4)
+ *  don't collide with top-level files of the same name. */
+function videoRelKey(folderPath: string, videoPath: string): string {
+  const rel = path.relative(folderPath, videoPath)
+  return rel.split(path.sep).join('/')
+}
+
+/** Detect game names from MKV filenames anywhere inside a stream folder
+ *  (including nested sub-folders like clips/ or recordings/). */
+function detectGamesFromFolderRecursive(folderPath: string): string[] {
+  const { videos } = collectStreamFiles(folderPath)
+  const games: string[] = []
+  for (const v of videos) {
+    if (!v.toLowerCase().endsWith('.mkv')) continue
+    const m = path.basename(v).match(/\(([^)]+)\)\.mkv$/i)
+    if (m) {
+      const game = m[1].trim()
+      if (!games.includes(game)) games.push(game)
+    }
+  }
+  return games
 }
 
 function metaFilePath(streamsDir: string): string {
   return path.join(streamsDir, META_FILENAME)
+}
+
+/** Ensure allMeta[key] exists so callers can safely read/write subfields like
+ *  videoMap or clipDrafts. The stub uses empty user-meaningful fields; the
+ *  app treats it as "no real metadata" via isMeaningfulMeta(). */
+function ensureMetaEntry(allMeta: Record<string, StreamMeta>, key: string, date: string): StreamMeta {
+  if (!allMeta[key]) {
+    allMeta[key] = { date, streamType: [], games: [], comments: '' }
+  }
+  return allMeta[key]
+}
+
+/** True if a meta entry has any user-meaningful content. videoMap and
+ *  clipDrafts are app-managed caches — their presence alone does NOT count
+ *  as the user having added metadata, so the "missing metadata" warning
+ *  still surfaces for streams whose only entry is a cached videoMap. */
+function isMeaningfulMeta(m: StreamMeta | null | undefined): boolean {
+  if (!m) return false
+  if (m.streamType?.length) return true
+  if (m.games?.length) return true
+  if (m.comments?.trim()) return true
+  if (m.archived) return true
+  if (m.ytVideoId) return true
+  if (m.preferredThumbnail) return true
+  // smThumbnail flags — the user has at least started a built-in thumbnail
+  if ((m as { smThumbnail?: boolean }).smThumbnail) return true
+  if ((m as { smThumbnailTemplate?: string }).smThumbnailTemplate) return true
+  return false
+}
+
+/** Canonical _meta.json key for a stream folder: forward-slash relative path
+ *  from the streams root. Falls back to the basename if the path isn't actually
+ *  inside streamsDir (defensive). */
+function metaKey(streamsDir: string, folderPath: string): string {
+  const rel = path.relative(streamsDir, folderPath)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return path.basename(folderPath)
+  }
+  return rel.split(path.sep).join('/')
+}
+
+/** Resolve the streams root from app config — used by IPC handlers that only
+ *  receive a folderPath but need to compute its key relative to the root. */
+function getStreamsDir(): string {
+  return ((getStore().get('config') as any)?.streamsDir as string) ?? ''
 }
 
 function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
@@ -279,17 +389,24 @@ function classifyVideo(
  * Returns true if anything changed (so the caller can decide to persist).
  */
 async function refreshVideoMaps(
-  entries: Array<{ key: string; videos: string[] }>,
+  entries: Array<{ key: string; folderPath: string; date: string; videos: string[] }>,
   allMeta: Record<string, StreamMeta>,
   clipThresholdSecs: number
 ): Promise<boolean> {
   const allPaths: string[] = []
   const pathKey: Map<string, string> = new Map()
+  const pathDate: Map<string, string> = new Map()
+  // Maps an absolute video path to its forward-slash key relative to its
+  // stream folder. For flat layouts this equals the basename — backward
+  // compatible with legacy videoMap entries.
+  const pathRelKey: Map<string, string> = new Map()
 
-  for (const { key, videos } of entries) {
+  for (const { key, folderPath, date, videos } of entries) {
     for (const v of videos) {
       allPaths.push(v)
       pathKey.set(v, key)
+      pathDate.set(v, date)
+      pathRelKey.set(v, videoRelKey(folderPath, v))
     }
   }
   if (allPaths.length === 0) return false
@@ -305,11 +422,11 @@ async function refreshVideoMaps(
   for (let i = 0; i < allPaths.length; i++) {
     const p = allPaths[i]
     const key = pathKey.get(p)!
-    const filename = path.basename(p)
+    const relKey = pathRelKey.get(p)!
     const stat = stats[i]
     if (!stat) continue
 
-    const existing = allMeta[key]?.videoMap?.[filename]
+    const existing = allMeta[key]?.videoMap?.[relKey]
     const isLocal = localFlags[i]
 
     if (isLocal) {
@@ -325,8 +442,9 @@ async function refreshVideoMaps(
         mtime: stat.mtimeMs,
         category: classifyVideo(undefined, undefined, undefined, stat.size, false, clipThresholdSecs),
       }
-      if (!allMeta[key].videoMap) allMeta[key].videoMap = {}
-      allMeta[key].videoMap![filename] = entry
+      const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
+      if (!meta.videoMap) meta.videoMap = {}
+      meta.videoMap[relKey] = entry
       changed = true
     }
   }
@@ -338,9 +456,9 @@ async function refreshVideoMaps(
     const PROBE_TIMEOUT_MS = 20_000
     const probeOne = async ({ p, idx }: { p: string; idx: number }) => {
       const key = pathKey.get(p)!
-      const filename = path.basename(p)
+      const relKey = pathRelKey.get(p)!
       const stat = stats[idx]!
-      const prev = allMeta[key].videoMap?.[filename]
+      const prev = allMeta[key]?.videoMap?.[relKey]
       try {
         // Wrap probeFile in a timeout — a single hanging ffprobe shouldn't stall the whole batch.
         const info = await Promise.race([
@@ -369,8 +487,9 @@ async function refreshVideoMaps(
           clipOf: prev?.clipOf,
           clipState: prev?.clipState,
         }
-        if (!allMeta[key].videoMap) allMeta[key].videoMap = {}
-        allMeta[key].videoMap![filename] = entry
+        const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
+        if (!meta.videoMap) meta.videoMap = {}
+        meta.videoMap[relKey] = entry
         changed = true
       } catch (err) {
         // Probe failed (corrupt file, locked by another process, ffprobe timeout, etc.).
@@ -383,8 +502,9 @@ async function refreshVideoMaps(
             mtime: stat.mtimeMs,
             category: classifyVideo(undefined, undefined, undefined, stat.size, true, clipThresholdSecs),
           }
-          if (!allMeta[key].videoMap) allMeta[key].videoMap = {}
-          allMeta[key].videoMap![filename] = entry
+          const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
+          if (!meta.videoMap) meta.videoMap = {}
+          meta.videoMap[relKey] = entry
           changed = true
         }
       }
@@ -397,10 +517,10 @@ async function refreshVideoMaps(
 
   // Prune stale entries: remove videoMap keys whose files are no longer in the folder.
   // Handles renames and deletes that happened outside the app (or via converter rename).
-  for (const { key, videos } of entries) {
+  for (const { key, folderPath, videos } of entries) {
     const map = allMeta[key]?.videoMap
     if (!map) continue
-    const currentNames = new Set(videos.map(v => path.basename(v)))
+    const currentNames = new Set(videos.map(v => videoRelKey(folderPath, v)))
     for (const name of Object.keys(map)) {
       if (!currentNames.has(name)) {
         delete map[name]
@@ -415,7 +535,7 @@ async function refreshVideoMaps(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerStreamsIPC(): void {
-  ipcMain.handle('streams:list', async (_event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'): Promise<StreamFolder[]> => {
+  ipcMain.handle('streams:list', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'): Promise<StreamFolder[]> => {
     if (!dir || !fs.existsSync(dir)) return []
 
     migrateMeta(dir)
@@ -460,9 +580,10 @@ export function registerStreamsIPC(): void {
         folders.push({
           folderName: date,
           folderPath: dir,
+          relativePath: date,
           date,
           meta,
-          hasMeta: meta !== null,
+          hasMeta: isMeaningfulMeta(meta),
           detectedGames: detectGamesFromFiles(videos),
           thumbnails: sortedThumbnails,
           videoCount: videos.length,
@@ -473,9 +594,13 @@ export function registerStreamsIPC(): void {
       // Meta entries with no files: isMissing only if date is strictly in the past
       for (const [date, meta] of Object.entries(allMeta)) {
         if (seenDates.has(date)) continue
+        // Skip stub entries (only videoMap/clipDrafts) — they're caches, not
+        // user-meaningful, and shouldn't surface as orphans on missing files.
+        if (!isMeaningfulMeta(meta)) continue
         folders.push({
           folderName: date,
           folderPath: dir,
+          relativePath: date,
           date,
           meta,
           hasMeta: true,
@@ -488,37 +613,34 @@ export function registerStreamsIPC(): void {
       }
     } else {
       // ── Folder-per-stream scan ────────────────────────────────────────────
-      const entries = fs.readdirSync(dir, { withFileTypes: true })
-      const seenFolders = new Set<string>()
+      // Walks recursively so users can group streams under year/month/etc.
+      // Each found stream folder may itself contain sub-folders for organization
+      // (clips, recordings, exports, …); collectStreamFiles flattens those.
+      const streamFolderPaths = findStreamFolders(dir)
+      const seenKeys = new Set<string>()
 
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        if (entry.name.startsWith('_')) continue
-        if (!DATE_FOLDER_RE.test(entry.name)) continue
+      for (const folderPath of streamFolderPaths) {
+        const folderName = path.basename(folderPath)
+        const relativePath = metaKey(dir, folderPath)
+        seenKeys.add(relativePath)
 
-        seenFolders.add(entry.name)
-        const folderPath = path.join(dir, entry.name)
-        const meta = allMeta[entry.name] ?? null
-        const detectedGames = detectGamesFromFolder(folderPath)
+        const meta = allMeta[relativePath] ?? null
+        const detectedGames = detectGamesFromFolderRecursive(folderPath)
         const thumbnails = detectThumbnails(folderPath)
         if (meta?.preferredThumbnail) {
           const idx = thumbnails.findIndex(t => path.basename(t) === meta.preferredThumbnail)
           if (idx > 0) { const [item] = thumbnails.splice(idx, 1); thumbnails.unshift(item) }
         }
 
-        let videos: string[] = []
-        try {
-          videos = fs.readdirSync(folderPath)
-            .filter(f => VIDEO_EXTS.has(path.extname(f).toLowerCase()))
-            .map(f => path.join(folderPath, f))
-        } catch (_) {}
+        const videos = collectStreamFiles(folderPath).videos
 
         folders.push({
-          folderName: entry.name,
+          folderName,
           folderPath,
-          date: calendarDate(entry.name),
+          relativePath,
+          date: calendarDate(folderName),
           meta,
-          hasMeta: meta !== null,
+          hasMeta: isMeaningfulMeta(meta),
           detectedGames,
           thumbnails,
           videoCount: videos.length,
@@ -526,14 +648,21 @@ export function registerStreamsIPC(): void {
         })
       }
 
-      // Orphaned meta entries (folder gone) — always isMissing in folder mode
-      for (const [folderName, meta] of Object.entries(allMeta)) {
-        if (seenFolders.has(folderName)) continue
+      // Orphaned meta entries (folder gone) — always isMissing in folder mode.
+      // Reconstruct the absolute path from the relative key so deep entries
+      // also surface as missing rather than silently disappearing.
+      for (const [key, meta] of Object.entries(allMeta)) {
+        if (seenKeys.has(key)) continue
+        // Skip stub entries (only videoMap/clipDrafts) — they're caches, not
+        // user-meaningful, and shouldn't surface as orphans on missing folders.
+        if (!isMeaningfulMeta(meta)) continue
+        const folderName = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
         if (!DATE_FOLDER_RE.test(folderName)) continue
-        const folderPath = path.join(dir, folderName)
+        const folderPath = path.join(dir, ...key.split('/'))
         folders.push({
           folderName,
           folderPath,
+          relativePath: key,
           date: calendarDate(folderName),
           meta,
           hasMeta: true,
@@ -553,23 +682,61 @@ export function registerStreamsIPC(): void {
       return streamIndex(b.folderName) - streamIndex(a.folderName)
     })
 
-    // Attach cached videoMap immediately so the response isn't blocked
+    // Attach the cached _meta.json entry to each folder so the response carries
+    // any cached videoMap and clipDrafts. This intentionally runs even for
+    // folders that don't have user-meaningful metadata yet — refreshVideoMaps
+    // creates stub entries on first scan, and the renderer needs to read the
+    // cached videoMap from them. hasMeta stays governed by isMeaningfulMeta().
     for (const folder of folders) {
-      if (allMeta[folder.folderName]?.videoMap && folder.meta) {
-        folder.meta.videoMap = allMeta[folder.folderName].videoMap
+      const cached = allMeta[folder.relativePath]
+      if (cached && !folder.meta) folder.meta = cached
+    }
+
+    // Compute thumbnail local-flags so the renderer can skip rendering an <img>
+    // for cloud-placeholder thumbnails (avoids hanging Chromium's network thread
+    // on a cloud provider that's stuck or unreachable).
+    const allThumbs = folders.flatMap(f => f.thumbnails)
+    if (allThumbs.length > 0) {
+      try {
+        const t0 = Date.now()
+        const flags = await Promise.race([
+          checkLocalFiles(allThumbs),
+          new Promise<boolean[]>((_, reject) =>
+            setTimeout(() => reject(new Error('thumbnail localFiles check timeout')), 15000)
+          ),
+        ])
+        let i = 0
+        for (const f of folders) {
+          f.thumbnailLocalFlags = flags.slice(i, i + f.thumbnails.length)
+          i += f.thumbnails.length
+        }
+        const localCount = flags.filter(Boolean).length
+        const cloudCount = flags.length - localCount
+        console.log(`[streams:list] thumbnails classified in ${Date.now() - t0}ms: ${localCount} local, ${cloudCount} cloud (of ${flags.length} total)`)
+      } catch (err) {
+        console.warn('[streams:list] thumbnail localFiles check failed:', err)
+        // SAFETY NET: when classification fails (timeout, PowerShell error, etc.),
+        // mark every thumbnail as non-local. The renderer shows cloud icons —
+        // ugly but safe — instead of trying to load file:// URLs that may hang
+        // Chromium's network thread on a stuck cloud provider.
+        for (const f of folders) {
+          f.thumbnailLocalFlags = f.thumbnails.map(() => false)
+        }
       }
     }
 
-    // Only refresh video maps if the set of video files has changed since last cache
+    // Only refresh video maps if the set of video files has changed since last cache.
+    // Keys are paths relative to each stream folder (forward-slash) — for flat layouts
+    // this equals the bare filename, so legacy maps are still valid.
     const clipThreshold = ((getStore().get('config') as any)?.clipDurationThreshold) ?? 300
     const videoEntries = folders
       .filter(f => f.videos.length > 0 && !f.isMissing)
-      .map(f => ({ key: f.folderName, videos: f.videos }))
-    const videoSetChanged = videoEntries.some(({ key, videos }) => {
+      .map(f => ({ key: f.relativePath, folderPath: f.folderPath, date: f.date, videos: f.videos }))
+    const videoSetChanged = videoEntries.some(({ key, folderPath, videos }) => {
       const cached = allMeta[key]?.videoMap
       if (!cached) return videos.length > 0
       const cachedNames = new Set(Object.keys(cached))
-      const currentNames = new Set(videos.map(v => path.basename(v)))
+      const currentNames = new Set(videos.map(v => videoRelKey(folderPath, v)))
       if (cachedNames.size !== currentNames.size) return true
       for (const name of currentNames) if (!cachedNames.has(name)) return true
       return false
@@ -577,10 +744,15 @@ export function registerStreamsIPC(): void {
     if (videoSetChanged) {
       refreshVideoMaps(videoEntries, allMeta, clipThreshold)
         .then(changed => {
-          if (changed) {
-            try { writeAllMeta(dir, allMeta) }
-            catch (err) { console.error('[streams:list] writeAllMeta failed:', err) }
-          }
+          if (!changed) return
+          try { writeAllMeta(dir, allMeta) }
+          catch (err) { console.error('[streams:list] writeAllMeta failed:', err) }
+          // Notify the renderer so it re-fetches with the freshly-written
+          // videoMap entries (e.g. categories for newly-arrived files). The
+          // chokidar self-loop guard means our own _meta.json write doesn't
+          // trigger a streams:changed event automatically.
+          const win = BrowserWindow.fromWebContents(event.sender)
+          if (win && !win.isDestroyed()) win.webContents.send('streams:changed')
         })
         .catch(err => console.error('[streams:list] refreshVideoMaps failed:', err))
     }
@@ -588,58 +760,63 @@ export function registerStreamsIPC(): void {
     return folders
   })
 
-  ipcMain.handle('streams:writeMeta', async (_event, folderPath: string, meta: StreamMeta) => {
-    const streamsDir = path.dirname(folderPath)
-    const folderName = path.basename(folderPath)
+  // For each meta-touching IPC: an explicit `metaKeyOverride` lets the renderer
+  // pass the canonical key (folder.relativePath). Necessary in dump mode where
+  // every stream shares the same folderPath (= the dump dir) and key derivation
+  // can't tell them apart. Falls back to deriving from folderPath when omitted.
+
+  ipcMain.handle('streams:writeMeta', async (_event, folderPath: string, meta: StreamMeta, metaKeyOverride?: string) => {
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
-    allMeta[folderName] = meta
+    allMeta[key] = meta
     writeAllMeta(streamsDir, allMeta)
   })
 
   // Merge a partial meta update into the existing entry. Safe for callers that only own a subset
   // of fields (e.g. the thumbnail editor's smThumbnail flags) — preserves any fields edited
   // concurrently from other UI paths.
-  ipcMain.handle('streams:updateMeta', async (_event, folderPath: string, partial: Partial<StreamMeta>) => {
-    const streamsDir = path.dirname(folderPath)
-    const folderName = path.basename(folderPath)
+  ipcMain.handle('streams:updateMeta', async (_event, folderPath: string, partial: Partial<StreamMeta>, metaKeyOverride?: string) => {
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
-    const existing = allMeta[folderName] ?? ({} as StreamMeta)
-    allMeta[folderName] = { ...existing, ...partial }
+    const existing = allMeta[key] ?? ({} as StreamMeta)
+    allMeta[key] = { ...existing, ...partial }
     writeAllMeta(streamsDir, allMeta)
   })
 
   // Insert or update a single clip draft in the folder's meta, preserving other drafts.
   // Server-side merge avoids races between concurrent draft edits on different videos in the folder.
-  ipcMain.handle('clipDraft:save', async (_event, folderPath: string, draft: ClipDraft) => {
-    const streamsDir = path.dirname(folderPath)
-    const folderName = path.basename(folderPath)
+  ipcMain.handle('clipDraft:save', async (_event, folderPath: string, draft: ClipDraft, metaKeyOverride?: string) => {
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
-    const existing = allMeta[folderName] ?? ({} as StreamMeta)
+    const existing = allMeta[key] ?? ({} as StreamMeta)
     const drafts = { ...(existing.clipDrafts ?? {}), [draft.id]: draft }
-    allMeta[folderName] = { ...existing, clipDrafts: drafts }
+    allMeta[key] = { ...existing, clipDrafts: drafts }
     writeAllMeta(streamsDir, allMeta)
   })
 
-  ipcMain.handle('clipDraft:delete', async (_event, folderPath: string, draftId: string) => {
-    const streamsDir = path.dirname(folderPath)
-    const folderName = path.basename(folderPath)
+  ipcMain.handle('clipDraft:delete', async (_event, folderPath: string, draftId: string, metaKeyOverride?: string) => {
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
-    const existing = allMeta[folderName]
+    const existing = allMeta[key]
     if (!existing?.clipDrafts?.[draftId]) return
     const drafts = { ...existing.clipDrafts }
     delete drafts[draftId]
-    allMeta[folderName] = { ...existing, clipDrafts: drafts }
+    allMeta[key] = { ...existing, clipDrafts: drafts }
     writeAllMeta(streamsDir, allMeta)
   })
 
   // Tag an exported clip's videoMap entry with clipOf + clipState so the user can reopen it
   // in the clip editor later. Also removes the originating draft if provided. Server-side merge
   // keeps concurrent edits (e.g. refreshVideoMaps) safe.
-  ipcMain.handle('clip:tagExport', async (_event, folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null) => {
-    const streamsDir = path.dirname(folderPath)
-    const folderName = path.basename(folderPath)
+  ipcMain.handle('clip:tagExport', async (_event, folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null, metaKeyOverride?: string) => {
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
-    const existing = allMeta[folderName] ?? ({} as StreamMeta)
+    const existing = allMeta[key] ?? ({} as StreamMeta)
     const videoMap = { ...(existing.videoMap ?? {}) }
     const outputPath = path.join(folderPath, outputFilename)
     let stat: fs.Stats | null = null
@@ -664,7 +841,7 @@ export function registerStreamsIPC(): void {
     } as VideoEntry
     const clipDrafts = { ...(existing.clipDrafts ?? {}) }
     if (draftId && clipDrafts[draftId]) delete clipDrafts[draftId]
-    allMeta[folderName] = { ...existing, videoMap, clipDrafts }
+    allMeta[key] = { ...existing, videoMap, clipDrafts }
     writeAllMeta(streamsDir, allMeta)
   })
 
@@ -1030,7 +1207,10 @@ export function registerStreamsIPC(): void {
     if (!win) return
 
     dirWatcher = chokidar.watch(dir, {
-      depth: mode === 'dump-folder' ? 0 : 2,  // dump: root files only; folder: root + session subfolders
+      // dump: root files only. folder: deep enough to cover year/month grouping
+      // above the stream folder PLUS sub-org (clips/, recordings/, …) below it.
+      // 6 covers root → year → month → stream → sub-folder → file.
+      depth: mode === 'dump-folder' ? 0 : 6,
       ignoreInitial: true,
       persistent: true,
       awaitWriteFinish: { stabilityThreshold: 1000, pollInterval: 300 },

@@ -358,7 +358,7 @@ export function RulesPage() {
                     </div>
                   )}
                   {ev.status === 'error' && ev.error && (
-                    <div className="text-xs text-red-400 truncate" title={ev.error}>{ev.error}</div>
+                    <div className="text-xs text-red-400 break-words whitespace-pre-wrap">{ev.error}</div>
                   )}
                 </div>
               </div>

@@ -66,6 +66,9 @@ contextBridge.exposeInMainWorld('api', {
   listFiles: (dir: string) =>
     ipcRenderer.invoke('files:list', dir),
 
+  listFilesRecursive: (dir: string, maxDepth?: number) =>
+    ipcRenderer.invoke('files:listRecursive', dir, maxDepth),
+
   fileExists: (filePath: string) =>
     ipcRenderer.invoke('files:exists', filePath),
 
@@ -89,6 +92,11 @@ contextBridge.exposeInMainWorld('api', {
 
   startCloudDownload: (filePath: string) =>
     ipcRenderer.invoke('files:startCloudDownload', filePath),
+
+  // Diagnostic for cloud-placeholder detection — call from devtools:
+  //   await window.api.debugFileAttrs('D:\\path\\to\\file.jpg')
+  debugFileAttrs: (filePath: string): Promise<{ exists: boolean; raw: number; hex: string; flags: Record<string, boolean>; isLocalByMask: boolean }> =>
+    ipcRenderer.invoke('files:debugFileAttrs', filePath),
 
   cancelCloudDownload: (filePath: string) =>
     ipcRenderer.invoke('files:cancelCloudDownload', filePath),
@@ -209,20 +217,20 @@ contextBridge.exposeInMainWorld('api', {
   listStreams: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
     ipcRenderer.invoke('streams:list', dir, mode),
 
-  writeStreamMeta: (folderPath: string, meta: any) =>
-    ipcRenderer.invoke('streams:writeMeta', folderPath, meta),
+  writeStreamMeta: (folderPath: string, meta: any, metaKey?: string) =>
+    ipcRenderer.invoke('streams:writeMeta', folderPath, meta, metaKey),
 
-  updateStreamMeta: (folderPath: string, partial: any) =>
-    ipcRenderer.invoke('streams:updateMeta', folderPath, partial),
+  updateStreamMeta: (folderPath: string, partial: any, metaKey?: string) =>
+    ipcRenderer.invoke('streams:updateMeta', folderPath, partial, metaKey),
 
-  saveClipDraft: (folderPath: string, draft: any) =>
-    ipcRenderer.invoke('clipDraft:save', folderPath, draft),
+  saveClipDraft: (folderPath: string, draft: any, metaKey?: string) =>
+    ipcRenderer.invoke('clipDraft:save', folderPath, draft, metaKey),
 
-  deleteClipDraft: (folderPath: string, draftId: string) =>
-    ipcRenderer.invoke('clipDraft:delete', folderPath, draftId),
+  deleteClipDraft: (folderPath: string, draftId: string, metaKey?: string) =>
+    ipcRenderer.invoke('clipDraft:delete', folderPath, draftId, metaKey),
 
-  clipTagExport: (folderPath: string, outputFilename: string, sourceName: string, clipState: any, draftId?: string | null) =>
-    ipcRenderer.invoke('clip:tagExport', folderPath, outputFilename, sourceName, clipState, draftId),
+  clipTagExport: (folderPath: string, outputFilename: string, sourceName: string, clipState: any, draftId?: string | null, metaKey?: string) =>
+    ipcRenderer.invoke('clip:tagExport', folderPath, outputFilename, sourceName, clipState, draftId, metaKey),
 
   listStreamTemplates: (streamsDir: string) =>
     ipcRenderer.invoke('streams:listTemplates', streamsDir),

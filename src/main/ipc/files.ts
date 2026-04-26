@@ -5,8 +5,14 @@ import { spawnSync, spawn, ChildProcess } from 'child_process'
 import { fileWatcher, WatchRule, WatchEvent } from '../services/fileWatcher'
 import { getStore } from './store'
 
-// FILE_ATTRIBUTE_OFFLINE = 0x1000, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
-const OFFLINE_MASK = 0x1000 | 0x400000
+// Windows attribute flags that indicate the file's data is not resident locally:
+//   0x1000   = FILE_ATTRIBUTE_OFFLINE              (data physically offline)
+//   0x40000  = FILE_ATTRIBUTE_RECALL_ON_OPEN       (opening triggers recall)
+//   0x400000 = FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS (reading triggers recall)
+// REPARSE_POINT (0x400) is intentionally NOT here — Synology Drive (and
+// similar) use reparse points on EVERY file in the synced folder for both
+// placeholders and locally-resident files, so it doesn't distinguish the two.
+const OFFLINE_MASK = 0x1000 | 0x40000 | 0x400000
 
 const activeDownloadPollers = new Map<string, ReturnType<typeof setInterval>>()
 
@@ -39,25 +45,23 @@ function isFileConfirmedLocal(filePath: string): boolean {
 export async function checkLocalFiles(filePaths: string[]): Promise<boolean[]> {
   if (process.platform !== 'win32' || filePaths.length === 0) return filePaths.map(() => true)
 
-  // Windows caps spawn argv at ~32k chars. With many or long paths the single-shot script
-  // hits ENAMETOOLONG and the whole call rejects. Chunk into smaller batches that each
-  // stay well under the limit, then concatenate results.
-  const CHUNK_SIZE = 40
-  const results: boolean[] = []
-  for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
-    const chunk = filePaths.slice(i, i + CHUNK_SIZE)
-    const chunkResult = await runChunk(chunk)
-    results.push(...chunkResult)
-  }
-  return results
+  // Single PowerShell process; paths streamed via stdin to avoid argv limits and
+  // to amortize the ~500ms PowerShell startup over the entire batch instead of
+  // paying it once per chunk. With 1000+ files this drops total time from
+  // double-digit seconds (chunked spawning) to roughly the time of one spawn.
+  return runAttrCheckViaStdin(filePaths)
 }
 
-function runChunk(filePaths: string[]): Promise<boolean[]> {
+function runAttrCheckViaStdin(filePaths: string[]): Promise<boolean[]> {
   return new Promise(resolve => {
-    const escaped = filePaths.map(p => p.replace(/'/g, "''"))
-    const pathsLiteral = escaped.map(p => `'${p}'`).join(',')
-    const script = `@(${pathsLiteral}) | ForEach-Object { try { [int][System.IO.File]::GetAttributes($_) } catch { -1 } }`
-
+    // Reads paths from stdin one per line, prints "<int>" per line in order.
+    // -1 marker for paths whose attributes can't be read (file gone, etc.).
+    const script = `
+      $ErrorActionPreference = 'Continue'
+      while (($line = [Console]::In.ReadLine()) -ne $null) {
+        try { [int][System.IO.File]::GetAttributes($line) } catch { -1 }
+      }
+    `
     let stdout = ''
     const proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script])
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
@@ -71,6 +75,9 @@ function runChunk(filePaths: string[]): Promise<boolean[]> {
       }))
     })
     proc.on('error', () => resolve(filePaths.map(() => true)))
+    // Stream paths to PowerShell. Each path on its own line.
+    proc.stdin.write(filePaths.join('\n') + '\n')
+    proc.stdin.end()
   })
 }
 
@@ -162,6 +169,36 @@ export function registerFilesIPC(): void {
     return fs.existsSync(filePath)
   })
 
+  // Recursive list — used for the player's Session Videos panel so files in
+  // sub-folders (clips/, recordings/, exports/, …) appear in the flat panel
+  // alongside top-level files. Skips dot/underscore-prefixed entries.
+  ipcMain.handle('files:listRecursive', async (_event, dir: string, maxDepth = 4): Promise<FileInfo[]> => {
+    if (!fs.existsSync(dir)) return []
+    const out: FileInfo[] = []
+    const walk = (current: string, depth: number) => {
+      if (depth > maxDepth) return
+      let entries: fs.Dirent[]
+      try { entries = fs.readdirSync(current, { withFileTypes: true }) } catch { return }
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue
+        const entryPath = path.join(current, entry.name)
+        if (entry.isDirectory()) { walk(entryPath, depth + 1); continue }
+        let size = 0, mtime = 0
+        try { const stat = fs.statSync(entryPath); size = stat.size; mtime = stat.mtimeMs } catch {}
+        out.push({
+          name: entry.name,
+          path: entryPath,
+          size,
+          mtime,
+          isDirectory: false,
+          extension: path.extname(entry.name).toLowerCase(),
+        })
+      }
+    }
+    walk(dir, 0)
+    return out
+  })
+
   ipcMain.handle('files:mkdir', async (_event, dirPath: string) => {
     fs.mkdirSync(dirPath, { recursive: true })
   })
@@ -191,6 +228,60 @@ export function registerFilesIPC(): void {
 
   ipcMain.handle('files:checkLocalFiles', async (_event, filePaths: string[]): Promise<boolean[]> => {
     return checkLocalFiles(filePaths)
+  })
+
+  // Diagnostic: returns the raw Windows file attributes for a single path so we
+  // can see exactly which cloud-provider flags it's setting. Useful for
+  // troubleshooting "why is this file being treated as local when it's a
+  // cloud placeholder" issues.
+  ipcMain.handle('files:debugFileAttrs', async (_event, filePath: string): Promise<{
+    exists: boolean
+    raw: number
+    hex: string
+    flags: Record<string, boolean>
+    isLocalByMask: boolean
+  }> => {
+    if (process.platform !== 'win32') {
+      return { exists: fs.existsSync(filePath), raw: 0, hex: '0x0', flags: {}, isLocalByMask: true }
+    }
+    const escaped = filePath.replace(/'/g, "''")
+    const script = `try { [int][System.IO.File]::GetAttributes('${escaped}') } catch { -1 }`
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command', script
+    ], { encoding: 'utf8', timeout: 5000 })
+    const raw = parseInt((result.stdout || '').trim(), 10)
+    if (isNaN(raw) || raw === -1) {
+      return { exists: false, raw: -1, hex: '-1', flags: {}, isLocalByMask: true }
+    }
+    const flags = {
+      READONLY:                 (raw & 0x1)        !== 0,
+      HIDDEN:                   (raw & 0x2)        !== 0,
+      SYSTEM:                   (raw & 0x4)        !== 0,
+      DIRECTORY:                (raw & 0x10)       !== 0,
+      ARCHIVE:                  (raw & 0x20)       !== 0,
+      NORMAL:                   (raw & 0x80)       !== 0,
+      TEMPORARY:                (raw & 0x100)      !== 0,
+      SPARSE_FILE:              (raw & 0x200)      !== 0,
+      REPARSE_POINT:            (raw & 0x400)      !== 0,
+      COMPRESSED:               (raw & 0x800)      !== 0,
+      OFFLINE:                  (raw & 0x1000)     !== 0,
+      NOT_CONTENT_INDEXED:      (raw & 0x2000)     !== 0,
+      ENCRYPTED:                (raw & 0x4000)     !== 0,
+      INTEGRITY_STREAM:         (raw & 0x8000)     !== 0,
+      VIRTUAL:                  (raw & 0x10000)    !== 0,
+      NO_SCRUB_DATA:            (raw & 0x20000)    !== 0,
+      RECALL_ON_OPEN:           (raw & 0x40000)    !== 0,
+      PINNED:                   (raw & 0x80000)    !== 0,
+      UNPINNED:                 (raw & 0x100000)   !== 0,
+      RECALL_ON_DATA_ACCESS:    (raw & 0x400000)   !== 0,
+    }
+    return {
+      exists: true,
+      raw,
+      hex: '0x' + raw.toString(16),
+      flags,
+      isLocalByMask: (raw & OFFLINE_MASK) === 0,
+    }
   })
 
   ipcMain.handle('files:startCloudDownload', async (event, filePath: string) => {

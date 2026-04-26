@@ -8,7 +8,7 @@ import {
   ChevronLeft, ChevronRight, ChevronUp, ChevronsUp, ChevronsDown, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
-  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, LayoutList, LayoutGrid
+  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, LayoutList, LayoutGrid
 } from 'lucide-react'
 
 // Inline SVG brand icons — lucide-react has deprecated all YouTube/Twitch exports
@@ -58,30 +58,91 @@ function toFileUrl(absPath: string): string {
 }
 
 // ─── ThumbImage ──────────────────────────────────────────────────────────────
-// Renders a thumbnail image with cloud-sync recovery: on load error it starts a
-// cloud download and shows a spinner overlay until the file is available locally.
+// Renders a thumbnail image cloud-aware:
+//   - When `isLocal` is false and `hydrate` is false → renders a Cloud icon
+//     and never makes a file:// request. This avoids hanging the renderer on a
+//     broken cloud-provider state (where Windows file APIs block indefinitely).
+//   - When `isLocal` is false and `hydrate` is true → kicks off a cloud
+//     download and shows a spinner; switches to <img> once the file becomes local.
+//   - When `isLocal` is true → renders <img> normally. If the load fails (file
+//     was supposedly local but isn't), falls back to the cloud-download flow.
 
-function ThumbImage({ path, thumbsKey, className, draggable, iconSize = 14, onLoad }: {
+function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, className, placeholderClassName, placeholderStyle, draggable, iconSize = 14, onLoad }: {
   path: string
   thumbsKey: number
+  /** False = file is a cloud placeholder. Default true (legacy callers / sites
+   *  where local-flag isn't computed). */
+  isLocal?: boolean
+  /** When true and the file isn't local, request a cloud download. Used by the
+   *  active image in carousels/lightbox so the user can preview by navigating. */
+  hydrate?: boolean
   className?: string
+  /** Classes applied to the placeholder element (cloud / syncing / error
+   *  states). When omitted, falls back to `className`. Use this when the
+   *  caller's className is image-specific (e.g. object-contain, max-w-[…]) and
+   *  the placeholder needs different sizing rules. */
+  placeholderClassName?: string
+  /** Inline style for the placeholder element. Useful for size constraints
+   *  that can't be expressed cleanly in Tailwind (e.g. min(…, calc(…))). */
+  placeholderStyle?: React.CSSProperties
   draggable?: boolean
   iconSize?: number
   onLoad?: () => void
 }) {
-  const [status, setStatus] = useState<'loading' | 'loaded' | 'syncing'>('loading')
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'syncing' | 'cloud' | 'error'>(
+    isLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud')
+  )
   const [reloadKey, setReloadKey] = useState(0)
 
-  useEffect(() => { setStatus('loading') }, [path, thumbsKey])
-
   useEffect(() => {
-    if (status !== 'syncing') return
-    window.api.startCloudDownload(path).catch(() => {})
+    setStatus(isLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud'))
+  }, [path, thumbsKey, isLocal, hydrate])
+
+  // Listen for cloud-download-done events whenever we're showing a placeholder.
+  // The active hydrate instance kicks off the download; other instances of the
+  // same file (e.g., the filmstrip thumb in a carousel) just listen so they
+  // can swap to <img> once the file becomes local.
+  useEffect(() => {
+    if (status === 'loaded' || status === 'loading') return
     const unsub = window.api.onCloudDownloadDone(done => {
       if (done === path) { setReloadKey(k => k + 1); setStatus('loading') }
     })
     return unsub
   }, [status, path])
+
+  // Active hydrate instance initiates the download and tracks the 30s timeout.
+  // If the cloud provider is broken (Synology Drive in a stuck state, etc.),
+  // the poller in main can run forever — surface an error after 30s.
+  useEffect(() => {
+    if (status !== 'syncing') return
+    window.api.startCloudDownload(path).catch(() => {})
+    const errorTimeoutId = setTimeout(() => setStatus('error'), 30_000)
+    return () => {
+      clearTimeout(errorTimeoutId)
+      window.api.cancelCloudDownload(path).catch(() => {})
+    }
+  }, [status, path])
+
+  // Cloud / syncing / error → render a sized placeholder. NEVER a file://
+  // request here — that's what avoids hanging Chromium on a stuck cloud
+  // provider. The caller controls the placeholder's shape via
+  // placeholderClassName / placeholderStyle (defaults to className).
+  if (status === 'cloud' || status === 'syncing' || status === 'error') {
+    const baseCls = 'flex flex-col items-center justify-center gap-1 bg-navy-800/40'
+    const cls = `${baseCls} ${placeholderClassName ?? className ?? ''}`
+    const tooltip = status === 'syncing' ? 'Downloading from cloud…'
+                  : status === 'error'   ? 'Cloud download failed — provider may be stuck or file is missing'
+                                         : 'Cloud — open in the carousel to download'
+    return (
+      <div className={cls} style={placeholderStyle} title={tooltip}>
+        {status === 'syncing' && <Loader2 size={iconSize} className="text-gray-600 animate-spin" />}
+        {status === 'cloud'   && <Cloud   size={iconSize} className="text-gray-600" />}
+        {status === 'error'   && <AlertTriangle size={iconSize} className="text-yellow-500" />}
+        {status === 'syncing' && <span className="text-[9px] text-gray-600 leading-none">Syncing…</span>}
+        {status === 'error'   && <span className="text-[9px] text-yellow-600 leading-none">Sync failed</span>}
+      </div>
+    )
+  }
 
   const src = `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
 
@@ -96,12 +157,7 @@ function ThumbImage({ path, thumbsKey, className, draggable, iconSize = 14, onLo
       />
       {status !== 'loaded' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-navy-900">
-          {status === 'syncing' && (
-            <>
-              <Loader2 size={iconSize} className="text-gray-600 animate-spin" />
-              <span className="text-[9px] text-gray-600 leading-none">Syncing…</span>
-            </>
-          )}
+          {/* loading state — silent placeholder */}
         </div>
       )}
     </>
@@ -143,7 +199,17 @@ const CATEGORY_STYLES: Record<string, string> = {
   clip:  'text-gray-400 border-gray-600',
 }
 
-function VideoCountTooltip({ videos, videoMap, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; children: React.ReactNode }) {
+/** videoMap is keyed by the video's path relative to its stream folder, forward-slash
+ *  normalized. For flat layouts that's just the basename; for nested layouts (e.g.
+ *  clips/highlight.mp4) it includes the sub-folder. */
+function videoMapKey(folderPath: string, videoPath: string): string {
+  // Normalize both to forward slashes, then strip the folder prefix.
+  const fp = folderPath.replace(/\\/g, '/').replace(/\/$/, '')
+  const vp = videoPath.replace(/\\/g, '/')
+  return vp.startsWith(fp + '/') ? vp.slice(fp.length + 1) : vp.split('/').pop() ?? vp
+}
+
+function VideoCountTooltip({ videos, videoMap, folderPath, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; folderPath: string; children: React.ReactNode }) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number }>({ top: 0, left: 0 })
   const [durations, setDurations] = useState<Record<string, number | null>>({})
@@ -219,13 +285,17 @@ function VideoCountTooltip({ videos, videoMap, children }: { videos: string[]; v
         >
           {videos.map(v => {
             const name = v.split(/[\\/]/).pop() ?? v
-            const entry = videoMap?.[name]
+            const relKey = videoMapKey(folderPath, v)
+            const entry = videoMap?.[relKey]
             const dur = entry?.duration ?? durations[v]
             const isOffline = offlineFiles.has(v)
             const category = entry?.category
+            // For nested files (clips/, recordings/, etc.), show the sub-folder
+            // path so the user can tell which file is which.
+            const display = relKey.includes('/') ? relKey : name
             return (
               <div key={v} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-2 px-3 py-1.5">
-                <span className="text-xs text-gray-300 truncate min-w-0" title={name}>{name}</span>
+                <span className="text-xs text-gray-300 truncate min-w-0" title={display}>{display}</span>
                 <span className="shrink-0">
                   {category
                     ? <span className={`inline-block -translate-y-0.5 text-[10px] font-mono border rounded px-1 ${CATEGORY_STYLES[category] ?? ''}`}>{CATEGORY_LABEL[category] ?? category}</span>
@@ -264,12 +334,14 @@ interface LightboxProps {
   onSetAsThumbnail?: (path: string) => void
   onClose: () => void
   onNavigate: (index: number) => void
+  /** Parallel to `thumbnails`; false → cloud placeholder. */
+  localFlags?: boolean[]
 }
 
-function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onClose, onNavigate }: LightboxProps) {
+function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onClose, onNavigate, localFlags }: LightboxProps) {
   const total = thumbnails.length
   const currentPath = thumbnails[index]
-  const src = `${toFileUrl(currentPath)}${thumbsKey ? `?t=${thumbsKey}` : ''}`
+  const currentIsLocal = localFlags?.[index] ?? true
   const filename = currentPath.split(/[\\/]/).pop() ?? ''
   const isPreferred = preferredThumbnail
     ? filename === preferredThumbnail
@@ -322,14 +394,25 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
       )}
 
       {/* Main image */}
-      <div className="flex flex-col items-center" onClick={e => e.stopPropagation()}>
-        <img
-          key={src}
-          src={src}
-          alt={filename}
-          className="max-h-[75vh] max-w-[85vw] object-contain shadow-2xl shadow-black"
-          draggable={false}
-        />
+      <div className="flex flex-col items-center relative" onClick={e => e.stopPropagation()}>
+        <div className="relative">
+          <ThumbImage
+            key={currentPath}
+            path={currentPath}
+            thumbsKey={thumbsKey ?? 0}
+            isLocal={currentIsLocal}
+            hydrate
+            className="max-h-[75vh] max-w-[85vw] object-contain shadow-2xl shadow-black"
+            placeholderClassName="rounded shadow-2xl shadow-black"
+            placeholderStyle={{
+              // Largest 16:9 box that fits both viewport constraints
+              width: 'min(85vw, calc(75vh * 16 / 9))',
+              aspectRatio: '16 / 9',
+            }}
+            iconSize={48}
+            draggable={false}
+          />
+        </div>
         <div className="mt-3 flex items-center gap-3">
           <p className="text-sm text-gray-400 font-mono">{filename}</p>
           {onSetAsThumbnail && (
@@ -361,8 +444,9 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
 
       {/* Filmstrip */}
       {total > 1 && (
+        <div className="absolute inset-x-0 bottom-5 px-5 flex justify-center pointer-events-none">
         <div
-          className="absolute left-5 right-5 bottom-5 flex gap-2 px-4 py-2 bg-black/60 rounded-xl w-auto overflow-x-scroll"
+          className="flex items-center gap-2 px-4 py-2 bg-black/60 rounded-xl max-w-full overflow-x-auto pointer-events-auto"
           onClick={e => e.stopPropagation()}
         >
           {thumbnails.map((t, i) => (
@@ -370,15 +454,26 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
               key={t}
               ref={el => { filmstripBtnRefs.current[i] = el }}
               onClick={() => onNavigate(i)}
-              className={`shrink-0 h-10 rounded overflow-hidden border-2 transition-all ${
+              className={`shrink-0 h-10 aspect-video bg-navy-600 rounded overflow-hidden border-2 transition-all ${
                 i === index
                   ? 'border-purple-500 opacity-100 scale-105'
                   : 'border-transparent opacity-40 hover:opacity-75'
               }`}
             >
-              <img src={toFileUrl(t)} alt="" className="w-full h-full object-cover" draggable={false} />
+              <div className="relative w-full h-full">
+                <ThumbImage
+                  path={t}
+                  thumbsKey={thumbsKey ?? 0}
+                  isLocal={localFlags?.[i] ?? true}
+                  className="w-full h-full object-cover"
+                  placeholderClassName="w-full h-full"
+                  iconSize={10}
+                  draggable={false}
+                />
+              </div>
             </button>
           ))}
+        </div>
         </div>
       )}
     </div>
@@ -392,9 +487,13 @@ interface ThumbnailCarouselProps {
   thumbsKey?: number
   preferredThumbnail?: string
   onSetAsThumbnail?: (path: string) => void
+  /** Parallel to `thumbnails`. Each element is true if the file's data is local
+   *  on disk; false if it's a cloud-provider placeholder. The active image
+   *  hydrates on demand; other slots show the cloud icon until they become active. */
+  localFlags?: boolean[]
 }
 
-function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail }: ThumbnailCarouselProps) {
+function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail, localFlags }: ThumbnailCarouselProps) {
   const [index, setIndex] = useState(0)
   const [translateX, setTranslateX] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -424,17 +523,31 @@ function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsT
           className="flex items-center gap-2 h-full transition-transform duration-200"
           style={{ transform: `translateX(${translateX}px)` }}
         >
-          {thumbnails.map((t, i) => (
-            <div key={t} ref={el => { imgRefs.current[i] = el }} className="relative h-full shrink-0" onClick={() => setIndex(i)}>
-              <ThumbImage
-                path={t}
-                thumbsKey={thumbsKey ?? 0}
-                className={`h-full w-auto cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
-                iconSize={14}
-                onLoad={recenter}
-              />
-            </div>
-          ))}
+          {thumbnails.map((t, i) => {
+            const slotIsLocal = localFlags?.[i] ?? true
+            // Cloud placeholders need an explicit shape since there's no <img>
+            // to size the slot. Default to 16:9 with a faint background.
+            const slotShapeClasses = slotIsLocal ? 'h-full' : 'h-full aspect-video bg-navy-800/40 rounded'
+            return (
+              <div
+                key={t}
+                ref={el => { imgRefs.current[i] = el }}
+                className={`relative shrink-0 ${slotShapeClasses}`}
+                onClick={() => setIndex(i)}
+              >
+                <ThumbImage
+                  path={t}
+                  thumbsKey={thumbsKey ?? 0}
+                  isLocal={slotIsLocal}
+                  hydrate={i === index}
+                  className={`h-full w-auto cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
+                  placeholderClassName={`w-full h-full rounded cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
+                  iconSize={20}
+                  onLoad={recenter}
+                />
+              </div>
+            )
+          })}
         </div>
         {!single && (
           <>
@@ -493,6 +606,8 @@ interface MetaModalProps {
   defaultBuiltinTemplateId?: string
   useBuiltinByDefault?: boolean
   thumbnails?: string[]
+  /** Parallel to `thumbnails`; false → cloud placeholder. */
+  thumbnailLocalFlags?: boolean[]
   thumbsKey?: number
   preferredThumbnail?: string
   onSetAsThumbnail?: (path: string) => void
@@ -567,7 +682,7 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], s
 
 // panelAnimate built inside StreamsPage so duration can react to slowAnimations setting
 
-function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
   const defaultBuiltinTemplate = builtinTemplates.find(t => t.id === defaultBuiltinTemplateId) ?? builtinTemplates[0] ?? null
   const { navigateToEditor } = useThumbnailEditor()
@@ -1178,6 +1293,7 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
         {thumbnails.length > 0 && (
           <ThumbnailCarousel
             thumbnails={thumbnails}
+            localFlags={thumbnailLocalFlags}
             thumbsKey={thumbsKey}
             preferredThumbnail={localPreferredThumbnail ?? preferredThumbnail}
             onSetAsThumbnail={onSetAsThumbnail ? (path) => {
@@ -2437,7 +2553,7 @@ export function StreamsPage({
   const [showTemplatesModal, setShowTemplatesModal] = useState(false)
   const [tagColors, setTagColors] = useState<Record<string, string>>({})
   const [tagTextures, setTagTextures] = useState<Record<string, string>>({})
-  const [lightbox, setLightbox] = useState<{ thumbnails: string[]; index: number; folderPath: string; folderDate: string; preferredThumbnail: string | undefined } | null>(null)
+  const [lightbox, setLightbox] = useState<{ thumbnails: string[]; localFlags?: boolean[]; index: number; folderPath: string; folderDate: string; preferredThumbnail: string | undefined } | null>(null)
 
   // ── YouTube live detection ─────────────────────────────────────────────────
   const [ytConnectedOuter, setYtConnectedOuter] = useState(false)
@@ -2638,11 +2754,10 @@ export function StreamsPage({
   ])
 
   const getVideosForFolder = async (folder: StreamFolder): Promise<string[]> => {
-    if (isDumpMode) return folder.videos
-    const allFiles = await window.api.listFiles(folder.folderPath)
-    return allFiles
-      .filter((f: any) => !f.isDirectory && VIDEO_EXTS_RENDERER.has(f.extension?.toLowerCase()))
-      .map((f: any) => f.path)
+    // Main's listStreams already walks the stream folder recursively (handles
+    // sub-org layouts like clips/, recordings/, exports/). Just reuse that list
+    // — listFiles is non-recursive and would miss files in sub-folders.
+    return folder.videos
   }
 
   const sendVideo = async (folder: StreamFolder, action: 'player' | 'converter') => {
@@ -2816,18 +2931,21 @@ export function StreamsPage({
             streamType: normalizeStreamTypes(existing.streamType).filter(t => !removing.has(t)),
             games: (existing.games ?? []).filter(g => !removingGames.has(g)),
           }
-      await window.api.writeStreamMeta(f.folderPath, merged)
+      await window.api.writeStreamMeta(f.folderPath, merged, f.relativePath)
       onProgress(++done)
     }
     setShowBulkTag(false)
     await loadFolders(streamsDir)
   }
 
-  const updateFolderMeta = useCallback(async (folderPath: string, meta: StreamMeta) => {
-    await window.api.writeStreamMeta(folderPath, meta)
+  const updateFolderMeta = useCallback(async (folder: StreamFolder, meta: StreamMeta) => {
+    // Pass the canonical relativePath as the meta key. Required in dump mode
+    // where every folder shares folderPath = the dump dir; without this,
+    // all writes would overwrite the same entry.
+    await window.api.writeStreamMeta(folder.folderPath, meta, folder.relativePath)
     suppressNextReload.current = true
     setFolders(prev => prev.map(f => {
-      if (f.folderPath !== folderPath) return f
+      if (f.relativePath !== folder.relativePath) return f
       // If preferredThumbnail changed, optimistically reorder the thumbnails array so the
       // visible thumbnail updates immediately without waiting for a full reload.
       let thumbnails = f.thumbnails
@@ -2847,7 +2965,7 @@ export function StreamsPage({
       await window.api.createStreamFolder(streamsDir, date, finalMeta, thumbnailTemplatePath, prevEpisodeFolderPath, streamMode as any)
       await loadFolders(streamsDir)
     } else if (modal.mode === 'edit' || modal.mode === 'add') {
-      await updateFolderMeta(modal.folder.folderPath, meta)
+      await updateFolderMeta(modal.folder, meta)
     }
   }, [modal, streamsDir, loadFolders, updateFolderMeta])
 
@@ -3394,7 +3512,7 @@ export function StreamsPage({
                         meta: folder.meta ?? undefined,
                       })}
                       onThumbClick={folder.thumbnails.length > 0
-                        ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
+                        ? (i) => setLightbox({ thumbnails: folder.thumbnails, localFlags: folder.thumbnailLocalFlags, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
                         : undefined}
                       thumbsKey={thumbsKey}
                       sameDayIndex={sameDayIndexMap.get(folder.folderPath)}
@@ -3575,7 +3693,7 @@ return (
                     meta: folder.meta ?? undefined,
                   })}
                   onThumbClick={folder.thumbnails.length > 0
-                    ? (i) => setLightbox({ thumbnails: folder.thumbnails, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
+                    ? (i) => setLightbox({ thumbnails: folder.thumbnails, localFlags: folder.thumbnailLocalFlags, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
                     : undefined}
                   thumbsKey={thumbsKey}
                   sameDayIndex={sameDayIndexMap.get(folder.folderPath)}
@@ -3596,6 +3714,7 @@ return (
       {lightbox && (
         <Lightbox
           thumbnails={lightbox.thumbnails}
+          localFlags={lightbox.localFlags}
           index={lightbox.index}
           thumbsKey={thumbsKey}
           preferredThumbnail={lightbox.preferredThumbnail}
@@ -3604,7 +3723,7 @@ return (
             const folder = folders.find(f => f.folderPath === lightbox.folderPath && f.date === lightbox.folderDate)
             if (!folder) return
             const meta: StreamMeta = { ...folderMetaBase(folder), preferredThumbnail: basename }
-            await updateFolderMeta(folder.folderPath, meta)
+            await updateFolderMeta(folder, meta)
             setLightbox(prev => prev ? { ...prev, preferredThumbnail: basename } : null)
           }}
           onClose={() => setLightbox(null)}
@@ -3864,6 +3983,7 @@ return (
               folderDate={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.date : undefined}
               detectedGames={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.detectedGames : []}
               thumbnails={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnails : []}
+              thumbnailLocalFlags={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnailLocalFlags : undefined}
               thumbsKey={thumbsKey}
               preferredThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta?.preferredThumbnail : undefined}
               onSetAsThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? async (filePath) => {
@@ -3871,7 +3991,7 @@ return (
                 const folder = modal.folder
                 const basename = filePath.split(/[\\/]/).pop() ?? ''
                 const meta: StreamMeta = { ...folderMetaBase(folder), preferredThumbnail: basename }
-                await updateFolderMeta(folder.folderPath, meta)
+                await updateFolderMeta(folder, meta)
               } : undefined}
               allGames={allGames}
               allStreamTypes={allStreamTypes}
@@ -3969,7 +4089,7 @@ return (
                 window.api.writeStreamMeta(f.folderPath, {
                   ...f.meta!,
                   streamType: normalizeStreamTypes(f.meta?.streamType).filter(t => t !== tag),
-                })
+                }, f.relativePath)
               )
             ).then(() => {
               const updatedColors = { ...tagColors }
@@ -3992,7 +4112,7 @@ return (
                 const merged = types.includes(survivor)
                   ? types.filter(t => !allDying.has(t))
                   : [survivor, ...types.filter(t => !allDying.has(t))]
-                return window.api.writeStreamMeta(f.folderPath, { ...f.meta!, streamType: merged })
+                return window.api.writeStreamMeta(f.folderPath, { ...f.meta!, streamType: merged }, f.relativePath)
               })
             ).then(() => {
               const updatedColors = { ...tagColors }
@@ -4010,7 +4130,7 @@ return (
                 window.api.writeStreamMeta(f.folderPath, {
                   ...f.meta!,
                   games: (f.meta!.games ?? []).filter(g => g !== game),
-                })
+                }, f.relativePath)
               )
             ).then(() => loadFolders(streamsDir))
           }}
@@ -4025,7 +4145,7 @@ return (
                 const merged = gs.includes(survivor)
                   ? gs.filter(g => !allDying.has(g))
                   : [survivor, ...gs.filter(g => !allDying.has(g))]
-                return window.api.writeStreamMeta(f.folderPath, { ...f.meta!, games: merged })
+                return window.api.writeStreamMeta(f.folderPath, { ...f.meta!, games: merged }, f.relativePath)
               })
             ).then(() => loadFolders(streamsDir))
           }}
@@ -4132,9 +4252,10 @@ function ClampedComment({ text }: { text: string }) {
 // ─── Stream card (grid view) ─────────────────────────────────────────────────
 
 function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
-  const { meta, hasMeta, detectedGames, date, thumbnails, videoCount, videos } = folder
+  const { meta, hasMeta, detectedGames, date, thumbnails, thumbnailLocalFlags, videoCount, videos } = folder
   const displayGames = meta?.games?.length ? meta.games : detectedGames
   const firstThumb = thumbnails[0]
+  const firstThumbLocal = thumbnailLocalFlags?.[0] ?? true
   const extraThumbs = thumbnails.length - 1
   const hasSMThumbnail = thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
 
@@ -4177,6 +4298,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
             <ThumbImage
               path={firstThumb}
               thumbsKey={thumbsKey}
+              isLocal={firstThumbLocal}
               className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
               draggable={false}
               iconSize={18}
@@ -4307,7 +4429,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
       {/* Footer actions */}
       <div className="flex items-center gap-1 px-2 pb-2">
         <div className="mr-auto">
-          <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined}>
+          <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined} folderPath={folder.folderPath}>
             {(() => {
               const vm = meta?.videoMap
               const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount
@@ -4442,9 +4564,10 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
     )
   }
 
-  const { meta, hasMeta, detectedGames, date, thumbnails, videoCount, videos } = folder
+  const { meta, hasMeta, detectedGames, date, thumbnails, thumbnailLocalFlags, videoCount, videos } = folder
   const displayGames = meta?.games?.length ? meta.games : detectedGames
   const firstThumb = thumbnails[0]
+  const firstThumbLocal = thumbnailLocalFlags?.[0] ?? true
   const extraCount = thumbnails.length - 1
   const hasSMThumbnail = thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
 
@@ -4482,6 +4605,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
               <ThumbImage
                 path={firstThumb}
                 thumbsKey={thumbsKey}
+                isLocal={firstThumbLocal}
                 className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                 draggable={false}
                 iconSize={12}
@@ -4515,7 +4639,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
 
       {/* Video count */}
       <td className="px-2 py-2 align-middle w-[44px]">
-        <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined}>
+        <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined} folderPath={folder.folderPath}>
           {(() => {
             const vm = meta?.videoMap
             const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount

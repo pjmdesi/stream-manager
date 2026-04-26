@@ -2,14 +2,20 @@
 
 ## Improvement ideas
 
+0. Support for more folder structures in the app.
+
 1. Add more info to onboarding step 1.5 to tell user about the reasons to not use dump mode (the feature-card grid covering each app area was added; the "why not dump mode" copy is still missing).
 2. Might need another organization mode which is like dump mode, but the user has some organization. For instance, user might have streams placed into year folders, but all the items in each year folder is loose.
 3. Maybe a music folder manager as well? To control and add info to the music that's played during streams through OBS.
-4. Add shorts view & upload functionality. Will need to enhance clipping feature to save shorts more fully. Will need to build a place to manage them. Might need to be a separate shorts page or upgrade the streams page to be able to handle both streams and their related shorts.
-5. Maybe add a button to a completed conversion task to send the source and output files to my other app ClpChk if it's detected on the user's machine. Since it's a deployable app, I may need to update it to add a registry key or something to indicate its location for other apps to find it. This button would send the current stream item or video file to ClpChk for checking and fixing any issues with the clips before uploading.
-6. Need to rebuild / significantly upgrade the bulk archive process to take into account the player & clips functionality. For instance, if the user chooses to append all the video files with "-archive" or something, all the relationships with the clips and their source files will be broken. The archive process needs to take this into account and make sure the _meta.json is updated to adjust the paths to the new filenames.
-7. Rename the comments feature in the stream items to "Notes" instead. Also update the How to Use section.
-8. Implement a recreation of the OBS stream picker for YouTube, to allow selection of scheduled streams through OBS. The ultimate goal would be to create a new stream item in the app, and when it's time to stream, the app automatically sends OBS the details for the YouTube connection. Here is what Claude recommended:
+4. Add shorts upload functionality. Needs to be able to upload to YouTube.
+5. The clipping mode needs to adapt to smaller window sizes, mostly by shortening labels. Also we need to clean up the crop region properties inputs. The up and down arrows are unstyled and too big. The inputs should also be stacked and the input elements should have less padding.
+6. Add a way to distinguish between livestream VODs and regular youtube video posts
+7. Maybe add a button to a completed conversion task to send the source and output files to my other app ClpChk if it's detected on the user's machine. Since it's a deployable app, I may need to update it to add a registry key or something to indicate its location for other apps to find it. This button would send the current stream item or video file to ClpChk for checking and fixing any issues with the clips before uploading.
+8. If a user updates the root stream directory in the settings page, and the app detects no _meta.json file. We need to force the user through the onboarding process again.
+9. Add a main process console viewer for the production version of the app, accessible with a keyboard shortcut.
+10. Need to rebuild / significantly upgrade the bulk archive process to take into account the player & clips functionality. For instance, if the user chooses to append all the video files with "-archive" or something, all the relationships with the clips and their source files will be broken. The archive process needs to take this into account and make sure the _meta.json is updated to adjust the paths to the new filenames.
+11. Rename the comments feature in the stream items to "Notes" instead. Also update the How to Use section.
+12. Implement a recreation of the OBS stream picker for YouTube, to allow selection of scheduled streams through OBS. The ultimate goal would be to create a new stream item in the app, and when it's time to stream, the app automatically sends OBS the details for the YouTube connection. Here is what Claude recommended:
     ```
     Option 3: Build the event picker yourself as a custom dock (the real answer)
     OBS supports custom browser docks, and YouTube's Live Streaming API exposes liveBroadcasts.list which returns exactly what OBS's native picker shows — your scheduled events with their bound stream keys. You build a small local web page that:
