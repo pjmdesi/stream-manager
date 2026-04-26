@@ -9,7 +9,10 @@
         "preview": "electron-vite preview",
         "start": "electron .",
         "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
-        "dist": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && electron-vite build && electron-builder"
+        "dist": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && electron-vite build && electron-builder",
+        "release:patch": "npm version patch && npm run dist",
+        "release:minor": "npm version minor && npm run dist",
+        "release:major": "npm version major && npm run dist"
     },
     "build": {
         "appId": "com.streammanager",

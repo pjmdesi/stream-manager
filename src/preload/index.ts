@@ -217,6 +217,9 @@ contextBridge.exposeInMainWorld('api', {
   listStreams: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
     ipcRenderer.invoke('streams:list', dir, mode),
 
+  detectStreamStructure: (dir: string) =>
+    ipcRenderer.invoke('streams:detectStructure', dir),
+
   writeStreamMeta: (folderPath: string, meta: any, metaKey?: string) =>
     ipcRenderer.invoke('streams:writeMeta', folderPath, meta, metaKey),
 

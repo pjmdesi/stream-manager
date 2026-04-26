@@ -58,6 +58,25 @@ export interface ArchiveProgress {
   error?: string
 }
 
+export interface DetectedStructure {
+  /** Best guess at the user's organizational mode. Empty when nothing was detected. */
+  suggestedMode: 'folder-per-stream' | 'dump-folder' | ''
+  /** Shape of the detected layout, for UI labelling.
+   *  - 'flat'    → date folders sit directly inside the chosen dir
+   *  - 'nested'  → date folders sit under intermediate grouping (e.g. year/month)
+   *  - 'dump'    → dated files in the chosen dir, no date subfolders
+   *  - 'unknown' → nothing recognisable */
+  layoutKind: 'flat' | 'nested' | 'dump' | 'unknown'
+  /** For folder-per-stream: 0 = direct child, 1 = under one grouping level, etc. */
+  nestingDepth: number
+  /** Total stream sessions found. */
+  sessionCount: number
+  /** First few sessions for the preview, newest first. */
+  samples: { date: string; relativePath: string; games: string[] }[]
+  /** Up to 3 example grouping prefixes (e.g. '2026/03-March') so the UI can describe the structure. */
+  groupingHints: string[]
+}
+
 export interface StreamFolder {
   /** Last path segment of the stream folder. Same as relativePath for flat layouts. */
   folderName: string
@@ -843,6 +862,88 @@ export function registerStreamsIPC(): void {
     if (draftId && clipDrafts[draftId]) delete clipDrafts[draftId]
     allMeta[key] = { ...existing, videoMap, clipDrafts }
     writeAllMeta(streamsDir, allMeta)
+  })
+
+  ipcMain.handle('streams:detectStructure', async (_event, dir: string): Promise<DetectedStructure> => {
+    const empty: DetectedStructure = {
+      suggestedMode: '', layoutKind: 'unknown', nestingDepth: 0,
+      sessionCount: 0, samples: [], groupingHints: [],
+    }
+    if (!dir || !fs.existsSync(dir)) return empty
+    let isDir = false
+    try { isDir = fs.statSync(dir).isDirectory() } catch {}
+    if (!isDir) return empty
+
+    const streamFolderPaths = findStreamFolders(dir)
+
+    // Per-stream wins if we found any date-named folders.
+    if (streamFolderPaths.length > 0) {
+      const depths = streamFolderPaths.map(fp => {
+        const rel = path.relative(dir, fp)
+        return rel.split(path.sep).length - 1
+      })
+      const maxDepth = Math.max(...depths)
+      const groupingSet = new Set<string>()
+      for (const fp of streamFolderPaths) {
+        const rel = path.relative(dir, fp)
+        const segments = rel.split(path.sep)
+        if (segments.length > 1) groupingSet.add(segments.slice(0, -1).join('/'))
+      }
+      const samples = streamFolderPaths
+        .slice()
+        .sort((a, b) => path.basename(b).localeCompare(path.basename(a)))
+        .slice(0, 5)
+        .map(fp => ({
+          date: calendarDate(path.basename(fp)),
+          relativePath: metaKey(dir, fp),
+          games: detectGamesFromFolderRecursive(fp),
+        }))
+      return {
+        suggestedMode: 'folder-per-stream',
+        layoutKind: maxDepth === 0 ? 'flat' : 'nested',
+        nestingDepth: maxDepth,
+        sessionCount: streamFolderPaths.length,
+        samples,
+        groupingHints: [...groupingSet].sort().slice(0, 3),
+      }
+    }
+
+    // No date folders → look for dated files in the root (dump layout).
+    const groups = new Map<string, { videos: string[]; thumbnails: string[] }>()
+    try {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) continue
+        const m = e.name.match(DATE_IN_FILENAME_RE)
+        if (!m) continue
+        const date = m[1]
+        if (!groups.has(date)) groups.set(date, { videos: [], thumbnails: [] })
+        const ext = path.extname(e.name).toLowerCase()
+        const filePath = path.join(dir, e.name)
+        if (VIDEO_EXTS.has(ext)) groups.get(date)!.videos.push(filePath)
+        else if (IMAGE_EXTS.has(ext)) groups.get(date)!.thumbnails.push(filePath)
+      }
+    } catch {}
+
+    if (groups.size > 0) {
+      const samples = [...groups.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .slice(0, 5)
+        .map(([date, g]) => ({
+          date,
+          relativePath: date,
+          games: detectGamesFromFiles(g.videos),
+        }))
+      return {
+        suggestedMode: 'dump-folder',
+        layoutKind: 'dump',
+        nestingDepth: 0,
+        sessionCount: groups.size,
+        samples,
+        groupingHints: [],
+      }
+    }
+
+    return empty
   })
 
   ipcMain.handle('streams:listTemplates', async (

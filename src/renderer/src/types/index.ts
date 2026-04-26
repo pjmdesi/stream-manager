@@ -182,6 +182,15 @@ export interface StreamMeta {
   preferredThumbnail?: string
 }
 
+export interface DetectedStructure {
+  suggestedMode: 'folder-per-stream' | 'dump-folder' | ''
+  layoutKind: 'flat' | 'nested' | 'dump' | 'unknown'
+  nestingDepth: number
+  sessionCount: number
+  samples: { date: string; relativePath: string; games: string[] }[]
+  groupingHints: string[]
+}
+
 export interface StreamFolder {
   folderName: string
   folderPath: string

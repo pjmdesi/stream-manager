@@ -11,6 +11,7 @@ import type {
   FileInfo,
   StreamMeta,
   StreamFolder,
+  DetectedStructure,
   ClipDraft,
   YTTitleTemplate,
   YTDescriptionTemplate,
@@ -115,6 +116,7 @@ declare global {
 
       // ── Streams ──────────────────────────────────────────────────────────────
       listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
+      detectStreamStructure(dir: string): Promise<DetectedStructure>
       writeStreamMeta(folderPath: string, meta: StreamMeta, metaKey?: string): Promise<void>
       updateStreamMeta(folderPath: string, partial: Partial<StreamMeta>, metaKey?: string): Promise<void>
       saveClipDraft(folderPath: string, draft: ClipDraft, metaKey?: string): Promise<void>
