@@ -190,13 +190,162 @@ export async function checkEncoderAvailable(name: string): Promise<boolean> {
   return out.includes(name)
 }
 
+/** Whether an encoder *actually works on this machine* — i.e. the hardware
+ *  and runtime libraries it depends on are present. ffmpeg-static is built
+ *  with every GPU encoder family compiled in, so checkEncoderAvailable
+ *  returns true for all of them regardless of hardware. To know if e.g.
+ *  h264_nvenc will actually run, we have to invoke the encoder against a
+ *  synthetic test frame and see whether ffmpeg exits 0 or with a "cannot
+ *  load nvcuda.dll" / "no AMF runtime" / similar error. */
+async function testEncoderRuntime(name: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    if (!ffmpegBin) { resolve(false); return }
+    // Synthetic single-frame source via lavfi → forced yuv420p (most GPU
+    // encoders reject the default yuv444p) → encoder under test → null sink.
+    // <1s on success, near-instant fail when the hardware/runtime is missing.
+    // SIGKILL fallback in case the process hangs (rare but possible with
+    // broken drivers).
+    const proc = spawn(ffmpegBin, [
+      '-hide_banner', '-loglevel', 'warning',
+      // 320×240 chosen to clear every encoder's minimum-dimension check
+      // (notably AV1 NVENC requires ≥144×96 in some driver branches and
+      // others bump it higher; 320×240 is safely above all of them while
+      // still being tiny). ~30 frames so AV1 hardware encoders (which
+      // buffer for B-frame lookahead) actually emit packets before the
+      // source ends.
+      '-f', 'lavfi', '-i', 'color=size=320x240:rate=30:duration=1',
+      '-pix_fmt', 'yuv420p',
+      '-c:v', name,
+      '-f', 'null', '-',
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderrBuf = ''
+    proc.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString('utf8') })
+    let settled = false
+    const finish = (ok: boolean, exitCode?: number | null) => {
+      if (settled) return
+      settled = true
+      // Full stderr dump on failure so we can diagnose without truncation.
+      if (!ok) {
+        const trimmed = stderrBuf.trim() || '(no stderr)'
+        console.warn(`[encoder-probe] ${name} failed (exit ${exitCode}):\n  ${trimmed.replace(/\n/g, '\n  ')}`)
+      }
+      try { proc.kill('SIGKILL') } catch {}
+      resolve(ok)
+    }
+    proc.on('close', code => finish(code === 0, code))
+    proc.on('error', () => finish(false))
+    setTimeout(() => finish(false), 5000)
+  })
+}
+
+type GpuMakers = { nvidia: boolean; amd: boolean; intel: boolean }
+
+let _gpuMakersCache: GpuMakers | null = null
+
+/** Query Windows for installed GPU adapters and map each to a vendor flag.
+ *  More reliable than runtime encoder probing because some encoders' runtime
+ *  init succeeds on the wrong adapter (AMF will sometimes init against an
+ *  Intel iGPU when no AMD GPU is present, producing a false positive). WMI
+ *  reports the actual hardware. */
+async function detectGpuMakersViaWMI(): Promise<GpuMakers> {
+  if (_gpuMakersCache) return _gpuMakersCache
+  const empty: GpuMakers = { nvidia: false, amd: false, intel: false }
+  if (process.platform !== 'win32') {
+    _gpuMakersCache = empty
+    return empty
+  }
+  return new Promise<GpuMakers>(resolve => {
+    const proc = spawn('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join '|'"
+    ], { stdio: ['ignore', 'pipe', 'ignore'] })
+    let out = ''
+    proc.stdout.on('data', c => { out += c.toString('utf8') })
+    const finish = () => {
+      // Each GPU on its own line. Most names contain a clear vendor token
+      // (NVIDIA "GeForce…", AMD "Radeon…", Intel "Intel(R) …"). Patterns are
+      // intentionally narrow — a stray "AMD" elsewhere in a description
+      // shouldn't flip the AMF flag on. Specifically: AMD requires "Radeon"
+      // or "Vega" (every shipping AMD GPU has one of those tokens).
+      const adapters = out.split('|').map(s => s.trim()).filter(Boolean)
+      const lower = adapters.join(' | ').toLowerCase()
+      const result: GpuMakers = {
+        nvidia: /nvidia|geforce|quadro|tesla/.test(lower),
+        amd:    /radeon|\bvega\b/.test(lower),
+        intel:  /intel\(r\)|uhd graphics|iris|\barc /.test(lower),
+      }
+      console.log(`[gpu-detect] adapters: ${adapters.join(' | ') || '<none>'}`)
+      console.log(`[gpu-detect] makers:`, result)
+      _gpuMakersCache = result
+      resolve(result)
+    }
+    proc.on('close', finish)
+    proc.on('error', () => { _gpuMakersCache = empty; resolve(empty) })
+    setTimeout(() => { try { proc.kill() } catch {}; resolve(empty) }, 5000)
+  })
+}
+
+const GPU_ENCODER_CANDIDATES = [
+  'h264_nvenc', 'hevc_nvenc', 'av1_nvenc',
+  'h264_qsv',   'hevc_qsv',   'av1_qsv',
+  'h264_amf',   'hevc_amf',   'av1_amf',
+] as const
+
+let _availableEncodersCache: Set<string> | null = null
+
+/** Returns the set of GPU encoder names that actually work on this machine.
+ *  Two-step detection:
+ *    1. Query Windows for installed GPU vendors (NVIDIA / AMD / Intel).
+ *       Hardware-truthful — encoder names are gated by vendor presence.
+ *    2. For AV1 encoders specifically, also runtime-probe — they require
+ *       very recent GPU generations (RTX 40 / RX 7000 / Arc) and the
+ *       vendor flag alone isn't enough.
+ *  CPU encoders aren't probed; they're always assumed available. */
+export async function detectAvailableEncoders(): Promise<Set<string>> {
+  if (_availableEncodersCache) return _availableEncodersCache
+  const compiled = await getEncodersOutput()
+  const makers = await detectGpuMakersViaWMI()
+
+  const isCompiled = (n: string) => compiled.includes(n)
+  const result = new Set<string>()
+
+  // h264 / h265: vendor present is sufficient — NVENC/QSV/AMF for these
+  // codecs has shipped on essentially every supported GPU generation.
+  if (makers.nvidia && isCompiled('h264_nvenc')) result.add('h264_nvenc')
+  if (makers.nvidia && isCompiled('hevc_nvenc')) result.add('hevc_nvenc')
+  if (makers.intel  && isCompiled('h264_qsv'))   result.add('h264_qsv')
+  if (makers.intel  && isCompiled('hevc_qsv'))   result.add('hevc_qsv')
+  if (makers.amd    && isCompiled('h264_amf'))   result.add('h264_amf')
+  if (makers.amd    && isCompiled('hevc_amf'))   result.add('hevc_amf')
+
+  // AV1: probe at runtime in addition to the vendor check, because hardware
+  // AV1 needs specific GPU generations (NVIDIA RTX 40+, AMD RX 7000+, Intel
+  // Arc+). Probing in parallel keeps the wait minimal.
+  const av1Probes: Promise<void>[] = []
+  if (makers.nvidia && isCompiled('av1_nvenc')) {
+    av1Probes.push(testEncoderRuntime('av1_nvenc').then(ok => { if (ok) result.add('av1_nvenc') }))
+  }
+  if (makers.intel && isCompiled('av1_qsv')) {
+    av1Probes.push(testEncoderRuntime('av1_qsv').then(ok => { if (ok) result.add('av1_qsv') }))
+  }
+  if (makers.amd && isCompiled('av1_amf')) {
+    av1Probes.push(testEncoderRuntime('av1_amf').then(ok => { if (ok) result.add('av1_amf') }))
+  }
+  await Promise.all(av1Probes)
+
+  _availableEncodersCache = result
+  return result
+}
+
 async function detectGpuVendor(): Promise<GpuVendor> {
   if (_gpuVendorCache !== undefined) return _gpuVendorCache
-  const out = await getEncodersOutput()
+  // Real hardware probe — picks the first family that actually works, not
+  // just the first one compiled in.
+  const available = await detectAvailableEncoders()
   const vendor: GpuVendor =
-    out.includes('h264_nvenc') ? 'nvenc' :
-    out.includes('h264_amf')   ? 'amf'   :
-    out.includes('h264_qsv')   ? 'qsv'   : null
+    available.has('h264_nvenc') ? 'nvenc' :
+    available.has('h264_qsv')   ? 'qsv'   :
+    available.has('h264_amf')   ? 'amf'   : null
   _gpuVendorCache = vendor
   return vendor
 }

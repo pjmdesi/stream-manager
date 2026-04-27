@@ -143,6 +143,9 @@ contextBridge.exposeInMainWorld('api', {
   checkEncoderAvailable: (name: string) =>
     ipcRenderer.invoke('converter:checkEncoderAvailable', name),
 
+  detectAvailableEncoders: () =>
+    ipcRenderer.invoke('converter:detectAvailableEncoders'),
+
   importPreset: (filePath: string) =>
     ipcRenderer.invoke('converter:importPreset', filePath),
 
@@ -154,6 +157,9 @@ contextBridge.exposeInMainWorld('api', {
 
   renameImportedPreset: (id: string, newName: string) =>
     ipcRenderer.invoke('converter:renameImportedPreset', id, newName),
+
+  saveCustomPreset: (preset: any) =>
+    ipcRenderer.invoke('converter:saveCustomPreset', preset),
 
   addToQueue: (job: any) =>
     ipcRenderer.invoke('converter:addToQueue', job),

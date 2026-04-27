@@ -302,6 +302,11 @@ app.whenReady().then(() => {
     registerLauncherIPC()
     registerClaudeIPC()
     registerThumbnailIPC()
+
+    // Eagerly probe available GPU encoders so the preset editor's encoder
+    // dropdown is instant when the user opens it. Result is cached in
+    // ffmpegService for the lifetime of the process.
+    import('./services/ffmpegService').then(m => m.detectAvailableEncoders().catch(() => {}))
   })
 
   app.on('activate', function () {

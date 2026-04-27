@@ -79,10 +79,12 @@ declare global {
       // ── Converter ────────────────────────────────────────────────────────────
       getBuiltinPresets(): Promise<ConversionPreset[]>
       checkEncoderAvailable(name: string): Promise<boolean>
+      detectAvailableEncoders(): Promise<string[]>
       importPreset(filePath: string): Promise<ConversionPreset>
       getImportedPresets(): Promise<ConversionPreset[]>
       deleteImportedPreset(id: string): Promise<void>
       renameImportedPreset(id: string, newName: string): Promise<void>
+      saveCustomPreset(preset: ConversionPreset): Promise<string>
       addToQueue(job: ConversionJob): Promise<string>
       addQueuedGroup(jobs: ConversionJob[]): Promise<string[]>
       addClipToQueue(params: {

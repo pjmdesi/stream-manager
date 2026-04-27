@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
-import { X, XCircle, FolderOpen, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Upload, Trash2, Pencil, Archive, Ban, Pause, Play, Star, Cloud } from 'lucide-react'
+import { X, XCircle, FolderOpen, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Upload, Trash2, Pencil, Archive, Ban, Pause, Play, Star, Cloud, Plus } from 'lucide-react'
+import { PresetEditorModal } from '../preset-editor/PresetEditorModal'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob } from '../../types'
 import { Button } from '../ui/Button'
@@ -76,6 +77,9 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   const { jobs, setJobs } = useConversionJobs()
   const [queuedFiles, setQueuedFiles] = useState<string[]>([])
   const [importing, setImporting] = useState(false)
+  // Custom preset editor (form-based; raw-args via the Advanced section).
+  const [presetEditorOpen, setPresetEditorOpen] = useState(false)
+  const [editingPreset, setEditingPreset] = useState<ConversionPreset | null>(null)
   const [importError, setImportError] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [autoDeletePartial, setAutoDeletePartial] = useState(false)
@@ -527,11 +531,20 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
         </div>
 
         </div>
-        {/* Import button */}
+        {/* Create + Import buttons */}
         <div className="p-3 border-t border-white/5 flex flex-col gap-2">
           {importError && (
             <p className="text-xs text-red-400 leading-tight">{importError}</p>
           )}
+          <Button
+            variant="primary"
+            size="sm"
+            className="w-full"
+            icon={<Plus size={12} />}
+            onClick={() => { setEditingPreset(null); setPresetEditorOpen(true) }}
+          >
+            New Custom Preset
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -540,7 +553,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             onClick={importPreset}
             disabled={importing}
           >
-            Import JSON Preset
+            Import HandBrake JSON
           </Button>
         </div>
       </div>
@@ -752,6 +765,25 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
         </div>
       </div>
     </Modal>
+
+    {/* Custom preset editor — opened via the "New Custom Preset" button (creation)
+        or via the imported-preset list (edit). On save, the IPC persists the preset
+        and we update the local list. */}
+    <PresetEditorModal
+      isOpen={presetEditorOpen}
+      onClose={() => { setPresetEditorOpen(false); setEditingPreset(null) }}
+      editing={editingPreset}
+      onSave={async (preset) => {
+        await window.api.saveCustomPreset(preset)
+        setImportedPresets(prev => {
+          const idx = prev.findIndex(p => p.id === preset.id)
+          return idx >= 0 ? prev.map((p, i) => i === idx ? preset : p) : [...prev, preset]
+        })
+        setSelectedPreset(preset)
+        setPresetEditorOpen(false)
+        setEditingPreset(null)
+      }}
+    />
     </>
   )
 }

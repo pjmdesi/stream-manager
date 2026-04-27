@@ -70,6 +70,31 @@ export interface WatchEvent {
   error?: string
 }
 
+/** Form state for the simplified custom-preset editor. Stored on the preset so
+ *  it can be re-opened in form mode. Absent for raw-text or HandBrake-imported
+ *  presets (those open in Advanced mode only). */
+export interface CustomPresetForm {
+  container: 'mp4' | 'mkv' | 'mov' | 'webm'
+  video: {
+    codec: 'h264' | 'h265' | 'av1' | 'copy'
+    encoder: 'cpu' | 'nvenc' | 'qsv' | 'amf'
+    /** 0 (fastest, lower quality) → 100 (slowest, highest quality). Drives
+     *  both the CRF/CQ value and the speed preset for the chosen encoder. */
+    quality: number
+  }
+  audio: {
+    codec: 'aac' | 'mp3' | 'opus' | 'copy' | 'none'
+    bitrate: number
+    channels: 'original' | 'stereo' | 'mono'
+    /** When true, every audio track in the input is preserved (re-encoded
+     *  with the same codec/bitrate, or copied if codec='copy'). When false
+     *  (default), ffmpeg's default behaviour applies: only the first audio
+     *  stream is included. Most useful for OBS multi-track recordings
+     *  (game/mic/music). */
+    keepAllTracks?: boolean
+  }
+}
+
 export interface ConversionPreset {
   id: string
   name: string
@@ -77,6 +102,8 @@ export interface ConversionPreset {
   ffmpegArgs: string
   outputExtension: string
   isBuiltin: boolean
+  source?: 'imported' | 'custom'
+  customForm?: CustomPresetForm
 }
 
 

@@ -5,6 +5,35 @@ import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import { getStore } from './store'
 
+/** Form state for the simplified custom-preset editor. Stored on the preset so
+ *  the user can re-open and edit it in form mode later, and so exports preserve
+ *  enough metadata for a recipient to do the same. Absent for raw-text presets
+ *  (and HandBrake-imported presets) — those open in Advanced mode only. */
+export interface CustomPresetForm {
+  container: 'mp4' | 'mkv' | 'mov' | 'webm'
+  video: {
+    codec: 'h264' | 'h265' | 'av1' | 'copy'
+    /** Only meaningful when codec !== 'copy'. */
+    encoder: 'cpu' | 'nvenc' | 'qsv' | 'amf'
+    /** 0 (fastest, lower quality) → 100 (slowest, highest quality). Combined
+     *  with the codec/encoder choice this controls both the CRF/CQ value AND
+     *  the speed preset — they're tied together because a slower preset always
+     *  produces better quality at the same numeric CRF. */
+    quality: number
+  }
+  audio: {
+    codec: 'aac' | 'mp3' | 'opus' | 'copy' | 'none'
+    /** kbps. Ignored when codec is 'copy' or 'none'. */
+    bitrate: number
+    channels: 'original' | 'stereo' | 'mono'
+    /** When true, every audio track in the input is preserved (re-encoded
+     *  with the same codec/bitrate, or copied if codec='copy'). When false
+     *  (default), ffmpeg's default behaviour applies: only the first audio
+     *  stream is included. Most useful for OBS multi-track recordings. */
+    keepAllTracks?: boolean
+  }
+}
+
 export interface ConversionPreset {
   id: string
   name: string
@@ -12,6 +41,13 @@ export interface ConversionPreset {
   ffmpegArgs: string
   outputExtension: string
   isBuiltin: boolean
+  /** Where this preset came from. 'imported' = HandBrake JSON; 'custom' =
+   *  built in the simplified editor. Only set for non-builtin presets. */
+  source?: 'imported' | 'custom'
+  /** Snapshot of the form state when the preset was authored in the simplified
+   *  editor. Lets the user re-open and edit in form mode. Absent when the
+   *  preset was authored in Advanced (raw-args) mode or imported from HandBrake. */
+  customForm?: CustomPresetForm
 }
 
 /** Hook fired by the converter once every job in a group has succeeded. The
@@ -574,6 +610,15 @@ export function registerConverterIPC(): void {
     return checkEncoderAvailable(name)
   })
 
+  /** Returns the set of GPU encoder names that actually work on this machine
+   *  (probed by invoking each one against a synthetic frame). Differs from
+   *  checkEncoderAvailable, which only tells you whether the encoder is
+   *  compiled into the binary. */
+  ipcMain.handle('converter:detectAvailableEncoders', async (): Promise<string[]> => {
+    const { detectAvailableEncoders } = await import('../services/ffmpegService')
+    return [...await detectAvailableEncoders()]
+  })
+
   ipcMain.handle('converter:importPreset', async (_event, srcPath: string) => {
     const content = fs.readFileSync(srcPath, 'utf-8')
     const data = JSON.parse(content)
@@ -632,6 +677,26 @@ export function registerConverterIPC(): void {
     const store = getStore()
     const presets: ConversionPreset[] = store.get('importedPresets', []) as ConversionPreset[]
     store.set('importedPresets', presets.map(p => p.id === id ? { ...p, name: newName.trim() } : p))
+  })
+
+  /** Save a preset built in the simplified editor. Stored alongside imported
+   *  presets — same store key, distinguished by `source: 'custom'`. */
+  ipcMain.handle('converter:saveCustomPreset', async (_event, preset: ConversionPreset): Promise<string> => {
+    const id = preset.id || `custom-${uuidv4()}`
+    const stored: ConversionPreset = {
+      ...preset,
+      id,
+      isBuiltin: false,
+      source: 'custom',
+    }
+    const store = getStore()
+    const existing = store.get('importedPresets', []) as ConversionPreset[]
+    // If an id was provided and already exists, treat as edit (replace in
+    // place, preserving order).
+    const idx = existing.findIndex(p => p.id === id)
+    const next = idx >= 0 ? existing.map((p, i) => i === idx ? stored : p) : [...existing, stored]
+    store.set('importedPresets', next)
+    return id
   })
 
   ipcMain.handle('converter:addToQueue', async (_event, job: ConversionJob) => {
