@@ -2468,6 +2468,21 @@ export function StreamsPage({
   const MAX_THUMB_WIDTH = 170
   const [thumbWidth, setThumbWidth] = useState(() => config.listThumbWidth ?? MIN_THUMB_WIDTH)
   const dragThumbWidthRef = useRef(thumbWidth)
+  // The StoreContext loads config asynchronously, so on first mount the
+  // useState initializer above sees the default config (listThumbWidth = 85)
+  // before the real persisted value arrives. This effect re-syncs once the
+  // store finishes loading. Subsequent updateConfig calls also flow through
+  // here but as a no-op since the value matches.
+  useEffect(() => {
+    if (configLoading) return
+    if (typeof config.listThumbWidth !== 'number') return
+    if (config.listThumbWidth === thumbWidth) return
+    setThumbWidth(config.listThumbWidth)
+    dragThumbWidthRef.current = config.listThumbWidth
+    // Intentionally not depending on thumbWidth — we only want this to fire
+    // when the store's value changes (initial load + cross-tab updates).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configLoading, config.listThumbWidth])
   const listScrollRef = useRef<HTMLDivElement>(null)
   const dragThumbElRef = useRef<HTMLElement | null>(null)
   const dragStartThumbTopRef = useRef<number>(0)
@@ -4245,17 +4260,29 @@ function TreeView({ nodes, depth, rootName }: { nodes: TreeNode[]; depth: number
 // ─── Clamped tooltip ─────────────────────────────────────────────────────────
 // Only renders the Tooltip when the text is actually truncated by line-clamp.
 
-function ClampedComment({ text }: { text: string }) {
+function ClampedComment({ text, maxLines = 3 }: { text: string; maxLines?: number }) {
   const spanRef = useRef<HTMLSpanElement>(null)
   const [clamped, setClamped] = useState(false)
 
   useEffect(() => {
     const el = spanRef.current
     if (el) setClamped(el.scrollHeight > el.clientHeight)
-  }, [text])
+  }, [text, maxLines])
 
+  // Inline -webkit-line-clamp lets each instance use a different clamp value
+  // (the Tailwind line-clamp-N classes can't be parameterised). The element
+  // still needs `display: -webkit-box` and the orient property for the clamp
+  // to take effect.
   const span = (
-    <span ref={spanRef} className="text-[10px] leading-tight text-gray-400 line-clamp-3 whitespace-pre-wrap">
+    <span
+      ref={spanRef}
+      className="text-[10px] leading-tight text-gray-400 whitespace-pre-wrap overflow-hidden"
+      style={{
+        display: '-webkit-box',
+        WebkitLineClamp: maxLines,
+        WebkitBoxOrient: 'vertical',
+      }}
+    >
       {text}
     </span>
   )
@@ -4750,11 +4777,27 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             })()}
           </div>
         </div>
-        {(meta?.ytTitle || meta?.twitchTitle) && (
-          <Tooltip content={meta.ytTitle || meta.twitchTitle} side="bottom" triggerClassName="block">
-            <div className="text-[10px] leading-normal text-gray-400 truncate max-w-[204px] overflow-auto">{meta.ytTitle || meta.twitchTitle}</div>
-          </Tooltip>
-        )}
+        {(meta?.ytTitle || meta?.twitchTitle) && (() => {
+          // Wrap to as many lines as fit in the thumbnail's height. text-[10px]
+          // with leading-normal (1.5) is ~15px per line; row's vertical real
+          // estate is roughly the thumb height (thumbWidth * 9/16). Account
+          // for the date row above (~20px).
+          const titleLines = Math.max(1, Math.floor(((thumbWidth * 9 / 16) - 20) / 15))
+          return (
+            <Tooltip content={meta.ytTitle || meta.twitchTitle} side="bottom" triggerClassName="block">
+              <div
+                className="text-[10px] leading-normal text-gray-400 max-w-[204px] overflow-hidden"
+                style={{
+                  display: '-webkit-box',
+                  WebkitLineClamp: titleLines,
+                  WebkitBoxOrient: 'vertical',
+                }}
+              >
+                {meta.ytTitle || meta.twitchTitle}
+              </div>
+            </Tooltip>
+          )
+        })()}
       </td>
 
       {/* Type */}
@@ -4801,10 +4844,14 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
         )}
       </td>
 
-      {/* Comments */}
+      {/* Comments — clamp scales with thumbnail height (mirrors the title
+          column). text-[10px] + leading-tight is ~12.5px per line. */}
       <td className="px-2 py-2 align-middle hidden xl:table-cell">
         {meta?.comments ? (
-          <ClampedComment text={meta.comments} />
+          <ClampedComment
+            text={meta.comments}
+            maxLines={Math.max(2, Math.floor((thumbWidth * 9 / 16) / 12.5))}
+          />
         ) : (
           <span className="text-xs text-gray-700">—</span>
         )}
