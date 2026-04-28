@@ -127,7 +127,12 @@ export function registerStoreIPC(): void {
   ipcMain.handle('store:setConfig', async (_event, partial: Partial<AppConfig>) => {
     const s = getStore()
     const current = s.get('config', getDefaultConfig())
-    s.set('config', { ...current, ...partial })
+    const next = { ...current, ...partial }
+    s.set('config', next)
+    if (partial.streamsDir !== undefined && partial.streamsDir !== current.streamsDir) {
+      const { invalidateCloudSyncCache } = await import('./cloudSync')
+      invalidateCloudSyncCache()
+    }
   })
 
   ipcMain.handle('store:getWatchRules', async () => {

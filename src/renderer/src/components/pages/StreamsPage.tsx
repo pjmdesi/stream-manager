@@ -38,6 +38,7 @@ import { Modal } from '../ui/Modal'
 import { TagComboBox } from '../ui/TagComboBox'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
+import { CloudOffloadModal } from '../CloudOffloadModal'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
 import { getTagColor, getTagTextureStyle, pickColorForNewTag, pickTextureForNewTag } from '../../constants/tagColors'
@@ -2546,6 +2547,15 @@ export function StreamsPage({
   // Startup warning: archive preset configured but missing
   const [archivePresetWarning, setArchivePresetWarning] = useState(false)
 
+  // Cloud-sync offload feature: only enabled when streamsDir is inside a CFAPI
+  // sync root (Synology Drive Client / OneDrive / etc.). Probed once at mount.
+  const [cloudSyncActive, setCloudSyncActive] = useState(false)
+  useEffect(() => {
+    window.api.cloudSyncIsActive().then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
+  }, [])
+  const [cloudOpInFlight, setCloudOpInFlight] = useState(false)
+  const [offloadModalFiles, setOffloadModalFiles] = useState<{ path: string; size: number }[] | null>(null)
+
   // Orphan (missing folder) handling
   const [orphanConfirmOpen, setOrphanConfirmOpen] = useState(false)
   const [orphanDismissed, setOrphanDismissed] = useState(false)
@@ -2931,6 +2941,48 @@ export function StreamsPage({
     setShowPresetPicker(true)
   }
 
+  // Walk every selected stream folder recursively and return all FILES with
+  // their sizes (no directories). Used by both offload and pin so the
+  // operation covers every asset in the folder — videos, thumbnails, source
+  // files, anything else the user dropped in. The backend protection filter
+  // silently keeps the preferredThumbnail local.
+  const collectSelectedFolderFiles = async (): Promise<{ path: string; size: number }[]> => {
+    const selectedFolders = folders.filter(f => selectedPaths.has(selectionKey(f)))
+    const all: { path: string; size: number }[] = []
+    for (const f of selectedFolders) {
+      try {
+        const entries = await window.api.listFilesRecursive(f.folderPath, 6)
+        for (const e of entries) if (!e.isDirectory) all.push({ path: e.path, size: e.size })
+      } catch {
+        // Folder gone or permission issue — fall back to known videos so the
+        // operation still does something rather than silently skipping.
+        for (const v of f.videos) all.push({ path: v, size: 0 })
+      }
+    }
+    return all
+  }
+
+  const clickOffload = async () => {
+    if (!cloudSyncActive || selectedPaths.size === 0 || cloudOpInFlight) return
+    const files = await collectSelectedFolderFiles()
+    if (files.length === 0) return
+    setOffloadModalFiles(files)
+    toggleSelectMode()
+  }
+
+  const clickPinLocal = async () => {
+    if (!cloudSyncActive || selectedPaths.size === 0 || cloudOpInFlight) return
+    setCloudOpInFlight(true)
+    try {
+      const files = await collectSelectedFolderFiles()
+      if (files.length === 0) return
+      await window.api.cloudSyncPin(files.map(f => f.path))
+    } finally {
+      setCloudOpInFlight(false)
+      toggleSelectMode()
+    }
+  }
+
   const handleBulkEditTags = async (
     mode: 'add' | 'remove',
     editStreamTypes: string[],
@@ -3249,6 +3301,32 @@ export function StreamsPage({
                 <span className="hidden wide:inline">Edit Tags {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
               </Button>
             </Tooltip>
+            {cloudSyncActive && (
+              <>
+                <Tooltip content="Offload selected streams to cloud (frees local disk; thumbnails stay local)" side="bottom">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<CloudOff size={14} />}
+                    onClick={clickOffload}
+                    disabled={selectedPaths.size === 0 || cloudOpInFlight}
+                  >
+                    <span className="hidden wide:inline">Offload {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Pin selected streams local (always keep on disk)" side="bottom">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Cloud size={14} />}
+                    onClick={clickPinLocal}
+                    disabled={selectedPaths.size === 0 || cloudOpInFlight}
+                  >
+                    <span className="hidden wide:inline">Pin Local {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
+                  </Button>
+                </Tooltip>
+              </>
+            )}
             <Tooltip content="Archive selected streams" side="bottom">
               <Button
                 variant="primary"
@@ -4196,6 +4274,13 @@ return (
         isOpen={showTemplatesModal}
         onClose={() => setShowTemplatesModal(false)}
         onSaved={() => {}}
+      />
+
+      {/* Cloud offload progress */}
+      <CloudOffloadModal
+        isOpen={!!offloadModalFiles}
+        onClose={() => setOffloadModalFiles(null)}
+        files={offloadModalFiles ?? []}
       />
 
       {/* Bulk tag */}

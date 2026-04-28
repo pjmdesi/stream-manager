@@ -65,6 +65,30 @@ declare global {
       cancelCloudDownload(filePath: string): Promise<void>
       onCloudDownloadDone(cb: (filePath: string) => void): () => void
 
+      // ── Cloud sync (offload) ─────────────────────────────────────────────────
+      cloudSyncIsActive(): Promise<boolean>
+      cloudSyncOffload(paths: string[]): Promise<{
+        ok: string[]
+        failed: { path: string; reason: string }[]
+        skipped: string[]
+        skippedAlreadyOffline: string[]
+        cancelled: boolean
+      }>
+      cloudSyncCancelOffload(): Promise<void>
+      cloudSyncPin(paths: string[]): Promise<{
+        ok: string[]
+        failed: { path: string; reason: string }[]
+      }>
+      cloudSyncHydrate(paths: string[]): Promise<{
+        ok: string[]
+        failed: { path: string; reason: string }[]
+      }>
+      onCloudSyncProgress(cb: (event:
+        | { type: 'init'; eligible: string[]; skippedProtected: string[] }
+        | { type: 'item'; path: string; status: 'running' | 'done' | 'already-offline' | 'failed'; reason?: string }
+        | { type: 'complete'; ok: number; failed: number; alreadyOffline: number; cancelled: boolean }
+      ) => void): () => void
+
       // ── File Watcher ─────────────────────────────────────────────────────────
       startWatcher(rules: WatchRule[]): Promise<void>
       stopWatcher(): Promise<void>

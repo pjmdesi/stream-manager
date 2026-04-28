@@ -456,14 +456,14 @@ function AppInner() {
           {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} collapsed={sidebarCollapsed} />}
           <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
-          <div className="py-1 flex justify-center gap-2 w-full">
+          <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
             <button
               onClick={() => setHelpOpen(true)}
               className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
             >
-              How to use
+              {sidebarCollapsed ? 'Help' : 'How to use'}
             </button>
-            <span className="text-[10px] text-gray-600">·</span>
+            {!sidebarCollapsed && <span className="text-[10px] text-gray-600">·</span>}
             <button
               onClick={() => setAboutOpen(true)}
               className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"

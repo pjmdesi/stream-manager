@@ -101,6 +101,34 @@ contextBridge.exposeInMainWorld('api', {
   cancelCloudDownload: (filePath: string) =>
     ipcRenderer.invoke('files:cancelCloudDownload', filePath),
 
+  // ── Cloud sync (offload to NAS / OneDrive / etc.) ──────────────────────────
+  cloudSyncIsActive: (): Promise<boolean> =>
+    ipcRenderer.invoke('cloud-sync:is-active'),
+
+  cloudSyncOffload: (paths: string[]): Promise<{ ok: string[]; failed: { path: string; reason: string }[]; skipped: string[]; skippedAlreadyOffline: string[]; cancelled: boolean }> =>
+    ipcRenderer.invoke('cloud-sync:offload', paths),
+
+  cloudSyncCancelOffload: (): Promise<void> =>
+    ipcRenderer.invoke('cloud-sync:cancel-offload'),
+
+  cloudSyncPin: (paths: string[]): Promise<{ ok: string[]; failed: { path: string; reason: string }[] }> =>
+    ipcRenderer.invoke('cloud-sync:pin', paths),
+
+  cloudSyncHydrate: (paths: string[]): Promise<{ ok: string[]; failed: { path: string; reason: string }[] }> =>
+    ipcRenderer.invoke('cloud-sync:hydrate', paths),
+
+  onCloudSyncProgress: (
+    callback: (event:
+      | { type: 'init'; eligible: string[]; skippedProtected: string[] }
+      | { type: 'item'; path: string; status: 'running' | 'done' | 'already-offline' | 'failed'; reason?: string }
+      | { type: 'complete'; ok: number; failed: number; alreadyOffline: number; cancelled: boolean }
+    ) => void
+  ) => {
+    const handler = (_e: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('cloud-sync:progress', handler)
+    return () => ipcRenderer.removeListener('cloud-sync:progress', handler)
+  },
+
   onCloudDownloadDone: (callback: (filePath: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, filePath: string) => callback(filePath)
     ipcRenderer.on('files:cloudDownloadDone', handler)

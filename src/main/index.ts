@@ -54,6 +54,7 @@ import { registerVideoPopupIPC } from './ipc/videoPopup'
 import { registerLauncherIPC } from './ipc/launcher'
 import { registerClaudeIPC } from './ipc/claude'
 import { registerThumbnailIPC } from './ipc/thumbnail'
+import { registerCloudSyncIPC } from './ipc/cloudSync'
 import { tempManager } from './services/tempManager'
 import { fileWatcher } from './services/fileWatcher'
 
@@ -223,6 +224,7 @@ app.whenReady().then(() => {
   registerStoreIPC()    // useStore calls getConfig on mount
   registerStreamsIPC()  // default page — calls listStreams + watchStreamsDir on first render
   registerFilesIPC()   // WatcherContext may autostart the watcher on mount
+  registerCloudSyncIPC()  // streams page probes cloud-sync:is-active on mount
 
   // Re-register startup entry on each launch (packaged only) to self-heal if app has been moved.
   // For portable builds, PORTABLE_EXECUTABLE_FILE is the actual .exe on disk (not the temp-extracted copy).

@@ -348,6 +348,73 @@ function writeAllMeta(streamsDir: string, allMeta: Record<string, StreamMeta>): 
   }
 }
 
+/**
+ * Absolute paths of files the streams UI reads on every render and would
+ * promptly re-hydrate if evicted. Mirrors the displayed-thumbnail logic from
+ * the streams listing (`streams:list`):
+ *   1. The thumbnail set per stream is sorted by `thumbnailSortKey`.
+ *   2. If meta.preferredThumbnail is set, it gets moved to position 0.
+ *   3. The streams page renders thumbnails[0] — that's the protected file.
+ *
+ * Without this fallback, streams whose meta has no preferredThumbnail get
+ * their default-displayed thumbnail offloaded, then immediately re-hydrated
+ * by the next render — defeating the purpose.
+ *
+ * Consumed by the cloud-sync offload IPC to silently skip these files.
+ */
+export function getProtectedPaths(streamsDir: string): Set<string> {
+  const protectedSet = new Set<string>()
+  if (!streamsDir) return protectedSet
+  const allMeta = readAllMeta(streamsDir)
+  const mode: 'folder-per-stream' | 'dump-folder' =
+    ((getStore().get('config') as { streamMode?: 'folder-per-stream' | 'dump-folder' } | undefined)?.streamMode) ?? 'folder-per-stream'
+
+  const pickDisplayed = (sortedThumbs: string[], pref?: string): string | null => {
+    if (sortedThumbs.length === 0) return null
+    if (pref) {
+      const match = sortedThumbs.find(t => path.basename(t) === pref)
+      if (match) return match
+    }
+    return sortedThumbs[0]
+  }
+
+  if (mode === 'dump-folder') {
+    // Group by date in filename — same shape the streams listing uses.
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(streamsDir, { withFileTypes: true }) } catch { return protectedSet }
+    const groups = new Map<string, string[]>()
+    for (const entry of entries) {
+      if (entry.isDirectory()) continue
+      const m = entry.name.match(DATE_IN_FILENAME_RE)
+      if (!m) continue
+      const ext = path.extname(entry.name).toLowerCase()
+      if (!IMAGE_EXTS.has(ext)) continue
+      const date = m[1]
+      const list = groups.get(date) ?? []
+      list.push(path.join(streamsDir, entry.name))
+      groups.set(date, list)
+    }
+    for (const [date, thumbnails] of groups) {
+      const sorted = [...thumbnails].sort((a, b) => {
+        const [ra, na] = thumbnailSortKey(path.basename(a))
+        const [rb, nb] = thumbnailSortKey(path.basename(b))
+        return ra !== rb ? ra - rb : na.localeCompare(nb)
+      })
+      const chosen = pickDisplayed(sorted, allMeta[date]?.preferredThumbnail)
+      if (chosen) protectedSet.add(chosen)
+    }
+  } else {
+    for (const folderPath of findStreamFolders(streamsDir)) {
+      const key = metaKey(streamsDir, folderPath)
+      const sorted = detectThumbnails(folderPath)
+      const chosen = pickDisplayed(sorted, allMeta[key]?.preferredThumbnail)
+      if (chosen) protectedSet.add(chosen)
+    }
+  }
+
+  return protectedSet
+}
+
 /** One-time migration: absorb per-folder stream-meta.json files into root _meta.json. */
 function migrateMeta(streamsDir: string): void {
   const store = getStore()
@@ -1392,5 +1459,12 @@ export function registerStreamsIPC(): void {
 
 // Set inside registerStreamsIPC so the reschedule handler can pause its own
 // chokidar watcher around the folder rename. Module-scoped so the assignment
-// inside the closure is visible to other handlers in the same module.
+// inside the closure is visible to other handlers in the same module — and
+// re-exported for outside modules (cloudSync) that need the same pause/restart
+// dance around CFAPI dehydrate calls.
 let pauseDirWatcher: () => Promise<() => void> = async () => () => {}
+
+/** Pause the streams chokidar watcher; returns a restart fn. Module-private
+ *  module-let pattern is closed-over by registerStreamsIPC, so callers must
+ *  import this wrapper rather than the variable directly. */
+export const pauseStreamsWatcher = (): Promise<() => void> => pauseDirWatcher()
