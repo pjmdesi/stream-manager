@@ -2758,7 +2758,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       className="flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded text-[11px] font-medium text-gray-300 border border-white/15 bg-white/5 hover:bg-white/10 transition-colors"
                     >
                       <X size={12} />
-                      Stop Clipping
+                      Stop<span className="hidden 2xl:inline"> Clipping</span>
                     </button>
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
 
@@ -2780,7 +2780,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                 disabled={!canSplit}
                                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-purple-400 border border-purple-500/30 hover:bg-purple-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                               >
-                                <Scissors size={11} /> Split Segment
+                                <Scissors size={11} /> Split<span className="hidden 2xl:inline"> Segment</span>
                               </button>
                             </Tooltip>
                             {!canSplit && (
@@ -2800,7 +2800,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             disabled={noRoom}
                             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400 border border-blue-500/30 hover:bg-blue-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            <PlusSquare size={11} /> Add Segment
+                            <PlusSquare size={11} /> Add<span className="hidden 2xl:inline"> Segment</span>
                           </button>
                           {(noRoom || addSegmentError) && (
                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2821,6 +2821,31 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         }`}
                       >
                         <Repeat size={11} /> Focus
+                      </button>
+                    </Tooltip>
+
+                    <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
+
+                    <Tooltip content="Add a bleep at the current playhead position">
+                      <button
+                        onClick={() => {
+                        const t = currentTime
+                        const dur = duration
+                        const { lo, hi } = getBleepFreeInterval(clipState.bleepRegions, t, dur)
+                        let s = t - 0.25, end = t + 0.25
+                        if (s < lo) { s = lo; end = s + 0.5 }
+                        if (end > hi) { end = hi; s = end - 0.5 }
+                        s   = Math.max(lo, Math.max(0, s))
+                        end = Math.min(hi, Math.min(dur, end))
+                        if (end - s < 0.25) return
+                        const newId = `bleep-${Date.now()}`
+                        setClipState(cs => ({ ...cs, bleepRegions: [...cs.bleepRegions, { id: newId, start: s, end }] }))
+                        setActiveBleepId(newId)
+                        setBleepLengthInput((end - s).toFixed(2))
+                      }}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors"
+                      >
+                        <AudioWaveform size={11} /> <span className="hidden 2xl:inline">Add </span>Bleep
                       </button>
                     </Tooltip>
 
@@ -2876,28 +2901,41 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       }
                       const setHeight = (px: number) => setWidth((px / maxH) * maxW)
                       const reset = () => apply({ cropX: DEFAULT_CROP_X, cropY: DEFAULT_CROP_Y, cropScale: DEFAULT_CROP_SCALE })
-                      const inputCls = 'w-12 px-1 py-0.5 text-[10px] tabular-nums text-center bg-navy-800 border border-white/10 rounded text-gray-200 focus:outline-none focus:border-blue-400/40 disabled:opacity-40'
-                      const labelCls = 'text-[10px] text-gray-500 select-none'
+                      // Tighter padding + hidden native spinner arrows. The
+                      // native up/down arrows render at OS-default size and
+                      // look out of place in this dense toolbar; users can
+                      // still scroll-to-adjust or type directly.
+                      const inputCls = 'w-10 px-0.5 py-0 text-[10px] tabular-nums text-right bg-navy-800 border border-white/10 rounded text-gray-200 focus:outline-none focus:border-blue-400/40 disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+                      const labelCls = 'text-[10px] text-gray-500 select-none w-2'
                       return (
                         <Tooltip content={disabled ? 'Move the playhead inside a clip region to edit its crop' : 'Crop position (offset from center) and dimensions, in source pixels'}>
                           <div className={`flex items-center gap-1 ${disabled ? 'opacity-50' : ''}`}>
-                            <span className={labelCls}>x</span>
-                            <input type="number" disabled={disabled} className={inputCls} value={offsetX}
-                              onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetX(v) }} />
-                            <span className={labelCls}>y</span>
-                            <input type="number" disabled={disabled} className={inputCls} value={offsetY}
-                              onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetY(v) }} />
-                            <span className={labelCls}>w</span>
-                            <input type="number" disabled={disabled} className={inputCls} value={dispW}
-                              onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setWidth(v) }} />
-                            <span className={labelCls}>h</span>
-                            <input type="number" disabled={disabled} className={inputCls} value={dispH}
-                              onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setHeight(v) }} />
+                            {/* 2×2 grid: x/y on top, w/h below — frees up
+                                horizontal space the toolbar needs at narrow
+                                window widths. */}
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1">
+                                <span className={labelCls}>x</span>
+                                <input type="number" disabled={disabled} className={inputCls} value={offsetX}
+                                  onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetX(v) }} />
+                                <span className={labelCls}>y</span>
+                                <input type="number" disabled={disabled} className={inputCls} value={offsetY}
+                                  onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetY(v) }} />
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className={labelCls}>w</span>
+                                <input type="number" disabled={disabled} className={inputCls} value={dispW}
+                                  onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setWidth(v) }} />
+                                <span className={labelCls}>h</span>
+                                <input type="number" disabled={disabled} className={inputCls} value={dispH}
+                                  onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setHeight(v) }} />
+                              </div>
+                            </div>
                             <button
                               type="button"
                               disabled={disabled}
                               onClick={reset}
-                              className="flex items-center px-1 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="flex items-center px-1 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-center"
                             >
                               <RotateCcw size={11} />
                             </button>
@@ -2905,33 +2943,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         </Tooltip>
                       )
                     })()}
-                    <Tooltip content="Add a bleep at the current playhead position">
-                      <button
-                        onClick={() => {
-                        const t = currentTime
-                        const dur = duration
-                        const { lo, hi } = getBleepFreeInterval(clipState.bleepRegions, t, dur)
-                        let s = t - 0.25, end = t + 0.25
-                        if (s < lo) { s = lo; end = s + 0.5 }
-                        if (end > hi) { end = hi; s = end - 0.5 }
-                        s   = Math.max(lo, Math.max(0, s))
-                        end = Math.min(hi, Math.min(dur, end))
-                        if (end - s < 0.25) return
-                        const newId = `bleep-${Date.now()}`
-                        setClipState(cs => ({ ...cs, bleepRegions: [...cs.bleepRegions, { id: newId, start: s, end }] }))
-                        setActiveBleepId(newId)
-                        setBleepLengthInput((end - s).toFixed(2))
-                      }}
-                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors"
-                      >
-                        <AudioWaveform size={11} /> Add Bleep
-                      </button>
-                    </Tooltip>
 
                     <div className="flex-1" />
 
-                    {/* Visible range timecodes */}
-                    <div className="flex items-center gap-1 shrink-0">
+                    {/* Visible range timecodes — stacks vertically below 2xl
+                        to free horizontal space. The em-dash separator is
+                        only meaningful in the row layout, so it hides too. */}
+                    <div className="flex flex-col 2xl:flex-row items-end 2xl:items-center gap-x-1 gap-y-0 shrink-0">
                       {editingVStart ? (
                         <input
                           ref={vStartInputRef}
@@ -2968,7 +2986,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           </span>
                         </Tooltip>
                       )}
-                      <span className="text-[11px] text-blue-400/30 select-none">—</span>
+                      <span className="hidden 2xl:inline text-[11px] text-blue-400/30 select-none">—</span>
                       {editingVEnd ? (
                         <input
                           ref={vEndInputRef}
@@ -3008,7 +3026,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
 
-                    {/* Zoom level + reset */}
+                    {/* Zoom level + reset (when zoomed). One divider trails
+                        the zoom controls to separate them from Export. The
+                        always-on extra divider that used to sit before
+                        Export was removed — we already have one above
+                        (after the timecodes) and don't need a duplicate. */}
                     {isZoomed && (
                       <>
                         <span className="text-[10px] text-blue-400/60 tabular-nums">{zoomLevel.toFixed(1)}×</span>
@@ -3024,15 +3046,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       </>
                     )}
 
-                    <div className="w-px h-3 bg-white/10 mx-0.5 shrink-0" />
-
                     <Tooltip content={clipState.clipRegions.length > 0 ? 'Export clip' : 'Add at least one segment first'}>
                       <button
                         onClick={() => setShowExportDialog(true)}
                         disabled={clipState.clipRegions.length === 0}
                         className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-purple-300 border-purple-600/30 bg-purple-600/20 hover:bg-purple-600/35 disabled:hover:bg-transparent"
                       >
-                        <Upload size={11} /> Export Clip
+                        <Upload size={11} /> Export<span className="hidden 2xl:inline"> Clip</span>
                       </button>
                     </Tooltip>
                   </div>
