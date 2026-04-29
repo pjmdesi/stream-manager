@@ -6,6 +6,10 @@ export interface PendingThumbnailStream {
   date: string
   title?: string
   meta?: StreamMeta
+  /** Total episodes in this stream's series+season (including this stream).
+   *  Pre-computed at navigation time because the thumbnail editor doesn't
+   *  load the full streams list. Used for the {total_episodes} merge field. */
+  totalEpisodes?: number
 }
 
 interface ThumbnailEditorContextValue {

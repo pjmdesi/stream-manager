@@ -171,6 +171,9 @@ contextBridge.exposeInMainWorld('api', {
   checkEncoderAvailable: (name: string) =>
     ipcRenderer.invoke('converter:checkEncoderAvailable', name),
 
+  checkAlreadyArchived: (paths: string[]): Promise<string[]> =>
+    ipcRenderer.invoke('converter:checkAlreadyArchived', paths),
+
   detectAvailableEncoders: () =>
     ipcRenderer.invoke('converter:detectAvailableEncoders'),
 

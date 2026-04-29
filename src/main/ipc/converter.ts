@@ -515,7 +515,15 @@ export async function startConversionJob(
         }
 
         const { runConversion, applyGpuAcceleration, probeFile } = await import('../services/ffmpegService')
-        const gpuArgs = await applyGpuAcceleration(job.preset.ffmpegArgs)
+        let gpuArgs = await applyGpuAcceleration(job.preset.ffmpegArgs)
+        // Stamp archive outputs with a provenance tag in the file's container
+        // metadata so the file itself remembers it's been archived (survives
+        // moves/renames/_meta.json loss). Detection looks for "Archived
+        // Stream" — a generic marker that survives any product-name change.
+        if (job.groupCompletionHook?.type === 'archiveMarkAsArchived') {
+          const { app } = await import('electron')
+          gpuArgs = `${gpuArgs} -metadata encoded_by="Archived Stream — Stream Manager v${app.getVersion()}"`
+        }
         const duration = await probeFile(job.inputFile).then(info => info.duration).catch(() => 0)
         const result = runConversion(job.inputFile, job.outputFile, gpuArgs, duration, handleProgress, handleComplete, handleError)
         cancellers.set(id, result.cancel)
@@ -604,6 +612,36 @@ export function registerConverterIPC(): void {
   restorePendingJobs()
 
   ipcMain.handle('converter:getBuiltinPresets', async () => BUILTIN_PRESETS)
+
+  /** Probe the given files for the archive-provenance tag we write into the
+   *  container metadata (`encoded_by` containing "Archived Stream").
+   *  Returns the subset of paths that are tagged. Cloud placeholders are
+   *  excluded — probing them would force a hydrate, which we never want for
+   *  a pre-flight check. */
+  ipcMain.handle('converter:checkAlreadyArchived', async (_event, paths: string[]): Promise<string[]> => {
+    if (!Array.isArray(paths) || paths.length === 0) return []
+    const { checkLocalFiles } = await import('./files')
+    const localFlags = await checkLocalFiles(paths)
+    const eligible = paths.filter((_, i) => localFlags[i])
+    if (eligible.length === 0) return []
+    const { probeArchiveTag } = await import('../services/ffmpegService')
+    // Cap concurrency so a 60-probe pre-flight doesn't overwhelm the system.
+    const CONCURRENCY = 4
+    const tagged: string[] = []
+    let cursor = 0
+    const workers = Array.from({ length: Math.min(CONCURRENCY, eligible.length) }, async () => {
+      while (cursor < eligible.length) {
+        const idx = cursor++
+        const p = eligible[idx]
+        try {
+          const tag = await probeArchiveTag(p)
+          if (tag && tag.includes('Archived Stream')) tagged.push(p)
+        } catch { /* skip files that fail to probe */ }
+      }
+    })
+    await Promise.all(workers)
+    return tagged
+  })
 
   ipcMain.handle('converter:checkEncoderAvailable', async (_event, name: string) => {
     const { checkEncoderAvailable } = await import('../services/ffmpegService')

@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import ReactDOM from 'react-dom'
 import {
-  Plus, FolderOpen, AlertTriangle, PencilLine,
+  Plus, FolderOpen, AlertTriangle, PencilLine, CopyPlus,
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, ChevronUp, ChevronsUp, ChevronsDown, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
@@ -632,6 +632,12 @@ interface MetaModalProps {
   initialMeta?: StreamMeta | null
   /** Authoritative date from the folder name — overrides initialMeta.date in edit/add mode */
   folderDate?: string
+  /** Set when in 'new' mode invoked from the row's Duplicate / New Episode
+   *  action. Pins the prev-episode source to this specific folder (overrides
+   *  the auto-detect that picks the most recent in series), defaults the
+   *  thumbnail picker to "copy from this stream", and updates the picker
+   *  label so users know exactly which stream the thumbnails come from. */
+  sourceFolder?: StreamFolder
   detectedGames?: string[]
   allGames?: string[]
   allStreamTypes?: string[]
@@ -699,7 +705,19 @@ function folderMetaBase(folder: StreamFolder): StreamMeta {
   return folder.meta ?? { date: folder.date, streamType: [], games: [], comments: '' }
 }
 
-const PREV_EPISODE_SENTINEL = '__copy_prev_episode__'
+/** Count streams in this folder's series+season, INCLUDING this folder.
+ *  Used for the thumbnail-editor {total_episodes} merge field. Returns 0 if
+ *  the folder has no game tag (no series to count). */
+function seriesEpisodeCount(folders: StreamFolder[], folder: StreamFolder): number {
+  const game = folder.meta?.games?.[0] ?? folder.detectedGames?.[0]
+  if (!game) return 0
+  const lower = game.toLowerCase()
+  const season = folder.meta?.ytSeason ?? '1'
+  return folders.filter(f =>
+    f.meta?.games?.some(g => g.toLowerCase() === lower) &&
+    (f.meta?.ytSeason ?? '1') === season
+  ).length
+}
 
 function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], season: string): StreamFolder | null {
   const mainGame = gamesList[0]
@@ -718,14 +736,15 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], s
 
 // panelAnimate built inside StreamsPage so duration can react to slowAnimations setting
 
-function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
-  const defaultBuiltinTemplate = builtinTemplates.find(t => t.id === defaultBuiltinTemplateId) ?? builtinTemplates[0] ?? null
 
   // In edit/add mode the folder name is the authoritative date source — the stored meta.date
   // may be wrong if the file was created with the wrong date (e.g. migration artefact).
   const [date, setDate] = useState(
-    mode === 'new' ? (initialMeta?.date ?? today()) : (folderDate ?? initialMeta?.date ?? today())
+    // `||` (not `??`) so the New Episode flow — which passes an empty-string
+    // date in initialMeta — still falls back to today().
+    mode === 'new' ? (initialMeta?.date || today()) : (folderDate ?? initialMeta?.date ?? today())
   )
   const [streamTypes, setStreamTypes] = useState<string[]>(
     normalizeStreamTypes(initialMeta?.streamType)
@@ -737,21 +756,40 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
   const ytSeasonUserEdited = useRef(!!initialMeta?.ytSeason)
 
   const prevEpisodeFolder = useMemo(
-    () => mode === 'new' ? getPrevEpisodeFolder(games, allFolders, ytSeason) : null,
-    [mode, games, allFolders, ytSeason]
+    // sourceFolder takes priority — when invoked via row Duplicate / New
+    // Episode, that explicit choice should win over the most-recent-in-series
+    // auto-detect. The user might be intentionally duplicating a much older
+    // stream because they want THAT stream's content, not the latest.
+    () => mode === 'new'
+      ? (sourceFolder ?? getPrevEpisodeFolder(games, allFolders, ytSeason))
+      : null,
+    [mode, sourceFolder, games, allFolders, ytSeason]
   )
   // Only show the copy option if the previous folder actually has thumbnails
   const hasPrevThumbnails = (prevEpisodeFolder?.thumbnails.length ?? 0) > 0
 
-  const [useBuiltinThumbnail, setUseBuiltinThumbnail] = useState<boolean>(useBuiltinByDefault)
-  const [selectedBuiltinTemplateId, setSelectedBuiltinTemplateId] = useState<string>(defaultBuiltinTemplate?.id ?? '')
-  const [selectedTemplatePath, setSelectedTemplatePath] = useState<string>(() => {
-    const initGames = initialMeta?.games?.length ? initialMeta.games : detectedGames
-    const initSeason = initialMeta?.ytSeason ?? '1'
-    const initPrevFolder = mode === 'new' ? getPrevEpisodeFolder(initGames, allFolders, initSeason) : null
-    const hasPrev = (initPrevFolder?.thumbnails.length ?? 0) > 0
-    return hasPrev ? PREV_EPISODE_SENTINEL : (defaultTemplate?.path ?? '')
-  })
+  // Two checkboxes in 'new' mode replace the previous dropdown selectors.
+  //   useBuiltinThumbnail → controls future thumbnail workflow for this stream
+  //                         (built-in canvas editor vs. external file).
+  //                         When checked, the SM editor's first-open template
+  //                         picker handles which built-in template to start
+  //                         from. When unchecked, the user's default external
+  //                         template (from Settings) is copied as the seed.
+  //   copyFromSource     → triggers the file-copy path that grabs every
+  //                         *thumbnail* file from prevEpisodeFolder (the
+  //                         explicit sourceFolder when invoked from a row's
+  //                         New Episode button, or the auto-detected most-
+  //                         recent in series otherwise). Works for SM editor
+  //                         JSON+PNG and external thumbnails uniformly.
+  // For New Episode, default useBuiltin to match the source's workflow so
+  // the user lands on the right side without thinking.
+  const [useBuiltinThumbnail, setUseBuiltinThumbnail] = useState<boolean>(
+    sourceFolder ? !!sourceFolder.meta?.smThumbnail : useBuiltinByDefault
+  )
+  // Default checked whenever a copy source exists (explicit sourceFolder OR
+  // auto-detected most-recent-in-series) AND that source has at least one
+  // thumbnail file to copy.
+  const [copyFromSource, setCopyFromSource] = useState<boolean>(hasPrevThumbnails)
   const [comments, setComments] = useState(initialMeta?.comments ?? '')
   const [archived, setArchived] = useState(initialMeta?.archived ?? false)
   const [localPreferredThumbnail, setLocalPreferredThumbnail] = useState<string | undefined>(
@@ -1213,13 +1251,17 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
     setError('')
     try {
       const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
-      const isPrevEpisode = selectedTemplatePath === PREV_EPISODE_SENTINEL
       const effectiveTwitchTitle = syncTitle ? ytTitle : twitchTitle
       await onSave(
         {
           date, streamType: streamTypes, games, comments,
           archived: mode === 'edit' ? archived : undefined,
           preferredThumbnail: localPreferredThumbnail,
+          // Reflect the user's chosen workflow for new streams. In edit/add
+          // we leave smThumbnail untouched (the SM editor manages it via
+          // updateMeta during canvas saves).
+          smThumbnail: mode === 'new' ? (useBuiltinThumbnail || undefined) : initialMeta?.smThumbnail,
+          smThumbnailTemplate: mode === 'new' ? initialMeta?.smThumbnailTemplate : initialMeta?.smThumbnailTemplate,
           ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
           ytTitle: ytTitle || undefined,
           ytDescription: ytDescription || undefined,
@@ -1233,9 +1275,17 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
           syncTitle,
         },
         date,
-        mode === 'new' && !isPrevEpisode && !useBuiltinThumbnail ? (selectedTemplatePath || undefined) : undefined,
-        mode === 'new' && isPrevEpisode ? (prevEpisodeFolder?.folderPath ?? undefined) : undefined,
-        mode === 'new' && !isPrevEpisode && useBuiltinThumbnail ? (selectedBuiltinTemplateId || undefined) : undefined,
+        // External template seed: only when neither built-in nor copy is
+        // selected. The user's default external template (from Settings)
+        // gets copied as `${date} thumbnail.${ext}`.
+        mode === 'new' && !useBuiltinThumbnail && !copyFromSource ? (defaultTemplate?.path || undefined) : undefined,
+        // Copy-from-source path: any *thumbnail* file in the prev folder
+        // gets copied with date renamed (covers SM editor JSON+PNG and
+        // external thumbnails uniformly).
+        mode === 'new' && copyFromSource ? (prevEpisodeFolder?.folderPath ?? undefined) : undefined,
+        // Built-in template ID is no longer asked at modal time — the SM
+        // editor's first-open template picker handles it.
+        undefined,
       )
       initialSnapshot.current = JSON.stringify({
         streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
@@ -1404,51 +1454,26 @@ function MetaModal({ mode, initialMeta, folderDate, detectedGames = [], allGames
           />
         </div>
 
-        {/* Thumbnail template — new streams only */}
+        {/* Thumbnail — new streams only.
+            Two checkboxes replace the per-stream template pickers. The
+            specific built-in template is asked at the SM editor's first open
+            on the new stream; the external template defaults to the user's
+            Settings choice. Power users who want a per-stream override can
+            still drop a thumbnail file into the new folder afterward. */}
         {mode === 'new' && (
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-gray-300">Thumbnail Template</label>
+            <label className="text-sm font-medium text-gray-300">Thumbnail</label>
             <Checkbox
               checked={useBuiltinThumbnail}
               onChange={setUseBuiltinThumbnail}
               label="Use built-in thumbnail creator"
             />
-            {useBuiltinThumbnail ? (
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <select
-                    value={selectedBuiltinTemplateId}
-                    onChange={e => setSelectedBuiltinTemplateId(e.target.value)}
-                    className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                    disabled={builtinTemplates.length === 0}
-                  >
-                    <option value="">— None —</option>
-                    {builtinTemplates.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-                </div>
-              </div>
-            ) : (
-              (templates.length > 0 || hasPrevThumbnails) && (
-                <div className="relative">
-                  <select
-                    value={selectedTemplatePath}
-                    onChange={e => setSelectedTemplatePath(e.target.value)}
-                    className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                  >
-                    <option value="">— None —</option>
-                    {hasPrevThumbnails && (
-                      <option value={PREV_EPISODE_SENTINEL}>* Copy Previous Episode Thumbnail *</option>
-                    )}
-                    {templates.map(t => (
-                      <option key={t.path} value={t.path}>{t.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-                </div>
-              )
+            {hasPrevThumbnails && (
+              <Checkbox
+                checked={copyFromSource}
+                onChange={setCopyFromSource}
+                label={sourceFolder ? "Copy thumbnails from this stream" : 'Copy thumbnails from previous episode'}
+              />
             )}
           </div>
         )}
@@ -2422,9 +2447,28 @@ function VideoPickerModal({
 
 type ModalState =
   | { mode: 'none' }
-  | { mode: 'new' }
+  | { mode: 'new'; sourceFolder?: StreamFolder }
   | { mode: 'edit'; folder: StreamFolder }
   | { mode: 'add'; folder: StreamFolder }
+
+/** Build a partial StreamMeta from an existing folder for the "New Episode"
+ *  flow. Carries over fields that should be inherited (stream type, games,
+ *  SM thumbnail flags so the streams list immediately shows the SM badge for
+ *  the new folder once it's created). Date stays empty so the modal's
+ *  today() fallback kicks in. YouTube/Twitch fields, comments, and series
+ *  metadata (season/episode/total) are intentionally left blank — the
+ *  modal's auto-detect logic derives them from `allFolders` based on the
+ *  games. */
+function buildNewEpisodeMeta(source: StreamFolder): StreamMeta {
+  return {
+    date: '',
+    streamType: source.meta?.streamType ?? [],
+    games: source.meta?.games?.length ? source.meta.games : source.detectedGames ?? [],
+    comments: '',
+    smThumbnail: source.meta?.smThumbnail,
+    smThumbnailTemplate: source.meta?.smThumbnailTemplate,
+  }
+}
 
 interface TreeNode {
   name: string
@@ -2638,8 +2682,23 @@ export function StreamsPage({
   const dragMoved = useRef(false)
 
   // Archive — preset picker only; the actual progress UI lives in the converter
-  // page now (archive jobs are submitted as a serial job-group).
+  // page now (archive jobs are submitted as a serial job-group). archiveTarget
+  // captures the folders the next archive run will operate on — set by either
+  // the bulk-action click or the single-item action panel button.
   const [showPresetPicker, setShowPresetPicker] = useState(false)
+  const [archiveTarget, setArchiveTarget] = useState<StreamFolder[] | null>(null)
+  // Holds the archive context while the "already archived" warning modal is
+  // open. Resolved by the user clicking Skip / Continue / Cancel.
+  const [pendingArchiveDecision, setPendingArchiveDecision] = useState<{
+    preset: ConversionPreset
+    selectedFolders: StreamFolder[]
+    taggedFiles: string[]
+    totalFiles: number
+  } | null>(null)
+
+  // Action Panel: which row currently has its expansion panel open. Only one
+  // at a time — clicking another row's body closes any other open panel.
+  const [expandedFolderKey, setExpandedFolderKey] = useState<string | null>(null)
 
   const [templates, setTemplates] = useState<{ name: string; path: string }[]>([])
   const [builtinTemplates, setBuiltinTemplates] = useState<ThumbnailTemplate[]>([])
@@ -2848,18 +2907,17 @@ export function StreamsPage({
     setShowPresetPicker(false)
     if (!streamsDir) return
 
-    const selectedFolders = folders.filter(f => selectedPaths.has(f.folderPath) || selectedPaths.has(f.date))
+    // archiveTarget is set by both the bulk-action toolbar click and the
+    // per-row Archive button in the action panel. Falls back to the current
+    // selection for safety in case the modal opens via some other path.
+    const selectedFolders = archiveTarget
+      ?? folders.filter(f => selectedPaths.has(f.folderPath) || selectedPaths.has(f.date))
+    setArchiveTarget(null)
 
-    // Pre-flight: bulk-check every input file across every selected folder for
-    // cloud-placeholder status, then reorder so local files queue first within
-    // each folder (and folders with any local content queue ahead of all-cloud
-    // ones). The cloud-aware wait happens inside the converter pipeline now;
-    // this just gives users responsive starts on whatever's already on disk.
-    //
-    // Filter to category === 'full' (the "vid" tag) — only full recordings are
-    // worth archive-encoding. Clips and shorts are typically already small
-    // enough that the encoding time outweighs the savings. Format-agnostic:
-    // any container marked 'full' qualifies.
+    // Collect the candidate files (full recordings only) so we can probe
+    // them for the archive-provenance tag before queueing. Tagged files were
+    // already encoded by a prior archive run; re-encoding them would lose
+    // quality with no benefit.
     const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '')
     const fullVideos = (f: StreamFolder): string[] => {
       const map = f.meta?.videoMap
@@ -2871,13 +2929,60 @@ export function StreamsPage({
         return map[relKey]?.category === 'full'
       })
     }
+    const allCandidateFiles = selectedFolders.flatMap(f => fullVideos(f))
+    if (allCandidateFiles.length === 0) return
+
+    const tagged = await window.api.checkAlreadyArchived(allCandidateFiles)
+    if (tagged.length > 0) {
+      // Hand off to the warning modal — user picks skip/continue/cancel,
+      // and the modal handlers call executeArchive with the appropriate
+      // skip set.
+      setPendingArchiveDecision({
+        preset,
+        selectedFolders,
+        taggedFiles: tagged,
+        totalFiles: allCandidateFiles.length,
+      })
+      return
+    }
+
+    await executeArchive(preset, selectedFolders, new Set())
+  }
+
+  /** Build and queue the archive jobs. Called either directly from
+   *  startArchive (no tagged files), or from the warning modal handlers
+   *  with a skip set populated from the tagged-files list. */
+  const executeArchive = async (
+    preset: ConversionPreset,
+    selectedFolders: StreamFolder[],
+    skipFiles: Set<string>,
+  ) => {
+    if (!streamsDir) return
+    const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '')
+    const fullVideos = (f: StreamFolder): string[] => {
+      const map = f.meta?.videoMap
+      if (!map) return []
+      const root = norm(f.folderPath)
+      return f.videos.filter(v => {
+        const n = norm(v)
+        const relKey = n.startsWith(root + '/') ? n.slice(root.length + 1) : n.split('/').pop() ?? n
+        return map[relKey]?.category === 'full'
+      })
+    }
+
+    // Pre-flight: bulk-check every input file across every selected folder for
+    // cloud-placeholder status, then reorder so local files queue first within
+    // each folder (and folders with any local content queue ahead of all-cloud
+    // ones). The cloud-aware wait happens inside the converter pipeline now;
+    // this just gives users responsive starts on whatever's already on disk.
     const sessionsRaw = selectedFolders.map(f => ({
       folderPath: f.folderPath,
       date: f.date,
-      filePaths: fullVideos(f),
-    }))
+      filePaths: fullVideos(f).filter(p => !skipFiles.has(p)),
+    })).filter(s => s.filePaths.length > 0)
     const allFiles = sessionsRaw.flatMap(s => s.filePaths)
-    const allLocal = allFiles.length > 0 ? await window.api.checkLocalFiles(allFiles) : []
+    if (allFiles.length === 0) return
+    const allLocal = await window.api.checkLocalFiles(allFiles)
     let cursor = 0
     const enriched = sessionsRaw.map(s => {
       const flags = allLocal.slice(cursor, cursor + s.filePaths.length)
@@ -2928,16 +3033,35 @@ export function StreamsPage({
     await window.api.addQueuedGroup(allJobs)
 
     // Drop selection so the user isn't left looking at "still selected" rows
-    // after the archive has been queued and the modal has dismissed.
-    setSelectMode(false)
-    setSelectedPaths(new Set())
+    // after the archive has been queued and the modal has dismissed. Only
+    // applies to the bulk path (selection-mode) — single-item archive doesn't
+    // touch the selection state.
+    if (selectMode) {
+      setSelectMode(false)
+      setSelectedPaths(new Set())
+    }
   }
 
   const clickArchive = async () => {
     if (selectedPaths.size === 0) return
+    const sel = folders.filter(f => selectedPaths.has(f.folderPath) || selectedPaths.has(f.date))
+    setArchiveTarget(sel)
     // Always show the picker so the user can override their saved default
     // for this run. The modal pre-selects config.archivePresetId when set,
     // so the common case is just one extra click on Confirm.
+    setShowPresetPicker(true)
+  }
+
+  const handleArchiveDecision = async (decision: 'skip' | 'continue') => {
+    if (!pendingArchiveDecision) return
+    const { preset, selectedFolders, taggedFiles } = pendingArchiveDecision
+    setPendingArchiveDecision(null)
+    const skipFiles = decision === 'skip' ? new Set(taggedFiles) : new Set<string>()
+    await executeArchive(preset, selectedFolders, skipFiles)
+  }
+
+  const archiveSingle = (folder: StreamFolder) => {
+    setArchiveTarget([folder])
     setShowPresetPicker(true)
   }
 
@@ -3346,11 +3470,11 @@ export function StreamsPage({
           </>
         ) : (
           <>
-            <Tooltip content="Change streams folder" side="bottom">
+            {/* <Tooltip content="Change streams folder" side="bottom">
               <Button variant="ghost" size="sm" icon={<FolderOpen size={14} />} onClick={pickDir}>
                 <span className="hidden wide:inline">Change</span>
               </Button>
-            </Tooltip>
+            </Tooltip> */}
 
             <Tooltip content="Manage title, description, and tag templates" side="bottom">
               <Button
@@ -3606,6 +3730,7 @@ export function StreamsPage({
                         date: folder.date,
                         title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
                         meta: folder.meta ?? undefined,
+                        totalEpisodes: seriesEpisodeCount(folders, folder),
                       })}
                       onThumbClick={folder.thumbnails.length > 0
                         ? (i) => setLightbox({ thumbnails: folder.thumbnails, localFlags: folder.thumbnailLocalFlags, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
@@ -3751,8 +3876,19 @@ export function StreamsPage({
                 <tr><td colSpan={selectMode ? 8 : 7} className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</td></tr>
               ) : filteredFolders.map((folder, i) => {
                 const pending = isPendingStream(folder, today())
+                const rowKey = isDumpMode ? folder.date : folder.folderPath
+                const isExpanded = expandedFolderKey === rowKey
+                const hasMeta = folder.hasMeta
+                const hasSMThumb = folder.thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
+                const seriesGame = folder.meta?.games?.[0] ?? folder.detectedGames?.[0]
+                const totalEpisodes = seriesGame
+                  ? folders.filter(f =>
+                      f.meta?.games?.some(g => g.toLowerCase() === seriesGame.toLowerCase()) &&
+                      (f.meta?.ytSeason ?? '1') === (folder.meta?.ytSeason ?? '1')
+                    ).length
+                  : 0
 return (
-                <React.Fragment key={isDumpMode ? folder.date : folder.folderPath}>
+                <React.Fragment key={rowKey}>
                 <StreamRow
                   folder={folder}
                   zebra={i % 2 === 0}
@@ -3785,6 +3921,7 @@ return (
                     date: folder.date,
                     title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
                     meta: folder.meta ?? undefined,
+                    totalEpisodes: seriesEpisodeCount(folders, folder),
                   })}
                   onThumbClick={folder.thumbnails.length > 0
                     ? (i) => setLightbox({ thumbnails: folder.thumbnails, localFlags: folder.thumbnailLocalFlags, index: i, folderPath: folder.folderPath, folderDate: folder.date, preferredThumbnail: folder.meta?.preferredThumbnail })
@@ -3793,7 +3930,42 @@ return (
                   sameDayIndex={sameDayIndexMap.get(folder.folderPath)}
                   thumbWidth={thumbWidth}
                   onThumbResizeStart={startThumbResize}
+                  expanded={isExpanded}
+                  onToggleExpand={() => setExpandedFolderKey(isExpanded ? null : rowKey)}
                 />
+                <AnimatePresence initial={false}>
+                  {isExpanded && !folder.isMissing && (
+                    <ExpandedStreamPanel
+                      key={`panel-${rowKey}`}
+                      folder={folder}
+                      isPending={pending}
+                      hasMeta={hasMeta}
+                      hasSMThumbnail={hasSMThumb}
+                      videoCount={folder.videoCount}
+                      totalEpisodes={totalEpisodes}
+                      selectMode={selectMode}
+                      onSendToPlayer={() => sendVideo(folder, 'player')}
+                      onSendToConverter={() => sendVideo(folder, 'converter')}
+                      onSendToCombine={() => sendToCombine(folder)}
+                      onOpenThumbnails={() => openThumbnailEditor({
+                        folderPath: folder.folderPath,
+                        date: folder.date,
+                        title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
+                        meta: folder.meta ?? undefined,
+                        totalEpisodes: seriesEpisodeCount(folders, folder),
+                      })}
+                      onEdit={() => setModal({ mode: 'edit', folder })}
+                      onAdd={() => setModal({ mode: 'add', folder })}
+                      onOpen={() => isDumpMode && folder.videos.length > 0
+                        ? window.api.openInExplorer(folder.videos[0])
+                        : window.api.openInExplorer(folder.folderPath)}
+                      onReschedule={() => { setRescheduleTarget(folder); setRescheduleDate(folder.date) }}
+                      onArchive={() => archiveSingle(folder)}
+                      onDelete={() => setDeleteTarget(folder)}
+                      onNewEpisode={() => setModal({ mode: 'new', sourceFolder: folder })}
+                    />
+                  )}
+                </AnimatePresence>
                 </React.Fragment>
                 )
               })}
@@ -4106,9 +4278,22 @@ return (
           >
             <MetaModal
               mode={modal.mode}
-              initialMeta={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.meta : null}
+              initialMeta={
+                modal.mode === 'edit' || modal.mode === 'add'
+                  ? modal.folder.meta
+                  : modal.mode === 'new' && modal.sourceFolder
+                    ? buildNewEpisodeMeta(modal.sourceFolder)
+                    : null
+              }
               folderDate={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.date : undefined}
-              detectedGames={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.detectedGames : []}
+              sourceFolder={modal.mode === 'new' ? modal.sourceFolder : undefined}
+              detectedGames={
+                modal.mode === 'edit' || modal.mode === 'add'
+                  ? modal.folder.detectedGames
+                  : modal.mode === 'new' && modal.sourceFolder
+                    ? modal.sourceFolder.detectedGames
+                    : []
+              }
               thumbnails={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnails : []}
               thumbnailLocalFlags={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.thumbnailLocalFlags : undefined}
               thumbsKey={thumbsKey}
@@ -4171,11 +4356,53 @@ return (
       {showPresetPicker && (
         <PresetPickerModal
           onPick={(preset, setAsDefault) => startArchive(preset, setAsDefault)}
-          onClose={() => setShowPresetPicker(false)}
+          onClose={() => { setShowPresetPicker(false); setArchiveTarget(null) }}
           isDumpMode={isDumpMode}
           defaultPresetId={config.archivePresetId}
-          selectionCount={selectedPaths.size}
+          selectionCount={archiveTarget?.length ?? selectedPaths.size}
         />
+      )}
+
+      {/* Already-archived pre-flight warning. Reads the file-level
+          `encoded_by` tag (written during prior archives) so the user can't
+          accidentally re-archive an already-encoded file. */}
+      {pendingArchiveDecision && (
+        <Modal
+          isOpen
+          onClose={() => setPendingArchiveDecision(null)}
+          title="Some files have already been archived"
+          width="lg"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setPendingArchiveDecision(null)}>Cancel</Button>
+              <Button variant="ghost" onClick={() => handleArchiveDecision('continue')}>Archive everything anyway</Button>
+              <Button variant="primary" onClick={() => handleArchiveDecision('skip')}>Skip already-archived</Button>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-gray-300">
+              <span className="text-yellow-300 font-medium">{pendingArchiveDecision.taggedFiles.length}</span>
+              {' '}of <span className="text-gray-200">{pendingArchiveDecision.totalFiles}</span> selected file
+              {pendingArchiveDecision.totalFiles === 1 ? '' : 's'} ha
+              {pendingArchiveDecision.taggedFiles.length === 1 ? 's' : 've'}
+              {' '}an "Archived Stream" tag in their container metadata, meaning they were encoded by a previous archive run. Re-encoding will lose quality without benefit.
+            </p>
+            <div className="border border-white/10 rounded-lg overflow-hidden bg-navy-900/40">
+              <div className="px-3 py-2 border-b border-white/10 text-[10px] uppercase tracking-wide text-gray-500">
+                Already archived
+              </div>
+              <div className="max-h-[40vh] overflow-y-auto divide-y divide-white/5">
+                {pendingArchiveDecision.taggedFiles.map(p => {
+                  const name = p.split(/[\\/]/).pop() ?? p
+                  return (
+                    <div key={p} className="px-3 py-1.5 text-xs text-gray-400 truncate" title={p}>{name}</div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Manage Tags */}
@@ -4676,9 +4903,16 @@ interface StreamRowProps {
   sameDayIndex?: number
   thumbWidth?: number
   onThumbResizeStart?: (e: React.MouseEvent) => void
+  /** Action panel is open for this row. Suppresses hover-revealed action
+   *  buttons in the column (they'd duplicate the panel buttons). Optional —
+   *  StreamCard (cards view) doesn't use the panel pattern yet. */
+  expanded?: boolean
+  /** Click on the row body (excluding interactive descendants) toggles the
+   *  action panel. Selection mode short-circuits this. */
+  onToggleExpand?: () => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart, expanded, onToggleExpand }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -4706,17 +4940,29 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
   const extraCount = thumbnails.length - 1
   const hasSMThumbnail = thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
 
+  // Click anywhere on the row body to toggle the action panel — but NOT when
+  // the click originated inside an interactive descendant (existing tag
+  // chips, action buttons, the thumbnail expand overlay, etc.). Selection
+  // mode short-circuits panel toggling entirely.
+  const handleRowClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
+    if (selectMode) { onToggleSelect(e.shiftKey); return }
+    if (!onToggleExpand) return
+    const target = e.target as HTMLElement
+    if (target.closest('button, a, input, textarea, select, [role="button"], [data-no-row-toggle]')) return
+    onToggleExpand()
+  }
+
   return (
     <tr
       className={`border-b group transition-colors ${
         isPending
           ? `border-teal-900/30 hover:bg-teal-900/30 ${zebra ? 'bg-teal-900/20' : 'bg-teal-900/15'}`
           : `border-white/5 hover:bg-white/[0.03] ${zebra ? 'bg-white/[0.02]' : ''}`
-      } ${selected ? 'bg-purple-900/10' : ''}`}
-      onClick={selectMode ? (e) => onToggleSelect(e.shiftKey) : undefined}
+      } ${selected ? 'bg-purple-900/10' : ''} ${expanded ? '!border-b-0' : ''}`}
+      onClick={handleRowClick}
       onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart() } : undefined}
       onMouseEnter={selectMode ? onDragEnter : undefined}
-      style={selectMode ? { cursor: 'pointer', userSelect: 'none' } : undefined}
+      style={{ cursor: 'pointer', userSelect: selectMode ? 'none' : undefined }}
     >
 
       {/* Checkbox */}
@@ -4942,9 +5188,12 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
         )}
       </td>
 
-      {/* Actions */}
+      {/* Actions — trimmed to high-frequency buttons. Combine, Open, Delete,
+          New Episode, and Archive(single) live in the action panel revealed
+          on row click. When that panel is open, suppress the hover-reveal so
+          the column buttons don't duplicate the panel's right side. */}
       <td className="px-2 py-2 align-middle">
-        <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className={`flex items-center justify-end transition-opacity ${expanded ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
           {!hasMeta && (
             <span className="flex items-center gap-1 text-xs text-yellow-600 mr-1 shrink-0">
               <AlertTriangle size={11} />
@@ -4953,9 +5202,6 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
           )}
           {videoCount > 0 && <Tooltip content="Send to Player"><Button variant="ghost" size="icon-sm" icon={<Film size={12} />} onClick={onSendToPlayer} /></Tooltip>}
           {videoCount > 0 && <Tooltip content="Send to Converter"><Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} /></Tooltip>}
-          {videoCount > 1 && (
-            <Tooltip content="Send to Combine"><Button variant="ghost" size="icon-sm" icon={<Combine size={12} />} onClick={onSendToCombine} /></Tooltip>
-          )}
           <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
             <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
           </Tooltip>
@@ -4967,25 +5213,206 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
               onClick={hasMeta ? onEdit : onAdd}
             />
           </Tooltip>
-          <Tooltip content="Open folder">
-            <Button variant="ghost" size="icon-sm" icon={<FolderOpen size={12} />} onClick={onOpen} />
-          </Tooltip>
           {isPending && (
             <Tooltip content="Reschedule">
               <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} />
             </Tooltip>
           )}
-          <div className="w-px h-3.5 bg-white/10" />
-          <Tooltip content="Delete folder">
-            <button
-              onClick={onDelete}
-              className="p-2 rounded-lg text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            >
-              <Trash2 size={12} />
-            </button>
-          </Tooltip>
         </div>
       </td>
     </tr>
+  )
+}
+
+// Shared style for the panel's bordered/colored hover buttons (Archive, Delete,
+// New Episode). Non-hovered state matches Button ghost (text-gray-400). Hover
+// tint differs per action so the user can tell them apart at a glance.
+const PANEL_ACTION_BUTTON_BASE = 'p-2 rounded-lg text-gray-400 transition-colors'
+const PANEL_ACTION_BUTTON_GREEN = `${PANEL_ACTION_BUTTON_BASE} hover:text-green-400 hover:bg-green-500/10`
+const PANEL_ACTION_BUTTON_BLUE = `${PANEL_ACTION_BUTTON_BASE} hover:text-blue-400 hover:bg-blue-500/10`
+const PANEL_ACTION_BUTTON_RED = `${PANEL_ACTION_BUTTON_BASE} hover:text-red-400 hover:bg-red-500/10`
+const PANEL_ACTION_BUTTON_YELLOW = `${PANEL_ACTION_BUTTON_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
+
+interface ExpandedPanelProps {
+  folder: StreamFolder
+  isPending: boolean
+  hasMeta: boolean
+  hasSMThumbnail: boolean
+  videoCount: number
+  totalEpisodes: number
+  selectMode: boolean
+  onSendToPlayer: () => void
+  onSendToConverter: () => void
+  onSendToCombine: () => void
+  onOpenThumbnails: () => void
+  onEdit: () => void
+  onAdd: () => void
+  onOpen: () => void
+  onReschedule: () => void
+  onArchive: () => void
+  onDelete: () => void
+  onNewEpisode: () => void
+}
+
+/**
+ * Action panel revealed underneath a stream row when the user clicks its
+ * body. Hosts the full action button set (mirrored + extended from the
+ * action column) on the right and supplementary metadata on the left.
+ *
+ * Buttons that don't apply to the row (Send-to-Combine without 2+ videos,
+ * Reschedule on past streams) are omitted rather than disabled — the panel
+ * is meant to be tight, not exhaustive.
+ */
+function ExpandedStreamPanel({
+  folder, isPending, hasMeta, hasSMThumbnail, videoCount, totalEpisodes, selectMode,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails,
+  onEdit, onAdd, onOpen, onReschedule, onArchive, onDelete, onNewEpisode,
+}: ExpandedPanelProps) {
+  const meta = folder.meta
+  const series = meta?.ytSeason || meta?.ytEpisode
+    ? `S${meta?.ytSeason || '1'} · E${meta?.ytEpisode || '?'}${totalEpisodes > 0 ? ` of ${totalEpisodes}` : ''}`
+    : null
+  const showTwitchTitle = meta?.twitchTitle && !meta?.syncTitle && meta.twitchTitle !== meta.ytTitle
+  const showTwitchGame = meta?.twitchGameName && meta.twitchGameName !== meta.ytGameTitle
+
+  return (
+    <motion.tr
+      key={`panel-${folder.folderPath}`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18, ease: 'easeOut' }}
+    >
+      <td colSpan={selectMode ? 8 : 7} className="p-0 border-b border-white/5 bg-white/[0.015]">
+        <motion.div
+          initial={{ height: 0 }}
+          animate={{ height: 'auto' }}
+          exit={{ height: 0 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          style={{ overflow: 'hidden' }}
+        >
+          <div className="flex items-center justify-between gap-6 px-3 py-3">
+            {/* Left: supplementary metadata. Hidden fields (no value) are
+                skipped entirely so the panel stays compact for sparse rows. */}
+            <div className="flex flex-col gap-1.5 text-xs min-w-0 flex-1">
+              {series && (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Series</span>
+                  <span className="text-gray-200 tabular-nums">{series}</span>
+                </div>
+              )}
+              {meta?.ytTitle && (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">YouTube title</span>
+                  <span className="text-gray-200">{meta.ytTitle}</span>
+                </div>
+              )}
+              {meta?.ytGameTitle && (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">YouTube game</span>
+                  <span className="text-gray-300">{meta.ytGameTitle}</span>
+                </div>
+              )}
+              {meta?.ytDescription && (() => {
+                // Show only the first line in the panel, content-width so the
+                // tooltip anchors over the actual text rather than empty
+                // trailing space. Append an explicit '…' when there's more
+                // content beyond the first line; long single lines get the
+                // ellipsis automatically via `truncate` at max-w-md.
+                const desc = meta.ytDescription
+                const firstLine = desc.split('\n')[0]
+                const hasMore = desc.length > firstLine.length
+                return (
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Description</span>
+                    <Tooltip
+                      content={<span className="whitespace-pre-wrap text-gray-300">{desc}</span>}
+                      maxWidth="max-w-md"
+                      triggerClassName="inline-block min-w-0 max-w-md"
+                    >
+                      <span className="text-gray-400 text-[11px] leading-snug truncate block">
+                        {firstLine}{hasMore && '…'}
+                      </span>
+                    </Tooltip>
+                  </div>
+                )
+              })()}
+              {showTwitchTitle && (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Twitch title</span>
+                  <span className="text-gray-200">{meta!.twitchTitle}</span>
+                </div>
+              )}
+              {showTwitchGame && (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Twitch game</span>
+                  <span className="text-gray-300">{meta!.twitchGameName}</span>
+                </div>
+              )}
+              {meta?.ytTags && meta.ytTags.length > 0 && (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Tags</span>
+                  <div className="flex flex-wrap gap-1">
+                    {meta.ytTags.map((t, i) => (
+                      <span key={i} className="text-[10px] text-gray-400 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!series && !meta?.ytTitle && !meta?.ytGameTitle && !meta?.ytDescription && !showTwitchTitle && !showTwitchGame && (!meta?.ytTags || meta.ytTags.length === 0) && (
+                <span className="text-[11px] text-gray-600 italic">No additional metadata.</span>
+              )}
+            </div>
+
+            {/* Right: action buttons. Mirrors the column buttons + adds
+                Open / Combine / Reschedule (where applicable), then a divider,
+                New Episode, divider, Archive (single-item bypasses selection
+                mode), Delete. */}
+            <div className="flex items-center gap-0.5 shrink-0">
+              {isPending && (
+                <Tooltip content="Reschedule">
+                  <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} />
+                </Tooltip>
+              )}
+              {videoCount > 0 && <Tooltip content="Send to Player"><Button variant="ghost" size="icon-sm" icon={<Film size={12} />} onClick={onSendToPlayer} /></Tooltip>}
+              {videoCount > 0 && <Tooltip content="Send to Converter"><Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} /></Tooltip>}
+              {videoCount > 1 && (
+                <Tooltip content="Send to Combine"><Button variant="ghost" size="icon-sm" icon={<Combine size={12} />} onClick={onSendToCombine} /></Tooltip>
+              )}
+              <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
+                <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
+              </Tooltip>
+              <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
+                <Button variant="ghost" size="icon-sm" icon={<PencilLine size={12} />} onClick={hasMeta ? onEdit : onAdd} />
+              </Tooltip>
+              <div className="w-px h-3.5 bg-white/10 mx-1" />
+              <Tooltip content="New episode based on this stream">
+                <button onClick={onNewEpisode} className={PANEL_ACTION_BUTTON_BLUE}>
+                  <CopyPlus size={12} />
+                </button>
+              </Tooltip>
+              <Tooltip content="Open folder">
+                <button onClick={onOpen} className={PANEL_ACTION_BUTTON_YELLOW}>
+                  <FolderOpen size={12} />
+                </button>
+              </Tooltip>
+              <div className="w-px h-3.5 bg-white/10 mx-1" />
+              {videoCount > 0 && (
+                <Tooltip content="Archive this stream">
+                  <button onClick={onArchive} className={PANEL_ACTION_BUTTON_GREEN}>
+                    <Archive size={12} />
+                  </button>
+                </Tooltip>
+              )}
+              <Tooltip content="Delete this stream and all its contents">
+                <button onClick={onDelete} className={PANEL_ACTION_BUTTON_RED}>
+                  <Trash2 size={12} />
+                </button>
+              </Tooltip>
+            </div>
+          </div>
+        </motion.div>
+      </td>
+    </motion.tr>
   )
 }

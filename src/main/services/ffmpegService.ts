@@ -89,6 +89,21 @@ export async function probeFile(filePath: string): Promise<VideoInfo> {
   })
 }
 
+/** Read the `encoded_by` container tag from a file. Returns the raw string
+ *  or undefined if not set / probe fails. Used as a fast pre-flight to
+ *  detect files we've already archived (the archive ffmpeg run writes a
+ *  marker into this tag). Lighter than `probeFile` since we only need
+ *  format-level metadata, not stream details. */
+export async function probeArchiveTag(filePath: string): Promise<string | undefined> {
+  return new Promise(resolve => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) { resolve(undefined); return }
+      const tags = (metadata.format as { tags?: Record<string, string> }).tags
+      resolve(tags?.encoded_by ?? tags?.ENCODED_BY)
+    })
+  })
+}
+
 let _extractCancel: (() => void) | null = null
 
 export function cancelExtraction(): void {

@@ -5,7 +5,7 @@ import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer, Rect
 import useImage from 'use-image'
 import Konva from 'konva'
 import {
-  ArrowLeft, Plus, Trash2, Eye, EyeOff, ChevronUp, ChevronDown,
+  ArrowLeft, Plus, Trash2, Eye, EyeOff,
   Image as ImageIcon, Type, Undo2, Redo2, Download,
   BookMarked, FolderOpen, LayoutTemplate, Sliders, RotateCcw, Copy,
   Magnet, Grid3x3, Check, X, AlertTriangle, Pencil,
@@ -193,9 +193,64 @@ interface KonvaLayerNodeProps {
   onSnapTransformBoundBox: (oldBox: KonvaBox, newBox: KonvaBox) => KonvaBox
   onClearGuides: () => void
   gridSnapEnabled: boolean
+  /** Merge field values for text layers. When null, merge fields render
+   *  literally ({title}, {episode}, etc.) — used for template editing. */
+  mergeFields: Record<string, string> | null
+}
+
+/** Replace {field} markers in `text` with values from `fields`. When fields
+ *  is null (template-edit mode), the original text is returned untouched so
+ *  the user sees the literal merge field markers on the canvas. Unknown
+ *  field names are left as-is to surface typos. */
+export function applyThumbnailMergeFields(text: string, fields: Record<string, string> | null): string {
+  if (!fields) return text
+  return text.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
 }
 
 function snapGrid(v: number) { return Math.round(v / GRID_SIZE) * GRID_SIZE }
+
+/** Returns the Konva shadow props for a layer. Konva has first-class shadow
+ *  support — we just pass these through to any Image/Text/Shape node. The
+ *  `shadowEnabled` prop is the master switch; setting it false leaves
+ *  shadow values intact in JSON so the user can toggle on/off without
+ *  losing settings. */
+function shadowProps(layer: ThumbnailLayer) {
+  return {
+    shadowEnabled: !!layer.shadowEnabled,
+    shadowColor: layer.shadowColor ?? '#000000',
+    shadowOffsetX: layer.shadowOffsetX ?? 4,
+    shadowOffsetY: layer.shadowOffsetY ?? 4,
+    shadowBlur: layer.shadowBlur ?? 8,
+    shadowOpacity: (layer.shadowOpacity ?? 100) / 100,
+  }
+}
+
+/** Returns the array of Konva.Filters to apply, based on which fields on the
+ *  layer have non-neutral values. Order matters: HSL → Brightness → Contrast
+ *  is the visually intuitive order. Toggles (grayscale, sepia, invert,
+ *  emboss) come last so they paint over the color adjustments. */
+type KonvaFilterFn = typeof Konva.Filters.Brighten
+
+function activeFilters(layer: ThumbnailLayer): KonvaFilterFn[] {
+  if (!layer.filtersEnabled) return []
+  const out: KonvaFilterFn[] = []
+  // HSL contributes if any of hue/saturation/luminance is non-zero
+  if ((layer.filterHue ?? 0) !== 0 || (layer.filterSaturation ?? 0) !== 0 || (layer.filterLuminance ?? 0) !== 0) {
+    out.push(Konva.Filters.HSL)
+  }
+  if ((layer.filterBrightness ?? 0) !== 0) out.push(Konva.Filters.Brighten)
+  if ((layer.filterContrast ?? 0) !== 0) out.push(Konva.Filters.Contrast)
+  if ((layer.filterBlur ?? 0) > 0) out.push(Konva.Filters.Blur)
+  if ((layer.filterEnhance ?? 0) !== 0) out.push(Konva.Filters.Enhance)
+  if ((layer.filterPixelate ?? 0) > 1) out.push(Konva.Filters.Pixelate)
+  if ((layer.filterPosterize ?? 0) > 0 && (layer.filterPosterize ?? 0) < 1) out.push(Konva.Filters.Posterize)
+  if ((layer.filterThreshold ?? 0) > 0) out.push(Konva.Filters.Threshold)
+  if (layer.filterGrayscale) out.push(Konva.Filters.Grayscale)
+  if (layer.filterSepia) out.push(Konva.Filters.Sepia)
+  if (layer.filterInvert) out.push(Konva.Filters.Invert)
+  if (layer.filterEmboss) out.push(Konva.Filters.Emboss)
+  return out
+}
 
 function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
   const [img] = useImage(layer.src ? `file://${layer.src}` : '', 'anonymous')
@@ -208,6 +263,46 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
       trRef.current.getLayer()?.batchDraw()
     }
   }, [isSelected])
+
+  // Apply Konva filters. Konva requires the node to be cached before filters
+  // are applied (filters operate on the rasterized bitmap). We re-cache
+  // whenever filter parameters change. If no filters are active, clear the
+  // cache so the image renders directly without rasterization overhead.
+  useEffect(() => {
+    const node = nodeRef.current
+    if (!node || !img) return
+    const filters = activeFilters(layer)
+    if (filters.length === 0) {
+      node.filters([])
+      node.clearCache()
+      node.getLayer()?.batchDraw()
+      return
+    }
+    // Map our schema values to Konva's filter API.
+    if (layer.filterBrightness !== undefined) node.brightness(layer.filterBrightness)
+    if (layer.filterContrast !== undefined) node.contrast(layer.filterContrast)
+    if (layer.filterBlur !== undefined) node.blurRadius(layer.filterBlur)
+    if (layer.filterHue !== undefined) node.hue(layer.filterHue)
+    if (layer.filterSaturation !== undefined) node.saturation(layer.filterSaturation)
+    if (layer.filterLuminance !== undefined) node.luminance(layer.filterLuminance)
+    if (layer.filterPixelate !== undefined) node.pixelSize(Math.max(1, Math.round(layer.filterPixelate)))
+    if (layer.filterPosterize !== undefined) node.levels(layer.filterPosterize)
+    if (layer.filterEnhance !== undefined) node.enhance(layer.filterEnhance)
+    if (layer.filterThreshold !== undefined) node.threshold(layer.filterThreshold)
+    node.cache({ pixelRatio: 2 })
+    node.filters(filters)
+    node.getLayer()?.batchDraw()
+  }, [
+    img,
+    layer.filtersEnabled,
+    layer.filterBrightness, layer.filterContrast, layer.filterBlur,
+    layer.filterHue, layer.filterSaturation, layer.filterLuminance,
+    layer.filterPixelate, layer.filterPosterize, layer.filterEnhance,
+    layer.filterThreshold,
+    layer.filterGrayscale, layer.filterSepia, layer.filterInvert, layer.filterEmboss,
+    // Re-cache when image dimensions change so the cached bitmap matches.
+    layer.width, layer.height,
+  ])
 
   if (!img) return null
 
@@ -228,6 +323,7 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
         rotation={layer.rotation}
         opacity={layer.opacity / 100}
         visible={layer.visible}
+        {...shadowProps(layer)}
         draggable
         onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
         onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
@@ -255,7 +351,7 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
   )
 }
 
-function TextNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function TextNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled, mergeFields }: KonvaLayerNodeProps) {
   const nodeRef = useRef<Konva.Text>(null)
   const trRef = useRef<Konva.Transformer>(null)
 
@@ -272,7 +368,7 @@ function TextNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDr
         ref={nodeRef}
         id={layer.id}
         name="snap-target"
-        text={layer.text ?? ''}
+        text={applyThumbnailMergeFields(layer.text ?? '', mergeFields)}
         x={layer.x}
         y={layer.y}
         width={layer.width ?? undefined}
@@ -287,6 +383,7 @@ function TextNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDr
         strokeWidth={layer.strokeWidth ?? 0}
         fillAfterStrokeEnabled
         align={layer.align ?? 'left'}
+        {...shadowProps(layer)}
         draggable
         onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
         onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
@@ -349,6 +446,7 @@ function ShapeNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
     stroke: layer.stroke ?? '#000000',
     strokeWidth: layer.strokeWidth ?? 0,
     fillAfterStrokeEnabled: true,
+    ...shadowProps(layer),
     draggable: true,
     onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button !== 0) e.target.stopDrag() },
     onClick: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) },
@@ -580,6 +678,45 @@ interface PropsPanelProps {
   fontVariantMap: Record<string, { name: string; css: string }[]>
 }
 
+function FilterSlider({ label, min, max, step, value, onChange }: {
+  label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void
+}) {
+  return (
+    <label className="flex flex-col gap-0.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-gray-500">{label}</span>
+        <span className="text-[10px] text-gray-400 tabular-nums">{Number.isInteger(step) ? value : value.toFixed(2)}</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="range" min={min} max={max} step={step} value={value}
+          onChange={e => onChange(Number(e.target.value))}
+          className="flex-1 accent-purple-600"
+        />
+        <input
+          type="number" min={min} max={max} step={step} value={value}
+          onChange={e => onChange(Number(e.target.value))}
+          className="w-14 bg-navy-900 border border-white/10 rounded px-1 py-0.5 text-[10px] text-gray-200 tabular-nums"
+        />
+      </div>
+    </label>
+  )
+}
+
+function FilterToggle({ label, checked, onChange }: {
+  label: string; checked: boolean; onChange: (v: boolean) => void
+}) {
+  return (
+    <label className="flex items-center gap-1.5 text-[10px] text-gray-300 cursor-pointer">
+      <input
+        type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
+        className="accent-purple-600"
+      />
+      {label}
+    </label>
+  )
+}
+
 function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: PropsPanelProps) {
   if (!layer) {
     return (
@@ -665,6 +802,20 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               rows={3}
               className="w-full bg-navy-900 border border-white/10 rounded px-2 py-1.5 text-xs text-gray-200 resize-none"
             />
+            <p className="text-[10px] text-gray-600 mt-1 leading-snug">
+              Merge fields:
+              {' '}
+              {['title', 'game', 'date', 'season', 'episode', 'total_episodes'].map((f, i, arr) => (
+                <React.Fragment key={f}>
+                  <code
+                    onClick={() => update({ text: (layer.text ?? '') + `{${f}}` })}
+                    className="text-purple-400/80 cursor-pointer hover:text-purple-300"
+                    title={`Insert {${f}}`}
+                  >{`{${f}}`}</code>
+                  {i < arr.length - 1 && ' '}
+                </React.Fragment>
+              ))}
+            </p>
           </section>
           <section>
             <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2">Font</p>
@@ -831,6 +982,131 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
           </div>
         </section>
       )}
+
+      {/* Drop Shadow — works on every layer type. Konva handles the rendering
+          natively via shadow* props; we just persist the values. */}
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] uppercase tracking-wider text-gray-600">Drop Shadow</p>
+          <label className="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!layer.shadowEnabled}
+              onChange={e => update({ shadowEnabled: e.target.checked })}
+              className="accent-purple-600"
+            />
+            Enable
+          </label>
+        </div>
+        {layer.shadowEnabled && (
+          <div className="flex flex-col gap-1.5">
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-500">Color</span>
+              <div className="flex items-center gap-1.5">
+                <input type="color" value={layer.shadowColor ?? '#000000'}
+                  onChange={e => update({ shadowColor: e.target.value })}
+                  className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer" />
+                <input type="text" value={layer.shadowColor ?? '#000000'}
+                  onChange={e => update({ shadowColor: e.target.value })}
+                  className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+              </div>
+            </label>
+            <div className="grid grid-cols-2 gap-1.5">
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-500">Offset X</span>
+                <input type="number" value={layer.shadowOffsetX ?? 4}
+                  onChange={e => update({ shadowOffsetX: Number(e.target.value) })}
+                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-500">Offset Y</span>
+                <input type="number" value={layer.shadowOffsetY ?? 4}
+                  onChange={e => update({ shadowOffsetY: Number(e.target.value) })}
+                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-500">Blur</span>
+                <input type="number" min={0} value={layer.shadowBlur ?? 8}
+                  onChange={e => update({ shadowBlur: Math.max(0, Number(e.target.value)) })}
+                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-500">Opacity %</span>
+                <input type="number" min={0} max={100} value={layer.shadowOpacity ?? 100}
+                  onChange={e => update({ shadowOpacity: Math.min(100, Math.max(0, Number(e.target.value))) })}
+                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
+              </label>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Filters — image layers only. All filter values persist in JSON
+          regardless of the master toggle, so the user can A/B compare without
+          re-dialing settings. The cache + filter application is wired in
+          ImageNode's effect. */}
+      {layer.type === 'image' && (
+        <section>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] uppercase tracking-wider text-gray-600">Filters</p>
+            <label className="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!layer.filtersEnabled}
+                onChange={e => update({ filtersEnabled: e.target.checked })}
+                className="accent-purple-600"
+              />
+              Enable
+            </label>
+          </div>
+          {layer.filtersEnabled && (
+            <div className="flex flex-col gap-2">
+              <FilterSlider label="Brightness" min={-1} max={1} step={0.05} value={layer.filterBrightness ?? 0}
+                onChange={v => update({ filterBrightness: v })} />
+              <FilterSlider label="Contrast" min={-100} max={100} step={1} value={layer.filterContrast ?? 0}
+                onChange={v => update({ filterContrast: v })} />
+              <FilterSlider label="Saturation" min={-2} max={10} step={0.1} value={layer.filterSaturation ?? 0}
+                onChange={v => update({ filterSaturation: v })} />
+              <FilterSlider label="Hue" min={-180} max={180} step={1} value={layer.filterHue ?? 0}
+                onChange={v => update({ filterHue: v })} />
+              <FilterSlider label="Luminance" min={-2} max={2} step={0.05} value={layer.filterLuminance ?? 0}
+                onChange={v => update({ filterLuminance: v })} />
+              <FilterSlider label="Blur" min={0} max={40} step={1} value={layer.filterBlur ?? 0}
+                onChange={v => update({ filterBlur: v })} />
+              <FilterSlider label="Enhance" min={-1} max={1} step={0.05} value={layer.filterEnhance ?? 0}
+                onChange={v => update({ filterEnhance: v })} />
+              <FilterSlider label="Pixelate" min={0} max={50} step={1} value={layer.filterPixelate ?? 0}
+                onChange={v => update({ filterPixelate: v })} />
+              <FilterSlider label="Posterize" min={0} max={1} step={0.05} value={layer.filterPosterize ?? 0}
+                onChange={v => update({ filterPosterize: v })} />
+              <FilterSlider label="Threshold" min={0} max={1} step={0.01} value={layer.filterThreshold ?? 0}
+                onChange={v => update({ filterThreshold: v })} />
+              <div className="grid grid-cols-2 gap-1.5 mt-1">
+                <FilterToggle label="Grayscale" checked={!!layer.filterGrayscale}
+                  onChange={v => update({ filterGrayscale: v })} />
+                <FilterToggle label="Sepia" checked={!!layer.filterSepia}
+                  onChange={v => update({ filterSepia: v })} />
+                <FilterToggle label="Invert" checked={!!layer.filterInvert}
+                  onChange={v => update({ filterInvert: v })} />
+                <FilterToggle label="Emboss" checked={!!layer.filterEmboss}
+                  onChange={v => update({ filterEmboss: v })} />
+              </div>
+              <button
+                type="button"
+                onClick={() => update({
+                  filterBrightness: 0, filterContrast: 0, filterBlur: 0,
+                  filterHue: 0, filterSaturation: 0, filterLuminance: 0,
+                  filterPixelate: 0, filterPosterize: 0, filterEnhance: 0, filterThreshold: 0,
+                  filterGrayscale: false, filterSepia: false, filterInvert: false, filterEmboss: false,
+                })}
+                className="text-[10px] text-gray-500 hover:text-gray-300 self-start"
+              >
+                Reset filters
+              </button>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }
@@ -850,12 +1126,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [overviewLoading, setOverviewLoading] = useState(false)
 
   // ── Editor state ──────────────────────────────────────────────────────────
-  const [currentStream, setCurrentStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta } | null>(null)
+  const [currentStream, setCurrentStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number } | null>(null)
   const [currentTemplateId, setCurrentTemplateId] = useState<string | undefined>(undefined)
   const { layers, commit, set: setLayersDirect, undo, redo, reset: resetLayers, canUndo, canRedo } = useUndoRedo([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
+  // Inline rename state for the layer panel. Only one layer renames at a time.
+  const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null)
+  // Drag-and-drop reordering state. `dropTargetDisplayIdx` is the gap index
+  // (0..N inclusive) in display-order space — 0 = above the topmost row,
+  // N = below the bottommost row.
+  const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null)
+  const [dropTargetDisplayIdx, setDropTargetDisplayIdx] = useState<number | null>(null)
 
   // Relocate any inline-mounted Transformers into the dedicated layer above the matte
   useLayoutEffect(() => {
@@ -875,7 +1158,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [clipboardLayers, setClipboardLayers] = useState<ThumbnailLayer[]>([])
 
   // ── Template picker (shown when opening a new stream with no existing canvas) ─
-  const [templatePickerStream, setTemplatePickerStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta } | null>(null)
+  const [templatePickerStream, setTemplatePickerStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number } | null>(null)
 
   // ── Container / zoom / pan ────────────────────────────────────────────────
   const canvasContainerRef = useRef<HTMLDivElement>(null)
@@ -901,6 +1184,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const bgLayerRef = useRef<Konva.Layer>(null)
   const guideLayerRef = useRef<Konva.Layer>(null)
   const transformerLayerRef = useRef<Konva.Layer>(null)
+  const matteLayerRef = useRef<Konva.Layer>(null)
 
   // ── Snapping ──────────────────────────────────────────────────────────────
   const [smartSnapEnabled, setSmartSnapEnabled] = useState(true)
@@ -1101,7 +1385,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Handle pending stream navigation ─────────────────────────────────────
   useEffect(() => {
     if (!pendingStream || !isVisible) return
-    openStreamEditor(pendingStream.folderPath, pendingStream.date, pendingStream.title, pendingStream.meta)
+    openStreamEditor(pendingStream.folderPath, pendingStream.date, pendingStream.title, pendingStream.meta, pendingStream.totalEpisodes)
     clearPendingStream()
   }, [pendingStream, isVisible])
 
@@ -1234,6 +1518,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (!stage) return ''
     bgLayerRef.current?.hide()
     guideLayerRef.current?.hide()
+    matteLayerRef.current?.hide()
     // Hide selection handles so they don't appear in the saved image
     const transformers = stage.find('Transformer')
     transformers.forEach(t => t.hide())
@@ -1248,6 +1533,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     transformers.forEach(t => t.show())
     bgLayerRef.current?.show()
     guideLayerRef.current?.show()
+    matteLayerRef.current?.show()
     return dataUrl
   }, [])
 
@@ -1297,14 +1583,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setSelectedIds([])
   }, [layers, selectedIds, commitLayers])
 
-  const moveLayer = useCallback((id: string, dir: 'up' | 'down') => {
-    const idx = layers.findIndex(l => l.id === id)
-    if (idx < 0) return
-    const next = [...layers]
-    const other = dir === 'up' ? idx + 1 : idx - 1
-    if (other < 0 || other >= next.length) return
-    ;[next[idx], next[other]] = [next[other], next[idx]]
-    commitLayers(next)
+  // Reorder a layer to a specific display-order gap index.
+  // displayIdx 0 = above the topmost row; layers.length = below the bottommost.
+  // The display order is the reverse of the storage array (top = highest index).
+  const reorderLayer = useCallback((srcId: string, displayDropIdx: number) => {
+    const display = [...layers].reverse()
+    const srcDisplayIdx = display.findIndex(l => l.id === srcId)
+    if (srcDisplayIdx === -1) return
+    // No-op if dropping in the same slot or the slot immediately after self.
+    if (displayDropIdx === srcDisplayIdx || displayDropIdx === srcDisplayIdx + 1) return
+    const [item] = display.splice(srcDisplayIdx, 1)
+    const adjusted = displayDropIdx > srcDisplayIdx ? displayDropIdx - 1 : displayDropIdx
+    display.splice(adjusted, 0, item)
+    commitLayers([...display].reverse())
   }, [layers, commitLayers])
 
   const duplicateLayer = useCallback((id: string) => {
@@ -1328,6 +1619,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     const paths = await window.api.openFileDialog({ filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }], properties: ['openFile'], defaultPath })
     if (!paths.length) return
+    // Use the original filename (sans extension) as the layer name. Read it
+    // from the user-picked path BEFORE caching, since the cached file may be
+    // hashed or sanitized.
+    const originalBasename = paths[0].split(/[\\/]/).pop() ?? ''
+    const layerName = originalBasename.replace(/\.[^.]+$/, '') || 'Image'
     const srcPath = config.streamsDir
       ? await window.api.thumbnailCacheAsset(config.streamsDir, paths[0])
       : paths[0]
@@ -1346,7 +1642,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const height = Math.round(naturalH * containScale)
 
     const layer: ThumbnailLayer = {
-      id: newId(), name: 'Image', type: 'image', visible: true, opacity: 100,
+      id: newId(), name: layerName, type: 'image', visible: true, opacity: 100,
       x: Math.round((CANVAS_W - width) / 2),
       y: Math.round((CANVAS_H - height) / 2),
       rotation: 0, src: srcPath, width, height,
@@ -1393,7 +1689,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   }, [])
 
   // ── Open editor for a stream ───────────────────────────────────────────────
-  const openStreamEditor = useCallback(async (folderPath: string, date: string, title?: string, meta?: StreamMeta) => {
+  const openStreamEditor = useCallback(async (folderPath: string, date: string, title?: string, meta?: StreamMeta, totalEpisodes?: number) => {
     // Load canvas + fresh template list in parallel (avoids race with isVisible effect)
     const [canvas, freshTemplates] = await Promise.all([
       window.api.thumbnailLoadCanvas(folderPath, date),
@@ -1409,12 +1705,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
     if (!canvas && !presetTemplate && freshTemplates.length > 0) {
       // No existing canvas, no preselection, but templates exist → ask user to pick one first
-      setTemplatePickerStream({ folderPath, date, title, meta })
+      setTemplatePickerStream({ folderPath, date, title, meta, totalEpisodes })
       setMode('overview')
       return
     }
 
-    setCurrentStream({ folderPath, date, title, meta })
+    setCurrentStream({ folderPath, date, title, meta, totalEpisodes })
     setSelectedIds([])
     if (canvas) {
       resetLayers(canvas.layers)
@@ -1440,9 +1736,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Confirm template picker choice ────────────────────────────────────────
   const confirmPickTemplate = useCallback((t: ThumbnailTemplate | null) => {
     if (!templatePickerStream) return
-    const { folderPath, date, title, meta } = templatePickerStream
+    const { folderPath, date, title, meta, totalEpisodes } = templatePickerStream
     setTemplatePickerStream(null)
-    setCurrentStream({ folderPath, date, title, meta })
+    setCurrentStream({ folderPath, date, title, meta, totalEpisodes })
     setSelectedIds([])
     if (t) {
       resetLayers(t.layers.map(l => ({ ...l, id: newId() })))
@@ -1599,6 +1895,24 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Rendered canvas layers (bottom-to-top order, reversed for konva draw) ──
   // layers[0] = bottom, layers[length-1] = top. Konva draws in array order.
   const renderLayers = useMemo(() => [...layers], [layers])
+
+  // Merge field substitutions for text layers. When `currentStream` is set,
+  // we have real values from its meta — text layers render with substitutions
+  // applied. When null (template editing mode), the memo returns null and
+  // text layers render the raw {field} markers literally so the user can see
+  // what they're authoring.
+  const mergeFieldValues = useMemo<Record<string, string> | null>(() => {
+    if (!currentStream) return null
+    const m = currentStream.meta
+    return {
+      title: m?.ytCatchyTitle || m?.ytTitle || '',
+      game: m?.ytGameTitle || m?.games?.[0] || '',
+      date: currentStream.date,
+      season: m?.ytSeason || '1',
+      episode: m?.ytEpisode || '1',
+      total_episodes: currentStream.totalEpisodes ? String(currentStream.totalEpisodes) : '',
+    }
+  }, [currentStream])
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -1871,14 +2185,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       onSnapTransformBoundBox: handleSnapTransformBoundBox,
                       onClearGuides: clearSnapGuides,
                       gridSnapEnabled,
+                      mergeFields: mergeFieldValues,
                     }
                     if (layer.type === 'image') return <ImageNode key={layer.id} {...props} />
                     if (layer.type === 'shape') return <ShapeNode key={layer.id} {...props} />
                     return <TextNode key={layer.id} {...props} />
                   })}
                 </Layer>
-                {/* Off-canvas matte: darkens content that falls outside the work area */}
-                <Layer listening={false}>
+                {/* Off-canvas matte: darkens content that falls outside the work area.
+                    Excluded from export — the matte's sceneFunc closes over
+                    viewPan/viewZoom at render time, so when the export logic
+                    resets the stage transform, the matte's outer rect can land
+                    partially over the canvas and bleed into the saved PNG. */}
+                <Layer ref={matteLayerRef} listening={false}>
                   {(() => {
                     const vx0 = -viewPan.x / viewZoom
                     const vy0 = -viewPan.y / viewZoom
@@ -1932,39 +2251,105 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <span className="text-[10px] text-gray-600">{layers.length}</span>
                 </div>
                 <div className="overflow-y-auto flex-1">
-                  {[...layers].reverse().map(layer => {
-                    const isSelected = selectedIds.includes(layer.id)
-                    const idx = layers.indexOf(layer)
-                    return (
-                      <div
-                        key={layer.id}
-                        onClick={() => handleLayerSelect(layer.id, false)}
-                        className={`flex items-center gap-1.5 px-2 py-1.5 cursor-pointer group border-b border-white/5 ${isSelected ? 'bg-purple-600/20' : 'hover:bg-white/5'}`}
-                      >
-                        <button
-                          onClick={e => { e.stopPropagation(); updateLayer({ ...layer, visible: !layer.visible }) }}
-                          className="text-gray-500 hover:text-gray-300 shrink-0"
-                        >
-                          {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-700" />}
-                        </button>
-                        <span className="flex-1 text-xs text-gray-400 truncate">{layer.name}</span>
-                        <div className={`flex gap-0.5 opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''} transition-opacity`}>
-                          <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-600 hover:text-gray-300">
-                            <Copy size={10} />
-                          </button>
-                          <button onClick={e => { e.stopPropagation(); moveLayer(layer.id, 'up') }} disabled={idx >= layers.length - 1} className="p-0.5 rounded hover:bg-white/10 text-gray-600 hover:text-gray-300 disabled:opacity-30">
-                            <ChevronUp size={10} />
-                          </button>
-                          <button onClick={e => { e.stopPropagation(); moveLayer(layer.id, 'down') }} disabled={idx <= 0} className="p-0.5 rounded hover:bg-white/10 text-gray-600 hover:text-gray-300 disabled:opacity-30">
-                            <ChevronDown size={10} />
-                          </button>
-                          <button onClick={e => { e.stopPropagation(); commitLayers(layers.filter(l => l.id !== layer.id)); setSelectedIds([]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-600 hover:text-red-400">
-                            <Trash2 size={10} />
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
+                  {(() => {
+                    const displayLayers = [...layers].reverse()
+                    return displayLayers.map((layer, displayIdx) => {
+                      const isSelected = selectedIds.includes(layer.id)
+                      const isRenaming = renamingLayerId === layer.id
+                      const isDragging = draggingLayerId === layer.id
+                      return (
+                        <React.Fragment key={layer.id}>
+                          {dropTargetDisplayIdx === displayIdx && (
+                            <div className="h-0.5 bg-purple-500" />
+                          )}
+                          <div
+                            draggable={!isRenaming}
+                            onDragStart={e => {
+                              setDraggingLayerId(layer.id)
+                              e.dataTransfer.effectAllowed = 'move'
+                              // Required for drag to work in some browsers; the
+                              // payload is unused since we track via state.
+                              e.dataTransfer.setData('text/plain', layer.id)
+                            }}
+                            onDragOver={e => {
+                              if (!draggingLayerId || draggingLayerId === layer.id) return
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = 'move'
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              const above = e.clientY < rect.top + rect.height / 2
+                              setDropTargetDisplayIdx(above ? displayIdx : displayIdx + 1)
+                            }}
+                            onDragLeave={e => {
+                              // Only clear when leaving the entire row, not when
+                              // crossing into a child element.
+                              const related = e.relatedTarget as Node | null
+                              if (related && e.currentTarget.contains(related)) return
+                              // Don't clear if we're moving onto another row that
+                              // will set its own target — let onDragOver of the
+                              // next row override us.
+                            }}
+                            onDrop={e => {
+                              e.preventDefault()
+                              if (draggingLayerId && dropTargetDisplayIdx !== null) {
+                                reorderLayer(draggingLayerId, dropTargetDisplayIdx)
+                              }
+                              setDraggingLayerId(null)
+                              setDropTargetDisplayIdx(null)
+                            }}
+                            onDragEnd={() => {
+                              setDraggingLayerId(null)
+                              setDropTargetDisplayIdx(null)
+                            }}
+                            onClick={() => { if (!isRenaming) handleLayerSelect(layer.id, false) }}
+                            className={`flex items-center gap-1.5 px-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-purple-600/20' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
+                          >
+                            <button
+                              onClick={e => { e.stopPropagation(); updateLayer({ ...layer, visible: !layer.visible }) }}
+                              className="text-gray-500 hover:text-gray-300 shrink-0"
+                            >
+                              {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-700" />}
+                            </button>
+                            {isRenaming ? (
+                              <input
+                                autoFocus
+                                defaultValue={layer.name}
+                                onClick={e => e.stopPropagation()}
+                                onFocus={e => e.currentTarget.select()}
+                                onBlur={e => {
+                                  const next = e.target.value.trim()
+                                  if (next && next !== layer.name) updateLayer({ ...layer, name: next })
+                                  setRenamingLayerId(null)
+                                }}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
+                                  else if (e.key === 'Escape') { e.preventDefault(); setRenamingLayerId(null) }
+                                }}
+                                className="flex-1 min-w-0 bg-navy-900 border border-purple-500/60 rounded px-1.5 py-0 text-xs text-gray-200 focus:outline-none"
+                              />
+                            ) : (
+                              <span
+                                onDoubleClick={e => { e.stopPropagation(); setRenamingLayerId(layer.id) }}
+                                className="flex-1 text-xs text-gray-400 truncate cursor-text"
+                              >
+                                {layer.name}
+                              </span>
+                            )}
+                            <div className={`flex gap-0.5 opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''} transition-opacity`}>
+                              <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-600 hover:text-gray-300">
+                                <Copy size={10} />
+                              </button>
+                              <button onClick={e => { e.stopPropagation(); commitLayers(layers.filter(l => l.id !== layer.id)); setSelectedIds([]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-600 hover:text-red-400">
+                                <Trash2 size={10} />
+                              </button>
+                            </div>
+                          </div>
+                          {displayIdx === displayLayers.length - 1 && dropTargetDisplayIdx === displayLayers.length && (
+                            <div className="h-0.5 bg-purple-500" />
+                          )}
+                        </React.Fragment>
+                      )
+                    })
+                  })()}
                 </div>
               </div>
 

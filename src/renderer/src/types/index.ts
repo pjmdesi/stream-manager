@@ -339,6 +339,30 @@ export interface ThumbnailLayer {
   fill?: string
   stroke?: string
   strokeWidth?: number
+  // Drop shadow (all layer types). Disabled when shadowEnabled is false/undefined.
+  shadowEnabled?: boolean
+  shadowColor?: string
+  shadowOffsetX?: number
+  shadowOffsetY?: number
+  shadowBlur?: number
+  shadowOpacity?: number    // 0–100
+  // Konva filters (image layers only). Master toggle so all slider values
+  // persist when the user temporarily disables effects without losing them.
+  filtersEnabled?: boolean
+  filterBrightness?: number     // -1..1
+  filterContrast?: number       // -100..100
+  filterBlur?: number           // 0..40 (px radius)
+  filterHue?: number            // -180..180 (HSL filter)
+  filterSaturation?: number     // -2..10 (HSL filter)
+  filterLuminance?: number      // -2..2 (HSL filter)
+  filterPixelate?: number       // 0..100 (off when <=1)
+  filterPosterize?: number      // 0..1 (off when 0)
+  filterEnhance?: number        // -1..1
+  filterThreshold?: number      // 0..1 (off when 0)
+  filterGrayscale?: boolean
+  filterSepia?: boolean
+  filterInvert?: boolean
+  filterEmboss?: boolean
 }
 
 export interface ThumbnailCanvasFile {

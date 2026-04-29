@@ -87,10 +87,15 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
   const [, setTick] = useState(0)
-  const jobStartTimes = useRef<Map<string, number>>(new Map())
+  // jobElapsed accumulates ACTIVE-only milliseconds — incremented each tick
+  // by the wall-clock delta IFF the job's status is 'running'. Pause time
+  // never counts. This replaces the previous "single startedAt timestamp +
+  // (now - startedAt)" approach which kept ticking through pauses and
+  // produced inflated ETAs immediately after resume.
   const jobEtas = useRef<Map<string, number | null>>(new Map())
   const jobElapsed = useRef<Map<string, number>>(new Map())
   const jobFinalElapsed = useRef<Map<string, number>>(new Map())
+  const lastTickAt = useRef<number>(Date.now())
   const ETA_ALPHA = 0.25
   const jobsRef = useRef(jobs)
 
@@ -122,7 +127,6 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
 
   useEffect(() => {
     const unsubProgress = window.api.onJobProgress(({ jobId, percent }: { jobId: string; percent: number }) => {
-      if (!jobStartTimes.current.has(jobId)) jobStartTimes.current.set(jobId, Date.now())
       setJobs(prev => prev.map(j => {
         if (j.id !== jobId) return j
         // Don't override transient sub-states ('downloading', 'replacing',
@@ -138,8 +142,8 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status } : j))
     })
     const unsubComplete = window.api.onJobComplete(({ jobId }: { jobId: string }) => {
-      const startedAt = jobStartTimes.current.get(jobId)
-      if (startedAt) jobFinalElapsed.current.set(jobId, Date.now() - startedAt)
+      const elapsed = jobElapsed.current.get(jobId)
+      if (elapsed !== undefined) jobFinalElapsed.current.set(jobId, elapsed)
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'done', progress: 100 } : j))
     })
     const unsubError = window.api.onJobError(({ jobId, error }: { jobId: string; error: string }) => {
@@ -154,14 +158,21 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
 
   useEffect(() => { jobsRef.current = jobs }, [jobs])
 
-  // Tick every second — update ETA once per second using current jobs ref
+  // Tick every second — accumulate active-only elapsed time and recompute
+  // ETA. We measure the wall-clock delta between ticks and add it to a
+  // job's elapsed counter only when the job is currently 'running', so
+  // pause / downloading / replacing time is excluded from the rate
+  // calculation that drives the ETA.
   useEffect(() => {
+    lastTickAt.current = Date.now()
     const id = setInterval(() => {
+      const now = Date.now()
+      const delta = now - lastTickAt.current
+      lastTickAt.current = now
       if (!jobsRef.current.some(j => j.status === 'running')) return
       jobsRef.current.forEach(j => {
         if (j.status !== 'running') return
-        const startedAt = jobStartTimes.current.get(j.id)
-        const elapsed = startedAt ? Date.now() - startedAt : 0
+        const elapsed = (jobElapsed.current.get(j.id) ?? 0) + delta
         jobElapsed.current.set(j.id, elapsed)
         if (j.progress > 0) {
           const raw = elapsed / (j.progress / 100) - elapsed
@@ -249,7 +260,6 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     jobEtas.current.delete(id)
     jobElapsed.current.delete(id)
     jobFinalElapsed.current.delete(id)
-    jobStartTimes.current.delete(id)
   }
 
   const cancelJob = async (id: string) => {
@@ -435,12 +445,19 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     )
   }
 
-  const PresetItem = ({ p, deletable }: { p: ConversionPreset; deletable?: boolean }) => {
+  // Render function (NOT a sub-component) so React reconciles its output
+  // as ordinary inline JSX. Defining this as `<PresetItem />` would create a
+  // new component-type identity on every parent re-render — and the parent
+  // re-renders every second from the ETA tick — causing every preset row's
+  // subtree to unmount/remount mid-hover, which manifests as flashing
+  // hover styles and tooltip flicker.
+  const renderPresetItem = (p: ConversionPreset, deletable?: boolean) => {
     const isRenaming = renamingId === p.id
     const isArchiveDefault = archivePresetId === p.id
     const isRecommended = recommendedArchiveId === p.id
     return (
       <div
+        key={p.id}
         className={`group flex items-start border-b border-white/5 transition-colors ${
           selectedPreset?.id === p.id
             ? 'bg-purple-600/20 border-l-2 border-l-purple-500'
@@ -518,14 +535,14 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
         </div>
 
         <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto">
-          {builtinPresets.map(p => <PresetItem key={p.id} p={p} />)}
+          {builtinPresets.map(p => renderPresetItem(p))}
 
           {importedPresets.length > 0 && (
             <>
               <div className="px-4 pt-3 pb-1">
                 <span className="text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Imported</span>
               </div>
-              {importedPresets.map(p => <PresetItem key={p.id} p={p} deletable />)}
+              {importedPresets.map(p => renderPresetItem(p, true))}
             </>
           )}
         </div>

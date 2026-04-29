@@ -7,6 +7,10 @@ interface TooltipProps {
   content: React.ReactNode
   side?: TooltipSide
   width?: string
+  /** Override the default `max-w-xs` cap. Use Tailwind classes like
+   *  'max-w-md' or 'max-w-[480px]' for tooltips that need to fit longer
+   *  prose (e.g. full stream descriptions). */
+  maxWidth?: string
   /** Extra classes applied to the trigger wrapper div (e.g. 'w-full block' for full-width triggers) */
   triggerClassName?: string
   children: React.ReactNode
@@ -50,7 +54,7 @@ function fits(rect: DOMRect, vw: number, vh: number): boolean {
          rect.top  >= GAP && rect.bottom <= vh - GAP
 }
 
-export function Tooltip({ content, side = 'top', width = 'w-max', triggerClassName, children }: TooltipProps) {
+export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'max-w-xs', triggerClassName, children }: TooltipProps) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos]         = useState({ top: 0, left: 0 })
   const triggerRef            = useRef<HTMLDivElement>(null)
@@ -93,7 +97,7 @@ export function Tooltip({ content, side = 'top', width = 'w-max', triggerClassNa
       {visible && createPortal(
         <div
           ref={tooltipRef}
-          className={`fixed pointer-events-none z-[10001] ${width} max-w-xs rounded-lg bg-navy-800 border border-white/10 px-3 py-2.5 text-xs text-gray-300 leading-relaxed shadow-xl`}
+          className={`fixed pointer-events-none z-[10001] ${width} ${maxWidth} rounded-lg bg-navy-800 border border-white/10 px-3 py-2.5 text-xs text-gray-300 leading-relaxed shadow-xl`}
           style={{ top: pos.top, left: pos.left, transform: TRANSFORM[side] }}
         >
           {content}

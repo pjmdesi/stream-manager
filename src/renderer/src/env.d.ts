@@ -103,6 +103,7 @@ declare global {
       // ── Converter ────────────────────────────────────────────────────────────
       getBuiltinPresets(): Promise<ConversionPreset[]>
       checkEncoderAvailable(name: string): Promise<boolean>
+      checkAlreadyArchived(paths: string[]): Promise<string[]>
       detectAvailableEncoders(): Promise<string[]>
       importPreset(filePath: string): Promise<ConversionPreset>
       getImportedPresets(): Promise<ConversionPreset[]>
