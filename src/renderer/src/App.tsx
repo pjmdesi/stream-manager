@@ -295,7 +295,10 @@ function AppInner() {
   const [helpOpen, setHelpOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [integrationAlert, setIntegrationAlert] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // Persist collapse state across app restarts. localStorage is the right
+  // store for UI-only prefs (matches the streams page's viewMode pattern).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
+  useEffect(() => { localStorage.setItem('sidebarCollapsed', String(sidebarCollapsed)) }, [sidebarCollapsed])
   const [quitConfirm, setQuitConfirm] = useState<{ running: number; queued: number } | null>(null)
   const { config, loading, refreshConfig } = useStore()
   const { refreshRules } = useWatcher()

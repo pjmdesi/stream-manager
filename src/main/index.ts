@@ -155,7 +155,12 @@ app.on('second-instance', () => {
   const win = BrowserWindow.getAllWindows()[0]
   if (win) {
     if (win.isMinimized()) win.restore()
+    if (!win.isVisible()) win.show()
     win.focus()
+    // Flash the taskbar icon so the user gets a visual cue that their second
+    // launch attempt was redirected to the existing instance. Windows stops
+    // the flash automatically when the user interacts with the window.
+    win.flashFrame(true)
   }
 })
 
@@ -171,23 +176,22 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
     ? `Converter: ${converterStatus.label}`
     : 'Converter: Idle'
 
+  // Layout: non-interactive info up top (app name + live watcher/converter
+  // status), then the toggles, then the action items (Open / Quit) at the
+  // bottom where they're closer to the cursor when the menu pops up from
+  // the tray.
   return Menu.buildFromTemplate([
     { label: 'Stream Manager', enabled: false },
-    { type: 'separator' },
     { label: watcherLabel, enabled: false },
     { label: converterLabel, enabled: false },
-    { type: 'separator' },
-    {
-      label: 'Open', click: () => {
-        mainWindow.show()
-        mainWindow.focus()
-      }
-    },
     { type: 'separator' },
     {
       label: 'Start with Windows',
       type: 'checkbox',
       checked: !!config?.startWithWindows,
+      // Dev builds would register the dev-electron exe path with Windows
+      // login, which is never what we want. Only allow toggling in packaged
+      // builds.
       enabled: app.isPackaged,
       click: (item) => {
         const startMinimized = !!config?.startMinimized
@@ -211,6 +215,12 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
       }
     },
     { type: 'separator' },
+    {
+      label: 'Open', click: () => {
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    },
     { label: 'Quit', click: () => app.quit() }
   ])
 }

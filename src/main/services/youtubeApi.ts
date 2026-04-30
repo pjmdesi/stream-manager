@@ -49,7 +49,17 @@ export async function uploadThumbnail(
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as any
-    throw new Error(err?.error?.message || `YouTube thumbnail upload failed (${res.status})`)
+    const apiMsg = err?.error?.message || `YouTube thumbnail upload failed (${res.status})`
+    // YouTube returns the same generic auth error for several distinct
+    // conditions, none of which the API disambiguates in the response. We
+    // augment the message with the most actionable known causes so users
+    // aren't stuck staring at a vague "not properly authorized" string.
+    if (apiMsg.includes("thumbnail can't be set")) {
+      throw new Error(
+        `${apiMsg}\n\nCommon causes:\n• An active A/B test (Test & Compare) for this video's thumbnail — stop the test in YouTube Studio and try again.\n• YouTube channel not verified for custom thumbnails.`
+      )
+    }
+    throw new Error(apiMsg)
   }
 }
 

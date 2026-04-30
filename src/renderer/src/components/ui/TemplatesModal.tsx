@@ -65,7 +65,16 @@ function DescriptionForm({ initial, onSave, onCancel }: {
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Description</label>
-        <p className="text-xs text-gray-600">Static text that gets pre-filled and can be edited before publishing.</p>
+        <p className="text-xs text-gray-600 leading-relaxed">
+          Merge fields:
+          {' '}<span className="font-mono text-purple-400">{'{game}'}</span>,
+          {' '}<span className="font-mono text-purple-400">{'{season}'}</span>,
+          {' '}<span className="font-mono text-purple-400">{'{episode}'}</span>,
+          {' '}<span className="font-mono text-purple-400">{'{total_episodes}'}</span>,
+          {' '}<span className="font-mono text-purple-400">{'{title}'}</span>,
+          {' '}<span className="font-mono text-purple-400">{'{season_links}'}</span>
+          {' '}(list of previous-episode links, applied once when the template is selected).
+        </p>
         <textarea value={description} onChange={e => setDescription(e.target.value)} rows={6} placeholder="Stream description…"
           className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y" />
       </div>
@@ -279,7 +288,18 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
 
       {tab === 'descriptions' && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-gray-500">Static text that gets pre-filled and can be edited before publishing.</p>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Pre-filled into the description field; can be edited before publishing.
+            Supports the same merge fields as titles (
+            <span className="font-mono text-purple-400">{'{game}'}</span>,
+            {' '}<span className="font-mono text-purple-400">{'{season}'}</span>,
+            {' '}<span className="font-mono text-purple-400">{'{episode}'}</span>,
+            {' '}<span className="font-mono text-purple-400">{'{total_episodes}'}</span>,
+            {' '}<span className="font-mono text-purple-400">{'{title}'}</span>
+            ), plus
+            {' '}<span className="font-mono text-purple-400">{'{season_links}'}</span>
+            {' '}— expands to a list of links to previous episodes in the same series+season (one per line, newest first).
+          </p>
           <TemplateList
             items={descTemplates}
             subtitle={t => <p className="text-xs text-gray-500 line-clamp-2 whitespace-pre-wrap">{t.description || <em className="text-gray-700">No description</em>}</p>}

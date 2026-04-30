@@ -665,6 +665,70 @@ function applyMergeFields(template: string, fields: Record<string, string>): str
   return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
 }
 
+/**
+ * Compute the value for the `{season_links}` description merge field. Returns
+ * a multi-line string of links to previous episodes in the same series+season,
+ * formatted as `Episode {n}: {title} - {url}` — one entry per line, newest
+ * previous episode first. Returns '' (no leading/trailing whitespace) when
+ * there are no eligible previous episodes.
+ *
+ * Eligibility: same first-game tag, same season, date strictly before the
+ * current stream's date, and the episode has a `ytVideoId` set (no link =
+ * nothing useful to share).
+ *
+ * Title resolution per episode: ytCatchyTitle → ytTitle → YouTube API fetch
+ * (blocking for that episode). API fallback is only invoked for episodes
+ * that lack both stored titles, so the common case has zero network calls.
+ */
+async function computeSeasonLinks(
+  allFolders: StreamFolder[],
+  game: string,
+  season: string,
+  currentDate: string,
+): Promise<string> {
+  if (!game) return ''
+  const lower = game.toLowerCase()
+  const s = season || '1'
+  const previous = allFolders.filter(f =>
+    f.meta?.games?.some(g => g.toLowerCase() === lower) &&
+    (f.meta?.ytSeason ?? '1') === s &&
+    f.date < currentDate &&
+    !!f.meta?.ytVideoId
+  )
+  if (previous.length === 0) return ''
+
+  // Position in chronological order is the fallback episode number when
+  // ytEpisode isn't set on a folder.
+  const chronological = [...previous].sort((a, b) => a.date.localeCompare(b.date))
+  const positionByPath = new Map<string, number>()
+  chronological.forEach((f, i) => positionByPath.set(f.folderPath, i + 1))
+
+  // Identify episodes missing both stored titles. Block on API fetch only
+  // for those (rare).
+  const needsApi = previous.filter(f => !(f.meta?.ytCatchyTitle || f.meta?.ytTitle))
+  const fetchedTitles = new Map<string, string>()
+  if (needsApi.length > 0) {
+    await Promise.all(needsApi.map(async f => {
+      const id = f.meta?.ytVideoId
+      if (!id) return
+      try {
+        const video = await window.api.youtubeGetVideoById(id)
+        if (video?.snippet?.title) fetchedTitles.set(f.folderPath, video.snippet.title)
+      } catch { /* missing title → fall through to placeholder */ }
+    }))
+  }
+
+  // Output order: newest previous episode first (descending by date).
+  const ordered = [...previous].sort((a, b) => b.date.localeCompare(a.date))
+  const lines = ordered.map(f => {
+    const ep = f.meta?.ytEpisode || String(positionByPath.get(f.folderPath) ?? '?')
+    const title = f.meta?.ytCatchyTitle || f.meta?.ytTitle || fetchedTitles.get(f.folderPath) || '(unknown)'
+    const url = `https://youtu.be/${f.meta?.ytVideoId}`
+    return `Episode ${ep}: ${title} - ${url}`
+  })
+  return lines.join('\n')
+}
+
 function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, season: string, beforeDate?: string): number {
   if (!gameName) return 1
   const lower = gameName.toLowerCase()
@@ -927,6 +991,11 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   const [pushing, setPushing] = useState(false)
   const [pushError, setPushError] = useState('')
   const [pushSuccess, setPushSuccess] = useState(false)
+  // Captures a thumbnail-only failure (typically an active A/B test on the
+  // video). Distinct from `pushError` because the metadata push already
+  // committed successfully — we don't want to imply the whole operation
+  // failed when most of it actually succeeded.
+  const [thumbnailWarning, setThumbnailWarning] = useState('')
   const [ytQualifyingThumbnails, setYtQualifyingThumbnails] = useState<string[]>([])
   const [ytSelectedThumbnail, setYtSelectedThumbnail] = useState<string | null>(null)
 
@@ -1141,16 +1210,30 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     })
   }, [ytSelectedTitleId, ytTitleTemplates, ytGameTitle, ytSeason, ytEpisode, ytCatchyTitle, ytTotalEpisodes])
 
-  // Apply description template
+  // Apply description template. {season_links} is substituted ONCE here at
+  // template-select time (not on every keystroke) — its value walks
+  // allFolders and may hit the YouTube API for missing titles. Subsequent
+  // edits in the description textarea aren't re-substituted; the user can
+  // tweak the rendered list by hand.
   useEffect(() => {
     const tmpl = ytDescTemplates.find(t => t.id === ytSelectedDescId)
     if (!tmpl) return
-    const rendered = applyMergeFields(tmpl.description, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes })
-    setYtDescription(rendered)
-    requestAnimationFrame(() => {
-      descRef.current?.focus()
-      descRef.current?.setCursorOffset(rendered.length)
-    })
+    let cancelled = false
+    ;(async () => {
+      let body = tmpl.description
+      if (body.includes('{season_links}')) {
+        const links = await computeSeasonLinks(allFolders, games[0] ?? '', ytSeason, date)
+        body = body.replace(/\{season_links\}/g, links)
+      }
+      if (cancelled) return
+      const rendered = applyMergeFields(body, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes })
+      setYtDescription(rendered)
+      requestAnimationFrame(() => {
+        descRef.current?.focus()
+        descRef.current?.setCursorOffset(rendered.length)
+      })
+    })()
+    return () => { cancelled = true }
   }, [ytSelectedDescId, ytDescTemplates])
 
   // Apply tag template
@@ -1308,6 +1391,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     setPushing(true)
     setPushError('')
     setPushSuccess(false)
+    setThumbnailWarning('')
     try {
       const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
       if (isPastStream) {
@@ -1319,8 +1403,17 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
           tags
         )
       }
+      // Thumbnail upload is non-fatal — the metadata above has already
+      // committed. Capture a thumbnail-specific failure separately so the
+      // rest of the push flow (Twitch update, local state refresh, success
+      // indicator) still runs. Typical failure cause is an active A/B test
+      // on the video which YouTube refuses to overwrite via API.
       if (ytSelectedThumbnail) {
-        await window.api.youtubeUploadThumbnail(ytSelectedBroadcastId, ytSelectedThumbnail)
+        try {
+          await window.api.youtubeUploadThumbnail(ytSelectedBroadcastId, ytSelectedThumbnail)
+        } catch (e: any) {
+          setThumbnailWarning(e.message || 'Thumbnail upload failed.')
+        }
       }
       if (alsoUpdateTwitch && twConnected) {
         const effectiveTwitchTitle = syncTitle ? ytTitle : twitchTitle
@@ -1892,9 +1985,16 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
             {/* Push action */}
             <div className="flex flex-col gap-2">
               {pushError && (
-                <p className="text-xs text-red-400 flex items-center gap-1.5">
-                  <AlertTriangle size={12} className="shrink-0" />
+                <p className="text-xs text-red-400 flex items-start gap-1.5 whitespace-pre-line">
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
                   {pushError}
+                </p>
+              )}
+              {thumbnailWarning && (
+                <p className="text-xs text-yellow-400 flex items-start gap-1.5 whitespace-pre-line">
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                  Thumbnail upload failed (other metadata was saved).{'\n'}
+                  {thumbnailWarning}
                 </p>
               )}
               {pushSuccess && (
@@ -3065,24 +3165,25 @@ export function StreamsPage({
     setShowPresetPicker(true)
   }
 
-  // Walk every selected stream folder recursively and return all FILES with
-  // their sizes (no directories). Used by both offload and pin so the
-  // operation covers every asset in the folder — videos, thumbnails, source
-  // files, anything else the user dropped in. The backend protection filter
-  // silently keeps the preferredThumbnail local.
+  // Walk a single stream folder recursively and return all FILES with their
+  // sizes (no directories). Covers every asset in the folder — videos,
+  // thumbnails, source files, anything the user dropped in. The backend
+  // protection filter silently keeps the preferredThumbnail local.
+  const collectFolderFiles = async (f: StreamFolder): Promise<{ path: string; size: number }[]> => {
+    try {
+      const entries = await window.api.listFilesRecursive(f.folderPath, 6)
+      return entries.filter(e => !e.isDirectory).map(e => ({ path: e.path, size: e.size }))
+    } catch {
+      // Folder gone or permission issue — fall back to known videos so the
+      // operation still does something rather than silently skipping.
+      return f.videos.map(v => ({ path: v, size: 0 }))
+    }
+  }
+
   const collectSelectedFolderFiles = async (): Promise<{ path: string; size: number }[]> => {
     const selectedFolders = folders.filter(f => selectedPaths.has(selectionKey(f)))
     const all: { path: string; size: number }[] = []
-    for (const f of selectedFolders) {
-      try {
-        const entries = await window.api.listFilesRecursive(f.folderPath, 6)
-        for (const e of entries) if (!e.isDirectory) all.push({ path: e.path, size: e.size })
-      } catch {
-        // Folder gone or permission issue — fall back to known videos so the
-        // operation still does something rather than silently skipping.
-        for (const v of f.videos) all.push({ path: v, size: 0 })
-      }
-    }
+    for (const f of selectedFolders) all.push(...await collectFolderFiles(f))
     return all
   }
 
@@ -3104,6 +3205,27 @@ export function StreamsPage({
     } finally {
       setCloudOpInFlight(false)
       toggleSelectMode()
+    }
+  }
+
+  // Per-folder cloud actions for the Action Panel. Mirror the bulk-toolbar
+  // versions but operate on a single folder and don't touch selection mode.
+  const offloadFolder = async (f: StreamFolder) => {
+    if (!cloudSyncActive) return
+    const files = await collectFolderFiles(f)
+    if (files.length === 0) return
+    setOffloadModalFiles(files)
+  }
+
+  const pinFolder = async (f: StreamFolder) => {
+    if (!cloudSyncActive || cloudOpInFlight) return
+    setCloudOpInFlight(true)
+    try {
+      const files = await collectFolderFiles(f)
+      if (files.length === 0) return
+      await window.api.cloudSyncPin(files.map(x => x.path))
+    } finally {
+      setCloudOpInFlight(false)
     }
   }
 
@@ -3944,6 +4066,7 @@ return (
                       videoCount={folder.videoCount}
                       totalEpisodes={totalEpisodes}
                       selectMode={selectMode}
+                      cloudSyncActive={cloudSyncActive}
                       onSendToPlayer={() => sendVideo(folder, 'player')}
                       onSendToConverter={() => sendVideo(folder, 'converter')}
                       onSendToCombine={() => sendToCombine(folder)}
@@ -3963,6 +4086,8 @@ return (
                       onArchive={() => archiveSingle(folder)}
                       onDelete={() => setDeleteTarget(folder)}
                       onNewEpisode={() => setModal({ mode: 'new', sourceFolder: folder })}
+                      onOffload={() => offloadFolder(folder)}
+                      onPinLocal={() => pinFolder(folder)}
                     />
                   )}
                 </AnimatePresence>
@@ -5232,6 +5357,8 @@ const PANEL_ACTION_BUTTON_GREEN = `${PANEL_ACTION_BUTTON_BASE} hover:text-green-
 const PANEL_ACTION_BUTTON_BLUE = `${PANEL_ACTION_BUTTON_BASE} hover:text-blue-400 hover:bg-blue-500/10`
 const PANEL_ACTION_BUTTON_RED = `${PANEL_ACTION_BUTTON_BASE} hover:text-red-400 hover:bg-red-500/10`
 const PANEL_ACTION_BUTTON_YELLOW = `${PANEL_ACTION_BUTTON_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
+const PANEL_ACTION_BUTTON_CYAN = `${PANEL_ACTION_BUTTON_BASE} hover:text-cyan-400 hover:bg-cyan-500/10`
+const PANEL_ACTION_BUTTON_PINK = `${PANEL_ACTION_BUTTON_BASE} hover:text-pink-400 hover:bg-pink-500/10`
 
 interface ExpandedPanelProps {
   folder: StreamFolder
@@ -5241,6 +5368,9 @@ interface ExpandedPanelProps {
   videoCount: number
   totalEpisodes: number
   selectMode: boolean
+  /** When true, shows the per-folder Offload + Pin Local buttons. False
+   *  when streamsDir is not inside a CFAPI sync root. */
+  cloudSyncActive: boolean
   onSendToPlayer: () => void
   onSendToConverter: () => void
   onSendToCombine: () => void
@@ -5252,6 +5382,8 @@ interface ExpandedPanelProps {
   onArchive: () => void
   onDelete: () => void
   onNewEpisode: () => void
+  onOffload: () => void
+  onPinLocal: () => void
 }
 
 /**
@@ -5264,9 +5396,10 @@ interface ExpandedPanelProps {
  * is meant to be tight, not exhaustive.
  */
 function ExpandedStreamPanel({
-  folder, isPending, hasMeta, hasSMThumbnail, videoCount, totalEpisodes, selectMode,
+  folder, isPending, hasMeta, hasSMThumbnail, videoCount, totalEpisodes, selectMode, cloudSyncActive,
   onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails,
   onEdit, onAdd, onOpen, onReschedule, onArchive, onDelete, onNewEpisode,
+  onOffload, onPinLocal,
 }: ExpandedPanelProps) {
   const meta = folder.meta
   const series = meta?.ytSeason || meta?.ytEpisode
@@ -5391,6 +5524,20 @@ function ExpandedStreamPanel({
                   <CopyPlus size={12} />
                 </button>
               </Tooltip>
+              {cloudSyncActive && videoCount > 0 && (
+                <>
+                  <Tooltip content="Offload this stream's files to cloud (frees local disk; thumbnail stays local)">
+                    <button onClick={onOffload} className={PANEL_ACTION_BUTTON_PINK}>
+                      <CloudOff size={12} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Pin this stream's files local (always keep on disk)">
+                    <button onClick={onPinLocal} className={PANEL_ACTION_BUTTON_CYAN}>
+                      <Cloud size={12} />
+                    </button>
+                  </Tooltip>
+                </>
+              )}
               <Tooltip content="Open folder">
                 <button onClick={onOpen} className={PANEL_ACTION_BUTTON_YELLOW}>
                   <FolderOpen size={12} />
