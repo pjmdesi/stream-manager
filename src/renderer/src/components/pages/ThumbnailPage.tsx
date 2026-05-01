@@ -278,6 +278,18 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
       node.getLayer()?.batchDraw()
       return
     }
+    // Skip caching when the node has no measurable dimensions yet — Konva
+    // would create a 0×0 cache canvas, and any subsequent draw call (even
+    // from another component on the page after a route change) hits
+    // "drawImage: image argument is a canvas with width/height of 0".
+    const nw = node.width()
+    const nh = node.height()
+    if (!nw || !nh) {
+      node.filters([])
+      node.clearCache()
+      node.getLayer()?.batchDraw()
+      return
+    }
     // Map our schema values to Konva's filter API.
     if (layer.filterBrightness !== undefined) node.brightness(layer.filterBrightness)
     if (layer.filterContrast !== undefined) node.contrast(layer.filterContrast)
@@ -504,10 +516,14 @@ function ShapeNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
 
 // ── Undo/redo ─────────────────────────────────────────────────────────────────
 
-function useUndoRedo(initial: ThumbnailLayer[]) {
+function useUndoRedo(initial: ThumbnailLayer[], onApply?: (next: ThumbnailLayer[]) => void) {
   const [past, setPast] = useState<ThumbnailLayer[][]>([])
   const [present, setPresent] = useState<ThumbnailLayer[]>(initial)
   const [future, setFuture] = useState<ThumbnailLayer[][]>([])
+  // Stash the latest onApply in a ref so undo/redo callbacks see fresh
+  // values without needing to re-create on every render of the parent.
+  const onApplyRef = useRef(onApply)
+  useEffect(() => { onApplyRef.current = onApply }, [onApply])
 
   const commit = useCallback((next: ThumbnailLayer[]) => {
     setPast(p => [...p.slice(-49), present])
@@ -526,6 +542,7 @@ function useUndoRedo(initial: ThumbnailLayer[]) {
     setPast(p => p.slice(0, -1))
     setFuture(f => [present, ...f])
     setPresent(prev)
+    onApplyRef.current?.(prev)
   }, [past, present])
 
   const redo = useCallback(() => {
@@ -534,6 +551,7 @@ function useUndoRedo(initial: ThumbnailLayer[]) {
     setFuture(f => f.slice(1))
     setPast(p => [...p, present])
     setPresent(next)
+    onApplyRef.current?.(next)
   }, [future, present])
 
   const reset = useCallback((layers: ThumbnailLayer[]) => {
@@ -1128,7 +1146,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Editor state ──────────────────────────────────────────────────────────
   const [currentStream, setCurrentStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number } | null>(null)
   const [currentTemplateId, setCurrentTemplateId] = useState<string | undefined>(undefined)
-  const { layers, commit, set: setLayersDirect, undo, redo, reset: resetLayers, canUndo, canRedo } = useUndoRedo([])
+  // Forward layer changes from undo/redo into the autosave pipeline. Uses a
+  // ref because triggerAutoSave is defined later in this function — the
+  // useUndoRedo hook needs a stable callback at construction time, but the
+  // body it points at can change as currentStream / template state shifts.
+  const triggerAutoSaveRef = useRef<((layers: ThumbnailLayer[]) => void) | null>(null)
+  const { layers, commit, set: setLayersDirect, undo, redo, reset: resetLayers, canUndo, canRedo } = useUndoRedo(
+    [],
+    useCallback((next: ThumbnailLayer[]) => triggerAutoSaveRef.current?.(next), []),
+  )
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
@@ -1396,6 +1422,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (!el) return
     const update = () => {
       const { width, height } = el.getBoundingClientRect()
+      // Skip when the container has no measurable size — happens whenever
+      // ThumbnailPage is hidden via App.tsx's `display: none` wrapper while
+      // the user is on a different page. ResizeObserver fires the moment
+      // visibility flips; if we propagated 0×0 down to the Konva Stage, its
+      // backing canvas resizes to 0×0 and the next layer draw (filter
+      // cache, batchDraw, anything) throws "drawImage on 0-sized canvas",
+      // which surfaces under the visible page's error boundary even though
+      // the user's nowhere near the editor. Keeping the previous (valid)
+      // size means the editor reopens to the same scroll/zoom state.
+      if (width === 0 || height === 0) return
       const padding = 32
       const fs = Math.max(0.05, Math.min((width - padding) / CANVAS_W, (height - padding) / CANVAS_H))
       const cw = width, ch = height
@@ -1511,6 +1547,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       doSave(newLayers, currentStream.folderPath, currentStream.date, currentTemplateId)
     }, 500)
   }, [currentStream, currentTemplateId])
+  // Expose the latest triggerAutoSave to the undo/redo hook via the
+  // construction-time ref. `doSave` and the unwritten currentStream/
+  // currentTemplateId are captured via closure inside triggerAutoSave, so
+  // pointing the ref at the callback is enough.
+  useEffect(() => { triggerAutoSaveRef.current = triggerAutoSave }, [triggerAutoSave])
 
   // Export the canvas at full 1:1 resolution regardless of current view
   const getCanvasDataUrl = useCallback((): string => {
