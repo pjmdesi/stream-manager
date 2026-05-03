@@ -11,7 +11,13 @@
 <img src="resources/icon.png" width="48" alt="Stream Manager icon" /> A desktop app for streamers to manage, review, and process their local recording files. Yet another app built with Electron + React. Windows only (for now), feel free to adapt this to other platforms if you're so inclined. Contributions are welcome.
 
 ## Mission
-Stream Manager is designed to be the central hub for everything related to your streams. It organizes your raw files, metadata, clips, and workflow in one place so you can spend less time wrangling files and more time creating content. If used in the recommended way, you should never have to open your file explorer again to manage your stream-related files.
+Stream Manager is designed to be the central hub for everything pre- and post-stream. It organizes your raw files, metadata, clips, and workflow in one place so you can spend less time wrangling files and more time creating content. If used in the recommended way, you should never have to open your file explorer again to manage your stream-related files.
+
+## Who this is for
+- Streamers who record and store their streams locally and want a better way to manage those files and related metadata.
+- Streamers who stream to YouTube and/or Twitch and want an easier way to keep their stream metadata in sync with their local files.
+- Streamers who want a built-in tool for clipping and thumbnail creation without needing to use separate apps like HandBrake, Photoshop, etc.
+- Streamers who want to automate parts of their workflow, like moving files from a recording folder to their main stream library, launching all their streaming apps at once, and archiving old streams with consistent encoding settings and tagging.
 
 ![Stream Manager screenshot](resources/sm-streams.png)
 
