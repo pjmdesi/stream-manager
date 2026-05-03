@@ -38,7 +38,7 @@ Stream Manager is designed to be the central hub for everything related to your 
 
 **Before starting:** Stream Manager requires consistent naming of files that must include the stream date (preferably as the first part of the filename). Without that, the app has no way to automatically detect and organize them. The default OBS naming format (`YYYY-MM-DD HH-MM-SS`) is recommended and works out of the box. Other formats are not officially supported but may still work.
 
-1. Download the latest release for Windows from the [Releases](https://github.com/your-repo/Stream-Manager/releases) page.
+1. Download the latest release for Windows from the [Releases](https://github.com/pjmdesi/stream-manager/releases) page.
 2. Extract the ZIP file and run `StreamManager.exe`.  
 _No installation required, runs from anywhere, can be moved freely. Stream Manager's data (settings) is stored on your machine in AppData. Stream item data is stored next to your stream files_
 3. Select your main "Streams" folder where your recordings are stored when prompted.
