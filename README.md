@@ -1,4 +1,4 @@
-# Stream Manager <img src="resources/icon.png" width="48" alt="Stream Manager icon" />
+# <img src="resources/icon.png" width="36" alt="Stream Manager icon" /> Stream Manager
 
 **Website:** [stream-manager.app](https://stream-manager.app/) · **Discord:** [Join the community](https://discord.gg/ufMSh9d8hu)
 
