@@ -1,5 +1,13 @@
 # Stream Manager
 
+**Website:** [stream-manager.app](https://stream-manager.app/) · **Discord:** [Join the community](https://discord.gg/ufMSh9d8hu)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Latest Release](https://img.shields.io/github/v/release/pjmdesi/stream-manager)](https://github.com/pjmdesi/stream-manager/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/pjmdesi/stream-manager/total)](https://github.com/pjmdesi/stream-manager/releases)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)](#)
+
+
 <img src="resources/icon.png" width="48" alt="Stream Manager icon" /> A desktop app for streamers to manage, review, and process their local recording files. Yet another app built with Electron + React. Windows only (for now), feel free to adapt this to other platforms if you're so inclined. Contributions are welcome.
 
 ## Mission
@@ -38,7 +46,7 @@ Stream Manager is designed to be the central hub for everything related to your 
 
 **Before starting:** Stream Manager requires consistent naming of files that must include the stream date (preferably as the first part of the filename). Without that, the app has no way to automatically detect and organize them. The default OBS naming format (`YYYY-MM-DD HH-MM-SS`) is recommended and works out of the box. Other formats are not officially supported but may still work.
 
-1. Download the latest release for Windows from the [Releases](https://github.com/your-repo/Stream-Manager/releases) page.
+1. Download the latest release for Windows from the [Releases](https://github.com/pjmdesi/stream-manager/releases) page.
 2. Extract the ZIP file and run `StreamManager.exe`.  
 _No installation required, runs from anywhere, can be moved freely. Stream Manager's data (settings) is stored on your machine in AppData. Stream item data is stored next to your stream files_
 3. Select your main "Streams" folder where your recordings are stored when prompted.
@@ -58,15 +66,25 @@ _No installation required, runs from anywhere, can be moved freely. Stream Manag
 
    ![Stream Manager New Stream Button Screenshot](resources/stream-manager-new-stream-button.png)
 2. Set your streaming software to save to a **recordings folder**. This is important if you use cloud-sync software like those for a NAS, OneDrive, or Google Drive to backup your streams.  
-_Recording directly to a cloud-synced folder can cause encoding errors and ruin recordings (in my experience). Stream Manager detects and adapts to cloud-synced storage._
+> _⚠️ **Important:** Recording directly to a cloud-synced folder can cause encoding errors and ruin recordings (in my experience). Stream Manager detects and adapts to cloud-synced storage._
 
-   ![OBS Output Settings Screenshot](resources/obs-recording-output.png)
+   ![OBS Output Settings Screenshot](resources/obs-recording-output.png)  
+   
 3. Set up an auto-rule in the app to watch that **recordings folder** and move/rename new files to your main **Streams** folder (the app will help you set this up during onboarding).
 
     ![Stream Manager Auto-Rules Screenshot](resources/stream-manager-auto-rules-setup.png)
 4. _**Stream your heart out!**_
 5. After your stream, the app will automatically organize your recordings. Find the session in the Streams page and optionally add any missing info like the topics/games, stream type, and personal comments.
 6. Review the recording in the built-in player and export clips for sharing on social media or YouTube, or send the whole session to the converter to compress it for other uses like archiving or uploading to other services.
+
+---
+
+## How this is built
+
+Stream Manager is built with substantial assistance from Claude (Anthropic's AI assistant) and GitHub Copilot. I'm a front-end developer by trade with a cursory understanding of backend systems; building a full Electron desktop app with multi-track video processing, ffmpeg integration, OAuth flows, and cloud-aware file handling is outside my normal scope and would take years to learn. If you want to see an example of a fully hand-coded application of mine, see [ClpChk](https://github.com/pjmdesi/clp-chk-react).  
+Claude is used heavily for architecture, implementation, debugging, code cleanup, and documentation through months of iterative back-and-forth. The product direction, UX decisions, feature scope, testing, and final calls on what is shipped are mine. If you're curious about my take on AI-assisted development, I'm happy to discuss in issues or Discord.
+
+---
 
 ## Features
 
