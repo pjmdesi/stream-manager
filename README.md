@@ -77,6 +77,15 @@ _No installation required, runs from anywhere, can be moved freely. Stream Manag
 5. After your stream, the app will automatically organize your recordings. Find the session in the Streams page and optionally add any missing info like the topics/games, stream type, and personal comments.
 6. Review the recording in the built-in player and export clips for sharing on social media or YouTube, or send the whole session to the converter to compress it for other uses like archiving or uploading to other services.
 
+---
+
+## How this is built
+
+Stream Manager is built with substantial assistance from Claude (Anthropic's AI assistant) and GitHub Copilot. I'm a front-end developer by trade with a cursory understanding of backend systems; building a full Electron desktop app with multi-track video processing, ffmpeg integration, OAuth flows, and cloud-aware file handling is outside my normal scope and would take years to learn. If you want to see an example of a fully hand-coded application of mine, see [ClpChk](https://github.com/pjmdesi/clp-chk-react).  
+Claude is used heavily for architecture, implementation, debugging, code cleanup, and documentation through months of iterative back-and-forth. The product direction, UX decisions, feature scope, testing, and final calls on what is shipped are mine. If you're curious about my take on AI-assisted development, I'm happy to discuss in issues or Discord.
+
+---
+
 ## Features
 
 Stream Manager is built around keeping everything about your stream sessions in one place — the recording, metadata, clips, and publishing destinations all collected and organized.
