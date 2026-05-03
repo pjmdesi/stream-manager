@@ -5,15 +5,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Latest Release](https://img.shields.io/github/v/release/pjmdesi/stream-manager)](https://github.com/pjmdesi/stream-manager/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/pjmdesi/stream-manager/total)](https://github.com/pjmdesi/stream-manager/releases)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)](#)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)](https://github.com/pjmdesi/stream-manager#)
 
-
-<img src="resources/icon.png" width="48" alt="Stream Manager icon" /> A desktop app for streamers to manage, review, and process their local recording files. Yet another app built with Electron + React. Windows only (for now), feel free to adapt this to other platforms if you're so inclined. Contributions are welcome.
+![Stream Manager icon](resources/icon.png) A desktop app for streamers to manage, review, and process their local recording files. Yet another app built with Electron + React. Windows only (for now), feel free to adapt this to other platforms if you're so inclined. Contributions are welcome.
 
 ## Mission
+
 Stream Manager is designed to be the central hub for everything pre- and post-stream. It organizes your raw files, metadata, clips, and workflow in one place so you can spend less time wrangling files and more time creating content. If used in the recommended way, you should never have to open your file explorer again to manage your stream-related files.
 
 ## Who this is for
+
 - Streamers who record and store their streams locally and want a better way to manage those files and related metadata.
 - Streamers who stream to YouTube and/or Twitch and want an easier way to keep their stream metadata in sync with their local files.
 - Streamers who want a built-in tool for clipping and thumbnail creation without needing to use separate apps like Premiere, DaVinci, HandBrake, Photoshop, Affinity, etc.
@@ -72,7 +73,8 @@ _No installation required, runs from anywhere, can be moved freely. Stream Manag
 
    ![Stream Manager New Stream Button Screenshot](resources/stream-manager-new-stream-button.png)
 2. Set your streaming software to save to a **recordings folder**. This is important if you use cloud-sync software like those for a NAS, OneDrive, or Google Drive to backup your streams.  
-> _⚠️ **Important:** Recording directly to a cloud-synced folder can cause encoding errors and ruin recordings (in my experience). Stream Manager detects and adapts to cloud-synced storage._
+
+    > _⚠️ **Important:** Recording directly to a cloud-synced folder can cause encoding errors and ruin recordings (in my experience). Stream Manager detects and adapts to cloud-synced storage._
 
    ![OBS Output Settings Screenshot](resources/obs-recording-output.png)  
    
@@ -176,10 +178,20 @@ Create named groups of apps that can be launched together with a single click �
 
 _You will need a google cloud project and OAuth 2.0 credentials to connect your YouTube account._
 
+##### YouTube API Limitations
+
+- The app cannot set or update a livestream or video's category or game due to YouTube API limitations. You will need to do this manually through YouTube studio.
+- YouTube's API has no controls for the newer A/B testing features for thumbnails and titles, so those cannot be managed through the app.
+
 #### Twitch
 
 - OAuth connection with automatic token refresh.
 - Update your Twitch channel title and category from the stream item metadata dialogs.
+
+##### Twitch API Limitations
+
+- The app does not connect to past VODs on Twitch, so stream metadata cannot be synced after the fact like with YouTube. Twitch's API only allows updating the current stream's title and category, so those are the only fields that can be managed through the app.
+- Twitch's API does not allow updating the go live notification or stream tags, so those cannot be managed through the app.
 
 #### Claude AI
 
