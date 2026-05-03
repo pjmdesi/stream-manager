@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Youtube, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2 } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2 } from 'lucide-react'
+import { Youtube } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { useStore } from '../hooks/useStore'
 

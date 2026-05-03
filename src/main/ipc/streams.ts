@@ -1412,11 +1412,16 @@ export function registerStreamsIPC(): void {
       ignoreInitial: true,
       persistent: true,
       awaitWriteFinish: { stabilityThreshold: 1000, pollInterval: 300 },
-      // Ignore our own metadata file. We write _meta.json from the renderer's
-      // save flow and from refreshVideoMaps; without this guard, chokidar fires
-      // 'change' on those writes and the renderer re-runs loadFolders, which
-      // re-runs refreshVideoMaps and may re-write _meta.json — feedback loop.
-      ignored: (p: string) => p.endsWith('_meta.json'),
+      // Ignore files the app writes itself, otherwise chokidar fires
+      // 'change' events for every internal write and the renderer re-runs
+      // loadFolders → refreshVideoMaps in a tight feedback loop:
+      //   - _meta.json: the metadata store (saved on every edit)
+      //   - *__arc_tmp.*: archive job temp output. ffmpeg writes incrementally
+      //     while encoding so 'change' events fire continuously through a
+      //     multi-hour archive run, and the renderer was thrashing thumbnails.
+      //     The temp file is renamed/swapped to the real file at end-of-job
+      //     anyway, so the user only needs to see the final state.
+      ignored: (p: string) => p.endsWith('_meta.json') || /__arc_tmp\.[^.]+$/.test(p),
     })
 
     const onChange = () => notifyChange(win)

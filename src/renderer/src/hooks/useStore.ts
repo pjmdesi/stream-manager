@@ -33,6 +33,7 @@ const defaultConfig: AppConfig = {
   claudeSystemPrompt: '',
   launcherWidgetGroupId: '',
   listThumbWidth: 85,
+  checkForUpdates: true,
 }
 
 interface StoreContextValue {

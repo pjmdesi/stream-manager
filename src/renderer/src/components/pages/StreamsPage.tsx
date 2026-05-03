@@ -8,24 +8,10 @@ import {
   ChevronLeft, ChevronRight, ChevronUp, ChevronsUp, ChevronsDown, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
-  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, LayoutList, LayoutGrid
+  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid
 } from 'lucide-react'
 
-// Inline SVG brand icons — lucide-react has deprecated all YouTube/Twitch exports
-function LucideYoutube({ size = 24, className }: { size?: number; className?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-    </svg>
-  )
-}
-function LucideTwitch({ size = 24, className }: { size?: number; className?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z" />
-    </svg>
-  )
-}
+import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { v4 as uuidv4 } from 'uuid'
 import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
@@ -38,7 +24,7 @@ import { Modal } from '../ui/Modal'
 import { TagComboBox } from '../ui/TagComboBox'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
-import { CloudOffloadModal } from '../CloudOffloadModal'
+import { useCloudOps } from '../../context/CloudOpsContext'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
 import { getTagColor, getTagTextureStyle, pickColorForNewTag, pickTextureForNewTag } from '../../constants/tagColors'
@@ -245,14 +231,13 @@ function isPendingStream(folder: import('../../types').StreamFolder, todayStr: s
   })
 }
 
-function VideoCountTooltip({ videos, videoMap, folderPath, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; folderPath: string; children: React.ReactNode }) {
+function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; folderPath: string; cloudSyncActive: boolean; children: React.ReactNode }) {
   const [visible, setVisible] = useState(false)
-  const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number }>({ top: 0, left: 0 })
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number }>({ top: 0, left: 0 })
   const [durations, setDurations] = useState<Record<string, number | null>>({})
   const [offlineFiles, setOfflineFiles] = useState<Set<string>>(new Set())
   const anchorRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
-  const probedRef = useRef(false)
 
   // Initial position: just below the anchor. useLayoutEffect repositions if it overflows.
   const show = async () => {
@@ -260,36 +245,64 @@ function VideoCountTooltip({ videos, videoMap, folderPath, children }: { videos:
     const rect = anchorRef.current.getBoundingClientRect()
     setPos({ top: rect.bottom + 6, left: rect.left })
     setVisible(true)
-    if (!probedRef.current) {
-      probedRef.current = true
-      const localFlags = await window.api.checkLocalFiles(videos)
-      videos.forEach(async (v, i) => {
-        if (!localFlags[i]) {
-          setOfflineFiles(prev => new Set([...prev, v]))
-          return
-        }
-        try {
-          const info = await window.api.probeFile(v)
-          setDurations(prev => ({ ...prev, [v]: info.duration }))
-        } catch {
-          setDurations(prev => ({ ...prev, [v]: null }))
-        }
+
+    // Re-check status on every hover for any video that doesn't yet have
+    // a usable cached duration. Previously this ran only once per
+    // tooltip mount, which meant a file marked offline at first hover
+    // stayed offline in the UI even after the user manually hydrated it
+    // through Windows. Files we already have a real duration for are
+    // skipped — no point re-probing those.
+    const needsCheck = videos.filter(v => {
+      const entry = videoMap?.[videoMapKey(folderPath, v)]
+      if (typeof entry?.duration === 'number' && entry.duration > 0) return false
+      const localDur = durations[v]
+      if (typeof localDur === 'number' && localDur > 0) return false
+      return true
+    })
+    if (needsCheck.length === 0) return
+
+    const localFlags = await window.api.checkLocalFiles(needsCheck)
+    for (let i = 0; i < needsCheck.length; i++) {
+      const v = needsCheck[i]
+      if (!localFlags[i]) {
+        // Still offline. Mark (idempotently) so the cloud icon shows.
+        setOfflineFiles(prev => prev.has(v) ? prev : new Set([...prev, v]))
+        continue
+      }
+      // Now local — clear any stale offline mark from a previous hover.
+      setOfflineFiles(prev => {
+        if (!prev.has(v)) return prev
+        const next = new Set(prev)
+        next.delete(v)
+        return next
       })
+      // Probe in the background; state updates trigger a re-render once
+      // each settles. Errors fall through to the `--:--:--` placeholder.
+      window.api.probeFile(v)
+        .then(info => setDurations(prev => ({ ...prev, [v]: info.duration })))
+        .catch(() => setDurations(prev => ({ ...prev, [v]: null })))
     }
   }
 
-  // After the tooltip renders, check whether it fits below the anchor. If not, flip to above.
-  // If neither side fits, pick whichever has more room and cap height with internal scroll.
+  // After the tooltip renders, fit it inside the viewport. Vertically: flip
+  // above the anchor if there's no room below; cap height + scroll if neither
+  // side has enough. Horizontally: the tooltip grows with its content (no
+  // hard cap on width), but if the natural width pushes it off-screen we
+  // shift it leftward and impose a maxWidth that triggers filename
+  // truncation only as a last resort.
   useLayoutEffect(() => {
     if (!visible || !anchorRef.current || !tooltipRef.current) return
     const anchor = anchorRef.current.getBoundingClientRect()
     const tip = tooltipRef.current.getBoundingClientRect()
+    const vw = window.innerWidth
     const vh = window.innerHeight
     const GAP = 6
     const PAD = 8
+
+    // Vertical
     const spaceBelow = vh - anchor.bottom - GAP - PAD
     const spaceAbove = anchor.top - GAP - PAD
-    const next: { top: number; left: number; maxHeight?: number } = { top: anchor.bottom + GAP, left: anchor.left }
+    const next: { top: number; left: number; maxHeight?: number; maxWidth?: number } = { top: anchor.bottom + GAP, left: anchor.left }
     if (tip.height <= spaceBelow) {
       next.top = anchor.bottom + GAP
     } else if (tip.height <= spaceAbove) {
@@ -301,8 +314,25 @@ function VideoCountTooltip({ videos, videoMap, folderPath, children }: { videos:
       next.maxHeight = Math.max(80, spaceAbove)
       next.top = anchor.top - next.maxHeight - GAP
     }
-    if (next.top !== pos.top || next.maxHeight !== pos.maxHeight) setPos(next)
-  }, [visible, videos.length, durations, offlineFiles, pos.top, pos.maxHeight])
+
+    // Horizontal — clamp left so the tooltip stays on-screen, then cap
+    // width if there still isn't enough room. The filename column inside
+    // is `1fr` with `truncate`, so it only ellipsises when the grid is
+    // forced narrower than its natural content width.
+    const maxAvailWidth = vw - PAD * 2
+    if (tip.width > maxAvailWidth) next.maxWidth = maxAvailWidth
+    const effectiveWidth = Math.min(tip.width, next.maxWidth ?? tip.width)
+    if (anchor.left + effectiveWidth > vw - PAD) {
+      next.left = Math.max(PAD, vw - effectiveWidth - PAD)
+    }
+
+    if (
+      next.top !== pos.top ||
+      next.left !== pos.left ||
+      next.maxHeight !== pos.maxHeight ||
+      next.maxWidth !== pos.maxWidth
+    ) setPos(next)
+  }, [visible, videos.length, durations, offlineFiles, pos.top, pos.left, pos.maxHeight, pos.maxWidth])
 
   if (videos.length === 0) return <>{children}</>
 
@@ -314,11 +344,23 @@ function VideoCountTooltip({ videos, videoMap, folderPath, children }: { videos:
       {visible && ReactDOM.createPortal(
         <div
           ref={tooltipRef}
-          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999, maxHeight: pos.maxHeight, overflowY: pos.maxHeight ? 'auto' : undefined }}
-          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1.5 min-w-[260px] max-w-[420px]"
+          style={{
+            position: 'fixed',
+            top: pos.top,
+            left: pos.left,
+            zIndex: 9999,
+            maxHeight: pos.maxHeight,
+            maxWidth: pos.maxWidth,
+            overflowY: pos.maxHeight ? 'auto' : undefined,
+          }}
+          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1.5 px-3 min-w-[260px] grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-2"
           onMouseEnter={() => setVisible(true)}
           onMouseLeave={() => setVisible(false)}
         >
+          {/* Single grid spanning every video row so columns (filename · type
+              badge · size · duration · cloud) line up across rows. Each row's
+              cells are emitted directly via Fragment; there's no per-row
+              wrapper element. */}
           {videos.map(v => {
             const name = v.split(/[\\/]/).pop() ?? v
             const relKey = videoMapKey(folderPath, v)
@@ -330,27 +372,49 @@ function VideoCountTooltip({ videos, videoMap, folderPath, children }: { videos:
             // path so the user can tell which file is which.
             const display = relKey.includes('/') ? relKey : name
             return (
-              <div key={v} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-2 px-3 py-1.5">
-                <span className="text-xs text-gray-300 truncate min-w-0" title={display}>{display}</span>
-                <span className="shrink-0">
+              <React.Fragment key={v}>
+                <span className="text-xs text-gray-300 truncate min-w-0 py-1.5" title={display}>{display}</span>
+                <span className="shrink-0 py-1.5">
                   {category
                     ? <span className={`inline-block -translate-y-0.5 text-[10px] font-mono border rounded px-1 ${CATEGORY_STYLES[category] ?? ''}`}>{CATEGORY_LABEL[category] ?? category}</span>
                     : null}
                 </span>
-                <span className="text-xs text-gray-400 shrink-0 tabular-nums">
+                <span className="text-xs text-gray-400 shrink-0 tabular-nums py-1.5">
                   {entry?.size !== undefined ? formatBytes(entry.size) : ''}
                 </span>
-                <span className="text-xs font-mono shrink-0">
-                  {isOffline
-                    ? <span className="text-gray-400 italic">cloud</span>
-                    : dur !== undefined
-                      ? (dur !== null ? <span className="text-gray-400">{formatDuration(dur)}</span> : <span className="text-gray-500">—</span>)
-                      : v in durations
-                        ? <span className="text-gray-500">—</span>
-                        : <Loader2 size={10} className="animate-spin text-gray-500" />
-                  }
+                <span className="text-xs font-mono shrink-0 py-1.5 justify-self-end">
+                  {/* Duration column. Prefers the cached duration even for
+                      offloaded files (stored in _meta.json from the last
+                      probe). Falls back to a timecode-shaped placeholder
+                      `--:--:--` when probe finished without a result so the
+                      column still aligns with neighboring real timecodes. */}
+                  {dur !== undefined && dur !== null ? (
+                    <span className="text-gray-400">{formatDuration(dur)}</span>
+                  ) : dur === null || v in durations ? (
+                    <span className="text-gray-500">--:--:--</span>
+                  ) : isOffline ? (
+                    // Offline + duration not yet probed (and probably never
+                    // will, since we skip probing cloud placeholders).
+                    <span className="text-gray-500">--:--:--</span>
+                  ) : (
+                    <Loader2 size={10} className="animate-spin text-gray-500" />
+                  )}
                 </span>
-              </div>
+                {/* Cloud-status column — empty when cloud sync isn't active
+                    for this folder. When it is, every file gets an icon:
+                    Cloud for offloaded placeholders, CloudCheck for files
+                    present locally. Kept in its own grid track so the
+                    duration text always ends at the same x-position. */}
+                <span className="shrink-0 py-1.5">
+                  {cloudSyncActive ? (
+                    isOffline ? (
+                      <Cloud size={12} className="text-gray-500" />
+                    ) : (
+                      <CloudCheck size={12} className="text-gray-500" />
+                    )
+                  ) : null}
+                </span>
+              </React.Fragment>
             )
           })}
         </div>,
@@ -2434,7 +2498,7 @@ function CloudDownloadModal({
         stage === 'confirm' ? (
           <div className="flex gap-2 justify-end w-full">
             <Button variant="ghost" onClick={onCancel}>Dismiss</Button>
-            <Button variant="primary" icon={<CloudOff size={13} />} onClick={onConfirm}>
+            <Button variant="primary" icon={<CloudDownload size={13} />} onClick={onConfirm}>
               Download
             </Button>
           </div>
@@ -2523,7 +2587,7 @@ function VideoPickerModal({
               className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-white/5 opacity-50 cursor-not-allowed"
               title="Not available locally — sync from cloud first"
             >
-              <CloudOff size={13} className="text-gray-600 shrink-0" />
+              <Cloud size={13} className="text-gray-600 shrink-0" />
               <span className="text-sm text-gray-500 font-mono truncate">{name}</span>
               <span className="ml-auto text-[10px] text-gray-600 shrink-0">cloud only</span>
             </div>
@@ -2697,8 +2761,7 @@ export function StreamsPage({
   useEffect(() => {
     window.api.cloudSyncIsActive().then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
   }, [])
-  const [cloudOpInFlight, setCloudOpInFlight] = useState(false)
-  const [offloadModalFiles, setOffloadModalFiles] = useState<{ path: string; size: number }[] | null>(null)
+  const { enqueueOffload, enqueueHydrate } = useCloudOps()
 
   // Orphan (missing folder) handling
   const [orphanConfirmOpen, setOrphanConfirmOpen] = useState(false)
@@ -3188,24 +3251,19 @@ export function StreamsPage({
   }
 
   const clickOffload = async () => {
-    if (!cloudSyncActive || selectedPaths.size === 0 || cloudOpInFlight) return
+    if (!cloudSyncActive || selectedPaths.size === 0) return
     const files = await collectSelectedFolderFiles()
     if (files.length === 0) return
-    setOffloadModalFiles(files)
+    enqueueOffload(files)
     toggleSelectMode()
   }
 
   const clickPinLocal = async () => {
-    if (!cloudSyncActive || selectedPaths.size === 0 || cloudOpInFlight) return
-    setCloudOpInFlight(true)
-    try {
-      const files = await collectSelectedFolderFiles()
-      if (files.length === 0) return
-      await window.api.cloudSyncPin(files.map(f => f.path))
-    } finally {
-      setCloudOpInFlight(false)
-      toggleSelectMode()
-    }
+    if (!cloudSyncActive || selectedPaths.size === 0) return
+    const files = await collectSelectedFolderFiles()
+    if (files.length === 0) return
+    enqueueHydrate(files)
+    toggleSelectMode()
   }
 
   // Per-folder cloud actions for the Action Panel. Mirror the bulk-toolbar
@@ -3214,19 +3272,14 @@ export function StreamsPage({
     if (!cloudSyncActive) return
     const files = await collectFolderFiles(f)
     if (files.length === 0) return
-    setOffloadModalFiles(files)
+    enqueueOffload(files)
   }
 
   const pinFolder = async (f: StreamFolder) => {
-    if (!cloudSyncActive || cloudOpInFlight) return
-    setCloudOpInFlight(true)
-    try {
-      const files = await collectFolderFiles(f)
-      if (files.length === 0) return
-      await window.api.cloudSyncPin(files.map(x => x.path))
-    } finally {
-      setCloudOpInFlight(false)
-    }
+    if (!cloudSyncActive) return
+    const files = await collectFolderFiles(f)
+    if (files.length === 0) return
+    enqueueHydrate(files)
   }
 
   const handleBulkEditTags = async (
@@ -3553,9 +3606,9 @@ export function StreamsPage({
                   <Button
                     variant="ghost"
                     size="sm"
-                    icon={<CloudOff size={14} />}
+                    icon={<Cloud size={14} />}
                     onClick={clickOffload}
-                    disabled={selectedPaths.size === 0 || cloudOpInFlight}
+                    disabled={selectedPaths.size === 0}
                   >
                     <span className="hidden wide:inline">Offload {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
                   </Button>
@@ -3564,9 +3617,9 @@ export function StreamsPage({
                   <Button
                     variant="ghost"
                     size="sm"
-                    icon={<Cloud size={14} />}
+                    icon={<CloudDownload size={14} />}
                     onClick={clickPinLocal}
-                    disabled={selectedPaths.size === 0 || cloudOpInFlight}
+                    disabled={selectedPaths.size === 0}
                   >
                     <span className="hidden wide:inline">Pin Local {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
                   </Button>
@@ -3831,6 +3884,7 @@ export function StreamsPage({
                       isPending={pending}
                       isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
                       privacyStatus={folder.meta?.ytVideoId ? ytPrivacyMap[folder.meta.ytVideoId] ?? null : null}
+                      cloudSyncActive={cloudSyncActive}
                       tagColors={tagColors}
                       tagTextures={tagTextures}
                       onToggleSelect={(shiftKey) => {
@@ -4020,6 +4074,7 @@ return (
                   isPending={pending}
                   isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
                   privacyStatus={folder.meta?.ytVideoId ? ytPrivacyMap[folder.meta.ytVideoId] ?? null : null}
+                  cloudSyncActive={cloudSyncActive}
                   tagColors={tagColors}
                   tagTextures={tagTextures}
                   onToggleSelect={(shiftKey) => {
@@ -4628,13 +4683,6 @@ return (
         onSaved={() => {}}
       />
 
-      {/* Cloud offload progress */}
-      <CloudOffloadModal
-        isOpen={!!offloadModalFiles}
-        onClose={() => setOffloadModalFiles(null)}
-        files={offloadModalFiles ?? []}
-      />
-
       {/* Bulk tag */}
       {showBulkTag && (() => {
         const selectedFolders = folders.filter(f => selectedPaths.has(selectionKey(f)))
@@ -4738,7 +4786,7 @@ function ClampedComment({ text, maxLines = 3 }: { text: string; maxLines?: numbe
 
 // ─── Stream card (grid view) ─────────────────────────────────────────────────
 
-function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
+function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, cloudSyncActive, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
   const { meta, hasMeta, detectedGames, date, thumbnails, thumbnailLocalFlags, videoCount, videos } = folder
   const displayGames = meta?.games?.length ? meta.games : detectedGames
   const firstThumb = thumbnails[0]
@@ -4916,7 +4964,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
       {/* Footer actions */}
       <div className="flex items-center gap-1 px-2 pb-2">
         <div className="mr-auto">
-          <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined} folderPath={folder.folderPath}>
+          <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined} folderPath={folder.folderPath} cloudSyncActive={cloudSyncActive}>
             {(() => {
               const vm = meta?.videoMap
               const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount
@@ -5009,6 +5057,10 @@ interface StreamRowProps {
   isPending: boolean
   isLive: boolean
   privacyStatus?: string | null
+  /** True when streamsDir is inside a cloud sync root. Threaded through to
+   *  the VideoCountTooltip so the per-file cloud column only renders icons
+   *  when cloud sync is actually in play. */
+  cloudSyncActive: boolean
   tagColors: Record<string, string>
   tagTextures: Record<string, string>
   onToggleSelect: (shiftKey: boolean) => void
@@ -5037,7 +5089,7 @@ interface StreamRowProps {
   onToggleExpand?: () => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart, expanded, onToggleExpand }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, cloudSyncActive, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart, expanded, onToggleExpand }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -5145,7 +5197,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
 
       {/* Video count */}
       <td className="px-2 py-2 align-middle w-[44px]">
-        <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined} folderPath={folder.folderPath}>
+        <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined} folderPath={folder.folderPath} cloudSyncActive={cloudSyncActive}>
           {(() => {
             const vm = meta?.videoMap
             const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount
@@ -5528,12 +5580,12 @@ function ExpandedStreamPanel({
                 <>
                   <Tooltip content="Offload this stream's files to cloud (frees local disk; thumbnail stays local)">
                     <button onClick={onOffload} className={PANEL_ACTION_BUTTON_PINK}>
-                      <CloudOff size={12} />
+                      <Cloud size={12} />
                     </button>
                   </Tooltip>
                   <Tooltip content="Pin this stream's files local (always keep on disk)">
                     <button onClick={onPinLocal} className={PANEL_ACTION_BUTTON_CYAN}>
-                      <Cloud size={12} />
+                      <CloudDownload size={12} />
                     </button>
                   </Tooltip>
                 </>

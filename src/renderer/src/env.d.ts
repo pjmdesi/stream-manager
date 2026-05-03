@@ -67,26 +67,21 @@ declare global {
 
       // ── Cloud sync (offload) ─────────────────────────────────────────────────
       cloudSyncIsActive(): Promise<boolean>
-      cloudSyncOffload(paths: string[]): Promise<{
-        ok: string[]
-        failed: { path: string; reason: string }[]
-        skipped: string[]
-        skippedAlreadyOffline: string[]
-        cancelled: boolean
+      checkForUpdate(force?: boolean): Promise<{
+        current: string
+        latest: string | null
+        hasUpdate: boolean
+        releaseUrl: string | null
+        releaseNotes: string | null
       }>
+      cloudSyncOffload(paths: string[], batchId: string): Promise<void>
       cloudSyncCancelOffload(): Promise<void>
-      cloudSyncPin(paths: string[]): Promise<{
-        ok: string[]
-        failed: { path: string; reason: string }[]
-      }>
-      cloudSyncHydrate(paths: string[]): Promise<{
-        ok: string[]
-        failed: { path: string; reason: string }[]
-      }>
+      cloudSyncPin(paths: string[], batchId: string): Promise<void>
+      cloudSyncCancelPin(): Promise<void>
       onCloudSyncProgress(cb: (event:
-        | { type: 'init'; eligible: string[]; skippedProtected: string[] }
-        | { type: 'item'; path: string; status: 'running' | 'done' | 'already-offline' | 'failed'; reason?: string }
-        | { type: 'complete'; ok: number; failed: number; alreadyOffline: number; cancelled: boolean }
+        | { type: 'init'; direction: 'offload' | 'hydrate'; batchId: string; eligible: string[]; skippedProtected: string[] }
+        | { type: 'item'; direction: 'offload' | 'hydrate'; batchId: string; path: string; status: 'running' | 'done' | 'already-offline' | 'already-local' | 'failed'; reason?: string }
+        | { type: 'complete'; direction: 'offload' | 'hydrate'; batchId: string; ok: number; failed: number; alreadyOffline?: number; alreadyLocal?: number; cancelled: boolean }
       ) => void): () => void
 
       // ── File Watcher ─────────────────────────────────────────────────────────

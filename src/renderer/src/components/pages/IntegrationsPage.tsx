@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Youtube, Twitch, CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown } from 'lucide-react'
+import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { useStore } from '../../hooks/useStore'

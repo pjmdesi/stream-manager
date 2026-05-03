@@ -12,86 +12,26 @@ import path from 'path'
 //      with ERROR_CLOUD_FILE_INVALID_REQUEST (0x80070188), so step 1 must run
 //      first.
 //
-// Pinning is the inverse: attrib +P -U. No API call needed; data hydrates
-// transparently on next access via the existing cloud-hydrate path in converter.
+// Pin-and-hydrate is the inverse:
+//   1. attrib +P -U  — set PINNED. Synology Drive honors this lazily, so we
+//      can't trust it to actually download; step 2 is the workhorse.
+//   2. CfHydratePlaceholder — synchronous; blocks until the provider has
+//      streamed the full file local.
 
 const REPARSE_POINT = 0x400
 const OFFLINE_MASK = 0x1000 | 0x40000 | 0x400000
 
+// Per-direction concurrency. Each unit is one PowerShell process running one
+// CFAPI call; provider contention (Synology Drive / OneDrive / etc.) caps
+// the useful number well before host CPU/RAM matters. 4 strikes a balance:
+// large enough to amortize PowerShell startup overhead and overlap network
+// transfers, small enough to stay below typical provider rate limits.
+const DEHYDRATE_CONCURRENCY = 4
+const HYDRATE_CONCURRENCY = 4
+
 export interface CloudOpResult {
   ok: string[]
   failed: { path: string; reason: string }[]
-}
-
-const PWSH_HEADER = `
-$ErrorActionPreference = 'Continue'
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class CFAPI {
-    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-    public static extern IntPtr CreateFileW(string n, uint a, uint s, IntPtr sa, uint c, uint f, IntPtr t);
-    [DllImport("kernel32.dll", SetLastError=true)]
-    public static extern bool CloseHandle(IntPtr h);
-    [DllImport("cldapi.dll", SetLastError=true)]
-    public static extern int CfDehydratePlaceholder(IntPtr h, long off, long len, uint flags, IntPtr o);
-    [DllImport("cldapi.dll", SetLastError=true)]
-    public static extern int CfHydratePlaceholder(IntPtr h, long off, long len, uint flags, IntPtr o);
-}
-"@
-$GENERIC_RW = [Convert]::ToUInt32('C0000000', 16)
-`
-
-function runBatch(paths: string[], perPath: string): Promise<CloudOpResult> {
-  return new Promise(resolve => {
-    if (process.platform !== 'win32' || paths.length === 0) {
-      resolve({ ok: [], failed: paths.map(p => ({ path: p, reason: 'not-windows' })) })
-      return
-    }
-    // '|||' is the delimiter (Windows paths can't contain '|', so it's
-    // unambiguous). Avoids PowerShell backtick-tab escapes which would close
-    // the JS template literal.
-    const script = `${PWSH_HEADER}
-while (($line = [Console]::In.ReadLine()) -ne $null) {
-  $p = $line
-  try {
-${perPath}
-  } catch {
-    Write-Output ("ERR|||" + $p + "|||" + $_.Exception.Message)
-  }
-}
-`
-    let stdout = ''
-    let stderr = ''
-    const proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script])
-    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
-    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
-    proc.on('close', () => {
-      const ok: string[] = []
-      const failed: { path: string; reason: string }[] = []
-      const seen = new Set<string>()
-      for (const line of stdout.split(/\r?\n/)) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        const [tag, p, reason] = trimmed.split('|||')
-        if (!p) continue
-        seen.add(p)
-        if (tag === 'OK') ok.push(p)
-        else failed.push({ path: p, reason: reason || tag || 'unknown' })
-      }
-      // Anything that didn't produce a line at all is a failure (process crashed
-      // mid-stream, bad path, etc.). Surface it rather than silently dropping.
-      for (const p of paths) {
-        if (!seen.has(p)) failed.push({ path: p, reason: stderr.trim() || 'no-output' })
-      }
-      resolve({ ok, failed })
-    })
-    proc.on('error', err => {
-      resolve({ ok: [], failed: paths.map(p => ({ path: p, reason: err.message })) })
-    })
-    proc.stdin.write(paths.join('\n') + '\n')
-    proc.stdin.end()
-  })
 }
 
 // Per-file dehydrate script — same shape as the spike that's known to work.
@@ -185,13 +125,14 @@ export interface DehydrateProgressEvent {
 }
 
 /**
- * Dehydrate files one at a time, emitting progress per file via `onProgress`.
- * Serial execution by design — concurrent PowerShell processes against the same
- * sync provider risk contention.
+ * Dehydrate files with up to DEHYDRATE_CONCURRENCY in flight at a time,
+ * emitting progress per file via `onProgress`. Workers pull from a shared
+ * cursor, so a slow file doesn't block the rest of the batch.
  *
- * Cancel via `shouldCancel()` is checked between files. The currently-running
- * file is allowed to finish so we never interrupt CfDehydratePlaceholder
- * mid-call (which could leave the file in an intermediate state).
+ * Cancel via `shouldCancel()` is checked at the start of each file. Files
+ * already in flight when cancel fires are allowed to finish — we never
+ * interrupt CfDehydratePlaceholder mid-call (which could leave the file in
+ * an intermediate state).
  */
 export async function dehydratePaths(
   paths: string[],
@@ -206,48 +147,178 @@ export async function dehydratePaths(
   const failed: { path: string; reason: string }[] = []
   const skippedAlreadyOffline: string[] = []
   let cancelled = false
-  for (const p of paths) {
-    if (shouldCancel?.()) { cancelled = true; break }
-    onProgress?.({ path: p, status: 'running' })
-    const result = await runOnePath(scriptPath, p)
-    if (result.outcome === 'ok') {
-      ok.push(p)
-      onProgress?.({ path: p, status: 'done' })
-    } else if (result.outcome === 'already-offline') {
-      skippedAlreadyOffline.push(p)
-      onProgress?.({ path: p, status: 'already-offline' })
-    } else {
-      failed.push({ path: p, reason: result.reason ?? 'unknown' })
-      onProgress?.({ path: p, status: 'failed', reason: result.reason })
+  // Shared cursor. The single-threaded event loop makes `next++` safe across
+  // workers without explicit locking.
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (true) {
+      if (shouldCancel?.()) { cancelled = true; return }
+      const i = next++
+      if (i >= paths.length) return
+      const p = paths[i]
+      onProgress?.({ path: p, status: 'running' })
+      const result = await runOnePath(scriptPath, p)
+      if (result.outcome === 'ok') {
+        ok.push(p)
+        onProgress?.({ path: p, status: 'done' })
+      } else if (result.outcome === 'already-offline') {
+        skippedAlreadyOffline.push(p)
+        onProgress?.({ path: p, status: 'already-offline' })
+      } else {
+        failed.push({ path: p, reason: result.reason ?? 'unknown' })
+        onProgress?.({ path: p, status: 'failed', reason: result.reason })
+      }
     }
   }
+  const workerCount = Math.min(DEHYDRATE_CONCURRENCY, paths.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
   return { ok, failed, skippedAlreadyOffline, cancelled }
 }
 
-/** Pin a file as "always keep local". Inverse of dehydratePaths. Hydration of
- *  any currently-evicted data happens lazily on next read. */
-export function pinPaths(paths: string[]): Promise<CloudOpResult> {
-  return runBatch(paths, `
-    & attrib +P -U $p 2>$null | Out-Null
-    Write-Output ("OK|||" + $p)
-  `)
+// Per-file pin-and-hydrate script. Inverse of DEHYDRATE_SCRIPT and meant to
+// be invoked the same way (one PowerShell process per file so we get
+// per-file progress events).
+//
+// Steps:
+//   1. attrib +P -U   — set PINNED ("always keep local"), clear UNPINNED.
+//      Required because Synology Drive Client honors +P lazily; we still
+//      drive the actual download via CfHydratePlaceholder below.
+//   2. If file already lacks any offline/recall flag, exit SKIP-ALREADY-LOCAL.
+//   3. Open the file with CreateFileW (FILE_FLAG_OPEN_REPARSE_POINT, 0x02000000).
+//   4. CfHydratePlaceholder(0, len, 0, NULL) — synchronous; blocks until the
+//      provider has streamed the full file local. Slow; can take many minutes
+//      on large files / slow links.
+//   5. Verify offline flags are cleared.
+//
+// Output is a single status token on the last stdout line:
+//   OK                      — was a placeholder, now fully local
+//   SKIP-ALREADY-LOCAL      — was already local, no work done
+//   ERR|||<reason>          — failed at any step
+const HYDRATE_SCRIPT = `
+param([Parameter(Mandatory=$true, Position=0)][string]$Path)
+$ErrorActionPreference = 'Continue'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class CFAPI {
+    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+    public static extern IntPtr CreateFileW(string n, uint a, uint s, IntPtr sa, uint c, uint f, IntPtr t);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool CloseHandle(IntPtr h);
+    [DllImport("cldapi.dll", SetLastError=true)]
+    public static extern int CfHydratePlaceholder(IntPtr h, long off, long len, uint flags, IntPtr o);
+}
+"@
+& attrib +P -U $Path 2>$null | Out-Null
+# OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS = 0x441000.
+$attrs = [int][System.IO.File]::GetAttributes($Path)
+if (($attrs -band 0x441000) -eq 0) {
+  Write-Output "SKIP-ALREADY-LOCAL"
+  exit 0
+}
+$len = (Get-Item -LiteralPath $Path).Length
+$GENERIC_RW = [Convert]::ToUInt32('C0000000', 16)
+$h = [CFAPI]::CreateFileW($Path, $GENERIC_RW, [uint32]7, [IntPtr]::Zero, [uint32]3, [uint32]0x02000000, [IntPtr]::Zero)
+if ($h -eq [IntPtr]::new(-1)) {
+  Write-Output ("ERR|||CreateFile " + [Runtime.InteropServices.Marshal]::GetLastWin32Error())
+  exit 1
+}
+$hr = [CFAPI]::CfHydratePlaceholder($h, 0, $len, 0, [IntPtr]::Zero)
+[CFAPI]::CloseHandle($h) | Out-Null
+if ($hr -ne 0) {
+  Write-Output ("ERR|||HRESULT 0x" + ('{0:X8}' -f $hr))
+  exit 1
+}
+$verify = [int][System.IO.File]::GetAttributes($Path)
+if (($verify -band 0x441000) -eq 0) { Write-Output "OK" }
+else { Write-Output ("ERR|||hydrate reported success but file still offline (0x" + ('{0:X}' -f $verify) + ')') }
+`
+
+let hydrateScriptPath: string | null = null
+function getHydrateScriptPath(): string {
+  if (hydrateScriptPath && fs.existsSync(hydrateScriptPath)) return hydrateScriptPath
+  const p = path.join(os.tmpdir(), `stream-manager-hydrate-${process.pid}.ps1`)
+  fs.writeFileSync(p, HYDRATE_SCRIPT, 'utf8')
+  hydrateScriptPath = p
+  return p
 }
 
-/** Force immediate hydration without changing the pin state. Useful for
- *  prefetching before a known-imminent operation. */
-export function hydratePaths(paths: string[]): Promise<CloudOpResult> {
-  return runBatch(paths, `
-    $len = (Get-Item -LiteralPath $p).Length
-    $h = [CFAPI]::CreateFileW($p, $GENERIC_RW, [uint32]7, [IntPtr]::Zero, [uint32]3, [uint32]0x02000000, [IntPtr]::Zero)
-    if ($h -eq [IntPtr]::new(-1)) {
-      Write-Output ("ERR|||" + $p + "|||CreateFile " + [Runtime.InteropServices.Marshal]::GetLastWin32Error())
-    } else {
-      $hr = [CFAPI]::CfHydratePlaceholder($h, 0, $len, 0, [IntPtr]::Zero)
-      [CFAPI]::CloseHandle($h) | Out-Null
-      if ($hr -eq 0) { Write-Output ("OK|||" + $p) }
-      else { Write-Output ("ERR|||" + $p + "|||HRESULT 0x" + ('{0:X8}' -f $hr)) }
+export type HydrateOutcome = 'ok' | 'already-local' | 'failed'
+
+function runOneHydrate(scriptPath: string, filePath: string): Promise<{ outcome: HydrateOutcome; reason?: string }> {
+  return new Promise(resolve => {
+    let stdout = ''
+    let stderr = ''
+    const proc = spawn('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', scriptPath, filePath
+    ])
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+    proc.on('close', () => {
+      const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
+      const last = lines[lines.length - 1] ?? ''
+      if (last === 'OK') { resolve({ outcome: 'ok' }); return }
+      if (last === 'SKIP-ALREADY-LOCAL') { resolve({ outcome: 'already-local' }); return }
+      if (last.startsWith('ERR|||')) { resolve({ outcome: 'failed', reason: last.slice(6) }); return }
+      resolve({ outcome: 'failed', reason: stderr.trim() || 'no-output' })
+    })
+    proc.on('error', err => resolve({ outcome: 'failed', reason: err.message }))
+  })
+}
+
+export interface HydrateProgressEvent {
+  path: string
+  status: 'running' | 'done' | 'already-local' | 'failed'
+  reason?: string
+}
+
+/**
+ * Pin + hydrate files with up to HYDRATE_CONCURRENCY in flight at a time,
+ * emitting per-file progress callbacks. Workers pull from a shared cursor
+ * so a slow file doesn't block faster ones.
+ *
+ * Cancel via `shouldCancel()` is checked at the start of each file. Files
+ * already in flight finish — we never interrupt CfHydratePlaceholder
+ * mid-call.
+ */
+export async function hydratePathsWithProgress(
+  paths: string[],
+  onProgress?: (event: HydrateProgressEvent) => void,
+  shouldCancel?: () => boolean
+): Promise<CloudOpResult & { skippedAlreadyLocal: string[]; cancelled: boolean }> {
+  if (process.platform !== 'win32' || paths.length === 0) {
+    return { ok: [], failed: paths.map(p => ({ path: p, reason: 'not-windows' })), skippedAlreadyLocal: [], cancelled: false }
+  }
+  const scriptPath = getHydrateScriptPath()
+  const ok: string[] = []
+  const failed: { path: string; reason: string }[] = []
+  const skippedAlreadyLocal: string[] = []
+  let cancelled = false
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (true) {
+      if (shouldCancel?.()) { cancelled = true; return }
+      const i = next++
+      if (i >= paths.length) return
+      const p = paths[i]
+      onProgress?.({ path: p, status: 'running' })
+      const result = await runOneHydrate(scriptPath, p)
+      if (result.outcome === 'ok') {
+        ok.push(p)
+        onProgress?.({ path: p, status: 'done' })
+      } else if (result.outcome === 'already-local') {
+        skippedAlreadyLocal.push(p)
+        onProgress?.({ path: p, status: 'already-local' })
+      } else {
+        failed.push({ path: p, reason: result.reason ?? 'unknown' })
+        onProgress?.({ path: p, status: 'failed', reason: result.reason })
+      }
     }
-  `)
+  }
+  const workerCount = Math.min(HYDRATE_CONCURRENCY, paths.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return { ok, failed, skippedAlreadyLocal, cancelled }
 }
 
 /**

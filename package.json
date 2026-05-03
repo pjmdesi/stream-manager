@@ -91,7 +91,7 @@
         "electron": "^34.0.0",
         "electron-builder": "^26.0.0",
         "electron-vite": "^2.3.0",
-        "lucide-react": "^0.312.0",
+        "lucide-react": "^1.14.0",
         "postcss": "^8.4.33",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",

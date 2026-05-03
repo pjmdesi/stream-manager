@@ -288,7 +288,14 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   }
 
   const clearDone = () => {
-    setJobs(prev => prev.filter(j => j.status === 'running' || j.status === 'paused' || j.status === 'queued'))
+    // Explicitly drop only terminal states. Earlier this kept an allow-list
+    // (running / paused / queued) and cleared everything else — which
+    // wrongly included transient states like 'downloading' (cloud hydrate
+    // wait) and 'replacing' (atomic swap), causing in-flight cloud archives
+    // to disappear from the queue mid-wait.
+    setJobs(prev => prev.filter(j =>
+      j.status !== 'done' && j.status !== 'error' && j.status !== 'cancelled'
+    ))
   }
 
   /** Render a single job row — extracted so both the ungrouped queue and

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discord community
+    url: https://discord.gg/ufMSh9d8hu
+    about: Ask questions or chat about Stream Manager with other users.
+  - name: Documentation
+    url: https://github.com/pjmdesi/stream-manager#readme
+    about: Setup, usage, and feature documentation.

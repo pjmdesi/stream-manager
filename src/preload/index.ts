@@ -105,23 +105,32 @@ contextBridge.exposeInMainWorld('api', {
   cloudSyncIsActive: (): Promise<boolean> =>
     ipcRenderer.invoke('cloud-sync:is-active'),
 
-  cloudSyncOffload: (paths: string[]): Promise<{ ok: string[]; failed: { path: string; reason: string }[]; skipped: string[]; skippedAlreadyOffline: string[]; cancelled: boolean }> =>
-    ipcRenderer.invoke('cloud-sync:offload', paths),
+  // ── Update check ───────────────────────────────────────────────────────────
+  checkForUpdate: (force?: boolean): Promise<{
+    current: string
+    latest: string | null
+    hasUpdate: boolean
+    releaseUrl: string | null
+    releaseNotes: string | null
+  }> => ipcRenderer.invoke('update:check', force ?? false),
+
+  cloudSyncOffload: (paths: string[], batchId: string): Promise<void> =>
+    ipcRenderer.invoke('cloud-sync:offload', paths, batchId),
 
   cloudSyncCancelOffload: (): Promise<void> =>
     ipcRenderer.invoke('cloud-sync:cancel-offload'),
 
-  cloudSyncPin: (paths: string[]): Promise<{ ok: string[]; failed: { path: string; reason: string }[] }> =>
-    ipcRenderer.invoke('cloud-sync:pin', paths),
+  cloudSyncPin: (paths: string[], batchId: string): Promise<void> =>
+    ipcRenderer.invoke('cloud-sync:pin', paths, batchId),
 
-  cloudSyncHydrate: (paths: string[]): Promise<{ ok: string[]; failed: { path: string; reason: string }[] }> =>
-    ipcRenderer.invoke('cloud-sync:hydrate', paths),
+  cloudSyncCancelPin: (): Promise<void> =>
+    ipcRenderer.invoke('cloud-sync:cancel-pin'),
 
   onCloudSyncProgress: (
     callback: (event:
-      | { type: 'init'; eligible: string[]; skippedProtected: string[] }
-      | { type: 'item'; path: string; status: 'running' | 'done' | 'already-offline' | 'failed'; reason?: string }
-      | { type: 'complete'; ok: number; failed: number; alreadyOffline: number; cancelled: boolean }
+      | { type: 'init'; direction: 'offload' | 'hydrate'; batchId: string; eligible: string[]; skippedProtected: string[] }
+      | { type: 'item'; direction: 'offload' | 'hydrate'; batchId: string; path: string; status: 'running' | 'done' | 'already-offline' | 'already-local' | 'failed'; reason?: string }
+      | { type: 'complete'; direction: 'offload' | 'hydrate'; batchId: string; ok: number; failed: number; alreadyOffline?: number; alreadyLocal?: number; cancelled: boolean }
     ) => void
   ) => {
     const handler = (_e: Electron.IpcRendererEvent, data: any) => callback(data)

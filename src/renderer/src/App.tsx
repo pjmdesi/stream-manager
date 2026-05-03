@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -19,6 +19,9 @@ import { LauncherPage } from './components/pages/LauncherPage'
 import { ThumbnailPage } from './components/pages/ThumbnailPage'
 import { useConversionJobs } from './context/ConversionContext'
 import { useWatcher } from './context/WatcherContext'
+import { CloudOpsProvider } from './context/CloudOpsContext'
+import { CloudOpsModal } from './components/CloudOpsModal'
+import { CloudOpsWidget } from './components/CloudOpsWidget'
 import { useStore } from './hooks/useStore'
 import { OnboardingModal } from './components/OnboardingModal'
 import { HelpModal } from './components/HelpModal'
@@ -69,35 +72,61 @@ interface PendingConverterFile {
 function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; collapsed: boolean }) {
   const { jobs } = useConversionJobs()
 
+  // Include 'downloading' (cloud-hydrate wait) and 'replacing' (atomic swap)
+  // as active states so the widget keeps surfacing while files are still
+  // hydrating — otherwise queueing an archive against cloud placeholders
+  // looked like "nothing happened" until the first file finished
+  // downloading and started encoding.
   const relevant = jobs.filter(j => j.status === 'running' || j.status === 'paused' || j.status === 'error' || j.status === 'done')
-  const active = relevant.filter(j => j.status === 'running' || j.status === 'paused' || j.status === 'error')
+  const active = jobs.filter(j =>
+    j.status === 'running' || j.status === 'paused' || j.status === 'error' ||
+    j.status === 'downloading' || j.status === 'replacing'
+  )
   if (active.length === 0) return null
 
-  const hasError   = active.some(j => j.status === 'error')
-  const allPaused  = !hasError && active.every(j => j.status === 'paused')
+  const hasError = active.some(j => j.status === 'error')
+  const allPaused = !hasError && active.every(j => j.status === 'paused')
+  // Only true when EVERY active job is mid-cloud-hydrate. As soon as one
+  // job starts encoding the widget reverts to its normal percentage view.
+  const allDownloading = !hasError && !allPaused && active.every(j => j.status === 'downloading')
 
-  const label = hasError ? 'Error' : allPaused ? 'All Paused' : 'In Progress'
+  const label =
+    hasError ? 'Error' :
+    allPaused ? 'All Paused' :
+    allDownloading ? 'Waiting on Download' :
+    'In Progress'
   const totalProgress = relevant.length > 0
     ? relevant.reduce((sum, j) => sum + j.progress, 0) / relevant.length
     : 0
 
-  const barColor     = hasError ? 'bg-red-500'    : allPaused ? 'bg-yellow-400'    : 'bg-purple-500'
-  const statusColor  = hasError ? 'text-red-400'  : allPaused ? 'text-yellow-400'  : 'text-purple-400'
+  const barColor =
+    hasError ? 'bg-red-500' :
+    allPaused ? 'bg-yellow-400' :
+    allDownloading ? 'bg-blue-400' :
+    'bg-purple-500'
+  const statusColor =
+    hasError ? 'text-red-400' :
+    allPaused ? 'text-yellow-400' :
+    allDownloading ? 'text-blue-400' :
+    'text-purple-400'
 
   if (collapsed) {
     return (
-      <Tooltip content={`Converting · ${label} · ${totalProgress.toFixed(0)}%`} side="right" triggerClassName="block w-full">
+      <Tooltip content={`Converting · ${label}${allDownloading ? '' : ` · ${totalProgress.toFixed(0)}%`}`} side="right" triggerClassName="block w-full">
         <button
           onClick={onNavigate}
           className="w-full flex flex-col items-center gap-0.5 py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors"
         >
           <Zap size={14} className={statusColor} />
-          <span className={`text-[10px] tabular-nums ${statusColor}`}>{totalProgress.toFixed(0)}%</span>
+          {allDownloading
+            ? <Cloud size={12} className="text-blue-400" />
+            : <span className={`text-[10px] tabular-nums ${statusColor}`}>{totalProgress.toFixed(0)}%</span>
+          }
           {hasError
             ? <AlertCircle size={10} className="text-red-400" />
             : allPaused
               ? <Pause size={10} className="text-yellow-400" />
-              : <RefreshCw size={10} className={`text-purple-400 animate-spin`} />
+              : <RefreshCw size={10} className={`${statusColor} animate-spin`} />
           }
         </button>
       </Tooltip>
@@ -120,7 +149,7 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
         />
       </div>
       <div className="mt-1.5 text-[10px] text-gray-600 tabular-nums">
-        {totalProgress.toFixed(1)}% · {active.length} job{active.length !== 1 ? 's' : ''}
+        {allDownloading ? `${active.length} downloading` : `${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
       </div>
     </button>
   )
@@ -292,6 +321,19 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
 function AppInner() {
   const [page, setPage] = useState<Page>('streams')
   const [aboutOpen, setAboutOpen] = useState(false)
+  // Update detection — fires once on mount, results cached for 6h in the
+  // store. Honors the `checkForUpdates` config opt-out. Failures are silent.
+  const [updateInfo, setUpdateInfo] = useState<{ latest: string; releaseUrl: string; releaseNotes: string } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    window.api.checkForUpdate().then(res => {
+      if (cancelled) return
+      if (res.hasUpdate && res.latest && res.releaseUrl) {
+        setUpdateInfo({ latest: res.latest, releaseUrl: res.releaseUrl, releaseNotes: res.releaseNotes ?? '' })
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
   const [helpOpen, setHelpOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [integrationAlert, setIntegrationAlert] = useState(false)
@@ -457,6 +499,7 @@ function AppInner() {
 
           <div className="border-t border-white/5" />
           {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} collapsed={sidebarCollapsed} />}
+          <CloudOpsWidget collapsed={sidebarCollapsed} />
           <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
@@ -467,12 +510,15 @@ function AppInner() {
               {sidebarCollapsed ? 'Help' : 'How to use'}
             </button>
             {!sidebarCollapsed && <span className="text-[10px] text-gray-600">·</span>}
-            <button
-              onClick={() => setAboutOpen(true)}
-              className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
-            >
-              v{appVersion}
-            </button>
+            <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}`} side="top">
+              <button
+                onClick={() => setAboutOpen(true)}
+                className={`text-[10px] transition-colors flex items-center gap-1 ${updateInfo ? 'text-amber-400 hover:text-amber-300' : 'text-gray-500 hover:text-gray-300'}`}
+              >
+                {updateInfo && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-label="update available" />}
+                v{appVersion}
+              </button>
+            </Tooltip>
           </div>
         </nav>
 
@@ -535,6 +581,8 @@ function AppInner() {
 
       <HelpModal isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
+      <CloudOpsModal />
+
       <Modal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} title="About Stream Manager" width="sm">
         <div className="flex flex-col items-center gap-4 py-2 text-center">
           <img src={logoUrl} alt="" className="w-12 h-12 opacity-90" />
@@ -544,6 +592,17 @@ function AppInner() {
             </p>
             <p className="text-xs text-gray-500 mt-1">Version {appVersion}</p>
           </div>
+          {updateInfo && (
+            <div className="w-full flex flex-col gap-2 p-3 rounded-lg bg-amber-400/10 border border-amber-400/30">
+              <p className="text-xs text-amber-200 font-medium">Update available — v{updateInfo.latest.replace(/^v/, '')}</p>
+              <button
+                onClick={() => window.api.openUrl(updateInfo.releaseUrl)}
+                className="text-xs text-amber-300 hover:text-amber-200 underline self-center"
+              >
+                View release on GitHub
+              </button>
+            </div>
+          )}
           <a
             href="https://github.com/pjmdesi/stream-manager"
             onClick={e => { e.preventDefault(); window.api.openUrl('https://github.com/pjmdesi/stream-manager') }}
@@ -567,7 +626,9 @@ function AppInner() {
 export default function App() {
   return (
     <ThumbnailEditorProvider>
-      <AppInner />
+      <CloudOpsProvider>
+        <AppInner />
+      </CloudOpsProvider>
     </ThumbnailEditorProvider>
   )
 }

@@ -171,6 +171,7 @@ export interface AppConfig {
   claudeSystemPrompt: string
   launcherWidgetGroupId: string
   listThumbWidth: number
+  checkForUpdates: boolean
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'

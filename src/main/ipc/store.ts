@@ -41,6 +41,7 @@ export interface AppConfig {
   listThumbWidth: number
   defaultBuiltinThumbnailTemplate: string
   useBuiltinThumbnailByDefault: boolean
+  checkForUpdates: boolean
 }
 
 function getDefaultConfig(): AppConfig {
@@ -76,6 +77,7 @@ function getDefaultConfig(): AppConfig {
     listThumbWidth: 85,
     defaultBuiltinThumbnailTemplate: '',
     useBuiltinThumbnailByDefault: true,
+    checkForUpdates: true,
   }
 }
 

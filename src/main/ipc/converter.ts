@@ -146,6 +146,103 @@ const resumers  = new Map<string, () => void>()
 // Set when a job is in the cloud-download wait so the renderer-driven cancel
 // can flip the flag and let the poll loop exit promptly. Per job id.
 const downloadCancelFlags = new Map<string, { cancelled: boolean }>()
+// Tracks job IDs whose pre-encode hydrate task has already been kicked off.
+// Prevents duplicate hydrate loops if addQueuedGroup is somehow called twice
+// for overlapping job sets, or if a job that already finished hydrating in
+// background later gets picked up by startConversionJob's inline hydrate.
+const hydrateInFlight = new Set<string>()
+
+/** Broadcast an IPC event to every renderer window. Module-scoped so
+ *  helpers outside startConversionJob can notify status changes too. */
+function notifyAll(channel: string, data: unknown): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send(channel, data)
+  }
+}
+
+/** Update a job's status in the registry and notify renderers. No-op when
+ *  the job has been removed from the registry (e.g. cancelled + cleared). */
+function setJobStatus(jobId: string, status: ConversionJob['status']): void {
+  const cur = jobs.get(jobId)
+  if (!cur) return
+  jobs.set(jobId, { ...cur, status })
+  notifyAll('converter:jobStatus', { jobId, status })
+}
+
+/**
+ * Pre-encode hydrate task. Runs in parallel for every job in a group so the
+ * second/third/etc. files don't sit idle as 'queued' while the first one
+ * downloads — they all start hydrating at the same time. The encode phase
+ * still serializes (one ffmpeg at a time per group) via startNextInGroup.
+ *
+ * Lifecycle:
+ *   queued → 'downloading' → (poll) → 'queued' (hydrated, ready to encode)
+ *
+ * Cancellation flips the same flag startConversionJob's inline hydrate uses,
+ * so the existing cancel IPC works without changes.
+ */
+async function ensureHydrated(jobId: string): Promise<void> {
+  const job = jobs.get(jobId)
+  if (!job) return
+  if (hydrateInFlight.has(jobId)) return
+  hydrateInFlight.add(jobId)
+  try {
+    const { isFileConfirmedLocal, checkLocalFiles } = await import('./files')
+    // Cheap upfront check — if the file is already local, no work to do.
+    if (isFileConfirmedLocal(job.inputFile)) return
+    // Don't kick off if the job has already been advanced past 'queued'
+    // (e.g. cancelled before this task got scheduled).
+    const cur = jobs.get(jobId)
+    if (!cur || cur.status !== 'queued') return
+
+    setJobStatus(jobId, 'downloading')
+    const flag = { cancelled: false }
+    downloadCancelFlags.set(jobId, flag)
+    cancellers.set(jobId, () => { flag.cancelled = true })
+
+    // Touching the file is what nudges the OS sync provider to start
+    // hydrating. Reading 1 byte is enough; the actual content streams in
+    // afterward as the provider downloads it.
+    fs.open(job.inputFile, 'r', (err, fd) => {
+      if (err) return
+      const buf = Buffer.alloc(1)
+      fs.read(fd, buf, 0, 1, 0, () => fs.close(fd, () => {}))
+    })
+
+    // Async batch poll — non-blocking PowerShell call, won't tie up the
+    // main thread when many parallel hydrates are running concurrently.
+    while (!flag.cancelled) {
+      const [local] = await checkLocalFiles([job.inputFile])
+      if (local) break
+      await new Promise(r => setTimeout(r, 2000))
+    }
+
+    downloadCancelFlags.delete(jobId)
+    cancellers.delete(jobId)
+
+    if (flag.cancelled) {
+      // Cancelled mid-hydrate. Mark the job and let the group orchestrator
+      // pick the next one (cancel doesn't short-circuit the rest of the
+      // group, matching the "errors don't abort the whole batch" pattern).
+      const cur2 = jobs.get(jobId)
+      if (cur2) {
+        jobs.set(jobId, { ...cur2, status: 'cancelled' })
+        notifyAll('converter:jobStatus', { jobId, status: 'cancelled' })
+        notifyAll('converter:jobError', { jobId, error: 'Cancelled' })
+      }
+      if (job.groupId) startNextInGroup(job.groupId)
+      return
+    }
+
+    // Hydrate finished — drop back to 'queued' so startNextInGroup can pick
+    // it up when the encoder slot frees. If it's already free (no other
+    // group sibling is encoding), this kicks the encode immediately.
+    setJobStatus(jobId, 'queued')
+    if (job.groupId) startNextInGroup(job.groupId)
+  } finally {
+    hydrateInFlight.delete(jobId)
+  }
+}
 
 // ── Pending-queue persistence ─────────────────────────────────────────────
 // Only jobs with status 'queued' (auto-rules with start-immediately disabled)
@@ -332,15 +429,21 @@ export function addPendingJob(job: ConversionJob): string {
 
 /** Start the first queued job in a group. Used to serialize execution within
  *  a group (archive batches) — kicked off when a group is submitted, then
- *  re-fired on each job-end so the next one begins. */
+ *  re-fired on each job-end so the next one begins.
+ *
+ *  Note: 'downloading' is NOT considered in-flight here because hydrate runs
+ *  in parallel for the whole group via ensureHydrated(). Only encoding-phase
+ *  states (running / replacing / paused) block the next encode slot. */
 function startNextInGroup(groupId: string): void {
-  // Skip if any job in the group is already running/transitioning.
   const groupJobs = [...jobs.values()].filter(j => j.groupId === groupId)
-  const inFlight = groupJobs.some(j =>
-    j.status === 'running' || j.status === 'downloading' ||
-    j.status === 'replacing' || j.status === 'paused'
+  const encoding = groupJobs.some(j =>
+    j.status === 'running' || j.status === 'replacing' || j.status === 'paused'
   )
-  if (inFlight) return
+  if (encoding) return
+  // Pick the first 'queued' job (preserves submission order). Note this
+  // catches both already-hydrated jobs and any that haven't been touched
+  // yet — startConversionJob's inline hydrate handles the latter as a
+  // fallback if a job somehow slips through ensureHydrated.
   const next = groupJobs.find(j => j.status === 'queued')
   if (!next) return
   startConversionJob(next).catch(() => { /* error broadcast separately */ })
@@ -752,6 +855,15 @@ export function registerConverterIPC(): void {
   ipcMain.handle('converter:addQueuedGroup', async (_event, jobsList: ConversionJob[]): Promise<string[]> => {
     const ids: string[] = []
     for (const j of jobsList) ids.push(addPendingJob(j))
+    // Kick off hydrate for every job in parallel — files needing cloud
+    // download all start hydrating immediately rather than waiting their
+    // turn behind the previous file's encode. Each ensureHydrated task
+    // fires startNextInGroup when it completes, so encoding starts as
+    // soon as the first hydrated job finishes (or immediately if a file
+    // was already local).
+    for (const id of ids) {
+      ensureHydrated(id).catch(() => { /* hydrate errors handled per-task */ })
+    }
     const groupIds = new Set(jobsList.map(j => j.groupId).filter(Boolean) as string[])
     for (const gid of groupIds) startNextInGroup(gid)
     return ids

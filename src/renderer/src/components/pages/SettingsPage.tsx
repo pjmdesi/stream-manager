@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, Youtube, Twitch, AlertCircle, Plus, Bot, FolderTree, CheckCircle } from 'lucide-react'
+import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Plus, Bot, FolderTree, CheckCircle } from 'lucide-react'
+import { Youtube, Twitch } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { Button } from '../ui/Button'
@@ -52,6 +53,16 @@ function DirInput({
   )
 }
 
+// TODO (cloud sync): if users report perf issues with the parallel
+// dehydrate/hydrate workers, expose two settings here:
+//   1. Max concurrent files (currently hardcoded at DEHYDRATE_CONCURRENCY /
+//      HYDRATE_CONCURRENCY = 4 in src/main/services/cfapi.ts). HDD users may
+//      benefit from 1; users on fast NAS could try 6–8.
+//   2. Cloud service provider selector (Synology Drive / OneDrive / Dropbox /
+//      iCloud / Generic). Lets us tune per-provider quirks — e.g. Synology's
+//      0x80070187 sensitivity, OneDrive's API rate limit, attribute-flag
+//      heuristics — instead of a one-size-fits-all CFAPI path. Remove this
+//      note if we either ship the settings or decide they're not warranted.
 export function SettingsPage() {
   const { config, updateConfig, loading } = useStore()
   const [local, setLocal] = useState(config)
@@ -353,6 +364,12 @@ export function SettingsPage() {
             checked={local.checkEpisodeIteration ?? true}
             onChange={v => set('checkEpisodeIteration', v)}
             label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration</div><div className="text-xs text-gray-500">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game</div></div>}
+          />
+
+          <Checkbox
+            checked={local.checkForUpdates ?? true}
+            onChange={v => set('checkForUpdates', v)}
+            label={<div><div className="text-sm font-medium text-gray-200">Check for app updates</div><div className="text-xs text-gray-500">On launch, check the GitHub releases page for a newer version of Stream Manager. An indicator appears next to the version label in the sidebar when an update is available. No data is sent — only a public API call.</div></div>}
           />
 
           <div className="flex flex-col gap-1">
