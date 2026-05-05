@@ -7,8 +7,9 @@ import {
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, ChevronUp, ChevronsUp, ChevronsDown, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
-  Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, LayoutTemplate,
-  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid
+  Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, SquareDashedText,
+  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid,
+  RadioTower
 } from 'lucide-react'
 
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
@@ -25,6 +26,7 @@ import { TagComboBox } from '../ui/TagComboBox'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
 import { useCloudOps } from '../../context/CloudOpsContext'
+import { useConversionJobs } from '../../context/ConversionContext'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
 import { getTagColor, getTagTextureStyle, pickColorForNewTag, pickTextureForNewTag } from '../../constants/tagColors'
@@ -2762,6 +2764,25 @@ export function StreamsPage({
     window.api.cloudSyncIsActive().then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
   }, [])
   const { enqueueOffload, enqueueHydrate } = useCloudOps()
+  // Folders with an active archive group in flight. Used to disable any
+  // action that would conflict with an archive-in-progress (offload, send
+  // to converter, combine, delete, reschedule, re-archive). Keyed by
+  // relativePath; we also probe by `date` so jobs persisted before
+  // groupCompletionHook.metaKey existed still match.
+  const { jobs: conversionJobs } = useConversionJobs()
+  const archivingFolderKeys = useMemo(() => {
+    const set = new Set<string>()
+    for (const j of conversionJobs) {
+      const hook = j.groupCompletionHook
+      if (hook?.type !== 'archiveMarkAsArchived') continue
+      if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') continue
+      set.add(hook.metaKey ?? hook.date)
+    }
+    return set
+  }, [conversionJobs])
+  const isFolderArchiving = useCallback((f: StreamFolder) => (
+    archivingFolderKeys.has(f.relativePath) || archivingFolderKeys.has(f.date)
+  ), [archivingFolderKeys])
 
   // Orphan (missing folder) handling
   const [orphanConfirmOpen, setOrphanConfirmOpen] = useState(false)
@@ -3141,6 +3162,7 @@ export function StreamsPage({
     const sessionsRaw = selectedFolders.map(f => ({
       folderPath: f.folderPath,
       date: f.date,
+      relativePath: f.relativePath,
       filePaths: fullVideos(f).filter(p => !skipFiles.has(p)),
     })).filter(s => s.filePaths.length > 0)
     const allFiles = sessionsRaw.flatMap(s => s.filePaths)
@@ -3183,7 +3205,7 @@ export function StreamsPage({
           groupId,
           groupLabel,
           replaceInput: true,
-          groupCompletionHook: { type: 'archiveMarkAsArchived', streamsDir, date: e.date },
+          groupCompletionHook: { type: 'archiveMarkAsArchived', streamsDir, date: e.date, metaKey: e.relativePath },
         })
       }
     }
@@ -3554,6 +3576,14 @@ export function StreamsPage({
     )
   }
 
+  // True iff any selected folder has an archive in flight. Used to disable
+  // bulk Offload / Pin Local / Archive when the selection includes a
+  // currently-archiving stream. Computed each render — selection sizes are
+  // small enough that a useMemo isn't worth the dependency wrangling.
+  const selectionContainsArchiving = selectedPaths.size > 0 && folders.some(
+    f => selectedPaths.has(selectionKey(f)) && isFolderArchiving(f)
+  )
+
   // ── Main view ────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -3602,37 +3632,37 @@ export function StreamsPage({
             </Tooltip>
             {cloudSyncActive && (
               <>
-                <Tooltip content="Offload selected streams to cloud (frees local disk; thumbnails stay local)" side="bottom">
+                <Tooltip content={selectionContainsArchiving ? 'One or more selected streams are being archived' : 'Offload selected streams to cloud (frees local disk; thumbnails stay local)'} side="bottom">
                   <Button
                     variant="ghost"
                     size="sm"
                     icon={<Cloud size={14} />}
                     onClick={clickOffload}
-                    disabled={selectedPaths.size === 0}
+                    disabled={selectedPaths.size === 0 || selectionContainsArchiving}
                   >
                     <span className="hidden wide:inline">Offload {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
                   </Button>
                 </Tooltip>
-                <Tooltip content="Pin selected streams local (always keep on disk)" side="bottom">
+                <Tooltip content={selectionContainsArchiving ? 'One or more selected streams are being archived' : 'Pin selected streams local (always keep on disk)'} side="bottom">
                   <Button
                     variant="ghost"
                     size="sm"
                     icon={<CloudDownload size={14} />}
                     onClick={clickPinLocal}
-                    disabled={selectedPaths.size === 0}
+                    disabled={selectedPaths.size === 0 || selectionContainsArchiving}
                   >
                     <span className="hidden wide:inline">Pin Local {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
                   </Button>
                 </Tooltip>
               </>
             )}
-            <Tooltip content="Archive selected streams" side="bottom">
+            <Tooltip content={selectionContainsArchiving ? 'One or more selected streams are already being archived' : 'Archive selected streams'} side="bottom">
               <Button
                 variant="primary"
                 size="sm"
                 icon={<Archive size={14} />}
                 onClick={clickArchive}
-                disabled={selectedPaths.size === 0}
+                disabled={selectedPaths.size === 0 || selectionContainsArchiving}
               >
                 <span className="hidden wide:inline">Archive {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
               </Button>
@@ -3651,11 +3681,31 @@ export function StreamsPage({
               </Button>
             </Tooltip> */}
 
+            {ytConnectedOuter && (
+              <Tooltip content="Open YouTube Studio's Go Live page in your browser to start an unscheduled livestream" side="bottom">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<RadioTower size={14} />}
+                  onClick={async () => {
+                    try {
+                      const channelId = await window.api.youtubeGetChannelId()
+                      await window.api.openUrl(`https://studio.youtube.com/channel/${channelId}/livestreaming`)
+                    } catch (err) {
+                      console.error('[Streams] Initialize Livestream failed:', err)
+                    }
+                  }}
+                >
+                  <span className="hidden wide:inline">Initialize Livestream</span>
+                </Button>
+              </Tooltip>
+            )}
+
             <Tooltip content="Manage title, description, and tag templates" side="bottom">
               <Button
                 variant="ghost"
                 size="sm"
-                icon={<LayoutTemplate size={14} />}
+                icon={<SquareDashedText size={14} />}
                 onClick={() => setShowTemplatesModal(true)}
               >
                 <span className="hidden wide:inline">Templates</span>
@@ -3885,6 +3935,7 @@ export function StreamsPage({
                       isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
                       privacyStatus={folder.meta?.ytVideoId ? ytPrivacyMap[folder.meta.ytVideoId] ?? null : null}
                       cloudSyncActive={cloudSyncActive}
+                      isArchiving={isFolderArchiving(folder)}
                       tagColors={tagColors}
                       tagTextures={tagTextures}
                       onToggleSelect={(shiftKey) => {
@@ -4075,6 +4126,7 @@ return (
                   isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
                   privacyStatus={folder.meta?.ytVideoId ? ytPrivacyMap[folder.meta.ytVideoId] ?? null : null}
                   cloudSyncActive={cloudSyncActive}
+                  isArchiving={isFolderArchiving(folder)}
                   tagColors={tagColors}
                   tagTextures={tagTextures}
                   onToggleSelect={(shiftKey) => {
@@ -4122,6 +4174,7 @@ return (
                       totalEpisodes={totalEpisodes}
                       selectMode={selectMode}
                       cloudSyncActive={cloudSyncActive}
+                      isArchiving={isFolderArchiving(folder)}
                       onSendToPlayer={() => sendVideo(folder, 'player')}
                       onSendToConverter={() => sendVideo(folder, 'converter')}
                       onSendToCombine={() => sendToCombine(folder)}
@@ -4786,7 +4839,7 @@ function ClampedComment({ text, maxLines = 3 }: { text: string; maxLines?: numbe
 
 // ─── Stream card (grid view) ─────────────────────────────────────────────────
 
-function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, cloudSyncActive, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
+function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, cloudSyncActive, isArchiving, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
   const { meta, hasMeta, detectedGames, date, thumbnails, thumbnailLocalFlags, videoCount, videos } = folder
   const displayGames = meta?.games?.length ? meta.games : detectedGames
   const firstThumb = thumbnails[0]
@@ -5000,15 +5053,15 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
             </Tooltip>
           )}
           {videoCount > 0 && (
-            <Tooltip content="Send to Converter">
-              <button onClick={e => { e.stopPropagation(); onSendToConverter() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            <Tooltip content={isArchiving ? 'Already in the converter — archive in progress' : 'Send to Converter'}>
+              <button onClick={e => { e.stopPropagation(); onSendToConverter() }} disabled={isArchiving} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
                 <Zap size={12} />
               </button>
             </Tooltip>
           )}
           {videoCount > 1 && (
-            <Tooltip content="Combine videos">
-              <button onClick={e => { e.stopPropagation(); onSendToCombine() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            <Tooltip content={isArchiving ? 'Combine disabled — archive in progress' : 'Combine videos'}>
+              <button onClick={e => { e.stopPropagation(); onSendToCombine() }} disabled={isArchiving} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
                 <Combine size={12} />
               </button>
             </Tooltip>
@@ -5029,14 +5082,14 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
             </button>
           </Tooltip>
           {isPending && (
-            <Tooltip content="Reschedule">
-              <button onClick={e => { e.stopPropagation(); onReschedule() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            <Tooltip content={isArchiving ? 'Reschedule disabled — archive in progress' : 'Reschedule'}>
+              <button onClick={e => { e.stopPropagation(); onReschedule() }} disabled={isArchiving} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
                 <CalendarClock size={12} />
               </button>
             </Tooltip>
           )}
-          <Tooltip content="Delete">
-            <button onClick={e => { e.stopPropagation(); onDelete() }} className="p-1 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+          <Tooltip content={isArchiving ? 'Delete disabled — archive in progress' : 'Delete'}>
+            <button onClick={e => { e.stopPropagation(); onDelete() }} disabled={isArchiving} className="p-1 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-700">
               <Trash2 size={12} />
             </button>
           </Tooltip>
@@ -5061,6 +5114,12 @@ interface StreamRowProps {
    *  the VideoCountTooltip so the per-file cloud column only renders icons
    *  when cloud sync is actually in play. */
   cloudSyncActive: boolean
+  /** True while at least one archive job for this folder is still in flight.
+   *  Disables actions that would conflict with the archive: re-archive,
+   *  send-to-converter (files are already in the queue), combine, delete,
+   *  reschedule, offload, pin local. Player / thumbnail / metadata stay
+   *  enabled. */
+  isArchiving: boolean
   tagColors: Record<string, string>
   tagTextures: Record<string, string>
   onToggleSelect: (shiftKey: boolean) => void
@@ -5089,7 +5148,7 @@ interface StreamRowProps {
   onToggleExpand?: () => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, cloudSyncActive, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart, expanded, onToggleExpand }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, cloudSyncActive, isArchiving, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart, expanded, onToggleExpand }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -5378,7 +5437,11 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             </span>
           )}
           {videoCount > 0 && <Tooltip content="Send to Player"><Button variant="ghost" size="icon-sm" icon={<Film size={12} />} onClick={onSendToPlayer} /></Tooltip>}
-          {videoCount > 0 && <Tooltip content="Send to Converter"><Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} /></Tooltip>}
+          {videoCount > 0 && (
+            <Tooltip content={isArchiving ? 'Already in the converter — archive in progress' : 'Send to Converter'}>
+              <Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} disabled={isArchiving} />
+            </Tooltip>
+          )}
           <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
             <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
           </Tooltip>
@@ -5391,8 +5454,8 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             />
           </Tooltip>
           {isPending && (
-            <Tooltip content="Reschedule">
-              <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} />
+            <Tooltip content={isArchiving ? 'Reschedule disabled — archive in progress' : 'Reschedule'}>
+              <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} disabled={isArchiving} />
             </Tooltip>
           )}
         </div>
@@ -5404,7 +5467,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
 // Shared style for the panel's bordered/colored hover buttons (Archive, Delete,
 // New Episode). Non-hovered state matches Button ghost (text-gray-400). Hover
 // tint differs per action so the user can tell them apart at a glance.
-const PANEL_ACTION_BUTTON_BASE = 'p-2 rounded-lg text-gray-400 transition-colors'
+const PANEL_ACTION_BUTTON_BASE = 'p-2 rounded-lg text-gray-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'
 const PANEL_ACTION_BUTTON_GREEN = `${PANEL_ACTION_BUTTON_BASE} hover:text-green-400 hover:bg-green-500/10`
 const PANEL_ACTION_BUTTON_BLUE = `${PANEL_ACTION_BUTTON_BASE} hover:text-blue-400 hover:bg-blue-500/10`
 const PANEL_ACTION_BUTTON_RED = `${PANEL_ACTION_BUTTON_BASE} hover:text-red-400 hover:bg-red-500/10`
@@ -5423,6 +5486,9 @@ interface ExpandedPanelProps {
   /** When true, shows the per-folder Offload + Pin Local buttons. False
    *  when streamsDir is not inside a CFAPI sync root. */
   cloudSyncActive: boolean
+  /** True while this folder has an archive in flight — see StreamRowProps
+   *  for the full list of buttons this gates. */
+  isArchiving: boolean
   onSendToPlayer: () => void
   onSendToConverter: () => void
   onSendToCombine: () => void
@@ -5448,7 +5514,7 @@ interface ExpandedPanelProps {
  * is meant to be tight, not exhaustive.
  */
 function ExpandedStreamPanel({
-  folder, isPending, hasMeta, hasSMThumbnail, videoCount, totalEpisodes, selectMode, cloudSyncActive,
+  folder, isPending, hasMeta, hasSMThumbnail, videoCount, totalEpisodes, selectMode, cloudSyncActive, isArchiving,
   onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails,
   onEdit, onAdd, onOpen, onReschedule, onArchive, onDelete, onNewEpisode,
   onOffload, onPinLocal,
@@ -5554,15 +5620,26 @@ function ExpandedStreamPanel({
                 New Episode, divider, Archive (single-item bypasses selection
                 mode), Delete. */}
             <div className="flex items-center gap-0.5 shrink-0">
+              {/* Buttons that mutate the folder's files (or queue work that
+                  touches them) are disabled while an archive is in flight
+                  for this folder. Player / thumbnail / metadata / open
+                  folder / new episode stay live since they're read-only or
+                  produce a separate folder. */}
               {isPending && (
-                <Tooltip content="Reschedule">
-                  <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} />
+                <Tooltip content={isArchiving ? 'Reschedule disabled — archive in progress' : 'Reschedule'}>
+                  <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} disabled={isArchiving} />
                 </Tooltip>
               )}
               {videoCount > 0 && <Tooltip content="Send to Player"><Button variant="ghost" size="icon-sm" icon={<Film size={12} />} onClick={onSendToPlayer} /></Tooltip>}
-              {videoCount > 0 && <Tooltip content="Send to Converter"><Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} /></Tooltip>}
+              {videoCount > 0 && (
+                <Tooltip content={isArchiving ? "Already in the converter — archive in progress" : 'Send to Converter'}>
+                  <Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} disabled={isArchiving} />
+                </Tooltip>
+              )}
               {videoCount > 1 && (
-                <Tooltip content="Send to Combine"><Button variant="ghost" size="icon-sm" icon={<Combine size={12} />} onClick={onSendToCombine} /></Tooltip>
+                <Tooltip content={isArchiving ? 'Combine disabled — archive in progress' : 'Send to Combine'}>
+                  <Button variant="ghost" size="icon-sm" icon={<Combine size={12} />} onClick={onSendToCombine} disabled={isArchiving} />
+                </Tooltip>
               )}
               <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
                 <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
@@ -5578,13 +5655,13 @@ function ExpandedStreamPanel({
               </Tooltip>
               {cloudSyncActive && videoCount > 0 && (
                 <>
-                  <Tooltip content="Offload this stream's files to cloud (frees local disk; thumbnail stays local)">
-                    <button onClick={onOffload} className={PANEL_ACTION_BUTTON_PINK}>
+                  <Tooltip content={isArchiving ? 'Offload disabled — archive in progress' : "Offload this stream's files to cloud (frees local disk; thumbnail stays local)"}>
+                    <button onClick={onOffload} disabled={isArchiving} className={PANEL_ACTION_BUTTON_PINK}>
                       <Cloud size={12} />
                     </button>
                   </Tooltip>
-                  <Tooltip content="Pin this stream's files local (always keep on disk)">
-                    <button onClick={onPinLocal} className={PANEL_ACTION_BUTTON_CYAN}>
+                  <Tooltip content={isArchiving ? 'Pin Local disabled — archive in progress' : "Pin this stream's files local (always keep on disk)"}>
+                    <button onClick={onPinLocal} disabled={isArchiving} className={PANEL_ACTION_BUTTON_CYAN}>
                       <CloudDownload size={12} />
                     </button>
                   </Tooltip>
@@ -5597,14 +5674,14 @@ function ExpandedStreamPanel({
               </Tooltip>
               <div className="w-px h-3.5 bg-white/10 mx-1" />
               {videoCount > 0 && (
-                <Tooltip content="Archive this stream">
-                  <button onClick={onArchive} className={PANEL_ACTION_BUTTON_GREEN}>
+                <Tooltip content={isArchiving ? 'Archive in progress' : 'Archive this stream'}>
+                  <button onClick={onArchive} disabled={isArchiving} className={PANEL_ACTION_BUTTON_GREEN}>
                     <Archive size={12} />
                   </button>
                 </Tooltip>
               )}
-              <Tooltip content="Delete this stream and all its contents">
-                <button onClick={onDelete} className={PANEL_ACTION_BUTTON_RED}>
+              <Tooltip content={isArchiving ? 'Delete disabled — archive in progress' : 'Delete this stream and all its contents'}>
+                <button onClick={onDelete} disabled={isArchiving} className={PANEL_ACTION_BUTTON_RED}>
                   <Trash2 size={12} />
                 </button>
               </Tooltip>

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastIsLive, fetchPrivacyStatuses, createBroadcast } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastIsLive, fetchPrivacyStatuses, createBroadcast, getMyChannelId, clearChannelIdCache } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -27,6 +27,13 @@ export function registerYouTubeIPC(): void {
 
   ipcMain.handle('youtube:disconnect', () => {
     clearTokens()
+    clearChannelIdCache()
+  })
+
+  ipcMain.handle('youtube:getChannelId', async () => {
+    const { clientId, clientSecret } = getCreds()
+    if (!clientId || !clientSecret) throw new Error('YouTube credentials not configured.')
+    return await getMyChannelId(clientId, clientSecret)
   })
 
   ipcMain.handle('youtube:validateToken', async () => {

@@ -177,14 +177,12 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
     ? `Converter: ${converterStatus.label}`
     : 'Converter: Idle'
 
-  // Layout: non-interactive info up top (app name + live watcher/converter
-  // status), then the toggles, then the action items (Open / Quit) at the
-  // bottom where they're closer to the cursor when the menu pops up from
-  // the tray.
+  // Layout: app brand at top, then rarely-touched startup toggles, then the
+  // live watcher/converter status (sits right above the actions so the user
+  // can glance at it before clicking), then Open + Quit at the very bottom
+  // where the cursor lands when the menu pops up from the tray.
   return Menu.buildFromTemplate([
     { label: 'Stream Manager', enabled: false },
-    { label: watcherLabel, enabled: false },
-    { label: converterLabel, enabled: false },
     { type: 'separator' },
     {
       label: 'Start with Windows',
@@ -215,6 +213,9 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
         s.set('config', { ...cur, startMinimized: item.checked })
       }
     },
+    { type: 'separator' },
+    { label: watcherLabel, enabled: false },
+    { label: converterLabel, enabled: false },
     { type: 'separator' },
     {
       label: 'Open', click: () => {

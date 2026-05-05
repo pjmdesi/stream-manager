@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2 } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard } from 'lucide-react'
 import { Youtube } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { useStore } from '../hooks/useStore'
@@ -13,6 +13,41 @@ function ElementSection({ icon, title, children }: { icon: React.ReactNode; titl
       </div>
       <div className="text-[13px] text-gray-400 leading-relaxed pl-6 [&_p]:m-0 flex flex-col gap-2">
         {children}
+      </div>
+    </div>
+  )
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex items-center justify-center min-w-[1.4rem] h-[1.4rem] px-1.5 rounded border border-white/10 bg-white/5 font-mono text-[11px] text-gray-200 leading-none shrink-0">
+      {children}
+    </kbd>
+  )
+}
+
+function ShortcutRow({ keys, label }: { keys: React.ReactNode[]; label: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 shrink-0">
+        {keys.map((k, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <span className="text-gray-600">+</span>}
+            <Kbd>{k}</Kbd>
+          </React.Fragment>
+        ))}
+      </div>
+      <span className="text-[13px] text-gray-400">{label}</span>
+    </div>
+  )
+}
+
+function ShortcutGroup({ title, rows }: { title: string; rows: { keys: React.ReactNode[]; label: string }[] }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{title}</div>
+      <div className="flex flex-col gap-1">
+        {rows.map((r, i) => <ShortcutRow key={i} keys={r.keys} label={r.label} />)}
       </div>
     </div>
   )
@@ -98,6 +133,53 @@ function getItems(isDumpMode: boolean): HelpItem[] {
       <>
         <p>The Player is for reviewing and clipping. Scrub through a recording, set in/out points to mark clip regions, add bleeps over moments you want muted, and crop with a chosen aspect ratio (16:9, 1:1, 9:16).</p>
         <p>The Session Videos panel keeps related files (clip drafts, exports, alternate takes) one click away. Clip drafts autosave so you can leave and come back later.</p>
+
+        <ElementSection icon={<Keyboard size={14} />} title="Keyboard shortcuts">
+          <p className="text-[11px] text-gray-500">Active anywhere on the Player page (except while typing in a text field).</p>
+
+          <ShortcutGroup title="Playback" rows={[
+            { keys: ['Space'], label: 'Play / pause' },
+            { keys: ['K'], label: 'Play / pause (alt)' },
+            { keys: ['J'], label: 'Skip back 10s' },
+            { keys: ['L'], label: 'Skip forward 10s' },
+            { keys: ['←'], label: 'Previous frame' },
+            { keys: ['→'], label: 'Next frame' },
+            { keys: ['Shift', '←/→'], label: 'Skip ±1s' },
+            { keys: ['Ctrl', '←/→'], label: 'Skip ±5s' },
+            { keys: ['Ctrl', 'Shift', '←/→'], label: 'Skip ±10s' },
+            { keys: ['Home'], label: 'Seek to start' },
+            { keys: ['End'], label: 'Seek to end' },
+          ]} />
+
+          <ShortcutGroup title="Timeline & view" rows={[
+            { keys: ['T'], label: 'Edit playhead timecode' },
+            { keys: ['0'], label: 'Reset zoom' },
+            { keys: ['Numpad +'], label: 'Zoom in (anchored on playhead)' },
+            { keys: ['Numpad -'], label: 'Zoom out (anchored on playhead)' },
+            { keys: ['Middle-click drag'], label: 'Pan timeline' },
+            { keys: ['Double middle-click'], label: 'Reset pan' },
+            { keys: ['F'], label: 'Toggle clip-region focus' },
+            { keys: ['P'], label: 'Toggle pop-out video' },
+            { keys: ['C'], label: 'Toggle clip mode' },
+            { keys: ['Esc'], label: 'Close current session' },
+          ]} />
+
+          <ShortcutGroup title="File & capture" rows={[
+            { keys: ['Ctrl', 'O'], label: 'Open video file' },
+            { keys: ['Ctrl', 'Shift', 'S'], label: 'Capture screenshot' },
+            { keys: ['Ctrl', 'Alt', '↑/↓'], label: 'Previous / next session item' },
+          ]} />
+
+          <ShortcutGroup title="Clip mode" rows={[
+            { keys: ['A'], label: 'Add segment at playhead' },
+            { keys: ['S'], label: 'Split segment at playhead' },
+            { keys: ['B'], label: 'Add bleep at playhead' },
+            { keys: ['['], label: 'Jump to previous in/out marker' },
+            { keys: [']'], label: 'Jump to next in/out marker' },
+            { keys: ['Delete'], label: 'Delete selected segment or bleep' },
+            { keys: ['Ctrl', 'E'], label: 'Open Export Clip dialog' },
+          ]} />
+        </ElementSection>
       </>
     ),
   },

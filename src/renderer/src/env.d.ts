@@ -174,6 +174,7 @@ declare global {
 
       // ── YouTube ──────────────────────────────────────────────────────────────
       youtubeGetStatus(): Promise<{ connected: boolean; channelName?: string }>
+      youtubeGetChannelId(): Promise<string>
       youtubeConnect(): Promise<void>
       youtubeDisconnect(): Promise<void>
       youtubeGetPrivacyStatuses(videoIds: string[]): Promise<Record<string, string>>

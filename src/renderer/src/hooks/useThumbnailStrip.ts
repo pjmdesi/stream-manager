@@ -55,14 +55,21 @@ export function useThumbnailStrip(
     canvas.height = renderHeight
     const ctx = canvas.getContext('2d')!
 
-    const captureAt = (time: number): Promise<string | null> =>
+    // Returns the captured frame plus the *actual* seeked time. Browsers
+    // snap `vid.currentTime = t` to the nearest keyframe, which can be
+    // seconds away from `t` for sparsely-keyframed sources — recording the
+    // actualTime lets the caller dedupe captures that landed on the same
+    // underlying frame, otherwise we get visual repeats at high zoom.
+    const captureAt = (time: number): Promise<{ dataUrl: string; actualTime: number } | null> =>
       new Promise(resolve => {
         let done = false
-        const finish = (result: string | null) => { if (!done) { done = true; resolve(result) } }
+        const finish = (result: { dataUrl: string; actualTime: number } | null) => {
+          if (!done) { done = true; resolve(result) }
+        }
         const capture = () => {
           try {
             ctx.drawImage(vid, 0, 0, renderWidth, renderHeight)
-            finish(canvas.toDataURL('image/jpeg', 0.8))
+            finish({ dataUrl: canvas.toDataURL('image/jpeg', 0.8), actualTime: vid.currentTime })
           } catch { finish(null) }
         }
         // Check BEFORE mutating currentTime — after assignment the browser reports the new
@@ -129,22 +136,31 @@ export function useThumbnailStrip(
         i === 0 ? 0 : i === FIXED_COUNT - 1 ? duration : (i / (FIXED_COUNT - 1)) * duration
       )
 
+      // Frames are deduped by actualTime: when the browser snaps two
+      // adjacent requested timecodes onto the same keyframe, we only keep
+      // the first capture. The cache stores the actualTime of each saved
+      // frame so reload behaves identically.
       const results: Thumbnail[] = []
+      const seenActualTimes: number[] = []
+      const isDup = (t: number) => seenActualTimes.some(kt => Math.abs(kt - t) < 0.05)
+
       for (let i = 0; i < FIXED_COUNT; i++) {
         if (cancelled) break
-        const dataUrl = await captureAt(timecodes[i])
+        const captured = await captureAt(timecodes[i])
         if (cancelled) break
-        if (dataUrl) {
-          results.push({ time: timecodes[i], dataUrl })
-          setCachedFrames([...results])
-          window.api.saveThumbnailFrame(filePath, i, dataUrl)
-        }
+        if (!captured) continue
+        if (isDup(captured.actualTime)) continue
+        seenActualTimes.push(captured.actualTime)
+        const frame: Thumbnail = { time: captured.actualTime, dataUrl: captured.dataUrl }
+        results.push(frame)
+        setCachedFrames([...results])
+        window.api.saveThumbnailFrame(filePath, results.length - 1, captured.dataUrl)
       }
 
       destroy()
 
-      if (!cancelled && results.length === FIXED_COUNT) {
-        window.api.finalizeThumbnailCache(filePath, timecodes)
+      if (!cancelled && results.length > 0) {
+        window.api.finalizeThumbnailCache(filePath, results.map(f => f.time))
       }
 
       if (!cancelled) setGenerating(false)
@@ -209,14 +225,22 @@ export function useThumbnailStrip(
           genStart + (i / (ZOOM_COUNT - 1)) * genSpan
         )
 
+        // Dedup against everything we already have (cached + zoom). Same
+        // 50ms threshold as the base generator — anything within means it
+        // landed on the same keyframe and the second capture is a visual
+        // duplicate.
+        const knownActualTimes = allFramesRef.current.map(f => f.time)
+        const isDup = (t: number) => knownActualTimes.some(kt => Math.abs(kt - t) < 0.05)
+
         for (let i = 0; i < ZOOM_COUNT; i++) {
           if (cancelled) break
-          const dataUrl = await captureAt(timecodes[i])
+          const captured = await captureAt(timecodes[i])
           if (cancelled) break
-          if (dataUrl) {
-            const frame: Thumbnail = { time: timecodes[i], dataUrl }
-            setZoomFrames(prev => [...prev, frame])
-          }
+          if (!captured) continue
+          if (isDup(captured.actualTime)) continue
+          knownActualTimes.push(captured.actualTime)
+          const frame: Thumbnail = { time: captured.actualTime, dataUrl: captured.dataUrl }
+          setZoomFrames(prev => [...prev, frame])
         }
 
         destroy()

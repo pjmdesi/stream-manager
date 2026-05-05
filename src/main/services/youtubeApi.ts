@@ -4,6 +4,30 @@ import { getValidToken } from './youtubeAuth'
 
 const BASE = 'https://www.googleapis.com/youtube/v3'
 
+// Channel ID for the connected user. The "Initialize Livestream" link in the
+// renderer needs this to build the YouTube Studio go-live URL. We cache it
+// per-process because it's stable for a given OAuth grant — clearTokens()
+// in youtubeAuth resets it via clearChannelIdCache().
+let cachedChannelId: string | null = null
+export function clearChannelIdCache(): void { cachedChannelId = null }
+
+export async function getMyChannelId(clientId: string, clientSecret: string): Promise<string> {
+  if (cachedChannelId) return cachedChannelId
+  const token = await getValidToken(clientId, clientSecret)
+  const res = await fetch(`${BASE}/channels?part=id&mine=true`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`channels.list failed (${res.status}): ${text}`)
+  }
+  const data = await res.json() as { items?: Array<{ id?: string }> }
+  const id = data.items?.[0]?.id
+  if (!id) throw new Error('No channel found for the connected account.')
+  cachedChannelId = id
+  return id
+}
+
 const YT_THUMBNAIL_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
 const YT_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024 // 2 MB
 

@@ -1,5 +1,5 @@
 import React, {
-  useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo
+  useState, useEffect, useRef, useCallback, useMemo
 } from 'react'
 import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, RegularPolygon as KonvaRegularPolygon, Shape as KonvaShape } from 'react-konva'
 import useImage from 'use-image'
@@ -9,7 +9,10 @@ import {
   Image as ImageIcon, Type, Undo2, Redo2, Download,
   BookMarked, FolderOpen, LayoutTemplate, Sliders, RotateCcw, Copy,
   Magnet, Grid3x3, Check, X, AlertTriangle, Pencil,
-  Square, Circle, Triangle
+  Square, Circle, Triangle,
+  Frame, BoxSelect,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+  AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -21,6 +24,10 @@ import type { ThumbnailLayer, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailR
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
 const CANVAS_W = 1280
 const CANVAS_H = 720
+
+type AlignOp =
+  | 'left' | 'h-center' | 'right'
+  | 'top'  | 'v-center' | 'bottom'
 
 /** Canonical _meta.json key for a stream the thumbnail editor is editing.
  *  In folder-per-stream mode the key is the relative path from streamsDir.
@@ -37,12 +44,34 @@ function streamMetaKey(folderPath: string, date: string, streamsDir: string | un
 // ── Pan / zoom ────────────────────────────────────────────────────────────────
 const SNAP_ZOOM_THRESHOLD = 0.05 // 5% — snap to 100% or fit
 
+// Extra pannable space beyond the canvas, expressed in canvas-widths/heights.
+// Pan is allowed at every zoom level (including when the canvas fits inside
+// the viewport entirely). With 1.0 the user can reach elements parked
+// anywhere in roughly [-CANVAS_W, 2*CANVAS_W] × [-CANVAS_H, 2*CANVAS_H] in
+// canvas coords.
+const PAN_OVERSCAN = 1
+
 function clampCanvasPan(x: number, y: number, zoom: number, cw: number, ch: number) {
   const csx = CANVAS_W * zoom
   const csy = CANVAS_H * zoom
+  const ox = CANVAS_W * PAN_OVERSCAN * zoom
+  const oy = CANVAS_H * PAN_OVERSCAN * zoom
+  // Pan range is symmetric around the natural centered position with
+  // half-width csx/2 + ox. Same formula at every zoom — the previous
+  // "canvas fits viewport" branch locked pan and is intentionally gone.
   return {
-    x: csx <= cw ? (cw - csx) / 2 : Math.max(cw / 2 - csx, Math.min(cw / 2, x)),
-    y: csy <= ch ? (ch - csy) / 2 : Math.max(ch / 2 - csy, Math.min(ch / 2, y)),
+    x: Math.max(cw / 2 - csx - ox, Math.min(cw / 2 + ox, x)),
+    y: Math.max(ch / 2 - csy - oy, Math.min(ch / 2 + oy, y)),
+  }
+}
+
+/** Pan offset that places the canvas centered in the viewport at the given
+ *  zoom. Used for initial mount and the double-middle-click reset, since
+ *  clampCanvasPan no longer auto-centers. */
+function centeredCanvasPan(zoom: number, cw: number, ch: number) {
+  return {
+    x: (cw - CANVAS_W * zoom) / 2,
+    y: (ch - CANVAS_H * zoom) / 2,
   }
 }
 
@@ -190,7 +219,14 @@ interface KonvaLayerNodeProps {
   scale: number
   onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void
   onSnapDragMove: (e: Konva.KonvaEventObject<DragEvent>) => void
-  onSnapTransformBoundBox: (oldBox: KonvaBox, newBox: KonvaBox) => KonvaBox
+  /** Commits the drag's final position. Routes through the parent so a
+   *  multi-selection drag can commit every moved layer in a single update
+   *  (one undo entry, not N). */
+  onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void
+  /** Same idea for transforms: the shared Transformer fires `transformend`
+   *  on each node it touched; the parent handler buffers them via microtask
+   *  and commits the whole group in one shot. */
+  onTransformEnd: (e: Konva.KonvaEventObject<Event>) => void
   onClearGuides: () => void
   gridSnapEnabled: boolean
   /** Merge field values for text layers. When null, merge fields render
@@ -252,17 +288,14 @@ function activeFilters(layer: ThumbnailLayer): KonvaFilterFn[] {
   return out
 }
 
-function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+  // isSelected is intentionally unused — the shared parent-level Transformer
+  // attaches itself to selected nodes via its own useEffect, so per-node
+  // Transformer mounts are gone. Kept in the props for symmetry across the
+  // three node components (and so a future filter-on-select etc. can reuse it).
+  void isSelected
   const [img] = useImage(layer.src ? `file://${layer.src}` : '', 'anonymous')
   const nodeRef = useRef<Konva.Image>(null)
-  const trRef = useRef<Konva.Transformer>(null)
-
-  useEffect(() => {
-    if (isSelected && trRef.current && nodeRef.current) {
-      trRef.current.nodes([nodeRef.current])
-      trRef.current.getLayer()?.batchDraw()
-    }
-  }, [isSelected])
 
   // Apply Konva filters. Konva requires the node to be cached before filters
   // are applied (filters operate on the rasterized bitmap). We re-cache
@@ -316,10 +349,15 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
     layer.width, layer.height,
   ])
 
-  if (!img) return null
-
-  const w = layer.width ?? img.naturalWidth
-  const h = layer.height ?? img.naturalHeight
+  // Render the Konva node even before the image bitmap finishes loading.
+  // `useImage` is async: returning null until it resolves would mean the
+  // parent's shared-Transformer sync effect runs against a non-existent
+  // node, so a freshly-added image's bbox handles wouldn't appear until
+  // the user reselected it. Konva accepts an undefined image (draws
+  // nothing inside) — the node, its id, and the layer-stored width/height
+  // are all that the Transformer needs to attach correctly.
+  const w = layer.width ?? img?.naturalWidth ?? 100
+  const h = layer.height ?? img?.naturalHeight ?? 100
 
   return (
     <>
@@ -342,37 +380,16 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
         onTap={() => onSelect(layer.id, false)}
         onDragStart={onDragStart}
         onDragMove={onSnapDragMove}
-        onDragEnd={e => {
-          onClearGuides()
-          onChange({ ...layer, x: e.target.x(), y: e.target.y() })
-        }}
-        onTransformEnd={e => {
-          onClearGuides()
-          const node = e.target
-          let x = node.x(), y = node.y()
-          let w2 = Math.round(node.width() * node.scaleX())
-          let h2 = Math.round(node.height() * node.scaleY())
-          if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w2 = snapGrid(w2); h2 = snapGrid(h2) }
-          onChange({ ...layer, x, y, width: w2, height: h2, rotation: node.rotation() })
-          node.scaleX(1)
-          node.scaleY(1)
-        }}
+        onDragEnd={e => { onClearGuides(); onDragEnd(e) }}
+        onTransformEnd={onTransformEnd}
       />
-      {isSelected && <Transformer ref={trRef} rotateEnabled keepRatio={false} boundBoxFunc={onSnapTransformBoundBox} />}
     </>
   )
 }
 
-function TextNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled, mergeFields }: KonvaLayerNodeProps) {
+function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides, mergeFields }: KonvaLayerNodeProps) {
+  void isSelected
   const nodeRef = useRef<Konva.Text>(null)
-  const trRef = useRef<Konva.Transformer>(null)
-
-  useEffect(() => {
-    if (isSelected && trRef.current && nodeRef.current) {
-      trRef.current.nodes([nodeRef.current])
-      trRef.current.getLayer()?.batchDraw()
-    }
-  }, [isSelected])
 
   return (
     <>
@@ -402,48 +419,21 @@ function TextNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDr
         onTap={() => onSelect(layer.id, false)}
         onDragStart={onDragStart}
         onDragMove={onSnapDragMove}
-        onDragEnd={e => {
-          onClearGuides()
-          onChange({ ...layer, x: e.target.x(), y: e.target.y() })
-        }}
-        onTransformEnd={e => {
-          onClearGuides()
-          const node = e.target
-          let x = node.x(), y = node.y()
-          let w2 = Math.round(node.width() * node.scaleX())
-          if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w2 = snapGrid(w2) }
-          onChange({ ...layer, x, y, width: w2, rotation: node.rotation() })
-          node.scaleX(1)
-          node.scaleY(1)
-        }}
+        onDragEnd={e => { onClearGuides(); onDragEnd(e) }}
+        onTransformEnd={onTransformEnd}
       />
-      {isSelected && (
-        <Transformer
-          ref={trRef}
-          rotateEnabled
-          enabledAnchors={['middle-left', 'middle-right']}
-          boundBoxFunc={(oldBox, newBox) => onSnapTransformBoundBox(oldBox, { ...newBox, height: oldBox.height })}
-        />
-      )}
     </>
   )
 }
 
-function ShapeNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onSnapTransformBoundBox, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides }: KonvaLayerNodeProps) {
+  void isSelected
   const nodeRef = useRef<any>(null)
-  const trRef = useRef<Konva.Transformer>(null)
   const w = layer.width ?? 200
   const h = layer.height ?? 200
   const shapeType = layer.shapeType ?? 'rect'
   // Ellipse and triangle are centered on x/y in Konva; we store top-left
   const isCentered = shapeType === 'ellipse' || shapeType === 'triangle'
-
-  useEffect(() => {
-    if (isSelected && trRef.current && nodeRef.current) {
-      trRef.current.nodes([nodeRef.current])
-      trRef.current.getLayer()?.batchDraw()
-    }
-  }, [isSelected])
 
   const sharedProps = {
     ref: nodeRef,
@@ -463,28 +453,10 @@ function ShapeNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
     onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button !== 0) e.target.stopDrag() },
     onClick: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) },
     onTap: () => onSelect(layer.id, false),
+    onDragStart,
     onDragMove: onSnapDragMove,
-    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
-      onClearGuides()
-      const nx = isCentered ? e.target.x() - w / 2 : e.target.x()
-      const ny = isCentered ? e.target.y() - h / 2 : e.target.y()
-      onChange({ ...layer, x: Math.round(nx), y: Math.round(ny) })
-    },
-    onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
-      onClearGuides()
-      const node = e.target
-      const sx = Math.abs(node.scaleX())
-      const sy = Math.abs(node.scaleY())
-      let newW = Math.round(w * sx)
-      let newH = Math.round(h * sy)
-      if (gridSnapEnabled) { newW = snapGrid(newW); newH = snapGrid(newH) }
-      // node.x/y is center for centered shapes
-      const nx = isCentered ? Math.round(node.x() - newW / 2) : Math.round(node.x())
-      const ny = isCentered ? Math.round(node.y() - newH / 2) : Math.round(node.y())
-      onChange({ ...layer, x: nx, y: ny, width: newW, height: newH, rotation: node.rotation() })
-      node.scaleX(1)
-      node.scaleY(1)
-    },
+    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => { onClearGuides(); onDragEnd(e) },
+    onTransformEnd,
   }
 
   return (
@@ -497,18 +469,6 @@ function ShapeNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
       )}
       {shapeType === 'triangle' && (
         <KonvaRegularPolygon {...sharedProps} sides={3} radius={Math.min(w, h) / 2} />
-      )}
-      {isSelected && (
-        <Transformer
-          ref={trRef}
-          rotateEnabled
-          keepRatio={shapeType === 'triangle'}
-          boundBoxFunc={(oldBox, newBox) => onSnapTransformBoundBox(oldBox, {
-            ...newBox,
-            width: Math.max(10, newBox.width),
-            height: Math.max(10, newBox.height),
-          })}
-        />
       )}
     </>
   )
@@ -1146,6 +1106,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Editor state ──────────────────────────────────────────────────────────
   const [currentStream, setCurrentStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number } | null>(null)
   const [currentTemplateId, setCurrentTemplateId] = useState<string | undefined>(undefined)
+  // Asset library data: images from the current stream's folder + images
+  // from same-season stream folders (other episodes), so the user can pull
+  // visuals from previous episodes when designing a new thumbnail.
+  type SeasonAssetGroup = { folderPath: string; date: string; episode?: string; title?: string; images: string[] }
+  const [seasonAssets, setSeasonAssets] = useState<{ current: SeasonAssetGroup | null; related: SeasonAssetGroup[] } | null>(null)
+  // Cache image dimensions as the grid <img> elements load — used for the
+  // hover tooltip (filename + dimensions). Map<absolutePath, {w, h}>.
+  const [assetDims, setAssetDims] = useState<Map<string, { w: number; h: number }>>(new Map())
   // Forward layer changes from undo/redo into the autosave pipeline. Uses a
   // ref because triggerAutoSave is defined later in this function — the
   // useUndoRedo hook needs a stable callback at construction time, but the
@@ -1166,15 +1134,38 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null)
   const [dropTargetDisplayIdx, setDropTargetDisplayIdx] = useState<number | null>(null)
 
-  // Relocate any inline-mounted Transformers into the dedicated layer above the matte
-  useLayoutEffect(() => {
+  // Sync the shared Transformer's nodes() to the current selection. Konva's
+  // Transformer renders no handles when nodes() is empty (i.e. nothing
+  // selected), so we don't need an isSelected gate. Single-text selection
+  // gets keepRatio off but the boundBoxFunc locks height to font metrics.
+  // Single triangle gets keepRatio on so it stays equilateral.
+  //
+  // Multi-select with any rotated member ALSO forces keepRatio: a non-uniform
+  // scale on a rotated child requires a skew to fit the axis-aligned group
+  // bbox, and we don't model skew anywhere else in the editor — letting it
+  // happen would leave items visibly sheared (and the shear would survive
+  // undo because skew lives on the Konva node, not the layer state).
+  useEffect(() => {
+    const tr = transformerRef.current
     const stage = stageRef.current
-    const tLayer = transformerLayerRef.current
-    if (!stage || !tLayer) return
-    stage.find('Transformer').forEach(t => {
-      if (t.getLayer() !== tLayer) (t as Konva.Transformer).moveTo(tLayer)
-    })
-  })
+    if (!tr || !stage) return
+    const nodes = selectedIds
+      .map(id => stage.findOne(`#${id}`))
+      .filter((n): n is Konva.Node => !!n)
+    tr.nodes(nodes)
+
+    const sel = layers.filter(l => selectedIds.includes(l.id))
+    const onlyText = sel.length > 0 && sel.every(l => l.type === 'text')
+    const singleTriangle = sel.length === 1 && sel[0].type === 'shape' && sel[0].shapeType === 'triangle'
+    const rotatedInMulti = sel.length > 1 && sel.some(l => (l.rotation ?? 0) !== 0)
+    tr.keepRatio(singleTriangle || rotatedInMulti)
+    tr.enabledAnchors(onlyText
+      ? ['middle-left', 'middle-right']
+      : ['top-left', 'top-right', 'bottom-left', 'bottom-right',
+         'top-center', 'bottom-center', 'middle-left', 'middle-right'])
+    tr.getLayer()?.batchDraw()
+  }, [selectedIds, layers])
+
   const [isDirty, setIsDirty] = useState(false)
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [saveTemplateName, setSaveTemplateName] = useState('')
@@ -1200,6 +1191,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const isPanningRef = useRef(false)
   const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
   const lastMiddleClickRef = useRef(0)
+  // First-mount flag for the resize observer. clampCanvasPan no longer
+  // auto-centers when the canvas fits the viewport, so we explicitly center
+  // on the first measurement instead of letting (0, 0) survive the clamp.
+  const hasInitializedPanRef = useRef(false)
 
   // Keep refs in sync
   useEffect(() => { viewZoomRef.current = viewZoom }, [viewZoom])
@@ -1211,15 +1206,113 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const guideLayerRef = useRef<Konva.Layer>(null)
   const transformerLayerRef = useRef<Konva.Layer>(null)
   const matteLayerRef = useRef<Konva.Layer>(null)
+  // Shared transformer: one for the whole stage, attached to all selected
+  // nodes. Multi-select resize/rotate works because Konva's Transformer
+  // applies group-bbox math across every node in nodes(). Per-node
+  // transformend events fire one at a time; we batch them via microtask
+  // so a 5-node group transform is a single undo entry.
+  const transformerRef = useRef<Konva.Transformer>(null)
+  const pendingTransformsRef = useRef<Map<string, Konva.Node>>(new Map())
+  const commitTransformScheduledRef = useRef(false)
 
   // ── Snapping ──────────────────────────────────────────────────────────────
   const [smartSnapEnabled, setSmartSnapEnabled] = useState(true)
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false)
+  // Alignment toolbar mode. 'artboard' aligns to canvas edges/centers.
+  // 'selection' aligns to the first-selected layer's bbox; only meaningful
+  // with 2+ items so we auto-revert to 'artboard' below the threshold.
+  const [alignMode, setAlignMode] = useState<'artboard' | 'selection'>('artboard')
+  useEffect(() => {
+    if (selectedIds.length < 2 && alignMode === 'selection') setAlignMode('artboard')
+  }, [selectedIds.length, alignMode])
+  // Bbox of the first-selected layer in stage (canvas) coords. Used to render
+  // the dashed anchor outline when the user is in selection-align mode, so
+  // they can see which item everything else is aligning to. Computed in an
+  // effect so Konva nodes are guaranteed up-to-date before getClientRect.
+  const [alignAnchorBbox, setAlignAnchorBbox] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  useEffect(() => {
+    if (alignMode !== 'selection' || selectedIds.length < 2) {
+      setAlignAnchorBbox(null)
+      return
+    }
+    const stage = stageRef.current
+    if (!stage) return
+    const node = stage.findOne(`#${selectedIds[0]}`)
+    if (!node) {
+      setAlignAnchorBbox(null)
+      return
+    }
+    const r = node.getClientRect({ relativeTo: stage as unknown as Konva.Container })
+    setAlignAnchorBbox({ x: r.x, y: r.y, width: r.width, height: r.height })
+  }, [alignMode, selectedIds, layers])
+
+  // Load asset-library data whenever the active stream changes. Reuses the
+  // existing listStreams IPC — each StreamFolder already carries its image
+  // paths and meta, so we just filter to the current folder + same-season
+  // siblings here. Stale results from a prior stream are guarded by the
+  // `cancelled` flag so a fast switch never mixes data.
+  useEffect(() => {
+    if (!currentStream || !config.streamsDir) {
+      setSeasonAssets(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream')
+        if (cancelled) return
+        const cur = all.find(s => s.folderPath === currentStream.folderPath)
+        if (!cur) { setSeasonAssets(null); return }
+        const season = cur.meta?.ytSeason
+        const related = season
+          ? all
+              .filter(s => s.folderPath !== currentStream.folderPath && s.meta?.ytSeason === season)
+              .sort((a, b) => Number(a.meta?.ytEpisode ?? 0) - Number(b.meta?.ytEpisode ?? 0))
+          : []
+        // Skip the SM thumbnail PNG itself (`<date>_sm-thumbnail.png`):
+        //   - Current stream: it's the file we're editing — adding it as a
+        //     layer would render the canvas inside itself, infinitely.
+        //   - Other streams: the rendered thumb isn't useful as source
+        //     material; the underlying screenshots are already in the list.
+        const isSmThumb = (p: string) => /(?:^|[\\/])[^\\/]*_sm-thumbnail\.png$/i.test(p)
+        const toGroup = (s: typeof cur): SeasonAssetGroup => ({
+          folderPath: s.folderPath,
+          date: s.date,
+          episode: s.meta?.ytEpisode,
+          title: s.meta?.ytTitle,
+          images: (s.thumbnails ?? []).filter(p => !isSmThumb(p)),
+        })
+        setSeasonAssets({
+          current: toGroup(cur),
+          related: related.map(toGroup),
+        })
+      } catch {
+        if (!cancelled) setSeasonAssets(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [currentStream, config.streamsDir, config.streamMode])
 
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null)
+  // {id → starting Konva-space (x, y)} for every OTHER node in the current
+  // multi-selection at drag-start time. Empty when not multi-dragging.
+  // Konva's node.x()/.y() is the correct coordinate to snapshot regardless
+  // of layer type — for centered shapes that's the center, but the delta
+  // we apply on drag-move is the same in either coordinate space.
+  const multiDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map())
 
   const handleDragStart = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
-    dragStartPosRef.current = { x: e.target.x(), y: e.target.y() }
+    const target = e.target
+    dragStartPosRef.current = { x: target.x(), y: target.y() }
+    multiDragStartRef.current.clear()
+    const sel = selectedIdsRef.current
+    if (sel.length > 1 && sel.includes(target.id()) && stageRef.current) {
+      for (const id of sel) {
+        if (id === target.id()) continue
+        const node = stageRef.current.findOne(`#${id}`)
+        if (node) multiDragStartRef.current.set(id, { x: node.x(), y: node.y() })
+      }
+    }
   }, [])
 
   const handleSnapDragMove = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
@@ -1234,11 +1327,28 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       else node.x(dragStartPosRef.current.x)
     }
 
-    if (!smartSnapEnabled && !gridSnapEnabled) return
-    const snap = getSnapResult(node, stageRef.current, smartSnapEnabled, gridSnapEnabled)
-    if (snap.x !== undefined) node.x(snap.x)
-    if (snap.y !== undefined) node.y(snap.y)
-    renderSnapGuides(snap.guides, guideLayerRef.current, viewZoomRef.current)
+    if (smartSnapEnabled || gridSnapEnabled) {
+      const snap = getSnapResult(node, stageRef.current, smartSnapEnabled, gridSnapEnabled)
+      if (snap.x !== undefined) node.x(snap.x)
+      if (snap.y !== undefined) node.y(snap.y)
+      renderSnapGuides(snap.guides, guideLayerRef.current, viewZoomRef.current)
+    }
+
+    // Multi-drag: shift the other selected nodes by the same delta the
+    // dragged node has moved (post-snap so they stay aligned to whatever
+    // the snap settled on).
+    if (multiDragStartRef.current.size > 0 && dragStartPosRef.current) {
+      const stage = stageRef.current
+      const dx = node.x() - dragStartPosRef.current.x
+      const dy = node.y() - dragStartPosRef.current.y
+      multiDragStartRef.current.forEach((start, id) => {
+        const other = stage.findOne(`#${id}`)
+        if (other) {
+          other.x(start.x + dx)
+          other.y(start.y + dy)
+        }
+      })
+    }
   }, [smartSnapEnabled, gridSnapEnabled])
 
   const handleSnapTransformBoundBox = useCallback((oldBox: KonvaBox, newBox: KonvaBox): KonvaBox => {
@@ -1444,7 +1554,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       setViewZoom(prev => {
         const next = Math.abs(prev - prevFit) < 0.001 ? fs : prev
         viewZoomRef.current = next
-        const pan = clampCanvasPan(viewPanRef.current.x, viewPanRef.current.y, next, cw, ch)
+        // Center on the very first measurement (replaces the auto-center
+        // that lived inside the old clampCanvasPan). Subsequent resizes
+        // just re-clamp the existing pan so user-chosen offsets persist.
+        const pan = hasInitializedPanRef.current
+          ? clampCanvasPan(viewPanRef.current.x, viewPanRef.current.y, next, cw, ch)
+          : centeredCanvasPan(next, cw, ch)
+        hasInitializedPanRef.current = true
         viewPanRef.current = pan
         setViewPan(pan)
         return next
@@ -1487,11 +1603,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       e.preventDefault()
       const now = Date.now()
       if (now - lastMiddleClickRef.current < 300) {
-        // Double middle-click: reset to fit
+        // Double middle-click: reset to fit + recenter.
         lastMiddleClickRef.current = 0
         const fs = fitScaleRef.current
         const { w: cw, h: ch } = containerSizeRef.current
-        const pan = clampCanvasPan(0, 0, fs, cw, ch)
+        const pan = centeredCanvasPan(fs, cw, ch)
         viewZoomRef.current = fs
         viewPanRef.current = pan
         setViewZoom(fs)
@@ -1617,6 +1733,155 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     commitLayers(next)
   }, [layers, commitLayers])
 
+  /** Commits the drag's final position(s). One commit = one undo entry,
+   *  whether single-drag or multi-drag. Layer-type-specific conversion
+   *  (centered shapes' center→top-left) lives here so the per-node
+   *  onDragEnd handlers can stay trivial. */
+  const handleDragEnd = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
+    const stage = stageRef.current
+    if (!stage) return
+    const draggedId = e.target.id()
+    const sel = selectedIdsRef.current
+    const movedIds = multiDragStartRef.current.size > 0 && sel.includes(draggedId)
+      ? sel
+      : [draggedId]
+
+    const positions = new Map<string, { x: number; y: number }>()
+    for (const id of movedIds) {
+      const node = stage.findOne(`#${id}`)
+      if (node) positions.set(id, { x: node.x(), y: node.y() })
+    }
+
+    const next = layers.map(l => {
+      const np = positions.get(l.id)
+      if (!np) return l
+      if (l.type === 'shape') {
+        const w = l.width ?? 200
+        const h = l.height ?? 200
+        const isCentered = l.shapeType === 'ellipse' || l.shapeType === 'triangle'
+        const x = isCentered ? Math.round(np.x - w / 2) : Math.round(np.x)
+        const y = isCentered ? Math.round(np.y - h / 2) : Math.round(np.y)
+        return { ...l, x, y }
+      }
+      return { ...l, x: np.x, y: np.y }
+    })
+    commitLayers(next)
+    multiDragStartRef.current.clear()
+  }, [layers, commitLayers])
+
+  /** Commits the transform's final state for every node the shared
+   *  Transformer touched. Konva fires `transformend` per node; we accumulate
+   *  in a Map and flush once via microtask so a group transform = one undo
+   *  entry. After commit, scaleX/scaleY are reset on each node since the
+   *  scale factors have already been baked into width/height. */
+  const handleTransformEnd = useCallback((e: Konva.KonvaEventObject<Event>) => {
+    pendingTransformsRef.current.set(e.target.id(), e.target)
+    if (commitTransformScheduledRef.current) return
+    commitTransformScheduledRef.current = true
+    queueMicrotask(() => {
+      commitTransformScheduledRef.current = false
+      const nodeMap = pendingTransformsRef.current
+      pendingTransformsRef.current = new Map()
+
+      const next = layers.map(l => {
+        const node = nodeMap.get(l.id)
+        if (!node) return l
+        const sx = node.scaleX(), sy = node.scaleY()
+        const rot = node.rotation()
+        let x = node.x(), y = node.y()
+        if (l.type === 'image') {
+          let w = Math.round((l.width ?? node.width()) * sx)
+          let h = Math.round((l.height ?? node.height()) * sy)
+          if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w = snapGrid(w); h = snapGrid(h) }
+          return { ...l, x, y, width: w, height: h, rotation: rot }
+        }
+        if (l.type === 'text') {
+          let w = Math.round((l.width ?? node.width()) * sx)
+          if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w = snapGrid(w) }
+          return { ...l, x, y, width: w, rotation: rot }
+        }
+        // shape: layer.width/height are authoritative, node.width()/height()
+        // doesn't apply to ellipse/triangle. Centered shapes also need the
+        // center→top-left offset applied to the new size.
+        const w0 = l.width ?? 200
+        const h0 = l.height ?? 200
+        let newW = Math.round(w0 * Math.abs(sx))
+        let newH = Math.round(h0 * Math.abs(sy))
+        if (gridSnapEnabled) { newW = snapGrid(newW); newH = snapGrid(newH) }
+        const isCentered = l.shapeType === 'ellipse' || l.shapeType === 'triangle'
+        const nx = isCentered ? Math.round(x - newW / 2) : Math.round(x)
+        const ny = isCentered ? Math.round(y - newH / 2) : Math.round(y)
+        return { ...l, x: nx, y: ny, width: newW, height: newH, rotation: rot }
+      })
+
+      commitLayers(next)
+      clearSnapGuides()
+      // Bake scale into width/height; reset Konva node scale + skew so
+      // subsequent transforms start fresh. Skew is reset because Konva can
+      // produce non-zero skewX/skewY when a non-uniform group scale is
+      // applied to a rotated child — those values aren't part of our layer
+      // schema, so leaving them on the node would persist a shear that
+      // survives undo (layer state restores fine, but the Konva node still
+      // has the stale skew).
+      nodeMap.forEach(node => {
+        node.scaleX(1)
+        node.scaleY(1)
+        node.skewX(0)
+        node.skewY(0)
+      })
+    })
+  }, [layers, commitLayers, gridSnapEnabled])
+
+  /** Aligns every selected layer (other than the anchor in selection mode)
+   *  to either the artboard or the first-selected layer's bbox. Uses each
+   *  Konva node's `getClientRect` for the source bbox so rotation is
+   *  honored visually — we then translate by the bbox delta and apply the
+   *  same delta to layer.x/y (which are stored in unrotated form). One
+   *  commit = one undo entry. */
+  const handleAlign = useCallback((op: AlignOp) => {
+    const stage = stageRef.current
+    if (!stage || selectedIds.length === 0) return
+
+    let target: { left: number; centerX: number; right: number; top: number; centerY: number; bottom: number }
+    let anchorId: string | null = null
+    const useSelectionAnchor = alignMode === 'selection' && selectedIds.length >= 2
+
+    if (useSelectionAnchor) {
+      anchorId = selectedIds[0]
+      const anchor = stage.findOne(`#${anchorId}`)
+      if (!anchor) return
+      const ar = anchor.getClientRect({ relativeTo: stage as unknown as Konva.Container })
+      target = {
+        left: ar.x, centerX: ar.x + ar.width / 2, right: ar.x + ar.width,
+        top: ar.y,  centerY: ar.y + ar.height / 2, bottom: ar.y + ar.height,
+      }
+    } else {
+      target = {
+        left: 0, centerX: CANVAS_W / 2, right: CANVAS_W,
+        top: 0,  centerY: CANVAS_H / 2, bottom: CANVAS_H,
+      }
+    }
+
+    const next = layers.map(l => {
+      if (!selectedIds.includes(l.id)) return l
+      if (l.id === anchorId) return l
+      const node = stage.findOne(`#${l.id}`)
+      if (!node) return l
+      const bbox = node.getClientRect({ relativeTo: stage as unknown as Konva.Container })
+      let nbx = bbox.x, nby = bbox.y
+      switch (op) {
+        case 'left':     nbx = target.left;                       break
+        case 'h-center': nbx = target.centerX - bbox.width / 2;   break
+        case 'right':    nbx = target.right  - bbox.width;        break
+        case 'top':      nby = target.top;                        break
+        case 'v-center': nby = target.centerY - bbox.height / 2;  break
+        case 'bottom':   nby = target.bottom - bbox.height;       break
+      }
+      return { ...l, x: l.x + (nbx - bbox.x), y: l.y + (nby - bbox.y) }
+    })
+    commitLayers(next)
+  }, [selectedIds, alignMode, layers, commitLayers])
+
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return
     const next = layers.filter(l => !selectedIds.includes(l.id))
@@ -1650,6 +1915,35 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   }, [layers, commitLayers])
 
   // ── Add layers ────────────────────────────────────────────────────────────
+  /** Shared helper for both the image-picker button and asset-library
+   *  drag-and-drop. Caches the source into _thumbnail-assets, reads natural
+   *  dimensions, contain-fits within the canvas, and adds an image layer
+   *  centered either on the canvas (no anchor) or on the given drop point.*/
+  const addImageLayerFromPath = useCallback(async (sourcePath: string, anchor?: { x: number; y: number }) => {
+    const originalBasename = sourcePath.split(/[\\/]/).pop() ?? ''
+    const layerName = originalBasename.replace(/\.[^.]+$/, '') || 'Image'
+    const srcPath = config.streamsDir
+      ? await window.api.thumbnailCacheAsset(config.streamsDir, sourcePath)
+      : sourcePath
+    const { naturalW, naturalH } = await new Promise<{ naturalW: number; naturalH: number }>(resolve => {
+      const img = new Image()
+      img.onload = () => resolve({ naturalW: img.naturalWidth, naturalH: img.naturalHeight })
+      img.onerror = () => resolve({ naturalW: CANVAS_W, naturalH: CANVAS_H })
+      img.src = `file://${srcPath}`
+    })
+    const containScale = Math.min(1, CANVAS_W / naturalW, CANVAS_H / naturalH)
+    const width = Math.round(naturalW * containScale)
+    const height = Math.round(naturalH * containScale)
+    const x = anchor ? Math.round(anchor.x - width / 2) : Math.round((CANVAS_W - width) / 2)
+    const y = anchor ? Math.round(anchor.y - height / 2) : Math.round((CANVAS_H - height) / 2)
+    const layer: ThumbnailLayer = {
+      id: newId(), name: layerName, type: 'image', visible: true, opacity: 100,
+      x, y, rotation: 0, src: srcPath, width, height,
+    }
+    commitLayers([...layers, layer])
+    setSelectedIds([layer.id])
+  }, [layers, commitLayers, config.streamsDir])
+
   const addImageLayer = useCallback(async () => {
     let defaultPath: string | undefined
     if (currentStream) {
@@ -1660,37 +1954,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     const paths = await window.api.openFileDialog({ filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }], properties: ['openFile'], defaultPath })
     if (!paths.length) return
-    // Use the original filename (sans extension) as the layer name. Read it
-    // from the user-picked path BEFORE caching, since the cached file may be
-    // hashed or sanitized.
-    const originalBasename = paths[0].split(/[\\/]/).pop() ?? ''
-    const layerName = originalBasename.replace(/\.[^.]+$/, '') || 'Image'
-    const srcPath = config.streamsDir
-      ? await window.api.thumbnailCacheAsset(config.streamsDir, paths[0])
-      : paths[0]
-
-    // Read natural dimensions, then contain within canvas if needed
-    const { naturalW, naturalH } = await new Promise<{ naturalW: number; naturalH: number }>(resolve => {
-      const img = new Image()
-      img.onload = () => resolve({ naturalW: img.naturalWidth, naturalH: img.naturalHeight })
-      img.onerror = () => resolve({ naturalW: CANVAS_W, naturalH: CANVAS_H })
-      img.src = `file://${srcPath}`
-    })
-    const scaleW = CANVAS_W / naturalW
-    const scaleH = CANVAS_H / naturalH
-    const containScale = Math.min(1, scaleW, scaleH) // ≤1: only ever shrink
-    const width = Math.round(naturalW * containScale)
-    const height = Math.round(naturalH * containScale)
-
-    const layer: ThumbnailLayer = {
-      id: newId(), name: layerName, type: 'image', visible: true, opacity: 100,
-      x: Math.round((CANVAS_W - width) / 2),
-      y: Math.round((CANVAS_H - height) / 2),
-      rotation: 0, src: srcPath, width, height,
-    }
-    commitLayers([...layers, layer])
-    setSelectedIds([layer.id])
-  }, [layers, commitLayers, config.streamsDir, currentStream])
+    await addImageLayerFromPath(paths[0])
+  }, [currentStream, config.streamsDir, addImageLayerFromPath])
 
   const addTextLayer = useCallback(() => {
     const layer: ThumbnailLayer = {
@@ -2081,6 +2346,44 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 </button>
               </Tooltip>
               <div className="w-px h-4 bg-white/10 mx-1" />
+              {/* Alignment mode toggle */}
+              <Tooltip content="Align to artboard (canvas)" side="bottom">
+                <button
+                  onClick={() => setAlignMode('artboard')}
+                  className={`p-1.5 rounded transition-colors ${alignMode === 'artboard' ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
+                >
+                  <Frame size={14} />
+                </button>
+              </Tooltip>
+              <Tooltip content={selectedIds.length < 2 ? 'Align to first selected (needs 2+ items)' : 'Align to first selected'} side="bottom">
+                <button
+                  onClick={() => setAlignMode('selection')}
+                  disabled={selectedIds.length < 2}
+                  className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${alignMode === 'selection' ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
+                >
+                  <BoxSelect size={14} />
+                </button>
+              </Tooltip>
+              {/* Alignment ops */}
+              {([
+                ['left',     <AlignStartVertical size={14} />,    'Align left edges'],
+                ['h-center', <AlignCenterVertical size={14} />,   'Align horizontal centers'],
+                ['right',    <AlignEndVertical size={14} />,      'Align right edges'],
+                ['top',      <AlignStartHorizontal size={14} />,  'Align top edges'],
+                ['v-center', <AlignCenterHorizontal size={14} />, 'Align vertical centers'],
+                ['bottom',   <AlignEndHorizontal size={14} />,    'Align bottom edges'],
+              ] as const).map(([op, icon, label]) => (
+                <Tooltip key={op} content={label} side="bottom">
+                  <button
+                    onClick={() => handleAlign(op as AlignOp)}
+                    disabled={selectedIds.length === 0}
+                    className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    {icon}
+                  </button>
+                </Tooltip>
+              ))}
+              <div className="w-px h-4 bg-white/10 mx-1" />
               {saveTemplateOpen ? (
                 <div className="flex items-center gap-1">
                   <input
@@ -2186,6 +2489,26 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               ref={canvasContainerRef}
               className="flex-1 overflow-hidden relative min-w-0"
               style={{ background: 'var(--color-bg)', cursor: isPanning ? 'grabbing' : undefined }}
+              onDragOver={e => {
+                // Only accept drops carrying our asset payload. preventDefault
+                // is required for the drop to fire.
+                if (!e.dataTransfer.types.includes('application/x-thumbnail-asset')) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+              }}
+              onDrop={e => {
+                const sourcePath = e.dataTransfer.getData('application/x-thumbnail-asset')
+                if (!sourcePath) return
+                e.preventDefault()
+                // Convert client coords → canvas (stage) coords using current pan/zoom.
+                const rect = canvasContainerRef.current?.getBoundingClientRect()
+                if (!rect) return
+                const sx = e.clientX - rect.left
+                const sy = e.clientY - rect.top
+                const cx = (sx - viewPanRef.current.x) / viewZoomRef.current
+                const cy = (sy - viewPanRef.current.y) / viewZoomRef.current
+                addImageLayerFromPath(sourcePath, { x: cx, y: cy }).catch(() => {})
+              }}
             >
               <Stage
                 ref={stageRef}
@@ -2223,7 +2546,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       scale: viewZoom,
                       onDragStart: handleDragStart,
                       onSnapDragMove: handleSnapDragMove,
-                      onSnapTransformBoundBox: handleSnapTransformBoundBox,
+                      onDragEnd: handleDragEnd,
+                      onTransformEnd: handleTransformEnd,
                       onClearGuides: clearSnapGuides,
                       gridSnapEnabled,
                       mergeFields: mergeFieldValues,
@@ -2268,8 +2592,42 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     )
                   })()}
                 </Layer>
-                {/* Transformer layer: hosts selection handles above the matte so they remain bright */}
-                <Layer ref={transformerLayerRef} />
+                {/* Transformer layer: hosts the shared selection handles
+                    above the matte so they remain bright. One Transformer
+                    is attached to every selected node — see the sync
+                    useEffect that calls transformerRef.current.nodes(...). */}
+                <Layer ref={transformerLayerRef}>
+                  {alignAnchorBbox && (
+                    <KonvaRect
+                      x={alignAnchorBbox.x}
+                      y={alignAnchorBbox.y}
+                      width={alignAnchorBbox.width}
+                      height={alignAnchorBbox.height}
+                      stroke="#a78bfa"
+                      strokeWidth={3 / viewZoom}
+                      dash={[10 / viewZoom, 5 / viewZoom]}
+                      listening={false}
+                    />
+                  )}
+                  <Transformer
+                    ref={transformerRef}
+                    rotateEnabled
+                    boundBoxFunc={(oldBox, newBox) => {
+                      // Universal min size + per-selection text-height lock.
+                      const constrained: KonvaBox = {
+                        ...newBox,
+                        width: Math.max(10, newBox.width),
+                        height: Math.max(10, newBox.height),
+                      }
+                      const sel = selectedIdsRef.current
+                      if (sel.length === 1) {
+                        const l = layers.find(x => x.id === sel[0])
+                        if (l?.type === 'text') constrained.height = oldBox.height
+                      }
+                      return handleSnapTransformBoundBox(oldBox, constrained)
+                    }}
+                  />
+                </Layer>
                 <Layer ref={guideLayerRef} listening={false} />
               </Stage>
 
@@ -2283,10 +2641,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               </div>
             </div>
 
-            {/* Right panel: Layers + Properties */}
+            {/* Right panel: Layers + Assets + Properties */}
             <div className="w-56 flex flex-col border-l border-white/5 bg-navy-800 shrink-0 overflow-hidden">
               {/* Layers */}
-              <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '50%' }}>
+              <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '30%' }}>
                 <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 shrink-0">
                   <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Layers</span>
                   <span className="text-[10px] text-gray-600">{layers.length}</span>
@@ -2404,6 +2762,93 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Properties</span>
                 </div>
                 <PropertiesPanel layer={selectedLayer} onChange={updateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} />
+              </div>
+
+              {/* Divider */}
+              <div className="border-t border-white/10 shrink-0" />
+
+              {/* Assets — images from the current stream's folder + same-season
+                  episodes. Drag a thumbnail onto the canvas to add it as an
+                  image layer. */}
+              <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '35%' }}>
+                <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
+                  <ImageIcon size={11} className="text-gray-500" />
+                  <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Assets</span>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {(() => {
+                    if (!seasonAssets) {
+                      return <div className="px-3 py-3 text-[11px] text-gray-600">Loading…</div>
+                    }
+                    const groups: Array<{ key: string; label: string; sublabel?: string; images: string[] }> = []
+                    if (seasonAssets.current && seasonAssets.current.images.length > 0) {
+                      groups.push({
+                        key: seasonAssets.current.folderPath,
+                        label: 'This stream',
+                        sublabel: seasonAssets.current.title,
+                        images: seasonAssets.current.images,
+                      })
+                    }
+                    for (const g of seasonAssets.related) {
+                      if (g.images.length === 0) continue
+                      groups.push({
+                        key: g.folderPath,
+                        label: g.episode ? `Episode ${g.episode}` : g.date,
+                        sublabel: g.title,
+                        images: g.images,
+                      })
+                    }
+                    if (groups.length === 0) {
+                      return <div className="px-3 py-3 text-[11px] text-gray-600">No images in this stream{seasonAssets.related.length > 0 ? ' or its season' : ''}.</div>
+                    }
+                    return groups.map(g => (
+                      <div key={g.key} className="border-b border-white/5 last:border-b-0">
+                        <div className="px-3 pt-2 pb-1 flex items-baseline gap-1.5">
+                          <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{g.label}</span>
+                          {g.sublabel && <span className="text-[10px] text-gray-600 truncate">— {g.sublabel}</span>}
+                        </div>
+                        <div className="px-2 pb-2 grid grid-cols-2 gap-1">
+                          {g.images.map(p => {
+                            const basename = p.split(/[\\/]/).pop() ?? p
+                            const dims = assetDims.get(p)
+                            const tooltipContent = (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="font-mono text-[11px] text-gray-200 break-all">{basename}</span>
+                                <span className="text-[10px] text-gray-400 tabular-nums">{dims ? `${dims.w} × ${dims.h}` : 'Loading…'}</span>
+                              </div>
+                            )
+                            return (
+                              <Tooltip key={p} content={tooltipContent} side="left">
+                                <div className="aspect-square bg-navy-900 border border-white/5 hover:border-purple-500/60 rounded overflow-hidden flex items-center justify-center transition-colors">
+                                  <img
+                                    src={`file://${p}`}
+                                    alt=""
+                                    draggable
+                                    onLoad={e => {
+                                      const img = e.currentTarget
+                                      const w = img.naturalWidth, h = img.naturalHeight
+                                      setAssetDims(prev => {
+                                        if (prev.get(p)?.w === w && prev.get(p)?.h === h) return prev
+                                        const next = new Map(prev)
+                                        next.set(p, { w, h })
+                                        return next
+                                      })
+                                    }}
+                                    onDragStart={e => {
+                                      e.dataTransfer.setData('application/x-thumbnail-asset', p)
+                                      e.dataTransfer.effectAllowed = 'copy'
+                                    }}
+                                    className="max-w-full max-h-full object-contain cursor-grab active:cursor-grabbing"
+                                  />
+                                </div>
+                              </Tooltip>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))
+                  })()}
+                </div>
               </div>
             </div>
           </div>

@@ -54,7 +54,15 @@ export interface ConversionPreset {
  *  main process owns this so it survives renderer reloads and isn't subject to
  *  IPC race conditions. Each variant carries the data needed to do the action. */
 export type GroupCompletionHook =
-  | { type: 'archiveMarkAsArchived'; streamsDir: string; date: string }
+  | {
+      type: 'archiveMarkAsArchived'
+      streamsDir: string
+      date: string
+      /** Forward-slash relative path of the folder under streamsDir.
+       *  Optional for back-compat with jobs persisted before this field
+       *  existed; new submissions always include it. */
+      metaKey?: string
+    }
 
 export interface ConversionJob {
   id: string
@@ -64,6 +72,8 @@ export interface ConversionJob {
   status: 'queued' | 'downloading' | 'running' | 'replacing' | 'paused' | 'done' | 'error' | 'cancelled'
   progress: number
   error?: string
+  /** Logical size of the input file in bytes, captured at queue/start. */
+  inputSize?: number
   /** Optional logical grouping (used by archive — one group per stream folder).
    *  Renderer renders these together with collective controls; main process
    *  fires the completion hook when all jobs in the group succeed. */
@@ -418,9 +428,24 @@ function broadcastJobAdded(job: ConversionJob): void {
 
 /** Add a job in the queued state WITHOUT running it. Used by auto-rules when the user has
  * opted out of "start immediately" — the user manually starts it from the ConverterPage. */
+/** Stamp the input file's logical size onto the job if not already set.
+ *  Cloud placeholders report their full logical size via fs.stat (not the
+ *  on-disk footprint), which matches what the user expects to see. Errors
+ *  (file missing, permission, etc.) are tolerated — the field stays
+ *  undefined and the renderer just hides the size label. */
+function withInputSize(job: ConversionJob): ConversionJob {
+  if (typeof job.inputSize === 'number') return job
+  try {
+    const stat = fs.statSync(job.inputFile)
+    return { ...job, inputSize: stat.size }
+  } catch {
+    return job
+  }
+}
+
 export function addPendingJob(job: ConversionJob): string {
   const id = job.id || uuidv4()
-  const queuedJob: ConversionJob = { ...job, id, status: 'queued', progress: 0 }
+  const queuedJob: ConversionJob = { ...withInputSize(job), id, status: 'queued', progress: 0 }
   jobs.set(id, queuedJob)
   persistPendingJobs()
   broadcastJobAdded(queuedJob)
@@ -506,7 +531,7 @@ export async function startConversionJob(
   onProgress?: (pct: number) => void
 ): Promise<{ id: string; done: Promise<void> }> {
   const id = job.id || uuidv4()
-  const newJob: ConversionJob = { ...job, id, status: 'running', progress: 0 }
+  const newJob: ConversionJob = { ...withInputSize(job), id, status: 'running', progress: 0 }
   jobs.set(id, newJob)
   // If this job was previously queued, drop it from the persisted queue now that it's running.
   persistPendingJobs()
@@ -664,16 +689,25 @@ function maybeFireGroupHook(jobId: string): void {
 
 async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void> {
   if (hook.type === 'archiveMarkAsArchived') {
-    // Read + write _meta.json in the streams root, marking the date entry as
-    // archived. Mirrors the inline logic the old archiveFolders used to run.
-    const { streamsDir, date } = hook
+    // Mark the stream's _meta.json entry as archived. Use metaKey (the
+    // folder's relative path) as the canonical key — bare `date` only works
+    // for flat layouts without same-day suffixes, and using it elsewhere
+    // resurrected a phantom entry at the wrong key on every archive.
+    //
+    // Skip entirely when no entry exists at the target key. This handles
+    // the case where the user deleted the stream while archive jobs were
+    // still in flight: their delete should stay deleted, not get
+    // resurrected by a late hook firing.
+    const { streamsDir, metaKey, date } = hook
+    const key = metaKey ?? date
     const metaPath = path.join(streamsDir, '_meta.json')
     let allMeta: Record<string, any> = {}
     try { allMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) } catch {}
-    allMeta[date] = {
-      ...(allMeta[date] ?? { date, streamType: ['games'], games: [], comments: '' }),
-      archived: true,
+    if (!allMeta[key]) {
+      console.log(`[archiveMarkAsArchived] no meta entry at "${key}" — skipping (stream was deleted before archive finished)`)
+      return
     }
+    allMeta[key] = { ...allMeta[key], archived: true }
     // On Windows the _meta.json is hidden (+H attribute) — unhide before write,
     // re-hide after.
     const isWin = process.platform === 'win32'

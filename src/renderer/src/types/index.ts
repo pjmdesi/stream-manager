@@ -111,7 +111,19 @@ export interface ConversionPreset {
  *  main process owns this so it survives renderer reloads and isn't subject to
  *  IPC race conditions. Each variant carries the data needed to do the action. */
 export type GroupCompletionHook =
-  | { type: 'archiveMarkAsArchived'; streamsDir: string; date: string }
+  | {
+      type: 'archiveMarkAsArchived'
+      streamsDir: string
+      /** Calendar date — kept for back-compat with persisted jobs queued
+       *  before metaKey was added; the hook handler falls back to this
+       *  when metaKey is absent. */
+      date: string
+      /** Forward-slash relative path of the stream folder under streamsDir.
+       *  This is the canonical _meta.json key — using bare `date` was a
+       *  bug in nested layouts and same-day-suffix folders, where it would
+       *  resurrect a phantom flat entry on archive completion. */
+      metaKey?: string
+    }
 
 export interface ConversionJob {
   id: string
@@ -121,6 +133,10 @@ export interface ConversionJob {
   status: 'queued' | 'downloading' | 'running' | 'replacing' | 'paused' | 'done' | 'error' | 'cancelled'
   progress: number
   error?: string
+  /** Logical size of the input file in bytes, captured when the job was
+   *  first queued/started. Stable for the lifetime of the job (cloud
+   *  placeholders return the full size, not the on-disk footprint). */
+  inputSize?: number
   /** Optional logical grouping (used by archive — one group per stream folder).
    *  Renderer renders these together with collective controls; main process
    *  fires the completion hook when all jobs in the group succeed. */

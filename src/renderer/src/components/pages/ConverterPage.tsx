@@ -9,6 +9,13 @@ import { FileDropZone } from '../ui/FileDropZone'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
+  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`
+  return `${bytes} B`
+}
+
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000)
   const h = Math.floor(s / 3600)
@@ -332,7 +339,12 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                   the row reads as "input → input (replaced in place)". */}
               {job.replaceInput ? job.inputFile.split(/[\\/]/).pop() : outputName}
             </span>
-            <span className="text-xs text-gray-600 shrink-0">{job.preset.name}</span>
+            <span className="text-xs text-gray-600 shrink-0">
+              {job.preset.name}
+              {typeof job.inputSize === 'number' && (
+                <span className="ml-1.5 text-gray-700 tabular-nums">· {formatBytes(job.inputSize)}</span>
+              )}
+            </span>
           </div>
 
           <ProgressBar percent={job.progress} status={job.status} />

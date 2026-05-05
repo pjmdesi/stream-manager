@@ -4,10 +4,17 @@ import crypto from 'crypto'
 import { pathToFileURL } from 'url'
 import { app } from 'electron'
 
+// Version 2: timecodes store the *actual* seeked time of each captured
+// frame (rather than the requested time), and frames that landed on the
+// same keyframe are deduped at generation. Older caches are silently
+// invalidated so the strip regenerates without visual repeats.
+const CACHE_VERSION = 2
+
 interface ThumbnailMeta {
   filePath: string
   mtime: number
   timecodes: number[]
+  version?: number
 }
 
 class ThumbnailCacheManager {
@@ -45,6 +52,10 @@ class ThumbnailCacheManager {
       return null
     }
 
+    // Reject older cache formats so the strip regenerates with the
+    // dedup-by-actualTime behavior introduced in v2.
+    if (meta.version !== CACHE_VERSION) return null
+
     // Validate source file mtime
     try {
       const stat = fs.statSync(filePath)
@@ -78,7 +89,7 @@ class ThumbnailCacheManager {
     const hash = this.hashKey(filePath)
     let mtime = 0
     try { mtime = Math.floor(fs.statSync(filePath).mtimeMs) } catch {}
-    const meta: ThumbnailMeta = { filePath, mtime, timecodes }
+    const meta: ThumbnailMeta = { filePath, mtime, timecodes, version: CACHE_VERSION }
     fs.writeFileSync(this.metaPath(hash), JSON.stringify(meta))
   }
 

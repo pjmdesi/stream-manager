@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToLine, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -426,26 +426,29 @@ function AppInner() {
               onClick={() => window.api.windowMinimizeToTray()}
               className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
             >
-              <ArrowDownToLine size={12} />
+              <ArrowDownToDot size={14} />
             </button>
           </Tooltip>
           <button
             onClick={() => window.api.windowMinimize()}
             className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
           >
-            <Minus size={12} />
+            <Minus size={14} />
           </button>
           <button
             onClick={() => window.api.windowMaximize()}
             className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
           >
-            {isMaximized ? <Minimize2 size={12} /> : <Square size={12} />}
+            {isMaximized ? <Minimize2 size={14} /> : <Square size={14} />}
           </button>
           <button
             onClick={() => window.api.windowClose()}
             className="p-1.5 rounded hover:bg-red-600 text-gray-500 hover:text-white transition-colors"
           >
-            <X size={12} />
+            {/* Lucide's X has more whitespace around its strokes than Square's
+                box outline, so it visually reads ~1–2px smaller at the same
+                size value. Bump it to keep the row optically balanced. */}
+            <X size={18} />
           </button>
         </div>
       </div>

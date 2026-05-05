@@ -1688,6 +1688,19 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   // Scrub by dragging the playhead
   const startPlayheadDrag = useCallback((e: React.MouseEvent) => {
+    // Middle-click on the playhead always starts a pan, never a scrub. The
+    // capture-phase intercept on stripsWrapperRef is supposed to catch this
+    // first, but in some browser/Electron cases the bubble-phase React
+    // handler still wins on the playhead's hit-area; handling it directly
+    // here makes the behavior reliable regardless.
+    if (e.button === 1) {
+      const wrapperEl = stripsWrapperRef.current
+      if (!wrapperEl) return
+      e.preventDefault()
+      e.stopPropagation()
+      startMiddleClickPan(e.nativeEvent, wrapperEl.getBoundingClientRect().width)
+      return
+    }
     if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
@@ -1714,7 +1727,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, [])
+  }, [startMiddleClickPan])
 
   // Corner resize: scales the crop rect around the opposite corner (which stays pinned).
   const handleCropCornerResize = useCallback((e: React.MouseEvent, corner: 'tl' | 'tr' | 'bl' | 'br') => {

@@ -350,6 +350,9 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetStatus: () =>
     ipcRenderer.invoke('youtube:getStatus'),
 
+  youtubeGetChannelId: (): Promise<string> =>
+    ipcRenderer.invoke('youtube:getChannelId'),
+
   youtubeConnect: () =>
     ipcRenderer.invoke('youtube:connect'),
 
