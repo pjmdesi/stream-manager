@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Plus, Bot, FolderTree, CheckCircle } from 'lucide-react'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
@@ -63,9 +63,21 @@ function DirInput({
 //      0x80070187 sensitivity, OneDrive's API rate limit, attribute-flag
 //      heuristics — instead of a one-size-fits-all CFAPI path. Remove this
 //      note if we either ship the settings or decide they're not warranted.
-export function SettingsPage() {
+interface SettingsPageProps {
+  /** Called after a save in which the streams root changed AND the new
+   *  directory has no _meta.json. The app interprets this as "the user is
+   *  pointing at an uninitialized folder" and re-opens the onboarding flow. */
+  onOpenOnboarding?: () => void
+}
+
+export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
   const { config, updateConfig, loading } = useStore()
   const [local, setLocal] = useState(config)
+  // Snapshot the streamsDir as it was when the page mounted (or after the
+  // last save). Compared to local.streamsDir on save so we only fire the
+  // post-change checks when the user actually changed it.
+  const lastSavedStreamsDirRef = useRef(config.streamsDir)
+  useEffect(() => { lastSavedStreamsDirRef.current = config.streamsDir }, [config.streamsDir])
   const [saved, setSaved] = useState(false)
   const [allPresets, setAllPresets] = useState<ConversionPreset[]>([])
   const [thumbnailTemplates, setThumbnailTemplates] = useState<{ name: string; path: string }[]>([])
@@ -128,10 +140,24 @@ export function SettingsPage() {
   }
 
   const save = async () => {
+    const prevStreamsDir = lastSavedStreamsDirRef.current
+    const newStreamsDir = local.streamsDir
     await updateConfig(local)
     await window.api.setStartupSettings(!!local.startWithWindows, !!local.startMinimized)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+
+    // If the streams root just changed AND the new location has no
+    // _meta.json (uninitialized or a wrong-folder mistake), re-run the
+    // onboarding flow so the user reconfigures stream-mode + scaffolds the
+    // initial state instead of working against a blank dir. .catch(true)
+    // is conservative: on probe error, leave the user alone.
+    if (newStreamsDir !== prevStreamsDir) {
+      const hasMeta = newStreamsDir
+        ? await window.api.fileExists(`${newStreamsDir}/_meta.json`).catch(() => true)
+        : false
+      if (!hasMeta) onOpenOnboarding?.()
+    }
   }
 
   if (loading) {

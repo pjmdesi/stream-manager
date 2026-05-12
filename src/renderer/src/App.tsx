@@ -546,11 +546,15 @@ function AppInner() {
           {page === 'combine'   && <CombinePage initialFiles={pendingCombine} />}
           {page === 'launcher'  && <LauncherPage />}
           {page === 'integrations'   && <IntegrationsPage />}
-          {page === 'settings'  && <SettingsPage />}
+          {page === 'settings'  && <SettingsPage onOpenOnboarding={() => setOnboardingOpen(true)} />}
         </PageErrorBoundary>
         </main>
       </div>
-      <OnboardingModal isOpen={onboardingOpen} onComplete={() => { setOnboardingOpen(false); refreshConfig(); refreshRules() }} />
+      <OnboardingModal
+        isOpen={onboardingOpen}
+        initialStreamsDir={config.streamsDir}
+        onComplete={() => { setOnboardingOpen(false); refreshConfig(); refreshRules() }}
+      />
 
       <Modal
         isOpen={!!quitConfirm}

@@ -38,6 +38,10 @@ export const Button: React.FC<ButtonProps> = ({
     <button
       className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       disabled={disabled || loading}
+      // data-variant lets the Modal autofocus logic distinguish
+      // action buttons (primary / danger / success) from cancel-style
+      // ghost/secondary ones — see Modal.tsx tryFocus().
+      data-variant={variant}
       {...props}
     >
       {loading ? (

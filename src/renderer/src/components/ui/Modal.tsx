@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 
 interface ModalProps {
@@ -37,6 +37,76 @@ export const Modal: React.FC<ModalProps> = ({
     }
   }, [isOpen, onClose, noOverlay])
 
+  // Auto-focus rules: when the modal opens, focus the first interactive
+  // input in the body (so the user can start typing immediately). If the
+  // body has no inputs (info-only confirm modals), focus the rightmost
+  // footer "action" button — primary / danger / success variants, marked
+  // via Button's data-variant attribute — so Enter confirms. Children
+  // that explicitly manage their own focus opt out by claiming focus
+  // first; we detect that via document.activeElement and bail.
+  //
+  // A MutationObserver on the footer watches for `disabled` attribute
+  // changes so a primary button that starts disabled (e.g. while the
+  // modal loads its initial data) still gets focus the moment it enables.
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const footerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!isOpen) return
+
+    const ACTION_SELECTOR = 'button[data-variant="primary"]:not([disabled]), button[data-variant="danger"]:not([disabled]), button[data-variant="success"]:not([disabled])'
+
+    const tryFocus = () => {
+      const body = bodyRef.current
+      if (body && body.contains(document.activeElement)) return // child claimed focus
+
+      const input = body?.querySelector<HTMLElement>(
+        'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable="true"]'
+      )
+      if (input) {
+        input.focus()
+        if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+          input.select?.()
+        }
+        return
+      }
+      const footer = footerRef.current
+      if (!footer) return
+      const action = footer.querySelectorAll<HTMLButtonElement>(ACTION_SELECTOR)
+      if (action.length > 0) { action[action.length - 1].focus(); return }
+      // No action variant available — fall back to rightmost any-button.
+      const all = footer.querySelectorAll<HTMLButtonElement>('button:not([disabled])')
+      if (all.length > 0) all[all.length - 1].focus()
+    }
+
+    // setTimeout(0) lets children's mount effects (autoFocus props, refs,
+    // etc.) run first so we can detect them via activeElement.
+    const initial = setTimeout(tryFocus, 0)
+
+    let observer: MutationObserver | null = null
+    const obsTimer = setTimeout(() => {
+      const footer = footerRef.current
+      if (!footer) return
+      observer = new MutationObserver(() => {
+        // Only re-focus when nothing in the modal currently holds keyboard
+        // focus, or when focus is on a fallback (cancel) button. This
+        // avoids stealing focus from a user who has Tabbed somewhere.
+        const focused = document.activeElement as HTMLElement | null
+        if (!focused) { tryFocus(); return }
+        if (focused.matches?.(ACTION_SELECTOR)) return
+        // If user focused an input or some other body element, leave them.
+        if (bodyRef.current?.contains(focused)) return
+        tryFocus()
+      })
+      observer.observe(footer, { attributes: true, subtree: true, attributeFilter: ['disabled'] })
+    }, 0)
+
+    return () => {
+      clearTimeout(initial)
+      clearTimeout(obsTimer)
+      observer?.disconnect()
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
 
   const widthClasses = {
@@ -60,11 +130,11 @@ export const Modal: React.FC<ModalProps> = ({
           </button>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-4">
         {children}
       </div>
       {footer && (
-        <div className="px-6 py-4 border-t border-white/10 flex justify-end gap-2 shrink-0">
+        <div ref={footerRef} className="px-6 py-4 border-t border-white/10 flex justify-end gap-2 shrink-0">
           {footer}
         </div>
       )}

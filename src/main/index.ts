@@ -78,7 +78,12 @@ function createWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       webSecurity: false, // Required for local file:// audio/video
-      allowRunningInsecureContent: false
+      allowRunningInsecureContent: false,
+      // Electron's built-in spell checker is on by default, but set
+      // explicitly so the context-menu handler below can rely on
+      // params.misspelledWord / params.dictionarySuggestions being
+      // populated for editable fields.
+      spellcheck: true
     }
   })
 
@@ -100,11 +105,36 @@ function createWindow(): BrowserWindow {
   })
 
   mainWindow.webContents.on('context-menu', (_event, params) => {
-    const { isEditable, selectionText, editFlags } = params
+    const { isEditable, selectionText, editFlags, misspelledWord, dictionarySuggestions } = params
     const hasSelection = selectionText.trim().length > 0
     if (!isEditable && !hasSelection) return
 
     const menu = new Menu()
+
+    // Spell-check section: appears at the top when the cursor is on a
+    // misspelled word inside an editable field. Chromium populates
+    // dictionarySuggestions automatically when spellcheck is enabled in
+    // webPreferences. Up to 5 suggestions are returned; clicking one
+    // replaces the misspelled word in place.
+    if (isEditable && misspelledWord) {
+      if (dictionarySuggestions.length > 0) {
+        for (const suggestion of dictionarySuggestions) {
+          menu.append(new MenuItem({
+            label: suggestion,
+            click: () => mainWindow.webContents.replaceMisspelling(suggestion),
+          }))
+        }
+      } else {
+        menu.append(new MenuItem({ label: 'No suggestions', enabled: false }))
+      }
+      menu.append(new MenuItem({ type: 'separator' }))
+      menu.append(new MenuItem({
+        label: 'Add to dictionary',
+        click: () => mainWindow.webContents.session.addWordToSpellCheckerDictionary(misspelledWord),
+      }))
+      menu.append(new MenuItem({ type: 'separator' }))
+    }
+
     if (isEditable) {
       menu.append(new MenuItem({ role: 'undo', enabled: editFlags.canUndo }))
       menu.append(new MenuItem({ role: 'redo', enabled: editFlags.canRedo }))

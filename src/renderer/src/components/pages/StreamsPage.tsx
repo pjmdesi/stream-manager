@@ -9,7 +9,7 @@ import {
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, SquareDashedText,
   Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid,
-  RadioTower
+  RadioTower, Clapperboard
 } from 'lucide-react'
 
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
@@ -2748,7 +2748,8 @@ export function StreamsPage({
   // ── YouTube live detection ─────────────────────────────────────────────────
   const [ytConnectedOuter, setYtConnectedOuter] = useState(false)
   const [ytIsLive, setYtIsLive] = useState(false)
-  const [ytPrivacyMap, setYtPrivacyMap] = useState<Record<string, string>>({})
+  type YtVideoStatus = { privacyStatus: string; isLivestream: boolean }
+  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, YtVideoStatus>>({})
 
   useEffect(() => {
     window.api.youtubeGetStatus().then((s: { connected: boolean }) => setYtConnectedOuter(s.connected)).catch(() => {})
@@ -3522,7 +3523,7 @@ export function StreamsPage({
   useEffect(() => {
     if (!ytConnectedOuter || !linkedYtIdsKey) return
     const ids = linkedYtIdsKey.split(',')
-    window.api.youtubeGetPrivacyStatuses(ids).then(setYtPrivacyMap).catch(() => {})
+    window.api.youtubeGetVideoStatuses(ids).then(setYtVideoStatusMap).catch(() => {})
   }, [ytConnectedOuter, linkedYtIdsKey])
 
   // Resolve the broadcast id to poll for the live indicator. Derived as a stable
@@ -3542,7 +3543,14 @@ export function StreamsPage({
     const check = () => window.api.youtubeCheckBroadcastIsLive(broadcastId)
       .then(r => {
         setYtIsLive(r.isLive)
-        if (r.privacyStatus) setYtPrivacyMap(prev => ({ ...prev, [broadcastId]: r.privacyStatus! }))
+        // checkBroadcastIsLive hits /liveBroadcasts, so a non-null reply
+        // implies isLivestream=true regardless of whether it's currently
+        // airing. Preserve any pre-existing isLivestream flag if we already
+        // had one from the bulk fetch.
+        if (r.privacyStatus) setYtVideoStatusMap(prev => ({
+          ...prev,
+          [broadcastId]: { privacyStatus: r.privacyStatus!, isLivestream: true },
+        }))
       })
       .catch(() => {})
     check()
@@ -3933,7 +3941,8 @@ export function StreamsPage({
                       isNextUpcoming={folder.folderPath === nextUpcomingFolderPath}
                       isPending={pending}
                       isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
-                      privacyStatus={folder.meta?.ytVideoId ? ytPrivacyMap[folder.meta.ytVideoId] ?? null : null}
+                      privacyStatus={folder.meta?.ytVideoId ? ytVideoStatusMap[folder.meta.ytVideoId]?.privacyStatus ?? null : null}
+                      isLivestream={folder.meta?.ytVideoId ? ytVideoStatusMap[folder.meta.ytVideoId]?.isLivestream ?? null : null}
                       cloudSyncActive={cloudSyncActive}
                       isArchiving={isFolderArchiving(folder)}
                       tagColors={tagColors}
@@ -4124,7 +4133,8 @@ return (
                   isNextUpcoming={folder.folderPath === nextUpcomingFolderPath}
                   isPending={pending}
                   isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
-                  privacyStatus={folder.meta?.ytVideoId ? ytPrivacyMap[folder.meta.ytVideoId] ?? null : null}
+                  privacyStatus={folder.meta?.ytVideoId ? ytVideoStatusMap[folder.meta.ytVideoId]?.privacyStatus ?? null : null}
+                  isLivestream={folder.meta?.ytVideoId ? ytVideoStatusMap[folder.meta.ytVideoId]?.isLivestream ?? null : null}
                   cloudSyncActive={cloudSyncActive}
                   isArchiving={isFolderArchiving(folder)}
                   tagColors={tagColors}
@@ -4839,7 +4849,7 @@ function ClampedComment({ text, maxLines = 3 }: { text: string; maxLines?: numbe
 
 // ─── Stream card (grid view) ─────────────────────────────────────────────────
 
-function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, cloudSyncActive, isArchiving, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
+function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, isLivestream, cloudSyncActive, isArchiving, tagColors, tagTextures, onToggleSelect, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex }: StreamRowProps) {
   const { meta, hasMeta, detectedGames, date, thumbnails, thumbnailLocalFlags, videoCount, videos } = folder
   const displayGames = meta?.games?.length ? meta.games : detectedGames
   const firstThumb = thumbnails[0]
@@ -4958,18 +4968,26 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                     </Tooltip>
                   )
                 )}
-                {/* YT link for past streams */}
-                {!isPending && meta?.ytVideoId && (
-                    <Tooltip content={privacyLabel ? `YouTube · ${privacyLabel}` : 'YouTube'}>
+                {/* YT link for past streams. Icon distinguishes livestream
+                    VODs (Radio) from regular video uploads (Clapperboard);
+                    falls back to Clapperboard while the bulk fetch is in
+                    flight (isLivestream === null). */}
+                {!isPending && meta?.ytVideoId && (() => {
+                  const KindIcon = isLivestream ? Radio : Clapperboard
+                  const kindLabel = isLivestream ? 'Livestream' : 'Video'
+                  const tooltipText = privacyLabel ? `${kindLabel} · ${privacyLabel}` : kindLabel
+                  return (
+                    <Tooltip content={tooltipText}>
                       <button
                         onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
                         className="inline-flex items-center gap-0.5 p-1 rounded bg-red-900/30 text-red-400 border border-red-400/40 hover:bg-red-900/50 transition-colors shrink-0"
                       >
-                        <LucideYoutube size={11} />
+                        <KindIcon size={11} />
                         {PrivacyIcon && <PrivacyIcon size={11} />}
                       </button>
                     </Tooltip>
-                  )}
+                  )
+                })()}
             </div>
             </div>
             {(meta?.ytTitle || meta?.twitchTitle) && (
@@ -5110,6 +5128,10 @@ interface StreamRowProps {
   isPending: boolean
   isLive: boolean
   privacyStatus?: string | null
+  /** True iff the linked YouTube video is (or was) a livestream — drives
+   *  the past-stream badge icon (Radio for livestream VOD, Clapperboard for
+   *  regular upload). null while the bulk fetch hasn't returned yet. */
+  isLivestream?: boolean | null
   /** True when streamsDir is inside a cloud sync root. Threaded through to
    *  the VideoCountTooltip so the per-file cloud column only renders icons
    *  when cloud sync is actually in play. */
@@ -5148,7 +5170,7 @@ interface StreamRowProps {
   onToggleExpand?: () => void
 }
 
-function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, cloudSyncActive, isArchiving, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart, expanded, onToggleExpand }: StreamRowProps) {
+function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPending, isLive, privacyStatus, isLivestream, cloudSyncActive, isArchiving, tagColors, tagTextures, onToggleSelect, onDragStart, onDragEnter, onEdit, onAdd, onOpen, onReschedule, onDelete, onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails, onThumbClick, thumbsKey, sameDayIndex, thumbWidth = 85, onThumbResizeStart, expanded, onToggleExpand }: StreamRowProps) {
   if (folder.isMissing) {
     return (
       <tr className={`border-b border-red-900/30 ${zebra ? 'bg-red-950/10' : ''}`}>
@@ -5330,13 +5352,16 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             {!isPending && meta?.ytVideoId && (() => {
                 const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
                 const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
+                const KindIcon = isLivestream ? Radio : Clapperboard
+                const kindLabel = isLivestream ? 'Livestream' : 'Video'
+                const tooltipText = privacyLabel ? `Edit on YouTube · ${kindLabel} · ${privacyLabel}` : `Edit on YouTube · ${kindLabel}`
                 return (
-                <Tooltip content={privacyLabel ? `Edit on YouTube · ${privacyLabel}` : 'Edit on YouTube'}>
+                <Tooltip content={tooltipText}>
                     <button
                     onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
                     className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-400/40 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
                     >
-                    <LucideYoutube size={12} />
+                    <KindIcon size={12} />
                     {PrivacyIcon && <PrivacyIcon size={12} />}
                     </button>
                 </Tooltip>

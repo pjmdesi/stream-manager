@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastIsLive, fetchPrivacyStatuses, createBroadcast, getMyChannelId, clearChannelIdCache } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastIsLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -47,10 +47,10 @@ export function registerYouTubeIPC(): void {
     }
   })
 
-  ipcMain.handle('youtube:getPrivacyStatuses', async (_event, videoIds: string[]) => {
+  ipcMain.handle('youtube:getVideoStatuses', async (_event, videoIds: string[]) => {
     const { clientId, clientSecret } = getCreds()
     try {
-      const map = await fetchPrivacyStatuses(videoIds, clientId, clientSecret)
+      const map = await fetchVideoStatuses(videoIds, clientId, clientSecret)
       return Object.fromEntries(map)
     } catch {
       return {}

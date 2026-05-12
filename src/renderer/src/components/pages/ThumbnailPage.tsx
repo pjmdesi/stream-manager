@@ -1246,21 +1246,25 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setAlignAnchorBbox({ x: r.x, y: r.y, width: r.width, height: r.height })
   }, [alignMode, selectedIds, layers])
 
-  // Load asset-library data whenever the active stream changes. Reuses the
-  // existing listStreams IPC — each StreamFolder already carries its image
-  // paths and meta, so we just filter to the current folder + same-season
-  // siblings here. Stale results from a prior stream are guarded by the
-  // `cancelled` flag so a fast switch never mixes data.
+  // Load asset-library data whenever the active stream changes, AND
+  // whenever the streams root's chokidar watcher reports a file change
+  // (so dragging in / removing thumbnails outside the app surfaces in the
+  // panel without a manual refresh). Reuses the existing listStreams IPC.
+  // A monotonic token gates stale results: rapid file events queueing
+  // multiple loads only let the latest one apply.
   useEffect(() => {
     if (!currentStream || !config.streamsDir) {
       setSeasonAssets(null)
       return
     }
     let cancelled = false
-    ;(async () => {
+    let token = 0
+
+    const load = async () => {
+      const myToken = ++token
       try {
         const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream')
-        if (cancelled) return
+        if (cancelled || myToken !== token) return
         const cur = all.find(s => s.folderPath === currentStream.folderPath)
         if (!cur) { setSeasonAssets(null); return }
         const season = cur.meta?.ytSeason
@@ -1287,10 +1291,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           related: related.map(toGroup),
         })
       } catch {
-        if (!cancelled) setSeasonAssets(null)
+        if (!cancelled && myToken === token) setSeasonAssets(null)
       }
-    })()
-    return () => { cancelled = true }
+    }
+
+    load()
+    const unsubscribe = window.api.onStreamsChanged(() => { load() })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [currentStream, config.streamsDir, config.streamMode])
 
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null)

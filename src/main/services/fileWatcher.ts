@@ -5,6 +5,7 @@ import fs from 'fs'
 import { pipeline } from 'stream/promises'
 import { createReadStream, createWriteStream } from 'fs'
 import { Transform } from 'stream'
+import { getStore } from '../ipc/store'
 
 const PROGRESS_THROTTLE_MS = 250
 
@@ -103,15 +104,22 @@ class FileWatcher {
   private watcher: FSWatcher | null = null
   private rules: WatchRule[] = []
   private callbacks: EventCallback[] = []
-  private streamsDir: string = ''
-  private streamMode: string = ''
   private retryTimers = new Map<string, ReturnType<typeof setInterval>>()
 
-  start(rules: WatchRule[], streamsDir: string = '', streamMode: string = ''): void {
+  // Read streamsDir / streamMode live from the store on each rule firing
+  // rather than caching them at start() time. Without this, changing the
+  // streams root in Settings while the watcher was running left the
+  // 'auto' destinationMode targeting the previous root.
+  private get streamsDir(): string {
+    return ((getStore().get('config') as { streamsDir?: string } | undefined)?.streamsDir) ?? ''
+  }
+  private get streamMode(): string {
+    return ((getStore().get('config') as { streamMode?: string } | undefined)?.streamMode) ?? ''
+  }
+
+  start(rules: WatchRule[]): void {
     this.stop()
     this.rules = rules.filter(r => r.enabled)
-    this.streamsDir = streamsDir
-    this.streamMode = streamMode
 
     if (this.rules.length === 0) return
 

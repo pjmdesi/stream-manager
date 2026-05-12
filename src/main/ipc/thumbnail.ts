@@ -114,7 +114,16 @@ export function registerThumbnailIPC(): void {
     canvasFile: ThumbnailCanvasFile,
     pngDataUrl: string
   ) => {
-    await fs.promises.mkdir(folderPath, { recursive: true })
+    // Bail if the stream's folder no longer exists. The previous behavior
+    // (mkdir -p) silently re-created deleted streams whenever an autosave
+    // fired against a stream the user had already removed (because the
+    // editor or its recents list was still holding a reference to the
+    // gone folder). That looked like the streams list "resurrecting" the
+    // entry in the UI.
+    if (!fs.existsSync(folderPath)) {
+      console.warn(`[thumbnail:saveCanvas] folder gone — skipping save: ${folderPath}`)
+      return
+    }
     // Save JSON
     await fs.promises.writeFile(canvasJsonPath(folderPath, date), JSON.stringify(canvasFile, null, 2), 'utf-8')
     // Save PNG

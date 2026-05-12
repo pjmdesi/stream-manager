@@ -279,25 +279,37 @@ export async function getCompletedBroadcasts(
   return broadcasts
 }
 
-/** Fetch privacy statuses for a list of video IDs.
+export interface VideoStatus {
+  privacyStatus: string
+  /** True iff the video is (or was) a livestream — i.e. the YouTube
+   *  resource carries a `liveStreamingDetails` block. Regular uploads
+   *  never have it; both upcoming/active/completed broadcasts do. */
+  isLivestream: boolean
+}
+
+/** Fetch privacy + livestream-or-not status for a list of video IDs.
  *  Chunks requests to stay within the API's 50-ID-per-request limit.
- *  Returns a map of videoId → privacyStatus. */
-export async function fetchPrivacyStatuses(
+ *  Returns a map of videoId → status. */
+export async function fetchVideoStatuses(
   ids: string[],
   clientId: string,
   clientSecret: string
-): Promise<Map<string, string>> {
+): Promise<Map<string, VideoStatus>> {
   if (ids.length === 0) return new Map()
-  const map = new Map<string, string>()
+  const map = new Map<string, VideoStatus>()
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50)
     const data = await ytRequest(
-      `/videos?${new URLSearchParams({ part: 'status', id: chunk.join(','), maxResults: '50' })}`,
+      `/videos?${new URLSearchParams({ part: 'status,liveStreamingDetails', id: chunk.join(','), maxResults: '50' })}`,
       { method: 'GET' },
       clientId, clientSecret
     )
     for (const item of (data?.items ?? [])) {
-      if (item.status?.privacyStatus) map.set(item.id, item.status.privacyStatus)
+      if (!item.status?.privacyStatus) continue
+      map.set(item.id, {
+        privacyStatus: item.status.privacyStatus,
+        isLivestream: !!item.liveStreamingDetails,
+      })
     }
   }
   return map

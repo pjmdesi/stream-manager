@@ -3,7 +3,6 @@ import fs from 'fs'
 import path from 'path'
 import { spawnSync, spawn, ChildProcess } from 'child_process'
 import { fileWatcher, WatchRule, WatchEvent } from '../services/fileWatcher'
-import { getStore } from './store'
 
 // Windows attribute flags that indicate the file's data is not resident locally:
 //   0x1000   = FILE_ATTRIBUTE_OFFLINE              (data physically offline)
@@ -339,10 +338,10 @@ export function registerFilesIPC(): void {
         win.webContents.send('watcher:fileMatched', watchEvent)
       }
     })
-    const config = (getStore().get('config') as any) ?? {}
-    const streamsDir = config.streamsDir ?? ''
-    const streamMode = config.streamMode ?? ''
-    fileWatcher.start(rules, streamsDir, streamMode)
+    // streamsDir / streamMode are no longer passed in: the watcher reads
+    // them live from the store on each match, so changing the streams root
+    // in Settings doesn't strand a running rule on the old path.
+    fileWatcher.start(rules)
     // Non-blocking: process existing files for rules that opted in
     fileWatcher.processExistingFiles()
   })

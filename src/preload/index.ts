@@ -359,8 +359,8 @@ contextBridge.exposeInMainWorld('api', {
   youtubeDisconnect: () =>
     ipcRenderer.invoke('youtube:disconnect'),
 
-  youtubeGetPrivacyStatuses: (videoIds: string[]) =>
-    ipcRenderer.invoke('youtube:getPrivacyStatuses', videoIds),
+  youtubeGetVideoStatuses: (videoIds: string[]) =>
+    ipcRenderer.invoke('youtube:getVideoStatuses', videoIds),
 
   youtubeCheckBroadcastIsLive: (broadcastId: string) =>
     ipcRenderer.invoke('youtube:checkBroadcastIsLive', broadcastId),

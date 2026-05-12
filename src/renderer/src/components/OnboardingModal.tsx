@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { FolderOpen, CheckCircle, MoveRight, HelpCircle, AlertTriangle, Info } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { Modal } from './ui/Modal'
@@ -11,6 +11,11 @@ import imgDumpFolder from '../assets/onboarding/stream-dump-folder.png'
 
 interface Props {
   isOpen: boolean
+  /** Pre-fill the setup step's streams folder field with this path when
+   *  the modal opens (e.g. user just changed streamsDir in Settings to a
+   *  folder that has no _meta.json). When set, the layout-detection runs
+   *  automatically so the user can typically just hit Next. */
+  initialStreamsDir?: string
   onComplete: () => void
 }
 
@@ -467,7 +472,7 @@ function StepDone({ mode, streamsDir, convertResult, autoRule }: StepDoneProps) 
 
 type Step = 'setup' | 'convert' | 'auto-rule' | 'done'
 
-export function OnboardingModal({ isOpen, onComplete }: Props) {
+export function OnboardingModal({ isOpen, initialStreamsDir, onComplete }: Props) {
   const [step, setStep] = useState<Step>('setup')
   const [streamsDir, setStreamsDir] = useState('')
   const [selectedMode, setSelectedMode] = useState<StreamMode>('')
@@ -478,9 +483,7 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
   const [rulePattern, setRulePattern] = useState('*.{mkv,mp4}')
   const [createdRule, setCreatedRule] = useState<WatchRule | null>(null)
 
-  const pickDir = async () => {
-    const picked = await window.api.openDirectoryDialog()
-    if (!picked) return
+  const detectAt = useCallback(async (picked: string) => {
     setStreamsDir(picked)
     setDetection(null)
     setConvertResult(null)
@@ -497,7 +500,36 @@ export function OnboardingModal({ isOpen, onComplete }: Props) {
     } finally {
       setScanning(false)
     }
+  }, [])
+
+  const pickDir = async () => {
+    const picked = await window.api.openDirectoryDialog()
+    if (!picked) return
+    await detectAt(picked)
   }
+
+  // Reset state on every open transition so a re-trigger from Settings
+  // doesn't land the user on a stale step (e.g. 'done' from a prior run).
+  // When initialStreamsDir is provided, immediately run layout detection
+  // for it so the setup step renders pre-populated.
+  const prevOpenRef = useRef(false)
+  useEffect(() => {
+    const wasOpen = prevOpenRef.current
+    prevOpenRef.current = isOpen
+    if (wasOpen || !isOpen) return
+    setStep('setup')
+    setDetection(null)
+    setConvertResult(null)
+    setRecordingsDir('')
+    setRulePattern('*.{mkv,mp4}')
+    setCreatedRule(null)
+    setSelectedMode('')
+    if (initialStreamsDir) {
+      detectAt(initialStreamsDir)
+    } else {
+      setStreamsDir('')
+    }
+  }, [isOpen, initialStreamsDir, detectAt])
 
   const handleBack = () => {
     if (step === 'convert') setStep('setup')
