@@ -1,6 +1,32 @@
 import { app, BrowserWindow, shell, ipcMain, globalShortcut, screen, Tray, Menu, MenuItem, nativeImage } from 'electron'
 import { join } from 'path'
+import fs from 'fs'
 import Store from 'electron-store'
+
+// ── Diagnostic: trace every mkdir of a date-pattern folder ───────────────
+// A phantom "2024-06-18" stream folder keeps reappearing without explicit
+// user action. Monkey-patches fs.mkdir{Sync} so any call whose target
+// path contains a YYYY-MM-DD segment logs to console with a stack trace,
+// pinpointing the call site. Catches both the explicit date folder and
+// any path nested under it. Remove once the source is identified.
+const __DATE_PATH_RE = /[\\/](\d{4}-\d{2}-\d{2})(-\d+)?([\\/]|$)/
+const __origMkdirSync = fs.mkdirSync.bind(fs)
+const __origMkdirP = fs.promises.mkdir.bind(fs.promises)
+;(fs as unknown as { mkdirSync: typeof fs.mkdirSync }).mkdirSync = ((p: fs.PathLike, opts?: fs.MakeDirectoryOptions | number | string) => {
+  if (typeof p === 'string' && __DATE_PATH_RE.test(p)) {
+    console.warn('[date-folder mkdirSync]', p)
+    console.warn(new Error('mkdir call site').stack)
+  }
+  return __origMkdirSync(p, opts as fs.MakeDirectoryOptions)
+}) as typeof fs.mkdirSync
+;(fs.promises as unknown as { mkdir: typeof fs.promises.mkdir }).mkdir = ((p: fs.PathLike, opts?: fs.MakeDirectoryOptions | fs.Mode) => {
+  if (typeof p === 'string' && __DATE_PATH_RE.test(p)) {
+    console.warn('[date-folder mkdir async]', p)
+    console.warn(new Error('mkdir call site').stack)
+  }
+  return __origMkdirP(p, opts as fs.MakeDirectoryOptions)
+}) as typeof fs.promises.mkdir
+
 const is = { dev: process.env['NODE_ENV'] === 'development' || !!process.env['ELECTRON_RENDERER_URL'] }
 
 interface WindowState { x: number; y: number; width: number; height: number; maximized: boolean }

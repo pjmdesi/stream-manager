@@ -1,14 +1,24 @@
 # To-Do
 
+## Discovery
+
+* AlternativeTo listing (after 7-day account wait)
+* Product Hunt listing (when ready for a possible traffic spike)
+* Slant.co listing
+* dev.to / Medium / Hacker News post linking to the site
+* YouTube demo video with the URL in the description
+
 ## Improvement ideas
 
 1. Add shorts upload functionality. Needs to be able to upload to YouTube.
 2. Add clip on twitch functionality. This is a bit more complex than the YouTube one, because Twitch clips are created through an API call that takes a start and end time, and then Twitch processes the clip and makes it available after a few minutes. We would need to have some kind of system for checking the status of the clip creation and updating the app when it's ready. We could also allow the user to download the clip once it's ready, since Twitch doesn't provide a direct download link for clips like YouTube does for its shorts.
 3. Add some functionality to the series section item in the info side of the action panel for stream items. Allow the user to see a list of all the other episodes in a tooltip similar to the one that opens for the video counter cell. This one should open to the right, and the user should be able to enter the tooltip. It will display all the episodes in the series (format: [episode number]: [stream item title], including the one selected, which should be highlighted and not clickable) and allow the user to jump to that item when they click on it inside the tooltip.
+4. I think it might be useful to be able to see all the audio tracks separately in the timeline track. And select which ones to include in the final output. This would be especially useful for stream items that have multiple audio tracks, such as a game audio track and a microphone track. The user could then choose to include only the microphone track in the final output, for example, if they want to create a highlight reel of their commentary without the game audio. Or if they use audio markers for solely visual cues, they could choose to exclude those tracks from the final output as well. This would require some changes to the timeline track UI, such as adding a dropdown or checkbox for each audio track to allow the user to select which ones to include in the output. Or maybe there's checkboxes in the export clip modal that asks which tracks to include (all selected by default). Perhaps in an "advanced" dropdown.
+5. Fill out converter section in help modal to describe the conversion presets in detail and about importing/exporting presets as well.
 
 ## Bugs
 
-(none)
+1. When entering clipping mode, and the user has already initiated an audio merge, the message asking the user to merge audio still appears and offers to merge audio (even though it's already running). I did not test to see what happens if the user clicks the merge audio button in this scenario, but it shouldn't show regardless. If the user is already merging audio, it should just start clipping. Also, we should add a checkbox to the message that asks if the user does not want to see the message again, since it can be a bit annoying if you know what you're doing and don't need the reminder every time.
 
 ## Other ideas
 

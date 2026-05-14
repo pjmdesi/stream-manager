@@ -89,27 +89,35 @@ export interface ConversionJob {
   groupCompletionHook?: GroupCompletionHook
 }
 
+// All video presets begin with `-map 0:v? -map 0:a?` so EVERY audio track
+// in the source is preserved. Without explicit -map, ffmpeg's default
+// stream selection picks ONE audio track (the highest-bitrate) and
+// silently drops the rest — a data-loss bug for any source with multiple
+// tracks (game audio, mic, music, etc.). The `?` qualifier makes each
+// mapping optional so the preset still runs against pure-video or
+// pure-audio sources. Archive presets also map subtitles since MKV is
+// permissive enough to stream-copy any subtitle format.
 const BUILTIN_PRESETS: ConversionPreset[] = [
   {
     id: 'youtube-h264',
     name: 'YouTube Ready (H.264)',
-    description: 'Compress to 8Mbps H.264/AAC for YouTube upload',
-    ffmpegArgs: '-c:v libx264 -b:v 8M -maxrate 8M -bufsize 16M -c:a aac -b:a 192k -movflags +faststart',
+    description: 'Compress to 8Mbps H.264/AAC for YouTube upload. Preserves all audio tracks.',
+    ffmpegArgs: '-map 0:v? -map 0:a? -c:v libx264 -b:v 8M -maxrate 8M -bufsize 16M -c:a aac -b:a 192k -movflags +faststart',
     outputExtension: 'mp4',
     isBuiltin: true
   },
   {
     id: 'compress-h265',
     name: 'Compress VOD (H.265)',
-    description: 'Compress to 4Mbps H.265/AAC for smaller file size',
-    ffmpegArgs: '-c:v libx265 -b:v 4M -maxrate 4M -bufsize 8M -c:a aac -b:a 128k -tag:v hvc1',
+    description: 'Compress to 4Mbps H.265/AAC for smaller file size. Preserves all audio tracks.',
+    ffmpegArgs: '-map 0:v? -map 0:a? -c:v libx265 -b:v 4M -maxrate 4M -bufsize 8M -c:a aac -b:a 128k -tag:v hvc1',
     outputExtension: 'mp4',
     isBuiltin: true
   },
   {
     id: 'extract-audio',
-    name: 'Extract Audio Mix',
-    description: 'Merge all audio tracks to stereo MP3',
+    name: 'Extract Audio (First Track)',
+    description: 'Extract the first audio track to stereo MP3. MP3 is single-track so additional tracks are dropped — use a video preset to keep them all.',
     ffmpegArgs: '-vn -c:a libmp3lame -b:a 320k -ac 2',
     outputExtension: 'mp3',
     isBuiltin: true
@@ -117,32 +125,32 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
   {
     id: 'fast-preview',
     name: 'Fast Web Preview',
-    description: 'Low bitrate quick preview version for web',
-    ffmpegArgs: '-c:v libx264 -b:v 1M -maxrate 1M -bufsize 2M -c:a aac -b:a 96k -preset ultrafast -movflags +faststart',
+    description: 'Low bitrate quick preview version for web. Preserves all audio tracks.',
+    ffmpegArgs: '-map 0:v? -map 0:a? -c:v libx264 -b:v 1M -maxrate 1M -bufsize 2M -c:a aac -b:a 96k -preset ultrafast -movflags +faststart',
     outputExtension: 'mp4',
     isBuiltin: true
   },
   {
     id: 'lossless-copy',
     name: 'Lossless Copy (Remux to MP4)',
-    description: 'Stream copy to MP4 container (no re-encoding)',
-    ffmpegArgs: '-c:v copy -c:a copy',
+    description: 'Stream copy to MP4 container (no re-encoding). Preserves all audio tracks.',
+    ffmpegArgs: '-map 0:v? -map 0:a? -c:v copy -c:a copy',
     outputExtension: 'mp4',
     isBuiltin: true
   },
   {
     id: 'archive-av1',
     name: 'Archive (SVT-AV1)',
-    description: 'Cold storage archive — CRF 28 SVT-AV1, preserves fine detail at a strong size ratio. Auto-swaps to a hardware AV1 encoder (NVENC / QSV / AMF) when one is available.',
-    ffmpegArgs: '-c:v libsvtav1 -crf 28 -preset 6 -c:a aac -b:a 128k',
+    description: 'Cold storage archive — CRF 28 SVT-AV1, preserves fine detail at a strong size ratio. Keeps all audio tracks and subtitles. Auto-swaps to a hardware AV1 encoder (NVENC / QSV / AMF) when one is available.',
+    ffmpegArgs: '-map 0:v? -map 0:a? -map 0:s? -c:v libsvtav1 -crf 28 -preset 6 -c:a aac -b:a 128k -c:s copy',
     outputExtension: 'mkv',
     isBuiltin: true
   },
   {
     id: 'archive-h265',
     name: 'Archive (H.265)',
-    description: 'Cold storage archive — CRF 26 H.265, widely compatible. GPU-accelerated automatically if available.',
-    ffmpegArgs: '-c:v libx265 -crf 26 -c:a aac -b:a 128k',
+    description: 'Cold storage archive — CRF 26 H.265, widely compatible. Keeps all audio tracks and subtitles. GPU-accelerated automatically if available.',
+    ffmpegArgs: '-map 0:v? -map 0:a? -map 0:s? -c:v libx265 -crf 26 -c:a aac -b:a 128k -c:s copy',
     outputExtension: 'mkv',
     isBuiltin: true
   }

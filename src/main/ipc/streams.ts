@@ -1427,8 +1427,23 @@ export function registerStreamsIPC(): void {
     const onChange = () => notifyChange(win)
     dirWatcher.on('add', onChange)
     dirWatcher.on('unlink', onChange)
-    dirWatcher.on('addDir', onChange)
-    dirWatcher.on('unlinkDir', onChange)
+    dirWatcher.on('addDir', (p: string) => {
+      // Diagnostic: surface every date-named folder appearing in the
+      // streams root, with timestamp. Helps pin down the phantom
+      // "2024-06-18" reappearance. The mkdir monkey-patch in main/index
+      // catches what the app does; this catches anything else (cloud
+      // sync, manual creation, etc.). Remove once root cause is found.
+      if (DATE_FOLDER_RE.test(path.basename(p))) {
+        console.warn(`[streams-watcher addDir] ${new Date().toISOString()} ${p}`)
+      }
+      onChange()
+    })
+    dirWatcher.on('unlinkDir', (p: string) => {
+      if (DATE_FOLDER_RE.test(path.basename(p))) {
+        console.warn(`[streams-watcher unlinkDir] ${new Date().toISOString()} ${p}`)
+      }
+      onChange()
+    })
     dirWatcher.on('change', onChange)
     dirWatcher.on('error', err => console.warn('[streams:watchDir] watcher error:', err))
   }
