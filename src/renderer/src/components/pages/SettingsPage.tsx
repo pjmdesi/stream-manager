@@ -9,6 +9,7 @@ import { Input } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { DumpConvertExplainer } from '../DumpConvertExplainer'
 import type { ConversionPreset, ThumbnailTemplate } from '../../types'
+import { isClipExportCompatible } from '../../lib/clipExport'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -426,8 +427,8 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 onChange={e => set('clipPresetId', e.target.value)}
                 className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
               >
-                <option value="">— Copy stream (no re-encode) —</option>
-                {allPresets.map(p => (
+                <option value="">— Default (H.264 CRF 18 + AAC 192k) —</option>
+                {allPresets.filter(p => isClipExportCompatible(p.ffmpegArgs)).map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
@@ -439,7 +440,13 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 Selected preset not found — it may have been removed.
               </p>
             )}
-            <p className="text-xs text-gray-500">Converter preset used when exporting clips from the player. Leave blank to copy the stream without re-encoding.</p>
+            {local.clipPresetId && allPresets.find(p => p.id === local.clipPresetId) && !isClipExportCompatible(allPresets.find(p => p.id === local.clipPresetId)!.ffmpegArgs) && (
+              <p className="flex items-center gap-1 text-xs text-yellow-500">
+                <AlertTriangle size={11} />
+                Selected preset uses stream copy or is audio-only and can't be used for clip exports. Pick an encoding preset or leave blank.
+              </p>
+            )}
+            <p className="text-xs text-gray-500">Converter preset used when exporting clips from the player. Stream-copy and audio-only presets are filtered out — clips always re-encode because of trim/crop/bleep filters.</p>
           </div>
 
           <div className="flex flex-col gap-1">

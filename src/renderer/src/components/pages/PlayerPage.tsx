@@ -12,6 +12,7 @@ import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { Checkbox } from '../ui/Checkbox'
+import { isClipExportCompatible } from '../../lib/clipExport'
 
 /** Given an absolute file path and the streams root, find the file's stream
  *  folder and the canonical key used in _meta.json:
@@ -293,7 +294,7 @@ export interface ExportClipOptions {
 }
 
 function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsOutsideRegions, onConfirm, onClose }: ExportClipDialogProps) {
-  const [presets, setPresets] = useState<{ id: string; name: string }[]>([])
+  const [presets, setPresets] = useState<{ id: string; name: string; ffmpegArgs: string }[]>([])
   const [presetId, setPresetId] = useState(defaultPresetId)
   const [saveNextToSource, setSaveNextToSource] = useState(true)
   const [outputDir, setOutputDir] = useState('')
@@ -301,8 +302,21 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
 
   useEffect(() => {
     Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
-      .then(([b, i]) => setPresets([...b, ...i]))
+      .then(([b, i]) => setPresets(
+        [...b, ...i]
+          .filter(p => isClipExportCompatible(p.ffmpegArgs))
+          .map(p => ({ id: p.id, name: p.name, ffmpegArgs: p.ffmpegArgs }))
+      ))
   }, [])
+
+  // If the saved default preset is filtered out (stream-copy / audio-only),
+  // fall back to "" so the dialog opens on the default-encoding option
+  // rather than appearing to have a selection that won't actually work.
+  useEffect(() => {
+    if (presetId && presets.length > 0 && !presets.some(p => p.id === presetId)) {
+      setPresetId('')
+    }
+  }, [presets, presetId])
 
   const pickDir = async () => {
     const picked = await window.api.openDirectoryDialog()
@@ -339,11 +353,14 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
             onChange={e => setPresetId(e.target.value)}
             className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
           >
-            <option value="">— Copy stream (no re-encode) —</option>
+            <option value="">— Default (H.264 CRF 18 + AAC 192k) —</option>
             {presets.map(p => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Clip exports always re-encode (trim/crop/bleep filters require decoded frames), so stream-copy presets aren't shown.
+          </p>
         </div>
 
         {/* Save location */}

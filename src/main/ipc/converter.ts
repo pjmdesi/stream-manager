@@ -974,9 +974,42 @@ export function registerConverterIPC(): void {
     const outH = regionCrops.length > 0 ? Math.max(...regionCrops.map(c => c.cropH)) : Math.floor(maxCropH / 2) * 2
     const sampleRate  = fileInfo?.audioTracks?.[0]?.sampleRate ?? 48000
 
-    // -bf 0: disable B-frames — prevents DTS/PTS ordering confusion at concat boundaries
-    // -g 60: keyframe every 60 frames (~1s at 60fps) — simpler than expr: and works on GPU encoders
-    const rawCodecArgs = '-c:v libx264 -crf 18 -preset fast -bf 0 -g 60 -c:a aac -b:a 192k -ac 2'
+    // Honor the selected preset's ffmpeg args. The clip pipeline runs every
+    // segment through a filter_complex (trim, optional crop, optional bleep,
+    // concat) which produces decoded [vout]/[aout] streams — those can only
+    // be encoded, never stream-copied. So a preset that asks for `-c:v copy`
+    // or `-c:a copy` is fundamentally incompatible here and we surface a
+    // clear error instead of silently falling back. Audio-only presets
+    // (`-vn`) are also rejected since the filter graph always emits a video
+    // output. When no preset is selected the previous hardcoded defaults
+    // (libx264 CRF 18 + AAC 192k) apply as a sensible baseline.
+    //
+    // -bf 0: disable B-frames — prevents DTS/PTS ordering confusion at concat boundaries.
+    // -g 60: keyframe every 60 frames — simpler than `expr:` and works on GPU encoders.
+    // Both are appended after the preset args so they win against any
+    // preset-supplied values (last writer wins in ffmpeg arg parsing).
+    const DEFAULT_CLIP_CODEC_ARGS = '-c:v libx264 -crf 18 -preset fast -c:a aac -b:a 192k -ac 2'
+    const CONCAT_SAFETY_ARGS = '-bf 0 -g 60'
+    const presetArgsRaw = (job.preset?.ffmpegArgs ?? '').trim()
+    // Strip `-map ...` directives — the filter_complex outputs are explicit
+    // and we always map [vout] + [aout]. Any -map in the preset would be a
+    // duplicate or, worse, a reference to nonexistent input streams (since
+    // the input files are now temp MKVs in tempDir, not the source).
+    const stripMapDirectives = (args: string): string => {
+      const toks = args.split(/\s+/).filter(Boolean)
+      const out: string[] = []
+      for (let i = 0; i < toks.length; i++) {
+        if (toks[i] === '-map') { i++; continue }
+        out.push(toks[i])
+      }
+      return out.join(' ')
+    }
+    const presetArgs = stripMapDirectives(presetArgsRaw)
+    const hasVideoCopy = /(?:^|\s)(?:-c:v|-vcodec)\s+copy(?:\s|$)/.test(presetArgs)
+    const hasAudioCopy = /(?:^|\s)(?:-c:a|-acodec)\s+copy(?:\s|$)/.test(presetArgs)
+    const isAudioOnly  = /(?:^|\s)-vn(?:\s|$)/.test(presetArgs)
+    const baseCodecArgs = presetArgs || DEFAULT_CLIP_CODEC_ARGS
+    const rawCodecArgs = `${baseCodecArgs} ${CONCAT_SAFETY_ARGS}`
     const gpuCodecArgs = await applyGpuAcceleration(rawCodecArgs)
     const outputArgs = ['-map', '[vout]', '-map', '[aout]', ...gpuCodecArgs.split(/\s+/).filter(Boolean)]
 
@@ -1000,6 +1033,21 @@ export function registerConverterIPC(): void {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
       cancellers.delete(id); pausers.delete(id); resumers.delete(id)
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobError', { jobId: id, error: err.message })
+    }
+
+    // Reject incompatible presets after onError is wired so the user sees
+    // the failure in the converter page exactly like any other job error.
+    if (hasVideoCopy || hasAudioCopy) {
+      onError(new Error(
+        `Stream-copy presets (-c:v copy / -c:a copy) can't be used for clip exports — clips are always re-encoded because of trim/crop/bleep filters. Pick an encoding preset instead.`
+      ))
+      return id
+    }
+    if (isAudioOnly) {
+      onError(new Error(
+        `Audio-only presets (-vn) aren't supported for clip exports. Pick a video-capable preset.`
+      ))
+      return id
     }
 
     win?.webContents.send('converter:jobProgress', { jobId: id, percent: 0 })
