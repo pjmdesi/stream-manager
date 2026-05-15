@@ -18,6 +18,7 @@ import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitle
 import { useStore } from '../../hooks/useStore'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { GhostTextArea } from '../ui/GhostTextArea'
 import type { GhostTextAreaHandle } from '../ui/GhostTextArea'
 import { Button } from '../ui/Button'
@@ -57,7 +58,7 @@ function toFileUrl(absPath: string): string {
 //   - When `isLocal` is true → renders <img> normally. If the load fails (file
 //     was supposedly local but isn't), falls back to the cloud-download flow.
 
-function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, className, placeholderClassName, placeholderStyle, draggable, iconSize = 14, onLoad }: {
+function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, className, style, placeholderClassName, placeholderStyle, draggable, iconSize = 14, onLoad }: {
   path: string
   thumbsKey: number
   /** False = file is a cloud placeholder. Default true (legacy callers / sites
@@ -67,6 +68,9 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
    *  active image in carousels/lightbox so the user can preview by navigating. */
   hydrate?: boolean
   className?: string
+  /** Inline style for the loaded <img>. Useful for size constraints that
+   *  can't be expressed cleanly in Tailwind (e.g. min(…, calc(…))). */
+  style?: React.CSSProperties
   /** Classes applied to the placeholder element (cloud / syncing / error
    *  states). When omitted, falls back to `className`. Use this when the
    *  caller's className is image-specific (e.g. object-contain, max-w-[…]) and
@@ -154,6 +158,7 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
       <img
         src={src}
         className={className}
+        style={style}
         draggable={draggable}
         onLoad={() => { setStatus('loaded'); onLoad?.() }}
         onError={() => setStatus('syncing')}
@@ -248,38 +253,36 @@ function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, chil
     setPos({ top: rect.bottom + 6, left: rect.left })
     setVisible(true)
 
-    // Re-check status on every hover for any video that doesn't yet have
-    // a usable cached duration. Previously this ran only once per
-    // tooltip mount, which meant a file marked offline at first hover
-    // stayed offline in the UI even after the user manually hydrated it
-    // through Windows. Files we already have a real duration for are
-    // skipped — no point re-probing those.
-    const needsCheck = videos.filter(v => {
-      const entry = videoMap?.[videoMapKey(folderPath, v)]
-      if (typeof entry?.duration === 'number' && entry.duration > 0) return false
-      const localDur = durations[v]
-      if (typeof localDur === 'number' && localDur > 0) return false
-      return true
-    })
-    if (needsCheck.length === 0) return
-
-    const localFlags = await window.api.checkLocalFiles(needsCheck)
-    for (let i = 0; i < needsCheck.length; i++) {
-      const v = needsCheck[i]
-      if (!localFlags[i]) {
-        // Still offline. Mark (idempotently) so the cloud icon shows.
+    // Re-check hydration on every hover for ALL files. A cached duration
+    // says nothing about the file's *current* hydration status — duration
+    // was stored from the last probe, possibly before the file got
+    // offloaded again. Skipping the hydration check for files with a
+    // known duration meant the cloud icon could lie indefinitely.
+    // Duration probes, on the other hand, are expensive and idempotent
+    // for unchanged files — those we still skip when we have a value.
+    if (videos.length === 0) return
+    const localFlags = await window.api.checkLocalFiles(videos)
+    for (let i = 0; i < videos.length; i++) {
+      const v = videos[i]
+      const isLocal = localFlags[i]
+      if (!isLocal) {
+        // Offline — flag for the cloud icon, skip the probe.
         setOfflineFiles(prev => prev.has(v) ? prev : new Set([...prev, v]))
         continue
       }
-      // Now local — clear any stale offline mark from a previous hover.
+      // Local — clear any stale offline mark from a previous hover.
       setOfflineFiles(prev => {
         if (!prev.has(v)) return prev
         const next = new Set(prev)
         next.delete(v)
         return next
       })
-      // Probe in the background; state updates trigger a re-render once
-      // each settles. Errors fall through to the `--:--:--` placeholder.
+      // Probe only when we don't already have a usable duration.
+      const entry = videoMap?.[videoMapKey(folderPath, v)]
+      if (typeof entry?.duration === 'number' && entry.duration > 0) continue
+      const localDur = durations[v]
+      if (typeof localDur === 'number' && localDur > 0) continue
+      // Errors fall through to the `--:--:--` placeholder.
       window.api.probeFile(v)
         .then(info => setDurations(prev => ({ ...prev, [v]: info.duration })))
         .catch(() => setDurations(prev => ({ ...prev, [v]: null })))
@@ -295,7 +298,17 @@ function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, chil
   useLayoutEffect(() => {
     if (!visible || !anchorRef.current || !tooltipRef.current) return
     const anchor = anchorRef.current.getBoundingClientRect()
-    const tip = tooltipRef.current.getBoundingClientRect()
+    // Use scrollHeight/scrollWidth, not getBoundingClientRect, for the
+    // cap decisions. The bounding rect returns the *clamped* size when
+    // maxHeight/maxWidth is already applied — using it caused an
+    // infinite update loop on tall tooltips:
+    //   iter 1: natural height 800 > space 600 → apply maxHeight=600
+    //   iter 2: rect height now 600, fits in space → drop maxHeight
+    //   iter 3: natural height 800 again → re-apply cap → loop
+    // scrollHeight/scrollWidth always report the natural content size
+    // regardless of the cap, so the decision stays stable.
+    const tipNaturalHeight = tooltipRef.current.scrollHeight
+    const tipNaturalWidth = tooltipRef.current.scrollWidth
     const vw = window.innerWidth
     const vh = window.innerHeight
     const GAP = 6
@@ -305,10 +318,10 @@ function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, chil
     const spaceBelow = vh - anchor.bottom - GAP - PAD
     const spaceAbove = anchor.top - GAP - PAD
     const next: { top: number; left: number; maxHeight?: number; maxWidth?: number } = { top: anchor.bottom + GAP, left: anchor.left }
-    if (tip.height <= spaceBelow) {
+    if (tipNaturalHeight <= spaceBelow) {
       next.top = anchor.bottom + GAP
-    } else if (tip.height <= spaceAbove) {
-      next.top = anchor.top - tip.height - GAP
+    } else if (tipNaturalHeight <= spaceAbove) {
+      next.top = anchor.top - tipNaturalHeight - GAP
     } else if (spaceBelow >= spaceAbove) {
       next.top = anchor.bottom + GAP
       next.maxHeight = Math.max(80, spaceBelow)
@@ -322,8 +335,8 @@ function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, chil
     // is `1fr` with `truncate`, so it only ellipsises when the grid is
     // forced narrower than its natural content width.
     const maxAvailWidth = vw - PAD * 2
-    if (tip.width > maxAvailWidth) next.maxWidth = maxAvailWidth
-    const effectiveWidth = Math.min(tip.width, next.maxWidth ?? tip.width)
+    if (tipNaturalWidth > maxAvailWidth) next.maxWidth = maxAvailWidth
+    const effectiveWidth = Math.min(tipNaturalWidth, next.maxWidth ?? tipNaturalWidth)
     if (anchor.left + effectiveWidth > vw - PAD) {
       next.left = Math.max(PAD, vw - effectiveWidth - PAD)
     }
@@ -465,6 +478,16 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
     filmstripBtnRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
   }, [index])
 
+  // Reserved vertical space below the image. Because the wrapper uses
+  // `justify-center`, any content height takes equal margin above AND
+  // below — so to leave a real gap above the filmstrip the reservation
+  // must be roughly *twice* the filmstrip's footprint (~76px) plus the
+  // button row (~36px) plus the title bar offset (`top-10` = 40px) and a
+  // bit of breathing room. ~16rem (256px) gives a clean ~14px gap at
+  // every window size. The 75vh cap keeps the image from getting
+  // absurdly large on tall monitors.
+  const IMAGE_MAX_H = 'min(calc(100vh - 16rem), 75vh)'
+
   return (
     <div
       className="fixed inset-x-0 bottom-0 top-10 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm select-none"
@@ -473,14 +496,14 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
       {/* Close */}
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/25 text-white transition-colors"
+        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/25 text-white transition-colors z-10"
       >
         <X size={20} />
       </button>
 
       {/* Counter */}
       {total > 1 && (
-        <div className="absolute top-5 left-1/2 -translate-x-1/2 text-xs text-gray-400 font-mono bg-black/50 px-3 py-1 rounded-full">
+        <div className="absolute top-5 left-1/2 -translate-x-1/2 text-xs text-gray-400 font-mono bg-black/50 px-3 py-1 rounded-full z-10">
           {index + 1} / {total}
         </div>
       )}
@@ -489,32 +512,44 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
       {index > 0 && (
         <button
           onClick={e => { e.stopPropagation(); onNavigate(index - 1) }}
-          className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/25 text-white transition-colors"
+          className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/25 text-white transition-colors z-10"
         >
           <ChevronLeft size={28} />
         </button>
       )}
 
-      {/* Main image */}
-      <div className="flex flex-col items-center relative" onClick={e => e.stopPropagation()}>
-        <div className="relative">
-          <ThumbImage
-            key={currentPath}
-            path={currentPath}
-            thumbsKey={thumbsKey ?? 0}
-            isLocal={currentIsLocal}
-            hydrate
-            className="max-h-[75vh] max-w-[85vw] object-contain shadow-2xl shadow-black"
-            placeholderClassName="rounded shadow-2xl shadow-black"
-            placeholderStyle={{
-              // Largest 16:9 box that fits both viewport constraints
-              width: 'min(85vw, calc(75vh * 16 / 9))',
-              aspectRatio: '16 / 9',
-            }}
-            iconSize={48}
-            draggable={false}
-          />
-        </div>
+      {/* Next arrow */}
+      {index < total - 1 && (
+        <button
+          onClick={e => { e.stopPropagation(); onNavigate(index + 1) }}
+          className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/25 text-white transition-colors z-10"
+        >
+          <ChevronRight size={28} />
+        </button>
+      )}
+
+      {/* Image + caption/button row, centered. The image carries a
+          viewport-relative max-height that already accounts for the
+          filmstrip and button row, so on short windows it shrinks to
+          leave both visible rather than overflowing them. */}
+      <div className="flex flex-col items-center" onClick={e => e.stopPropagation()}>
+        <ThumbImage
+          key={currentPath}
+          path={currentPath}
+          thumbsKey={thumbsKey ?? 0}
+          isLocal={currentIsLocal}
+          hydrate
+          className="max-w-[85vw] object-contain shadow-2xl shadow-black"
+          style={{ maxHeight: IMAGE_MAX_H }}
+          placeholderClassName="rounded shadow-2xl shadow-black"
+          placeholderStyle={{
+            aspectRatio: '16 / 9',
+            width: `min(85vw, calc(${IMAGE_MAX_H} * 16 / 9))`,
+            maxHeight: IMAGE_MAX_H,
+          }}
+          iconSize={48}
+          draggable={false}
+        />
         <div className="mt-3 flex items-center gap-3">
           <p className="text-sm text-gray-400 font-mono">{filename}</p>
           {onSetAsThumbnail && (
@@ -534,48 +569,40 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
         </div>
       </div>
 
-      {/* Next arrow */}
-      {index < total - 1 && (
-        <button
-          onClick={e => { e.stopPropagation(); onNavigate(index + 1) }}
-          className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/25 text-white transition-colors"
-        >
-          <ChevronRight size={28} />
-        </button>
-      )}
-
-      {/* Filmstrip */}
+      {/* Filmstrip — absolute at the bottom; the image's max-height
+          already reserves space for it so it never overlaps the
+          image/button row. */}
       {total > 1 && (
         <div className="absolute inset-x-0 bottom-5 px-5 flex justify-center pointer-events-none">
-        <div
-          className="flex items-center gap-2 px-4 py-2 bg-black/60 rounded-xl max-w-full overflow-x-auto pointer-events-auto"
-          onClick={e => e.stopPropagation()}
-        >
-          {thumbnails.map((t, i) => (
-            <button
-              key={t}
-              ref={el => { filmstripBtnRefs.current[i] = el }}
-              onClick={() => onNavigate(i)}
-              className={`shrink-0 h-10 aspect-video bg-navy-600 rounded overflow-hidden border-2 transition-all ${
-                i === index
-                  ? 'border-purple-500 opacity-100 scale-105'
-                  : 'border-transparent opacity-40 hover:opacity-75'
-              }`}
-            >
-              <div className="relative w-full h-full">
-                <ThumbImage
-                  path={t}
-                  thumbsKey={thumbsKey ?? 0}
-                  isLocal={localFlags?.[i] ?? true}
-                  className="w-full h-full object-cover"
-                  placeholderClassName="w-full h-full"
-                  iconSize={10}
-                  draggable={false}
-                />
-              </div>
-            </button>
-          ))}
-        </div>
+          <div
+            className="flex items-center gap-2 px-4 py-2 bg-black/60 rounded-xl max-w-full overflow-x-auto pointer-events-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            {thumbnails.map((t, i) => (
+              <button
+                key={t}
+                ref={el => { filmstripBtnRefs.current[i] = el }}
+                onClick={() => onNavigate(i)}
+                className={`shrink-0 h-10 aspect-video bg-navy-600 rounded overflow-hidden border-2 transition-all ${
+                  i === index
+                    ? 'border-purple-500 opacity-100 scale-105'
+                    : 'border-transparent opacity-40 hover:opacity-75'
+                }`}
+              >
+                <div className="relative w-full h-full">
+                  <ThumbImage
+                    path={t}
+                    thumbsKey={thumbsKey ?? 0}
+                    isLocal={localFlags?.[i] ?? true}
+                    className="w-full h-full object-cover"
+                    placeholderClassName="w-full h-full"
+                    iconSize={10}
+                    draggable={false}
+                  />
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -1512,6 +1539,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
       title={title}
       width="2xl"
       dismissible={false}
+      autoFocus={mode === 'new' ? 'initial-only' : 'none'}
       footer={
         <>
           {mode === 'edit' && isPastStream && (
@@ -2675,6 +2703,11 @@ export function StreamsPage({
 }) {
   const { config, updateConfig, loading: configLoading } = useStore()
 
+  // Mirrors the Comments column's `hidden xl:table-cell` rule. Used to
+  // size colSpans that cross the comments slot — see ExpandedStreamPanel
+  // for context.
+  const isXlViewport = useMediaQuery('(min-width: 1280px)')
+
   const MIN_THUMB_WIDTH = 85
   const MAX_THUMB_WIDTH = 170
   const [thumbWidth, setThumbWidth] = useState(() => config.listThumbWidth ?? MIN_THUMB_WIDTH)
@@ -2723,6 +2756,26 @@ export function StreamsPage({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
       updateConfig({ listThumbWidth: dragThumbWidthRef.current })
+      // Browsers fire `click` on the deepest common ancestor of mousedown
+      // and mouseup. When the user drags past the column's min/max width
+      // and releases outside the handle, that ancestor is the row — so
+      // the action panel would toggle even though the handle is tagged
+      // `data-no-row-toggle`. Swallow exactly one click in the capture
+      // phase to neutralise the post-drag synthesis. A setTimeout fallback
+      // detaches the listener even if no click fires (defensive — keeps
+      // a future legitimate click from being eaten).
+      let removed = false
+      const detach = () => {
+        if (removed) return
+        removed = true
+        window.removeEventListener('click', swallowClick, true)
+      }
+      const swallowClick = (ev: MouseEvent) => {
+        ev.stopPropagation()
+        detach()
+      }
+      window.addEventListener('click', swallowClick, true)
+      setTimeout(detach, 0)
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -3591,6 +3644,12 @@ export function StreamsPage({
   const selectionContainsArchiving = selectedPaths.size > 0 && folders.some(
     f => selectedPaths.has(selectionKey(f)) && isFolderArchiving(f)
   )
+  // True iff every selected folder is already archived. We only disable the
+  // bulk Archive button in this all-archived case; partial selections still
+  // proceed so users can archive the non-archived items in a mixed selection.
+  const selectionAllArchived = selectedPaths.size > 0 && folders.filter(
+    f => selectedPaths.has(selectionKey(f))
+  ).every(f => f.meta?.archived)
 
   // ── Main view ────────────────────────────────────────────────────────────
   return (
@@ -3664,13 +3723,17 @@ export function StreamsPage({
                 </Tooltip>
               </>
             )}
-            <Tooltip content={selectionContainsArchiving ? 'One or more selected streams are already being archived' : 'Archive selected streams'} side="bottom">
+            <Tooltip content={
+              selectionContainsArchiving ? 'One or more selected streams are already being archived'
+                : selectionAllArchived ? 'All selected streams are already archived'
+                : 'Archive selected streams'
+            } side="bottom">
               <Button
                 variant="primary"
                 size="sm"
                 icon={<Archive size={14} />}
                 onClick={clickArchive}
-                disabled={selectedPaths.size === 0 || selectionContainsArchiving}
+                disabled={selectedPaths.size === 0 || selectionContainsArchiving || selectionAllArchived}
               >
                 <span className="hidden wide:inline">Archive {selectedPaths.size > 0 ? `(${selectedPaths.size})` : ''}</span>
               </Button>
@@ -4109,7 +4172,7 @@ export function StreamsPage({
             </thead>
             <tbody>
               {filteredFolders.length === 0 ? (
-                <tr><td colSpan={selectMode ? 8 : 7} className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</td></tr>
+                <tr><td colSpan={(selectMode ? 8 : 7) - (isXlViewport ? 0 : 1)} className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</td></tr>
               ) : filteredFolders.map((folder, i) => {
                 const pending = isPendingStream(folder, today())
                 const rowKey = isDumpMode ? folder.date : folder.folderPath
@@ -5267,9 +5330,13 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             </div>
           )}
         </div>
-        {/* Resize handle */}
+        {/* Resize handle. The `data-no-row-toggle` marker keeps the
+            synthetic `click` event that fires when mouseup lands back
+            on the handle (i.e. a short drag) from bubbling up to
+            handleRowClick and toggling the action panel. */}
         <div
           className="group/resize absolute top-0 right-0 w-2 h-full cursor-ew-resize z-10"
+          data-no-row-toggle
           onMouseDown={onThumbResizeStart}
         >
           <div className="absolute top-0 right-0 w-px h-full bg-purple-500 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
@@ -5545,6 +5612,12 @@ function ExpandedStreamPanel({
   onOffload, onPinLocal,
 }: ExpandedPanelProps) {
   const meta = folder.meta
+  // The Comments column is hidden below Tailwind's xl breakpoint (1280px).
+  // table-fixed still reserves width for its hidden <th>, so a static
+  // colSpan that crosses the comments slot ends up wider than the visible
+  // row. Shrink the colSpan by one when comments are hidden.
+  const isXl = useMediaQuery('(min-width: 1280px)')
+  const visibleColCount = (selectMode ? 8 : 7) - (isXl ? 0 : 1)
   const series = meta?.ytSeason || meta?.ytEpisode
     ? `S${meta?.ytSeason || '1'} · E${meta?.ytEpisode || '?'}${totalEpisodes > 0 ? ` of ${totalEpisodes}` : ''}`
     : null
@@ -5559,7 +5632,7 @@ function ExpandedStreamPanel({
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18, ease: 'easeOut' }}
     >
-      <td colSpan={selectMode ? 8 : 7} className="p-0 border-b border-white/5 bg-white/[0.015]">
+      <td colSpan={visibleColCount} className="p-0 border-b border-white/5 bg-white/[0.015]">
         <motion.div
           initial={{ height: 0 }}
           animate={{ height: 'auto' }}
@@ -5699,8 +5772,16 @@ function ExpandedStreamPanel({
               </Tooltip>
               <div className="w-px h-3.5 bg-white/10 mx-1" />
               {videoCount > 0 && (
-                <Tooltip content={isArchiving ? 'Archive in progress' : 'Archive this stream'}>
-                  <button onClick={onArchive} disabled={isArchiving} className={PANEL_ACTION_BUTTON_GREEN}>
+                <Tooltip content={
+                  meta?.archived ? 'Already archived — remove archive status in metadata to re-archive'
+                    : isArchiving ? 'Archive in progress'
+                    : 'Archive this stream'
+                }>
+                  <button
+                    onClick={onArchive}
+                    disabled={isArchiving || !!meta?.archived}
+                    className={PANEL_ACTION_BUTTON_GREEN}
+                  >
                     <Archive size={12} />
                   </button>
                 </Tooltip>

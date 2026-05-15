@@ -90,10 +90,21 @@ export function useThumbnailStrip(
         vid.currentTime = time
       })
 
+    // Wait for HAVE_FUTURE_DATA (readyState >= 3, fired as `canplay`) so
+    // the first decoded frame is actually displayable. Resolving on
+    // `loadedmetadata` (readyState 1) was enough for dimensions but not
+    // for pixel data, so the first captureAt(0) would draw an
+    // un-decoded video to the canvas and produce a black thumbnail —
+    // the cached version then persisted that black frame indefinitely.
     const ready = new Promise<void>(resolve => {
-      if (vid.readyState >= 1) { resolve(); return }
-      vid.onloadedmetadata = () => resolve()
-      vid.onerror          = () => resolve()
+      if (vid.readyState >= 3) { resolve(); return }
+      const finish = () => {
+        vid.removeEventListener('canplay', finish)
+        vid.removeEventListener('error', finish)
+        resolve()
+      }
+      vid.addEventListener('canplay', finish)
+      vid.addEventListener('error', finish)
     })
 
     const destroy = () => { vid.src = '' }
@@ -132,8 +143,16 @@ export function useThumbnailStrip(
       const { captureAt, ready, destroy } = makeCapturer(videoUrl, videoWidth, videoHeight)
       await ready
 
+      // First slot uses a small positive offset rather than 0 so the
+      // capture path always goes through a real `seeked` event. A
+      // detached <video> that has never seeked won't have a frame
+      // presented for `drawImage`, so the fast-path at currentTime=0
+      // captured a black canvas. The browser snaps the seek to the
+      // nearest keyframe (usually t=0), so the frame still represents
+      // the start of the video — just with the decoder warmed up.
+      const FIRST_FRAME_OFFSET = Math.min(0.04, duration / (FIXED_COUNT * 2))
       const timecodes: number[] = Array.from({ length: FIXED_COUNT }, (_, i) =>
-        i === 0 ? 0 : i === FIXED_COUNT - 1 ? duration : (i / (FIXED_COUNT - 1)) * duration
+        i === 0 ? FIRST_FRAME_OFFSET : i === FIXED_COUNT - 1 ? duration : (i / (FIXED_COUNT - 1)) * duration
       )
 
       // Frames are deduped by actualTime: when the browser snaps two

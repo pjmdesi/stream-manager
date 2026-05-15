@@ -11,6 +11,7 @@ import { FileDropZone } from '../ui/FileDropZone'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
+import { Checkbox } from '../ui/Checkbox'
 
 /** Given an absolute file path and the streams root, find the file's stream
  *  folder and the canonical key used in _meta.json:
@@ -795,7 +796,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   initialFile?: PendingFile | null
   onNavigateToConverter?: () => void
 }) {
-  const { config } = useStore()
+  const { config, updateConfig } = useStore()
   const { videoRef, state, loadFile, extractTracks, cancelExtraction, resetExtraction, clearError, closeVideo, seek, fastSeek, togglePlay, audioElements } = useVideoPlayer()
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [editingTimecode, setEditingTimecode] = useState(false)
@@ -1257,6 +1258,17 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   // Multi-track warning modal before entering clip mode
   const [clipModeModal, setClipModeModal] = useState<'warn' | 'merge' | null>(null)
   const pendingClipAfterMerge = useRef(false)
+  // Tracks the "don't show this again" checkbox inside the warn modal —
+  // persisted to config when the user confirms via either footer action.
+  const [warnDontShowAgain, setWarnDontShowAgain] = useState(false)
+  // Reset the checkbox each time the modal closes so a previous session's
+  // toggle doesn't carry over into the next open.
+  useEffect(() => {
+    if (clipModeModal === null) setWarnDontShowAgain(false)
+  }, [clipModeModal])
+  const commitWarnDontShowAgain = useCallback(() => {
+    if (warnDontShowAgain) updateConfig({ skipClipMergeWarning: true })
+  }, [warnDontShowAgain, updateConfig])
 
   const [clipFocus, setClipFocus] = useState(false)
   const clipFocusRef = useRef(false)
@@ -2502,11 +2514,15 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         if (k === 'k' || k === 'K') { e.preventDefault(); effectiveTogglePlay(); return }
         if (k === 'l' || k === 'L') { e.preventDefault(); skip(10);  return }
 
-        // C — toggle clip mode (mirror the toolbar button's logic)
+        // C — toggle clip mode (mirror the toolbar button's logic). Show
+        // the merge-warning modal only when a merge is genuinely needed
+        // and not already running, and the user hasn't opted out.
         if (k === 'c' || k === 'C') {
           e.preventDefault()
           if (isClipModeRef.current) exitClipMode()
-          else if (multiTrack && !tracksExtracted) setClipModeModal('warn')
+          else if (multiTrack && !tracksExtracted && !isExtracting && !config.skipClipMergeWarning) {
+            setClipModeModal('warn')
+          }
           else setIsClipMode(true)
           return
         }
@@ -2605,7 +2621,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     return () => document.removeEventListener('keydown', handler)
   }, [
     clipModeModal, draftPendingDelete, showExportDialog,
-    effectiveTogglePlay, skip, stepFrame, multiTrack, tracksExtracted, exitClipMode,
+    effectiveTogglePlay, skip, stepFrame, multiTrack, tracksExtracted, isExtracting,
+    config.skipClipMergeWarning, exitClipMode,
     setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
     closeVideo, state.filePath, addSegment, splitSegment,
     activeBleepId, flatSessionItems, loadFile, loadDraft, activeDraftId,
@@ -3829,7 +3846,10 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           reopenClipOutput(currentVideoClip.clipOf, currentVideoClip.clipState)
                           return
                         }
-                        if (multiTrack && !tracksExtracted) { setClipModeModal('warn'); return }
+                        if (multiTrack && !tracksExtracted && !isExtracting && !config.skipClipMergeWarning) {
+                          setClipModeModal('warn')
+                          return
+                        }
                         setIsClipMode(true)
                       }}
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed bg-blue-950/40 border-blue-500/30 text-blue-400 hover:bg-blue-950/60"
@@ -4217,10 +4237,10 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         footer={
           clipModeModal === 'warn' ? (
             <>
-              <Button variant="ghost" size="sm" onClick={() => { setClipModeModal(null); setIsClipMode(true) }}>
+              <Button variant="ghost" size="sm" onClick={() => { commitWarnDontShowAgain(); setClipModeModal(null); setIsClipMode(true) }}>
                 Continue anyway
               </Button>
-              <Button variant="primary" size="sm" onClick={() => setClipModeModal('merge')}>
+              <Button variant="primary" size="sm" onClick={() => { commitWarnDontShowAgain(); setClipModeModal('merge') }}>
                 Merge audio now
               </Button>
             </>
@@ -4256,6 +4276,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
             <p className="text-xs text-gray-500 leading-relaxed pl-[23px]">
               Merging combines all tracks so you hear everything while clipping. Exporting always includes all audio tracks. Merging takes time to process.
             </p>
+            <div className="pl-[23px] pt-1">
+              <Checkbox
+                checked={warnDontShowAgain}
+                onChange={setWarnDontShowAgain}
+                label="Don't show this again"
+              />
+            </div>
           </div>
         )}
 

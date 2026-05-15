@@ -11,6 +11,19 @@ interface ModalProps {
   dismissible?: boolean
   /** When true, skip the fixed overlay + backdrop (caller handles positioning and animation) */
   noOverlay?: boolean
+  /**
+   * Auto-focus policy:
+   *   'default'      — focus first input on open + watch footer for a
+   *                    primary action that transitions from disabled to
+   *                    enabled and refocus it. Right for most modals.
+   *   'initial-only' — focus first input on open, then leave focus alone.
+   *                    Right for long forms where re-focusing on every
+   *                    `disabled` change steals focus mid-edit.
+   *   'none'         — never auto-focus anything. Right for edit-mode
+   *                    forms where the user opens the modal already
+   *                    knowing what they want to change.
+   */
+  autoFocus?: 'default' | 'initial-only' | 'none'
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -22,6 +35,7 @@ export const Modal: React.FC<ModalProps> = ({
   footer,
   dismissible = true,
   noOverlay = false,
+  autoFocus = 'default',
 }) => {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -37,25 +51,31 @@ export const Modal: React.FC<ModalProps> = ({
     }
   }, [isOpen, onClose, noOverlay])
 
-  // Auto-focus rules: when the modal opens, focus the first interactive
-  // input in the body (so the user can start typing immediately). If the
-  // body has no inputs (info-only confirm modals), focus the rightmost
-  // footer "action" button — primary / danger / success variants, marked
-  // via Button's data-variant attribute — so Enter confirms. Children
-  // that explicitly manage their own focus opt out by claiming focus
-  // first; we detect that via document.activeElement and bail.
+  // Auto-focus is controlled by the `autoFocus` prop (see ModalProps docs).
   //
-  // A MutationObserver on the footer watches for `disabled` attribute
-  // changes so a primary button that starts disabled (e.g. while the
-  // modal loads its initial data) still gets focus the moment it enables.
+  // On open ('default' or 'initial-only'): focus the first interactive
+  // input in the body. If there are no inputs (info-only confirm modals),
+  // focus the rightmost footer action button (primary / danger / success
+  // via Button's data-variant) so Enter confirms. Children that claim
+  // focus themselves (autoFocus on a deeper element) opt out — we detect
+  // that via document.activeElement and bail.
+  //
+  // On enable ('default' only): a MutationObserver on the footer watches
+  // for `disabled` attribute changes. When the primary action transitions
+  // from disabled to enabled — e.g. a modal that starts disabled while
+  // its initial data loads — we move focus to it. This observer NEVER
+  // re-focuses inputs; doing so would steal focus mid-edit on long forms
+  // (any chip removal or button click that drops the focused element from
+  // the DOM would otherwise trigger an input refocus).
   const bodyRef = useRef<HTMLDivElement>(null)
   const footerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!isOpen) return
+    if (autoFocus === 'none') return
 
     const ACTION_SELECTOR = 'button[data-variant="primary"]:not([disabled]), button[data-variant="danger"]:not([disabled]), button[data-variant="success"]:not([disabled])'
 
-    const tryFocus = () => {
+    const focusInitial = () => {
       const body = bodyRef.current
       if (body && body.contains(document.activeElement)) return // child claimed focus
 
@@ -78,34 +98,38 @@ export const Modal: React.FC<ModalProps> = ({
       if (all.length > 0) all[all.length - 1].focus()
     }
 
-    // setTimeout(0) lets children's mount effects (autoFocus props, refs,
-    // etc.) run first so we can detect them via activeElement.
-    const initial = setTimeout(tryFocus, 0)
-
-    let observer: MutationObserver | null = null
-    const obsTimer = setTimeout(() => {
+    const focusPrimaryActionIfIdle = () => {
+      const focused = document.activeElement as HTMLElement | null
+      // Leave the user alone if focus is already on a real interactive
+      // element somewhere in the document — they're using the modal.
+      if (focused && focused !== document.body && focused.tagName !== 'HTML') return
       const footer = footerRef.current
       if (!footer) return
-      observer = new MutationObserver(() => {
-        // Only re-focus when nothing in the modal currently holds keyboard
-        // focus, or when focus is on a fallback (cancel) button. This
-        // avoids stealing focus from a user who has Tabbed somewhere.
-        const focused = document.activeElement as HTMLElement | null
-        if (!focused) { tryFocus(); return }
-        if (focused.matches?.(ACTION_SELECTOR)) return
-        // If user focused an input or some other body element, leave them.
-        if (bodyRef.current?.contains(focused)) return
-        tryFocus()
-      })
-      observer.observe(footer, { attributes: true, subtree: true, attributeFilter: ['disabled'] })
-    }, 0)
+      const action = footer.querySelectorAll<HTMLButtonElement>(ACTION_SELECTOR)
+      if (action.length > 0) action[action.length - 1].focus()
+    }
+
+    // setTimeout(0) lets children's mount effects (autoFocus props, refs,
+    // etc.) run first so we can detect them via activeElement.
+    const initial = setTimeout(focusInitial, 0)
+
+    let observer: MutationObserver | null = null
+    let obsTimer: ReturnType<typeof setTimeout> | null = null
+    if (autoFocus === 'default') {
+      obsTimer = setTimeout(() => {
+        const footer = footerRef.current
+        if (!footer) return
+        observer = new MutationObserver(focusPrimaryActionIfIdle)
+        observer.observe(footer, { attributes: true, subtree: true, attributeFilter: ['disabled'] })
+      }, 0)
+    }
 
     return () => {
       clearTimeout(initial)
-      clearTimeout(obsTimer)
+      if (obsTimer) clearTimeout(obsTimer)
       observer?.disconnect()
     }
-  }, [isOpen])
+  }, [isOpen, autoFocus])
 
   if (!isOpen) return null
 

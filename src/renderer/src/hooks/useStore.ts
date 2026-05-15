@@ -34,6 +34,7 @@ const defaultConfig: AppConfig = {
   launcherWidgetGroupId: '',
   listThumbWidth: 85,
   checkForUpdates: true,
+  skipClipMergeWarning: false,
 }
 
 interface StoreContextValue {

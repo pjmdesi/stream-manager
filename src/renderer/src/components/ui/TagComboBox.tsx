@@ -27,10 +27,58 @@ function SuggestionsPortal({
   useEffect(() => {
     const el = anchorRef.current
     if (!el) return
-    setRect(el.getBoundingClientRect())
-    const obs = new ResizeObserver(() => setRect(el.getBoundingClientRect()))
+    // Find the nearest scrolling ancestor so we can hide the dropdown
+    // when the anchor scrolls out of its visible bounds — e.g. when a
+    // long modal body is scrolled and the input leaves the viewport.
+    // Without this the portal kept showing at the (now-invisible)
+    // anchor's position and overlapped the modal header.
+    const getScrollParent = (node: HTMLElement | null): HTMLElement | null => {
+      let cur = node?.parentElement ?? null
+      while (cur) {
+        const style = getComputedStyle(cur)
+        if (/auto|scroll|overlay/.test(style.overflowY)) return cur
+        cur = cur.parentElement
+      }
+      return null
+    }
+    const scrollParent = getScrollParent(el)
+    // Coalesce rect updates through rAF so a rapid scroll doesn't trigger
+    // a setState per pixel — one update per frame is plenty for tracking
+    // a fixed-position dropdown to its anchor.
+    let raf = 0
+    const update = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const anchorRect = el.getBoundingClientRect()
+        if (scrollParent) {
+          const parentRect = scrollParent.getBoundingClientRect()
+          // Hide when the anchor is entirely above or below the scroll
+          // container's visible area. Partial overlap still renders the
+          // dropdown — that matches native <select> behaviour and lets
+          // the user keep typing as they scroll the input into view.
+          if (anchorRect.bottom < parentRect.top || anchorRect.top > parentRect.bottom) {
+            setRect(null)
+            return
+          }
+        }
+        setRect(anchorRect)
+      })
+    }
+    update()
+    const obs = new ResizeObserver(update)
     obs.observe(el)
-    return () => obs.disconnect()
+    // capture:true catches scrolls of any ancestor (modal body, page,
+    // anything nested) so the dropdown follows the input wherever it
+    // moves. Without this, the portal stayed pinned at its initial
+    // viewport coordinates while the user scrolled.
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      cancelAnimationFrame(raf)
+      obs.disconnect()
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
   }, [anchorRef])
 
   if (!rect) return null

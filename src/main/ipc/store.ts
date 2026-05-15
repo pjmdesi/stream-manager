@@ -42,6 +42,7 @@ export interface AppConfig {
   defaultBuiltinThumbnailTemplate: string
   useBuiltinThumbnailByDefault: boolean
   checkForUpdates: boolean
+  skipClipMergeWarning: boolean
 }
 
 function getDefaultConfig(): AppConfig {
@@ -78,6 +79,7 @@ function getDefaultConfig(): AppConfig {
     defaultBuiltinThumbnailTemplate: '',
     useBuiltinThumbnailByDefault: true,
     checkForUpdates: true,
+    skipClipMergeWarning: false,
   }
 }
 

@@ -18,8 +18,6 @@
 
 ## Bugs
 
-1. When entering clipping mode, and the user has already initiated an audio merge, the message asking the user to merge audio still appears and offers to merge audio (even though it's already running). I did not test to see what happens if the user clicks the merge audio button in this scenario, but it shouldn't show regardless. If the user is already merging audio, it should just start clipping. Also, we should add a checkbox to the message that asks if the user does not want to see the message again, since it can be a bit annoying if you know what you're doing and don't need the reminder every time.
-
 ## Other ideas
 
 1. Rename the comments feature in the stream items to "Notes" instead. Also update that entry in the How to Use section.

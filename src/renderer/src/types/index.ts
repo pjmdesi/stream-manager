@@ -188,6 +188,7 @@ export interface AppConfig {
   launcherWidgetGroupId: string
   listThumbWidth: number
   checkForUpdates: boolean
+  skipClipMergeWarning: boolean
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'

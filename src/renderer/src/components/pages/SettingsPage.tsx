@@ -462,6 +462,12 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
             </div>
             <p className="text-xs text-gray-500">Starting volume for bleep markers in clip mode. Can be adjusted per-session by dragging the line on a marker.</p>
           </div>
+
+          <Checkbox
+            checked={local.skipClipMergeWarning ?? false}
+            onChange={v => set('skipClipMergeWarning', v)}
+            label={<div><div className="text-sm font-medium text-gray-200">Skip multi-track merge warning</div><div className="text-xs text-gray-500">Enter clip mode immediately on multi-track videos instead of prompting to merge audio first. You can still merge from the audio tracks panel inside clip mode.</div></div>}
+          />
         </section>
 
         {/* Converter */}
