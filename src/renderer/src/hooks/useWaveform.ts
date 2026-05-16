@@ -106,31 +106,50 @@ export function useWaveform(sources: string[], vStart: number, vEnd: number, dur
     return () => { cancelled = true }
   }, [cacheKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const svgPath = useMemo(() => {
-    const filled = rawArrays.filter(r => r.length > 0)
-    if (filled.length === 0) return ''
+  const { svgPath, svgPaths } = useMemo(() => {
+    if (rawArrays.length === 0) return { svgPath: '', svgPaths: [] as string[] }
 
     const safeStart = Math.max(0, vStart)
     const safeEnd   = duration > 0 ? Math.min(duration, vEnd) : vEnd
 
-    // Re-bucket each track independently, then combine (take min of mins, max of maxs)
-    const bucketed = filled.map(raw => rebucket(raw, safeStart, safeEnd, TARGET_PEAKS))
+    // Re-bucket each source. Empty arrays produce no buckets — the slot
+    // in svgPaths stays as '' so callers can still index by source order.
+    const bucketed = rawArrays.map(raw =>
+      raw.length > 0 ? rebucket(raw, safeStart, safeEnd, TARGET_PEAKS) : null
+    )
+
+    // Shared gmax — max across every loaded source. This is what makes
+    // per-source paths comparable: a quiet mic track and a loud game
+    // track end up with peaks at proportional heights instead of each
+    // filling its row.
+    const filledRaw = rawArrays.filter(r => r.length > 0)
+    if (filledRaw.length === 0) {
+      return { svgPath: '', svgPaths: rawArrays.map(() => '') }
+    }
+    const gmax = Math.max(...filledRaw.map(globalMax))
+
+    // Per-source paths, each normalised to the SHARED gmax so the
+    // amplitude difference between tracks is honest.
+    const svgPaths = bucketed.map(b => b ? buildSvgPath(b.mins, b.maxs, gmax) : '')
+
+    // Combined min-of-mins / max-of-maxs across sources, also scaled to
+    // gmax so it lines up with the per-source paths if both are shown.
     const combinedMins = new Float32Array(TARGET_PEAKS)
     const combinedMaxs = new Float32Array(TARGET_PEAKS)
     for (let i = 0; i < TARGET_PEAKS; i++) {
       let mn = 0, mx = 0
-      for (const { mins, maxs } of bucketed) {
-        if (mins[i] < mn) mn = mins[i]
-        if (maxs[i] > mx) mx = maxs[i]
+      for (const b of bucketed) {
+        if (!b) continue
+        if (b.mins[i] < mn) mn = b.mins[i]
+        if (b.maxs[i] > mx) mx = b.maxs[i]
       }
       combinedMins[i] = mn
       combinedMaxs[i] = mx
     }
+    const svgPath = buildSvgPath(combinedMins, combinedMaxs, gmax)
 
-    // Global max across all raw data for consistent amplitude scaling
-    const gmax = Math.max(...filled.map(globalMax))
-    return buildSvgPath(combinedMins, combinedMaxs, gmax)
+    return { svgPath, svgPaths }
   }, [rawArrays, vStart, vEnd, duration])
 
-  return { svgPath, peakCount: TARGET_PEAKS, loading }
+  return { svgPath, svgPaths, peakCount: TARGET_PEAKS, loading }
 }

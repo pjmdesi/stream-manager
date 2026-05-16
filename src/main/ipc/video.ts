@@ -16,19 +16,40 @@ export function registerVideoIPC(): void {
   ipcMain.handle(
     'video:extractTracks',
     async (event: IpcMainInvokeEvent, filePath: string, trackIndices?: number[]) => {
-      const fullExtraction = trackIndices === undefined
-      // For a full extraction, use cache only if every track slot is populated
-      if (fullExtraction) {
-        const cached = audioCacheManager.getCachedTracks(filePath)
-        if (cached && cached.every(p => p !== '')) return cached
-      }
-
       const win = BrowserWindow.fromWebContents(event.sender)
       const hash = audioCacheManager.hashKey(filePath)
       const cacheDir = audioCacheManager.cacheDir
 
-      const { extractAudioTracks } = await import('../services/ffmpegService')
-      const paths = await extractAudioTracks(
+      // Always pull the existing cache entry first so partial caches survive
+      // across calls. The new per-track multi-track flow asks for one index
+      // at a time; we want each call to honour what's already cached and
+      // only run ffmpeg for slots that aren't.
+      const { probeFile, extractAudioTracks } = await import('../services/ffmpegService')
+      const info = await probeFile(filePath)
+      const totalTracks = info.audioTracks.length
+      const cached = audioCacheManager.getCachedTracks(filePath) ?? new Array(totalTracks).fill('')
+      // Tolerate cache entries that pre-date a source-track change
+      if (cached.length !== totalTracks) {
+        cached.length = totalTracks
+        for (let i = 0; i < totalTracks; i++) if (cached[i] === undefined) cached[i] = ''
+      }
+
+      const requested = trackIndices ?? Array.from({ length: totalTracks }, (_, i) => i)
+
+      // Report 100% immediately for any requested slot we already have. The
+      // renderer treats the extract-progress channel as authoritative for
+      // ready-state transitions, so this completes the "extracting" UI
+      // without any disk work.
+      for (const i of requested) {
+        if (cached[i] && win && !win.isDestroyed()) {
+          win.webContents.send('video:extractProgress', { trackIndex: i, percent: 100 })
+        }
+      }
+
+      const missing = requested.filter(i => !cached[i])
+      if (missing.length === 0) return cached
+
+      const extracted = await extractAudioTracks(
         filePath,
         cacheDir,
         (trackIndex, percent) => {
@@ -37,19 +58,30 @@ export function registerVideoIPC(): void {
           }
         },
         hash,
-        trackIndices
+        missing
       )
 
-      // Always write to cache so size is tracked correctly regardless of partial/full
+      // Merge: newly-extracted paths overlay onto whatever was already cached.
+      const merged = cached.map((existing, i) => extracted[i] || existing)
+
       const limitBytes = getStore().get('config').audioCacheLimit ?? 1_073_741_824
-      audioCacheManager.setCachedTracks(filePath, paths, limitBytes)
-      return paths
+      audioCacheManager.setCachedTracks(filePath, merged, limitBytes)
+      return merged
     }
   )
 
   ipcMain.handle('video:cancelExtract', async () => {
     const { cancelExtraction } = await import('../services/ffmpegService')
     cancelExtraction()
+  })
+
+  // Look up which audio tracks are already in the persistent cache without
+  // triggering an extraction. Used by the renderer when the user enables
+  // multi-track on a file they've worked with before — previously-extracted
+  // tracks can re-attach instantly while the rest stay in their
+  // "unextracted" state until the user explicitly plays them.
+  ipcMain.handle('video:getCachedTracks', async (_event, filePath: string) => {
+    return audioCacheManager.getCachedTracks(filePath)
   })
 
   // Cleanup is now a no-op — files live in the cache managed by audioCacheManager

@@ -929,8 +929,17 @@ export function registerConverterIPC(): void {
     videoHeight: number
     bleepRegions: Array<{ id: string; start: number; end: number }>
     bleepVolume: number
+    /** Source audio track indices to include in the clip's audio mix.
+     *  Omitted / empty / invalid = use every track on the source (the
+     *  legacy behaviour). Index 0 is the video's first audio track. */
+    audioTrackIndices?: number[]
+    /** Per-track volume scalar (0–1+ with 1 = unity). Mirrors what the
+     *  user set in the audio-controls row during editing. Missing
+     *  entries default to 1. Applied via amix weights when multiple
+     *  tracks are mixed, or a `volume=` filter for single-track export. */
+    audioTrackVolumes?: Record<number, number>
   }) => {
-    const { job, clipRegions, cropAspect, cropX, videoWidth, videoHeight, bleepRegions, bleepVolume } = params
+    const { job, clipRegions, cropAspect, cropX, videoWidth, videoHeight, bleepRegions, bleepVolume, audioTrackIndices, audioTrackVolumes } = params
     if (clipRegions.length === 0) return
     const id = job.id || uuidv4()
 
@@ -942,7 +951,19 @@ export function registerConverterIPC(): void {
     const { extractSegmentToFile, runClipConversion, probeFile, applyGpuAcceleration } = await import('../services/ffmpegService')
     const fileInfo = await probeFile(job.inputFile).catch(() => null)
     const audioTrackCount = fileInfo?.audioTracks?.length ?? 1
-    const hasMultiTrack = audioTrackCount > 1
+
+    // Resolve which source audio tracks actually feed the clip's mix.
+    // Filter out negative / out-of-range entries, dedupe, sort. Empty
+    // selection falls back to "every track" so a buggy caller doesn't
+    // accidentally produce a silent clip.
+    const requestedAudio = (audioTrackIndices ?? []).filter(
+      i => Number.isInteger(i) && i >= 0 && i < audioTrackCount,
+    )
+    const dedupedAudio = Array.from(new Set(requestedAudio)).sort((a, b) => a - b)
+    const selectedAudioIndices = dedupedAudio.length > 0
+      ? dedupedAudio
+      : Array.from({ length: audioTrackCount }, (_, i) => i)
+    const hasMultiTrack = selectedAudioIndices.length > 1
 
     // Resolve the target aspect ratio (width / height). 'original' uses the video's native ratio.
     const videoAspect = videoWidth / videoHeight
@@ -1131,11 +1152,33 @@ export function registerConverterIPC(): void {
       }
       fcParts.push(`${vChain}[v${i}]`)
 
-      let audioIn = `[${i}:a:0]`
+      // Build the per-segment audio source. Single selected track →
+      // map it directly; multiple → amix the chosen subset (not every
+      // track on the source, so unchecked tracks really are excluded).
+      // Per-track volume is applied via amix `weights=` when mixing, or
+      // a `volume=` filter when a single track is exported alone. A
+      // missing entry in the volume map defaults to 1.0 (unity).
+      const volFor = (idx: number) => {
+        const v = audioTrackVolumes?.[idx]
+        return typeof v === 'number' && isFinite(v) ? Math.max(0, v) : 1
+      }
+      let audioIn: string
       if (hasMultiTrack) {
-        const trackInputs = Array.from({ length: audioTrackCount }, (_, t) => `[${i}:a:${t}]`).join('')
-        fcParts.push(`${trackInputs}amix=inputs=${audioTrackCount}:normalize=0:duration=first[amix${i}]`)
+        const trackInputs = selectedAudioIndices.map(t => `[${i}:a:${t}]`).join('')
+        const weights = selectedAudioIndices.map(t => volFor(t).toFixed(4)).join(' ')
+        // weights= preserves relative loudness between tracks; normalize=0
+        // keeps the mix from being scaled down by inputs count.
+        fcParts.push(`${trackInputs}amix=inputs=${selectedAudioIndices.length}:weights=${weights}:normalize=0:duration=first[amix${i}]`)
         audioIn = `[amix${i}]`
+      } else {
+        const t = selectedAudioIndices[0]
+        const v = volFor(t)
+        if (Math.abs(v - 1) < 0.001) {
+          audioIn = `[${i}:a:${t}]`
+        } else {
+          fcParts.push(`[${i}:a:${t}]volume=${v.toFixed(4)}[vol${i}]`)
+          audioIn = `[vol${i}]`
+        }
       }
 
       let aChain = `${audioIn}atrim=start=${trimStart}:end=${trimEnd},asetpts=PTS-STARTPTS`

@@ -203,6 +203,38 @@ export const TAG_COLOR_MAP: Record<string, TagColor> = Object.fromEntries(
 /** Fallback used when a tag has no recorded color yet */
 export const DEFAULT_TAG_COLOR = 'purple'
 
+/**
+ * Per-color SVG fill class for waveform paths. Mirrors the TAG_COLORS
+ * palette one step lighter (400) at ~70% opacity so the fill reads
+ * against the bg-black/60 waveform strip. Static map — Tailwind's
+ * purger never strips the strings.
+ */
+const WAVEFORM_FILL: Record<string, string> = {
+  slate: 'fill-slate-400/70',
+  red: 'fill-red-400/70',
+  orange: 'fill-orange-400/70',
+  amber: 'fill-amber-400/70',
+  yellow: 'fill-yellow-400/70',
+  lime: 'fill-lime-400/70',
+  green: 'fill-green-400/70',
+  teal: 'fill-teal-400/70',
+  cyan: 'fill-cyan-400/70',
+  blue: 'fill-blue-400/70',
+  purple: 'fill-purple-400/70',
+  pink: 'fill-pink-400/70',
+}
+
+export function getWaveformFillClass(colorKey: string | undefined): string {
+  return WAVEFORM_FILL[colorKey ?? ''] ?? WAVEFORM_FILL[DEFAULT_TAG_COLOR]
+}
+
+/** Default color rotation for per-track audio coloring. Indexed by track
+ *  number so each track gets a distinct color out of the box. */
+export const DEFAULT_TRACK_COLORS = [
+  'purple', 'cyan', 'amber', 'pink', 'lime', 'orange',
+  'blue', 'teal', 'green', 'yellow', 'red', 'slate',
+]
+
 /** Resolve a stored color key (or undefined) to a TagColor, falling back to purple. */
 export function getTagColor(colorKey: string | undefined): TagColor {
   return TAG_COLOR_MAP[colorKey ?? ''] ?? TAG_COLOR_MAP[DEFAULT_TAG_COLOR]

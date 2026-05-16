@@ -104,10 +104,16 @@ export async function probeArchiveTag(filePath: string): Promise<string | undefi
   })
 }
 
-let _extractCancel: (() => void) | null = null
+// Set of per-call cancel handles. Each in-flight extractAudioTracks adds
+// its own cancel on entry and removes it on exit, so multiple concurrent
+// extractions are safe and cancelExtraction() kills every one of them.
+// Previously this was a single ref, which meant a second concurrent call
+// silently overwrote the first call's cancel — making parallel
+// per-track extractions un-cancellable in aggregate.
+const _extractCancellers = new Set<() => void>()
 
 export function cancelExtraction(): void {
-  if (_extractCancel) _extractCancel()
+  for (const fn of [..._extractCancellers]) fn()
 }
 
 export async function extractAudioTracks(
@@ -128,7 +134,16 @@ export async function extractAudioTracks(
   // Sparse array — unselected slots stay as empty string
   const outputPaths: string[] = new Array(info.audioTracks.length).fill('')
   let cancelled = false
-  _extractCancel = () => { cancelled = true }
+  // currentKill points at the ffmpeg-kill closure for the segment that's
+  // CURRENTLY running inside this call. The outer cancel handle (registered
+  // in _extractCancellers) closes over it so cancelExtraction() can SIGKILL
+  // the active process and flip the loop's `cancelled` flag in one shot.
+  let currentKill: (() => void) | null = null
+  const ownCancel = () => {
+    cancelled = true
+    currentKill?.()
+  }
+  _extractCancellers.add(ownCancel)
 
   try {
     for (const i of indicesToExtract) {
@@ -164,15 +179,15 @@ export async function extractAudioTracks(
             }
           })
 
-        _extractCancel = () => {
-          cancelled = true
+        currentKill = () => {
           try { (cmd as any).kill('SIGKILL') } catch (_) {}
         }
         cmd.run()
       })
+      currentKill = null
     }
   } finally {
-    _extractCancel = null
+    _extractCancellers.delete(ownCancel)
   }
 
   if (cancelled) throw new Error('cancelled')

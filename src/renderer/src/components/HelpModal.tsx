@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle } from 'lucide-react'
 import { Youtube } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { useStore } from '../hooks/useStore'
@@ -131,8 +131,42 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <Film size={16} />,
     body: (
       <>
-        <p>The Player is for reviewing and clipping. Scrub through a recording, set in/out points to mark clip regions, add bleeps over moments you want muted, and crop with a chosen aspect ratio (16:9, 1:1, 9:16).</p>
-        <p>The Session Videos panel keeps related files (clip drafts, exports, alternate takes) one click away. Clip drafts autosave so you can leave and come back later.</p>
+        <p>Review and clip your videos. Drag-and-drop a video onto the page or press <Kbd>Ctrl</Kbd>+<Kbd>O</Kbd> to start a session; sending a stream from the Streams page opens its first full recording here.</p>
+
+        <ElementSection icon={<PanelRight size={14} />} title="Sidebar">
+          <p>The right sidebar shows info and controls for the stream and loaded video.</p>
+          <ul className="list-none pl-0 flex flex-col gap-1.5">
+            <li><strong className="text-gray-300">Selected Stream</strong> — the stream item the loaded video belongs to, with its thumbnail, date, and title.</li>
+            <li><strong className="text-gray-300">Session Videos</strong> — displays every video in the same stream folder. Clip drafts and exports nest under their parent recording.</li>
+            <li className="flex items-baseline gap-2"><AlertTriangle size={11} className="shrink-0 text-amber-400 translate-y-0.5" /><span><strong className="text-gray-300">Warning:</strong> making changes outside the app such as renaming or moving files will break clip file connections to their source clip in the app.</span></li>
+          </ul>
+        </ElementSection>
+
+        <ElementSection icon={<Film size={14} />} title="Timeline">
+          <p>A thumbnail filmstrip stacked above one or more audio waveforms.</p>
+          <p><strong className="text-gray-300">Scroll/zoom bar</strong> — sits beneath the timeline and represents the full duration. The colored thumb shows your current zoom region; its rounded boundary caps mark the in/out edges of what's visible above. Drag a cap to resize, drag the thumb body to pan, or drag the thin playhead needle directly to scrub.</p>
+          <p><strong className="text-gray-300">Zoom controls</strong> — use the toolbar above the timeline, <Kbd>Numpad +</Kbd>/<Kbd>Numpad -</Kbd>, or the mouse wheel.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Layers size={14} />} title="Multi-track audio">
+          <p>When a source has multiple audio tracks (e.g. game + microphone + Discord), an <em>Enable Multi-track Audio</em> button appears below the waveform. Click it to split the waveform track in the timeline into  per-track rows.</p>
+          <p>Track 0 is the source's built-in audio and is always available immediately. Other tracks decode on-demand — click <em>Add track to playback</em> on a row to extract the audio to a temporary file (stored in the app's cache) and start hearing it during playback.</p>
+          <p>Exporting a clip preserves every audio track in the output by default. The export dialog has checkboxes to pick which tracks to include in the mix, and each track's volume setting applies to that mix.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Scissors size={14} />} title="Clip mode">
+          <p>Toggle clip mode with <Kbd>C</Kbd> or the <em>Start Clipping</em> sidebar button. A toolbar appears above the timeline with controls for segments, bleeps, and cropping.</p>
+          <ul className="list-none pl-0 flex flex-col gap-1.5">
+            <li><strong className="text-gray-300">Segments</strong> — press <Kbd>A</Kbd> or click the <em>Add Segment</em> button to add a clip segment centered on the playhead. Drag the in/out handles to refine; click a handle for a precise timecode input. Multiple segments are concatenated into one export. <Kbd>S</Kbd> splits the segment under the playhead.</li>
+            <li>When segments are bumped against each other, a button to merge them into a single segment will appear over the touching edges.</li>
+            <li className="border border-navy-500 px-2 py-1 bg-navy-600 rounded leading-4 text-gray-200"><small>Tip: If you want a segment to <i>start</i> at the playhead, place a segment normally, then leave the playhead where it is and split the segment. Then delete the left-hand segment.</small></li>
+            <li><strong className="text-gray-300">Bleeps</strong> — add a bleep with <Kbd>B</Kbd>. Drag horizontally to move it, drag its edges to resize, and drag the volume marker up/down to set its loudness. The volume setting is shared across every bleep in the session.</li>
+            <li><strong className="text-gray-300">Crop</strong> — pick an aspect ratio (16:9, 1:1, 9:16) and the player overlays a draggable crop rectangle. Drag inside to pan, drag the corners to resize. Each clip region can have its own crop position.</li>
+            <li><strong className="text-gray-300">Drafts</strong> — clipping work autosaves per source video. Multiple drafts can be added to the same source video file. Clip drafts can be renamed in the Session Videos panel.</li>
+            <li><strong className="text-gray-300">Export</strong> — <Kbd>Ctrl</Kbd>+<Kbd>E</Kbd> opens the export dialog. Clips are re-encoded with whatever encoding preset you pick, defaulting to the default encoder preset in the app settings. "Copy only" encoders are not available for clip exporting due to the complexity of the available features.</li>
+
+          </ul>
+        </ElementSection>
 
         <ElementSection icon={<Keyboard size={14} />} title="Keyboard shortcuts">
           <p className="text-[11px] text-gray-500">Active anywhere on the Player page (except while typing in a text field).</p>

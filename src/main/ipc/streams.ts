@@ -34,6 +34,14 @@ export interface ClipDraft {
   updatedAt: number
 }
 
+export interface AudioTrackSetting {
+  muted?: boolean
+  solo?: boolean
+  volume?: number
+  /** Tag-color key (see renderer constants/tagColors). */
+  color?: string
+}
+
 export interface StreamMeta {
   date: string
   streamType: string[]
@@ -44,6 +52,9 @@ export interface StreamMeta {
   preferredThumbnail?: string
   videoMap?: Record<string, VideoEntry>
   clipDrafts?: Record<string, ClipDraft>
+  // Multi-track audio settings keyed by filename → trackIndex → settings.
+  // Persisted so reopening a file restores the user's M/S/volume choices.
+  audioSettings?: Record<string, Record<number, AudioTrackSetting>>
 }
 
 export interface DetectedStructure {
@@ -846,7 +857,22 @@ export function registerStreamsIPC(): void {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
     const key = metaKeyOverride || metaKey(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
-    allMeta[key] = meta
+    // Preserve tracking fields the metadata UIs don't own — videoMap
+    // (holds clipOf parent↔clip relationships), clipDrafts (in-progress
+    // clip work), and audioSettings (per-track M/S/volume preferences).
+    // These are managed by dedicated IPCs (clip:tagExport, clipDraft:*,
+    // streams:updateMeta partial writes from the player), and any caller
+    // that builds `meta` from scratch — e.g. the MetaModal save path —
+    // would otherwise silently wipe them on every save. Callers that
+    // spread `{...f.meta!, ...}` already include these so this is a no-op
+    // for them; only the from-scratch paths benefit.
+    const existing = allMeta[key] ?? ({} as StreamMeta)
+    allMeta[key] = {
+      ...meta,
+      videoMap: meta.videoMap ?? existing.videoMap,
+      clipDrafts: meta.clipDrafts ?? existing.clipDrafts,
+      audioSettings: meta.audioSettings ?? existing.audioSettings,
+    }
     writeAllMeta(streamsDir, allMeta)
   })
 

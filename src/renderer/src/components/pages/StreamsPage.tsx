@@ -3044,8 +3044,13 @@ export function StreamsPage({
     }
     // Player has a built-in Session Videos panel that lets users switch between videos in the
     // same folder, so we don't need a picker modal — just open the first available video.
+    // Prefer a 'full' recording over exported child clips/shorts so sending a stream item
+    // lands on the source recording by default; users can pick a clip from the Session
+    // Videos panel if they actually want one.
     if (action === 'player') {
-      onSendToPlayer(localVideos[0])
+      const map = folder.meta?.videoMap
+      const firstFull = localVideos.find(v => map?.[videoMapKey(folder.folderPath, v)]?.category === 'full')
+      onSendToPlayer(firstFull ?? localVideos[0])
       return
     }
     if (localVideos.length === 1) {

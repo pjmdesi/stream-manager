@@ -193,6 +193,28 @@ export interface AppConfig {
 
 export type VideoCategory = 'full' | 'short' | 'clip'
 
+/**
+ * Per-track audio settings remembered for a single video file. Index 0 is
+ * the source's first audio track (which plays from the video element
+ * directly — no extraction needed); higher indices map onto additional
+ * tracks that the user has to "Play" before they become audible.
+ *
+ *   volume: 0–1, omitted means 1
+ *   muted/solo: omitted means false
+ *
+ * Solo is treated as "if any track has solo=true, mute every non-soloed
+ * track" — see useVideoPlayer's effective-mute computation.
+ */
+export interface AudioTrackSetting {
+  muted?: boolean
+  solo?: boolean
+  volume?: number
+  /** Tag-color key (see constants/tagColors). Drives the waveform fill +
+   *  the swatch dot in the track-control row. Omitted = use the index-
+   *  based default rotation. */
+  color?: string
+}
+
 export interface VideoEntry {
   size: number          // bytes
   mtime: number         // ms epoch — used to invalidate cache
@@ -245,6 +267,11 @@ export interface StreamMeta {
   smThumbnail?: boolean
   smThumbnailTemplate?: string
   preferredThumbnail?: string
+  // Per-file, per-track audio settings (M/S/volume) for the multi-track
+  // playback feature. Outer key = video filename (matching videoMap keys);
+  // inner key = track index. Omitted fields use sensible defaults; an
+  // omitted entry entirely means "use defaults across the board".
+  audioSettings?: Record<string, Record<number, AudioTrackSetting>>
 }
 
 export interface DetectedStructure {

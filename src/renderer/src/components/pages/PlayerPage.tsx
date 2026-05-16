@@ -1,9 +1,11 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
-import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film } from 'lucide-react'
+import ReactDOM from 'react-dom'
+import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward } from 'lucide-react'
+import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass } from '../../constants/tagColors'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useStore } from '../../hooks/useStore'
-import type { BleepRegion, ClipRegion, ClipState, CropAspect, TimelineViewport } from '../../types'
+import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, TimelineViewport } from '../../types'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
 import { useWaveform } from '../../hooks/useWaveform'
@@ -275,6 +277,107 @@ function clampVideoPan(x: number, y: number, zoom: number, w: number, h: number)
 
 const TRACK_LABELS = ['Game', 'Mic', 'Discord', 'Music', 'SFX']
 
+// ── Per-track waveform strip (used inside the multi-track rows).
+// Receives a precomputed SVG path so the parent can call useWaveform
+// once with every extracted track and have all of them share a single
+// `gmax`. That way a quiet mic track renders shorter peaks than a loud
+// game track instead of each one being normalised to its own peak.
+function TrackWaveformStrip({
+  path, peakCount, loading, dimmed, volume, fillClass, onSeek, onHover, onHoverLeave, onMiddleDown,
+}: {
+  /** Pre-built SVG path. Empty string while the source's raw samples load. */
+  path: string
+  peakCount: number
+  loading: boolean
+  /** When true, the waveform fill is desaturated (e.g. muted or solo'd out). */
+  dimmed: boolean
+  /** 0–1 — scales the waveform's vertical amplitude so the visible peaks
+   *  shrink as the user drags the volume slider down. The path itself is
+   *  normalised; we apply scaleY via CSS rather than rebuilding the path
+   *  so dragging stays cheap (no recompute on every input event). */
+  volume: number
+  /** Tailwind `fill-…/70` class derived from the track's chosen color
+   *  (or the index-based default). Ignored when `dimmed` is true. */
+  fillClass: string
+  onSeek: (clientX: number, rect: DOMRect) => void
+  onHover: (clientX: number, rect: DOMRect) => void
+  onHoverLeave: () => void
+  onMiddleDown: (e: React.MouseEvent) => void
+}) {
+  return (
+    <div
+      className="relative h-8 w-full cursor-pointer bg-black/60"
+      onClick={e => onSeek(e.clientX, e.currentTarget.getBoundingClientRect())}
+      onMouseDown={onMiddleDown}
+      onMouseMove={e => onHover(e.clientX, e.currentTarget.getBoundingClientRect())}
+      onMouseLeave={onHoverLeave}
+    >
+      {loading && !path && (
+        <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-600 pointer-events-none">
+          <Loader2 size={10} className="animate-spin" />
+          Generating waveform…
+        </div>
+      )}
+      {path && (
+        <svg
+          viewBox={`0 0 ${peakCount} 100`}
+          preserveAspectRatio="none"
+          className="w-full h-full"
+          style={{ transform: `scaleY(${volume})`, transformOrigin: 'center' }}
+        >
+          <path
+            d={path}
+            className={dimmed ? 'fill-gray-500/30' : fillClass}
+          />
+        </svg>
+      )}
+    </div>
+  )
+}
+
+// ── Per-track color picker portal. Anchored to a snapshotted rect (the
+// dot's bounding rect at click time) so the picker stays put if the row
+// re-renders. Click outside or on a swatch closes it.
+function TrackColorPicker({
+  rect, currentKey, onPick, onClose,
+}: {
+  rect: DOMRect
+  currentKey: string | undefined
+  onPick: (colorKey: string) => void
+  onClose: () => void
+}) {
+  const pickerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+  return ReactDOM.createPortal(
+    <div
+      ref={pickerRef}
+      style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, zIndex: 10000 }}
+      className="bg-navy-700 border border-white/10 rounded-xl shadow-2xl p-2"
+    >
+      <div className="grid grid-cols-4 gap-1.5">
+        {TAG_COLORS.map(c => (
+          <button
+            key={c.key}
+            type="button"
+            title={c.label}
+            onMouseDown={e => { e.preventDefault(); onPick(c.key) }}
+            className={`w-6 h-6 rounded-full ${c.swatch} transition-transform hover:scale-110 flex items-center justify-center`}
+          >
+            {c.key === currentKey && <Check size={11} className="text-white drop-shadow" />}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 // ── Export Clip Dialog ────────────────────────────────────────────────────────
 
 interface ExportClipDialogProps {
@@ -282,6 +385,20 @@ interface ExportClipDialogProps {
   defaultSuffix?: string
   filePath: string
   hasBleepsOutsideRegions: boolean
+  /** Audio tracks on the source video (from probe). Drives the per-track
+   *  selection list. */
+  audioTracks: { title?: string; codec?: string; channels?: number; language?: string }[]
+  /** Current TrackState from useVideoPlayer — used to pick sensible
+   *  defaults: tracks the user has played (status='extracted') and not
+   *  muted start checked; the rest start unchecked, except in pristine
+   *  mode where every track is checked. Volume is shown as a sanity-
+   *  check label and forwarded to the converter so the exported clip
+   *  matches what the user was hearing. */
+  tracksState: { index: number; status: 'unextracted' | 'extracting' | 'extracted'; muted: boolean; volume: number }[]
+  /** True iff the user has enabled multi-track for this file in this
+   *  session. When false AND no track has been touched, we treat the
+   *  state as "pristine" and default to all tracks selected. */
+  multiTrackEnabled: boolean
   onConfirm: (opts: ExportClipOptions) => void
   onClose: () => void
 }
@@ -291,14 +408,51 @@ export interface ExportClipOptions {
   saveNextToSource: boolean
   outputDir: string
   suffix: string
+  /** Source audio track indices to include in the exported clip's mix.
+   *  Empty array is treated as "include all" by the main process for
+   *  safety (so a buggy/legacy caller never ends up with a silent clip). */
+  audioTrackIndices: number[]
+  /** Per-track volume (0–1, where 1 = unity gain) applied during the
+   *  export mix. Tracks not in this map use volume 1. Mirrors what the
+   *  user set in the audio-controls row so the exported clip matches
+   *  what they were hearing during editing. */
+  audioTrackVolumes: Record<number, number>
 }
 
-function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsOutsideRegions, onConfirm, onClose }: ExportClipDialogProps) {
+function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsOutsideRegions, audioTracks, tracksState, multiTrackEnabled, onConfirm, onClose }: ExportClipDialogProps) {
   const [presets, setPresets] = useState<{ id: string; name: string; ffmpegArgs: string }[]>([])
   const [presetId, setPresetId] = useState(defaultPresetId)
   const [saveNextToSource, setSaveNextToSource] = useState(true)
   const [outputDir, setOutputDir] = useState('')
   const [suffix, setSuffix] = useState(defaultSuffix || '_clip')
+  // Per-track export selection. Initial value follows the rule the user
+  // wrote up: pristine state = include every track; otherwise honour the
+  // current audio settings — extracted-and-not-muted tracks start
+  // checked, unextracted tracks start unchecked (the user can still add
+  // any of those by ticking the box — main process pulls them straight
+  // from the source on export). Solo is deliberately ignored here; it
+  // only affects monitoring, not what ends up in the file.
+  const [selectedTrackIndices, setSelectedTrackIndices] = useState<Set<number>>(() => {
+    const initial = new Set<number>()
+    const pristine = !multiTrackEnabled && tracksState.every(t => t.index === 0 || (t.status === 'unextracted' && !t.muted))
+    for (let i = 0; i < audioTracks.length; i++) {
+      const st = tracksState.find(t => t.index === i)
+      let include: boolean
+      if (pristine) include = true
+      else if (st?.status === 'extracted') include = !st.muted
+      else include = false
+      if (include) initial.add(i)
+    }
+    return initial
+  })
+  const toggleTrack = (i: number) => {
+    setSelectedTrackIndices(prev => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  }
 
   useEffect(() => {
     Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
@@ -336,8 +490,26 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            onClick={() => onConfirm({ presetId, saveNextToSource, outputDir: saveNextToSource ? sourceDir : outputDir, suffix })}
-            disabled={!saveNextToSource && !outputDir}
+            onClick={() => {
+              // Pack a volume map only for the tracks the user actually
+              // chose to include. Each entry mirrors what they were
+              // hearing in the audio-controls row (or 1.0 if the track
+              // hasn't been extracted in this session).
+              const audioTrackVolumes: Record<number, number> = {}
+              for (const i of selectedTrackIndices) {
+                const st = tracksState.find(t => t.index === i)
+                audioTrackVolumes[i] = st?.volume ?? 1
+              }
+              onConfirm({
+                presetId,
+                saveNextToSource,
+                outputDir: saveNextToSource ? sourceDir : outputDir,
+                suffix,
+                audioTrackIndices: Array.from(selectedTrackIndices).sort((a, b) => a - b),
+                audioTrackVolumes,
+              })
+            }}
+            disabled={(!saveNextToSource && !outputDir) || selectedTrackIndices.size === 0}
           >
             Export
           </Button>
@@ -400,6 +572,71 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
             <p className="text-xs text-gray-500 break-all">{sourceDir}</p>
           )}
         </div>
+
+        {/* Audio tracks to include. Shown only for multi-track sources;
+            single-track files have nothing to choose. Checked tracks are
+            mixed into the exported clip's audio; un-checked tracks are
+            dropped. Track 0 always comes from the video file directly,
+            tracks 1+ can be added even if they haven't been played
+            during this session — main process reads them straight from
+            the source on export. */}
+        {audioTracks.length > 1 && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-gray-300">Audio Tracks to Include</label>
+            <div className="flex flex-col gap-1">
+              {audioTracks.map((t, i) => {
+                const checked = selectedTrackIndices.has(i)
+                const st = tracksState.find(s => s.index === i)
+                const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
+                const detail = `${t.codec ?? 'audio'}${t.channels ? ` · ${t.channels}ch` : ''}${t.language ? ` · ${t.language}` : ''}`
+                const isUnextracted = st?.status === 'unextracted'
+                // Volume shown to the user as a sanity check. Tracks the
+                // user never touched default to 100% (they'd be exported
+                // at unity gain anyway).
+                const volPct = Math.round((st?.volume ?? 1) * 100)
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => toggleTrack(i)}
+                    className={`w-full text-left px-3 py-1.5 rounded-lg border transition-colors ${
+                      checked
+                        ? 'bg-purple-600/20 border-purple-600/40'
+                        : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
+                        checked ? 'bg-purple-700 border-purple-700' : 'border-gray-600'
+                      }`}>
+                        {checked && <Check size={10} className="text-white" strokeWidth={3} />}
+                      </div>
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className={`text-xs font-medium leading-tight ${checked ? 'text-purple-200' : 'text-gray-300'}`}>
+                          {label}
+                          <span className="text-gray-500 font-normal"> · Track {i + 1}</span>
+                        </span>
+                        <span className="text-[11px] text-gray-500 leading-tight mt-0.5">{detail}</span>
+                      </div>
+                      {isUnextracted && (
+                        <span className="text-[10px] text-gray-500 shrink-0 italic">not playing</span>
+                      )}
+                      <span
+                        className={`text-[11px] tabular-nums shrink-0 ${checked ? 'text-purple-200' : 'text-gray-500'}`}
+                        title="Volume from the audio controls row — adjust there to change it for the export."
+                      >
+                        {volPct}%
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+            {selectedTrackIndices.size === 0 && (
+              <p className="text-[11px] text-yellow-400/90">Pick at least one track — the exporter needs an audio source.</p>
+            )}
+          </div>
+        )}
 
         {/* Suffix */}
         <div className="flex flex-col gap-1.5">
@@ -483,13 +720,16 @@ function SiblingVideoItem({
   item,
   isActive,
   onClick,
-  onReopenAsClip,
   indented = false,
+  compact = false,
 }: {
   item: SiblingFile
   isActive: boolean
   onClick: () => void
-  onReopenAsClip?: () => void
+  /** When true, render as an icon-strip-friendly tiny row (used by the
+   *  collapsed sidebar). Smaller thumbnail, no inline metadata, full
+   *  info shown in a hover tooltip instead. */
+  compact?: boolean
   indented?: boolean
 }) {
   const [thumbnail, setThumbnail] = useState<string | null>(null)
@@ -548,20 +788,33 @@ function SiblingVideoItem({
     return cleanup
   }, [item.path, item.isLocal])
 
-  const thumbWidth = Math.round(32 * aspectRatio)
+  // Compact rendering uses a fixed 20px thumbnail height to fit the
+  // collapsed sidebar's narrow content area; expanded keeps the previous
+  // 32px height. Width is derived from the captured aspect ratio so
+  // unusual ratios stay correctly shaped.
+  const thumbHeight = compact ? 20 : 32
+  const thumbWidth = Math.round(thumbHeight * aspectRatio)
 
-  return (
+  // Combined info string surfaced via tooltip in compact mode so the user
+  // can still see name + duration + category without the inline metadata.
+  const durationStr = duration !== null ? formatTime(duration) : item.isLocal ? '…' : 'Cloud sync'
+  const categoryStr = item.category ? ` · ${SESSION_CATEGORY_LABEL[item.category] ?? item.category}` : ''
+  const tooltipContent = `${item.name} · ${durationStr}${categoryStr}`
+
+  const body = (
     <div
       onClick={onClick}
-      title={item.name}
-      className={`group/item w-full text-left flex items-center gap-2 ${indented ? 'pl-6 pr-2' : 'px-2'} py-1.5 rounded-lg transition-colors cursor-pointer ${
+      className={`group/item w-full text-left flex items-center gap-2 ${indented ? (compact ? 'pl-3 pr-1' : 'pl-6 pr-2') : (compact ? 'px-1' : 'px-2')} py-1.5 rounded-lg transition-colors cursor-pointer ${
         isActive
           ? 'bg-purple-600/20'
           : 'hover:bg-white/5'
       }`}
     >
       {/* Thumbnail */}
-      <div className="relative shrink-0 h-8 rounded overflow-hidden bg-white/5" style={{ width: thumbWidth }}>
+      <div
+        className="relative shrink-0 rounded overflow-hidden bg-white/5"
+        style={{ width: thumbWidth, height: thumbHeight }}
+      >
         {thumbnail ? (
           <img
             src={thumbnail}
@@ -570,43 +823,46 @@ function SiblingVideoItem({
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-700">
             {item.isLocal
-              ? <Film size={11} />
-              : <span className="text-[9px] leading-tight text-center px-1 text-gray-600">Cloud</span>
+              ? <Film size={compact ? 9 : 11} />
+              : <span className={`leading-tight text-center px-1 text-gray-600 ${compact ? 'text-[7px]' : 'text-[9px]'}`}>Cloud</span>
             }
           </div>
         )}
       </div>
 
-      {/* Info */}
-      <div className="min-w-0 flex-1">
-        <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
-          {item.name}
+      {/* Inline info — hidden in compact mode (surfaced via tooltip). */}
+      {!compact && (
+        <div className="min-w-0 flex-1">
+          <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
+            {item.name}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[10px] text-gray-500 tabular-nums">{durationStr}</span>
+            {item.category && (
+              <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${SESSION_CATEGORY_STYLES[item.category] ?? ''}`}>
+                {SESSION_CATEGORY_LABEL[item.category] ?? item.category}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="text-[10px] text-gray-500 tabular-nums">
-            {duration !== null
-              ? formatTime(duration)
-              : item.isLocal ? '…' : 'Cloud sync'
-            }
-          </span>
-          {item.category && (
-            <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${SESSION_CATEGORY_STYLES[item.category] ?? ''}`}>
-              {SESSION_CATEGORY_LABEL[item.category] ?? item.category}
-            </span>
-          )}
-        </div>
-      </div>
-      {onReopenAsClip && item.clipOf && (
-        <Tooltip content="Start new clipping draft based on this clip" side="left" triggerClassName="shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
-          <button
-            onClick={e => { e.stopPropagation(); onReopenAsClip() }}
-            className="p-1 text-blue-400/60 hover:text-blue-300 transition-colors"
-          >
-            <Scissors size={12} />
-          </button>
-        </Tooltip>
       )}
     </div>
+  )
+
+  // Both compact and expanded modes wrap in a Tooltip so the user can
+  // read the full filename when the inline label is truncated. Compact
+  // sits in the popup-out (left of the sidebar) so the tooltip flows
+  // right; expanded sits inside the right-edge sidebar so it flows
+  // left. side= is the *preferred* side — Tooltip falls back if it
+  // doesn't fit.
+  return (
+    <Tooltip
+      content={tooltipContent}
+      side={compact ? 'right' : 'left'}
+      triggerClassName="block"
+    >
+      {body}
+    </Tooltip>
   )
 }
 
@@ -619,6 +875,7 @@ function DraftSessionItem({
   onClick,
   onDelete,
   onRename,
+  compact = false,
 }: {
   draft: import('../../types').ClipDraft
   displayName: string
@@ -628,6 +885,10 @@ function DraftSessionItem({
   onClick: () => void
   onDelete: () => void
   onRename: (newName: string) => Promise<boolean>
+  /** When true, render as an icon-strip-friendly tiny row (collapsed
+   *  sidebar). Renaming, deletion, and inline metadata move to the
+   *  hover tooltip; the user can still expand the sidebar for those. */
+  compact?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(displayName)
@@ -650,72 +911,86 @@ function DraftSessionItem({
   }
   const cancel = () => { setDraftName(displayName); setError(false); setEditing(false) }
 
-  return (
+  // Compact mode condenses the row to icon + tooltip only — rename and
+  // delete are out of reach until the user expands the sidebar.
+  const tooltipContent = `${displayName} · ${isExporting ? 'exporting…' : 'draft'} · ${segmentCount} seg${segmentCount === 1 ? '' : 's'}${totalDuration > 0 ? ` · ${formatTime(totalDuration, sourceFps)}` : ''}`
+
+  const body = (
     <div
-      className={`group/item w-full text-left flex items-center gap-2 pl-6 pr-2 py-1.5 rounded-lg transition-colors ${editing ? '' : isExporting ? 'cursor-not-allowed' : 'cursor-pointer'} ${
+      className={`group/item w-full text-left flex items-center gap-2 ${compact ? 'pl-3 pr-1' : 'pl-6 pr-2'} py-1.5 rounded-lg transition-colors ${editing ? '' : isExporting ? 'cursor-not-allowed' : 'cursor-pointer'} ${
         isActive ? 'bg-purple-600/20' : isExporting ? 'opacity-60' : 'hover:bg-white/5'
       }`}
       onClick={editing || isExporting ? undefined : onClick}
-      title={editing ? undefined : isExporting ? 'This clip is currently exporting. Wait for the conversion to finish (or cancel it) before editing.' : `Open clip draft for ${draft.sourceName}`}
+      title={compact || editing ? undefined : isExporting ? 'This clip is currently exporting. Wait for the conversion to finish (or cancel it) before editing.' : `Open clip draft for ${draft.sourceName}`}
     >
-      <div className="shrink-0 w-8 h-8 rounded flex items-center justify-center bg-blue-950/40 border border-blue-500/20 text-blue-400">
-        <Scissors size={14} />
+      <div
+        className={`shrink-0 rounded flex items-center justify-center bg-blue-950/40 border border-blue-500/20 text-blue-400 ${compact ? 'w-5 h-5' : 'w-8 h-8'}`}
+      >
+        <Scissors size={compact ? 10 : 14} />
       </div>
-      <div className="min-w-0 flex-1" onClick={editing ? e => e.stopPropagation() : undefined}>
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={draftName}
-            onChange={e => { setDraftName(e.target.value); if (error) setError(false) }}
-            onKeyDown={e => {
-              if (e.key === 'Enter') { e.preventDefault(); commit() }
-              else if (e.key === 'Escape') { e.preventDefault(); cancel() }
-            }}
-            onBlur={commit}
-            onClick={e => e.stopPropagation()}
-            className={`w-full text-[11px] font-medium bg-navy-900 border rounded px-1.5 py-0.5 text-gray-200 focus:outline-none focus:ring-1 ${
-              error ? 'border-red-500/60 focus:ring-red-500/40' : 'border-white/15 focus:ring-purple-500/40'
-            }`}
-            title={error ? 'Name already in use by another clip draft' : undefined}
-            spellCheck={false}
-          />
-        ) : (
-          <div className="flex items-center gap-1 min-w-0">
-            <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
-              {displayName}
+      {!compact && (
+        <>
+          <div className="min-w-0 flex-1" onClick={editing ? e => e.stopPropagation() : undefined}>
+            {editing ? (
+              <input
+                ref={inputRef}
+                value={draftName}
+                onChange={e => { setDraftName(e.target.value); if (error) setError(false) }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); commit() }
+                  else if (e.key === 'Escape') { e.preventDefault(); cancel() }
+                }}
+                onBlur={commit}
+                onClick={e => e.stopPropagation()}
+                className={`w-full text-[11px] font-medium bg-navy-900 border rounded px-1.5 py-0.5 text-gray-200 focus:outline-none focus:ring-1 ${
+                  error ? 'border-red-500/60 focus:ring-red-500/40' : 'border-white/15 focus:ring-purple-500/40'
+                }`}
+                title={error ? 'Name already in use by another clip draft' : undefined}
+                spellCheck={false}
+              />
+            ) : (
+              <div className="flex items-center gap-1 min-w-0">
+                <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
+                  {displayName}
+                </div>
+                <Tooltip content="Rename draft" side="top" triggerClassName="ml-auto shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                  <button
+                    onClick={e => { e.stopPropagation(); setEditing(true) }}
+                    className="p-0.5 text-gray-600 hover:text-gray-300 transition-colors"
+                  >
+                    <PencilLine size={11} />
+                  </button>
+                </Tooltip>
+              </div>
+            )}
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${isExporting ? 'text-blue-300 border-blue-400/50' : 'text-amber-400 border-amber-400/50'}`}>
+                {isExporting ? 'exporting…' : 'draft'}
+              </span>
+              <span className="text-[10px] text-gray-500 tabular-nums">
+                {segmentCount} seg{segmentCount === 1 ? '' : 's'}
+                {totalDuration > 0 && ` · ${formatTime(totalDuration, sourceFps)}`}
+              </span>
             </div>
-            <Tooltip content="Rename draft" side="top" triggerClassName="ml-auto shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+          </div>
+          {!editing && (
+            <Tooltip content="Delete draft" side="left" triggerClassName="shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
               <button
-                onClick={e => { e.stopPropagation(); setEditing(true) }}
-                className="p-0.5 text-gray-600 hover:text-gray-300 transition-colors"
+                onClick={e => { e.stopPropagation(); onDelete() }}
+                className="p-1 text-gray-600 hover:text-red-400 transition-colors"
               >
-                <PencilLine size={11} />
+                <Trash2 size={12} />
               </button>
             </Tooltip>
-          </div>
-        )}
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${isExporting ? 'text-blue-300 border-blue-400/50' : 'text-amber-400 border-amber-400/50'}`}>
-            {isExporting ? 'exporting…' : 'draft'}
-          </span>
-          <span className="text-[10px] text-gray-500 tabular-nums">
-            {segmentCount} seg{segmentCount === 1 ? '' : 's'}
-            {totalDuration > 0 && ` · ${formatTime(totalDuration, sourceFps)}`}
-          </span>
-        </div>
-      </div>
-      {!editing && (
-        <Tooltip content="Delete draft" side="left" triggerClassName="shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
-          <button
-            onClick={e => { e.stopPropagation(); onDelete() }}
-            className="p-1 text-gray-600 hover:text-red-400 transition-colors"
-          >
-            <Trash2 size={12} />
-          </button>
-        </Tooltip>
+          )}
+        </>
       )}
     </div>
   )
+
+  return compact
+    ? <Tooltip content={tooltipContent} side="right" triggerClassName="block">{body}</Tooltip>
+    : body
 }
 
 // Crop aspect dropdown: Off + Original (when video doesn't match a preset) + 16:9 / 1:1 / 9:16
@@ -814,8 +1089,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   onNavigateToConverter?: () => void
 }) {
   const { config, updateConfig } = useStore()
-  const { videoRef, state, loadFile, extractTracks, cancelExtraction, resetExtraction, clearError, closeVideo, seek, fastSeek, togglePlay, audioElements } = useVideoPlayer()
-  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
+  const {
+    videoRef, state, loadFile,
+    enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction,
+    setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, recomputeAudibility,
+    clearError, closeVideo, seek, fastSeek, togglePlay,
+  } = useVideoPlayer()
   const [editingTimecode, setEditingTimecode] = useState(false)
   const [timecodeInput, setTimecodeInput] = useState('')
   const timecodeInputRef = useRef<HTMLInputElement>(null)
@@ -928,6 +1207,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [siblingFiles, setSiblingFiles] = useState<SiblingFile[]>([])
   const [folderDrafts, setFolderDrafts] = useState<import('../../types').ClipDraft[]>([])
   const [folderPath, setFolderPath] = useState<string | null>(null)
+  // Full list of stream folders in the streams root, sorted by date.
+  // Powers the Selected Stream sidebar section: lookup of the stream
+  // the currently-loaded video belongs to, plus prev/next navigation
+  // between sibling stream items.
+  const [allStreamFolders, setAllStreamFolders] = useState<import('../../types').StreamFolder[]>([])
   // If the currently-loaded video is a known clip output, this holds the info needed for the
   // "New clip from current" action. Null otherwise.
   const [currentVideoClip, setCurrentVideoClip] = useState<{ clipOf: string; clipState: ClipState; sourceExists: boolean } | null>(null)
@@ -997,12 +1281,214 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
           clipState: entry?.clipState,
         }
       }))
+
+      // Apply saved per-track audio settings (mute / solo / volume) for the
+      // currently-loaded file. Skips indices that don't exist in the source.
+      const savedSettings: Record<number, AudioTrackSetting> | undefined =
+        (folderMeta as StreamMeta).audioSettings?.[currentName] ??
+        (folderMeta as StreamMeta).audioSettings?.[currentRelKey]
+      if (savedSettings) {
+        for (const [idxStr, s] of Object.entries(savedSettings)) {
+          const i = Number(idxStr)
+          if (Number.isNaN(i)) continue
+          if (s.muted !== undefined) setTrackMuted(i, !!s.muted)
+          if (s.solo !== undefined) setTrackSolo(i, !!s.solo)
+          if (s.volume !== undefined) setTrackVolume(i, s.volume)
+          if (s.color !== undefined) setTrackColor(i, s.color)
+        }
+      }
     } catch { /* swallow */ }
-  }, [config.streamsDir])
+  }, [config.streamsDir, setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor])
 
   useEffect(() => {
     reloadSessionPanel(state.filePath)
   }, [state.filePath, reloadSessionPanel])
+
+  // Populate the full stream-folder list used by the Selected Stream
+  // sidebar section. Re-runs when the streams root or mode changes and
+  // also when the active video changes (so newly-added folders or
+  // freshly-written meta surface without a full app reload).
+  useEffect(() => {
+    if (!config.streamsDir) { setAllStreamFolders([]); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const folders = await window.api.listStreams(
+          config.streamsDir,
+          (config.streamMode || 'folder-per-stream') as 'folder-per-stream' | 'dump-folder',
+        )
+        if (!cancelled) setAllStreamFolders(folders)
+      } catch { /* swallow */ }
+    })()
+    return () => { cancelled = true }
+  }, [config.streamsDir, config.streamMode, state.filePath])
+
+  // Sorted list (by date, oldest → newest) so prev/next is chronological.
+  // Filtering on a stable date string also avoids in-place mutation surprises.
+  const sortedStreamFolders = useMemo(
+    () => [...allStreamFolders].sort((a, b) => a.date.localeCompare(b.date) || a.relativePath.localeCompare(b.relativePath)),
+    [allStreamFolders],
+  )
+
+  // The stream folder the currently-loaded video belongs to, or null if
+  // the user opened a video that isn't part of any stream item (e.g.
+  // dropped a one-off file from outside the streams root).
+  const currentStreamFolder = useMemo(() => {
+    if (!state.filePath || !config.streamsDir) return null
+    const { metaKey } = resolveStreamContext(state.filePath, config.streamsDir)
+    return (
+      sortedStreamFolders.find(f => f.relativePath === metaKey) ??
+      (folderPath ? sortedStreamFolders.find(f => f.folderPath === folderPath) : null) ??
+      null
+    )
+  }, [state.filePath, config.streamsDir, sortedStreamFolders, folderPath])
+
+  // Prev/next stream items in chronological order. Streams with zero
+  // playable video files are skipped over (navigating to an empty
+  // folder would just dead-end the player). When no qualifying stream
+  // exists in a direction the corresponding button stays disabled.
+  const currentStreamIndex = useMemo(() => {
+    if (!currentStreamFolder) return -1
+    return sortedStreamFolders.findIndex(
+      f => f.folderPath === currentStreamFolder.folderPath && f.relativePath === currentStreamFolder.relativePath,
+    )
+  }, [sortedStreamFolders, currentStreamFolder])
+  const prevStreamFolder = useMemo(() => {
+    if (currentStreamIndex < 0) return null
+    for (let i = currentStreamIndex - 1; i >= 0; i--) {
+      if (sortedStreamFolders[i].videos.length > 0) return sortedStreamFolders[i]
+    }
+    return null
+  }, [sortedStreamFolders, currentStreamIndex])
+  const nextStreamFolder = useMemo(() => {
+    if (currentStreamIndex < 0) return null
+    for (let i = currentStreamIndex + 1; i < sortedStreamFolders.length; i++) {
+      if (sortedStreamFolders[i].videos.length > 0) return sortedStreamFolders[i]
+    }
+    return null
+  }, [sortedStreamFolders, currentStreamIndex])
+
+  // Jump to the prev/next stream and auto-load its first audible video.
+  // Prefer a 'full' recording over exported child clips/shorts (same rule
+  // as Streams page → "Send to Player") so jumping streams lands on the
+  // source recording by default. Within that preference, the first
+  // *hydrated* video wins; if everything is a cloud placeholder we fall
+  // back to the preferred[0] and let loadFile's cloud download kick in.
+  const navigateToStream = useCallback(async (target: import('../../types').StreamFolder | null) => {
+    if (!target || target.videos.length === 0) return
+    const videoMap = target.meta?.videoMap
+    const folderNorm = target.folderPath.replace(/\\/g, '/').replace(/\/$/, '')
+    const relKey = (absPath: string): string => {
+      const p = absPath.replace(/\\/g, '/')
+      return p.startsWith(folderNorm + '/') ? p.slice(folderNorm.length + 1) : p.split('/').pop() ?? p
+    }
+    const fullVideos = target.videos.filter(v => videoMap?.[relKey(v)]?.category === 'full')
+    const preferred = fullVideos.length > 0 ? fullVideos : target.videos
+    let videoPath = preferred[0]
+    try {
+      const localFlags = await window.api.checkLocalFiles(preferred)
+      const firstLocal = localFlags.findIndex(b => b)
+      if (firstLocal >= 0) videoPath = preferred[firstLocal]
+    } catch { /* fall back to preferred[0] */ }
+    loadFile(videoPath)
+  }, [loadFile])
+
+  // Session Videos hover popup (collapsed-sidebar only). Replaces the
+  // squeezed inline list with a single icon trigger that pops out the
+  // full panel to the left on hover. The close timer gives the user a
+  // 200 ms grace window to transition the cursor from trigger to popup
+  // without losing the open state.
+  const [sessionVideosPopupOpen, setSessionVideosPopupOpen] = useState(false)
+  const sessionVideosTriggerRef = useRef<HTMLButtonElement>(null)
+  const sessionVideosCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const openSessionVideosPopup = useCallback(() => {
+    if (sessionVideosCloseTimer.current) {
+      clearTimeout(sessionVideosCloseTimer.current)
+      sessionVideosCloseTimer.current = null
+    }
+    setSessionVideosPopupOpen(true)
+  }, [])
+  const scheduleCloseSessionVideosPopup = useCallback(() => {
+    if (sessionVideosCloseTimer.current) clearTimeout(sessionVideosCloseTimer.current)
+    sessionVideosCloseTimer.current = setTimeout(() => setSessionVideosPopupOpen(false), 200)
+  }, [])
+  // Force-close the popup whenever the user expands the sidebar — the
+  // inline section takes over and the popup would be redundant/stale.
+  useEffect(() => {
+    if (!panelCollapsed) setSessionVideosPopupOpen(false)
+  }, [panelCollapsed])
+
+  // Quick stream-jump dropdown — open this from the list-icon button in
+  // the Selected Stream header instead of clicking prev/next many times.
+  // Same anchor + dynamic max-height pattern as the Streams page filter
+  // dropdowns so it stays inside the viewport on small windows.
+  const [streamPickerOpen, setStreamPickerOpen] = useState(false)
+  // Ref is HTMLElement (not HTMLDivElement) because the anchor switches
+  // between a <div> wrapper (expanded sidebar) and a <button> (collapsed
+  // sidebar) depending on layout. We only call getBoundingClientRect on
+  // it, which is defined on HTMLElement.
+  const streamPickerAnchorRef = useRef<HTMLElement>(null)
+  const [streamPickerMaxHeight, setStreamPickerMaxHeight] = useState(600)
+  const updateStreamPickerMaxHeight = useCallback(() => {
+    if (streamPickerAnchorRef.current) {
+      const rect = streamPickerAnchorRef.current.getBoundingClientRect()
+      // Expanded mode pops the dropdown BELOW the button group, so cap
+      // by the remaining viewport height under it. Collapsed mode pops
+      // it to the LEFT of the icon button with its TOP aligned to the
+      // anchor's top — so the budget is viewport-height minus rect.top
+      // (and a small bottom margin) to keep the last row in-window.
+      setStreamPickerMaxHeight(
+        panelCollapsed
+          ? Math.max(160, window.innerHeight - rect.top - 12)
+          : window.innerHeight - rect.bottom - 12,
+      )
+    }
+  }, [panelCollapsed])
+  const openStreamPicker = useCallback(() => {
+    if (streamPickerOpen) { setStreamPickerOpen(false); return }
+    updateStreamPickerMaxHeight()
+    setStreamPickerOpen(true)
+  }, [streamPickerOpen, updateStreamPickerMaxHeight])
+  useEffect(() => {
+    if (!streamPickerOpen) return
+    window.addEventListener('resize', updateStreamPickerMaxHeight)
+    return () => window.removeEventListener('resize', updateStreamPickerMaxHeight)
+  }, [streamPickerOpen, updateStreamPickerMaxHeight])
+
+  // Debounced save of per-track audio settings back into _meta.json. Only
+  // non-default values are persisted; if every track is at defaults the
+  // entry is dropped entirely to keep meta clean. Save fires for any
+  // mute/solo/volume change once the user has interacted with multi-track,
+  // not while the file is loading — `state.multiTrackEnabled` gates that.
+  useEffect(() => {
+    if (!state.filePath || !folderPath || !state.multiTrackEnabled) return
+    const filePath = state.filePath
+    const metaKey = folderMetaKeyRef.current
+    if (!metaKey) return
+    const timer = setTimeout(async () => {
+      try {
+        const { streamsDir } = resolveStreamContext(filePath, config.streamsDir)
+        const raw = await window.api.readFile(`${streamsDir}/_meta.json`).then(r => JSON.parse(r)).catch(() => null)
+        const existing: StreamMeta = raw?.[metaKey] ?? { date: '', streamType: [], games: [], comments: '' }
+        const filename = filePath.replace(/.*[\\/]/, '')
+        const entry: Record<number, AudioTrackSetting> = {}
+        for (const t of state.tracks) {
+          const settings: AudioTrackSetting = {}
+          if (t.muted) settings.muted = true
+          if (t.solo) settings.solo = true
+          if (t.volume !== 1) settings.volume = t.volume
+          if (t.color !== undefined) settings.color = t.color
+          if (Object.keys(settings).length > 0) entry[t.index] = settings
+        }
+        const allAudioSettings = { ...(existing.audioSettings ?? {}) }
+        if (Object.keys(entry).length === 0) delete allAudioSettings[filename]
+        else allAudioSettings[filename] = entry
+        const updated: StreamMeta = { ...existing, audioSettings: allAudioSettings }
+        await window.api.writeStreamMeta(folderPath, updated, metaKey)
+      } catch { /* swallow */ }
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [state.tracks, state.filePath, folderPath, state.multiTrackEnabled, config.streamsDir])
 
   // Any time the source video changes, drop the draft binding so a fresh clip session starts fresh.
   useEffect(() => { setActiveDraftId(null) }, [state.filePath])
@@ -1272,12 +1758,18 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     await persistDraftState(clipState, fp, dir)
   }, [clipState, state.filePath, persistDraftState])
 
-  // Multi-track warning modal before entering clip mode
+  // Multi-track warning modal before entering clip mode. Only the 'warn'
+  // variant is used now — the legacy 'merge' selection step was removed
+  // when extraction became lazy/per-track. State type kept loose so old
+  // saved sessions aren't a problem.
   const [clipModeModal, setClipModeModal] = useState<'warn' | 'merge' | null>(null)
-  const pendingClipAfterMerge = useRef(false)
   // Tracks the "don't show this again" checkbox inside the warn modal —
   // persisted to config when the user confirms via either footer action.
   const [warnDontShowAgain, setWarnDontShowAgain] = useState(false)
+  // Per-track color picker state. Snapshotted rect (not a live element)
+  // so the picker stays anchored even if the row re-renders or the dot
+  // unmounts due to a status flip.
+  const [colorPicker, setColorPicker] = useState<{ trackIndex: number; rect: DOMRect } | null>(null)
   // Reset the checkbox each time the modal closes so a previous session's
   // toggle doesn't carry over into the next open.
   useEffect(() => {
@@ -1383,22 +1875,9 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     if (initialFile) loadFile(initialFile.path)
   }, [initialFile?.token]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Select all tracks by default when a new file loads
-  useEffect(() => {
-    if (state.videoInfo) {
-      setSelectedIndices(new Set(state.videoInfo.audioTracks.map((_, i) => i)))
-    }
-  }, [state.videoUrl]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleIndex = useCallback((i: number) => {
-    setSelectedIndices(prev => {
-      const next = new Set(prev)
-      next.has(i) ? next.delete(i) : next.add(i)
-      return next
-    })
-  }, [])
-
-  const { videoInfo, tracks, isExtracting, extractProgress, tracksExtracted, isPlaying, currentTime, duration, videoUrl, error } = state
+  const { videoInfo, tracks, multiTrackEnabled, isPlaying, currentTime, duration, videoUrl, error } = state
+  const isExtracting = tracks.some(t => t.status === 'extracting')
   const multiTrack = (videoInfo?.audioTracks.length ?? 0) > 1
 
   // Default crop values used when a region has no override yet, or when no region is active.
@@ -1454,15 +1933,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     popupPCRef.current?.close()
     popupPCRef.current = null
   }, [state.videoUrl]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // After a merge triggered from the clip-mode modal completes, enter clip mode automatically
-  useEffect(() => {
-    if (tracksExtracted && pendingClipAfterMerge.current) {
-      pendingClipAfterMerge.current = false
-      setClipModeModal(null)
-      setIsClipMode(true)
-    }
-  }, [tracksExtracted])
 
 
   // Snap viewport to keep playhead visible
@@ -1839,12 +2309,18 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  // Start/stop the 1 kHz bleep tone and mute/unmute the video simultaneously
+  // Start/stop the 1 kHz bleep tone and mute/unmute the video simultaneously.
+  // During a bleep, force every audio source silent (video element + any
+  // extracted-track audio elements). When the bleep ends, defer to the
+  // hook's recomputeAudibility so the user's M/S/solo choices come back —
+  // we can't just clear `.muted` because that would override mute state.
   const startBleep = useCallback(() => {
     if (isBleepingRef.current) return
     isBleepingRef.current = true
-    if (videoRef.current && audioElements.current.length === 0) videoRef.current.muted = true
-    audioElements.current.forEach(a => { if (a) a.muted = true })
+    if (videoRef.current) videoRef.current.muted = true
+    for (const t of tracks) {
+      if (t.audioEl) t.audioEl.muted = true
+    }
 
     if (!audioCtxRef.current) audioCtxRef.current = new AudioContext()
     const ctx = audioCtxRef.current
@@ -1862,14 +2338,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     osc.start()
     bleepOscRef.current  = osc
     bleepGainRef.current = gain
-  }, [videoRef, audioElements])
+  }, [videoRef, tracks])
 
   const stopBleep = useCallback(() => {
     if (!isBleepingRef.current) return
     isBleepingRef.current = false
-    // Only unmute the video element if it's the active audio source (no extracted tracks)
-    if (videoRef.current && audioElements.current.length === 0) videoRef.current.muted = false
-    audioElements.current.forEach(a => { if (a) a.muted = false })
+    // Restore audibility from the current M/S/solo state.
+    recomputeAudibility()
 
     const ctx  = audioCtxRef.current
     const osc  = bleepOscRef.current
@@ -1881,7 +2356,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
     bleepOscRef.current  = null
     bleepGainRef.current = null
-  }, [videoRef, audioElements])
+  }, [recomputeAudibility])
 
   // rAF loop — check every frame whether playback is inside a bleep region
   useEffect(() => {
@@ -2083,11 +2558,53 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     seekRef.current(Math.max(lo, Math.min(hi, currentTimeRef.current + seconds)))
   }, [duration])
 
+  // Jump to the closest clip-region in/out marker in the given direction.
+  // Shared by the [ / ] keyboard shortcuts and the clip-mode prev/next
+  // buttons in the playback controls row. Returns the target time if a
+  // marker was found, or null if there's nothing in that direction —
+  // useful for disabling the buttons.
+  const jumpToMarker = useCallback((direction: 'prev' | 'next'): number | null => {
+    const markers: number[] = []
+    for (const r of clipStateRef.current.clipRegions) { markers.push(r.inPoint, r.outPoint) }
+    if (markers.length === 0) return null
+    markers.sort((a, b) => a - b)
+    const t = currentTimeRef.current
+    const eps = 0.001
+    let target: number | undefined
+    if (direction === 'next') target = markers.find(m => m > t + eps)
+    else { for (let i = markers.length - 1; i >= 0; i--) { if (markers[i] < t - eps) { target = markers[i]; break } } }
+    if (target === undefined) return null
+    seekRef.current(target)
+    return target
+  }, [])
+
   // Thumbnail strip
   const [filmstripEl, setFilmstripEl] = useState<HTMLDivElement | null>(null)
   const [stripWidth, setStripWidth] = useState(0)
   const [hoverRatio, setHoverRatio] = useState<number | null>(null)
   const isPlayheadDraggingRef = useRef(false)
+
+  // Track the scrollbar's pixel width so the playhead position can be
+  // pixel-snapped — a fractional left would render the 1px playhead
+  // across two pixels at half intensity and look invisible.
+  const [scrollbarWidth, setScrollbarWidth] = useState(0)
+  useEffect(() => {
+    const el = scrollbarRef.current
+    if (!el) return
+    setScrollbarWidth(el.getBoundingClientRect().width)
+    const ro = new ResizeObserver(entries => setScrollbarWidth(entries[0].contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [duration]) // re-attach when scrollbar appears (gated on duration > 0)
+
+  // Per-track volume-input draft. Key = track index, value = the
+  // in-progress string while the user is typing. The entry exists only
+  // while the input is focused/being edited; it's cleared on commit
+  // (Enter/blur) so the field falls back to the live volume rendered as
+  // an integer percentage. A draft is necessary because typing "1"→"0"→"0"
+  // for 100 would otherwise be impossible — parseInt on each keystroke
+  // would round-trip a partial value back into the field.
+  const [volumeInputs, setVolumeInputs] = useState<Record<number, string>>({})
 
   useEffect(() => {
     if (!filmstripEl) return
@@ -2109,16 +2626,38 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     return () => el.removeEventListener('wheel', handler)
   }, [handleZoom, filmstripEl])
 
+  // Waveform sources. In single-track mode this is just the video file
+  // (so the legacy single waveform strip renders it). In multi-track mode
+  // it's every extracted track, in track-index order — the hook returns
+  // a parallel `svgPaths` array where each entry is normalised to the
+  // shared peak across all tracks, so quiet tracks look quiet relative
+  // to loud ones rather than each filling its row.
   const waveformSources = useMemo(() => {
     if (!state.filePath) return []
-    if (tracksExtracted) {
-      const paths = state.tracks.map(t => t.tempPath).filter((p): p is string => !!p)
-      return paths.length > 0 ? paths : [state.filePath]
+    if (multiTrackEnabled) {
+      return state.tracks
+        .filter(t => t.status === 'extracted')
+        .map(t => t.index === 0 ? state.filePath! : t.cachedPath!) as string[]
     }
     return [state.filePath]
-  }, [state.filePath, tracksExtracted, state.tracks])
+  }, [state.filePath, multiTrackEnabled, state.tracks])
 
-  const { svgPath: waveformPath, peakCount, loading: waveformLoading } = useWaveform(waveformSources, vStart, vEnd, duration)
+  const { svgPath: waveformPath, svgPaths: trackWaveformPaths, peakCount, loading: waveformLoading } = useWaveform(waveformSources, vStart, vEnd, duration)
+  // Map track.index → its individually-normalised path, in the order the
+  // hook produced them. Lookups stay O(1) and the map is stable as long
+  // as the underlying svgPaths array reference is.
+  const trackPathByIndex = useMemo(() => {
+    const m = new Map<number, string>()
+    if (!state.multiTrackEnabled) return m
+    let i = 0
+    for (const t of state.tracks) {
+      if (t.status === 'extracted') {
+        m.set(t.index, trackWaveformPaths[i] ?? '')
+        i++
+      }
+    }
+    return m
+  }, [state.multiTrackEnabled, state.tracks, trackWaveformPaths])
 
   const { thumbnails, generating, zoomGenerating } = useThumbnailStrip(
     state.filePath ?? null,
@@ -2251,6 +2790,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       videoHeight:  videoInfo.height,
       bleepRegions: clipState.bleepRegions,
       bleepVolume:  clipState.bleepVolume,
+      audioTrackIndices: opts.audioTrackIndices,
+      audioTrackVolumes: opts.audioTrackVolumes,
     })
 
     // The clip is now in the converter's hands; close the editor so returning to the player
@@ -2537,7 +3078,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         if (k === 'c' || k === 'C') {
           e.preventDefault()
           if (isClipModeRef.current) exitClipMode()
-          else if (multiTrack && !tracksExtracted && !isExtracting && !config.skipClipMergeWarning) {
+          else if (multiTrack && !multiTrackEnabled && !isExtracting && !config.skipClipMergeWarning) {
             setClipModeModal('warn')
           }
           else setIsClipMode(true)
@@ -2612,16 +3153,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         // [ / ] — jump to prev/next clip region marker (in/out points, chronological)
         if (k === '[' || k === ']') {
           e.preventDefault()
-          const markers: number[] = []
-          for (const r of clipStateRef.current.clipRegions) { markers.push(r.inPoint, r.outPoint) }
-          if (markers.length === 0) return
-          markers.sort((a, b) => a - b)
-          const t = currentTimeRef.current
-          const eps = 0.001
-          let target: number | undefined
-          if (k === ']') target = markers.find(m => m > t + eps)
-          else { for (let i = markers.length - 1; i >= 0; i--) { if (markers[i] < t - eps) { target = markers[i]; break } } }
-          if (target !== undefined) seekRef.current(target)
+          jumpToMarker(k === ']' ? 'next' : 'prev')
           return
         }
       }
@@ -2638,10 +3170,10 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     return () => document.removeEventListener('keydown', handler)
   }, [
     clipModeModal, draftPendingDelete, showExportDialog,
-    effectiveTogglePlay, skip, stepFrame, multiTrack, tracksExtracted, isExtracting,
+    effectiveTogglePlay, skip, stepFrame, multiTrack, multiTrackEnabled, isExtracting,
     config.skipClipMergeWarning, exitClipMode,
     setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
-    closeVideo, state.filePath, addSegment, splitSegment,
+    closeVideo, state.filePath, addSegment, splitSegment, jumpToMarker,
     activeBleepId, flatSessionItems, loadFile, loadDraft, activeDraftId,
   ])
 
@@ -2771,7 +3303,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   </button>
                 </Tooltip>
                 {videoUrl && (
-                  <Tooltip content={isPopupOpen ? 'Return video to player' : 'Pop out video (for OBS capture)'}>
+                  <Tooltip content={isPopupOpen ? 'Return video to player' : 'Pop out video (for stream capture)'}>
                     <button
                       onClick={isPopupOpen ? () => window.api.closeVideoPopup() : openVideoPopup}
                       className={`p-2 rounded-lg bg-black/60 hover:bg-black/80 transition-colors ${isPopupOpen ? 'text-purple-400 hover:text-purple-300' : 'text-white/70 hover:text-white'}`}
@@ -2794,7 +3326,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
             </FileDropZone>
 
             {/* Playback controls */}
-            <div className="bg-navy-800 border-t border-white/5 px-4 py-3 flex flex-col gap-2 shrink-0">
+            <div className="bg-navy-800 border-t border-white/5 py-2 px-3 flex flex-col gap-2 shrink-0">
 
               {/* Clip mode toolbar */}
               {isClipMode && (
@@ -3172,83 +3704,307 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   </div>
                 )}
 
-                {/* Hover marker + timecode */}
-                {hoverRatio !== null && duration > 0 && (
-                  <>
-                    <div
-                      className="absolute top-0 bottom-0 w-px bg-white/40 pointer-events-none z-20"
-                      style={{ left: `${hoverRatio * 100}%`, transform: 'translateX(-50%)' }}
-                    />
-                    <div
-                      className="absolute pointer-events-none z-20 tabular-nums"
-                      style={{
-                        bottom: '100%',
-                        marginBottom: 3,
-                        left: `${Math.min(Math.max(hoverRatio * 100, 2), 98)}%`,
-                        transform: 'translateX(-50%)'
-                      }}
-                    >
-                      <div className="text-[10px] text-white bg-black/70 px-1 py-0.5 rounded">
-                        {formatTime(vStart + hoverRatio * vSpan, videoInfo?.fps)}
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
 
-              {/* Waveform strip */}
-              <div
-                ref={waveformStripRef}
-                className="relative h-10 w-full cursor-pointer bg-black/30"
-                onClick={e => {
-                  setSelectedRegionId(null)
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  const ratio = (e.clientX - rect.left) / rect.width
-                  seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
-                }}
-                onMouseDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
-                onMouseMove={e => {
-                  if (isPlayheadDraggingRef.current) return
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  setHoverRatio((e.clientX - rect.left) / rect.width)
-                }}
-                onMouseLeave={() => { if (!isPlayheadDraggingRef.current) setHoverRatio(null) }}
-              >
-                {waveformLoading && (
-                  <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-600 pointer-events-none">
-                    <Loader2 size={10} className="animate-spin" />
-                    Generating waveform…
-                  </div>
-                )}
-                {waveformPath && (
-                  <svg
-                    viewBox={`0 0 ${peakCount} 100`}
-                    preserveAspectRatio="none"
-                    className="w-full h-full"
-                  >
-                    <path
-                      d={waveformPath}
-                      className={tracksExtracted ? 'fill-purple-500/50' : 'fill-gray-300/60'}
-                    />
-                  </svg>
-                )}
-              </div>
-
-              {/* Playhead — single element spanning both strips; frozen during handle drag */}
-              {duration > 0 && (handleDragDisplayTime ?? currentTime) >= vStart && (handleDragDisplayTime ?? currentTime) <= vEnd && (
+              {/* Audio area — when multi-track is OFF, this is the legacy single
+                  waveform strip plus an "Enable Multi-track Audio" chip on
+                  multi-track sources. When multi-track is ON, the strip is
+                  replaced by one row per audio track (controls + waveform),
+                  with a small "Disable Multi-track audio" affordance at the
+                  bottom. */}
+              {!multiTrackEnabled ? (
                 <>
                   <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-purple-400/90 pointer-events-none z-20"
-                    style={{ left: `${(((handleDragDisplayTime ?? currentTime) - vStart) / vSpan) * 100}%`, transform: 'translateX(-50%)' }}
-                  />
-                  {/* Draggable hit area — z-10 beats region drag (no z-index), yields to handles (z-20) */}
-                  <div
-                    className="absolute inset-y-0 z-10 -translate-x-1/2 cursor-ew-resize"
-                    style={{ left: `${(((handleDragDisplayTime ?? currentTime) - vStart) / vSpan) * 100}%`, width: '12px' }}
-                    onMouseDown={startPlayheadDrag}
-                  />
+                    ref={waveformStripRef}
+                    className="relative h-10 w-full cursor-pointer bg-black/30"
+                    onClick={e => {
+                      setSelectedRegionId(null)
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const ratio = (e.clientX - rect.left) / rect.width
+                      seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
+                    }}
+                    onMouseDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
+                    onMouseMove={e => {
+                      if (isPlayheadDraggingRef.current) return
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      setHoverRatio((e.clientX - rect.left) / rect.width)
+                    }}
+                    onMouseLeave={() => { if (!isPlayheadDraggingRef.current) setHoverRatio(null) }}
+                  >
+                    {waveformLoading && (
+                      <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-600 pointer-events-none">
+                        <Loader2 size={10} className="animate-spin" />
+                        Generating waveform…
+                      </div>
+                    )}
+                    {waveformPath && (
+                      <svg
+                        viewBox={`0 0 ${peakCount} 100`}
+                        preserveAspectRatio="none"
+                        className="w-full h-full"
+                      >
+                        <path
+                          d={waveformPath}
+                          className="fill-gray-300/60"
+                        />
+                      </svg>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Per-track rows. anySolo is computed once so every row
+                      can flag its waveform as dimmed when solo'd out. */}
+                  {/* Multi-track audio area wraps in a relative+z-30 container
+                      so the playhead (z-20 inside the strips wrapper) renders
+                      BEHIND each track row rather than over it. Control rows
+                      have a low-opacity background so the playhead bleeds
+                      faintly through. */}
+                  <div className="relative z-30">
+                  {(() => {
+                    const anySolo = tracks.some(t => t.solo)
+                    const onTrackSeek = (clientX: number, rect: DOMRect) => {
+                      setSelectedRegionId(null)
+                      const ratio = (clientX - rect.left) / rect.width
+                      seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
+                    }
+                    const onTrackHover = (clientX: number, rect: DOMRect) => {
+                      if (isPlayheadDraggingRef.current) return
+                      setHoverRatio((clientX - rect.left) / rect.width)
+                    }
+                    const onTrackHoverLeave = () => { if (!isPlayheadDraggingRef.current) setHoverRatio(null) }
+                    // Fixed pre-name column width. Lines up the name across
+                    // extracted (dot/M/S/volume on the left) and unextracted
+                    // (dot + "Add track to playback" button) rows so it
+                    // never jitters as tracks become available. Sized to
+                    // fit the longest variant — the unextracted button.
+                    const CTRL_COL = '220px'
+                    return tracks.map(track => {
+                      const label = track.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
+                      const effectivelyMuted = anySolo ? !track.solo : track.muted
+                      const wfPath = trackPathByIndex.get(track.index) ?? ''
+                      // Color resolution: explicit user choice wins; else
+                      // fall back to the per-index default rotation so
+                      // every track has a distinct look out of the box.
+                      const effectiveColorKey = track.color ?? DEFAULT_TRACK_COLORS[track.index % DEFAULT_TRACK_COLORS.length]
+                      const swatchClass = TAG_COLOR_MAP[effectiveColorKey]?.swatch ?? 'bg-purple-500'
+                      const fillClass = getWaveformFillClass(effectiveColorKey)
+                      const colorDot = (
+                        <button
+                          onClick={e => setColorPicker({ trackIndex: track.index, rect: e.currentTarget.getBoundingClientRect() })}
+                          className={`w-3 h-3 rounded-full shrink-0 transition-transform hover:scale-110 ${swatchClass}`}
+                          title="Change track color"
+                        />
+                      )
+                      return (
+                        <div key={track.index} className="border-t border-navy-700/70">
+                          {/* Controls row. Bg matches the waveform strip so
+                              the playhead is uniformly visible/hidden across
+                              the two; a subtle 1px bottom border separates
+                              the control area from its own waveform. The
+                              outer track-pair divider above is the heavier
+                              one (border-white/15) — it groups each
+                              control+waveform pair into a single visual
+                              block. Unextracted rows are slightly lighter
+                              so the call-to-action stands out. */}
+                          <div
+                            className={`grid items-center gap-2 px-2 py-1 text-[11px] min-h-[24px] border-b border-white/5 ${
+                              track.status === 'unextracted' ? 'bg-navy-800/70' : 'bg-black/60'
+                            }`}
+                            style={{ gridTemplateColumns: `${CTRL_COL} 1fr` }}
+                          >
+                            {track.status === 'extracting' ? (
+                              <div className="col-span-2 flex items-center gap-2">
+                                {colorDot}
+                                <Loader2 size={12} className="animate-spin shrink-0 text-purple-400" />
+                                <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-purple-500 rounded-full transition-all"
+                                    style={{ width: `${track.extractProgress}%` }}
+                                  />
+                                </div>
+                                <span className="text-[10px] tabular-nums text-gray-500 shrink-0 w-8 text-right">{track.extractProgress}%</span>
+                                <span className="text-[10px] text-gray-500 truncate ml-1" title={label}>{label}</span>
+                              </div>
+                            ) : track.status === 'extracted' ? (
+                              <>
+                                <div className="flex items-center gap-1.5">
+                                  {colorDot}
+                                  <button
+                                    onClick={() => setTrackMuted(track.index, !track.muted)}
+                                    className={`w-5 h-4 rounded text-[9px] font-semibold transition-colors ${
+                                      track.muted
+                                        ? 'bg-red-600/40 text-red-100 border border-red-500/60'
+                                        : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 hover:text-gray-200'
+                                    }`}
+                                    title={track.muted ? 'Unmute' : 'Mute this track'}
+                                  >
+                                    M
+                                  </button>
+                                  <button
+                                    onClick={() => setTrackSolo(track.index, !track.solo)}
+                                    className={`w-5 h-4 rounded text-[9px] font-semibold transition-colors ${
+                                      track.solo
+                                        ? 'bg-yellow-500/35 text-yellow-100 border border-yellow-400/60'
+                                        : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 hover:text-gray-200'
+                                    }`}
+                                    title={track.solo ? 'Unsolo' : 'Solo this track (silences others)'}
+                                  >
+                                    S
+                                  </button>
+                                  {(() => {
+                                    const pct = Math.round(track.volume * 100)
+                                    // Track gradient lives on the input
+                                    // itself (not ::-webkit-slider-runnable-track)
+                                    // because appearance:none lets Chromium
+                                    // use the input's background as the track,
+                                    // and Tailwind's arbitrary-value parser
+                                    // chokes on linear-gradient() commas
+                                    // when nested in a pseudo-element
+                                    // selector. Fill color is the project's
+                                    // purple-500 (#c9d5e3) — slate light-grey
+                                    // per tailwind.config.js, not real purple.
+                                    const draft = volumeInputs[track.index]
+                                    const displayed = draft ?? String(pct)
+                                    const commit = (raw: string) => {
+                                      const n = parseInt(raw, 10)
+                                      if (!isNaN(n)) setTrackVolume(track.index, Math.max(0, Math.min(100, n)) / 100)
+                                      setVolumeInputs(prev => {
+                                        if (!(track.index in prev)) return prev
+                                        const next = { ...prev }
+                                        delete next[track.index]
+                                        return next
+                                      })
+                                    }
+                                    return (
+                                      <>
+                                        <input
+                                          type="range"
+                                          min={0}
+                                          max={100}
+                                          step={1}
+                                          value={pct}
+                                          onChange={e => setTrackVolume(track.index, parseInt(e.target.value, 10) / 100)}
+                                          style={{
+                                            background: `linear-gradient(to right, #c9d5e3 ${pct}%, rgba(255,255,255,0.1) ${pct}%)`,
+                                          }}
+                                          className="volume-slider-mt w-[100px] h-1 rounded-full cursor-pointer appearance-none"
+                                          title={`Volume — ${pct}%`}
+                                        />
+                                        {/* Editable percentage — minimal styling
+                                            matches the timecode inputs (transparent
+                                            bg, tabular-nums, no focus ring).
+                                            ArrowUp/Down step ±1% and commit
+                                            immediately; Enter/blur commit any
+                                            typed value; Escape reverts. */}
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          value={displayed}
+                                          onChange={e => setVolumeInputs(prev => ({ ...prev, [track.index]: e.target.value.replace(/[^0-9]/g, '') }))}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') { (e.currentTarget as HTMLInputElement).blur(); return }
+                                            if (e.key === 'Escape') {
+                                              setVolumeInputs(prev => {
+                                                if (!(track.index in prev)) return prev
+                                                const next = { ...prev }
+                                                delete next[track.index]
+                                                return next
+                                              })
+                                              ;(e.currentTarget as HTMLInputElement).blur()
+                                              return
+                                            }
+                                            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                              e.preventDefault()
+                                              const base = parseInt(displayed, 10)
+                                              if (isNaN(base)) return
+                                              const next = Math.max(0, Math.min(100, base + (e.key === 'ArrowUp' ? 1 : -1)))
+                                              setVolumeInputs(prev => ({ ...prev, [track.index]: String(next) }))
+                                              setTrackVolume(track.index, next / 100)
+                                            }
+                                          }}
+                                          onBlur={e => commit(e.currentTarget.value)}
+                                          className="w-7 text-[11px] text-gray-300 tabular-nums bg-transparent focus:outline-none text-right"
+                                          title={`Volume — ${pct}%`}
+                                        />
+                                        <span className="text-[10px] text-gray-500 select-none -ml-0.5">%</span>
+                                      </>
+                                    )
+                                  })()}
+                                </div>
+                                <span className="truncate text-gray-300" title={label}>{label}</span>
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-1.5">
+                                  {colorDot}
+                                  <button
+                                    onClick={() => playTrack(track.index)}
+                                    className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] bg-white/5 border border-white/10 hover:bg-purple-600/15 hover:border-purple-500/30 text-purple-200 transition-colors"
+                                    title={`Decode and play ${label}`}
+                                  >
+                                    <AudioLines size={11} className="text-purple-400 shrink-0" />
+                                    Add track to playback
+                                  </button>
+                                </div>
+                                <span className="truncate text-gray-400" title={label}>{label}</span>
+                              </>
+                            )}
+                          </div>
+                          {/* Waveform — only when extracted. Track 0's source
+                              is the video file (its built-in first audio
+                              track), tracks 1+ come from their cached .opus. */}
+                          {track.status === 'extracted' && (
+                            <TrackWaveformStrip
+                              path={wfPath}
+                              peakCount={peakCount}
+                              loading={waveformLoading}
+                              dimmed={effectivelyMuted}
+                              volume={track.volume}
+                              fillClass={fillClass}
+                              onSeek={onTrackSeek}
+                              onHover={onTrackHover}
+                              onHoverLeave={onTrackHoverLeave}
+                              onMiddleDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
+                            />
+                          )}
+                        </div>
+                      )
+                    })
+                  })()}
+                  </div>
                 </>
               )}
+
+              {/* Playhead — single element spanning both strips; frozen during handle drag.
+                  Pixel-snapped via stripWidth so the 1px line lands on an integer pixel —
+                  without snapping, translateX(-50%) on a 1px element shifts by 0.5px and
+                  subpixel-blurs the line into invisibility. Hit area keeps the
+                  translateX(-50%) since it's 12px wide and pixel-aligns cleanly at -6px. */}
+              {duration > 0 && (handleDragDisplayTime ?? currentTime) >= vStart && (handleDragDisplayTime ?? currentTime) <= vEnd && (() => {
+                const t = handleDragDisplayTime ?? currentTime
+                const ratio = (t - vStart) / vSpan
+                // floor (not round) so the playhead lands on the pixel
+                // directly under the cursor while dragging — round would
+                // jump 1px right whenever the cursor is in a pixel's
+                // right half. Cap to stripWidth-1 so the right edge
+                // case (ratio === 1) still paints a visible pixel.
+                const px = Math.min(stripWidth - 1, Math.max(0, Math.floor(ratio * stripWidth)))
+                return (
+                  <>
+                    <div
+                      className="playhead-line absolute top-0 bottom-0 w-px pointer-events-none z-20"
+                      style={{ left: `${px}px` }}
+                    />
+                    {/* Draggable hit area — z-10 beats region drag (no z-index), yields to handles (z-20) */}
+                    <div
+                      className="absolute inset-y-0 z-10 -translate-x-1/2 cursor-ew-resize"
+                      style={{ left: `${px}px`, width: '12px' }}
+                      onMouseDown={startPlayheadDrag}
+                    />
+                  </>
+                )
+              })()}
 
               {/* Clip region shading + bleep markers + per-region handles — spans both strips */}
               {isClipMode && (
@@ -3265,7 +4021,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       const l = Math.max(0, Math.min(100, ((iv.s - vStart) / vSpan) * 100))
                       const r = Math.max(0, Math.min(100, ((vEnd - iv.e) / vSpan) * 100))
                       if (l + r >= 100) return null
-                      return <div key={idx} className="absolute inset-y-0 bg-black/45 pointer-events-none z-[5]" style={{ left: `${l}%`, right: `${r}%` }} />
+                      return <div key={idx} className="absolute inset-y-0 bg-black/45 pointer-events-none z-[40]" style={{ left: `${l}%`, right: `${r}%` }} />
                     })
                   })()}
                   {/* Bleep markers — positioned at waveform strip height only (top-8 = thumbnail h-8) */}
@@ -3278,12 +4034,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     return (
                       <div
                         key={region.id}
-                        className="absolute top-8 bottom-0 bg-black overflow-hidden cursor-grab active:cursor-grabbing z-[4] border border-white/20"
+                        className="absolute top-8 bottom-0 bg-black overflow-hidden cursor-grab active:cursor-grabbing z-[40] border border-white/20"
                         style={{ left: `${l}%`, right: `${r}%` }}
                         onMouseDown={e => {
                           if (e.button !== 0) return
                           e.stopPropagation()
-                          startBleepMove(e, region.id, waveformStripRef.current!.getBoundingClientRect())
+                          startBleepMove(e, region.id, (waveformStripRef.current ?? stripsWrapperRef.current)!.getBoundingClientRect())
                         }}
                       >
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-35">
@@ -3305,8 +4061,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         </div>
                         {showHandles && (
                           <>
-                            <div className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-white/30 transition-colors" onMouseDown={e => { e.stopPropagation(); if (e.button === 0) startBleepResize(e, region.id, 'start', waveformStripRef.current!.getBoundingClientRect()) }} />
-                            <div className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-white/30 transition-colors" onMouseDown={e => { e.stopPropagation(); if (e.button === 0) startBleepResize(e, region.id, 'end', waveformStripRef.current!.getBoundingClientRect()) }} />
+                            <div className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-white/30 transition-colors" onMouseDown={e => { e.stopPropagation(); if (e.button === 0) startBleepResize(e, region.id, 'start', (waveformStripRef.current ?? stripsWrapperRef.current)!.getBoundingClientRect()) }} />
+                            <div className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-white/30 transition-colors" onMouseDown={e => { e.stopPropagation(); if (e.button === 0) startBleepResize(e, region.id, 'end', (waveformStripRef.current ?? stripsWrapperRef.current)!.getBoundingClientRect()) }} />
                           </>
                         )}
                       </div>
@@ -3618,13 +4374,69 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   })()}
                 </>
               )}
+              {/* Hover marker + timecode tooltip — lifted out of the
+                  thumbnail strip so the line spans every track (thumbnails,
+                  single waveform, or all multi-track rows) and the tooltip
+                  sits in the gap below the wrapper instead of overlapping
+                  the scaled-up thumbnail. z-[45] beats the clip-region
+                  shading (z-[40]); the tooltip's z-[70] beats the
+                  selected region's timecode (z-50) and the duration
+                  labels (z-40/60 selected) so it covers them per spec. */}
+              {hoverRatio !== null && duration > 0 && (
+                <>
+                  <div
+                    className="absolute top-0 bottom-0 w-px bg-white/40 pointer-events-none z-[45]"
+                    style={{ left: `${hoverRatio * 100}%`, transform: 'translateX(-50%)' }}
+                  />
+                  <div
+                    className="absolute pointer-events-none z-[70] tabular-nums"
+                    style={{
+                      top: '100%',
+                      left: `${Math.min(Math.max(hoverRatio * 100, 2), 98)}%`,
+                      transform: 'translateX(-50%)',
+                    }}
+                  >
+                    <div className="text-[10px] text-white bg-black px-1 py-0.5 rounded shadow-lg">
+                      {formatTime(vStart + hoverRatio * vSpan, videoInfo?.fps)}
+                    </div>
+                  </div>
+                </>
+              )}
               </div>{/* end stripsWrapperRef */}
+
+              {/* Multi-track entry/exit affordances. Rendered OUTSIDE the
+                  strips wrapper on purpose so the clip-region shading and
+                  the playhead indicator (both absolute-positioned within
+                  the wrapper) can't extend over the button and block its
+                  click area. */}
+              {!multiTrackEnabled && multiTrack && (
+                <div className={`flex justify-center ${isClipMode ? 'pt-5' : ''}`}>
+                  <button
+                    onClick={enableMultiTrack}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] bg-purple-600/15 border border-purple-500/30 text-purple-200 hover:bg-purple-600/25 transition-colors"
+                  >
+                    <Layers size={11} />
+                    Enable Multi-track Audio · {videoInfo?.audioTracks.length} tracks
+                  </button>
+                </div>
+              )}
+              {multiTrackEnabled && (
+                <div className={`flex justify-start ${isClipMode ? 'pt-5' : ''}`}>
+                  <button
+                    onClick={disableMultiTrack}
+                    className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
+                  >
+                    <X size={10} />
+                    Disable Multi-track audio
+                  </button>
+                </div>
+              )}
 
               {/* Viewport scrollbar — below waveform, above playback controls */}
               {duration > 0 && (
                 <div
                   ref={scrollbarRef}
-                  className="relative h-3 w-full select-none mt-4"
+                  className="relative h-3 w-full select-none mt-1"
                 >
                   {/* Track */}
                   <div className="absolute inset-y-1 inset-x-0 bg-white/5 rounded-full" />
@@ -3639,17 +4451,22 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       }}
                     />
                   ))}
-                  {/* Playhead position needle */}
+                  {/* Thumb — purple to distinguish from clip markers.
+                      Rectangular (not rounded) because the boundary
+                      markers now flank the thumb and provide the pill
+                      caps. The thumb's left/right edges sit exactly at
+                      the zoom region's vStart/vEnd — i.e. the flat
+                      inner sides of the markers indicate the true
+                      timeline boundaries, with the rounded outer half
+                      of each marker hanging off into the panel's
+                      px-3 padding area (which gives ~2px of slack
+                      before line 3161's overflow-hidden would clip). */}
                   <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-purple-400/70 pointer-events-none z-[2] -translate-x-1/2"
-                    style={{ left: `${((handleDragDisplayTime ?? currentTime) / duration) * 100}%` }}
-                  />
-                  {/* Thumb — purple to distinguish from clip markers */}
-                  <div
-                    className="absolute inset-y-0 rounded-full bg-purple-500/30 hover:bg-purple-500/40 cursor-grab active:cursor-grabbing flex items-center"
+                    className="absolute inset-y-0 bg-purple-500/30 hover:bg-purple-500/40 cursor-grab active:cursor-grabbing flex items-center"
                     style={{
                       left: `${(vStart / duration) * 100}%`,
-                      width: `${Math.max((vSpan / duration) * 100, 2)}%`,
+                      width: `${(vSpan / duration) * 100}%`,
+                      minWidth: 4,
                     }}
                     onMouseDown={e => {
                       if (e.button !== 0) return
@@ -3676,9 +4493,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       window.addEventListener('mouseup', onUp)
                     }}
                   >
-                    {/* Left resize handle */}
+                    {/* Left resize handle — flat side flush against the
+                        thumb's left edge at vStart; rounded side
+                        protrudes 10px to the left into the scrollbar's
+                        margin. */}
                     <div
-                      className="absolute left-0 top-0 bottom-0 w-2.5 rounded-l-full cursor-ew-resize bg-purple-400/60 hover:bg-purple-400/90 transition-colors z-10"
+                      className="absolute right-full top-0 bottom-0 w-2.5 rounded-l-full cursor-ew-resize bg-purple-400/60 hover:bg-purple-400/90 transition-colors z-10"
                       onMouseDown={e => {
                         e.preventDefault(); e.stopPropagation()
                         ;(document.activeElement as HTMLElement)?.blur()
@@ -3700,9 +4520,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         window.addEventListener('mouseup', onUp)
                       }}
                     />
-                    {/* Right resize handle */}
+                    {/* Right resize handle — flat side flush against
+                        the thumb's right edge at vEnd; rounded side
+                        protrudes 10px to the right. */}
                     <div
-                      className="absolute right-0 top-0 bottom-0 w-2.5 rounded-r-full cursor-ew-resize bg-purple-400/60 hover:bg-purple-400/90 transition-colors z-10"
+                      className="absolute left-full top-0 bottom-0 w-2.5 rounded-r-full cursor-ew-resize bg-purple-400/60 hover:bg-purple-400/90 transition-colors z-10"
                       onMouseDown={e => {
                         e.preventDefault(); e.stopPropagation()
                         ;(document.activeElement as HTMLElement)?.blur()
@@ -3725,11 +4547,61 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       }}
                     />
                   </div>
+                  {/* Playhead position needle — draggable scrubber for
+                      the full timeline. Hit area is 12px wide (matches
+                      the resize handles' feel) so it's easy to grab,
+                      and stretches 2px above/below the scrollbar so
+                      the line is visible even when crossing a region
+                      boundary marker. z-30 puts it above the resize
+                      handles (z-10) so grabbing the playhead always
+                      takes precedence over starting a resize. Rendered
+                      AFTER the thumb so it paints on top regardless of
+                      z-index quirks; visible line is centered inside
+                      the wider hit area and inherits pointer-events
+                      from the wrapper via group hover. */}
+                  {(() => {
+                    // Pixel-snap the playhead's X to a whole pixel — see comment on
+                    // the timeline playhead for why. Hit area's translateX(-50%) is
+                    // fine because it's 12px wide (-6px is a whole pixel).
+                    // floor (not round) + cap to scrollbarWidth-1 for the same reasons
+                    // as the timeline playhead above.
+                    const px = Math.min(scrollbarWidth - 1, Math.max(0, Math.floor(((handleDragDisplayTime ?? currentTime) / duration) * scrollbarWidth)))
+                    return (
+                      <div
+                        className="absolute -top-0.5 -bottom-0.5 w-3 -translate-x-1/2 cursor-ew-resize z-30 group"
+                        style={{ left: `${px}px` }}
+                        onMouseDown={e => {
+                          if (e.button !== 0) return
+                          e.preventDefault()
+                          e.stopPropagation()
+                          ;(document.activeElement as HTMLElement)?.blur()
+                          const rect = scrollbarRef.current!.getBoundingClientRect()
+                          const getTime = (clientX: number) => {
+                            const dur = durationRef.current
+                            return Math.max(0, Math.min(dur, ((clientX - rect.left) / rect.width) * dur))
+                          }
+                          fastSeekRef.current(getTime(e.clientX))
+                          const onMove = (me: MouseEvent) => fastSeekRef.current(getTime(me.clientX))
+                          const onUp = () => {
+                            window.removeEventListener('mousemove', onMove)
+                            window.removeEventListener('mouseup', onUp)
+                          }
+                          window.addEventListener('mousemove', onMove)
+                          window.addEventListener('mouseup', onUp)
+                        }}
+                      >
+                        {/* Visible 1px line — left edge at +6px from the wrapper's left
+                            (the wrapper is 12px wide and translated -6px, so +6 puts
+                            the line exactly at the snapped pixel position). */}
+                        <div className="playhead-line absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: '6px' }} />
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
 
               {/* Spacer — reserves room for handle/duration popups below the strips; divider separates timeline from controls */}
-              <div className={`shrink-0 ${duration > 0 ? 'h-[8px]' : 'h-px bg-white/15 mt-1'}`} />
+              {/* <div className={`shrink-0 ${duration > 0 ? 'h-[8px]' : 'h-px bg-white/15 mt-1'}`} /> */}
 
               {/* Timecodes + playback controls on one row */}
               <div className="flex items-center">
@@ -3758,7 +4630,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 ) : (
                   <Tooltip content="Click to enter timecode">
                     <span
-                      className="text-xs text-gray-500 tabular-nums w-24 shrink-0 cursor-text hover:text-gray-300 transition-colors"
+                      className="text-xs text-gray-400 tabular-nums w-20 shrink-0 cursor-text hover:text-gray-200 transition-colors"
                       onClick={() => {
                         if (!duration) return
                         setTimecodeInput(formatViewTime(currentTime, videoInfo?.fps))
@@ -3770,151 +4642,136 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     </span>
                   </Tooltip>
                 )}
-                <div className="flex-1 flex items-center justify-center gap-1">
-                {/* Skip to start */}
-                <Tooltip content="Skip to start">
-                  <button onClick={() => seekRef.current(0)} className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
-                    <ChevronsLeft size={15} />
-                  </button>
-                </Tooltip>
-
-                <div className="w-px h-4 bg-white/10 mx-0.5" />
-
-                {/* Skip back */}
-                {[-10, -5, -1].map(s => (
-                  <Tooltip key={s} content={`${Math.abs(s)}s back`}>
-                    <button onClick={() => skip(s)} className="px-1.5 py-1 rounded text-xs text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
-                      {s}
-                    </button>
-                  </Tooltip>
-                ))}
-
-                <div className="w-px h-4 bg-white/10 mx-0.5" />
-
-                {/* Prev frame */}
-                <Tooltip content="Previous frame">
-                  <button onClick={() => stepFrame(-1)} className="p-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
-                    <ChevronLeft size={16} />
-                  </button>
-                </Tooltip>
-
-                {/* Play / Pause */}
-                <Tooltip content={isPlaying ? 'Pause' : 'Play'}>
-                  <button
-                    onClick={effectiveTogglePlay}
-                    className="p-2 mx-1 rounded-full bg-purple-800 hover:bg-purple-700 text-white transition-colors"
-                  >
-                    {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-                  </button>
-                </Tooltip>
-
-                {/* Next frame */}
-                <Tooltip content="Next frame">
-                  <button onClick={() => stepFrame(1)} className="p-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
-                    <ChevronRight size={16} />
-                  </button>
-                </Tooltip>
-
-                <div className="w-px h-4 bg-white/10 mx-0.5" />
-
-                {/* Skip forward */}
-                {[1, 5, 10].map(s => (
-                  <Tooltip key={s} content={`${s}s forward`}>
-                    <button onClick={() => skip(s)} className="px-1.5 py-1 rounded text-xs text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
-                      +{s}
-                    </button>
-                  </Tooltip>
-                ))}
-
-                <div className="w-px h-4 bg-white/10 mx-0.5" />
-
-                {/* Skip to end */}
-                <Tooltip content="Skip to end">
-                  <button onClick={() => seekRef.current(duration)} className="p-1.5 rounded text-gray-500 hover:text-gray-100 hover:bg-white/10 transition-colors">
-                    <ChevronsRight size={15} />
-                  </button>
-                </Tooltip>
-
-                </div>
-                <span className="text-xs text-gray-500 tabular-nums w-24 shrink-0 text-right">{formatTime(duration, videoInfo?.fps)}</span>
-              </div>
-
-              {/* Secondary controls row */}
-              <div className="flex items-center gap-3 min-w-0">
-                {videoUrl && !isClipMode && (() => {
-                  const isClipFile = !!currentVideoClip
-                  const sourceMissing = isClipFile && !currentVideoClip.sourceExists
-                  const tooltip = sourceMissing
-                    ? `Source video "${currentVideoClip.clipOf}" is missing from this folder`
-                    : ''
-                  const currentName = state.filePath?.replace(/.*[\\/]/, '') ?? ''
-                  // A source already has clips if there's a draft or an exported clip output for it
-                  const hasExistingClips = !isClipFile && (
-                    folderDrafts.some(d => d.sourceName === currentName) ||
-                    siblingFiles.some(f => f.clipOf === currentName)
+                <div className="flex-1 flex items-center justify-center gap-0.5">
+                {/* Skip label/tooltip helpers — keeps the buttons themselves tight.
+                    Magnitudes < 60s display as integer seconds (e.g. "-10", "+5");
+                    60s and 300s display as minutes ("-1m", "+5m"). */}
+                {(() => {
+                  const skipLabel = (s: number) => {
+                    const abs = Math.abs(s)
+                    // n-dash (U+2013) for negatives so width matches '+' visually
+                    const sign = s < 0 ? '–' : '+'
+                    return abs >= 60 ? `${sign}${abs / 60}m` : `${sign}${abs}`
+                  }
+                  const skipTip = (s: number) => {
+                    const abs = Math.abs(s)
+                    const unit = abs >= 60 ? `${abs / 60}m` : `${abs}s`
+                    return `${unit} ${s < 0 ? 'back' : 'forward'}`
+                  }
+                  // Prev/next clip-region marker — disabled state is computed
+                  // by peeking at clipState.clipRegions vs. currentTime. eps
+                  // matches jumpToMarker so the buttons enable/disable in lockstep.
+                  const eps = 0.001
+                  const hasPrevMarker = isClipMode && clipState.clipRegions.some(r =>
+                    r.inPoint < currentTime - eps || r.outPoint < currentTime - eps,
+                  )
+                  const hasNextMarker = isClipMode && clipState.clipRegions.some(r =>
+                    r.inPoint > currentTime + eps || r.outPoint > currentTime + eps,
                   )
                   return (
-                    <button
-                      disabled={sourceMissing}
-                      title={tooltip}
-                      onClick={() => {
-                        if (isClipFile) {
-                          // Exported clips are immutable; branch a new clip from the saved state.
-                          reopenClipOutput(currentVideoClip.clipOf, currentVideoClip.clipState)
-                          return
-                        }
-                        if (multiTrack && !tracksExtracted && !isExtracting && !config.skipClipMergeWarning) {
-                          setClipModeModal('warn')
-                          return
-                        }
-                        setIsClipMode(true)
-                      }}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed bg-blue-950/40 border-blue-500/30 text-blue-400 hover:bg-blue-950/60"
-                    >
-                      <Scissors size={12} />
-                      {isClipFile
-                        ? 'New clip from current'
-                        : hasExistingClips ? 'Start New Clip' : 'Start Clipping'}
-                    </button>
+                    <>
+                      {/* Skip to start */}
+                      <Tooltip content="Skip to start">
+                        <button onClick={() => seekRef.current(0)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                          <ChevronsLeft size={15} />
+                        </button>
+                      </Tooltip>
+
+                      {/* Prev clip-region marker — clip mode only.
+                          Disabled (and dimmed) when there's no marker before
+                          the playhead, matching the [ keyboard shortcut. */}
+                      {isClipMode && (
+                        <Tooltip content="Previous clip marker">
+                          <button
+                            onClick={() => jumpToMarker('prev')}
+                            disabled={!hasPrevMarker}
+                            className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                          >
+                            <SkipBack size={14} />
+                          </button>
+                        </Tooltip>
+                      )}
+
+                      {/* Skip back: -5m, -1m, -10s, -5s, -1s */}
+                      {[-300, -60, -10, -5, -1].map(s => (
+                        <Tooltip key={s} content={skipTip(s)}>
+                          <button onClick={() => skip(s)} className="px-1 py-1 rounded text-xs text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
+                            {skipLabel(s)}
+                          </button>
+                        </Tooltip>
+                      ))}
+
+                      {/* Prev frame */}
+                      <Tooltip content="Previous frame">
+                        <button onClick={() => stepFrame(-1)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                          <ChevronLeft size={16} />
+                        </button>
+                      </Tooltip>
+
+                      {/* Play / Pause */}
+                      <Tooltip content={isPlaying ? 'Pause' : 'Play'}>
+                        <button
+                          onClick={effectiveTogglePlay}
+                          className="p-2 mx-1 rounded-full bg-purple-800 hover:bg-purple-700 text-white transition-colors"
+                        >
+                          {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                        </button>
+                      </Tooltip>
+
+                      {/* Next frame */}
+                      <Tooltip content="Next frame">
+                        <button onClick={() => stepFrame(1)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                          <ChevronRight size={16} />
+                        </button>
+                      </Tooltip>
+
+                      {/* Skip forward: +1s, +5s, +10s, +1m, +5m */}
+                      {[1, 5, 10, 60, 300].map(s => (
+                        <Tooltip key={s} content={skipTip(s)}>
+                          <button onClick={() => skip(s)} className="px-1 py-1 rounded text-xs text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
+                            {skipLabel(s)}
+                          </button>
+                        </Tooltip>
+                      ))}
+
+                      {/* Next clip-region marker — clip mode only */}
+                      {isClipMode && (
+                        <Tooltip content="Next clip marker">
+                          <button
+                            onClick={() => jumpToMarker('next')}
+                            disabled={!hasNextMarker}
+                            className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                          >
+                            <SkipForward size={14} />
+                          </button>
+                        </Tooltip>
+                      )}
+
+                      {/* Skip to end */}
+                      <Tooltip content="Skip to end">
+                        <button onClick={() => seekRef.current(duration)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                          <ChevronsRight size={15} />
+                        </button>
+                      </Tooltip>
+                    </>
                   )
                 })()}
-                {videoInfo && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500 min-w-0 overflow-hidden">
-                    <Info size={12} className="shrink-0" />
-                    <Tooltip
-                      content={state.filePath ? `Show in Explorer: ${state.filePath}` : ''}
-                      triggerClassName="min-w-0 overflow-hidden inline-flex"
-                    >
-                      <button
-                        className="truncate hover:text-gray-300 transition-colors cursor-pointer min-w-0 max-w-full"
-                        onClick={() => state.filePath && window.api.openInExplorer(state.filePath)}
-                      >
-                        {videoInfo.width}×{videoInfo.height}
-                        {videoInfo.fps && ` · ${videoInfo.fps.toFixed(2)} fps`}
-                        {` · ${videoInfo.videoCodec}`}
-                        {state.filePath && ` · ${state.filePath.split(/[\\/]/).pop()}`}
-                      </button>
-                    </Tooltip>
-                  </div>
-                )}
-                <Button variant="ghost" size="sm" icon={<FolderOpen size={14} />} onClick={handleBrowse} className="ml-auto shrink-0">
-                  Open Video File
-                </Button>
-                {videoInfo && (
-                  <button
-                    onClick={() => closeVideo()}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border text-red-400 border-red-600/40 bg-red-900/30 hover:bg-red-900/50 transition-colors shrink-0"
-                  >
-                    <X size={12} />
-                    Close Session
-                  </button>
-                )}
+                </div>
+                <span className="text-xs text-gray-400 tabular-nums w-20 shrink-0 text-right">{formatTime(duration, videoInfo?.fps)}</span>
               </div>
+
+              {/* Note: the contextual action buttons (Start Clipping,
+                  Open Video File, Close Session, Video Info) that used
+                  to live here have moved into the sidebar — see the
+                  "Player Actions" block. This frees up vertical space
+                  for the video itself. */}
             </div>
           </div>
 
-          {/* Audio tracks panel */}
-          <div className={`relative bg-navy-800 flex flex-col shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-2 overflow-hidden' : 'w-64 overflow-hidden'}`}>
+          {/* Player sidebar — host for the contextual action buttons, the
+              Selected Stream section, and Session Videos. Collapsed mode
+              shrinks to an icon strip; expanded shows icons + labels. */}
+          <div className={`relative bg-navy-800 flex flex-col shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-12 overflow-hidden' : 'w-64 overflow-hidden'}`}>
             {/* Left edge — collapse/expand handle */}
             <Tooltip content={panelCollapsed ? 'Expand panel' : 'Collapse panel'} side="left" triggerClassName="group/edge absolute left-0 inset-y-0 w-2 z-20">
               <button
@@ -3924,289 +4781,492 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               />
               <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-purple-500 transition-all duration-150" />
             </Tooltip>
-            {!panelCollapsed && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 
-              {/* Audio Tracks section — absorbs variable height so Session Videos stays pinned to the bottom */}
-              <div className="flex-1 min-h-0 overflow-y-auto">
-                <div className="px-4 py-2.5 border-b border-white/5">
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Audio Tracks</h3>
-                </div>
-
-                {/* Pre-merge: track selector */}
-                {multiTrack && !tracksExtracted && !isExtracting && (
-                  <div className="px-4 py-2.5 flex flex-col gap-2">
-                    <div className="flex items-start gap-2 text-[11px] text-gray-400 leading-relaxed">
-                      <Layers size={12} className="text-purple-400 mt-0.5 shrink-0" />
-                      <span>
-                        {videoInfo!.audioTracks.length} tracks detected. Only <span className="text-gray-300">{videoInfo!.audioTracks[0]?.title || TRACK_LABELS[0] || 'Track 1'}</span> will be audible. Select tracks to merge.
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      {videoInfo!.audioTracks.map((t, i) => {
-                        const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
-                        const checked = selectedIndices.has(i)
-                        return (
-                          <button
-                            key={i}
-                            onClick={() => toggleIndex(i)}
-                            className={`w-full text-left px-3 py-1.5 rounded-lg border transition-colors ${
-                              checked
-                                ? 'bg-purple-600/20 border-purple-600/40'
-                                : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06]'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
-                                checked ? 'bg-purple-700 border-purple-700' : 'border-gray-600'
-                              }`}>
-                                {checked && <Check size={10} className="text-white" strokeWidth={3} />}
-                              </div>
-                              <div className="flex flex-col min-w-0">
-                                <span className={`text-xs font-medium leading-tight ${checked ? 'text-purple-200' : 'text-gray-300'}`}>{label}</span>
-                                <span className="text-[11px] text-gray-400 leading-tight mt-0.5">
-                                  {t.codec} · {t.channels}ch{t.language ? ` · ${t.language}` : ''}
-                                </span>
-                              </div>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-
-                    <button
-                      onClick={() => extractTracks(Array.from(selectedIndices).sort())}
-                      disabled={selectedIndices.size < 1}
-                      className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg bg-purple-800 hover:bg-purple-700 active:bg-purple-900 text-white transition-colors disabled:opacity-40 disabled:pointer-events-none"
-                    >
-                      <GitMerge size={12} />
-                      Merge audio tracks
-                    </button>
+              {/* Session-level actions — Close + Open. Pinned at the very
+                  top of the sidebar so opening/closing a video is always
+                  one click away regardless of what else is in the sidebar.
+                  Was previously bundled into the Player Actions stack
+                  below the Selected Stream section. Tooltips always
+                  show so users can learn the keyboard shortcuts. */}
+              {videoUrl && (() => {
+                const topBtnBase = panelCollapsed
+                  ? 'flex items-center justify-center h-8 w-8 rounded transition-colors shrink-0'
+                  : 'flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors w-full text-left'
+                const topStackCls = panelCollapsed
+                  ? 'flex flex-col items-center gap-1 py-2 shrink-0'
+                  : 'flex flex-col gap-1 p-2 shrink-0'
+                return (
+                  <div className={`${topStackCls} border-b border-white/5`}>
+                    {videoInfo && (
+                      <Tooltip content="Close session (Esc)" side="left">
+                        <button
+                          onClick={() => closeVideo()}
+                          className={`${topBtnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
+                        >
+                          <X size={14} className="shrink-0" />
+                          {!panelCollapsed && <span className="truncate">Close Session</span>}
+                        </button>
+                      </Tooltip>
+                    )}
+                    <Tooltip content="Open a video file (Ctrl+O)" side="left">
+                      <button
+                        onClick={handleBrowse}
+                        className={`${topBtnBase} text-gray-300 hover:bg-white/10 ${panelCollapsed ? '' : 'border border-white/10'}`}
+                      >
+                        <FolderOpen size={14} className="shrink-0" />
+                        {!panelCollapsed && <span className="truncate">Open Video File</span>}
+                      </button>
+                    </Tooltip>
                   </div>
-                )}
+                )
+              })()}
 
-                {/* During merge: progress bars */}
-                {multiTrack && isExtracting && (
-                  <div className="px-4 py-2.5 flex flex-col gap-2.5">
-                    <div className="flex items-center gap-2 text-xs text-purple-300 font-medium">
-                      <Loader2 size={12} className="animate-spin shrink-0" />
-                      Merging audio tracks…
-                    </div>
-                    <div className="flex flex-col gap-2.5">
-                      {videoInfo!.audioTracks.map((t, i) => {
-                        const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
-                        const selected = selectedIndices.has(i)
-                        const progress = extractProgress[i] ?? 0
-                        return (
-                          <div key={i} className={`flex flex-col gap-1 ${selected ? '' : 'opacity-35'}`}>
-                            <div className="flex items-center justify-between">
-                              <span className={`text-[11px] text-gray-400 truncate ${selected ? '' : 'line-through'}`}>
-                                {label}
-                              </span>
-                              {selected && (
-                                <span className="text-[11px] tabular-nums text-gray-500 shrink-0 ml-2">
-                                  {progress >= 100 ? <span className="text-green-400">✓</span> : `${progress}%`}
-                                </span>
-                              )}
-                            </div>
-                            <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-                              {selected
-                                ? <div
-                                    className={`h-full rounded-full transition-all duration-300 ${progress >= 100 ? 'bg-green-500' : 'bg-purple-500'}`}
-                                    style={{ width: `${progress}%` }}
-                                  />
-                                : null
-                              }
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    <button
-                      onClick={cancelExtraction}
-                      className="text-xs text-gray-600 hover:text-gray-400 transition-colors text-left"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
-
-                {/* Post-merge: merged + skipped tracks, undo button */}
-                {tracksExtracted && (() => {
-                  const merged = tracks.filter(t => t.audioEl !== null)
-                  const skipped = tracks.filter(t => t.audioEl === null)
-                  return (
-                    <div className="px-4 py-2.5 flex flex-col gap-2.5">
-                      {/* Merged */}
-                      <div className="flex flex-col gap-1.5">
-                        <p className="text-[10px] text-gray-600 uppercase tracking-wider font-semibold">Merged tracks</p>
-                        {merged.map((track) => {
-                          const info = videoInfo?.audioTracks[track.index]
-                          const label = info?.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
-                          return (
-                            <div key={track.index} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600/10 border border-purple-600/20">
-                              <div className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-                              <div className="min-w-0">
-                                <div className="text-xs font-medium text-purple-200">
-                                  {label} <span className="text-purple-600 font-normal">(Track {track.index + 1})</span>
-                                </div>
-                                {info && (
-                                  <div className="text-[10px] text-gray-600">
-                                    {info.codec} · {info.channels}ch{info.language ? ` · ${info.language}` : ''}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-
-                      {/* Skipped */}
-                      {skipped.length > 0 && (
-                        <div className="flex flex-col gap-1.5">
-                          <p className="text-[10px] text-gray-600 uppercase tracking-wider font-semibold">Tracks not merged</p>
-                          {skipped.map((track) => {
-                            const info = videoInfo?.audioTracks[track.index]
-                            const label = info?.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
+              {/* Selected Stream — context about the stream item the active
+                  video belongs to (thumbnail, date, title) plus prev/next
+                  navigation through sibling stream items. Hidden when the
+                  user has loaded a video that isn't part of any stream
+                  (e.g. dropped a one-off file from outside the streams
+                  root). */}
+              {currentStreamFolder && (() => {
+                const meta = currentStreamFolder.meta
+                const title = meta?.ytTitle?.trim()
+                  || meta?.twitchTitle?.trim()
+                  || (meta?.games && meta.games.length > 0 ? meta.games.join(' · ') : '')
+                  || currentStreamFolder.folderName
+                // Resolve the thumbnail (preferredThumbnail filename if set,
+                // else first slot). Cloud placeholders render as a Cloud
+                // icon — no file:// fetch — to keep us from hanging on a
+                // broken sync state.
+                const thumbs = currentStreamFolder.thumbnails
+                const localFlags = currentStreamFolder.thumbnailLocalFlags ?? []
+                let thumbIdx = 0
+                if (meta?.preferredThumbnail) {
+                  const found = thumbs.findIndex(t => (t.split(/[\\/]/).pop() ?? '') === meta.preferredThumbnail)
+                  if (found >= 0) thumbIdx = found
+                }
+                const thumbPath = thumbs[thumbIdx]
+                const thumbLocal = localFlags[thumbIdx] ?? true
+                const thumbNode = thumbPath && thumbLocal
+                  ? <img src={'file:///' + thumbPath.replace(/\\/g, '/')} className="w-full h-full object-cover" draggable={false} />
+                  : thumbPath
+                    ? <div className="w-full h-full flex items-center justify-center bg-navy-700"><Cloud size={panelCollapsed ? 12 : 16} className="text-gray-600" /></div>
+                    : <div className="w-full h-full flex items-center justify-center bg-navy-700"><Film size={panelCollapsed ? 12 : 16} className="text-gray-600" /></div>
+                // Chevron convention: ▲ = next (chronologically newer),
+                // ▼ = previous (older). Expanded lays them out side-by-side
+                // with ▼ on the left and ▲ on the right; collapsed stacks
+                // them vertically with ▲ on top and ▼ on the bottom so the
+                // arrow direction matches its spatial position too.
+                // Shared stream-jump dropdown portal — same JSX for both
+                // collapsed and expanded modes; positioning differs since
+                // the anchor differs (right-edge icon vs. inline header
+                // button group). Mounted via document.body so the
+                // sidebar's overflow-hidden can't clip it.
+                const streamPickerDropdown = streamPickerOpen && streamPickerAnchorRef.current && ReactDOM.createPortal(
+                  (() => {
+                    const r = streamPickerAnchorRef.current.getBoundingClientRect()
+                    const positionStyle: React.CSSProperties = panelCollapsed
+                      ? {
+                          position: 'fixed',
+                          top: Math.max(8, r.top),
+                          right: Math.max(8, window.innerWidth - r.left + 8),
+                          zIndex: 61,
+                          maxHeight: streamPickerMaxHeight,
+                        }
+                      : {
+                          position: 'fixed',
+                          top: r.bottom + 4,
+                          right: Math.max(8, window.innerWidth - r.right),
+                          zIndex: 61,
+                          maxHeight: streamPickerMaxHeight,
+                        }
+                    return (
+                      <>
+                        <div className="fixed inset-0 z-[60]" onClick={() => setStreamPickerOpen(false)} />
+                        <div
+                          style={positionStyle}
+                          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl min-w-[220px] max-w-[280px] overflow-y-auto"
+                        >
+                          {sortedStreamFolders.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-gray-600">No streams</p>
+                          ) : sortedStreamFolders.slice().reverse().map(folder => {
+                            const fMeta = folder.meta
+                            const fTitle = fMeta?.ytTitle?.trim()
+                              || fMeta?.twitchTitle?.trim()
+                              || (fMeta?.games && fMeta.games.length > 0 ? fMeta.games.join(' · ') : '')
+                              || folder.folderName
+                            const isCurrent = !!currentStreamFolder
+                              && folder.folderPath === currentStreamFolder.folderPath
+                              && folder.relativePath === currentStreamFolder.relativePath
+                            const empty = folder.videos.length === 0
                             return (
-                              <div key={track.index} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/5">
-                                <div className="w-1.5 h-1.5 rounded-full bg-gray-700 shrink-0" />
-                                <div className="min-w-0">
-                                  <div className="text-xs font-medium text-gray-500 line-through">
-                                    {label} <span className="text-gray-700 font-normal">(Track {track.index + 1})</span>
-                                  </div>
-                                  {info && (
-                                    <div className="text-[10px] text-gray-700">
-                                      {info.codec} · {info.channels}ch{info.language ? ` · ${info.language}` : ''}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
+                              <button
+                                key={folder.relativePath || folder.folderPath}
+                                onClick={() => {
+                                  if (empty || isCurrent) return
+                                  navigateToStream(folder)
+                                  setStreamPickerOpen(false)
+                                }}
+                                disabled={empty || isCurrent}
+                                className={`flex flex-col items-start w-full px-3 py-1.5 text-left transition-colors ${
+                                  isCurrent
+                                    ? 'bg-purple-600/20 text-purple-200 cursor-default'
+                                    : empty
+                                      ? 'text-gray-600 cursor-default'
+                                      : 'text-gray-300 hover:bg-white/5'
+                                }`}
+                                title={fTitle}
+                              >
+                                <span className="text-[11px] tabular-nums leading-tight">
+                                  {folder.date}
+                                  {empty && <span className="ml-1 text-gray-700 italic">(no videos)</span>}
+                                  {isCurrent && <span className="ml-1 text-purple-400 italic">(current)</span>}
+                                </span>
+                                <span className="text-xs truncate w-full leading-tight">{fTitle}</span>
+                              </button>
                             )
                           })}
                         </div>
-                      )}
-
-                      {/* Undo */}
-                      <button
-                        onClick={() => {
-                          resetExtraction()
-                          if (videoInfo) setSelectedIndices(new Set(videoInfo.audioTracks.map((_, i) => i)))
-                        }}
-                        className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-300 transition-colors mt-1"
-                      >
-                        <RotateCcw size={11} />
-                        Undo merge
-                      </button>
-                    </div>
+                      </>
+                    )
+                  })(),
+                  document.body,
+                )
+                if (panelCollapsed) {
+                  return (
+                    <>
+                      <div className="flex flex-col items-center gap-1 py-2 border-b border-white/5">
+                        <Tooltip content="Jump to stream…" side="right">
+                          <button
+                            ref={streamPickerAnchorRef as React.RefObject<HTMLButtonElement>}
+                            onClick={openStreamPicker}
+                            className={`flex items-center justify-center h-6 w-8 rounded transition-colors ${streamPickerOpen ? 'bg-white/10 text-gray-200' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
+                            aria-label="Jump to stream"
+                          >
+                            <List size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content={nextStreamFolder ? `Next: ${nextStreamFolder.date}` : 'No next stream'} side="right">
+                          <button
+                            onClick={() => navigateToStream(nextStreamFolder)}
+                            disabled={!nextStreamFolder}
+                            className="flex items-center justify-center h-6 w-8 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          >
+                            <ChevronUp size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content={`${currentStreamFolder.date} — ${title}`} side="right">
+                          <div className="w-9 h-5 rounded overflow-hidden bg-navy-900 border border-white/10 shrink-0">
+                            {thumbNode}
+                          </div>
+                        </Tooltip>
+                        <Tooltip content={prevStreamFolder ? `Previous: ${prevStreamFolder.date}` : 'No previous stream'} side="right">
+                          <button
+                            onClick={() => navigateToStream(prevStreamFolder)}
+                            disabled={!prevStreamFolder}
+                            className="flex items-center justify-center h-6 w-8 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          >
+                            <ChevronDown size={12} />
+                          </button>
+                        </Tooltip>
+                      </div>
+                      {streamPickerDropdown}
+                    </>
                   )
-                })()}
-
-                {!multiTrack && !tracksExtracted && !isExtracting && (
-                  <div className="px-4 py-4 text-center text-xs text-gray-600 leading-relaxed">
-                    {(videoInfo?.audioTracks.length ?? 0) === 0
-                      ? 'No audio tracks found.'
-                      : 'Only 1 audio track — audio merge not available.'
-                    }
-                  </div>
-                )}
-              </div>
-
-              {/* Session Videos panel — hide when there's only one video and nothing derived from it.
-                  Pinned to the bottom of the sidebar with a 50% cap so it never dominates and doesn't
-                  shift around as the Audio Tracks section grows/shrinks. */}
-              {(siblingFiles.length > 1 || folderDrafts.length > 0) && (
-                <div className="shrink-0 max-h-[50%] overflow-hidden pr-2 border-t border-white/5">
-                  <div className="max-h-full overflow-y-auto">
-                    <div className="sticky top-0 z-10 bg-navy-800 px-4 py-2.5 border-b border-white/5 flex items-center gap-2">
-                      <Film size={12} className="text-gray-600 shrink-0" />
-                      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Session Videos</h3>
+                }
+                return (
+                  <div className="flex flex-col gap-1.5 p-2 border-b border-white/5">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Selected Stream</h3>
+                      <div ref={streamPickerAnchorRef as React.RefObject<HTMLDivElement>} className="relative flex items-center gap-0.5">
+                        <Tooltip content="Jump to stream…" side="bottom">
+                          <button
+                            onClick={openStreamPicker}
+                            className={`flex items-center justify-center h-5 w-5 rounded transition-colors ${streamPickerOpen ? 'bg-white/10 text-gray-200' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
+                          >
+                            <List size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content={prevStreamFolder ? `Previous: ${prevStreamFolder.date}` : 'No previous stream'} side="bottom">
+                          <button
+                            onClick={() => navigateToStream(prevStreamFolder)}
+                            disabled={!prevStreamFolder}
+                            className="flex items-center justify-center h-5 w-5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          >
+                            <ChevronDown size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content={nextStreamFolder ? `Next: ${nextStreamFolder.date}` : 'No next stream'} side="bottom">
+                          <button
+                            onClick={() => navigateToStream(nextStreamFolder)}
+                            disabled={!nextStreamFolder}
+                            className="flex items-center justify-center h-5 w-5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          >
+                            <ChevronUp size={12} />
+                          </button>
+                        </Tooltip>
+                        {streamPickerDropdown}
+                      </div>
                     </div>
-                    {isExtracting ? (
-                      <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">Available once merge is complete or cancelled</div>
-                    ) : (() => {
-                      // Group drafts by source filename so each source video shows its drafts underneath.
-                      const draftsBySource = folderDrafts.reduce<Record<string, import('../../types').ClipDraft[]>>((acc, d) => {
-                        (acc[d.sourceName] ||= []).push(d)
-                        return acc
-                      }, {})
-                      const seenNames = new Set(siblingFiles.map(v => v.name))
-                      // Group clip-output siblings under their source video so they nest like drafts do.
-                      // If a clip's source isn't in the folder, it falls through to the top level as an orphan.
-                      const clipChildren: Record<string, SiblingFile[]> = {}
-                      const topLevelSiblings: SiblingFile[] = []
-                      for (const s of siblingFiles) {
-                        if (s.clipOf && seenNames.has(s.clipOf)) {
-                          (clipChildren[s.clipOf] ||= []).push(s)
-                        } else {
-                          topLevelSiblings.push(s)
-                        }
+                    <div className="flex items-start gap-2">
+                      <div className="w-16 h-9 rounded overflow-hidden bg-navy-900 border border-white/10 shrink-0">
+                        {thumbNode}
+                      </div>
+                      <div className="flex flex-col min-w-0 flex-1 leading-tight">
+                        <span className="text-[11px] text-gray-400 tabular-nums">{currentStreamFolder.date}</span>
+                        <Tooltip content={title} side="bottom" triggerClassName="block min-w-0">
+                          <span className="text-xs text-gray-200 truncate block">{title}</span>
+                        </Tooltip>
+                        {meta?.games && meta.games.length > 0 && meta.ytTitle && (
+                          <span className="text-[10px] text-gray-500 truncate" title={meta.games.join(' · ')}>
+                            {meta.games.join(' · ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Player Actions. Same buttons that used to live in the bottom
+                  controls row of the main player area, lifted here so the
+                  video gets more vertical real estate. Each renders as
+                  icon-only in collapsed mode (with the label as tooltip)
+                  and icon + label in expanded mode. */}
+              {videoUrl && (() => {
+                const isClipFile = !!currentVideoClip
+                const sourceMissing = isClipFile && !currentVideoClip!.sourceExists
+                const currentName = state.filePath?.replace(/.*[\\/]/, '') ?? ''
+                const hasExistingClips = !isClipFile && (
+                  folderDrafts.some(d => d.sourceName === currentName) ||
+                  siblingFiles.some(f => f.clipOf === currentName)
+                )
+                const clipLabel = isClipFile
+                  ? 'New clip from current'
+                  : hasExistingClips ? 'Start New Clip' : 'Start Clipping'
+                const clipTooltip = sourceMissing
+                  ? `Source video "${currentVideoClip!.clipOf}" is missing from this folder`
+                  : `${clipLabel} (C)`
+                const onClipClick = () => {
+                  if (isClipFile) {
+                    reopenClipOutput(currentVideoClip!.clipOf, currentVideoClip!.clipState)
+                    return
+                  }
+                  if (multiTrack && !multiTrackEnabled && !isExtracting && !config.skipClipMergeWarning) {
+                    setClipModeModal('warn')
+                    return
+                  }
+                  setIsClipMode(true)
+                }
+                // Shared button class strings. Collapsed = centered icon-
+                // only h-8; expanded = full-width row with icon + label.
+                const btnBase = panelCollapsed
+                  ? 'flex items-center justify-center h-8 w-8 rounded transition-colors shrink-0'
+                  : 'flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors w-full text-left'
+                // Outer container class for both top and bottom button
+                // stacks. Identical so the two halves visually pair up.
+                // No horizontal padding in collapsed mode so the centered
+                // icons sit symmetrically inside the sidebar width.
+                const stackCls = panelCollapsed
+                  ? 'flex flex-col items-center gap-1 py-2 shrink-0'
+                  : 'flex flex-col gap-1 p-2 shrink-0'
+                return (
+                  <>
+                    {/* Session Videos — always visible. Expanded: full
+                        inline section taking flex-1. Collapsed: single
+                        Film-icon trigger that pops a full panel out to
+                        the LEFT of the sidebar on hover (portal below).
+                        Same renderSessionVideos helper feeds both
+                        surfaces so they stay in sync. */}
+                    {(() => {
+                      const renderSessionVideos = () => (
+                        <>
+                          <div className="sticky top-0 z-10 bg-navy-800 px-4 py-2.5 border-b border-white/5 flex items-center gap-2">
+                            <Film size={12} className="text-gray-600 shrink-0" />
+                            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Session Videos</h3>
+                          </div>
+                          {isExtracting ? (
+                            <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">Available once merge is complete or cancelled</div>
+                          ) : siblingFiles.length === 0 && folderDrafts.length === 0 ? (
+                            <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">
+                              {state.filePath ? 'No other videos in this folder' : 'Open a video to see siblings here'}
+                            </div>
+                          ) : (() => {
+                            const draftsBySource = folderDrafts.reduce<Record<string, import('../../types').ClipDraft[]>>((acc, d) => {
+                              (acc[d.sourceName] ||= []).push(d)
+                              return acc
+                            }, {})
+                            const seenNames = new Set(siblingFiles.map(v => v.name))
+                            const clipChildren: Record<string, SiblingFile[]> = {}
+                            const topLevelSiblings: SiblingFile[] = []
+                            for (const s of siblingFiles) {
+                              if (s.clipOf && seenNames.has(s.clipOf)) {
+                                (clipChildren[s.clipOf] ||= []).push(s)
+                              } else {
+                                topLevelSiblings.push(s)
+                              }
+                            }
+                            const orphanDrafts = Object.entries(draftsBySource)
+                              .filter(([name]) => !seenNames.has(name))
+                              .flatMap(([, list]) => list)
+                            return (
+                              <div className="px-1 py-1.5 flex flex-col gap-0.5">
+                                {topLevelSiblings.map(item => (
+                                  <React.Fragment key={item.path}>
+                                    <SiblingVideoItem
+                                      item={item}
+                                      isActive={item.path === state.filePath}
+                                      onClick={() => loadFile(item.path)}
+                                    />
+                                    {(draftsBySource[item.name] ?? []).map(draft => (
+                                      <DraftSessionItem
+                                        key={draft.id}
+                                        draft={draft}
+                                        displayName={draftDisplayName(draft)}
+                                        sourceFps={item.fps}
+                                        isActive={activeDraftId === draft.id}
+                                        isExporting={exportingDraftIds.has(draft.id)}
+                                        onClick={() => loadDraft(draft)}
+                                        onDelete={() => requestDeleteDraft(draft)}
+                                        onRename={name => renameDraft(draft.id, name)}
+                                      />
+                                    ))}
+                                    {(clipChildren[item.name] ?? []).map(child => (
+                                      <SiblingVideoItem
+                                        key={child.path}
+                                        item={child}
+                                        isActive={child.path === state.filePath}
+                                        indented
+                                        onClick={() => loadFile(child.path)}
+                                      />
+                                    ))}
+                                  </React.Fragment>
+                                ))}
+                                {orphanDrafts.map(draft => (
+                                  <DraftSessionItem
+                                    key={draft.id}
+                                    draft={draft}
+                                    displayName={draftDisplayName(draft)}
+                                    sourceFps={siblingFiles.find(f => f.name === draft.sourceName)?.fps}
+                                    isActive={activeDraftId === draft.id}
+                                    onClick={() => loadDraft(draft)}
+                                    onDelete={() => requestDeleteDraft(draft)}
+                                    onRename={name => renameDraft(draft.id, name)}
+                                  />
+                                ))}
+                              </div>
+                            )
+                          })()}
+                        </>
+                      )
+
+                      if (panelCollapsed) {
+                        return (
+                          <>
+                            <div className="flex flex-col items-center py-2 shrink-0">
+                              <button
+                                ref={sessionVideosTriggerRef}
+                                onMouseEnter={openSessionVideosPopup}
+                                onMouseLeave={scheduleCloseSessionVideosPopup}
+                                className={`flex items-center justify-center h-8 w-8 rounded transition-colors ${sessionVideosPopupOpen ? 'bg-white/10 text-gray-200' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
+                                aria-label="Session Videos"
+                              >
+                                <Film size={14} />
+                              </button>
+                            </div>
+                            {/* Spacer keeps the bottom stack pinned to the
+                                bottom of the sidebar in collapsed mode now
+                                that the SV section is no longer flex-1. */}
+                            <div className="flex-1 min-h-0" />
+                            {sessionVideosPopupOpen && sessionVideosTriggerRef.current && ReactDOM.createPortal(
+                              (() => {
+                                const r = sessionVideosTriggerRef.current.getBoundingClientRect()
+                                // Pop out to the LEFT of the sidebar with a
+                                // small gap. Width matches the expanded
+                                // sidebar so the panel feels familiar.
+                                const top = Math.max(8, r.top)
+                                return (
+                                  <div
+                                    onMouseEnter={openSessionVideosPopup}
+                                    onMouseLeave={scheduleCloseSessionVideosPopup}
+                                    style={{
+                                      position: 'fixed',
+                                      top,
+                                      right: Math.max(8, window.innerWidth - r.left + 8),
+                                      maxHeight: Math.max(120, window.innerHeight - top - 12),
+                                      width: 256,
+                                      zIndex: 50,
+                                    }}
+                                    className="bg-navy-700 border border-white/10 rounded-lg shadow-2xl overflow-y-auto"
+                                  >
+                                    {renderSessionVideos()}
+                                  </div>
+                                )
+                              })(),
+                              document.body,
+                            )}
+                          </>
+                        )
                       }
-                      // Any drafts whose source isn't in the folder (e.g., renamed/deleted) appear at the bottom.
-                      const orphanDrafts = Object.entries(draftsBySource)
-                        .filter(([name]) => !seenNames.has(name))
-                        .flatMap(([, list]) => list)
+
                       return (
-                        <div className="px-1 py-1.5 flex flex-col gap-0.5">
-                          {topLevelSiblings.map(item => (
-                            <React.Fragment key={item.path}>
-                              <SiblingVideoItem
-                                item={item}
-                                isActive={item.path === state.filePath}
-                                onClick={() => loadFile(item.path)}
-                                onReopenAsClip={item.clipOf && item.clipState
-                                  ? () => reopenClipOutput(item.clipOf!, item.clipState!)
-                                  : undefined}
-                              />
-                              {(draftsBySource[item.name] ?? []).map(draft => (
-                                <DraftSessionItem
-                                  key={draft.id}
-                                  draft={draft}
-                                  displayName={draftDisplayName(draft)}
-                                  sourceFps={item.fps}
-                                  isActive={activeDraftId === draft.id}
-                                  isExporting={exportingDraftIds.has(draft.id)}
-                                  onClick={() => loadDraft(draft)}
-                                  onDelete={() => requestDeleteDraft(draft)}
-                                  onRename={name => renameDraft(draft.id, name)}
-                                />
-                              ))}
-                              {(clipChildren[item.name] ?? []).map(child => (
-                                <SiblingVideoItem
-                                  key={child.path}
-                                  item={child}
-                                  isActive={child.path === state.filePath}
-                                  indented
-                                  onClick={() => loadFile(child.path)}
-                                  onReopenAsClip={child.clipOf && child.clipState
-                                    ? () => reopenClipOutput(child.clipOf!, child.clipState!)
-                                    : undefined}
-                                />
-                              ))}
-                            </React.Fragment>
-                          ))}
-                          {orphanDrafts.map(draft => (
-                            <DraftSessionItem
-                              key={draft.id}
-                              draft={draft}
-                              displayName={draftDisplayName(draft)}
-                              sourceFps={siblingFiles.find(f => f.name === draft.sourceName)?.fps}
-                              isActive={activeDraftId === draft.id}
-                              onClick={() => loadDraft(draft)}
-                              onDelete={() => requestDeleteDraft(draft)}
-                              onRename={name => renameDraft(draft.id, name)}
-                            />
-                          ))}
+                        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
+                          {renderSessionVideos()}
                         </div>
                       )
                     })()}
-                  </div>
-                </div>
-              )}
+
+                    {/* Bottom stack: current-video context (info + start
+                        clipping). The visual separator above this group
+                        is a border-t matching the same `border-white/5`
+                        style as the other section dividers in the
+                        sidebar — no inner divider needed. */}
+                    <div className={`${stackCls} border-t border-white/5`}>
+                      {videoInfo && (
+                        <Tooltip
+                          content={
+                            panelCollapsed
+                              ? `${videoInfo.width}×${videoInfo.height}${videoInfo.fps ? ` · ${videoInfo.fps.toFixed(2)} fps` : ''} · ${videoInfo.videoCodec}${state.filePath ? `\n${state.filePath.split(/[\\/]/).pop()}` : ''}`
+                              : (state.filePath ? `Show in Explorer: ${state.filePath}` : '')
+                          }
+                          side="right"
+                        >
+                          <button
+                            onClick={() => state.filePath && window.api.openInExplorer(state.filePath)}
+                            className={`${btnBase} text-gray-400 hover:text-gray-200 hover:bg-white/5 min-w-0`}
+                          >
+                            <Info size={14} className="shrink-0" />
+                            {!panelCollapsed && (
+                              <div className="flex flex-col items-start min-w-0 flex-1 leading-tight">
+                                <span className="truncate w-full text-[11px]">
+                                  {videoInfo.width}×{videoInfo.height}{videoInfo.fps && ` · ${videoInfo.fps.toFixed(2)}fps`}
+                                </span>
+                                <span className="truncate w-full text-[10px] text-gray-500">
+                                  {videoInfo.videoCodec}{state.filePath && ` · ${state.filePath.split(/[\\/]/).pop()}`}
+                                </span>
+                              </div>
+                            )}
+                          </button>
+                        </Tooltip>
+                      )}
+                      {!isClipMode && (
+                        <Tooltip content={clipTooltip} side="left">
+                          <button
+                            disabled={sourceMissing}
+                            onClick={onClipClick}
+                            className={`${btnBase} bg-blue-950/40 border border-blue-500/30 text-blue-400 hover:bg-blue-950/60 disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            <Scissors size={14} className="shrink-0" />
+                            {!panelCollapsed && <span className="truncate">{clipLabel}</span>}
+                          </button>
+                        </Tooltip>
+                      )}
+                    </div>
+                  </>
+                )
+              })()}
 
             </div>
-            )}
           </div>
         </div>
       )}
@@ -4244,146 +5304,75 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         )}
       </Modal>
 
-      {/* ── Multi-track warning / merge modal before entering clip mode ────── */}
+      {/* ── Per-track color picker. Rendered at PlayerPage level so it can
+          portal over the whole UI without being trapped inside the
+          relative-positioned multi-track stack. */}
+      {colorPicker && (
+        <TrackColorPicker
+          rect={colorPicker.rect}
+          currentKey={tracks.find(t => t.index === colorPicker.trackIndex)?.color}
+          onPick={key => { setTrackColor(colorPicker.trackIndex, key); setColorPicker(null) }}
+          onClose={() => setColorPicker(null)}
+        />
+      )}
+
+      {/* ── Multi-track warning before entering clip mode ─────────────────────
+          New simplified flow: the user either continues with single-track
+          audio (only Track 1 audible) or enables multi-track for this
+          session. Track extraction itself is now lazy / per-track from the
+          timeline, so this modal no longer needs a selection step. */}
       <Modal
-        isOpen={clipModeModal !== null}
+        isOpen={clipModeModal === 'warn'}
         onClose={() => setClipModeModal(null)}
-        title={clipModeModal === 'merge' ? 'Select tracks to merge' : 'Multiple audio tracks detected'}
+        title="Multiple audio tracks detected"
         width="sm"
-        dismissible={!isExtracting}
         footer={
-          clipModeModal === 'warn' ? (
-            <>
-              <Button variant="ghost" size="sm" onClick={() => { commitWarnDontShowAgain(); setClipModeModal(null); setIsClipMode(true) }}>
-                Continue anyway
-              </Button>
-              <Button variant="primary" size="sm" onClick={() => { commitWarnDontShowAgain(); setClipModeModal('merge') }}>
-                Merge audio now
-              </Button>
-            </>
-          ) : isExtracting ? null : (
-            <>
-              <Button variant="ghost" size="sm" onClick={() => setClipModeModal(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={selectedIndices.size < 1}
-                onClick={() => {
-                  pendingClipAfterMerge.current = true
-                  extractTracks(Array.from(selectedIndices).sort())
-                }}
-              >
-                Merge audio tracks
-              </Button>
-            </>
-          )
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                commitWarnDontShowAgain()
+                setClipModeModal(null)
+                setIsClipMode(true)
+              }}
+            >
+              Continue with single track
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                commitWarnDontShowAgain()
+                enableMultiTrack()
+                setClipModeModal(null)
+                setIsClipMode(true)
+              }}
+            >
+              Enable Multi-track Audio
+            </Button>
+          </>
         }
       >
-        {clipModeModal === 'warn' && (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-start gap-2.5 text-sm text-gray-300 leading-relaxed">
-              <Layers size={15} className="text-purple-400 mt-0.5 shrink-0" />
-              <span>
-                This video has <strong className="text-white">{videoInfo?.audioTracks.length} audio tracks</strong>.
-                You will only hear <strong className="text-white">Track 1</strong>.
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 leading-relaxed pl-[23px]">
-              Merging combines all tracks so you hear everything while clipping. Exporting always includes all audio tracks. Merging takes time to process.
-            </p>
-            <div className="pl-[23px] pt-1">
-              <Checkbox
-                checked={warnDontShowAgain}
-                onChange={setWarnDontShowAgain}
-                label="Don't show this again"
-              />
-            </div>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-start gap-2.5 text-sm text-gray-300 leading-relaxed">
+            <Layers size={15} className="text-purple-400 mt-0.5 shrink-0" />
+            <span>
+              This video has <strong className="text-white">{videoInfo?.audioTracks.length} audio tracks</strong>.
+              You'll only hear <strong className="text-white">Track 1</strong> unless you enable multi-track playback.
+            </span>
           </div>
-        )}
-
-        {clipModeModal === 'merge' && (
-          <div className="flex flex-col gap-3">
-            {isExtracting ? (
-              /* Progress view */
-              <div className="flex flex-col items-center gap-4 py-2">
-                <div className="text-purple-300 font-medium text-sm">Merging audio tracks…</div>
-                <div className="flex flex-col gap-2.5 w-full">
-                  {videoInfo?.audioTracks.map((t, i) => {
-                    const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
-                    const selected = selectedIndices.has(i)
-                    return (
-                      <div key={i} className="flex items-center gap-3">
-                        <span className={`text-xs text-white whitespace-nowrap min-w-[80px] ${selected ? '' : 'line-through opacity-50'}`}>
-                          {label} <span className="text-white/50">(Track {i + 1})</span>
-                        </span>
-                        {selected ? (
-                          <>
-                            <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all ${(extractProgress[i] ?? 0) >= 100 ? 'bg-green-500' : 'bg-purple-500'}`}
-                                style={{ width: `${extractProgress[i] ?? 0}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-white/50 w-8 text-right tabular-nums">{extractProgress[i] ?? 0}%</span>
-                          </>
-                        ) : (
-                          <div className="flex-1 h-1.5 bg-white/5 rounded-full" />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-                <button
-                  onClick={() => { cancelExtraction(); pendingClipAfterMerge.current = false; setClipModeModal(null) }}
-                  className="text-xs text-white/50 hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              /* Track selector */
-              <>
-                <div className="flex items-start gap-2 text-xs text-gray-400 leading-relaxed">
-                  <Layers size={13} className="text-purple-400 mt-0.5 shrink-0" />
-                  <span>Select which tracks to include in the merge.</span>
-                </div>
-                <div className="flex flex-col gap-1">
-                  {videoInfo!.audioTracks.map((t, i) => {
-                    const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
-                    const checked = selectedIndices.has(i)
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => toggleIndex(i)}
-                        className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
-                          checked
-                            ? 'bg-purple-600/20 border-purple-600/40'
-                            : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06]'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
-                            checked ? 'bg-purple-700 border-purple-700' : 'border-gray-600'
-                          }`}>
-                            {checked && <Check size={10} className="text-white" strokeWidth={3} />}
-                          </div>
-                          <div className="flex flex-col min-w-0">
-                            <span className={`text-xs font-medium leading-tight ${checked ? 'text-purple-200' : 'text-gray-300'}`}>{label}</span>
-                            <span className="text-[11px] text-gray-500 leading-tight mt-0.5">
-                              {t.codec} · {t.channels}ch{t.language ? ` · ${t.language}` : ''}
-                            </span>
-                          </div>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </>
-            )}
+          <p className="text-xs text-gray-500 leading-relaxed pl-[23px]">
+            Multi-track playback splits each track into its own timeline row with mute, solo, and volume controls. Individual tracks are decoded on demand when you click "Play this track". Exported clips always include every source audio track regardless.
+          </p>
+          <div className="pl-[23px] pt-1">
+            <Checkbox
+              checked={warnDontShowAgain}
+              onChange={setWarnDontShowAgain}
+              label="Don't show this again"
+            />
           </div>
-        )}
+        </div>
       </Modal>
 
 
@@ -4398,6 +5387,9 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
             hasBleepsOutsideRegions={clipState.bleepRegions.some(b =>
               !clipState.clipRegions.some(r => b.start >= r.inPoint && b.end <= r.outPoint)
             )}
+            audioTracks={videoInfo?.audioTracks ?? []}
+            tracksState={tracks.map(t => ({ index: t.index, status: t.status, muted: t.muted, volume: t.volume }))}
+            multiTrackEnabled={multiTrackEnabled}
             onConfirm={runExport}
             onClose={() => setShowExportDialog(false)}
           />

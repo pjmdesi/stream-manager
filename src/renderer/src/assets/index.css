@@ -74,6 +74,39 @@ input[type=range]::-webkit-slider-runnable-track {
   border-radius: 2px;
 }
 
+/* Scoped override for the multi-track audio volume sliders only — the
+   global thumb rule above paints a 14px+border knob and a solid track,
+   which would both obscure the small thumb and the per-track fill
+   gradient set inline on the input. The opaque-track bg is replaced
+   with transparent so the input's inline linear-gradient shows through,
+   and the thumb is shrunk to a small flat dot. Selector includes the
+   `input` type so its specificity (0,2,2) beats the global
+   `input[type=range]::-webkit-slider-thumb` (0,1,2). */
+input.volume-slider-mt::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-accent-light);
+  margin-top: -4px;
+  background: #c9d5e3; /* project purple-500 — one notch darker than the border */
+}
+input.volume-slider-mt::-webkit-slider-runnable-track {
+  background: transparent;
+}
+
+/* Shared playhead-needle styling for the timeline and scroll/zoom bar.
+   1px solid center with two 1px translucent halos (left + right) gives
+   a precise-feeling indicator that remains visible when it crosses
+   region boundary markers or other overlays — without obscuring them.
+   Color is the project's "purple"-400 (slate light-grey #e0e7f0) at
+   90% / 30% alpha respectively. Halos use box-shadow so they don't
+   participate in layout (no width change, no clipping by content-box). */
+.playhead-line {
+  background: rgba(224, 231, 240, 0.9);
+  box-shadow:
+    1px 0 0 0 rgba(224, 231, 240, 0.3),
+    -1px 0 0 0 rgba(224, 231, 240, 0.3);
+}
+
 /* Shared outline-pulse keyframe. Color is controlled per-class via --pulse-color.
    Uses outline (not box-shadow) so it is never clipped by overflow:auto/hidden containers. */
 @keyframes outline-pulse {

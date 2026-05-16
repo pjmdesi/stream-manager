@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('api', {
   extractAudioTracks: (filePath: string, trackIndices?: number[]) =>
     ipcRenderer.invoke('video:extractTracks', filePath, trackIndices),
 
+  getCachedAudioTracks: (filePath: string) =>
+    ipcRenderer.invoke('video:getCachedTracks', filePath),
+
   cancelExtractAudioTracks: () =>
     ipcRenderer.invoke('video:cancelExtract'),
 

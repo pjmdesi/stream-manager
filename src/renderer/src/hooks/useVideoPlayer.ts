@@ -1,20 +1,35 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { VideoInfo } from '../types'
+import { VideoInfo, AudioTrackSetting } from '../types'
+
+// Per-track status. Track 0 is the source's first audio track — always
+// 'extracted' because it plays from the <video> element directly. Tracks
+// 1+ require an ffmpeg pass (or a cache hit) before they become audible.
+export type TrackStatus = 'unextracted' | 'extracting' | 'extracted'
 
 export interface TrackState {
   index: number
-  volume: number
+  title?: string
+  status: TrackStatus
+  /** 0–100 while extracting; ignored otherwise. */
+  extractProgress: number
+  /** Filesystem path to the cached .opus, when status === 'extracted' and index > 0. */
+  cachedPath?: string
+  /** HTMLAudioElement playing this track. Only present for index > 0 in 'extracted' state. */
+  audioEl?: HTMLAudioElement | null
   muted: boolean
-  audioEl: HTMLAudioElement | null
-  tempPath: string | null
+  solo: boolean
+  /** 0–1. */
+  volume: number
+  /** Tag-color key for the swatch dot + waveform fill. Undefined =
+   *  fall back to the index-based default rotation in tagColors. */
+  color?: string
 }
 
 export interface VideoPlayerState {
   videoInfo: VideoInfo | null
   tracks: TrackState[]
-  isExtracting: boolean
-  extractProgress: Record<number, number>
-  tracksExtracted: boolean
+  /** True iff the user has explicitly enabled multi-track playback for this file. */
+  multiTrackEnabled: boolean
   isPlaying: boolean
   currentTime: number
   duration: number
@@ -23,58 +38,116 @@ export interface VideoPlayerState {
   error: string | null
 }
 
+/** Compute and apply effective audibility across the video element +
+ *  all extracted audio elements, given the current set of M/S flags.
+ *  When any track has solo=true, every non-solo track is forced silent
+ *  regardless of its own muted flag — standard DAW behaviour. */
+function applyAudibility(
+  tracks: TrackState[],
+  multiTrackEnabled: boolean,
+  video: HTMLVideoElement | null,
+) {
+  if (!video) return
+  if (!multiTrackEnabled) {
+    // Plain single-track playback. Video plays at full volume; whatever
+    // audio elements may exist (from a previous enable) should be silent.
+    video.muted = false
+    video.volume = 1
+    for (const t of tracks) {
+      if (t.audioEl) {
+        t.audioEl.muted = true
+        t.audioEl.pause()
+      }
+    }
+    return
+  }
+  const anySolo = tracks.some(t => t.solo)
+  for (const t of tracks) {
+    const effectivelyMuted = anySolo ? !t.solo : t.muted
+    if (t.index === 0) {
+      video.muted = effectivelyMuted
+      video.volume = t.volume
+    } else if (t.audioEl) {
+      t.audioEl.muted = effectivelyMuted
+      t.audioEl.volume = t.volume
+      if (!effectivelyMuted && !video.paused) {
+        t.audioEl.play().catch(() => {})
+      } else if (effectivelyMuted) {
+        t.audioEl.pause()
+      }
+    }
+  }
+}
+
+function makeDefaultTrackState(
+  index: number,
+  title?: string,
+  saved?: AudioTrackSetting,
+): TrackState {
+  return {
+    index,
+    title,
+    // Track 0 is always 'extracted' (lives on the <video> element).
+    status: index === 0 ? 'extracted' : 'unextracted',
+    extractProgress: 0,
+    audioEl: null,
+    muted: saved?.muted ?? false,
+    solo: saved?.solo ?? false,
+    volume: saved?.volume ?? 1,
+    color: saved?.color,
+  }
+}
+
 export function useVideoPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [state, setState] = useState<VideoPlayerState>({
     videoInfo: null,
     tracks: [],
-    isExtracting: false,
-    extractProgress: {},
-    tracksExtracted: false,
+    multiTrackEnabled: false,
     isPlaying: false,
     currentTime: 0,
     duration: 0,
     videoUrl: null,
     filePath: null,
-    error: null
+    error: null,
   })
 
-  const audioElements = useRef<HTMLAudioElement[]>([])
-  const tempPaths = useRef<string[]>([])
-  const syncInterval = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Tracks snapshot kept in sync via effect — used by callbacks that need
+  // the current per-track state without retriggering on every render.
+  const tracksRef = useRef<TrackState[]>([])
+  useEffect(() => { tracksRef.current = state.tracks }, [state.tracks])
+  const multiTrackEnabledRef = useRef(false)
+  useEffect(() => { multiTrackEnabledRef.current = state.multiTrackEnabled }, [state.multiTrackEnabled])
+
   const isSeeking = useRef(false)
   const pendingSeekTime = useRef<number | null>(null)
-  const setupSyncRef = useRef<() => void>(() => {})
 
-  // Cleanup old tracks
-  const cleanupTracks = useCallback(async () => {
-    audioElements.current.forEach(el => {
-      el.pause()
-      el.src = ''
-    })
-    audioElements.current = []
-
-    if (tempPaths.current.length > 0) {
-      await window.api.cleanupTracks(tempPaths.current)
-      tempPaths.current = []
-    }
-
-    if (syncInterval.current) {
-      clearInterval(syncInterval.current)
-      syncInterval.current = null
+  // Detach all extracted audio elements (does NOT delete cache files —
+  // the persistent cache survives so re-enabling is cheap).
+  const releaseAudioElements = useCallback(() => {
+    for (const t of tracksRef.current) {
+      if (t.audioEl) {
+        t.audioEl.pause()
+        t.audioEl.src = ''
+      }
     }
   }, [])
 
-  const loadFile = useCallback(async (filePath: string) => {
-    setState(prev => ({ ...prev, error: null, isExtracting: false }))
-    await cleanupTracks()
+  const loadFile = useCallback(async (
+    filePath: string,
+    savedSettings?: Record<number, AudioTrackSetting>,
+  ) => {
+    setState(prev => ({ ...prev, error: null }))
+    releaseAudioElements()
 
     try {
       const info = await window.api.probeFile(filePath)
       const videoUrl = `file://${filePath.replace(/\\/g, '/')}`
 
-      // Unmute video element so the user can play immediately without extraction
-      if (videoRef.current) videoRef.current.muted = false
+      if (videoRef.current) {
+        videoRef.current.muted = false
+        videoRef.current.volume = 1
+      }
 
       setState(prev => ({
         ...prev,
@@ -82,154 +155,238 @@ export function useVideoPlayer() {
         videoUrl,
         filePath,
         duration: info.duration,
-        tracksExtracted: false,
-        extractProgress: {},
-        tracks: info.audioTracks.map(t => ({
-          index: t.index,
-          volume: 1,
-          muted: false,
-          audioEl: null,
-          tempPath: null
-        }))
+        multiTrackEnabled: false,
+            tracks: info.audioTracks.map((t, i) =>
+          makeDefaultTrackState(i, t.title, savedSettings?.[i]),
+        ),
       }))
     } catch (err: any) {
       setState(prev => ({ ...prev, error: err.message }))
     }
-  }, [cleanupTracks])
+  }, [releaseAudioElements])
 
-  const extractTracks = useCallback(async (selectedIndices: number[]) => {
-    const { filePath, videoInfo } = state
-    if (!filePath || !videoInfo || videoInfo.audioTracks.length === 0) return
+  // ── Multi-track mode ────────────────────────────────────────────────────
 
-    setState(prev => ({ ...prev, isExtracting: true, extractProgress: {} }))
+  /** Enable the multi-track UI. Auto-attaches Audio elements for any
+   *  tracks already in the persistent cache so re-opening a file the user
+   *  has worked with skips the extraction round-trip. Track 0 needs no
+   *  extraction — it's already on the <video>. */
+  const enableMultiTrack = useCallback(async () => {
+    const filePath = state.filePath
+    if (!filePath) return
+    setState(prev => ({ ...prev, multiTrackEnabled: true }))
 
-    // Mute the video element — audio will come from extracted track elements
-    if (videoRef.current) videoRef.current.muted = true
+    let cached: string[] | null = null
+    try {
+      cached = await window.api.getCachedAudioTracks(filePath)
+    } catch { /* no-op */ }
+    if (!cached) {
+      // No cached tracks — Track 0 is already audible from the video
+      // element; tracks 1+ will sit in 'unextracted' until the user
+      // clicks "Play this track".
+      requestAnimationFrame(() => {
+        applyAudibility(tracksRef.current, true, videoRef.current)
+      })
+      return
+    }
+
+    // For each cached slot (index > 0), instantiate an Audio element and
+    // mark the track as 'extracted'. Track 0 is always 'extracted'.
+    setState(prev => {
+      const tracks = prev.tracks.map((t, i) => {
+        if (i === 0) return t
+        const path = cached?.[i]
+        if (!path) return t
+        const el = new Audio(`file://${path.replace(/\\/g, '/')}`)
+        el.preload = 'auto'
+        el.volume = t.volume
+        el.muted = t.muted
+        const video = videoRef.current
+        if (video) el.currentTime = video.currentTime
+        return { ...t, status: 'extracted' as TrackStatus, cachedPath: path, audioEl: el }
+      })
+      return { ...prev, tracks }
+    })
+
+    requestAnimationFrame(() => {
+      applyAudibility(tracksRef.current, true, videoRef.current)
+    })
+  }, [state.filePath])
+
+  /** Tear down: release Audio elements, reset video element, drop M/S/volume
+   *  in-state (saved values stay in StreamMeta so a future re-enable still
+   *  picks them up). Does NOT delete the cached .opus files. */
+  const disableMultiTrack = useCallback(() => {
+    releaseAudioElements()
+    if (videoRef.current) {
+      videoRef.current.muted = false
+      videoRef.current.volume = 1
+    }
+    setState(prev => ({
+      ...prev,
+      multiTrackEnabled: false,
+        tracks: prev.tracks.map((t, i) => ({
+        ...t,
+        status: i === 0 ? ('extracted' as TrackStatus) : ('unextracted' as TrackStatus),
+        extractProgress: 0,
+        audioEl: null,
+        cachedPath: undefined,
+      })),
+    }))
+  }, [releaseAudioElements])
+
+  /** Extract a single track (cache-aware via the IPC handler). Multiple
+   *  playTrack calls can run in parallel — the main process queues
+   *  per-call cancel handles so each ffmpeg invocation lives on its own
+   *  and cancelExtraction() kills every in-flight job at once. We skip
+   *  duplicate triggers for a track that's already mid-extraction. */
+  const playTrack = useCallback(async (index: number) => {
+    const filePath = state.filePath
+    if (!filePath || index === 0) return
+    const already = tracksRef.current.find(t => t.index === index)?.status
+    if (already === 'extracting' || already === 'extracted') return
+
+    setState(prev => ({
+      ...prev,
+      tracks: prev.tracks.map(t =>
+        t.index === index ? { ...t, status: 'extracting', extractProgress: 0 } : t
+      ),
+    }))
+
+    const unsubProgress = window.api.onExtractProgress(({ trackIndex, percent }) => {
+      if (trackIndex !== index) return
+      setState(prev => ({
+        ...prev,
+        tracks: prev.tracks.map(t =>
+          t.index === trackIndex ? { ...t, extractProgress: percent } : t
+        ),
+      }))
+    })
 
     try {
-      const unsubProgress = window.api.onExtractProgress(({ trackIndex, percent }) => {
-        setState(prev => ({
-          ...prev,
-          extractProgress: { ...prev.extractProgress, [trackIndex]: percent }
-        }))
-      })
+      const paths = await window.api.extractAudioTracks(filePath, [index])
+      const path = paths[index]
+      if (!path) throw new Error(`Track ${index} extraction returned no path`)
 
-      const paths = await window.api.extractAudioTracks(filePath, selectedIndices)
-      unsubProgress()
-      tempPaths.current = paths.filter(Boolean)
-
-      // Only create audio elements for selected (non-empty) paths
-      const audioEls: (HTMLAudioElement | null)[] = paths.map((p) => {
-        if (!p) return null
-        const el = new Audio(`file://${p.replace(/\\/g, '/')}`)
-        el.preload = 'auto'
-        el.volume = 1
-        if (videoRef.current) el.currentTime = videoRef.current.currentTime
-        return el
-      })
-      audioElements.current = audioEls.filter((el): el is HTMLAudioElement => el !== null)
+      const el = new Audio(`file://${path.replace(/\\/g, '/')}`)
+      el.preload = 'auto'
+      const trackBefore = tracksRef.current.find(t => t.index === index)
+      el.volume = trackBefore?.volume ?? 1
+      el.muted = trackBefore?.muted ?? false
+      const video = videoRef.current
+      if (video) el.currentTime = video.currentTime
 
       setState(prev => ({
         ...prev,
-        isExtracting: false,
-        tracksExtracted: true,
-        tracks: prev.tracks.map((t, i) => ({
-          ...t,
-          audioEl: audioEls[i] || null,
-          tempPath: paths[i] || null
-        }))
+            tracks: prev.tracks.map(t =>
+          t.index === index
+            ? { ...t, status: 'extracted' as TrackStatus, cachedPath: path, audioEl: el, extractProgress: 100 }
+            : t
+        ),
       }))
 
-      setupSyncRef.current()
-    } catch (err: any) {
-      if (err.message?.includes('cancelled')) return  // handled by cancelExtraction
-      if (videoRef.current) videoRef.current.muted = false
-      setState(prev => ({ ...prev, error: err.message, isExtracting: false }))
-    }
-  }, [state])
-
-  const setupSync = useCallback(() => {
-    const video = videoRef.current
-    if (!video) return
-
-    video.addEventListener('play', handlePlay)
-    video.addEventListener('pause', handlePause)
-    video.addEventListener('seeked', handleSeeked)
-    video.addEventListener('timeupdate', handleTimeUpdate)
-
-    // Drift correction every 500ms
-    syncInterval.current = setInterval(() => {
-      if (!video || video.paused) return
-      audioElements.current.forEach(audio => {
-        if (!audio) return
-        const drift = Math.abs(audio.currentTime - video.currentTime)
-        if (drift > 0.15) {
-          audio.currentTime = video.currentTime
-        }
+      requestAnimationFrame(() => {
+        applyAudibility(tracksRef.current, multiTrackEnabledRef.current, videoRef.current)
       })
-    }, 500)
-
-    return () => {
-      video.removeEventListener('play', handlePlay)
-      video.removeEventListener('pause', handlePause)
-      video.removeEventListener('seeked', handleSeeked)
-      video.removeEventListener('timeupdate', handleTimeUpdate)
+    } catch (err: any) {
+      if (!err?.message?.includes('cancelled')) {
+        setState(prev => ({ ...prev, error: err.message }))
+      }
+      setState(prev => ({
+        ...prev,
+            tracks: prev.tracks.map(t =>
+          t.index === index ? { ...t, status: 'unextracted' as TrackStatus, extractProgress: 0 } : t
+        ),
+      }))
+    } finally {
+      unsubProgress()
     }
-  }, [])
-  setupSyncRef.current = setupSync
+  }, [state.filePath])
 
-  const handlePlay = useCallback(() => {
-    setState(prev => ({ ...prev, isPlaying: true }))
-    audioElements.current.forEach(audio => {
-      if (audio && !audio.muted) audio.play().catch(() => {})
+  const cancelExtraction = useCallback(async () => {
+    await window.api.cancelExtractAudioTracks()
+    setState(prev => ({
+      ...prev,
+        tracks: prev.tracks.map(t =>
+        t.status === 'extracting' ? { ...t, status: 'unextracted' as TrackStatus, extractProgress: 0 } : t
+      ),
+    }))
+  }, [])
+
+  // ── Per-track controls ─────────────────────────────────────────────────
+
+  const setTrackMuted = useCallback((index: number, muted: boolean) => {
+    setState(prev => {
+      const tracks = prev.tracks.map(t => t.index === index ? { ...t, muted } : t)
+      requestAnimationFrame(() => {
+        applyAudibility(tracksRef.current, multiTrackEnabledRef.current, videoRef.current)
+      })
+      return { ...prev, tracks }
     })
   }, [])
 
-  const handlePause = useCallback(() => {
-    setState(prev => ({ ...prev, isPlaying: false }))
-    audioElements.current.forEach(audio => audio && audio.pause())
-  }, [])
-
-  const handleSeeked = useCallback(() => {
-    const video = videoRef.current
-    if (!video) return
-    audioElements.current.forEach(audio => {
-      if (audio) audio.currentTime = video.currentTime
+  const setTrackSolo = useCallback((index: number, solo: boolean) => {
+    setState(prev => {
+      const tracks = prev.tracks.map(t => t.index === index ? { ...t, solo } : t)
+      requestAnimationFrame(() => {
+        applyAudibility(tracksRef.current, multiTrackEnabledRef.current, videoRef.current)
+      })
+      return { ...prev, tracks }
     })
   }, [])
 
-  const handleTimeUpdate = useCallback(() => {
-    const video = videoRef.current
-    if (video) {
-      setState(prev => ({ ...prev, currentTime: video.currentTime }))
-    }
+  const setTrackVolume = useCallback((index: number, volume: number) => {
+    setState(prev => {
+      const tracks = prev.tracks.map(t => t.index === index ? { ...t, volume } : t)
+      requestAnimationFrame(() => {
+        applyAudibility(tracksRef.current, multiTrackEnabledRef.current, videoRef.current)
+      })
+      return { ...prev, tracks }
+    })
   }, [])
 
-  // Called when video element mounts
+  /** Update a track's color (tag-palette key). Purely visual — does not
+   *  touch audibility. Pass undefined to clear and fall back to the
+   *  index-based default. */
+  const setTrackColor = useCallback((index: number, colorKey: string | undefined) => {
+    setState(prev => ({
+      ...prev,
+      tracks: prev.tracks.map(t => t.index === index ? { ...t, color: colorKey } : t),
+    }))
+  }, [])
+
+  // ── Video element wiring ───────────────────────────────────────────────
+
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
     const onPlay = () => {
       setState(prev => ({ ...prev, isPlaying: true }))
-      audioElements.current.forEach(audio => {
-        if (audio) audio.play().catch(() => {})
-      })
+      // Honour the effective-audibility table on play so muted/solo'd tracks
+      // don't start sounding when the user hits Play.
+      for (const t of tracksRef.current) {
+        if (!t.audioEl) continue
+        if (!t.audioEl.muted) t.audioEl.play().catch(() => {})
+      }
     }
     const onPause = () => {
       setState(prev => ({ ...prev, isPlaying: false }))
-      audioElements.current.forEach(audio => audio && audio.pause())
+      for (const t of tracksRef.current) {
+        if (t.audioEl) t.audioEl.pause()
+      }
     }
     const onSeeked = () => {
-      audioElements.current.forEach(audio => {
-        if (audio) audio.currentTime = video.currentTime
-      })
-      // Flush any pending scrub position that arrived while a seek was in-flight
+      for (const t of tracksRef.current) {
+        if (t.audioEl) t.audioEl.currentTime = video.currentTime
+      }
       const pending = pendingSeekTime.current
       if (pending !== null) {
         pendingSeekTime.current = null
         video.currentTime = pending
-        audioElements.current.forEach(audio => { if (audio) audio.currentTime = pending })
+        for (const t of tracksRef.current) {
+          if (t.audioEl) t.audioEl.currentTime = pending
+        }
       } else {
         isSeeking.current = false
       }
@@ -251,64 +408,35 @@ export function useVideoPlayer() {
     }
   }, [state.videoUrl])
 
-  // Drift correction
+  // Drift correction — audio elements have independent clocks, so they
+  // gradually slip from the video. Snap any track that strays beyond
+  // 150ms back to the video's currentTime.
   useEffect(() => {
     const id = setInterval(() => {
       const video = videoRef.current
       if (!video || video.paused) return
-      audioElements.current.forEach(audio => {
-        if (!audio || audio.muted) return
-        const drift = Math.abs(audio.currentTime - video.currentTime)
-        if (drift > 0.15) {
-          audio.currentTime = video.currentTime
-        }
-      })
+      for (const t of tracksRef.current) {
+        if (!t.audioEl || t.audioEl.muted) continue
+        const drift = Math.abs(t.audioEl.currentTime - video.currentTime)
+        if (drift > 0.15) t.audioEl.currentTime = video.currentTime
+      }
     }, 500)
     return () => clearInterval(id)
   }, [state.videoUrl])
 
-  const setTrackVolume = useCallback((trackIndex: number, volume: number) => {
-    const audio = audioElements.current[trackIndex]
-    if (audio) audio.volume = volume
-    setState(prev => ({
-      ...prev,
-      tracks: prev.tracks.map(t =>
-        t.index === trackIndex ? { ...t, volume } : t
-      )
-    }))
-  }, [])
-
-  const setTrackMuted = useCallback((trackIndex: number, muted: boolean) => {
-    const audio = audioElements.current[trackIndex]
-    if (audio) {
-      audio.muted = muted
-      if (!muted && videoRef.current && !videoRef.current.paused) {
-        audio.play().catch(() => {})
-      }
-    }
-    setState(prev => ({
-      ...prev,
-      tracks: prev.tracks.map(t =>
-        t.index === trackIndex ? { ...t, muted } : t
-      )
-    }))
-  }, [])
+  // ── Seek + play control ────────────────────────────────────────────────
 
   const seek = useCallback((time: number) => {
     const video = videoRef.current
     if (!video) return
-    // Cancel any queued scrub position — this is an authoritative exact seek
     pendingSeekTime.current = null
     isSeeking.current = true
     video.currentTime = time
-    audioElements.current.forEach(audio => {
-      if (audio) audio.currentTime = time
-    })
+    for (const t of tracksRef.current) {
+      if (t.audioEl) t.audioEl.currentTime = time
+    }
   }, [])
 
-  // Throttled seek for scrub drags. Only one seek is ever in-flight at a time;
-  // intermediate positions are dropped, keeping only the latest pending one.
-  // Call seek() on mouseup to land on the exact frame.
   const fastSeek = useCallback((time: number) => {
     const video = videoRef.current
     if (!video) return
@@ -317,43 +445,25 @@ export function useVideoPlayer() {
     } else {
       isSeeking.current = true
       video.currentTime = time
-      audioElements.current.forEach(audio => { if (audio) audio.currentTime = time })
+      for (const t of tracksRef.current) {
+        if (t.audioEl) t.audioEl.currentTime = time
+      }
     }
   }, [])
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current
     if (!video) return
-    if (video.paused) {
-      video.play()
-    } else {
-      video.pause()
-    }
+    if (video.paused) video.play()
+    else video.pause()
   }, [])
 
-  const cancelExtraction = useCallback(async () => {
-    await window.api.cancelExtractAudioTracks()
-    // Delete any partially-written temp files and reset
-    if (tempPaths.current.length > 0) {
-      await Promise.allSettled(tempPaths.current.map(p => window.api.deleteFile(p)))
-      tempPaths.current = []
-    }
-    audioElements.current.forEach(el => { el.pause(); el.src = '' })
-    audioElements.current = []
-    if (videoRef.current) videoRef.current.muted = false
-    setState(prev => ({ ...prev, isExtracting: false, extractProgress: {}, tracks: prev.tracks.map(t => ({ ...t, audioEl: null, tempPath: null })) }))
-  }, [])
-
-  const resetExtraction = useCallback(() => {
-    audioElements.current.forEach(el => { el.pause(); el.src = '' })
-    audioElements.current = []
-    if (videoRef.current) videoRef.current.muted = false
-    setState(prev => ({
-      ...prev,
-      tracksExtracted: false,
-      extractProgress: {},
-      tracks: prev.tracks.map(t => ({ ...t, audioEl: null, tempPath: null }))
-    }))
+  /** Re-derive video.muted / audioEl.muted from the current track M/S state.
+   *  External callers (e.g. the bleep logic) that bypass the system to force
+   *  silence temporarily call this when they're done so the user's chosen
+   *  audibility comes back. */
+  const recomputeAudibility = useCallback(() => {
+    applyAudibility(tracksRef.current, multiTrackEnabledRef.current, videoRef.current)
   }, [])
 
   const clearError = useCallback(() => {
@@ -361,7 +471,7 @@ export function useVideoPlayer() {
   }, [])
 
   const closeVideo = useCallback(async () => {
-    await cleanupTracks()
+    releaseAudioElements()
     if (videoRef.current) {
       videoRef.current.pause()
       videoRef.current.src = ''
@@ -369,33 +479,33 @@ export function useVideoPlayer() {
     setState({
       videoInfo: null,
       tracks: [],
-      isExtracting: false,
-      extractProgress: {},
-      tracksExtracted: false,
-      isPlaying: false,
+      multiTrackEnabled: false,
+        isPlaying: false,
       currentTime: 0,
       duration: 0,
       videoUrl: null,
       filePath: null,
-      error: null
+      error: null,
     })
-  }, [cleanupTracks])
+  }, [releaseAudioElements])
 
   return {
     videoRef,
     state,
     loadFile,
-    extractTracks,
+    enableMultiTrack,
+    disableMultiTrack,
+    playTrack,
     cancelExtraction,
-    resetExtraction,
-    clearError,
-    closeVideo,
-    setTrackVolume,
     setTrackMuted,
+    setTrackSolo,
+    setTrackVolume,
+    setTrackColor,
+    recomputeAudibility,
     seek,
     fastSeek,
     togglePlay,
-    cleanupTracks,
-    audioElements,
+    clearError,
+    closeVideo,
   }
 }

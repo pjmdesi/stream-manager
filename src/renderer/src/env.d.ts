@@ -26,6 +26,7 @@ declare global {
       // ── Video ────────────────────────────────────────────────────────────────
       probeFile(filePath: string): Promise<VideoInfo>
       extractAudioTracks(filePath: string, trackIndices?: number[]): Promise<string[]>
+      getCachedAudioTracks(filePath: string): Promise<string[] | null>
       cancelExtractAudioTracks(): Promise<void>
       cleanupTracks(paths: string[]): Promise<void>
       getWaveform(filePath: string): Promise<Uint8Array>
@@ -116,6 +117,8 @@ declare global {
         cropX: number
         bleepRegions: Array<{ id: string; start: number; end: number }>
         bleepVolume: number
+        audioTrackIndices?: number[]
+        audioTrackVolumes?: Record<number, number>
       }): Promise<string>
       cancelJob(jobId: string): Promise<void>
       cancelJobGroup(groupId: string): Promise<void>
