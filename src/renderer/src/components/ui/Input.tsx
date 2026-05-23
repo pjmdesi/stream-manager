@@ -29,7 +29,7 @@ export const Input: React.FC<InputProps> = ({
       )}
       <div className="relative flex items-center">
         {prefix && (
-          <span className="absolute left-3 text-gray-500 pointer-events-none">
+          <span className="absolute left-3 text-gray-400 pointer-events-none">
             {prefix}
           </span>
         )}
@@ -48,13 +48,13 @@ export const Input: React.FC<InputProps> = ({
           {...props}
         />
         {suffix && (
-          <span className="absolute right-3 text-gray-500">
+          <span className="absolute right-3 text-gray-400">
             {suffix}
           </span>
         )}
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
-      {hint && !error && <p className="text-xs text-gray-500">{hint}</p>}
+      {hint && !error && <p className="text-xs text-gray-400">{hint}</p>}
     </div>
   )
 }
@@ -95,7 +95,7 @@ export const Textarea: React.FC<TextareaProps> = ({
         {...props}
       />
       {error && <p className="text-xs text-red-400">{error}</p>}
-      {hint && !error && <p className="text-xs text-gray-500">{hint}</p>}
+      {hint && !error && <p className="text-xs text-gray-400">{hint}</p>}
     </div>
   )
 }

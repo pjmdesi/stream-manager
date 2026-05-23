@@ -239,7 +239,7 @@ function TagListPanel({
     <>
       {/* ── Header row ─────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-3">
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-400">
           {items.length} item{items.length !== 1 ? 's' : ''}
         </p>
         {!combineMode && items.length >= 2 && (
@@ -266,7 +266,7 @@ function TagListPanel({
       {/* ── List ───────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-1 overflow-y-auto max-h-[380px] pr-1">
         {sorted.length === 0 && (
-          <p className="text-sm text-gray-600 italic text-center py-6">Nothing here yet.</p>
+          <p className="text-sm text-gray-400 italic text-center py-6">Nothing here yet.</p>
         )}
 
         {sorted.map(item => {
@@ -325,7 +325,7 @@ function TagListPanel({
               </span>
 
               {/* Usage */}
-              <span className="text-xs text-gray-600 shrink-0">
+              <span className="text-xs text-gray-400 shrink-0">
                 {usageCounts[item] ?? 0} stream{(usageCounts[item] ?? 0) !== 1 ? 's' : ''}
               </span>
 
@@ -340,7 +340,7 @@ function TagListPanel({
                         ref={el => { swatchBtnRefs.current[item] = el }}
                         type="button"
                         onClick={() => { setOpenColorPicker(prev => prev === item ? null : item); setOpenTexturePicker(null) }}
-                        className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                        className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
                       >
                         <SwatchBook size={14} />
                       </button>
@@ -352,7 +352,7 @@ function TagListPanel({
                         ref={el => { textureBtnRefs.current[item] = el }}
                         type="button"
                         onClick={() => { setOpenTexturePicker(prev => prev === item ? null : item); setOpenColorPicker(null) }}
-                        className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                        className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
                       >
                         <Layers size={14} />
                       </button>
@@ -362,7 +362,7 @@ function TagListPanel({
                     <button
                       type="button"
                       onClick={() => onDeleteItem(item)}
-                      className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+                      className="p-1.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-colors"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -439,7 +439,7 @@ function TagListPanel({
           </span>
 
           {/* Mirrors usage count slot */}
-          <span className="text-xs text-gray-600 shrink-0">0 streams</span>
+          <span className="text-xs text-gray-400 shrink-0">0 streams</span>
 
           <div className="flex-1" />
 
@@ -453,7 +453,7 @@ function TagListPanel({
                     ref={newTagSwatchRef}
                     type="button"
                     onClick={() => { setNewTagColorOpen(p => !p); setNewTagTextureOpen(false) }}
-                    className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                    className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
                   >
                     <SwatchBook size={14} />
                   </button>
@@ -476,7 +476,7 @@ function TagListPanel({
                     ref={newTagTextureRef}
                     type="button"
                     onClick={() => { setNewTagTextureOpen(p => !p); setNewTagColorOpen(false) }}
-                    className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                    className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
                   >
                     <Layers size={14} />
                   </button>
@@ -497,7 +497,7 @@ function TagListPanel({
                 type="button"
                 onClick={commitNewTag}
                 disabled={!newTag.name.trim()}
-                className="p-1.5 rounded text-gray-500 hover:text-green-400 hover:bg-green-900/20 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                className="p-1.5 rounded text-gray-400 hover:text-green-400 hover:bg-green-900/20 transition-colors disabled:opacity-30 disabled:pointer-events-none"
               >
                 <Check size={14} />
               </button>
@@ -507,7 +507,7 @@ function TagListPanel({
               <button
                 type="button"
                 onClick={cancelNewTag}
-                className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+                className="p-1.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-colors"
               >
                 <X size={14} />
               </button>
@@ -521,7 +521,7 @@ function TagListPanel({
         <button
           type="button"
           onClick={openNewTag}
-          className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-white/15 text-xs text-gray-600 hover:text-gray-300 hover:border-white/30 transition-colors"
+          className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-white/15 text-xs text-gray-400 hover:text-gray-300 hover:border-white/30 transition-colors"
         >
           <Plus size={12} />
           Add Tag
@@ -531,7 +531,7 @@ function TagListPanel({
       {/* Combine summary */}
       {combineMode && (
         <div className="mt-3 px-3 py-2.5 rounded-lg bg-navy-700/60 border border-white/10 text-xs text-gray-400 flex items-center gap-2">
-          <GitMerge size={13} className="text-gray-500 shrink-0" />
+          <GitMerge size={13} className="text-gray-400 shrink-0" />
           {selected.length === 0 && (
             <span>Select items to combine. The first item you pick becomes the survivor.</span>
           )}
@@ -726,12 +726,12 @@ export function ManageTagsModal({
               flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors
               ${activeTab === t.key
                 ? 'bg-navy-700 text-gray-100 shadow-sm'
-                : 'text-gray-500 hover:text-gray-300'
+                : 'text-gray-400 hover:text-gray-300'
               }
             `}
           >
             {t.label}
-            <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === t.key ? 'bg-white/10 text-gray-300' : 'bg-white/5 text-gray-600'}`}>
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === t.key ? 'bg-white/10 text-gray-300' : 'bg-white/5 text-gray-400'}`}>
               {t.count}
             </span>
           </button>

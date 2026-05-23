@@ -95,13 +95,13 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         {isDragging ? (
           <Upload size={32} className="text-purple-400" />
         ) : (
-          <Film size={32} className="text-gray-500" />
+          <Film size={32} className="text-gray-400" />
         )}
       </div>
       <div className="text-center">
         <p className="text-gray-300 font-medium">{label}</p>
         {accept && (
-          <p className="text-gray-600 text-sm mt-1">
+          <p className="text-gray-400 text-sm mt-1">
             Supports: {accept.join(', ')}
           </p>
         )}

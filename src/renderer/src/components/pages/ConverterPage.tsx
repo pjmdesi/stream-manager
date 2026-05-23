@@ -32,7 +32,7 @@ function StatusIcon({ status }: { status: ConversionJob['status'] }) {
   if (status === 'running')     return <RefreshCw size={14} className="text-purple-400 animate-spin shrink-0" />
   if (status === 'replacing')   return <RefreshCw size={14} className="text-purple-300 animate-spin shrink-0" />
   if (status === 'paused')      return <Pause size={14} className="text-yellow-400 shrink-0" />
-  if (status === 'cancelled')   return <XCircle size={14} className="text-gray-500 shrink-0" />
+  if (status === 'cancelled')   return <XCircle size={14} className="text-gray-400 shrink-0" />
   return <Clock size={14} className="text-yellow-500 shrink-0" />
 }
 
@@ -329,20 +329,20 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
           {/* Filenames row */}
           <div className="flex items-center gap-2">
             <StatusIcon status={job.status} />
-            <span className="text-xs text-gray-500 truncate shrink-0 max-w-[30%]" title={job.inputFile}>
+            <span className="text-xs text-gray-400 truncate shrink-0 max-w-[30%]" title={job.inputFile}>
               {job.inputFile.split(/[\\/]/).pop()}
             </span>
-            <span className="text-xs text-gray-600 shrink-0">→</span>
+            <span className="text-xs text-gray-400 shrink-0">→</span>
             <span className="flex-1 text-xs text-gray-200 truncate" title={job.outputFile}>
               {/* Hide the temp-file name for replaceInput jobs — they're
                   invisible to the user; show the input file's name instead so
                   the row reads as "input → input (replaced in place)". */}
               {job.replaceInput ? job.inputFile.split(/[\\/]/).pop() : outputName}
             </span>
-            <span className="text-xs text-gray-600 shrink-0">
+            <span className="text-xs text-gray-400 shrink-0">
               {job.preset.name}
               {typeof job.inputSize === 'number' && (
-                <span className="ml-1.5 text-gray-700 tabular-nums">· {formatBytes(job.inputSize)}</span>
+                <span className="ml-1.5 text-gray-400 tabular-nums">· {formatBytes(job.inputSize)}</span>
               )}
             </span>
           </div>
@@ -352,19 +352,19 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
           {isDownloading && (
             <div className="flex items-center gap-3 text-xs text-blue-300 tabular-nums">
               <span>Downloading from cloud…</span>
-              {elapsed > 0 && <span className="text-gray-500">Elapsed: {formatDuration(elapsed)}</span>}
+              {elapsed > 0 && <span className="text-gray-400">Elapsed: {formatDuration(elapsed)}</span>}
             </div>
           )}
 
           {isReplacing && (
             <div className="flex items-center gap-3 text-xs text-purple-200 tabular-nums">
               <span>Replacing original…</span>
-              {elapsed > 0 && <span className="text-gray-500">Elapsed: {formatDuration(elapsed)}</span>}
+              {elapsed > 0 && <span className="text-gray-400">Elapsed: {formatDuration(elapsed)}</span>}
             </div>
           )}
 
           {isActive && (
-            <div className="flex items-center gap-3 text-xs text-gray-500 tabular-nums">
+            <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
               <span>{job.progress.toFixed(1)}%</span>
               {elapsed > 0 && <span>Elapsed: {formatDuration(elapsed)}</span>}
               <span>
@@ -376,7 +376,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                 <Tooltip content="Open output folder" side="top">
                   <button
                     onClick={() => window.api.openInExplorer(outputDir)}
-                    className="ml-auto text-gray-600 hover:text-gray-300 transition-colors truncate max-w-[200px]"
+                    className="ml-auto text-gray-400 hover:text-gray-300 transition-colors truncate max-w-[200px]"
                   >
                     {outputDir}
                   </button>
@@ -386,14 +386,14 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
           )}
 
           {isDone && (
-            <div className="flex items-center gap-3 text-xs text-gray-500 tabular-nums">
+            <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
               <span>100%</span>
               {finalElapsed > 0 && <span>Elapsed: {formatDuration(finalElapsed)}</span>}
               {!job.replaceInput && (
                 <Tooltip content="Open output folder" side="top">
                   <button
                     onClick={() => window.api.openInExplorer(outputDir)}
-                    className="ml-auto text-gray-600 hover:text-gray-300 transition-colors truncate max-w-[200px]"
+                    className="ml-auto text-gray-400 hover:text-gray-300 transition-colors truncate max-w-[200px]"
                   >
                     {outputDir}
                   </button>
@@ -403,7 +403,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
           )}
 
           {isCancelled && (
-            <div className="flex items-center gap-3 text-xs text-gray-500 tabular-nums">
+            <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
               <span>{job.progress.toFixed(1)}%</span>
               <span>Conversion cancelled</span>
             </div>
@@ -411,7 +411,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
 
           {isError && (
             <div className="flex items-center gap-3 text-xs tabular-nums">
-              <span className="text-gray-500">{job.progress.toFixed(1)}%</span>
+              <span className="text-gray-400">{job.progress.toFixed(1)}%</span>
               <span className="text-red-400 whitespace-pre-wrap">{job.error}</span>
             </div>
           )}
@@ -423,7 +423,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             <Tooltip content="Start conversion">
               <button
                 onClick={() => window.api.startQueuedJob(job.id)}
-                className="p-1.5 text-gray-600 hover:text-green-400 transition-colors"
+                className="p-1.5 text-gray-400 hover:text-green-400 transition-colors"
               >
                 <Play size={14} />
               </button>
@@ -433,7 +433,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             <Tooltip content={job.status === 'paused' ? 'Resume' : 'Pause'}>
               <button
                 onClick={() => job.status === 'paused' ? resumeJob(job.id) : pauseJob(job.id)}
-                className={`p-1.5 text-gray-600 transition-colors ${job.status === 'paused' ? 'hover:text-blue-400' : 'hover:text-yellow-400'}`}
+                className={`p-1.5 text-gray-400 transition-colors ${job.status === 'paused' ? 'hover:text-blue-400' : 'hover:text-yellow-400'}`}
               >
                 {job.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
               </button>
@@ -443,7 +443,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             <Tooltip content="Cancel">
               <button
                 onClick={() => cancelJob(job.id)}
-                className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
+                className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
               >
                 <Ban size={14} />
               </button>
@@ -453,7 +453,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             <Tooltip content="Remove">
               <button
                 onClick={() => removeJob(job.id)}
-                className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
+                className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
               >
                 <Trash2 size={14} />
               </button>
@@ -516,7 +516,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
           )}
           {!isRenaming && p.description && (
             <Tooltip content={p.description} side="right" width="w-64" triggerClassName="block w-full">
-              <div className="text-xs text-gray-500 mt-0.5 truncate">{p.description}</div>
+              <div className="text-xs text-gray-400 mt-0.5 truncate">{p.description}</div>
             </Tooltip>
           )}
         </div>
@@ -525,7 +525,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             <Tooltip content="Rename preset">
               <button
                 onClick={e => { e.stopPropagation(); startRename(p) }}
-                className="p-1.5 text-gray-600 hover:text-blue-400 transition-colors"
+                className="p-1.5 text-gray-400 hover:text-blue-400 transition-colors"
               >
                 <Pencil size={11} />
               </button>
@@ -533,7 +533,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             <Tooltip content="Remove preset">
               <button
                 onClick={e => { e.stopPropagation(); deleteImported(p.id) }}
-                className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
+                className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
               >
                 <Trash2 size={11} />
               </button>
@@ -559,7 +559,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
           {importedPresets.length > 0 && (
             <>
               <div className="px-4 pt-3 pb-1">
-                <span className="text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Imported</span>
+                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Imported</span>
               </div>
               {importedPresets.map(p => renderPresetItem(p, true))}
             </>
@@ -616,13 +616,13 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-gray-400">
                       Output: {outputDir ? outputDir : 'Next to original'}
                     </span>
                     {outputDir && (
                       <button
                         onClick={() => setOutputDir('')}
-                        className="text-xs text-gray-600 hover:text-gray-300 transition-colors"
+                        className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
                       >
                         Clear
                       </button>
@@ -648,11 +648,11 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                     {f.split(/[\\/]/).pop()}
                   </span>
                   {selectedPreset && (
-                    <span className="text-xs text-gray-600 shrink-0">
+                    <span className="text-xs text-gray-400 shrink-0">
                       → {getOutputPath(f, selectedPreset, outputDir).split(/[\\/]/).pop()}
                     </span>
                   )}
-                  <button onClick={() => removeFile(f)} className="p-1 text-gray-600 hover:text-red-400 transition-colors shrink-0">
+                  <button onClick={() => removeFile(f)} className="p-1 text-gray-400 hover:text-red-400 transition-colors shrink-0">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -696,7 +696,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                 </div>
               </div>
               {jobs.length === 0 && (
-                <div className="px-4 py-6 text-center text-xs text-gray-600">Nothing in the queue</div>
+                <div className="px-4 py-6 text-center text-xs text-gray-400">Nothing in the queue</div>
               )}
               {/* Build a render list: group rows are emitted at the position of
                   their first member; subsequent members are skipped (the group
@@ -729,7 +729,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                         <div className="flex items-center gap-2 px-4 py-2 bg-green-500/5 border-l-2 border-green-500/40">
                           <Archive size={13} className="text-green-400 shrink-0" />
                           <span className="text-xs font-semibold text-gray-200 shrink-0">{job.groupLabel ?? 'Group'}</span>
-                          <span className="text-[11px] text-gray-500 shrink-0 tabular-nums">· {groupSummary}</span>
+                          <span className="text-[11px] text-gray-400 shrink-0 tabular-nums">· {groupSummary}</span>
                           <div className="flex-1 mx-2">
                             <ProgressBar percent={aggregatePct} status={groupActive ? 'running' : (errN > 0 ? 'error' : 'done')} />
                           </div>
@@ -737,7 +737,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                             <Tooltip content="Cancel all jobs in this group">
                               <button
                                 onClick={() => window.api.cancelJobGroup(job.groupId!)}
-                                className="p-1 text-gray-600 hover:text-red-400 transition-colors shrink-0"
+                                className="p-1 text-gray-400 hover:text-red-400 transition-colors shrink-0"
                               >
                                 <Ban size={13} />
                               </button>
@@ -763,7 +763,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
             label="Drop video files here to convert"
             className="min-h-[100px]"
           />
-          <p className="text-xs text-gray-600 px-1">You can also send videos here from the Streams page using the action buttons on each row.</p>
+          <p className="text-xs text-gray-400 px-1">You can also send videos here from the Streams page using the action buttons on each row.</p>
         </div></div>
       </div>
     </div>
@@ -779,7 +779,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
           The conversion was cancelled. Do you want to delete the partial output file?
         </p>
         {deleteDialog && (
-          <p className="text-xs text-gray-500 font-mono break-all bg-navy-900 border border-white/5 rounded-lg px-3 py-2">
+          <p className="text-xs text-gray-400 font-mono break-all bg-navy-900 border border-white/5 rounded-lg px-3 py-2">
             {deleteDialog.outputFile.replace(/.*[\\/]/, '')}
           </p>
         )}

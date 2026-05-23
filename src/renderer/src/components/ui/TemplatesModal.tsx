@@ -29,7 +29,7 @@ function TitleForm({ initial, onSave, onCancel }: {
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Title template</label>
-        <p className="text-xs text-gray-600">
+        <p className="text-xs text-gray-400">
           Merge fields: <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span>
         </p>
         <input value={template} onChange={e => setTemplate(e.target.value)} placeholder="{game} S{season} — Part {episode} of {total_episodes} | {title}"
@@ -65,7 +65,7 @@ function DescriptionForm({ initial, onSave, onCancel }: {
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Description</label>
-        <p className="text-xs text-gray-600 leading-relaxed">
+        <p className="text-xs text-gray-400 leading-relaxed">
           Merge fields:
           {' '}<span className="font-mono text-purple-400">{'{game}'}</span>,
           {' '}<span className="font-mono text-purple-400">{'{season}'}</span>,
@@ -109,10 +109,10 @@ function TagForm({ initial, onSave, onCancel }: {
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Tags</label>
-        <p className="text-xs text-gray-600">Comma-separated.</p>
+        <p className="text-xs text-gray-400">Comma-separated.</p>
         <textarea value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="gaming, lets play, elden ring, …"
           className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y" />
-        <p className="text-xs text-gray-600 text-right">{tagCount} tags</p>
+        <p className="text-xs text-gray-400 text-right">{tagCount} tags</p>
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
@@ -145,7 +145,7 @@ function TemplateList<T extends { id: string; name: string }>({
   return (
     <div className="flex flex-col gap-2">
       {items.length === 0 && editingId !== '__new__' && (
-        <p className="text-xs text-gray-600 italic">No templates yet.</p>
+        <p className="text-xs text-gray-400 italic">No templates yet.</p>
       )}
       {items.map(t => (
         editingId === t.id ? (
@@ -160,7 +160,7 @@ function TemplateList<T extends { id: string; name: string }>({
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <Button variant="ghost" size="sm" onClick={() => setEditingId(t.id)}>Edit</Button>
-              <button onClick={() => onDelete(t.id)} className="p-1.5 rounded text-gray-700 hover:text-red-400 transition-colors">
+              <button onClick={() => onDelete(t.id)} className="p-1.5 rounded text-gray-400 hover:text-red-400 transition-colors">
                 <Trash2 size={13} />
               </button>
             </div>
@@ -249,18 +249,18 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
             className={`px-3 py-2 text-sm font-medium rounded-t transition-colors ${
               tab === t.id
                 ? 'text-white border-b-2 border-purple-500'
-                : 'text-gray-500 hover:text-gray-300'
+                : 'text-gray-400 hover:text-gray-300'
             }`}
           >
             {t.label}
             {t.id === 'titles' && titleTemplates.length > 0 && (
-              <span className="ml-1.5 text-xs text-gray-600">{titleTemplates.length}</span>
+              <span className="ml-1.5 text-xs text-gray-400">{titleTemplates.length}</span>
             )}
             {t.id === 'descriptions' && descTemplates.length > 0 && (
-              <span className="ml-1.5 text-xs text-gray-600">{descTemplates.length}</span>
+              <span className="ml-1.5 text-xs text-gray-400">{descTemplates.length}</span>
             )}
             {t.id === 'tags' && tagTemplates.length > 0 && (
-              <span className="ml-1.5 text-xs text-gray-600">{tagTemplates.length}</span>
+              <span className="ml-1.5 text-xs text-gray-400">{tagTemplates.length}</span>
             )}
           </button>
         ))}
@@ -269,13 +269,13 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
       {/* Tab content */}
       {tab === 'titles' && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-gray-500 leading-relaxed">
+          <p className="text-xs text-gray-400 leading-relaxed">
             Use <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span> as merge fields.
             Title templates are shared between YouTube and Twitch.
           </p>
           <TemplateList
             items={titleTemplates}
-            subtitle={t => <p className="text-xs text-gray-500 font-mono truncate">{t.template}</p>}
+            subtitle={t => <p className="text-xs text-gray-400 font-mono truncate">{t.template}</p>}
             onSave={t => saveTitles(upsert(titleTemplates, t))}
             onDelete={id => saveTitles(titleTemplates.filter(t => t.id !== id))}
             newLabel="New title template"
@@ -288,7 +288,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
 
       {tab === 'descriptions' && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-gray-500 leading-relaxed">
+          <p className="text-xs text-gray-400 leading-relaxed">
             Pre-filled into the description field; can be edited before publishing.
             Supports the same merge fields as titles (
             <span className="font-mono text-purple-400">{'{game}'}</span>,
@@ -302,7 +302,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
           </p>
           <TemplateList
             items={descTemplates}
-            subtitle={t => <p className="text-xs text-gray-500 line-clamp-2 whitespace-pre-wrap">{t.description || <em className="text-gray-700">No description</em>}</p>}
+            subtitle={t => <p className="text-xs text-gray-400 line-clamp-2 whitespace-pre-wrap">{t.description || <em className="text-gray-400">No description</em>}</p>}
             onSave={t => saveDescs(upsert(descTemplates, t))}
             onDelete={id => saveDescs(descTemplates.filter(t => t.id !== id))}
             newLabel="New description template"
@@ -315,10 +315,10 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
 
       {tab === 'tags' && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-gray-500">Curated tag lists you can mix and match per stream.</p>
+          <p className="text-xs text-gray-400">Curated tag lists you can mix and match per stream.</p>
           <TemplateList
             items={tagTemplates}
-            subtitle={t => <p className="text-xs text-gray-500">{t.tags.length} tags — <span className="text-gray-600 font-mono">{t.tags.slice(0, 5).join(', ')}{t.tags.length > 5 ? '…' : ''}</span></p>}
+            subtitle={t => <p className="text-xs text-gray-400">{t.tags.length} tags — <span className="text-gray-400 font-mono">{t.tags.slice(0, 5).join(', ')}{t.tags.length > 5 ? '…' : ''}</span></p>}
             onSave={t => saveTags(upsert(tagTemplates, t))}
             onDelete={id => saveTags(tagTemplates.filter(t => t.id !== id))}
             newLabel="New tag template"

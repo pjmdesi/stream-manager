@@ -11,7 +11,7 @@ function FolderTree({ nodes, depth = 0 }: { nodes: FolderNode[]; depth?: number 
       {nodes.map((node, i) => (
         <div key={i}>
           <div className="flex items-center gap-1 py-0.5" style={{ paddingLeft: `${depth * 16}px` }}>
-            <ChevronRight size={12} className={`text-gray-600 ${node.children?.length ? '' : 'opacity-0'}`} />
+            <ChevronRight size={12} className={`text-gray-400 ${node.children?.length ? '' : 'opacity-0'}`} />
             <FolderOpen size={12} className="text-yellow-600/70" />
             <span className="text-xs text-gray-400 font-mono">{node.name}</span>
           </div>
@@ -107,7 +107,7 @@ function ApplyModal({
           ))}
 
           <div className="border border-white/10 rounded-lg p-3 bg-navy-900">
-            <div className="text-xs text-gray-500 mb-2">Preview structure:</div>
+            <div className="text-xs text-gray-400 mb-2">Preview structure:</div>
             <FolderTree nodes={template.structure} />
           </div>
 
@@ -216,7 +216,7 @@ export function TemplatesPage() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Folder Templates</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Create folder structures for new streaming sessions</p>
+          <p className="text-xs text-gray-400 mt-0.5">Create folder structures for new streaming sessions</p>
         </div>
         <Button
           variant="primary"
@@ -230,14 +230,14 @@ export function TemplatesPage() {
 
       <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto p-6">
         {templates.length === 0 ? (
-          <div className="text-center text-gray-600 py-16">No templates yet. Create one to get started.</div>
+          <div className="text-center text-gray-400 py-16">No templates yet. Create one to get started.</div>
         ) : (
           <div className="grid grid-cols-2 gap-4">
             {templates.map(t => (
               <div key={t.id} className="bg-navy-800 border border-white/5 rounded-xl p-4 flex flex-col gap-3">
                 <div>
                   <div className="font-medium text-gray-200">{t.name}</div>
-                  {t.description && <div className="text-xs text-gray-500 mt-0.5">{t.description}</div>}
+                  {t.description && <div className="text-xs text-gray-400 mt-0.5">{t.description}</div>}
                 </div>
 
                 <div className="border border-white/5 rounded-lg p-2 bg-navy-900 flex-1">

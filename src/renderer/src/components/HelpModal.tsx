@@ -32,7 +32,7 @@ function ShortcutRow({ keys, label }: { keys: React.ReactNode[]; label: string }
       <div className="flex items-center gap-1 shrink-0">
         {keys.map((k, i) => (
           <React.Fragment key={i}>
-            {i > 0 && <span className="text-gray-600">+</span>}
+            {i > 0 && <span className="text-gray-400">+</span>}
             <Kbd>{k}</Kbd>
           </React.Fragment>
         ))}
@@ -45,7 +45,7 @@ function ShortcutRow({ keys, label }: { keys: React.ReactNode[]; label: string }
 function ShortcutGroup({ title, rows }: { title: string; rows: { keys: React.ReactNode[]; label: string }[] }) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{title}</div>
+      <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{title}</div>
       <div className="flex flex-col gap-1">
         {rows.map((r, i) => <ShortcutRow key={i} keys={r.keys} label={r.label} />)}
       </div>
@@ -169,7 +169,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<Keyboard size={14} />} title="Keyboard shortcuts">
-          <p className="text-[11px] text-gray-500">Active anywhere on the Player page (except while typing in a text field).</p>
+          <p className="text-[11px] text-gray-400">Active anywhere on the Player page (except while typing in a text field).</p>
 
           <ShortcutGroup title="Playback" rows={[
             { keys: ['Space'], label: 'Play / pause' },
@@ -310,7 +310,7 @@ export function HelpModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                     : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'
                 }`}
               >
-                <span className={isActive ? 'text-purple-300' : 'text-gray-500'}>{i.icon}</span>
+                <span className={isActive ? 'text-purple-300' : 'text-gray-400'}>{i.icon}</span>
                 <span>{i.label}</span>
               </button>
             )

@@ -54,10 +54,10 @@ export function CloudOpsWidget({ collapsed }: { collapsed: boolean }) {
   return (
     <button
       onClick={openModal}
-      className="w-full p-3 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors text-left"
+      className="w-full p-3 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors text-left whitespace-nowrap"
     >
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
           <Cloud size={11} className="text-cyan-300" />
           Cloud sync
         </span>
@@ -69,7 +69,7 @@ export function CloudOpsWidget({ collapsed }: { collapsed: boolean }) {
           style={{ width: `${percent}%` }}
         />
       </div>
-      <div className="mt-1.5 text-[10px] text-gray-600 tabular-nums flex items-center justify-between">
+      <div className="mt-1.5 text-[10px] text-gray-400 tabular-nums flex items-center justify-between">
         <span>{completed} / {total} files</span>
         <RefreshCw size={10} className="text-cyan-300 animate-spin" />
       </div>

@@ -86,7 +86,7 @@ export function CloudOpsModal() {
       footer={<Button variant="primary" onClick={closeModal}>{anyActive ? 'Run in background' : 'Close'}</Button>}
     >
       {!anySectionVisible ? (
-        <div className="py-8 text-center text-sm text-gray-500">No cloud operations.</div>
+        <div className="py-8 text-center text-sm text-gray-400">No cloud operations.</div>
       ) : (
         <div className="space-y-5">
           {offloadItems.length > 0 && (
@@ -172,7 +172,7 @@ function CloudOpsSection({ direction, items, active, cancelling, onCancel }: Sec
       </div>
       <div className="px-3 py-3 space-y-3">
         {!isOffload && (
-          <p className="flex items-start gap-1.5 text-[11px] text-gray-500 leading-relaxed">
+          <p className="flex items-start gap-1.5 text-[11px] text-gray-400 leading-relaxed">
             <Info size={11} className="shrink-0 mt-0.5" />
             <span>
               Stream Manager can only see per-file completion, not live byte progress. For real-time download progress, check your cloud app (Synology Drive, OneDrive, etc.) or the Windows notification center.
@@ -194,7 +194,7 @@ function CloudOpsSection({ direction, items, active, cancelling, onCancel }: Sec
           />
         </div>
         <div className="border border-white/10 rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 border-b border-white/10 bg-navy-900/60">
+          <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-400 border-b border-white/10 bg-navy-900/60">
             <span>File</span>
             <span className="text-right">Size</span>
             <span className="text-right w-32">Status</span>
@@ -227,10 +227,10 @@ function SummaryStat({ label, value, sub, tone }: { label: string; value: string
   const valueClass = tone === 'error' ? 'text-red-300' : 'text-gray-200'
   return (
     <div className="bg-navy-900 border border-white/5 rounded-lg px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wide text-gray-500">{label}</div>
+      <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
       <div className={`text-sm tabular-nums ${valueClass}`}>
         {value}
-        {sub && <span className="text-gray-600 text-[10px] ml-1.5">{sub}</span>}
+        {sub && <span className="text-gray-400 text-[10px] ml-1.5">{sub}</span>}
       </div>
     </div>
   )
@@ -246,7 +246,7 @@ function StatusBadge({ status, reason }: { status: CloudOpItemStatus; reason?: s
   const iconCls = 'shrink-0'
   switch (status) {
     case 'pending':
-      return wrap('text-gray-500', 'Pending')
+      return wrap('text-gray-400', 'Pending')
     case 'running':
       return wrap('text-blue-300', <><Loader2 size={11} className={`${iconCls} animate-spin`} /> Working</>)
     case 'done':
@@ -260,7 +260,7 @@ function StatusBadge({ status, reason }: { status: CloudOpItemStatus; reason?: s
     case 'failed':
       return wrap('text-red-300', <><XCircle size={11} className={iconCls} /> Failed</>, reason)
     case 'cancelled':
-      return wrap('text-gray-500', <><Ban size={11} className={iconCls} /> Cancelled</>)
+      return wrap('text-gray-400', <><Ban size={11} className={iconCls} /> Cancelled</>)
   }
 }
 

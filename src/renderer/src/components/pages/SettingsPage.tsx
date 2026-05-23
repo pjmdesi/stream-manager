@@ -49,7 +49,7 @@ function DirInput({
           Browse
         </Button>
       </div>
-      {hint && <p className="text-xs text-gray-500">{hint}</p>}
+      {hint && <p className="text-xs text-gray-400">{hint}</p>}
     </div>
   )
 }
@@ -162,7 +162,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-full text-gray-500 text-sm">Loading…</div>
+    return <div className="flex items-center justify-center h-full text-gray-400 text-sm">Loading…</div>
   }
 
   return (
@@ -170,7 +170,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Settings</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Configure default paths and preferences</p>
+          <p className="text-xs text-gray-400 mt-0.5">Configure default paths and preferences</p>
         </div>
         <Button
           variant={saved ? 'success' : 'primary'}
@@ -205,7 +205,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 <span className={`flex items-center gap-1.5 text-xs ${
                   ytStatus.connected && ytStatus.valid ? 'text-green-400' :
                   ytStatus.connected && !ytStatus.valid ? 'text-amber-400' :
-                  'text-gray-600'
+                  'text-gray-400'
                 }`}>
                   {ytStatus.connected && !ytStatus.valid
                     ? <AlertCircle size={18} />
@@ -217,12 +217,12 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 </span>
               )}
               {twStatus && (
-                <span className={`flex items-center gap-1.5 text-xs ${twStatus.connected ? 'text-twitch-400' : 'text-gray-600'}`}>
+                <span className={`flex items-center gap-1.5 text-xs ${twStatus.connected ? 'text-twitch-400' : 'text-gray-400'}`}>
                   <Twitch size={18} />
                   {twStatus.connected ? 'Connected' : 'Not connected'}
                 </span>
               )}
-              <span className={`flex items-center gap-1.5 text-xs ${local.claudeApiKey ? 'text-orange-400' : 'text-gray-600'}`}>
+              <span className={`flex items-center gap-1.5 text-xs ${local.claudeApiKey ? 'text-orange-400' : 'text-gray-400'}`}>
                 <Bot size={18} />
                 {local.claudeApiKey ? 'Connected' : 'Not connected'}
               </span>
@@ -256,7 +256,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
               >
                 Convert to folder-per-stream
               </Button>
-              <span className="text-xs text-gray-500">Currently using dump-folder mode.</span>
+              <span className="text-xs text-gray-400">Currently using dump-folder mode.</span>
             </div>
           )}
           <DirInput
@@ -289,14 +289,14 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 onChange={e => set('audioCacheLimit', Math.max(128, parseInt(e.target.value) || 128) * 1024 * 1024)}
                 className="w-28 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
               />
-              <span className="text-sm text-gray-500">MB</span>
+              <span className="text-sm text-gray-400">MB</span>
             </div>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-400">
               Maximum disk space used by cached files. Oldest entries are evicted automatically when the limit is reached.
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500">Currently using {formatBytes(cacheSize)}</span>
+            <span className="text-xs text-gray-400">Currently using {formatBytes(cacheSize)}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -334,7 +334,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                     <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
                 </select>
-                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               </div>
               {builtinTemplates.length === 0 && (
                 <Button variant="secondary" size="sm" icon={<Plus size={13} />} onClick={navigateToEditor}>
@@ -342,7 +342,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 </Button>
               )}
             </div>
-            <p className="text-xs text-gray-500">Used when the "use built-in thumbnail creator" option is checked in the new-stream dialog.</p>
+            <p className="text-xs text-gray-400">Used when the "use built-in thumbnail creator" option is checked in the new-stream dialog.</p>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -358,9 +358,9 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                   <option key={t.name} value={t.name}>{t.name}</option>
                 ))}
               </select>
-              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
-            <p className="text-xs text-gray-500">Copied into new stream folders as <span className="font-mono">[date] thumbnail.af</span> when the built-in option is unchecked.</p>
+            <p className="text-xs text-gray-400">Copied into new stream folders as <span className="font-mono">[date] thumbnail.af</span> when the built-in option is unchecked.</p>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -376,7 +376,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
             {local.archivePresetId && !allPresets.find(p => p.id === local.archivePresetId) && (
               <p className="flex items-center gap-1 text-xs text-yellow-500">
@@ -384,19 +384,19 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 Selected preset not found — it may have been removed or the presets directory hasn't loaded yet.
               </p>
             )}
-            <p className="text-xs text-gray-500">Converter preset used when archiving stream folders from the Streams page. Compresses MKVs in-place and marks them as archived.</p>
+            <p className="text-xs text-gray-400">Converter preset used when archiving stream folders from the Streams page. Compresses MKVs in-place and marks them as archived.</p>
           </div>
 
           <Checkbox
             checked={local.checkEpisodeIteration ?? true}
             onChange={v => set('checkEpisodeIteration', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration</div><div className="text-xs text-gray-500">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration</div><div className="text-xs text-gray-400">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game</div></div>}
           />
 
           <Checkbox
             checked={local.checkForUpdates ?? true}
             onChange={v => set('checkForUpdates', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Check for app updates</div><div className="text-xs text-gray-500">On launch, check the GitHub releases page for a newer version of Stream Manager. An indicator appears next to the version label in the sidebar when an update is available. No data is sent — only a public API call.</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Check for app updates</div><div className="text-xs text-gray-400">On launch, check the GitHub releases page for a newer version of Stream Manager. An indicator appears next to the version label in the sidebar when an update is available. No data is sent — only a public API call.</div></div>}
           />
 
           <div className="flex flex-col gap-1">
@@ -409,7 +409,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
               value={Math.round((local.clipDurationThreshold ?? 300) / 60)}
               onChange={e => set('clipDurationThreshold', parseInt(e.target.value) * 60)}
             />
-            <p className="text-xs text-gray-500">Videos at or under this length are classified as clips in the stream video map. Default is 5 minutes.</p>
+            <p className="text-xs text-gray-400">Videos at or under this length are classified as clips in the stream video map. Default is 5 minutes.</p>
           </div>
         </section>
 
@@ -432,7 +432,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
             {local.clipPresetId && !allPresets.find(p => p.id === local.clipPresetId) && (
               <p className="flex items-center gap-1 text-xs text-yellow-500">
@@ -446,7 +446,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 Selected preset uses stream copy or is audio-only and can't be used for clip exports. Pick an encoding preset or leave blank.
               </p>
             )}
-            <p className="text-xs text-gray-500">Converter preset used when exporting clips from the player. Stream-copy and audio-only presets are filtered out — clips always re-encode because of trim/crop/bleep filters.</p>
+            <p className="text-xs text-gray-400">Converter preset used when exporting clips from the player. Stream-copy and audio-only presets are filtered out — clips always re-encode because of trim/crop/bleep filters.</p>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -462,18 +462,18 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
               onChange={e => set('defaultBleepVolume', parseFloat(e.target.value))}
               className="w-full accent-purple-500"
             />
-            <div className="flex justify-between text-xs text-gray-600">
+            <div className="flex justify-between text-xs text-gray-400">
               <span>Silent</span>
               <span>100%</span>
               <span>150%</span>
             </div>
-            <p className="text-xs text-gray-500">Starting volume for bleep markers in clip mode. Can be adjusted per-session by dragging the line on a marker.</p>
+            <p className="text-xs text-gray-400">Starting volume for bleep markers in clip mode. Can be adjusted per-session by dragging the line on a marker.</p>
           </div>
 
           <Checkbox
             checked={local.skipClipMergeWarning ?? false}
             onChange={v => set('skipClipMergeWarning', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Skip multi-track merge warning</div><div className="text-xs text-gray-500">Enter clip mode immediately on multi-track videos instead of prompting to merge audio first. You can still merge from the audio tracks panel inside clip mode.</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Skip multi-track merge warning</div><div className="text-xs text-gray-400">Enter clip mode immediately on multi-track videos instead of prompting to merge audio first. You can still merge from the audio tracks panel inside clip mode.</div></div>}
           />
         </section>
 
@@ -488,7 +488,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
             label={
               <div>
                 <div className="text-sm font-medium text-gray-200">Automatically delete partial files on cancel</div>
-                <div className="text-xs text-gray-500">When unchecked, you'll be asked each time a conversion is cancelled</div>
+                <div className="text-xs text-gray-400">When unchecked, you'll be asked each time a conversion is cancelled</div>
               </div>
             }
           />
@@ -505,7 +505,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
             label={
               <div>
                 <div className="text-sm font-medium text-gray-200">Disable animations</div>
-                <div className="text-xs text-gray-500">Turn off motion animations throughout the app. Also applies automatically if your OS has "Reduce motion" enabled.</div>
+                <div className="text-xs text-gray-400">Turn off motion animations throughout the app. Also applies automatically if your OS has "Reduce motion" enabled.</div>
               </div>
             }
           />
@@ -526,7 +526,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                   Start with Windows
                   {import.meta.env.DEV && <span className="ml-2 text-xs text-yellow-600 font-normal">(deployable builds only)</span>}
                 </div>
-                <div className="text-xs text-gray-500">Automatically launch Stream Manager when Windows starts</div>
+                <div className="text-xs text-gray-400">Automatically launch Stream Manager when Windows starts</div>
               </div>
             }
           />
@@ -537,7 +537,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
             label={
               <div>
                 <div className="text-sm font-medium text-gray-200">Start Minimized</div>
-                <div className="text-xs text-gray-500">Hide to tray on launch instead of opening the window</div>
+                <div className="text-xs text-gray-400">Hide to tray on launch instead of opening the window</div>
               </div>
             }
           />
@@ -551,7 +551,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
           <Checkbox
             checked={local.autoStartWatcher}
             onChange={v => set('autoStartWatcher', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Auto-start file watcher on launch</div><div className="text-xs text-gray-500">Automatically activate all enabled rules when the app opens</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Auto-start file watcher on launch</div><div className="text-xs text-gray-400">Automatically activate all enabled rules when the app opens</div></div>}
           />
         </section>
 
@@ -571,7 +571,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
               >
                 Reset onboarding
               </Button>
-              <p className="text-xs text-gray-600">Clears streamsDir and streamerName, then reloads the app to trigger the onboarding flow. Not visible in production builds.</p>
+              <p className="text-xs text-gray-400">Clears streamsDir and streamerName, then reloads the app to trigger the onboarding flow. Not visible in production builds.</p>
             </div>
             <div className="flex flex-col gap-1">
               <Checkbox
@@ -579,7 +579,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
                 checked={!!local.slowAnimations}
                 onChange={v => setLocal(prev => ({ ...prev, slowAnimations: v }))}
               />
-              <p className="text-xs text-gray-600">Multiplies all motion animation durations by 10 to make transitions easier to inspect.</p>
+              <p className="text-xs text-gray-400">Multiplies all motion animation durations by 10 to make transitions easier to inspect.</p>
             </div>
           </section>
         )}

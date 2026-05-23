@@ -53,7 +53,7 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
 
         {/* Search */}
         <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
             ref={inputRef}
             value={query}
@@ -65,7 +65,7 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors"
             >
               <X size={13} />
             </button>
@@ -75,7 +75,7 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
         {/* Grid */}
         <div className="h-[520px] overflow-y-auto pr-1">
           {filtered.length === 0 ? (
-            <p className="text-sm text-gray-500 text-center py-10">No icons found for "{query}"</p>
+            <p className="text-sm text-gray-400 text-center py-10">No icons found for "{query}"</p>
           ) : (
             <>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-1">

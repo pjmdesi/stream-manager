@@ -162,11 +162,11 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
         <div className="p-4 rounded-full bg-white/5">
-          <Combine size={36} className="text-gray-600" />
+          <Combine size={36} className="text-gray-400" />
         </div>
         <div>
           <p className="text-gray-300 font-medium">No files loaded</p>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm text-gray-400 mt-1">
             Use the <Film size={12} className="inline mb-0.5" /> button on a stream row with multiple videos.
           </p>
         </div>
@@ -183,7 +183,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
       <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-semibold">Combine</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-gray-400 mt-0.5">
             {files.length} files · {totalDur > 0 ? formatDur(totalDur) + ' total' : 'probing…'}
           </p>
         </div>
@@ -209,10 +209,10 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
                   : 'border-white/5 bg-white/[0.03] hover:bg-white/[0.06]'
               } ${running ? 'opacity-50 pointer-events-none' : 'cursor-grab active:cursor-grabbing'}`}
             >
-              <GripVertical size={14} className="text-gray-600 shrink-0" />
+              <GripVertical size={14} className="text-gray-400 shrink-0" />
 
               {/* Order number */}
-              <span className="text-xs text-gray-600 font-mono w-5 text-right shrink-0">{i + 1}</span>
+              <span className="text-xs text-gray-400 font-mono w-5 text-right shrink-0">{i + 1}</span>
 
               {/* Filename */}
               <span className="flex-1 text-sm text-gray-200 truncate font-mono" title={f.path}>
@@ -221,20 +221,20 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
 
               {/* Timestamp */}
               {f.timestamp && (
-                <span className="text-xs text-gray-600 shrink-0 tabular-nums">
+                <span className="text-xs text-gray-400 shrink-0 tabular-nums">
                   {f.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </span>
               )}
 
               {/* Duration */}
-              <span className="text-xs text-gray-500 font-mono w-16 text-right shrink-0">
+              <span className="text-xs text-gray-400 font-mono w-16 text-right shrink-0">
                 {f.duration !== null ? formatDur(f.duration) : <Loader2 size={11} className="animate-spin inline" />}
               </span>
 
               {/* Remove */}
               <button
                 onClick={() => removeFile(i)}
-                className="text-gray-700 hover:text-red-400 transition-colors shrink-0"
+                className="text-gray-400 hover:text-red-400 transition-colors shrink-0"
               >
                 <X size={13} />
               </button>
@@ -247,7 +247,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
       <div className="px-6 py-4 border-t border-white/5 flex flex-col gap-3 shrink-0 bg-navy-800/50">
         {/* Output path */}
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500 shrink-0">Output</label>
+          <label className="text-xs text-gray-400 shrink-0">Output</label>
           <input
             value={outputPath}
             onChange={e => setOutputPath(e.target.value)}
@@ -266,7 +266,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <span className="text-xs text-gray-500 font-mono w-10 text-right">{progress}%</span>
+            <span className="text-xs text-gray-400 font-mono w-10 text-right">{progress}%</span>
           </div>
         )}
 
@@ -302,7 +302,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
             disabled={running}
             color="red"
             size="sm"
-            label={<span className={deleteAfter ? 'text-red-400' : 'text-gray-500'}>Delete source files after combining</span>}
+            label={<span className={deleteAfter ? 'text-red-400' : 'text-gray-400'}>Delete source files after combining</span>}
           />
           <Button
             variant="primary"

@@ -136,13 +136,13 @@ function SamplesList({ samples, total }: { samples: DetectedStructure['samples']
       {samples.map(s => (
         <div key={s.relativePath} className="flex items-center justify-between gap-4 px-4 py-2.5">
           <span className="text-sm text-gray-300 font-medium tabular-nums shrink-0">{s.date}</span>
-          <span className="text-xs text-gray-500 truncate text-right">
+          <span className="text-xs text-gray-400 truncate text-right">
             {s.games.length > 0 ? s.games.join(', ') : '—'}
           </span>
         </div>
       ))}
       {overflow > 0 && (
-        <div className="px-4 py-2.5 text-xs text-gray-600">
+        <div className="px-4 py-2.5 text-xs text-gray-400">
           …and {overflow} more
         </div>
       )}
@@ -183,7 +183,7 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
       </div>
 
       {scanning && (
-        <p className="text-sm text-gray-500 animate-pulse">Scanning folder…</p>
+        <p className="text-sm text-gray-400 animate-pulse">Scanning folder…</p>
       )}
 
       {!scanning && detection && (
@@ -203,7 +203,7 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
 
           {detection.samples.length > 0 && (
             <div className="flex flex-col gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Sample sessions</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Sample sessions</h3>
               <SamplesList samples={detection.samples} total={detection.sessionCount} />
             </div>
           )}
@@ -214,7 +214,7 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
             <button
               type="button"
               onClick={() => setOverrideOpen(true)}
-              className="self-start text-xs text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
+              className="self-start text-xs text-gray-400 hover:text-gray-300 underline underline-offset-2 transition-colors"
             >
               Not what you expected? Choose mode manually
             </button>
@@ -222,7 +222,7 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
 
           {showCards && (
             <div className="flex flex-col gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
                 {detected ? 'Override the detected mode' : 'Pick a mode'}
               </h3>
               <div className="flex gap-4">
@@ -353,7 +353,7 @@ function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChang
       <div className="flex flex-col gap-4">
         {/* Source */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-gray-300">Recordings folder <span className="text-gray-500 font-normal">(where your streaming software saves files)</span></label>
+          <label className="text-sm font-medium text-gray-300">Recordings folder <span className="text-gray-400 font-normal">(where your streaming software saves files)</span></label>
           <div className="flex gap-2">
             <input
               className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
@@ -370,7 +370,7 @@ function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChang
         {/* Arrow + destination */}
         <div className="flex items-center gap-3">
           <div className="flex-1 h-px bg-white/10" />
-          <div className="flex items-center gap-1.5 text-xs text-gray-500">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400">
             <MoveRight size={14} />
             <span>moves to</span>
           </div>
@@ -378,9 +378,9 @@ function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChang
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-gray-300">Destination <span className="text-gray-500 font-normal">(your streams folder)</span></label>
+          <label className="text-sm font-medium text-gray-300">Destination <span className="text-gray-400 font-normal">(your streams folder)</span></label>
           <input
-            className="flex-1 bg-navy-900/50 border border-white/10 text-gray-500 text-sm rounded-lg px-3 py-2 cursor-not-allowed"
+            className="flex-1 bg-navy-900/50 border border-white/10 text-gray-400 text-sm rounded-lg px-3 py-2 cursor-not-allowed"
             value={streamsDir}
             readOnly
           />
@@ -389,7 +389,7 @@ function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChang
         {/* Pattern */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-1.5">
-            <label className="text-sm font-medium text-gray-300">File pattern <span className="text-gray-500 font-normal">(which files to watch for)</span></label>
+            <label className="text-sm font-medium text-gray-300">File pattern <span className="text-gray-400 font-normal">(which files to watch for)</span></label>
             <Tooltip width="w-72" content={
               <>
                 <p className="font-semibold text-gray-200 mb-1">Glob pattern syntax</p>
@@ -400,10 +400,10 @@ function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChang
                 <p><span className="font-mono text-purple-300">*.mkv</span> — all MKV files (OBS default)</p>
                 <p><span className="font-mono text-purple-300">*.mp4</span> — all MP4 files</p>
                 <p><span className="font-mono text-purple-300">{'*.{mkv,mp4}'}</span> — MKV or MP4</p>
-                <p><span className="font-mono text-purple-300">*</span> — all files <span className="text-gray-500">(not recommended)</span></p>
+                <p><span className="font-mono text-purple-300">*</span> — all files <span className="text-gray-400">(not recommended)</span></p>
               </>
             }>
-              <HelpCircle size={14} className="text-gray-600 hover:text-gray-400 cursor-default transition-colors" />
+              <HelpCircle size={14} className="text-gray-400 hover:text-gray-400 cursor-default transition-colors" />
             </Tooltip>
           </div>
           <input
@@ -432,7 +432,7 @@ function StepDone({ mode, streamsDir, convertResult, autoRule }: StepDoneProps) 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Summary</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Summary</h3>
         <div className="flex flex-col divide-y divide-white/5 rounded-xl border border-white/10 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3">
             <span className="text-sm text-gray-400">Mode</span>

@@ -267,12 +267,12 @@ export function PresetEditorModal({ isOpen, onClose, onSave, editing }: Props) {
                       options={encodersForCodec(form.video.codec).map(e => ({ value: e, label: ENCODER_LABELS[e] }))}
                     />
                   ) : (
-                    <div className="w-full bg-navy-900/50 border border-white/10 text-gray-500 text-sm rounded-lg px-3 py-2 italic">
+                    <div className="w-full bg-navy-900/50 border border-white/10 text-gray-400 text-sm rounded-lg px-3 py-2 italic">
                       Detecting available encoders…
                     </div>
                   )}
                   {encodersReady && encoderAutoPicked && encodersForCodec(form.video.codec).length > 1 && (
-                    <p className="text-[11px] text-gray-500 italic">
+                    <p className="text-[11px] text-gray-400 italic">
                       Auto-picked the best available encoder for {CODEC_LABELS[form.video.codec].split(' ')[0]} on this machine.
                     </p>
                   )}
@@ -282,7 +282,7 @@ export function PresetEditorModal({ isOpen, onClose, onSave, editing }: Props) {
               <Field label="Quality">
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-3">
-                    <span className="text-[10px] text-gray-500 w-12 shrink-0">Lower</span>
+                    <span className="text-[10px] text-gray-400 w-12 shrink-0">Lower</span>
                     <Slider
                       value={form.video.quality}
                       min={0}
@@ -294,15 +294,15 @@ export function PresetEditorModal({ isOpen, onClose, onSave, editing }: Props) {
                       }}
                       className="flex-1"
                     />
-                    <span className="text-[10px] text-gray-500 w-12 shrink-0 text-right">Higher</span>
+                    <span className="text-[10px] text-gray-400 w-12 shrink-0 text-right">Higher</span>
                     <span className="text-xs text-gray-300 tabular-nums w-10 text-right">{form.video.quality}%</span>
                   </div>
                   {resolvedQuality && !advancedMode && (
-                    <p className="text-[11px] text-gray-500">
+                    <p className="text-[11px] text-gray-400">
                       <span className="text-gray-400">{resolvedQuality.speedLabel}</span>
-                      <span className="text-gray-600"> · </span>
+                      <span className="text-gray-400"> · </span>
                       CRF {resolvedQuality.qualityValue}, preset <span className="font-mono">{resolvedQuality.presetValue}</span>
-                      <span className="text-gray-600"> · </span>
+                      <span className="text-gray-400"> · </span>
                       slower presets compress better at the same quality
                     </p>
                   )}
@@ -359,7 +359,7 @@ export function PresetEditorModal({ isOpen, onClose, onSave, editing }: Props) {
               />
               <span className="flex flex-col gap-0.5">
                 <span className="text-gray-300">Keep all audio tracks</span>
-                <span className="text-[11px] text-gray-500 leading-relaxed">
+                <span className="text-[11px] text-gray-400 leading-relaxed">
                   Preserve every audio track in the input (game / mic / music etc.) instead of just the first.
                   Useful for OBS multi-track recordings.
                 </span>
@@ -380,7 +380,7 @@ export function PresetEditorModal({ isOpen, onClose, onSave, editing }: Props) {
           </button>
           {advancedExpanded && (
             <div className="flex flex-col gap-2">
-              <p className="text-xs text-gray-500 italic">
+              <p className="text-xs text-gray-400 italic">
                 {advancedMode
                   ? 'Editing the raw args. The form fields above are disabled.'
                   : 'Auto-generated from the form above. Toggle "Edit raw" to override and disable the form.'}
@@ -418,7 +418,7 @@ export function PresetEditorModal({ isOpen, onClose, onSave, editing }: Props) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-3">
-      <h3 className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{title}</h3>
+      <h3 className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{title}</h3>
       <div className="flex flex-col gap-3">
         {children}
       </div>
@@ -431,7 +431,7 @@ function Field({ label, optional, children }: { label: string; optional?: boolea
     <div className="flex flex-col gap-1">
       <label className="text-xs text-gray-400">
         {label}
-        {optional && <span className="text-gray-600"> · optional</span>}
+        {optional && <span className="text-gray-400"> · optional</span>}
       </label>
       {children}
     </div>
@@ -461,7 +461,7 @@ function SelectMenu({
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
-      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
     </div>
   )
 }

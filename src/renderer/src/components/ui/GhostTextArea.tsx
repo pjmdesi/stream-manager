@@ -148,7 +148,7 @@ function insertGhost(el: HTMLElement, text: string, charOffset: number) {
   const span = document.createElement('span')
   span.dataset.ghost = 'true'
   span.contentEditable = 'false'
-  span.className = 'text-gray-600 pointer-events-none select-none'
+  span.className = 'text-gray-400 pointer-events-none select-none'
   span.textContent = text
 
   const pos = findPosition(el, charOffset)
@@ -293,6 +293,20 @@ export const GhostTextArea = forwardRef<GhostTextAreaHandle, Props>(function Gho
     }
   }
 
+  // contentEditable's default paste preserves source formatting (bold, links,
+  // colors, fonts) — meaningless in a textarea-style field and visually
+  // inconsistent with the rest of the app. Intercept and insert plain text
+  // via execCommand: deprecated in the spec but the only reliable way to
+  // keep the insertion in the browser's undo stack and fire a real input
+  // event (which handleInput then picks up to push onChange).
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text/plain')
+    if (!text) return
+    if (suggestion) onDismiss?.()
+    document.execCommand('insertText', false, text)
+  }
+
   const minH = `${rows * 1.5}rem`
 
   return (
@@ -302,6 +316,7 @@ export const GhostTextArea = forwardRef<GhostTextAreaHandle, Props>(function Gho
       suppressContentEditableWarning
       onInput={handleInput}
       onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
       onFocus={onFocus}
       onBlur={onBlur}
       onCompositionStart={() => { composing.current = true }}

@@ -29,9 +29,10 @@
 17. Add a "reset" button to the thumbnail editor that resets all the transform values back to their defaults (scale: 100%, rotation: 0, position: centered).
 18. In the thumbnail editor, in addition to showing the zoom level in the bottom left corner, also show buttons that allow the user to quickly set the zoom level to common values (like 100%, 75%, 50%, fit to screen, etc.) for easier use. ALso add a button that "resets" the zoom level back to 100% and centers the canvas in the editor.
 19. Consider removing the additional list of thumbnail options in the metamodal that allows the user to pick which image is uploaded to YouTube. Maybe just default to whatever is used as the stream item thumbnail and just have a checkbox (checked by default) that says "Use stream item thumbnail as YouTube thumbnail" or something like that. If the user unchecks it, then show the additional options for picking a different image from the carousel to use as the YouTube thumbnail. This will simplify the UI and reduce confusion for users who don't need that level of control, while still allowing power users to customize it if they want.
-20. Maybe?... Update the "new stream" version of the metamodal to automatically save the stream item as soon as the user fills anything into the title and clicks out of the input, instead of waiting for them to click the "Save" button at the bottom.
-21. In the metamodal, allow the tags input textarea to expand vertically as the user types in more tags, instead of having a fixed height with a scrollbar. This will make it easier to see all the tags at once and edit them without needing to scroll within the textarea.
-22. Update the tags input in the metamodal and the tag templates modal to count the characters and warn the user when they exceed YouTube's tag character limit (currently 500 characters total for all tags). This will help prevent issues with tags not being applied correctly when the user tries to use them on YouTube. The actual calculation is a bit weird, I'm not exactly sure how YouTube counts the characters, but I think it's just the total number of characters in all the tags combined, including commas and spaces. For example, this is a list of tags that I copied from YouTube. They claim it's 482 characters, but I count 433:
+20. If possible, when the user deletes a stream item, it should offer the option to also delete the linked YouTube livestream VOD or video if there is one, and if they confirm, it will delete the broadcast through the YouTube API.
+21. Maybe?... Update the "new stream" version of the metamodal to automatically save the stream item as soon as the user fills anything into the title and clicks out of the input, instead of waiting for them to click the "Save" button at the bottom.
+22. In the metamodal, allow the tags input textarea to expand vertically as the user types in more tags, instead of having a fixed height with a scrollbar. This will make it easier to see all the tags at once and edit them without needing to scroll within the textarea.
+23. Update the tags input in the metamodal and the tag templates modal to count the characters and warn the user when they exceed YouTube's tag character limit (currently 500 characters total for all tags). This will help prevent issues with tags not being applied correctly when the user tries to use them on YouTube. The actual calculation is a bit weird, I'm not exactly sure how YouTube counts the characters, but I think it's just the total number of characters in all the tags combined, including commas and spaces. For example, this is a list of tags that I copied from YouTube. They claim it's 482 characters, but I count 433:
     ```
     Amanita Design,Creaks,Floex,Machinarium,Phonopolis,Phonopolis gameplay,Samorost,atmospheric game,avant garde,blind playthrough,cardboard game,cozy game,dystopian game,first impressions,gaming,hand drawn game,indie adventure,indie game,indie puzzle,lets play,live stream,no commentary,pc gaming,point and click,puzzle adventure,puzzle game,relaxing game,single player,stop motion game,story rich game,tectix,twitch stream,walkthrough
     ```
@@ -58,35 +59,21 @@
 4. When pasting into the description field in the metamodal, the text comes in styled with the formatting from the source. We should strip all formatting from pasted text in that field and just paste in plain text to keep the app's styling consistent and prevent any weird formatting issues.
 5. Clicking the thumbnail in a stream item row opens the action panel as well as opening the image carousel. It should not open the action panel, just the image carousel.
 
-## Other ideas
+## Other ideas (small)
 
 1. Rename the comments feature in the stream items to "Notes" instead. Also update that entry in the How to Use section.
-2. Maybe a music folder manager as well? To control and add info to the music that's played during streams through OBS.
-3. Maybe add a button to a completed conversion task to send the source and output files to my other app ClpChk if it's detected on the user's machine. Since it's a deployable app, I may need to update it to add a registry key or something to indicate its location for other apps to find it. This button would send the current stream item or video file to ClpChk for checking and fixing any issues with the clips before uploading.
-4. Add a main process console viewer for the production version of the app, accessible with a keyboard shortcut.
-5. Maybe add a "streaming mode" that detects if there's an app that's currently recording (like OBS, Xsplit, or Streamlabs). This would allow the app to adapt in order to obscure sensitive info and perhaps even enter into a streamlined UI.
-6. Relay feature ideas:
+2. Maybe add a button to a completed conversion task to send the source and output files to my other app ClpChk if it's detected on the user's machine. Since it's a deployable app, I may need to update it to add a registry key or something to indicate its location for other apps to find it. This button would send the current stream item or video file to ClpChk for checking and fixing any issues with the clips before uploading.
+3. Add a main process console viewer for the production version of the app, accessible with a keyboard shortcut.
+4. Maybe add a "streaming mode" that detects if there's an app that's currently recording (like OBS, Xsplit, or Streamlabs). This would allow the app to adapt in order to obscure sensitive info and perhaps even enter into a streamlined UI.
+5. Relay feature ideas:
    * Add the ability to allow to the to add a "technical difficulties" fallback image so if the stream app (like OBS) crashes or the signal fails, it will instead push that image to YouTube as a backup until the stream app reconnects.
    * If it's possible to integrate Twitch's enhanced broadcast mode, allow the relay to send to multiple platforms (just Twitch and YouTube for now) at the same time
    * Allow the user to manage the editable details for each platform straight from SM. Maybe they change up what game they're playing or topic they're doing or otherwise what to flexibly update the details while streaming or right before.
-7. Implement a recreation of the OBS stream picker for YouTube, to allow selection of scheduled streams through OBS. The ultimate goal would be to create a new stream item in the app, and when it's time to stream, the app automatically sends OBS the details for the YouTube connection. Here is what Claude recommended:
-**No easy way to do this right now**
-    ```
-    Option 3: Build the event picker yourself as a custom dock (the real answer)
-    OBS supports custom browser docks, and YouTube's Live Streaming API exposes liveBroadcasts.list which returns exactly what OBS's native picker shows — your scheduled events with their bound stream keys. You build a small local web page that:
 
-    Authenticates to the YouTube Data API (OAuth with your Google account, one-time setup).
-    Calls liveBroadcasts.list to fetch your upcoming scheduled events.
-    Displays them as a dropdown.
-    On selection, pulls the stream key via liveStreams.list on the broadcast's bound stream.
-    Pushes that key into Aitum's YouTube output via obs-websocket (which Aitum exposes settings for) — or writes directly to Aitum's plugin config file and triggers a reload.
+## Other ideas (big)
 
-    You host this page locally (file:// or python -m http.server), add it as a Custom Browser Dock in OBS. Now you have a native-looking dock inside OBS with your scheduled events, one click away, and Twitch stays primary the whole time.
-    This is the only path that actually achieves what you described. It's a few hours of work: a single HTML page with a Google OAuth flow, three API calls, and either obs-websocket JS or a file write. Given your existing automation chops (the video processing PowerShell stuff), this is well within reach.
-    Caveats on option 3:
-
-    You need a Google Cloud project with YouTube Data API v3 enabled to get OAuth credentials. Free. One-time setup, 15 minutes.
-    The YouTube Data API has a daily quota (10,000 units default). liveBroadcasts.list costs 1 unit. You won't come close.
-    Aitum doesn't publicly document whether its output keys are writable via obs-websocket — it may require editing the plugin's JSON config on disk (in %APPDATA%\obs-studio\plugin_config\) and restarting OBS or toggling the output. Worth confirming before committing to this.
-    If Aitum's config isn't easily hot-swappable, the fallback is writing directly to the standard OBS profile's service.json — but that file is only read by OBS's primary service, so you'd be back to needing YouTube as primary.
-    ```
+1. Maybe a music folder manager as well? To control and add info to the music that's played during streams through OBS.
+   * Not sure if it should play through the SM app or just manage the files and the metadata for the music that's played through OBS.
+   * Maybe it could serve a custom web page that displays in OBS as a browser source that shows the current track info and maybe even the album art or something in a customizable layout.
+   * The biggest add for me would be a way to group music items into playlists so I can easily switch between different sets of music for different types of streams or different moods. This way, I won't have to manually edit the settings of the OBS music source every time I want to change up the music.
+   * Maybe one day, there could even be a feature that allows the user's audience to vote on what music they want to hear during the stream through a Twitch extension or a website. And maybe even rate the music or suggest new tracks to add to the playlists. This would be a fun way to engage with the audience and make the music selection more interactive.

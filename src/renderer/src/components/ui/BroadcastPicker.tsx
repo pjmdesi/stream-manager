@@ -91,13 +91,13 @@ export function BroadcastPicker({
         {selected ? (
           <RowContent broadcast={selected} showDateOnly={showDateOnly} compact />
         ) : (
-          <span className="text-gray-500">
+          <span className="text-gray-400">
             {broadcasts.length === 0 ? (emptyLabel ?? placeholder) : placeholder}
           </span>
         )}
         {loading
-          ? <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 animate-spin" />
-          : <ChevronDown size={12} className={`absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+          ? <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />
+          : <ChevronDown size={12} className={`absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
         }
       </button>
 
@@ -121,7 +121,7 @@ export function BroadcastPicker({
                 className="bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-y-auto"
               >
                 {broadcasts.length === 0 ? (
-                  <p className="px-3 py-3 text-xs text-gray-500 italic">
+                  <p className="px-3 py-3 text-xs text-gray-400 italic">
                     {emptyLabel ?? 'No broadcasts available.'}
                   </p>
                 ) : broadcasts.map(b => {

@@ -130,10 +130,10 @@ export function StreamRelayWidget({
     : status.state === 'listening' ? 'text-gray-200'
     : status.state === 'starting' || status.state === 'restarting' ? 'text-amber-400'
     : isError ? 'text-red-400'
-    : 'text-gray-600'
+    : 'text-gray-400'
 
   return (
-    <div className="border-y border-white/5 bg-navy-900">
+    <div className="border-y border-white/5 bg-navy-900 whitespace-nowrap">
       {/* Title row — navigates to Integrations on click. Icon on the left;
           title + status stacked vertically on the right so the title never
           wraps when the sidebar is at its narrowest. */}
@@ -162,13 +162,13 @@ export function StreamRelayWidget({
             <Calendar size={11} className="text-purple-400 shrink-0 mt-0.5" />
             <div className="flex flex-col flex-1 min-w-0 leading-tight">
               <span className="text-[11px] text-gray-200 truncate">{broadcastTitle}</span>
-              <span className="text-[10px] text-gray-500 tabular-nums">
+              <span className="text-[10px] text-gray-400 tabular-nums">
                 {broadcastTime}
                 {active.isManual && <span className="text-purple-400 ml-1">· picked</span>}
-                {!active.isManual && <span className="text-gray-600 ml-1">· auto</span>}
+                {!active.isManual && <span className="text-gray-400 ml-1">· auto</span>}
               </span>
             </div>
-            {!isStreaming && <ChevronDown size={11} className="text-gray-500 shrink-0 mt-1" />}
+            {!isStreaming && <ChevronDown size={11} className="text-gray-400 shrink-0 mt-1" />}
           </button>
         ) : (
           // Render an interactive trigger even with no auto-pick so the user
@@ -179,9 +179,9 @@ export function StreamRelayWidget({
             className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-left hover:bg-white/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             title="Pick a broadcast"
           >
-            <Calendar size={11} className="text-gray-500 shrink-0" />
-            <span className="text-[10px] text-gray-500 italic flex-1">No upcoming broadcasts.</span>
-            {!isStreaming && <ChevronDown size={11} className="text-gray-500 shrink-0" />}
+            <Calendar size={11} className="text-gray-400 shrink-0" />
+            <span className="text-[10px] text-gray-400 italic flex-1">No upcoming broadcasts.</span>
+            {!isStreaming && <ChevronDown size={11} className="text-gray-400 shrink-0" />}
           </button>
         )}
 
@@ -216,14 +216,14 @@ export function StreamRelayWidget({
           </p>
         )}
         {lifecycle && lifecycle.stage === 'no-broadcast' && isStreaming && (
-          <p className="px-2 text-[10px] text-gray-500 leading-tight">
+          <p className="px-2 text-[10px] text-gray-400 leading-tight">
             Streaming without a bound broadcast (YouTube will auto-create one).
           </p>
         )}
 
         {/* Live stats while streaming */}
         {isStreaming && stats && lifecycle?.stage !== 'going-live' && lifecycle?.stage !== 'binding' && (
-          <div className="px-2 pt-1 flex items-center gap-2 text-[10px] text-gray-500 tabular-nums">
+          <div className="px-2 pt-1 flex items-center gap-2 text-[10px] text-gray-400 tabular-nums">
             <span>{Math.round(stats.kbps)} kbps</span>
             <span>·</span>
             <span>{formatDurationSec(stats.durationSec)}</span>
@@ -268,11 +268,11 @@ export function StreamRelayWidget({
                 className="bg-navy-700 border border-white/10 rounded-lg shadow-xl w-72 overflow-y-auto"
               >
                 <div className="sticky top-0 z-10 bg-navy-700 px-3 py-2 border-b border-white/5 flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Pick a broadcast</span>
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Pick a broadcast</span>
                   <Tooltip content="Refresh from YouTube" side="bottom">
                     <button
                       onClick={refreshUpcoming}
-                      className="ml-auto p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                      className="ml-auto p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
                     >
                       <RotateCcw size={11} />
                     </button>
@@ -286,10 +286,10 @@ export function StreamRelayWidget({
                   }`}
                 >
                   <span className="text-[11px] font-medium">Use soonest upcoming (auto)</span>
-                  <span className="text-[10px] text-gray-500">SM auto-picks the next-scheduled broadcast</span>
+                  <span className="text-[10px] text-gray-400">SM auto-picks the next-scheduled broadcast</span>
                 </button>
                 {upcoming.length === 0 ? (
-                  <p className="px-3 py-3 text-[11px] text-gray-500 italic">No upcoming broadcasts.</p>
+                  <p className="px-3 py-3 text-[11px] text-gray-400 italic">No upcoming broadcasts.</p>
                 ) : upcoming.map(b => {
                   const isCurrent = active.isManual && active.broadcast?.id === b.id
                   const title = b.snippet?.title?.trim() || 'Untitled broadcast'
@@ -305,7 +305,7 @@ export function StreamRelayWidget({
                       }`}
                     >
                       <span className="text-[11px] truncate w-full">{title}</span>
-                      <span className="text-[10px] text-gray-500 tabular-nums">{when}</span>
+                      <span className="text-[10px] text-gray-400 tabular-nums">{when}</span>
                     </button>
                   )
                 })}

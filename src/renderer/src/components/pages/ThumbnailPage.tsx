@@ -533,7 +533,7 @@ function RecentThumb({ folderPath, date, updatedAt }: { folderPath: string; date
     <div className="w-20 shrink-0 self-stretch bg-navy-900 rounded-l-lg overflow-hidden flex items-center justify-center">
       {!err
         ? <img src={src} className="w-full h-full object-cover" onError={() => setErr(true)} />
-        : <ImageIcon size={12} className="text-gray-600" />
+        : <ImageIcon size={12} className="text-gray-400" />
       }
     </div>
   )
@@ -555,7 +555,7 @@ function TemplatePreview({ streamsDir, templateId, name, cacheKey }: { streamsDi
           onError={() => setImgError(true)}
         />
       ) : (
-        <LayoutTemplate size={28} className="text-gray-600" />
+        <LayoutTemplate size={28} className="text-gray-400" />
       )}
     </div>
   )
@@ -584,9 +584,9 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
           </Button>
         </div>
         {loading ? (
-          <p className="text-xs text-gray-500">Loading…</p>
+          <p className="text-xs text-gray-400">Loading…</p>
         ) : templates.length === 0 ? (
-          <p className="text-xs text-gray-500">No templates yet. Create one from the editor.</p>
+          <p className="text-xs text-gray-400">No templates yet. Create one from the editor.</p>
         ) : (
           <div className="grid grid-cols-3 gap-3">
             {templates.map(t => (
@@ -600,14 +600,14 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
                   <span className="text-xs text-gray-300 truncate">{t.name}</span>
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-all shrink-0">
                     <button
-                      className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-200 transition-colors"
+                      className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
                       onClick={e => { e.stopPropagation(); onOpenTemplate(t) }}
                       title="Edit template"
                     >
                       <Pencil size={12} />
                     </button>
                     <button
-                      className="p-1 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors"
+                      className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
                       onClick={e => { e.stopPropagation(); onDeleteTemplate(t.id) }}
                       title="Delete template"
                     >
@@ -635,9 +635,9 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
                 <RecentThumb folderPath={entry.folderPath} date={entry.date} updatedAt={entry.updatedAt} />
                 <div className="flex-1 min-w-0 py-2">
                   <p className="text-xs text-gray-300 truncate">{entry.title ?? entry.date}</p>
-                  <p className="text-[10px] text-gray-500 truncate">{entry.folderPath}</p>
+                  <p className="text-[10px] text-gray-400 truncate">{entry.folderPath}</p>
                 </div>
-                <span className="text-[10px] text-gray-500 shrink-0 py-2">{entry.date}</span>
+                <span className="text-[10px] text-gray-400 shrink-0 py-2">{entry.date}</span>
               </button>
             ))}
           </div>
@@ -662,7 +662,7 @@ function FilterSlider({ label, min, max, step, value, onChange }: {
   return (
     <label className="flex flex-col gap-0.5">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-gray-500">{label}</span>
+        <span className="text-[10px] text-gray-400">{label}</span>
         <span className="text-[10px] text-gray-400 tabular-nums">{Number.isInteger(step) ? value : value.toFixed(2)}</span>
       </div>
       <div className="flex items-center gap-1.5">
@@ -698,7 +698,7 @@ function FilterToggle({ label, checked, onChange }: {
 function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: PropsPanelProps) {
   if (!layer) {
     return (
-      <div className="p-4 text-xs text-gray-600 text-center">
+      <div className="p-4 text-xs text-gray-400 text-center">
         Select a layer to edit properties
       </div>
     )
@@ -710,11 +710,11 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
     <div className="p-3 flex flex-col gap-3 overflow-y-auto flex-1 min-h-0">
       {/* Common */}
       <section>
-        <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2">Transform</p>
+        <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Transform</p>
         <div className="grid grid-cols-2 gap-1.5">
           {[['X', 'x'], ['Y', 'y']].map(([label, key]) => (
             <label key={key} className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-500">{label}</span>
+              <span className="text-[10px] text-gray-400">{label}</span>
               <input
                 type="number"
                 value={Math.round((layer as any)[key])}
@@ -724,7 +724,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
             </label>
           ))}
           <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-gray-500">Rotation</span>
+            <span className="text-[10px] text-gray-400">Rotation</span>
             <input
               type="number"
               value={Math.round(layer.rotation)}
@@ -733,7 +733,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
             />
           </label>
           <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-gray-500">Opacity %</span>
+            <span className="text-[10px] text-gray-400">Opacity %</span>
             <input
               type="number"
               min={0}
@@ -747,7 +747,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
         {(layer.width !== undefined) && (
           <div className="grid grid-cols-2 gap-1.5 mt-1.5">
             <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-500">Width</span>
+              <span className="text-[10px] text-gray-400">Width</span>
               <input
                 type="number"
                 value={Math.round(layer.width ?? 0)}
@@ -757,7 +757,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
             </label>
             {(layer.type === 'image' || layer.type === 'shape') && layer.height !== undefined && (
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-500">Height</span>
+                <span className="text-[10px] text-gray-400">Height</span>
                 <input
                   type="number"
                   value={Math.round(layer.height ?? 0)}
@@ -773,14 +773,14 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
       {layer.type === 'text' && (
         <>
           <section>
-            <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2">Text</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Text</p>
             <textarea
               value={layer.text ?? ''}
               onChange={e => update({ text: e.target.value })}
               rows={3}
               className="w-full bg-navy-900 border border-white/10 rounded px-2 py-1.5 text-xs text-gray-200 resize-none"
             />
-            <p className="text-[10px] text-gray-600 mt-1 leading-snug">
+            <p className="text-[10px] text-gray-400 mt-1 leading-snug">
               Merge fields:
               {' '}
               {['title', 'game', 'date', 'season', 'episode', 'total_episodes'].map((f, i, arr) => (
@@ -796,7 +796,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
             </p>
           </section>
           <section>
-            <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2">Font</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Font</p>
             <div className="flex flex-col gap-1.5">
               <select
                 value={layer.fontFamily ?? 'Arial'}
@@ -821,7 +821,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               </select>
               <div className="grid grid-cols-2 gap-1.5">
                 <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-500">Size</span>
+                  <span className="text-[10px] text-gray-400">Size</span>
                   <input
                     type="number"
                     min={8}
@@ -832,7 +832,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                   />
                 </label>
                 <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-500">Style</span>
+                  <span className="text-[10px] text-gray-400">Style</span>
                   {(() => {
                     const variants = fontVariantMap[layer.fontFamily ?? 'Arial'] ?? []
                     if (variants.length > 0) {
@@ -867,7 +867,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-500">Align</span>
+                  <span className="text-[10px] text-gray-400">Align</span>
                   <select
                     value={layer.align ?? 'left'}
                     onChange={e => update({ align: e.target.value as any })}
@@ -882,10 +882,10 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
             </div>
           </section>
           <section>
-            <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2">Color</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Color</p>
             <div className="grid grid-cols-2 gap-1.5">
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-500">Fill</span>
+                <span className="text-[10px] text-gray-400">Fill</span>
                 <div className="flex items-center gap-1.5">
                   <input
                     type="color"
@@ -902,7 +902,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                 </div>
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-500">Stroke</span>
+                <span className="text-[10px] text-gray-400">Stroke</span>
                 <div className="flex items-center gap-1.5">
                   <input
                     type="color"
@@ -928,10 +928,10 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
 
       {layer.type === 'shape' && (
         <section>
-          <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2">Fill & Stroke</p>
+          <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Fill & Stroke</p>
           <div className="flex flex-col gap-1.5">
             <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-500">Fill</span>
+              <span className="text-[10px] text-gray-400">Fill</span>
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
                   className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer" />
@@ -940,7 +940,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               </div>
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-500">Stroke</span>
+              <span className="text-[10px] text-gray-400">Stroke</span>
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.stroke ?? '#000000'} onChange={e => update({ stroke: e.target.value })}
                   className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer" />
@@ -951,7 +951,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
             </label>
             {layer.shapeType === 'rect' && (
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-500">Corner radius</span>
+                <span className="text-[10px] text-gray-400">Corner radius</span>
                 <input type="number" min={0} max={999} value={layer.cornerRadius ?? 0}
                   onChange={e => update({ cornerRadius: Number(e.target.value) })}
                   className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
@@ -965,8 +965,8 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
           natively via shadow* props; we just persist the values. */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] uppercase tracking-wider text-gray-600">Drop Shadow</p>
-          <label className="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
+          <p className="text-[10px] uppercase tracking-wider text-gray-400">Drop Shadow</p>
+          <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
             <input
               type="checkbox"
               checked={!!layer.shadowEnabled}
@@ -979,7 +979,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
         {layer.shadowEnabled && (
           <div className="flex flex-col gap-1.5">
             <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-500">Color</span>
+              <span className="text-[10px] text-gray-400">Color</span>
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.shadowColor ?? '#000000'}
                   onChange={e => update({ shadowColor: e.target.value })}
@@ -991,25 +991,25 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
             </label>
             <div className="grid grid-cols-2 gap-1.5">
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-500">Offset X</span>
+                <span className="text-[10px] text-gray-400">Offset X</span>
                 <input type="number" value={layer.shadowOffsetX ?? 4}
                   onChange={e => update({ shadowOffsetX: Number(e.target.value) })}
                   className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-500">Offset Y</span>
+                <span className="text-[10px] text-gray-400">Offset Y</span>
                 <input type="number" value={layer.shadowOffsetY ?? 4}
                   onChange={e => update({ shadowOffsetY: Number(e.target.value) })}
                   className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-500">Blur</span>
+                <span className="text-[10px] text-gray-400">Blur</span>
                 <input type="number" min={0} value={layer.shadowBlur ?? 8}
                   onChange={e => update({ shadowBlur: Math.max(0, Number(e.target.value)) })}
                   className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-500">Opacity %</span>
+                <span className="text-[10px] text-gray-400">Opacity %</span>
                 <input type="number" min={0} max={100} value={layer.shadowOpacity ?? 100}
                   onChange={e => update({ shadowOpacity: Math.min(100, Math.max(0, Number(e.target.value))) })}
                   className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
@@ -1026,8 +1026,8 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
       {layer.type === 'image' && (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] uppercase tracking-wider text-gray-600">Filters</p>
-            <label className="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
+            <p className="text-[10px] uppercase tracking-wider text-gray-400">Filters</p>
+            <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
               <input
                 type="checkbox"
                 checked={!!layer.filtersEnabled}
@@ -1077,7 +1077,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                   filterPixelate: 0, filterPosterize: 0, filterEnhance: 0, filterThreshold: 0,
                   filterGrayscale: false, filterSepia: false, filterInvert: false, filterEmboss: false,
                 })}
-                className="text-[10px] text-gray-500 hover:text-gray-300 self-start"
+                className="text-[10px] text-gray-400 hover:text-gray-300 self-start"
               >
                 Reset filters
               </button>
@@ -2255,13 +2255,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
                   <div>
                     <h2 className="text-sm font-semibold text-gray-200">Choose a starting template</h2>
-                    <p className="text-xs text-gray-500 mt-0.5 truncate max-w-xs">
+                    <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">
                       {templatePickerStream.title ?? templatePickerStream.date}
                     </p>
                   </div>
                   <button
                     onClick={() => setTemplatePickerStream(null)}
-                    className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+                    className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     <X size={15} />
                   </button>
@@ -2307,15 +2307,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               {currentStream ? (
                 <span className="text-xs text-gray-400 truncate">
                   {currentStream.title ?? currentStream.date}
-                  <span className="text-gray-600 ml-2">{currentStream.date}</span>
+                  <span className="text-gray-400 ml-2">{currentStream.date}</span>
                 </span>
               ) : currentTemplateId ? (
                 <span className="text-xs text-gray-400 truncate">
                   {templates.find(t => t.id === currentTemplateId)?.name ?? 'Template'}
-                  <span className="text-gray-600 ml-1.5">template</span>
+                  <span className="text-gray-400 ml-1.5">template</span>
                 </span>
               ) : (
-                <span className="text-xs text-gray-500 italic">Unsaved canvas</span>
+                <span className="text-xs text-gray-400 italic">Unsaved canvas</span>
               )}
               {isDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
             </div>
@@ -2342,7 +2342,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               <Tooltip content={`Smart guides ${smartSnapEnabled ? '(on)' : '(off)'} — snap to edges & centers`} side="bottom">
                 <button
                   onClick={() => setSmartSnapEnabled(v => !v)}
-                  className={`p-1.5 rounded transition-colors ${smartSnapEnabled ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
+                  className={`p-1.5 rounded transition-colors ${smartSnapEnabled ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
                 >
                   <Magnet size={14} />
                 </button>
@@ -2350,7 +2350,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               <Tooltip content={`Grid snap ${gridSnapEnabled ? '(on)' : '(off)'} — snap to ${GRID_SIZE}px grid (G)`} side="bottom">
                 <button
                   onClick={() => setGridSnapEnabled(v => !v)}
-                  className={`p-1.5 rounded transition-colors ${gridSnapEnabled ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
+                  className={`p-1.5 rounded transition-colors ${gridSnapEnabled ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
                 >
                   <Grid3x3 size={14} />
                 </button>
@@ -2360,7 +2360,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               <Tooltip content="Align to artboard (canvas)" side="bottom">
                 <button
                   onClick={() => setAlignMode('artboard')}
-                  className={`p-1.5 rounded transition-colors ${alignMode === 'artboard' ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
+                  className={`p-1.5 rounded transition-colors ${alignMode === 'artboard' ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
                 >
                   <Frame size={14} />
                 </button>
@@ -2369,7 +2369,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <button
                   onClick={() => setAlignMode('selection')}
                   disabled={selectedIds.length < 2}
-                  className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${alignMode === 'selection' ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
+                  className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${alignMode === 'selection' ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
                 >
                   <BoxSelect size={14} />
                 </button>
@@ -2387,7 +2387,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <button
                     onClick={() => handleAlign(op as AlignOp)}
                     disabled={selectedIds.length === 0}
-                    className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     {icon}
                   </button>
@@ -2417,7 +2417,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   </button>
                   <button
                     onClick={() => setSaveTemplateOpen(false)}
-                    className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+                    className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     <X size={12} />
                   </button>
@@ -2645,8 +2645,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               <div className="absolute bottom-3 left-3 flex items-center gap-1.5 pointer-events-none">
                 <span className="text-[10px] tabular-nums bg-black/50 text-gray-400 px-1.5 py-0.5 rounded">
                   {Math.round(viewZoom * 100)}%
-                  {Math.abs(viewZoom - fitScale) < 0.001 && <span className="text-gray-600 ml-1">fit</span>}
-                  {Math.abs(viewZoom - 1) < 0.001 && <span className="text-gray-600 ml-1">1:1</span>}
+                  {Math.abs(viewZoom - fitScale) < 0.001 && <span className="text-gray-400 ml-1">fit</span>}
+                  {Math.abs(viewZoom - 1) < 0.001 && <span className="text-gray-400 ml-1">1:1</span>}
                 </span>
               </div>
             </div>
@@ -2656,8 +2656,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               {/* Layers */}
               <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '30%' }}>
                 <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 shrink-0">
-                  <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Layers</span>
-                  <span className="text-[10px] text-gray-600">{layers.length}</span>
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Layers</span>
+                  <span className="text-[10px] text-gray-400">{layers.length}</span>
                 </div>
                 <div className="overflow-y-auto flex-1">
                   {(() => {
@@ -2714,9 +2714,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                           >
                             <button
                               onClick={e => { e.stopPropagation(); updateLayer({ ...layer, visible: !layer.visible }) }}
-                              className="text-gray-500 hover:text-gray-300 shrink-0"
+                              className="text-gray-400 hover:text-gray-300 shrink-0"
                             >
-                              {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-700" />}
+                              {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-400" />}
                             </button>
                             {isRenaming ? (
                               <input
@@ -2744,10 +2744,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                               </span>
                             )}
                             <div className={`flex gap-0.5 opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''} transition-opacity`}>
-                              <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-600 hover:text-gray-300">
+                              <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300">
                                 <Copy size={10} />
                               </button>
-                              <button onClick={e => { e.stopPropagation(); commitLayers(layers.filter(l => l.id !== layer.id)); setSelectedIds([]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-600 hover:text-red-400">
+                              <button onClick={e => { e.stopPropagation(); commitLayers(layers.filter(l => l.id !== layer.id)); setSelectedIds([]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400">
                                 <Trash2 size={10} />
                               </button>
                             </div>
@@ -2768,8 +2768,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               {/* Properties */}
               <div className="flex flex-col flex-1 overflow-hidden min-h-0">
                 <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
-                  <Sliders size={11} className="text-gray-500" />
-                  <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Properties</span>
+                  <Sliders size={11} className="text-gray-400" />
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
                 </div>
                 <PropertiesPanel layer={selectedLayer} onChange={updateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} />
               </div>
@@ -2782,13 +2782,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   image layer. */}
               <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '35%' }}>
                 <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
-                  <ImageIcon size={11} className="text-gray-500" />
-                  <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Assets</span>
+                  <ImageIcon size={11} className="text-gray-400" />
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Assets</span>
                 </div>
                 <div className="overflow-y-auto flex-1">
                   {(() => {
                     if (!seasonAssets) {
-                      return <div className="px-3 py-3 text-[11px] text-gray-600">Loading…</div>
+                      return <div className="px-3 py-3 text-[11px] text-gray-400">Loading…</div>
                     }
                     const groups: Array<{ key: string; label: string; sublabel?: string; images: string[] }> = []
                     if (seasonAssets.current && seasonAssets.current.images.length > 0) {
@@ -2809,13 +2809,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       })
                     }
                     if (groups.length === 0) {
-                      return <div className="px-3 py-3 text-[11px] text-gray-600">No images in this stream{seasonAssets.related.length > 0 ? ' or its season' : ''}.</div>
+                      return <div className="px-3 py-3 text-[11px] text-gray-400">No images in this stream{seasonAssets.related.length > 0 ? ' or its season' : ''}.</div>
                     }
                     return groups.map(g => (
                       <div key={g.key} className="border-b border-white/5 last:border-b-0">
                         <div className="px-3 pt-2 pb-1 flex items-baseline gap-1.5">
-                          <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{g.label}</span>
-                          {g.sublabel && <span className="text-[10px] text-gray-600 truncate">— {g.sublabel}</span>}
+                          <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{g.label}</span>
+                          {g.sublabel && <span className="text-[10px] text-gray-400 truncate">— {g.sublabel}</span>}
                         </div>
                         <div className="px-2 pb-2 grid grid-cols-2 gap-1">
                           {g.images.map(p => {
@@ -2878,14 +2878,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       <span className="text-gray-200">{currentStream.title ?? currentStream.date}</span>.
                     </p>
                     <ul className="mt-2 flex flex-col gap-0.5">
-                      <li className="text-[11px] text-gray-500 font-mono truncate">
+                      <li className="text-[11px] text-gray-400 font-mono truncate">
                         {currentStream.date}_sm-thumbnail.json
                       </li>
-                      <li className="text-[11px] text-gray-500 font-mono truncate">
+                      <li className="text-[11px] text-gray-400 font-mono truncate">
                         {currentStream.date}_sm-thumbnail.png
                       </li>
                     </ul>
-                    <p className="text-xs text-gray-500 mt-2">This cannot be undone.</p>
+                    <p className="text-xs text-gray-400 mt-2">This cannot be undone.</p>
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/10">

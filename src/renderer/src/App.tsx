@@ -41,7 +41,7 @@ class PageErrorBoundary extends Component<{ children: React.ReactNode }, { error
         <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
           <AlertTriangle size={32} className="text-red-400" />
           <p className="text-sm text-gray-300 font-medium">Something went wrong on this page.</p>
-          <p className="text-xs text-gray-500 font-mono break-all max-w-lg">{this.state.error.message}</p>
+          <p className="text-xs text-gray-400 font-mono break-all max-w-lg">{this.state.error.message}</p>
           <button
             onClick={() => this.setState({ error: null })}
             className="px-3 py-1.5 rounded text-xs bg-white/10 hover:bg-white/15 text-gray-300 transition-colors"
@@ -137,10 +137,10 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
   return (
     <button
       onClick={onNavigate}
-      className="w-full p-3 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors text-left"
+      className="w-full p-3 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors text-left whitespace-nowrap"
     >
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Converting</span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Converting</span>
         <span className={`text-[10px] font-medium ${statusColor}`}>{label}</span>
       </div>
       <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
@@ -149,7 +149,7 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
           style={{ width: `${totalProgress}%` }}
         />
       </div>
-      <div className="mt-1.5 text-[10px] text-gray-600 tabular-nums">
+      <div className="mt-1.5 text-[10px] text-gray-400 tabular-nums">
         {allDownloading ? `${active.length} downloading` : `${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
       </div>
     </button>
@@ -182,8 +182,8 @@ function AutoRulesWidget({ active, onNavigate, collapsed }: { active: boolean; o
             </div>
             <div className="flex items-center justify-center gap-1 pb-2">
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-              <span className="text-[10px] text-gray-500">•</span>
-              <span className="text-[10px] text-gray-500">{enabledCount}</span>
+              <span className="text-[10px] text-gray-400">•</span>
+              <span className="text-[10px] text-gray-400">{enabledCount}</span>
             </div>
           </>
         )}
@@ -192,7 +192,7 @@ function AutoRulesWidget({ active, onNavigate, collapsed }: { active: boolean; o
   }
 
   return (
-    <div className={`border-y transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'bg-navy-900 border-white/5'}`}>
+    <div className={`border-y transition-colors whitespace-nowrap ${active ? 'bg-purple-600/20 border-purple-600/30' : 'bg-navy-900 border-white/5'}`}>
       <button
         onClick={onNavigate}
         className={`flex items-center gap-3 w-full px-4 py-2.5 text-sm font-medium transition-colors ${active ? 'text-purple-300' : 'text-gray-400 hover:text-gray-200'}`}
@@ -215,7 +215,7 @@ function AutoRulesWidget({ active, onNavigate, collapsed }: { active: boolean; o
           </div>
           <div className="px-4 py-2 flex items-center gap-1.5">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-            <span className="text-[10px] text-gray-500">
+            <span className="text-[10px] text-gray-400">
               {running ? 'Running' : 'Stopped'} · {enabledCount} rule{enabledCount !== 1 ? 's' : ''} active
             </span>
           </div>
@@ -282,7 +282,7 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
   }
 
   return (
-    <div className="bg-navy-900 border-y border-white/5 hover:border-white/10 transition-colors">
+    <div className="bg-navy-900 border-y border-white/5 hover:border-white/10 transition-colors whitespace-nowrap">
       <button
         onClick={onNavigate}
         className="flex items-center gap-3 w-full px-4 py-2.5 text-sm font-medium text-gray-400 hover:text-gray-200 transition-colors"
@@ -425,26 +425,26 @@ function AppInner() {
           <Tooltip content="Minimize to tray" side="bottom">
             <button
               onClick={() => window.api.windowMinimizeToTray()}
-              className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+              className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors"
             >
               <ArrowDownToDot size={14} />
             </button>
           </Tooltip>
           <button
             onClick={() => window.api.windowMinimize()}
-            className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+            className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors"
           >
             <Minus size={14} />
           </button>
           <button
             onClick={() => window.api.windowMaximize()}
-            className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+            className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors"
           >
             {isMaximized ? <Minimize2 size={14} /> : <Square size={14} />}
           </button>
           <button
             onClick={() => window.api.windowClose()}
-            className="p-1.5 rounded hover:bg-red-600 text-gray-500 hover:text-white transition-colors"
+            className="p-1.5 rounded hover:bg-red-600 text-gray-400 hover:text-white transition-colors"
           >
             {/* Lucide's X has more whitespace around its strokes than Square's
                 box outline, so it visually reads ~1–2px smaller at the same
@@ -510,15 +510,15 @@ function AppInner() {
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
             <button
               onClick={() => setHelpOpen(true)}
-              className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
+              className="text-[10px] text-gray-400 hover:text-gray-300 transition-colors"
             >
               {sidebarCollapsed ? 'Help' : 'How to use'}
             </button>
-            {!sidebarCollapsed && <span className="text-[10px] text-gray-600">·</span>}
+            {!sidebarCollapsed && <span className="text-[10px] text-gray-400">·</span>}
             <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}`} side="top">
               <button
                 onClick={() => setAboutOpen(true)}
-                className={`text-[10px] transition-colors flex items-center gap-1 ${updateInfo ? 'text-amber-400 hover:text-amber-300' : 'text-gray-500 hover:text-gray-300'}`}
+                className={`text-[10px] transition-colors flex items-center gap-1 ${updateInfo ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-gray-300'}`}
               >
                 {updateInfo && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-label="update available" />}
                 v{appVersion}
@@ -599,7 +599,7 @@ function AppInner() {
             <p className="text-sm text-gray-300 leading-relaxed">
               A desktop app for streamers to manage, review, and process local recording files.
             </p>
-            <p className="text-xs text-gray-500 mt-1">Version {appVersion}</p>
+            <p className="text-xs text-gray-400 mt-1">Version {appVersion}</p>
           </div>
           {updateInfo && (
             <div className="w-full flex flex-col gap-2 p-3 rounded-lg bg-amber-400/10 border border-amber-400/30">

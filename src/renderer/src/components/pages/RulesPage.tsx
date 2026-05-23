@@ -137,7 +137,7 @@ function RuleModal({
                 <span>Encoding is CPU/GPU-intensive. Make sure this rule only matches files you actually want to convert right away.</span>
               </div>
             ) : (
-              <p className="text-xs text-gray-500 pl-6 -mt-2">
+              <p className="text-xs text-gray-400 pl-6 -mt-2">
                 Matched files are added to the converter queue. Start them manually from the Converter page.
               </p>
             )}
@@ -175,7 +175,7 @@ function RuleModal({
               <div className="flex flex-col gap-2 pl-1">
                 <Checkbox checked={autoMatchDate} onChange={setAutoMatchDate} label="Match date in filename" />
                 {autoMatchDate && (
-                  <p className="text-xs text-gray-500 pl-6">
+                  <p className="text-xs text-gray-400 pl-6">
                     Looks for a <span className="font-mono text-gray-400">YYYY-MM-DD</span> date in the filename and moves the file to the matching stream folder. The watcher will wait for the recording to finish writing before moving.
                   </p>
                 )}
@@ -183,7 +183,7 @@ function RuleModal({
             )}
 
             {destinationMode === 'next-to-original' && (
-              <p className="text-xs text-gray-500 pl-1">
+              <p className="text-xs text-gray-400 pl-1">
                 The output file is placed next to the original in the same folder.
               </p>
             )}
@@ -201,7 +201,7 @@ function RuleModal({
         <div className="border-t border-white/5 pt-4 flex flex-col gap-1.5">
           <Checkbox checked={onlyNewFiles} onChange={setOnlyNewFiles} label="Only apply to new files" />
           {onlyNewFiles && (
-            <p className="text-xs text-gray-500 pl-6">The rule will only apply to files created when the watcher is active.</p>
+            <p className="text-xs text-gray-400 pl-6">The rule will only apply to files created when the watcher is active.</p>
           )}
         </div>
       </div>
@@ -256,7 +256,7 @@ export function RulesPage() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Auto-Rules</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Watch folders and automatically move, copy, or rename files</p>
+          <p className="text-xs text-gray-400 mt-0.5">Watch folders and automatically move, copy, or rename files</p>
         </div>
         <Checkbox checked={autoStart} onChange={toggleAutoStart} label="Start watcher on launch" />
         <Button
@@ -273,7 +273,7 @@ export function RulesPage() {
         {/* Rules list */}
         <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto p-4 flex flex-col gap-2">
           {rules.length === 0 && (
-            <div className="text-center text-gray-600 py-16">No rules yet. Add one to start automating.</div>
+            <div className="text-center text-gray-400 py-16">No rules yet. Add one to start automating.</div>
           )}
           {rules.map(rule => (
             <div
@@ -296,17 +296,17 @@ export function RulesPage() {
                   }`}>{rule.action}</span>
                 </div>
                 {rule.destinationMode === 'auto' ? (
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs text-gray-400 mt-1">
                     → <span className="text-purple-400">auto</span>
-                    {rule.autoMatchDate && <span className="text-gray-600"> · match date in filename</span>}
+                    {rule.autoMatchDate && <span className="text-gray-400"> · match date in filename</span>}
                   </div>
                 ) : rule.destinationMode === 'next-to-original' ? (
-                  <div className="text-xs text-gray-500 mt-1">→ <span className="text-purple-400">next to original</span></div>
+                  <div className="text-xs text-gray-400 mt-1">→ <span className="text-purple-400">next to original</span></div>
                 ) : rule.destination ? (
-                  <div className="text-xs text-gray-500 mt-1 truncate">→ {rule.destination}</div>
+                  <div className="text-xs text-gray-400 mt-1 truncate">→ {rule.destination}</div>
                 ) : null}
                 {rule.namePattern && (
-                  <div className="text-xs text-gray-500 mt-0.5">rename: {rule.namePattern}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">rename: {rule.namePattern}</div>
                 )}
               </div>
               <div className="flex gap-1 shrink-0">
@@ -332,14 +332,14 @@ export function RulesPage() {
           </div>
           <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto">
             {events.length === 0 && (
-              <div className="text-center text-xs text-gray-600 py-8">No events yet</div>
+              <div className="text-center text-xs text-gray-400 py-8">No events yet</div>
             )}
             {events.map((ev) => (
               <div key={ev.id} className="px-3 py-2 border-b border-white/5 flex items-start gap-2">
                 <EventBadge status={ev.status} />
                 <div className="min-w-0 w-full">
                   <div className="text-xs text-gray-300 truncate">{ev.filePath.split(/[\\/]/).pop()}</div>
-                  <div className="text-xs text-gray-600">{ev.action} · {new Date(ev.timestamp).toLocaleTimeString()}</div>
+                  <div className="text-xs text-gray-400">{ev.action} · {new Date(ev.timestamp).toLocaleTimeString()}</div>
                   {ev.progress !== undefined && ev.status !== 'applied' && ev.status !== 'error' && (
                     <div className="mt-1">
                       <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
@@ -348,7 +348,7 @@ export function RulesPage() {
                           style={{ width: `${ev.progress}%` }}
                         />
                       </div>
-                      <div className="text-[10px] text-gray-600 mt-0.5">{ev.progress}%</div>
+                      <div className="text-[10px] text-gray-400 mt-0.5">{ev.progress}%</div>
                     </div>
                   )}
                   {ev.status === 'waiting' && ev.progress === undefined && (

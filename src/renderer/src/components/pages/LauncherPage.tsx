@@ -60,7 +60,7 @@ function EditableLabel({
         <button onMouseDown={e => { e.preventDefault(); commit() }} className="text-green-400 hover:text-green-300 transition-colors">
           <Check size={13} />
         </button>
-        <button onMouseDown={e => { e.preventDefault(); cancel() }} className="text-gray-500 hover:text-gray-300 transition-colors">
+        <button onMouseDown={e => { e.preventDefault(); cancel() }} className="text-gray-400 hover:text-gray-300 transition-colors">
           <X size={13} />
         </button>
       </div>
@@ -69,7 +69,7 @@ function EditableLabel({
 
   return (
     <button onClick={start} className={`group flex items-center gap-1.5 min-w-0 text-left ${className}`}>
-      <span className="truncate">{value || <span className="text-gray-600 italic">{placeholder}</span>}</span>
+      <span className="truncate">{value || <span className="text-gray-400 italic">{placeholder}</span>}</span>
       <Pencil size={11} className="shrink-0 opacity-0 group-hover:opacity-40 transition-opacity" />
     </button>
   )
@@ -147,12 +147,12 @@ function AppDropZone({ onClick, onFileDrop, compact = false }: {
             : 'border-white/10 hover:border-purple-500/40'
           }`}
       >
-        <div className={`shrink-0 transition-colors ${isDragging ? 'text-purple-400' : 'text-gray-600'}`}>
+        <div className={`shrink-0 transition-colors ${isDragging ? 'text-purple-400' : 'text-gray-400'}`}>
           {isDragging ? <Upload size={14} /> : <Plus size={14} />}
         </div>
         <div className="pointer-events-none">
           <p className="text-gray-300 font-medium text-sm">Drop an app here or click to browse</p>
-          <p className="text-gray-600 text-xs mt-0.5">Supports: .exe, .lnk</p>
+          <p className="text-gray-400 text-xs mt-0.5">Supports: .exe, .lnk</p>
         </div>
       </div>
     )
@@ -171,12 +171,12 @@ function AppDropZone({ onClick, onFileDrop, compact = false }: {
       <div className="p-3 rounded-full transition-colors pointer-events-none">
         {isDragging
           ? <Upload size={24} className="text-purple-400" />
-          : <Plus size={24} className="text-gray-500" />
+          : <Plus size={24} className="text-gray-400" />
         }
       </div>
       <div className="text-center pointer-events-none">
         <p className="text-gray-300 font-medium">Drop an app here or click to browse</p>
-        <p className="text-gray-600 text-sm mt-1">Supports: .exe, .lnk</p>
+        <p className="text-gray-400 text-sm mt-1">Supports: .exe, .lnk</p>
       </div>
     </div>
   )
@@ -291,9 +291,9 @@ function AddAppModal({
                   </span>
                 </>
               ) : (
-                <span className="flex-1 text-gray-500">Select a previously linked app</span>
+                <span className="flex-1 text-gray-400">Select a previously linked app</span>
               )}
-              <ChevronDown size={13} className={`shrink-0 text-gray-500 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown size={13} className={`shrink-0 text-gray-400 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
             </button>
             {dropdownOpen && anchorRef.current && ReactDOM.createPortal(
               <div
@@ -310,7 +310,7 @@ function AddAppModal({
               >
                 {selectedExistingId && (
                   <button
-                    className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:bg-white/5 transition-colors border-b border-white/5"
+                    className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-white/5 transition-colors border-b border-white/5"
                     onClick={() => { setSelectedExistingId(''); setDropdownOpen(false) }}
                   >
                     — Clear selection —
@@ -357,7 +357,7 @@ function AddAppModal({
                   <span className="text-sm text-gray-200 truncate">{path.replace(/.*[\\/]/, '')}</span>
                 </>
               ) : (
-                <span className="text-sm text-gray-600">No file selected…</span>
+                <span className="text-sm text-gray-400">No file selected…</span>
               )}
             </div>
             <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={browse}>
@@ -365,7 +365,7 @@ function AddAppModal({
             </Button>
           </div>
           {path && (
-            <p className="text-[11px] text-gray-600 font-mono truncate px-1">{path}</p>
+            <p className="text-[11px] text-gray-400 font-mono truncate px-1">{path}</p>
           )}
         </div>
 
@@ -447,7 +447,7 @@ function AppRow({
     >
       <GripVertical
         size={14}
-        className="text-gray-600 shrink-0 cursor-grab active:cursor-grabbing"
+        className="text-gray-400 shrink-0 cursor-grab active:cursor-grabbing"
         onMouseDown={onGripMouseDown}
       />
       <AppIcon path={app.path} size={20} />
@@ -459,13 +459,13 @@ function AppRow({
           className="text-sm font-medium text-gray-200"
         />
         <div className="flex items-center gap-1 min-w-0">
-          <span className="text-xs text-gray-500 truncate font-mono">
-            {app.path || <span className="text-gray-700 not-italic">No path set</span>}
+          <span className="text-xs text-gray-400 truncate font-mono">
+            {app.path || <span className="text-gray-400 not-italic">No path set</span>}
           </span>
           <Tooltip content="Change executable" side="top">
             <button
               onClick={browsePath}
-              className="shrink-0 p-0.5 text-gray-600 hover:text-gray-300 transition-colors opacity-0 group-hover:opacity-100"
+              className="shrink-0 p-0.5 text-gray-400 hover:text-gray-300 transition-colors opacity-0 group-hover:opacity-100"
             >
               <FolderOpen size={12} />
             </button>
@@ -477,7 +477,7 @@ function AppRow({
           onClick={launch}
           disabled={!app.path}
           className={`shrink-0 p-1 transition-colors opacity-0 group-hover:opacity-100 disabled:pointer-events-none ${
-            launched ? 'text-green-400' : 'text-gray-600 hover:text-green-400'
+            launched ? 'text-green-400' : 'text-gray-400 hover:text-green-400'
           }`}
         >
           <Play size={13} />
@@ -486,7 +486,7 @@ function AppRow({
       <Tooltip content="Remove" side="left">
         <button
           onClick={onRemove}
-          className="shrink-0 p-1 text-gray-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+          className="shrink-0 p-1 text-gray-400 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
         >
           <Trash2 size={13} />
         </button>
@@ -666,7 +666,7 @@ export function LauncherPage() {
                 >
                   <GroupIcon name={group.icon} size={14} />
                   <span className="flex-1 truncate">{group.name}</span>
-                  <span className="text-[10px] text-gray-600 shrink-0">{group.apps.length}</span>
+                  <span className="text-[10px] text-gray-400 shrink-0">{group.apps.length}</span>
                 </button>
                 <Tooltip content={isPinned ? 'Remove from sidebar widget' : 'Pin to sidebar widget'} side="right">
                   <button
@@ -674,7 +674,7 @@ export function LauncherPage() {
                     className={`shrink-0 px-2 py-2 transition-colors ${
                       isPinned
                         ? 'text-yellow-400'
-                        : 'text-gray-700 opacity-0 group-hover/row:opacity-100 hover:text-gray-400'
+                        : 'text-gray-400 opacity-0 group-hover/row:opacity-100 hover:text-gray-400'
                     }`}
                   >
                     <Star size={12} className={isPinned ? 'fill-yellow-400' : ''} />
@@ -723,7 +723,7 @@ export function LauncherPage() {
                 <Tooltip content="Remove this group" side="left">
                   <button
                     onClick={() => removeGroup(selected.id)}
-                    className="p-1.5 text-gray-600 hover:text-red-400 transition-colors"
+                    className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
                   >
                     <Trash2 size={15} />
                   </button>
@@ -780,8 +780,8 @@ export function LauncherPage() {
           </>
         ) : (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
-            <Rocket size={32} className="text-gray-700" />
-            <p className="text-sm text-gray-500">Create a launch group to get started.</p>
+            <Rocket size={32} className="text-gray-400" />
+            <p className="text-sm text-gray-400">Create a launch group to get started.</p>
             <Button variant="secondary" size="sm" icon={<Plus size={13} />} onClick={addGroup}>
               New Group
             </Button>

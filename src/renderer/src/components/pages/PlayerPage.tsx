@@ -313,7 +313,7 @@ function TrackWaveformStrip({
       onMouseLeave={onHoverLeave}
     >
       {loading && !path && (
-        <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-600 pointer-events-none">
+        <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-400 pointer-events-none">
           <Loader2 size={10} className="animate-spin" />
           Generating waveform…
         </div>
@@ -530,7 +530,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
-          <p className="text-xs text-gray-500 leading-relaxed">
+          <p className="text-xs text-gray-400 leading-relaxed">
             Clip exports always re-encode (trim/crop/bleep filters require decoded frames), so stream-copy presets aren't shown.
           </p>
         </div>
@@ -569,7 +569,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
             </>
           )}
           {saveNextToSource && (
-            <p className="text-xs text-gray-500 break-all">{sourceDir}</p>
+            <p className="text-xs text-gray-400 break-all">{sourceDir}</p>
           )}
         </div>
 
@@ -614,15 +614,15 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
                       <div className="flex flex-col min-w-0 flex-1">
                         <span className={`text-xs font-medium leading-tight ${checked ? 'text-purple-200' : 'text-gray-300'}`}>
                           {label}
-                          <span className="text-gray-500 font-normal"> · Track {i + 1}</span>
+                          <span className="text-gray-400 font-normal"> · Track {i + 1}</span>
                         </span>
-                        <span className="text-[11px] text-gray-500 leading-tight mt-0.5">{detail}</span>
+                        <span className="text-[11px] text-gray-400 leading-tight mt-0.5">{detail}</span>
                       </div>
                       {isUnextracted && (
-                        <span className="text-[10px] text-gray-500 shrink-0 italic">not playing</span>
+                        <span className="text-[10px] text-gray-400 shrink-0 italic">not playing</span>
                       )}
                       <span
-                        className={`text-[11px] tabular-nums shrink-0 ${checked ? 'text-purple-200' : 'text-gray-500'}`}
+                        className={`text-[11px] tabular-nums shrink-0 ${checked ? 'text-purple-200' : 'text-gray-400'}`}
                         title="Volume from the audio controls row — adjust there to change it for the export."
                       >
                         {volPct}%
@@ -648,7 +648,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
             placeholder="_clip"
             spellCheck={false}
           />
-          <p className="text-xs text-gray-500">Added to the end of the filename before the extension.</p>
+          <p className="text-xs text-gray-400">Added to the end of the filename before the extension.</p>
         </div>
 
         {/* Warning: bleeps outside all clip regions */}
@@ -821,10 +821,10 @@ function SiblingVideoItem({
             className="w-full h-full object-cover transition-transform duration-200 group-hover/item:scale-110"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-700">
+          <div className="w-full h-full flex items-center justify-center text-gray-400">
             {item.isLocal
               ? <Film size={compact ? 9 : 11} />
-              : <span className={`leading-tight text-center px-1 text-gray-600 ${compact ? 'text-[7px]' : 'text-[9px]'}`}>Cloud</span>
+              : <span className={`leading-tight text-center px-1 text-gray-400 ${compact ? 'text-[7px]' : 'text-[9px]'}`}>Cloud</span>
             }
           </div>
         )}
@@ -837,7 +837,7 @@ function SiblingVideoItem({
             {item.name}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-[10px] text-gray-500 tabular-nums">{durationStr}</span>
+            <span className="text-[10px] text-gray-400 tabular-nums">{durationStr}</span>
             {item.category && (
               <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${SESSION_CATEGORY_STYLES[item.category] ?? ''}`}>
                 {SESSION_CATEGORY_LABEL[item.category] ?? item.category}
@@ -956,7 +956,7 @@ function DraftSessionItem({
                 <Tooltip content="Rename draft" side="top" triggerClassName="ml-auto shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
                   <button
                     onClick={e => { e.stopPropagation(); setEditing(true) }}
-                    className="p-0.5 text-gray-600 hover:text-gray-300 transition-colors"
+                    className="p-0.5 text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     <PencilLine size={11} />
                   </button>
@@ -967,7 +967,7 @@ function DraftSessionItem({
               <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${isExporting ? 'text-blue-300 border-blue-400/50' : 'text-amber-400 border-amber-400/50'}`}>
                 {isExporting ? 'exporting…' : 'draft'}
               </span>
-              <span className="text-[10px] text-gray-500 tabular-nums">
+              <span className="text-[10px] text-gray-400 tabular-nums">
                 {segmentCount} seg{segmentCount === 1 ? '' : 's'}
                 {totalDuration > 0 && ` · ${formatTime(totalDuration, sourceFps)}`}
               </span>
@@ -977,7 +977,7 @@ function DraftSessionItem({
             <Tooltip content="Delete draft" side="left" triggerClassName="shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
               <button
                 onClick={e => { e.stopPropagation(); onDelete() }}
-                className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+                className="p-1 text-gray-400 hover:text-red-400 transition-colors"
               >
                 <Trash2 size={12} />
               </button>
@@ -3188,7 +3188,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
             label="Drop a video file here or click to browse"
             className="w-full max-w-lg"
           />
-          <p className="text-xs text-gray-600">You can also send a video here from the Streams page using the action buttons on each row.</p>
+          <p className="text-xs text-gray-400">You can also send a video here from the Streams page using the action buttons on each row.</p>
         </div>
       ) : (
         <div className="flex flex-1 overflow-hidden">
@@ -3319,7 +3319,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 pointer-events-none">
                   <Tv2 size={28} className="text-purple-400 opacity-60" />
                   <p className="text-sm text-gray-400">Video opened in separate window</p>
-                  <p className="text-xs text-gray-600">Controls still work from here</p>
+                  <p className="text-xs text-gray-400">Controls still work from here</p>
                 </div>
               )}
 
@@ -3485,7 +3485,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       // look out of place in this dense toolbar; users can
                       // still scroll-to-adjust or type directly.
                       const inputCls = 'w-10 px-0.5 py-0 text-[10px] tabular-nums text-right bg-navy-800 border border-white/10 rounded text-gray-200 focus:outline-none focus:border-blue-400/40 disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
-                      const labelCls = 'text-[10px] text-gray-500 select-none w-2'
+                      const labelCls = 'text-[10px] text-gray-400 select-none w-2'
                       return (
                         <Tooltip content={disabled ? 'Move the playhead inside a clip region to edit its crop' : 'Crop position (offset from center) and dimensions, in source pixels'}>
                           <div className={`flex items-center gap-1 ${disabled ? 'opacity-50' : ''}`}>
@@ -3674,7 +3674,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             className="absolute h-full flex items-center justify-center pointer-events-none"
                             style={{ left: `${i * naturalW}px`, width: `${naturalW}px` }}
                           >
-                            <Loader2 size={8} className="animate-spin text-gray-700" />
+                            <Loader2 size={8} className="animate-spin text-gray-400" />
                           </div>
                         ) : null
                         const isHovered = !isClipMode && hoverRatio !== null &&
@@ -3698,7 +3698,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 })()}
 
                 {generating && (
-                  <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-600 pointer-events-none">
+                  <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-400 pointer-events-none">
                     <Loader2 size={10} className="animate-spin" />
                     Generating thumbnails…
                   </div>
@@ -3732,7 +3732,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     onMouseLeave={() => { if (!isPlayheadDraggingRef.current) setHoverRatio(null) }}
                   >
                     {waveformLoading && (
-                      <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-600 pointer-events-none">
+                      <div className="absolute inset-0 flex items-center justify-center gap-1.5 text-[10px] text-gray-400 pointer-events-none">
                         <Loader2 size={10} className="animate-spin" />
                         Generating waveform…
                       </div>
@@ -3823,8 +3823,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                     style={{ width: `${track.extractProgress}%` }}
                                   />
                                 </div>
-                                <span className="text-[10px] tabular-nums text-gray-500 shrink-0 w-8 text-right">{track.extractProgress}%</span>
-                                <span className="text-[10px] text-gray-500 truncate ml-1" title={label}>{label}</span>
+                                <span className="text-[10px] tabular-nums text-gray-400 shrink-0 w-8 text-right">{track.extractProgress}%</span>
+                                <span className="text-[10px] text-gray-400 truncate ml-1" title={label}>{label}</span>
                               </div>
                             ) : track.status === 'extracted' ? (
                               <>
@@ -3927,7 +3927,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                           className="w-7 text-[11px] text-gray-300 tabular-nums bg-transparent focus:outline-none text-right"
                                           title={`Volume — ${pct}%`}
                                         />
-                                        <span className="text-[10px] text-gray-500 select-none -ml-0.5">%</span>
+                                        <span className="text-[10px] text-gray-400 select-none -ml-0.5">%</span>
                                       </>
                                     )
                                   })()}
@@ -4424,7 +4424,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 <div className={`flex justify-start ${isClipMode ? 'pt-5' : ''}`}>
                   <button
                     onClick={disableMultiTrack}
-                    className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
+                    className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     <X size={10} />
                     Disable Multi-track audio
@@ -4850,8 +4850,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 const thumbNode = thumbPath && thumbLocal
                   ? <img src={'file:///' + thumbPath.replace(/\\/g, '/')} className="w-full h-full object-cover" draggable={false} />
                   : thumbPath
-                    ? <div className="w-full h-full flex items-center justify-center bg-navy-700"><Cloud size={panelCollapsed ? 12 : 16} className="text-gray-600" /></div>
-                    : <div className="w-full h-full flex items-center justify-center bg-navy-700"><Film size={panelCollapsed ? 12 : 16} className="text-gray-600" /></div>
+                    ? <div className="w-full h-full flex items-center justify-center bg-navy-700"><Cloud size={panelCollapsed ? 12 : 16} className="text-gray-400" /></div>
+                    : <div className="w-full h-full flex items-center justify-center bg-navy-700"><Film size={panelCollapsed ? 12 : 16} className="text-gray-400" /></div>
                 // Chevron convention: ▲ = next (chronologically newer),
                 // ▼ = previous (older). Expanded lays them out side-by-side
                 // with ▼ on the left and ▲ on the right; collapsed stacks
@@ -4888,7 +4888,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           className="bg-navy-700 border border-white/10 rounded-lg shadow-xl min-w-[220px] max-w-[280px] overflow-y-auto"
                         >
                           {sortedStreamFolders.length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-gray-600">No streams</p>
+                            <p className="px-3 py-2 text-xs text-gray-400">No streams</p>
                           ) : sortedStreamFolders.slice().reverse().map(folder => {
                             const fMeta = folder.meta
                             const fTitle = fMeta?.ytTitle?.trim()
@@ -4912,14 +4912,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                   isCurrent
                                     ? 'bg-purple-600/20 text-purple-200 cursor-default'
                                     : empty
-                                      ? 'text-gray-600 cursor-default'
+                                      ? 'text-gray-400 cursor-default'
                                       : 'text-gray-300 hover:bg-white/5'
                                 }`}
                                 title={fTitle}
                               >
                                 <span className="text-[11px] tabular-nums leading-tight">
                                   {folder.date}
-                                  {empty && <span className="ml-1 text-gray-700 italic">(no videos)</span>}
+                                  {empty && <span className="ml-1 text-gray-400 italic">(no videos)</span>}
                                   {isCurrent && <span className="ml-1 text-purple-400 italic">(current)</span>}
                                 </span>
                                 <span className="text-xs truncate w-full leading-tight">{fTitle}</span>
@@ -4977,7 +4977,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 return (
                   <div className="flex flex-col gap-1.5 p-2 border-b border-white/5">
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Selected Stream</h3>
+                      <h3 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Selected Stream</h3>
                       <div ref={streamPickerAnchorRef as React.RefObject<HTMLDivElement>} className="relative flex items-center gap-0.5">
                         <Tooltip content="Jump to stream…" side="bottom">
                           <button
@@ -5018,7 +5018,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           <span className="text-xs text-gray-200 truncate block">{title}</span>
                         </Tooltip>
                         {meta?.games && meta.games.length > 0 && meta.ytTitle && (
-                          <span className="text-[10px] text-gray-500 truncate" title={meta.games.join(' · ')}>
+                          <span className="text-[10px] text-gray-400 truncate" title={meta.games.join(' · ')}>
                             {meta.games.join(' · ')}
                           </span>
                         )}
@@ -5082,13 +5082,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       const renderSessionVideos = () => (
                         <>
                           <div className="sticky top-0 z-10 bg-navy-800 px-4 py-2.5 border-b border-white/5 flex items-center gap-2">
-                            <Film size={12} className="text-gray-600 shrink-0" />
+                            <Film size={12} className="text-gray-400 shrink-0" />
                             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Session Videos</h3>
                           </div>
                           {isExtracting ? (
-                            <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">Available once merge is complete or cancelled</div>
+                            <div className="px-3 py-4 text-xs text-gray-400 text-center leading-relaxed">Available once merge is complete or cancelled</div>
                           ) : siblingFiles.length === 0 && folderDrafts.length === 0 ? (
-                            <div className="px-3 py-4 text-xs text-gray-600 text-center leading-relaxed">
+                            <div className="px-3 py-4 text-xs text-gray-400 text-center leading-relaxed">
                               {state.filePath ? 'No other videos in this folder' : 'Open a video to see siblings here'}
                             </div>
                           ) : (() => {
@@ -5241,7 +5241,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                 <span className="truncate w-full text-[11px]">
                                   {videoInfo.width}×{videoInfo.height}{videoInfo.fps && ` · ${videoInfo.fps.toFixed(2)}fps`}
                                 </span>
-                                <span className="truncate w-full text-[10px] text-gray-500">
+                                <span className="truncate w-full text-[10px] text-gray-400">
                                   {videoInfo.videoCodec}{state.filePath && ` · ${state.filePath.split(/[\\/]/).pop()}`}
                                 </span>
                               </div>
@@ -5362,7 +5362,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
               You'll only hear <strong className="text-white">Track 1</strong> unless you enable multi-track playback.
             </span>
           </div>
-          <p className="text-xs text-gray-500 leading-relaxed pl-[23px]">
+          <p className="text-xs text-gray-400 leading-relaxed pl-[23px]">
             Multi-track playback splits each track into its own timeline row with mute, solo, and volume controls. Individual tracks are decoded on demand when you click "Play this track". Exported clips always include every source audio track regardless.
           </p>
           <div className="pl-[23px] pt-1">

@@ -265,7 +265,7 @@ export function IntegrationsPage() {
       <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Integrations</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Connect and manage your streaming platform accounts.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Connect and manage your streaming platform accounts.</p>
         </div>
       </div>
 
@@ -277,11 +277,11 @@ export function IntegrationsPage() {
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 px-1">
             <Youtube size={16} className="text-red-400 shrink-0" />
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">YouTube</span>
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">YouTube</span>
             <span className={`ml-auto text-xs font-medium ${
               ytConnected && ytTokenValid ? 'text-green-400' :
               ytConnected && !ytTokenValid ? 'text-amber-400' :
-              'text-gray-600'
+              'text-gray-400'
             }`}>
               {ytConnected && ytTokenValid ? 'Connected' :
                ytConnected && !ytTokenValid ? 'Token expired' :
@@ -347,7 +347,7 @@ export function IntegrationsPage() {
                 {ytConnected && ytTokenValid && (
                   <button
                     onClick={() => setYtInstructionsExpanded(v => !v)}
-                    className="flex items-center gap-1.5 text-gray-500 hover:text-gray-300 transition-colors self-start"
+                    className="flex items-center gap-1.5 text-gray-400 hover:text-gray-300 transition-colors self-start"
                   >
                     <ChevronDown size={13} className={`transition-transform duration-150 ${ytInstructionsExpanded ? 'rotate-180' : ''}`} />
                     {ytInstructionsExpanded ? 'Hide setup instructions' : 'Show setup instructions'}
@@ -365,7 +365,7 @@ export function IntegrationsPage() {
                   <div className="relative">
                     <input type={revealed.has('yt-secret') ? 'text' : 'password'} value={ytClientSecret} onChange={e => setYtClientSecret(e.target.value)} placeholder="GOCSPX-…"
                       className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
-                    <button onClick={() => requestReveal('yt-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors">
+                    <button onClick={() => requestReveal('yt-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors">
                       {revealed.has('yt-secret') ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
                   </div>
@@ -546,7 +546,7 @@ export function IntegrationsPage() {
                     />
                     <button
                       onClick={() => requestReveal('sr-key')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors"
                     >
                       {revealed.has('sr-key') ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
@@ -592,8 +592,8 @@ export function IntegrationsPage() {
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 px-1">
             <Twitch size={16} className="text-twitch-400 shrink-0" />
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Twitch</span>
-            <span className={`ml-auto text-xs font-medium ${twConnected ? 'text-green-400' : 'text-gray-600'}`}>
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Twitch</span>
+            <span className={`ml-auto text-xs font-medium ${twConnected ? 'text-green-400' : 'text-gray-400'}`}>
               {twConnected ? 'Connected' : 'Not connected'}
             </span>
           </div>
@@ -626,7 +626,7 @@ export function IntegrationsPage() {
                   <div className="relative">
                     <input type={revealed.has('tw-secret') ? 'text' : 'password'} value={twClientSecret} onChange={e => setTwClientSecret(e.target.value)} placeholder="Twitch Client Secret"
                       className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
-                    <button onClick={() => requestReveal('tw-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors">
+                    <button onClick={() => requestReveal('tw-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors">
                       {revealed.has('tw-secret') ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
                   </div>
@@ -661,8 +661,8 @@ export function IntegrationsPage() {
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 px-1">
             <Bot size={16} className="text-orange-400 shrink-0" />
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Claude AI</span>
-            <span className={`ml-auto text-xs font-medium ${config.claudeApiKey ? 'text-green-400' : 'text-gray-600'}`}>
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Claude AI</span>
+            <span className={`ml-auto text-xs font-medium ${config.claudeApiKey ? 'text-green-400' : 'text-gray-400'}`}>
               {config.claudeApiKey ? 'Connected' : 'Not connected'}
             </span>
           </div>
@@ -686,7 +686,7 @@ export function IntegrationsPage() {
                     placeholder="sk-ant-…"
                     className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
                   />
-                  <button onClick={() => requestReveal('claude-key')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors">
+                  <button onClick={() => requestReveal('claude-key')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors">
                     {revealed.has('claude-key') ? <EyeOff size={13} /> : <Eye size={13} />}
                   </button>
                 </div>
@@ -694,7 +694,7 @@ export function IntegrationsPage() {
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-400">
                   Preferences / System Prompt
-                  <span className="text-gray-500 font-normal ml-1">(optional)</span>
+                  <span className="text-gray-400 font-normal ml-1">(optional)</span>
                 </label>
                 <textarea
                   value={claudeSystemPrompt}

@@ -24,7 +24,7 @@ export function DumpConvertExplainer() {
         <p className="text-sm text-gray-400 leading-relaxed">
           Most of the app works the same either way, but a few features are cleaner with folder-per-stream. The app can convert your dump folder into that layout in one click.
         </p>
-        <p className="text-xs text-gray-500 italic leading-relaxed">
+        <p className="text-xs text-gray-400 italic leading-relaxed">
           Recording files need <span className="font-mono">YYYY-MM-DD</span> in the name (OBS's default). Subfolders won't be touched.
         </p>
       </div>

@@ -58,24 +58,26 @@
       #splash-controls {
         display: flex;
         align-items: center;
-        gap: 2px;
+        gap: 4px;
         -webkit-app-region: no-drag;
       }
+      /* Sized to match the loaded title bar (App.tsx): tray/min/max get
+         Lucide-14 inside p-1.5 = 26px; close gets Lucide-18 = 30px. */
       .splash-btn {
-        width: 28px;
-        height: 28px;
+        width: 26px;
+        height: 26px;
         border: none;
         background: transparent;
-        color: #6b7280;
+        color: #9ca3af;
         border-radius: 4px;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 13px;
-        line-height: 1;
         transition: background 150ms, color 150ms;
       }
+      .splash-btn.close { width: 30px; height: 30px; }
+      .splash-btn svg { display: block; }
       .splash-btn:hover { background: rgba(255,255,255,0.1); color: #d1d5db; }
       .splash-btn.close:hover { background: #dc2626; color: #fff; }
       #splash-body {
@@ -111,9 +113,18 @@
           Stream Manager
         </div>
         <div id="splash-controls">
-          <button class="splash-btn" onclick="window.api.windowMinimize()">&#x2212;</button>
-          <button class="splash-btn" onclick="window.api.windowMaximize()">&#x25A1;</button>
-          <button class="splash-btn close" onclick="window.api.windowClose()">&#x2715;</button>
+          <button class="splash-btn" onclick="window.api.windowMinimizeToTray()" title="Minimize to tray">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v14"/><path d="m19 9-7 7-7-7"/><circle cx="12" cy="21" r="1"/></svg>
+          </button>
+          <button class="splash-btn" onclick="window.api.windowMinimize()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+          </button>
+          <button class="splash-btn" onclick="window.api.windowMaximize()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
+          </button>
+          <button class="splash-btn close" onclick="window.api.windowClose()">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
       </div>
       <div id="splash-body">

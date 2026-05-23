@@ -143,10 +143,10 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
                                          : 'Cloud — open in the carousel to download'
     return (
       <div className={cls} style={placeholderStyle} title={tooltip}>
-        {status === 'syncing' && <Loader2 size={iconSize} className="text-gray-600 animate-spin" />}
-        {status === 'cloud'   && <Cloud   size={iconSize} className="text-gray-600" />}
+        {status === 'syncing' && <Loader2 size={iconSize} className="text-gray-400 animate-spin" />}
+        {status === 'cloud'   && <Cloud   size={iconSize} className="text-gray-400" />}
         {status === 'error'   && <AlertTriangle size={iconSize} className="text-yellow-500" />}
-        {status === 'syncing' && <span className="text-[9px] text-gray-600 leading-none">Syncing…</span>}
+        {status === 'syncing' && <span className="text-[9px] text-gray-400 leading-none">Syncing…</span>}
         {status === 'error'   && <span className="text-[9px] text-yellow-600 leading-none">Sync failed</span>}
       </div>
     )
@@ -407,13 +407,13 @@ function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, chil
                   {dur !== undefined && dur !== null ? (
                     <span className="text-gray-400">{formatDuration(dur)}</span>
                   ) : dur === null || v in durations ? (
-                    <span className="text-gray-500">--:--:--</span>
+                    <span className="text-gray-400">--:--:--</span>
                   ) : isOffline ? (
                     // Offline + duration not yet probed (and probably never
                     // will, since we skip probing cloud placeholders).
-                    <span className="text-gray-500">--:--:--</span>
+                    <span className="text-gray-400">--:--:--</span>
                   ) : (
-                    <Loader2 size={10} className="animate-spin text-gray-500" />
+                    <Loader2 size={10} className="animate-spin text-gray-400" />
                   )}
                 </span>
                 {/* Cloud-status column — empty when cloud sync isn't active
@@ -424,9 +424,9 @@ function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, chil
                 <span className="shrink-0 py-1.5">
                   {cloudSyncActive ? (
                     isOffline ? (
-                      <Cloud size={12} className="text-gray-500" />
+                      <Cloud size={12} className="text-gray-400" />
                     ) : (
-                      <CloudCheck size={12} className="text-gray-500" />
+                      <CloudCheck size={12} className="text-gray-400" />
                     )
                   ) : null}
                 </span>
@@ -698,7 +698,7 @@ function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsT
       </div>
       <div className="flex items-center justify-between px-1 min-h-[20px]">
         {!single ? (
-          <p className="text-xs text-gray-500 truncate flex-1 text-center px-7">{filename}</p>
+          <p className="text-xs text-gray-400 truncate flex-1 text-center px-7">{filename}</p>
         ) : <span />}
         {onSetAsThumbnail && (
           isPreferred ? (
@@ -1662,7 +1662,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
           <label className="text-sm font-medium text-gray-300">
             Topics / Games
             {detectedGames.length > 0 && !initialMeta && (
-              <span className="ml-2 text-xs text-gray-500 font-normal">(auto-detected from files)</span>
+              <span className="ml-2 text-xs text-gray-400 font-normal">(auto-detected from files)</span>
             )}
           </label>
           <TagComboBox
@@ -1713,7 +1713,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
 
         {/* ── Publishing Info ──────────────────────────────────────────────── */}
         <div className="flex flex-col gap-4 pt-1 border-t border-white/5">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Publishing Info</h3>
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Publishing Info</h3>
 
           {/* Merge field inputs */}
           <div className="grid grid-cols-[1fr_auto_auto_1fr] gap-2 items-start">
@@ -1724,12 +1724,12 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 onChange={e => setYtGameTitle(e.target.value)}
                 className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
               />
-              <span className="text-[10px] text-gray-500">Set manually in YouTube Studio</span>
+              <span className="text-[10px] text-gray-400">Set manually in YouTube Studio</span>
             </div>
             <div className="flex flex-col gap-1 items-center">
-              <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+              <label className="text-xs font-medium text-gray-400 whitespace-nowrap flex items-center gap-1">
                 <Tooltip content="Auto-inherited from the most recent preceding stream in the same series. Change it to start a new season — episode numbering will restart from 1." side="top">
-                  <Info size={11} className="text-gray-500 cursor-default" />
+                  <Info size={11} className="text-gray-400 cursor-default" />
                 </Tooltip>
                 <span className="font-mono text-purple-400">{'{season}'}</span>
               </label>
@@ -1741,9 +1741,9 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
             </div>
             <div className="flex items-end gap-1.5">
               <div className="flex flex-col gap-1 items-end">
-                <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+                <label className="text-xs font-medium text-gray-400 whitespace-nowrap flex items-center gap-1">
                   <Tooltip content="Auto-detected by counting preceding streams with the same game and season. Resets to 1 when season changes. Can be overridden manually." side="top">
-                    <Info size={11} className="text-gray-500 cursor-default" />
+                    <Info size={11} className="text-gray-400 cursor-default" />
                   </Tooltip>
                   <span className="font-mono text-purple-400">{'{episode}'}</span>
                 </label>
@@ -1753,12 +1753,12 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                   className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
                 />
               </div>
-              <span className="text-gray-600 text-xs pb-1.5 shrink-0">/</span>
+              <span className="text-gray-400 text-xs pb-1.5 shrink-0">/</span>
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+                <label className="text-xs font-medium text-gray-400 whitespace-nowrap flex items-center gap-1">
                   <span className="font-mono text-purple-400">{'{total_episodes}'}</span>
                   <Tooltip content="Total episodes in this season. Auto-counted from all streams sharing the same game and season, including this one. Can be overridden manually." side="top">
-                    <Info size={11} className="text-gray-500 cursor-default" />
+                    <Info size={11} className="text-gray-400 cursor-default" />
                   </Tooltip>
                 </label>
                 <input
@@ -1769,7 +1769,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               </div>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500"><span className="font-mono text-purple-400">{'{title}'}</span></label>
+              <label className="text-xs font-medium text-gray-400"><span className="font-mono text-purple-400">{'{title}'}</span></label>
               <input
                 value={ytCatchyTitle}
                 onChange={e => setYtCatchyTitle(e.target.value)}
@@ -1786,7 +1786,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 Title
                 <LucideYoutube size={11} className="text-red-400/70" />
                 {(!twConnected || syncTitle) && <LucideTwitch size={11} className="text-twitch-400/70" />}
-                <span className="text-gray-600 font-normal">(editable)</span>
+                <span className="text-gray-400 font-normal">(editable)</span>
               </label>
               <div className="flex items-center gap-3">
                 {twConnected && (
@@ -1804,10 +1804,10 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               {...titleSg.props}
             />
             <div className="flex items-center justify-between min-h-[16px]">
-              {claudeEnabled && titleSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-600" />}
-              {claudeEnabled && titleSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-600"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
+              {claudeEnabled && titleSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-400" />}
+              {claudeEnabled && titleSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-400"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
               {(!claudeEnabled || !titleSg.hint) && <span />}
-              <p className="text-xs text-gray-500">{ytTitle.length}/100</p>
+              <p className="text-xs text-gray-400">{ytTitle.length}/100</p>
             </div>
           </div>
 
@@ -1824,7 +1824,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 maxLength={140}
                 className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
               />
-              <p className="text-right text-xs text-gray-700">{twitchTitle.length}/140</p>
+              <p className="text-right text-xs text-gray-400">{twitchTitle.length}/140</p>
             </div>
           )}
 
@@ -1853,8 +1853,8 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500/40"
             />
             <div className="flex items-center min-h-[16px]">
-              {claudeEnabled && descLoading && <Loader2 size={10} className="animate-spin text-gray-600" />}
-              {claudeEnabled && !descLoading && descSuggestion && <span className="flex items-center gap-1 text-[10px] text-gray-600"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
+              {claudeEnabled && descLoading && <Loader2 size={10} className="animate-spin text-gray-400" />}
+              {claudeEnabled && !descLoading && descSuggestion && <span className="flex items-center gap-1 text-[10px] text-gray-400"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
             </div>
           </div>
 
@@ -1864,7 +1864,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
                 Tags
                 <LucideYoutube size={11} className="text-red-400/70" />
-                <span className="text-gray-600 font-normal">(comma-separated)</span>
+                <span className="text-gray-400 font-normal">(comma-separated)</span>
               </label>
               <div className="flex items-center gap-3">
                 {gameMatchedTagTemplate && (
@@ -1888,10 +1888,10 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               {...tagsSg.props}
             />
             <div className="flex items-center justify-between min-h-[16px]">
-              {claudeEnabled && tagsSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-600" />}
-              {claudeEnabled && tagsSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-600"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
+              {claudeEnabled && tagsSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-400" />}
+              {claudeEnabled && tagsSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-400"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
               {(!claudeEnabled || !tagsSg.hint) && <span />}
-              <p className="text-xs text-gray-700">{ytTagsText.split(',').map(t => t.trim()).filter(Boolean).length} tags</p>
+              <p className="text-xs text-gray-400">{ytTagsText.split(',').map(t => t.trim()).filter(Boolean).length} tags</p>
             </div>
           </div>
 
@@ -1908,7 +1908,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 placeholder="e.g. Elden Ring"
                 className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 placeholder-gray-700"
               />
-              <p className="text-xs text-gray-600">Searched against Twitch categories — closest match will be used.</p>
+              <p className="text-xs text-gray-400">Searched against Twitch categories — closest match will be used.</p>
             </div>
           )}
         </div>
@@ -1916,7 +1916,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
         {/* ── YouTube ─────────────────────────────────────────────────────── */}
         {ytConnected && (
           <div className="flex flex-col gap-3 pt-1 border-t border-white/5">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
               <LucideYoutube size={13} className="text-red-400" /> YouTube
             </h3>
 
@@ -1999,7 +1999,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                       <button
                         type="button"
                         onClick={() => { setYtSelectedBroadcastId(''); setYtVideoUnlinked(true); setYtManualUrl(''); setYtManualError('') }}
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors shrink-0"
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors shrink-0"
                         title="Unlink from broadcast"
                       >
                         <X size={12} />
@@ -2040,7 +2040,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                   {!ytSelectedBroadcastId && (
                     <>
                       <div className="flex flex-col gap-1">
-                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Or paste a URL</span>
+                        <span className="text-[10px] text-gray-400 uppercase tracking-wider">Or paste a URL</span>
                         <input
                           value={ytManualUrl}
                           onChange={e => handleManualUrlChange(e.target.value)}
@@ -2048,7 +2048,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                           className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-600"
                         />
                         {ytManualLoading && (
-                          <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                          <p className="text-xs text-gray-400 flex items-center gap-1.5">
                             <Loader2 size={11} className="animate-spin shrink-0" />
                             Looking up video…
                           </p>
@@ -2063,7 +2063,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
 
                       {streamDateInFuture && (
                         <div className="flex flex-col gap-1.5">
-                          <span className="text-[10px] text-gray-500 uppercase tracking-wider">Or create a new scheduled broadcast</span>
+                          <span className="text-[10px] text-gray-400 uppercase tracking-wider">Or create a new scheduled broadcast</span>
                           <div className="flex items-center gap-2 flex-wrap">
                             <div className="flex items-center gap-1.5">
                               <label className="text-xs text-gray-400 shrink-0">Time</label>
@@ -2093,7 +2093,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                                   <option value="unlisted">Unlisted</option>
                                   <option value="private">Private</option>
                                 </select>
-                                <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                                <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                               </div>
                             </div>
                             <Button
@@ -2152,7 +2152,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-gray-400">Thumbnail to upload</label>
               {ytQualifyingThumbnails.length === 0 ? (
-                <p className="text-xs text-gray-600 italic">
+                <p className="text-xs text-gray-400 italic">
                   {thumbnails.length === 0
                     ? 'No images found in this stream folder.'
                     : 'No images meet YouTube\'s requirements (JPG/PNG/GIF/WebP, max 2 MB).'}
@@ -2181,7 +2181,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                   })}
                 </div>
               )}
-              <p className="text-[10px] text-gray-600">Recommended: 1280×720 or larger. Uploads when you click 'Update YouTube Info'.</p>
+              <p className="text-[10px] text-gray-400">Recommended: 1280×720 or larger. Uploads when you click 'Update YouTube Info'.</p>
             </div>
 
             {/* Push action */}
@@ -2298,12 +2298,12 @@ function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId, selec
             : 'No default archive preset is set. Choose which converter preset to use for compression.'}
         </p>
         {isDumpMode && (
-          <p className="text-xs text-gray-500 italic">
+          <p className="text-xs text-gray-400 italic">
             In dump-folder mode, archived files are converted in place — they replace the originals in the same folder.
           </p>
         )}
         {loading ? (
-          <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 size={14} className="animate-spin" /> Loading presets…</div>
+          <div className="flex items-center gap-2 text-gray-400 text-sm"><Loader2 size={14} className="animate-spin" /> Loading presets…</div>
         ) : presets.length === 0 ? (
           <p className="text-sm text-yellow-600">No presets found. Configure your presets directory in Settings first.</p>
         ) : (
@@ -2317,13 +2317,13 @@ function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId, selec
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
         )}
         {selected !== defaultPresetId && (
           <Checkbox checked={setAsDefault} onChange={setSetAsDefault} label="Save as default archive preset" />
         )}
-        <p className="text-xs text-gray-500 italic leading-relaxed">
+        <p className="text-xs text-gray-400 italic leading-relaxed">
           Test your preset on a few video files in the Converter page first to verify the output quality before archiving in bulk.
         </p>
       </div>
@@ -2372,7 +2372,7 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
         ref={anchorRef}
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors focus:outline-none"
+        className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-300 transition-colors focus:outline-none"
       >
         <span>{selected ? selected.name : placeholder}</span>
         <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -2386,14 +2386,14 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
         >
           {value && (
             <button
-              className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:bg-white/5 transition-colors border-b border-white/5"
+              className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-white/5 transition-colors border-b border-white/5"
               onClick={() => { onChange(''); close() }}
             >
               — Clear —
             </button>
           )}
           {items.length === 0 && (
-            <p className="px-3 py-2 text-xs text-gray-600 italic">No templates</p>
+            <p className="px-3 py-2 text-xs text-gray-400 italic">No templates</p>
           )}
           {items.map(t => (
             <button
@@ -2470,7 +2470,7 @@ function SaveAsTemplateButton({ onSave }: { onSave: (name: string) => Promise<vo
       <button
         type="button"
         onClick={cancel}
-        className="p-0.5 text-gray-500 hover:text-gray-300 transition-colors"
+        className="p-0.5 text-gray-400 hover:text-gray-300 transition-colors"
         title="Cancel"
       >
         <X size={12} />
@@ -2576,7 +2576,7 @@ function BulkTagModal({
           </div>
         )}
         {!progress && (
-          <p className="text-xs text-gray-500 -mt-2">
+          <p className="text-xs text-gray-400 -mt-2">
             {isRemoving
               ? <>Selected tags will be <span className="text-red-400">removed from</span> each stream's existing tags.</>
               : <>Selected tags will be <span className="text-gray-300">added to</span> each stream's existing tags.</>
@@ -2655,7 +2655,7 @@ function CloudDownloadModal({
           <p className="text-sm text-gray-400">
             Download it now? The file will be sent to the player automatically once it's ready.
           </p>
-          <p className="text-xs text-gray-600 font-mono truncate" title={filePath}>{filePath}</p>
+          <p className="text-xs text-gray-400 font-mono truncate" title={filePath}>{filePath}</p>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -2665,7 +2665,7 @@ function CloudDownloadModal({
               Downloading <span className="font-medium text-gray-100">{fileName}</span>…
             </p>
           </div>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-400">
             The file will be sent automatically once the download is complete.
           </p>
         </div>
@@ -2713,7 +2713,7 @@ function VideoPickerModal({
       }
     >
       <div className="flex flex-col gap-1">
-        <p className="text-xs text-gray-500 mb-2">
+        <p className="text-xs text-gray-400 mb-2">
           {isCombine ? 'Multiple video files found — combine all or pick one:' : 'Multiple video files found — choose one:'}
         </p>
         {files.map(f => {
@@ -2725,9 +2725,9 @@ function VideoPickerModal({
               className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-white/5 opacity-50 cursor-not-allowed"
               title="Not available locally — sync from cloud first"
             >
-              <Cloud size={13} className="text-gray-600 shrink-0" />
-              <span className="text-sm text-gray-500 font-mono truncate">{name}</span>
-              <span className="ml-auto text-[10px] text-gray-600 shrink-0">cloud only</span>
+              <Cloud size={13} className="text-gray-400 shrink-0" />
+              <span className="text-sm text-gray-400 font-mono truncate">{name}</span>
+              <span className="ml-auto text-[10px] text-gray-400 shrink-0">cloud only</span>
             </div>
           ) : (
             <button
@@ -3069,6 +3069,23 @@ export function StreamsPage({
   // Action Panel: which row currently has its expansion panel open. Only one
   // at a time — clicking another row's body closes any other open panel.
   const [expandedFolderKey, setExpandedFolderKey] = useState<string | null>(null)
+
+  // After the open animation completes, scroll the list just enough to bring
+  // the panel's bottom into view if it extends past the viewport. No-op when
+  // the panel is already fully visible. Only one panel is open at a time, so
+  // a generic `[data-panel-key]` selector is sufficient.
+  const scrollExpandedPanelIntoView = useCallback(() => {
+    const scrollEl = listScrollRef.current
+    if (!scrollEl) return
+    const panelEl = scrollEl.querySelector('[data-panel-key]') as HTMLElement | null
+    if (!panelEl) return
+    const panelRect = panelEl.getBoundingClientRect()
+    const containerRect = scrollEl.getBoundingClientRect()
+    const overflow = panelRect.bottom - containerRect.bottom
+    if (overflow > 0) {
+      scrollEl.scrollBy({ top: overflow + 8, behavior: 'smooth' })
+    }
+  }, [])
 
   const [templates, setTemplates] = useState<{ name: string; path: string }[]>([])
   const [builtinTemplates, setBuiltinTemplates] = useState<ThumbnailTemplate[]>([])
@@ -3788,11 +3805,11 @@ export function StreamsPage({
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
         <div className="p-4 rounded-full bg-white/5">
-          <Radio size={36} className="text-gray-600" />
+          <Radio size={36} className="text-gray-400" />
         </div>
         <div className="text-center">
           <p className="text-gray-300 font-medium">No streams directory set</p>
-          <p className="text-sm text-gray-600 mt-1">Choose the folder where your stream session folders live.</p>
+          <p className="text-sm text-gray-400 mt-1">Choose the folder where your stream session folders live.</p>
         </div>
         <Button variant="primary" icon={<FolderOpen size={14} />} onClick={pickDir}>
           Choose Directory
@@ -3827,7 +3844,7 @@ export function StreamsPage({
               <button
                 onClick={() => loadFolders(streamsDir)}
                 disabled={loading}
-                className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors"
+                className="p-1 rounded text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors"
               >
                 <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
               </button>
@@ -3835,7 +3852,7 @@ export function StreamsPage({
           </div>
           <Tooltip content={streamsDir} side="bottom" width="w-72">
             <button
-              className="text-xs text-gray-500 font-mono truncate mt-0.5 hover:text-gray-300 transition-colors text-left"
+              className="text-xs text-gray-400 font-mono truncate mt-0.5 hover:text-gray-300 transition-colors text-left"
               onClick={() => window.api.openInExplorer(streamsDir)}
             >
               {streamsDir}
@@ -3960,7 +3977,7 @@ export function StreamsPage({
               <Tooltip content="List view" side="bottom">
                 <button
                   onClick={() => { setViewMode('list'); localStorage.setItem('streamsViewMode', 'list') }}
-                  className={`p-1.5 transition-colors ${viewMode === 'list' ? 'bg-white/10 text-gray-200' : 'text-gray-600 hover:text-gray-400 hover:bg-white/5'}`}
+                  className={`p-1.5 transition-colors ${viewMode === 'list' ? 'bg-white/10 text-gray-200' : 'text-gray-400 hover:text-gray-400 hover:bg-white/5'}`}
                 >
                   <LayoutList size={14} />
                 </button>
@@ -3968,7 +3985,7 @@ export function StreamsPage({
               <Tooltip content="Grid view" side="bottom">
                 <button
                   onClick={() => { setViewMode('grid'); localStorage.setItem('streamsViewMode', 'grid') }}
-                  className={`p-1.5 transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-gray-200' : 'text-gray-600 hover:text-gray-400 hover:bg-white/5'}`}
+                  className={`p-1.5 transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-gray-200' : 'text-gray-400 hover:text-gray-400 hover:bg-white/5'}`}
                 >
                   <LayoutGrid size={14} />
                 </button>
@@ -4000,10 +4017,10 @@ export function StreamsPage({
 
       {/* Summary bar */}
       {folders.length > 0 && (
-        <div className="flex items-center gap-4 px-6 py-2 border-b border-white/5 bg-navy-800/50 shrink-0 text-xs text-gray-500">
+        <div className="flex items-center gap-4 px-6 py-2 border-b border-white/5 bg-navy-800/50 shrink-0 text-xs text-gray-400">
           <span>
             {filteredFolders.length !== folders.length
-              ? <>{filteredFolders.length} <span className="text-gray-600">/ {folders.length}</span> sessions</>
+              ? <>{filteredFolders.length} <span className="text-gray-400">/ {folders.length}</span> sessions</>
               : <>{folders.length} session{folders.length !== 1 ? 's' : ''}</>
             }
           </span>
@@ -4019,7 +4036,7 @@ export function StreamsPage({
               <div ref={gridTypeFilterAnchorRef} className="relative">
                 <button
                   onClick={openTypeFilter}
-                  className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors text-[11px] ${filterTypes.size > 0 ? 'border-purple-600/50 text-purple-400 bg-purple-900/20' : 'border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'}`}
+                  className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors text-[11px] ${filterTypes.size > 0 ? 'border-purple-600/50 text-purple-400 bg-purple-900/20' : 'border-white/10 text-gray-400 hover:text-gray-300 hover:border-white/20'}`}
                 >
                   <ListFilter size={11} />
                   Type{filterTypes.size > 0 && ` (${filterTypes.size})`}
@@ -4029,7 +4046,7 @@ export function StreamsPage({
                     <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
                     <div className="absolute top-full right-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] overflow-y-auto" style={{ maxHeight: typeFilterMaxHeight }}>
                       {allStreamTypes.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-gray-600">No types tagged yet</p>
+                        <p className="px-3 py-2 text-xs text-gray-400">No types tagged yet</p>
                       ) : (
                         <>
                           <button onClick={() => { setFilterTypes(new Set()); setOpenFilter(null) }} disabled={filterTypes.size === 0} className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-purple-400 hover:text-purple-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-purple-400">
@@ -4057,7 +4074,7 @@ export function StreamsPage({
               <div ref={gridGameFilterAnchorRef} className="relative">
                 <button
                   onClick={openGameFilter}
-                  className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors text-[11px] ${filterGames.size > 0 ? 'border-blue-600/50 text-blue-400 bg-blue-900/20' : 'border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'}`}
+                  className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors text-[11px] ${filterGames.size > 0 ? 'border-blue-600/50 text-blue-400 bg-blue-900/20' : 'border-white/10 text-gray-400 hover:text-gray-300 hover:border-white/20'}`}
                 >
                   <ListFilter size={11} />
                   Topic{filterGames.size > 0 && ` (${filterGames.size})`}
@@ -4067,7 +4084,7 @@ export function StreamsPage({
                     <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
                     <div className="absolute top-full right-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] overflow-y-auto" style={{ maxHeight: gameFilterMaxHeight }}>
                       {allGames.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-gray-600">No games tagged yet</p>
+                        <p className="px-3 py-2 text-xs text-gray-400">No games tagged yet</p>
                       ) : (
                         <>
                           <button onClick={() => { setFilterGames(new Set()); setOpenFilter(null) }} disabled={filterGames.size === 0} className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-blue-400 hover:text-blue-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-blue-400">
@@ -4140,11 +4157,11 @@ export function StreamsPage({
       <div className="flex-1 overflow-hidden pr-2">
       <div ref={listScrollRef} className="h-full overflow-y-auto [scrollbar-gutter:stable]">
         {loading && folders.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-gray-600 text-sm gap-2">
+          <div className="flex items-center justify-center h-32 text-gray-400 text-sm gap-2">
             <RefreshCw size={14} className="animate-spin" /> Loading…
           </div>
         ) : folders.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 gap-2 text-gray-600">
+          <div className="flex flex-col items-center justify-center h-32 gap-2 text-gray-400">
             <p className="text-sm">No stream folders found in this directory.</p>
             <Button variant="primary" size="sm" icon={<Plus size={12} />} onClick={() => setModal({ mode: 'new' })}>
               Create First Stream
@@ -4153,7 +4170,7 @@ export function StreamsPage({
         ) : viewMode === 'grid' ? (
           <div className="p-4">
             {filteredFolders.length === 0 ? (
-              <p className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</p>
+              <p className="text-center py-12 text-gray-400 text-sm">No sessions match the current filters.</p>
             ) : (
               <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                 {filteredFolders.map((folder, i) => {
@@ -4209,7 +4226,7 @@ export function StreamsPage({
         ) : (
           <table className="w-full text-sm border-collapse table-fixed">
             <thead className="sticky top-0 bg-navy-900 z-10">
-              <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              <tr className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
                 {selectMode && <th className="pl-4 py-2 w-[40px]" />}
                 <th className="p-0" style={{ width: thumbWidth }}>Thumbnail</th>
                 <th className="px-2 py-2 w-[44px]"></th>
@@ -4221,7 +4238,7 @@ export function StreamsPage({
                     <Tooltip content="Filter by type" side="bottom">
                       <button
                         onClick={openTypeFilter}
-                        className={`p-0.5 rounded transition-colors ${filterTypes.size > 0 ? 'text-purple-400' : 'text-gray-600 hover:text-gray-400'}`}
+                        className={`p-0.5 rounded transition-colors ${filterTypes.size > 0 ? 'text-purple-400' : 'text-gray-400 hover:text-gray-400'}`}
                       >
                         <ListFilter size={12} />
                       </button>
@@ -4231,7 +4248,7 @@ export function StreamsPage({
                         <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
                         <div className="absolute top-full left-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] overflow-y-auto" style={{ maxHeight: typeFilterMaxHeight }}>
                           {allStreamTypes.length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-gray-600">No types tagged yet</p>
+                            <p className="px-3 py-2 text-xs text-gray-400">No types tagged yet</p>
                           ) : (
                             <>
                               <button
@@ -4281,7 +4298,7 @@ export function StreamsPage({
                     <Tooltip content="Filter by topic or game" side="bottom">
                       <button
                         onClick={openGameFilter}
-                        className={`p-0.5 rounded transition-colors ${filterGames.size > 0 ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
+                        className={`p-0.5 rounded transition-colors ${filterGames.size > 0 ? 'text-blue-400' : 'text-gray-400 hover:text-gray-400'}`}
                       >
                         <ListFilter size={12} />
                       </button>
@@ -4291,7 +4308,7 @@ export function StreamsPage({
                         <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
                         <div className="absolute top-full left-0 mt-1 z-30 bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[160px] overflow-y-auto" style={{ maxHeight: gameFilterMaxHeight }}>
                           {allGames.length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-gray-600">No games tagged yet</p>
+                            <p className="px-3 py-2 text-xs text-gray-400">No games tagged yet</p>
                           ) : (
                             <>
                               <button
@@ -4336,7 +4353,7 @@ export function StreamsPage({
             </thead>
             <tbody>
               {filteredFolders.length === 0 ? (
-                <tr><td colSpan={(selectMode ? 8 : 7) - (isXlViewport ? 0 : 1)} className="text-center py-12 text-gray-600 text-sm">No sessions match the current filters.</td></tr>
+                <tr><td colSpan={(selectMode ? 8 : 7) - (isXlViewport ? 0 : 1)} className="text-center py-12 text-gray-400 text-sm">No sessions match the current filters.</td></tr>
               ) : filteredFolders.map((folder, i) => {
                 const pending = isPendingStream(folder, today())
                 const rowKey = isDumpMode ? folder.date : folder.folderPath
@@ -4433,6 +4450,7 @@ return (
                       onNewEpisode={() => setModal({ mode: 'new', sourceFolder: folder })}
                       onOffload={() => offloadFolder(folder)}
                       onPinLocal={() => pinFolder(folder)}
+                      onOpenAnimationComplete={scrollExpandedPanelIntoView}
                     />
                   )}
                 </AnimatePresence>
@@ -4567,7 +4585,7 @@ return (
             </div>
 
             {rescheduleDate === rescheduleTarget.date && (
-              <p className="text-xs text-gray-500 italic">Choose a different date to reschedule.</p>
+              <p className="text-xs text-gray-400 italic">Choose a different date to reschedule.</p>
             )}
 
             {/* Future-date notice — shown whenever the new date is after
@@ -4595,17 +4613,17 @@ return (
                 {rescheduleCreateBroadcast && (
                   <div className="flex flex-col gap-2 pl-6">
                     <div className="flex items-center gap-2">
-                      <label className="text-xs text-gray-500 w-16 shrink-0">Time</label>
+                      <label className="text-xs text-gray-400 w-16 shrink-0">Time</label>
                       <input
                         type="time"
                         value={rescheduleTime}
                         onChange={e => setRescheduleTime(e.target.value)}
                         className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
                       />
-                      <span className="text-[10px] text-gray-600">your local time</span>
+                      <span className="text-[10px] text-gray-400">your local time</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500 w-16 shrink-0">Privacy</span>
+                      <span className="text-xs text-gray-400 w-16 shrink-0">Privacy</span>
                       <div className="flex gap-3">
                         {(['private', 'unlisted', 'public'] as const).map(p => (
                           <label key={p} className="flex items-center gap-1.5 cursor-pointer">
@@ -4627,7 +4645,7 @@ return (
             )}
 
             {rescheduleDate !== rescheduleTarget.date && rescheduleLoading && (
-              <p className="text-xs text-gray-500 flex items-center gap-1.5">
+              <p className="text-xs text-gray-400 flex items-center gap-1.5">
                 <Loader2 size={11} className="animate-spin shrink-0" />
                 Checking…
               </p>
@@ -4654,7 +4672,7 @@ return (
                       {reschedulePreview.filesToRename.map(f => (
                         <li
                           key={f.from}
-                          className={`text-xs font-mono px-2 py-0.5 ${f.collision ? 'text-red-400' : 'text-gray-500'}`}
+                          className={`text-xs font-mono px-2 py-0.5 ${f.collision ? 'text-red-400' : 'text-gray-400'}`}
                           title={f.collision ? 'Skipped: a file with that name already exists.' : undefined}
                         >
                           {f.collision && <AlertTriangle size={10} className="inline mr-1 mb-0.5" />}
@@ -4662,7 +4680,7 @@ return (
                         </li>
                       ))}
                       {reschedulePreview.filesToRename.length === 0 && (
-                        <li className="text-xs text-gray-600 italic px-2 py-0.5">No files to rename inside folder.</li>
+                        <li className="text-xs text-gray-400 italic px-2 py-0.5">No files to rename inside folder.</li>
                       )}
                     </ul>
                     {reschedulePreview.hasCollisions && (
@@ -4721,10 +4739,10 @@ return (
           <div className="bg-white/5 rounded-lg px-3 py-2.5 mb-3 font-mono text-sm text-gray-200 max-h-64 overflow-y-auto">
             {isDumpMode ? (
               deleteFileList.length === 0
-                ? <span className="text-gray-600 italic text-xs">No files found for this date.</span>
+                ? <span className="text-gray-400 italic text-xs">No files found for this date.</span>
                 : deleteFileList.map(f => (
-                    <div key={f} className="flex items-center gap-1.5 text-gray-500 py-px">
-                      <span className="shrink-0 text-gray-700">·</span>
+                    <div key={f} className="flex items-center gap-1.5 text-gray-400 py-px">
+                      <span className="shrink-0 text-gray-400">·</span>
                       <span className="truncate">{f.split(/[\\/]/).pop()}</span>
                     </div>
                   ))
@@ -4732,7 +4750,7 @@ return (
               <TreeView nodes={deleteTree} depth={0} rootName={deleteTarget.folderName} />
             )}
           </div>
-          <p className="text-xs text-gray-600">This action can be undone from the Recycle Bin.</p>
+          <p className="text-xs text-gray-400">This action can be undone from the Recycle Bin.</p>
         </Modal>
       )}
 
@@ -4776,7 +4794,7 @@ return (
             </li>
           ))}
         </ul>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-400">
           <strong className="text-gray-400">Remove from records</strong> — deletes their metadata entries from the app.<br />
           <strong className="text-gray-400">Keep</strong> — retains the records and shows a warning in the list.
         </p>
@@ -4816,7 +4834,7 @@ return (
             <div className="relative w-full max-w-4xl">
               <div className="absolute right-full top-1/2 -translate-y-1/2 pr-3 flex flex-row gap-2 items-center pointer-events-auto">
                 <Tooltip content="Previous in series" side="right">
-                  <button onClick={() => navigateModal(prevSeriesFolder!, 'up')} disabled={!prevSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-500 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsDown size={16} /></button>
+                  <button onClick={() => navigateModal(prevSeriesFolder!, 'up')} disabled={!prevSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-400 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsDown size={16} /></button>
                 </Tooltip>
                 <Tooltip content="Previous stream" side="right">
                   <button onClick={() => navigateModal(prevFolder!, 'up')} disabled={!prevFolder} className="p-3 rounded-full bg-navy-700/80 border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-navy-600 transition-colors shadow-lg disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/80 disabled:hover:text-gray-400"><ChevronDown size={22} /></button>
@@ -4827,7 +4845,7 @@ return (
                   <button onClick={() => navigateModal(nextFolder!, 'down')} disabled={!nextFolder} className="p-3 rounded-full bg-navy-700/80 border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-navy-600 transition-colors shadow-lg disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/80 disabled:hover:text-gray-400"><ChevronUp size={22} /></button>
                 </Tooltip>
                 <Tooltip content="Next in series" side="left">
-                  <button onClick={() => navigateModal(nextSeriesFolder!, 'down')} disabled={!nextSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-500 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsUp size={16} /></button>
+                  <button onClick={() => navigateModal(nextSeriesFolder!, 'down')} disabled={!nextSeriesFolder} className="p-2 rounded-full bg-navy-700/60 border border-white/10 text-gray-400 hover:text-gray-300 hover:bg-navy-600/80 transition-colors shadow-md disabled:opacity-30 disabled:cursor-default disabled:hover:bg-navy-700/60 disabled:hover:text-gray-500"><ChevronsUp size={16} /></button>
                 </Tooltip>
               </div>
             </div>
@@ -4958,7 +4976,7 @@ return (
               {' '}an "Archived Stream" tag in their container metadata, meaning they were encoded by a previous archive run. Re-encoding will lose quality without benefit.
             </p>
             <div className="border border-white/10 rounded-lg overflow-hidden bg-navy-900/40">
-              <div className="px-3 py-2 border-b border-white/10 text-[10px] uppercase tracking-wide text-gray-500">
+              <div className="px-3 py-2 border-b border-white/10 text-[10px] uppercase tracking-wide text-gray-400">
                 Already archived
               </div>
               <div className="max-h-[40vh] overflow-y-auto divide-y divide-white/5">
@@ -5108,20 +5126,20 @@ function TreeView({ nodes, depth, rootName }: { nodes: TreeNode[]; depth: number
     <div>
       {rootName !== undefined && (
         <div className="flex items-center gap-1.5 text-gray-300 mb-0.5">
-          <FolderOpen size={12} className="shrink-0 text-gray-500" />
+          <FolderOpen size={12} className="shrink-0 text-gray-400" />
           <span>{rootName}/</span>
         </div>
       )}
       {nodes.length === 0 && depth === 0 && (
-        <div style={{ paddingLeft: 20 }} className="text-gray-600 italic text-xs">Empty folder</div>
+        <div style={{ paddingLeft: 20 }} className="text-gray-400 italic text-xs">Empty folder</div>
       )}
       {nodes.map(node => (
         <div key={node.name} style={{ paddingLeft: rootName !== undefined || depth > 0 ? 20 : 0 }}>
           {node.isDirectory ? (
             <TreeView nodes={node.children ?? []} depth={depth + 1} rootName={node.name} />
           ) : (
-            <div className="flex items-center gap-1.5 text-gray-500 py-px">
-              <span className="shrink-0 text-gray-700">·</span>
+            <div className="flex items-center gap-1.5 text-gray-400 py-px">
+              <span className="shrink-0 text-gray-400">·</span>
               <span className="truncate">{node.name}</span>
             </div>
           )}
@@ -5235,8 +5253,8 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
           </>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-1">
-            <ImageOff size={18} className="text-gray-700" />
-            <span className="text-[9px] text-gray-700">no thumbnail</span>
+            <ImageOff size={18} className="text-gray-400" />
+            <span className="text-[9px] text-gray-400">no thumbnail</span>
           </div>
         )}
 
@@ -5345,7 +5363,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                 <span key={g} className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30">{g}</span>
               ) : (
                 <Tooltip key={g} content="Detected from filename">
-                  <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 border border-gray-500/30 italic">{g}</span>
+                  <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic">{g}</span>
                 </Tooltip>
               )
             )}
@@ -5368,7 +5386,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
               const shortClipCount = vm ? Object.values(vm).filter(e => e.category === 'short' || e.category === 'clip').length : 0
               return (
                 <div className="flex items-center gap-2 cursor-default">
-                  <div className={`flex items-center gap-1 text-xs font-mono ${fullCount > 0 ? 'text-gray-400' : 'text-gray-700'}`}>
+                  <div className={`flex items-center gap-1 text-xs font-mono ${fullCount > 0 ? 'text-gray-400' : 'text-gray-400'}`}>
                     <Film size={11} className="shrink-0" />
                     <span>{fullCount}</span>
                   </div>
@@ -5391,49 +5409,49 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
           )}
           {videoCount > 0 && (
             <Tooltip content="Send to Player">
-              <button onClick={e => { e.stopPropagation(); onSendToPlayer() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+              <button onClick={e => { e.stopPropagation(); onSendToPlayer() }} className="p-1 rounded text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors">
                 <Film size={12} />
               </button>
             </Tooltip>
           )}
           {videoCount > 0 && (
             <Tooltip content={isArchiving ? 'Already in the converter — archive in progress' : 'Send to Converter'}>
-              <button onClick={e => { e.stopPropagation(); onSendToConverter() }} disabled={isArchiving} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
+              <button onClick={e => { e.stopPropagation(); onSendToConverter() }} disabled={isArchiving} className="p-1 rounded text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
                 <Zap size={12} />
               </button>
             </Tooltip>
           )}
           {videoCount > 1 && (
             <Tooltip content={isArchiving ? 'Combine disabled — archive in progress' : 'Combine videos'}>
-              <button onClick={e => { e.stopPropagation(); onSendToCombine() }} disabled={isArchiving} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
+              <button onClick={e => { e.stopPropagation(); onSendToCombine() }} disabled={isArchiving} className="p-1 rounded text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
                 <Combine size={12} />
               </button>
             </Tooltip>
           )}
           <Tooltip content={hasSMThumbnail ? 'Edit thumbnail' : 'Create thumbnail'}>
-            <button onClick={e => { e.stopPropagation(); onOpenThumbnails() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            <button onClick={e => { e.stopPropagation(); onOpenThumbnails() }} className="p-1 rounded text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors">
               <ImageIcon size={12} />
             </button>
           </Tooltip>
           <Tooltip content={hasMeta ? 'Edit metadata' : 'Add metadata'}>
-            <button onClick={e => { e.stopPropagation(); hasMeta ? onEdit() : onAdd() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            <button onClick={e => { e.stopPropagation(); hasMeta ? onEdit() : onAdd() }} className="p-1 rounded text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors">
               <PencilLine size={12} />
             </button>
           </Tooltip>
           <Tooltip content="Open folder">
-            <button onClick={e => { e.stopPropagation(); onOpen() }} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+            <button onClick={e => { e.stopPropagation(); onOpen() }} className="p-1 rounded text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors">
               <FolderOpen size={12} />
             </button>
           </Tooltip>
           {isPending && (
             <Tooltip content={isArchiving ? 'Reschedule disabled — archive in progress' : 'Reschedule'}>
-              <button onClick={e => { e.stopPropagation(); onReschedule() }} disabled={isArchiving} className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
+              <button onClick={e => { e.stopPropagation(); onReschedule() }} disabled={isArchiving} className="p-1 rounded text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600">
                 <CalendarClock size={12} />
               </button>
             </Tooltip>
           )}
           <Tooltip content={isArchiving ? 'Delete disabled — archive in progress' : 'Delete'}>
-            <button onClick={e => { e.stopPropagation(); onDelete() }} disabled={isArchiving} className="p-1 rounded text-gray-700 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-700">
+            <button onClick={e => { e.stopPropagation(); onDelete() }} disabled={isArchiving} className="p-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-700">
               <Trash2 size={12} />
             </button>
           </Tooltip>
@@ -5563,7 +5581,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
         <div
           className={`relative overflow-hidden shrink-0 ${onThumbClick ? 'cursor-zoom-in' : ''}`}
           style={{ width: thumbWidth, height: thumbWidth * (9 / 16) }}
-          onClick={() => onThumbClick?.(0)}
+          onClick={e => { e.stopPropagation(); onThumbClick?.(0) }}
         >
           {firstThumb ? (
             <>
@@ -5588,8 +5606,8 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             </>
           ) : (
             <div className="w-full h-full bg-white/5 flex flex-col items-center justify-center gap-0.5">
-              <ImageOff size={14} className="text-gray-700" />
-              <span className="text-[9px] text-gray-700 leading-none">none</span>
+              <ImageOff size={14} className="text-gray-400" />
+              <span className="text-[9px] text-gray-400 leading-none">none</span>
             </div>
           )}
         </div>
@@ -5615,7 +5633,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             const shortClipCount = vm ? Object.values(vm).filter(e => e.category === 'short' || e.category === 'clip').length : 0
             return (
               <div className="flex flex-col items-center gap-0.5 cursor-default">
-                <div className={`flex items-center gap-1 text-xs font-mono ${fullCount > 0 ? 'text-gray-400' : 'text-gray-700'}`}>
+                <div className={`flex items-center gap-1 text-xs font-mono ${fullCount > 0 ? 'text-gray-400' : 'text-gray-400'}`}>
                   <Film size={11} className="shrink-0" />
                   <span>{fullCount}</span>
                 </div>
@@ -5736,7 +5754,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             })}
           </div>
         ) : (
-          <span className="text-xs text-gray-700">—</span>
+          <span className="text-xs text-gray-400">—</span>
         )}
       </td>
 
@@ -5754,7 +5772,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                 </span>
               ) : (
                 <Tooltip key={g} content="Detected from filename">
-                  <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 border border-gray-500/30 italic">
+                  <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic">
                     {g}
                   </span>
                 </Tooltip>
@@ -5762,7 +5780,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             )}
           </div>
         ) : (
-          <span className="text-xs text-gray-700">—</span>
+          <span className="text-xs text-gray-400">—</span>
         )}
       </td>
 
@@ -5775,7 +5793,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             maxLines={Math.max(2, Math.floor((thumbWidth * 9 / 16) / 12.5))}
           />
         ) : (
-          <span className="text-xs text-gray-700">—</span>
+          <span className="text-xs text-gray-400">—</span>
         )}
       </td>
 
@@ -5844,6 +5862,10 @@ interface ExpandedPanelProps {
   /** True while this folder has an archive in flight — see StreamRowProps
    *  for the full list of buttons this gates. */
   isArchiving: boolean
+  /** Fired after the open animation completes — used by the parent to
+   *  scroll the panel into view when it expands near the bottom of the
+   *  list. Not fired on close. */
+  onOpenAnimationComplete?: () => void
   onSendToPlayer: () => void
   onSendToConverter: () => void
   onSendToCombine: () => void
@@ -5870,6 +5892,7 @@ interface ExpandedPanelProps {
  */
 function ExpandedStreamPanel({
   folder, isPending, hasMeta, hasSMThumbnail, videoCount, totalEpisodes, selectMode, cloudSyncActive, isArchiving,
+  onOpenAnimationComplete,
   onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails,
   onEdit, onAdd, onOpen, onReschedule, onArchive, onDelete, onNewEpisode,
   onOffload, onPinLocal,
@@ -5890,6 +5913,7 @@ function ExpandedStreamPanel({
   return (
     <motion.tr
       key={`panel-${folder.folderPath}`}
+      data-panel-key={folder.folderPath}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -5902,6 +5926,14 @@ function ExpandedStreamPanel({
           exit={{ height: 0 }}
           transition={{ duration: 0.18, ease: 'easeOut' }}
           style={{ overflow: 'hidden' }}
+          onAnimationComplete={def => {
+            // Only fire on enter — `def` is the latest animation target, so
+            // 'auto' = open, 0 = close. We skip close so the panel doesn't
+            // re-scroll the list as it collapses.
+            if (typeof def === 'object' && (def as { height?: unknown }).height === 'auto') {
+              onOpenAnimationComplete?.()
+            }
+          }}
         >
           <div className="flex items-center justify-between gap-6 px-3 py-3">
             {/* Left: supplementary metadata. Hidden fields (no value) are
@@ -5909,19 +5941,19 @@ function ExpandedStreamPanel({
             <div className="flex flex-col gap-1.5 text-xs min-w-0 flex-1">
               {series && (
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Series</span>
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0 w-24">Series</span>
                   <span className="text-gray-200 tabular-nums">{series}</span>
                 </div>
               )}
               {meta?.ytTitle && (
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">YouTube title</span>
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0 w-24">YouTube title</span>
                   <span className="text-gray-200">{meta.ytTitle}</span>
                 </div>
               )}
               {meta?.ytGameTitle && (
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">YouTube game</span>
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0 w-24">YouTube game</span>
                   <span className="text-gray-300">{meta.ytGameTitle}</span>
                 </div>
               )}
@@ -5936,7 +5968,7 @@ function ExpandedStreamPanel({
                 const hasMore = desc.length > firstLine.length
                 return (
                   <div className="flex items-baseline gap-2">
-                    <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Description</span>
+                    <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0 w-24">Description</span>
                     <Tooltip
                       content={<span className="whitespace-pre-wrap text-gray-300">{desc}</span>}
                       maxWidth="max-w-md"
@@ -5951,19 +5983,19 @@ function ExpandedStreamPanel({
               })()}
               {showTwitchTitle && (
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Twitch title</span>
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0 w-24">Twitch title</span>
                   <span className="text-gray-200">{meta!.twitchTitle}</span>
                 </div>
               )}
               {showTwitchGame && (
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Twitch game</span>
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0 w-24">Twitch game</span>
                   <span className="text-gray-300">{meta!.twitchGameName}</span>
                 </div>
               )}
               {meta?.ytTags && meta.ytTags.length > 0 && (
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0 w-24">Tags</span>
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0 w-24">Tags</span>
                   <div className="flex flex-wrap gap-1">
                     {meta.ytTags.map((t, i) => (
                       <span key={i} className="text-[10px] text-gray-400 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">{t}</span>
@@ -5972,7 +6004,7 @@ function ExpandedStreamPanel({
                 </div>
               )}
               {!series && !meta?.ytTitle && !meta?.ytGameTitle && !meta?.ytDescription && !showTwitchTitle && !showTwitchGame && (!meta?.ytTags || meta.ytTags.length === 0) && (
-                <span className="text-[11px] text-gray-600 italic">No additional metadata.</span>
+                <span className="text-[11px] text-gray-400 italic">No additional metadata.</span>
               )}
             </div>
 
