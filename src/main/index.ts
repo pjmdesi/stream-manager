@@ -81,6 +81,7 @@ import { registerLauncherIPC } from './ipc/launcher'
 import { registerClaudeIPC } from './ipc/claude'
 import { registerThumbnailIPC } from './ipc/thumbnail'
 import { registerCloudSyncIPC } from './ipc/cloudSync'
+import { registerStreamRelayIPC } from './ipc/streamRelay'
 import { registerUpdateCheckIPC } from './services/updateCheck'
 import { tempManager } from './services/tempManager'
 import { fileWatcher } from './services/fileWatcher'
@@ -373,6 +374,11 @@ app.whenReady().then(() => {
     registerLauncherIPC()
     registerClaudeIPC()
     registerThumbnailIPC()
+    // Stream Relay — registers IPC + auto-starts the ffmpeg child if the
+    // user had it enabled when SM last quit. Deferred since the YouTube
+    // integration page is the typical entry point and the relay's auto-
+    // start logic looks at the saved config which is already loaded.
+    registerStreamRelayIPC()
 
     // Eagerly probe available GPU encoders so the preset editor's encoder
     // dropdown is instant when the user opens it. Result is cached in

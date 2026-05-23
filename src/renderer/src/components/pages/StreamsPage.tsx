@@ -24,6 +24,7 @@ import type { GhostTextAreaHandle } from '../ui/GhostTextArea'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
 import { TagComboBox } from '../ui/TagComboBox'
+import { BroadcastPicker, BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
 import { useCloudOps } from '../../context/CloudOpsContext'
@@ -971,6 +972,9 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   const [ytManualLoading, setYtManualLoading] = useState(false)
   const [ytManualError, setYtManualError] = useState('')
   const [ytNewPrivacy, setYtNewPrivacy] = useState<'public' | 'unlisted' | 'private'>('public')
+  // 24-hour HH:MM. Defaults to 19:00 local for consistency with the relay's
+  // reschedule modal — most streamers schedule for an evening slot.
+  const [ytNewTime, setYtNewTime] = useState<string>('19:00')
   const [ytCreatingBroadcast, setYtCreatingBroadcast] = useState(false)
   const [ytCreateError, setYtCreateError] = useState('')
 
@@ -1224,8 +1228,10 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
       })
 
       if (!isPastStream) {
-        // Only the next upcoming stream gets the active broadcast auto-attached
-        if (!isNextUpcomingStream) return
+        // Used to gate on isNextUpcomingStream; removed now that the picker
+        // surfaces multi-link warnings — users can deliberately link any
+        // upcoming stream to any broadcast, and the warning makes the
+        // implication visible at pick-time.
         setYtBroadcastsLoading(true)
         window.api.youtubeGetBroadcasts().then((items: LiveBroadcast[]) => {
           console.log('[YT renderer] broadcasts:', items.length, items.map((b: any) => b.id))
@@ -1396,6 +1402,34 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     () => (isPastStream ? ytVods : ytBroadcasts).find(b => b.id === ytSelectedBroadcastId) ?? null,
     [isPastStream, ytVods, ytBroadcasts, ytSelectedBroadcastId]
   )
+
+  // Build the cross-link list so the BroadcastPicker can warn when a broadcast
+  // is already linked from another stream item. `allFolders` is pre-filtered
+  // by the caller to exclude the current folder (edit mode), so every entry
+  // here represents a "linked elsewhere" reference. We allow multi-link by
+  // design — see _todo.md / Discord — but surface it loudly so the user can
+  // catch accidental double-links.
+  const broadcastLinks = useMemo<BroadcastLinkRef[]>(() => {
+    const refs: BroadcastLinkRef[] = []
+    for (const f of allFolders) {
+      const id = f.meta?.ytVideoId
+      if (!id) continue
+      const title = f.meta?.ytTitle?.trim() || f.meta?.twitchTitle?.trim()
+      refs.push({
+        broadcastId: id,
+        folderDate: f.date,
+        folderTitle: title || undefined,
+      })
+    }
+    return refs
+  }, [allFolders])
+
+  /** Cross-link refs for the currently-selected broadcast, if any. Used to
+   *  surface a "shared with other items" banner in the linked-state UI. */
+  const selectedBroadcastSharedLinks = useMemo<BroadcastLinkRef[]>(() => {
+    if (!ytSelectedBroadcastId) return []
+    return broadcastLinks.filter(l => l.broadcastId === ytSelectedBroadcastId)
+  }, [ytSelectedBroadcastId, broadcastLinks])
 
   const broadcastMismatch = useMemo(() => {
     if (!selectedBroadcast) return false
@@ -1886,159 +1920,233 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               <LucideYoutube size={13} className="text-red-400" /> YouTube
             </h3>
 
-            {/* Broadcast / VOD picker */}
-            {!isPastStream && !isNextUpcomingStream ? (
-              <p className="text-xs text-gray-500 italic">Only the next upcoming stream can be linked to a live broadcast.</p>
-            ) : ytBroadcastError ? (
+            {/* Broadcast / VOD picker.
+                State machine:
+                  Linked    (ytSelectedBroadcastId set) → dropdown shows selected, X to unlink, Push button enabled
+                  Unlinked  (no id) → three options stacked vertically: pick, paste, create
+                The "Create" affordance is only available for future-dated
+                streams (you can't schedule a broadcast in the past), and is
+                hidden entirely for past-stream metadata edits. */}
+            {ytBroadcastError ? (
               <p className="text-xs text-red-400 flex items-center gap-1.5">
                 <AlertTriangle size={12} className="shrink-0" />
                 {ytBroadcastError}
               </p>
-            ) : !isPastStream && ytBroadcasts.length === 0 && !ytBroadcastsLoading ? (
-              <div className="flex flex-col gap-2">
-                <p className="text-xs text-gray-500 italic">No upcoming or active broadcasts found.</p>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-400 shrink-0">Privacy</label>
-                  <div className="relative">
-                    <select
-                      value={ytNewPrivacy}
-                      onChange={e => setYtNewPrivacy(e.target.value as 'public' | 'unlisted' | 'private')}
-                      disabled={ytCreatingBroadcast}
-                      className="appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-7 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50"
-                    >
-                      <option value="public">Public</option>
-                      <option value="unlisted">Unlisted</option>
-                      <option value="private">Private</option>
-                    </select>
-                    <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-                  </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    loading={ytCreatingBroadcast}
-                    onClick={async () => {
-                      setYtCreatingBroadcast(true)
-                      setYtCreateError('')
-                      try {
-                        // Use the stream's date at noon local, or now+5min if that's already past
-                        const noon = new Date(`${date}T12:00:00`).getTime()
-                        const future = Date.now() + 5 * 60 * 1000
-                        const scheduledStartTime = new Date(Math.max(noon, future)).toISOString()
-                        const created = await window.api.youtubeCreateBroadcast({
-                          title: ytTitle || 'Untitled stream',
-                          description: ytDescription || '',
-                          scheduledStartTime,
-                          privacyStatus: ytNewPrivacy,
-                        })
-                        setYtBroadcasts(prev => [created, ...prev])
-                        setYtSelectedBroadcastId(created.id)
-                        setYtVideoUnlinked(false)
-                      } catch (err: any) {
-                        setYtCreateError(err?.message ?? 'Failed to create broadcast')
-                      } finally {
-                        setYtCreatingBroadcast(false)
-                      }
-                    }}
-                  >
-                    Create broadcast
-                  </Button>
-                </div>
-                {ytCreateError && (
-                  <p className="text-xs text-red-400 flex items-center gap-1.5">
-                    <AlertTriangle size={12} className="shrink-0" />
-                    {ytCreateError}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-medium text-gray-400">
-                  {isPastStream ? 'VOD' : 'Broadcast'}
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <div className="relative flex-1">
-                    <select
-                      value={ytSelectedBroadcastId}
-                      onChange={e => { setYtSelectedBroadcastId(e.target.value); setYtManualUrl(''); setYtManualError('') }}
-                      onMouseDown={() => isPastStream && loadAllVods()}
-                      disabled={ytBroadcastsLoading}
-                      className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 disabled:cursor-wait"
-                    >
-                      {!ytSelectedBroadcastId && (
-                        <option value="">— No video found for this date —</option>
-                      )}
-                      {(isPastStream ? ytVods : ytBroadcasts).map(b => {
-                        const startDate = utcToLocalDate(b.snippet.actualStartTime ?? b.snippet.scheduledStartTime ?? '')
-                        return (
-                          <option key={b.id} value={b.id}>
-                            {b.snippet.title}{isPastStream && startDate ? ` · ${startDate}` : ''}
-                          </option>
-                        )
-                      })}
-                    </select>
-                    {ytBroadcastsLoading
-                      ? <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 animate-spin pointer-events-none" />
-                      : <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-                    }
-                  </div>
-                  {ytSelectedBroadcastId && (
-                    <button
-                      type="button"
-                      onClick={() => { setYtSelectedBroadcastId(''); setYtVideoUnlinked(true); setYtManualUrl(''); setYtManualError('') }}
-                      className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors shrink-0"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-                {!ytSelectedBroadcastId && (
-                  <div className="flex flex-col gap-1">
-                    <input
-                      value={ytManualUrl}
-                      onChange={e => handleManualUrlChange(e.target.value)}
-                      placeholder="Paste YouTube URL or video ID to link manually…"
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-600"
-                    />
-                    {ytManualLoading && (
-                      <p className="text-xs text-gray-500 flex items-center gap-1.5">
-                        <Loader2 size={11} className="animate-spin shrink-0" />
-                        Looking up video…
-                      </p>
-                    )}
-                    {ytManualError && (
-                      <p className="text-xs text-red-400 flex items-center gap-1.5">
-                        <AlertTriangle size={11} className="shrink-0" />
-                        {ytManualError}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {(broadcastMismatch || ytSelectedBroadcastId) && (
-                  <div className="flex items-center gap-2">
-                    {broadcastMismatch && (
-                      <button
-                        type="button"
-                        onClick={applyBroadcastToMeta}
-                        className="flex items-center gap-1.5 text-xs text-yellow-300 bg-yellow-500/10 border border-yellow-500/30 hover:bg-yellow-500/20 transition-colors rounded-lg px-3 py-1.5"
-                      >
-                        <AlertTriangle size={11} className="shrink-0" />
-                        {isPastStream ? 'Update metadata to match YouTube VOD info' : 'Update metadata to match YouTube stream info'}
-                      </button>
-                    )}
+            ) : (() => {
+              // Future-date gate for the Create section. The "Create" option
+              // is only meaningful for a stream that hasn't happened yet.
+              const streamDateInFuture = !isPastStream && (() => {
+                const [y, m, d] = date.split('-').map(n => parseInt(n, 10))
+                if (!y || !m || !d) return false
+                const eod = new Date(y, m - 1, d, 23, 59, 59, 999)
+                return eod.getTime() > Date.now()
+              })()
+              const createBroadcast = async () => {
+                setYtCreatingBroadcast(true)
+                setYtCreateError('')
+                try {
+                  // Build scheduledStartTime from the stream's date + user's
+                  // chosen time. If that ends up in the past (e.g. user picks
+                  // an early time on a same-day stream), clamp to now+5min so
+                  // YouTube doesn't reject the request.
+                  const [hh, mm] = ytNewTime.split(':').map(n => parseInt(n, 10))
+                  const [y, m, d] = date.split('-').map(n => parseInt(n, 10))
+                  const target = new Date(y, m - 1, d, hh, mm, 0, 0).getTime()
+                  const future = Date.now() + 5 * 60 * 1000
+                  const scheduledStartTime = new Date(Math.max(target, future)).toISOString()
+                  const created = await window.api.youtubeCreateBroadcast({
+                    title: ytTitle || 'Untitled stream',
+                    description: ytDescription || '',
+                    scheduledStartTime,
+                    privacyStatus: ytNewPrivacy,
+                  })
+                  setYtBroadcasts(prev => [created, ...prev])
+                  setYtSelectedBroadcastId(created.id)
+                  setYtVideoUnlinked(false)
+                } catch (err: any) {
+                  setYtCreateError(err?.message ?? 'Failed to create broadcast')
+                } finally {
+                  setYtCreatingBroadcast(false)
+                }
+              }
+              return (
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-medium text-gray-400">
+                    {isPastStream ? 'VOD' : 'Broadcast'}
+                  </label>
+
+                  {/* Dropdown — primary picker. Lists existing broadcasts
+                      (including the user's default broadcast if they have
+                      one set up). The X clears the selection so the user can
+                      switch via dropdown or fall through to URL/Create.
+                      Rich-row rendering + cross-link warnings live inside
+                      the BroadcastPicker component. */}
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex-1 min-w-0">
+                      <BroadcastPicker
+                        value={ytSelectedBroadcastId}
+                        onChange={id => { setYtSelectedBroadcastId(id); setYtManualUrl(''); setYtManualError('') }}
+                        broadcasts={isPastStream ? ytVods : ytBroadcasts}
+                        otherFolderLinks={broadcastLinks}
+                        loading={ytBroadcastsLoading}
+                        placeholder="— Select a broadcast —"
+                        emptyLabel={!isPastStream ? '— No upcoming broadcasts —' : '— No VODs found —'}
+                        showDateOnly={isPastStream}
+                        onOpen={isPastStream ? loadAllVods : undefined}
+                      />
+                    </div>
                     {ytSelectedBroadcastId && (
                       <button
                         type="button"
-                        onClick={() => window.api.openUrl(`https://studio.youtube.com/video/${ytSelectedBroadcastId}`)}
-                        className="flex items-center gap-1.5 text-xs text-gray-200 bg-surface-100 border border-white/10 hover:bg-surface-200 transition-colors rounded-lg px-3 py-1.5"
+                        onClick={() => { setYtSelectedBroadcastId(''); setYtVideoUnlinked(true); setYtManualUrl(''); setYtManualError('') }}
+                        className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors shrink-0"
+                        title="Unlink from broadcast"
                       >
-                        <LucideYoutube size={11} />
-                        Open in YouTube Studio
+                        <X size={12} />
                       </button>
                     )}
                   </div>
-                )}
-              </div>
-            )}
+
+                  {/* Linked-state multi-link warning — surfaced whenever the
+                      currently-selected broadcast is also linked from one or
+                      more other stream items. Not a blocker; the message
+                      explains the implication of pushing this item's data. */}
+                  {ytSelectedBroadcastId && selectedBroadcastSharedLinks.length > 0 && (
+                    <div className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 leading-relaxed">
+                      <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                      <span>
+                        {selectedBroadcastSharedLinks.length === 1 ? (
+                          <>
+                            Another stream item is already linked to this broadcast:{' '}
+                            <strong className="text-amber-200">
+                              {selectedBroadcastSharedLinks[0].folderDate}
+                              {selectedBroadcastSharedLinks[0].folderTitle ? ` · ${selectedBroadcastSharedLinks[0].folderTitle}` : ''}
+                            </strong>
+                            . Pushing this item's data will overwrite the stream details on YouTube.
+                          </>
+                        ) : (
+                          <>
+                            <strong className="text-amber-200">{selectedBroadcastSharedLinks.length} other stream items</strong> are
+                            already linked to this broadcast. Pushing this item's data will overwrite the stream details on YouTube.
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Unlinked-state alternatives: paste URL + (for future-dated
+                      streams) create a new broadcast. Both fall away when a
+                      broadcast is selected so the linked-state UX stays clean. */}
+                  {!ytSelectedBroadcastId && (
+                    <>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Or paste a URL</span>
+                        <input
+                          value={ytManualUrl}
+                          onChange={e => handleManualUrlChange(e.target.value)}
+                          placeholder="https://youtube.com/watch?v=… or video ID"
+                          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-600"
+                        />
+                        {ytManualLoading && (
+                          <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                            <Loader2 size={11} className="animate-spin shrink-0" />
+                            Looking up video…
+                          </p>
+                        )}
+                        {ytManualError && (
+                          <p className="text-xs text-red-400 flex items-center gap-1.5">
+                            <AlertTriangle size={11} className="shrink-0" />
+                            {ytManualError}
+                          </p>
+                        )}
+                      </div>
+
+                      {streamDateInFuture && (
+                        <div className="flex flex-col gap-1.5">
+                          <span className="text-[10px] text-gray-500 uppercase tracking-wider">Or create a new scheduled broadcast</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              <label className="text-xs text-gray-400 shrink-0">Time</label>
+                              <input
+                                type="time"
+                                value={ytNewTime}
+                                onChange={e => setYtNewTime(e.target.value)}
+                                disabled={ytCreatingBroadcast}
+                                // Asymmetric padding: native time-input chrome
+                                // adds ~1px to the bottom of the rendered box
+                                // that other inputs don't have. pt-[5px] pb-1
+                                // shaves that off so the height lands flush
+                                // with the privacy dropdown + button.
+                                className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <label className="text-xs text-gray-400 shrink-0">Privacy</label>
+                              <div className="relative">
+                                <select
+                                  value={ytNewPrivacy}
+                                  onChange={e => setYtNewPrivacy(e.target.value as 'public' | 'unlisted' | 'private')}
+                                  disabled={ytCreatingBroadcast}
+                                  className="appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-7 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50"
+                                >
+                                  <option value="public">Public</option>
+                                  <option value="unlisted">Unlisted</option>
+                                  <option value="private">Private</option>
+                                </select>
+                                <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                              </div>
+                            </div>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              loading={ytCreatingBroadcast}
+                              onClick={createBroadcast}
+                            >
+                              Create broadcast
+                            </Button>
+                          </div>
+                          {ytCreateError && (
+                            <p className="text-xs text-red-400 flex items-center gap-1.5">
+                              <AlertTriangle size={12} className="shrink-0" />
+                              {ytCreateError}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Linked-state actions — mismatch banner + Open in Studio. */}
+                  {(broadcastMismatch || ytSelectedBroadcastId) && (
+                    <div className="flex items-center gap-2">
+                      {broadcastMismatch && (
+                        <button
+                          type="button"
+                          onClick={applyBroadcastToMeta}
+                          className="flex items-center gap-1.5 text-xs text-gray-200 bg-surface-100 border border-white/10 hover:bg-surface-200 transition-colors rounded-lg px-3 py-1.5"
+                          title={isPastStream
+                            ? 'Replace the metadata in this modal with the title/description/tags from YouTube'
+                            : 'Replace the metadata in this modal with the title/description/tags from YouTube'}
+                        >
+                          <RefreshCw size={11} className="shrink-0" />
+                          Pull info from YouTube
+                        </button>
+                      )}
+                      {ytSelectedBroadcastId && (
+                        <button
+                          type="button"
+                          onClick={() => window.api.openUrl(`https://studio.youtube.com/video/${ytSelectedBroadcastId}`)}
+                          className="flex items-center gap-1.5 text-xs text-gray-200 bg-surface-100 border border-white/10 hover:bg-surface-200 transition-colors rounded-lg px-3 py-1.5"
+                        >
+                          <LucideYoutube size={11} />
+                          Open in YouTube Studio
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Thumbnail picker */}
             <div className="flex flex-col gap-1.5">
@@ -2800,7 +2908,11 @@ export function StreamsPage({
 
   // ── YouTube live detection ─────────────────────────────────────────────────
   const [ytConnectedOuter, setYtConnectedOuter] = useState(false)
-  const [ytIsLive, setYtIsLive] = useState(false)
+  // Map of broadcastId → currently-live? Built from a batched poll over every
+  // upcoming linked broadcast plus push updates from the relay orchestrator.
+  // Lets us turn the badge green for whichever upcoming stream the user
+  // actually goes live with (not just the soonest one).
+  const [ytLiveMap, setYtLiveMap] = useState<Record<string, boolean>>({})
   type YtVideoStatus = { privacyStatus: string; isLivestream: boolean }
   const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, YtVideoStatus>>({})
 
@@ -2855,6 +2967,16 @@ export function StreamsPage({
   const [rescheduleLoading, setRescheduleLoading] = useState(false)
   const [rescheduling, setRescheduling] = useState(false)
   const [rescheduleError, setRescheduleError] = useState<string | null>(null)
+  // Optional YT-broadcast-creation flow inside the reschedule modal. Surfaces
+  // a checkbox + time + privacy picker only when (a) the new date is in the
+  // future, (b) YouTube is connected, and (c) the stream isn't already linked
+  // to an existing ytVideoId (we never silently replace a live link). Time
+  // defaults to 19:00 local; privacy defaults to private since the user can
+  // change it from YT Studio if they want it public (in-app privacy editing
+  // is tracked as a follow-up — see _todo.md item 7).
+  const [rescheduleTime, setRescheduleTime] = useState('19:00')
+  const [rescheduleCreateBroadcast, setRescheduleCreateBroadcast] = useState(false)
+  const [rescheduleBroadcastPrivacy, setRescheduleBroadcastPrivacy] = useState<'private' | 'unlisted' | 'public'>('private')
 
   useEffect(() => {
     setRescheduleError(null)
@@ -2867,6 +2989,16 @@ export function StreamsPage({
       .then(setReschedulePreview)
       .finally(() => setRescheduleLoading(false))
   }, [rescheduleTarget, rescheduleDate])
+
+  // Reset the YT-broadcast sub-controls whenever the modal is reopened or the
+  // target stream changes — sticky state across opens would be surprising
+  // (e.g. checkbox stays on after a successful create, then accidentally
+  // fires again on the next reschedule of an unrelated stream).
+  useEffect(() => {
+    setRescheduleCreateBroadcast(false)
+    setRescheduleTime('19:00')
+    setRescheduleBroadcastPrivacy('private')
+  }, [rescheduleTarget])
 
   const [deleteTarget, setDeleteTarget] = useState<StreamFolder | null>(null)
   const [deleteTree, setDeleteTree] = useState<TreeNode[]>([])
@@ -3584,37 +3716,64 @@ export function StreamsPage({
     window.api.youtubeGetVideoStatuses(ids).then(setYtVideoStatusMap).catch(() => {})
   }, [ytConnectedOuter, linkedYtIdsKey])
 
-  // Resolve the broadcast id to poll for the live indicator. Derived as a stable
-  // string so the polling effect below doesn't tear down + re-fire whenever the
-  // `folders` array reference changes with identical content.
-  const nextUpcomingBroadcastId = useMemo(() => {
-    if (!ytConnectedOuter || !nextUpcomingFolderPath) return null
-    const f = folders.find(f => f.folderPath === nextUpcomingFolderPath)
-    if (!f || f.date !== today() || !f.meta?.ytVideoId) return null
-    return f.meta.ytVideoId
-  }, [ytConnectedOuter, nextUpcomingFolderPath, folders])
+  // Collect every upcoming linked broadcast as a stable joined key so the
+  // polling effect doesn't tear down on incidental `folders` re-renders.
+  // User might decide to stream the 2nd-scheduled session before the 1st, so
+  // we can't just watch the soonest one — we watch them all.
+  const upcomingLinkedBroadcastKey = useMemo(() => {
+    if (!ytConnectedOuter) return ''
+    const todayStr = today()
+    return folders
+      .filter(f => isPendingStream(f, todayStr) && !!f.meta?.ytVideoId)
+      .map(f => f.meta!.ytVideoId!)
+      .sort()
+      .join(',')
+  }, [ytConnectedOuter, folders])
 
-  // Poll the upcoming broadcast every 60s to detect if it's live
+  // Batched poll: one liveBroadcasts.list call covers every upcoming linked
+  // broadcast (still 1 quota unit). Push updates from the relay orchestrator
+  // below cover the SM-orchestrated case faster than the 60s tick.
   useEffect(() => {
-    if (!nextUpcomingBroadcastId) { setYtIsLive(false); return }
-    const broadcastId = nextUpcomingBroadcastId
-    const check = () => window.api.youtubeCheckBroadcastIsLive(broadcastId)
-      .then(r => {
-        setYtIsLive(r.isLive)
-        // checkBroadcastIsLive hits /liveBroadcasts, so a non-null reply
-        // implies isLivestream=true regardless of whether it's currently
-        // airing. Preserve any pre-existing isLivestream flag if we already
-        // had one from the bulk fetch.
-        if (r.privacyStatus) setYtVideoStatusMap(prev => ({
-          ...prev,
-          [broadcastId]: { privacyStatus: r.privacyStatus!, isLivestream: true },
-        }))
+    if (!upcomingLinkedBroadcastKey) { setYtLiveMap({}); return }
+    const ids = upcomingLinkedBroadcastKey.split(',')
+    const check = () => window.api.youtubeCheckBroadcastsAreLive(ids)
+      .then(map => {
+        const liveById: Record<string, boolean> = {}
+        for (const id of ids) liveById[id] = !!map[id]?.isLive
+        setYtLiveMap(prev => ({ ...prev, ...liveById }))
+        // Hydrate privacy + isLivestream from the same response — these IDs
+        // are all liveBroadcasts, so isLivestream is implicitly true.
+        setYtVideoStatusMap(prev => {
+          const next = { ...prev }
+          for (const id of ids) {
+            const p = map[id]?.privacyStatus
+            if (p) next[id] = { privacyStatus: p, isLivestream: true }
+          }
+          return next
+        })
       })
       .catch(() => {})
     check()
     const interval = setInterval(check, 60_000)
     return () => clearInterval(interval)
-  }, [nextUpcomingBroadcastId])
+  }, [upcomingLinkedBroadcastKey])
+
+  // Push-based override: when the relay orchestrator transitions a broadcast
+  // to live, flip the map immediately instead of waiting up to 60s for the
+  // next poll. Symmetric clear on completing/completed so a finished broadcast
+  // doesn't keep the green badge until the next tick.
+  useEffect(() => {
+    const off = window.api.onRelayLifecycle(ev => {
+      const id = ev?.broadcastId
+      if (!id) return
+      if (ev.stage === 'live') {
+        setYtLiveMap(prev => prev[id] ? prev : { ...prev, [id]: true })
+      } else if (ev.stage === 'completing' || ev.stage === 'completed') {
+        setYtLiveMap(prev => (id in prev) ? { ...prev, [id]: false } : prev)
+      }
+    })
+    return off
+  }, [])
 
   const toggleGameFilter = (game: string) => {
     setFilterGames(prev => {
@@ -4008,7 +4167,7 @@ export function StreamsPage({
                       selected={selectedPaths.has(selectionKey(folder))}
                       isNextUpcoming={folder.folderPath === nextUpcomingFolderPath}
                       isPending={pending}
-                      isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
+                      isLive={!!(folder.meta?.ytVideoId && ytLiveMap[folder.meta.ytVideoId])}
                       privacyStatus={folder.meta?.ytVideoId ? ytVideoStatusMap[folder.meta.ytVideoId]?.privacyStatus ?? null : null}
                       isLivestream={folder.meta?.ytVideoId ? ytVideoStatusMap[folder.meta.ytVideoId]?.isLivestream ?? null : null}
                       cloudSyncActive={cloudSyncActive}
@@ -4200,7 +4359,7 @@ return (
                   selected={selectedPaths.has(selectionKey(folder))}
                   isNextUpcoming={folder.folderPath === nextUpcomingFolderPath}
                   isPending={pending}
-                  isLive={ytIsLive && folder.folderPath === nextUpcomingFolderPath}
+                  isLive={!!(folder.meta?.ytVideoId && ytLiveMap[folder.meta.ytVideoId])}
                   privacyStatus={folder.meta?.ytVideoId ? ytVideoStatusMap[folder.meta.ytVideoId]?.privacyStatus ?? null : null}
                   isLivestream={folder.meta?.ytVideoId ? ytVideoStatusMap[folder.meta.ytVideoId]?.isLivestream ?? null : null}
                   cloudSyncActive={cloudSyncActive}
@@ -4309,7 +4468,15 @@ return (
       )}
 
       {/* Delete confirmation modal */}
-      {rescheduleTarget && (
+      {rescheduleTarget && (() => {
+        // Derived booleans for the optional YT-broadcast-creation flow. The
+        // checkbox only surfaces when the new date is in the future, YT is
+        // connected, and the stream isn't already linked to a broadcast
+        // (replacing an existing link silently would be surprising).
+        const newDateIsFuture = !!rescheduleDate && rescheduleDate > today()
+        const hasExistingYtLink = !!rescheduleTarget.meta?.ytVideoId
+        const canOfferCreateBroadcast = newDateIsFuture && ytConnectedOuter && !hasExistingYtLink
+        return (
         <Modal
           isOpen
           onClose={() => { setRescheduleTarget(null); setReschedulePreview(null); setRescheduleError(null) }}
@@ -4328,7 +4495,41 @@ return (
                   setRescheduling(true)
                   setRescheduleError(null)
                   try {
-                    await window.api.rescheduleStream(rescheduleTarget.folderPath, rescheduleTarget.date, rescheduleDate)
+                    const result = await window.api.rescheduleStream(rescheduleTarget.folderPath, rescheduleTarget.date, rescheduleDate)
+                    // Optional follow-up: create a YT broadcast for the new
+                    // date and link its ID into the stream's meta. Non-fatal
+                    // — the rename has already committed by this point, so a
+                    // YT failure leaves the modal open with a friendly
+                    // message instead of rolling anything back.
+                    if (rescheduleCreateBroadcast && canOfferCreateBroadcast) {
+                      try {
+                        const meta = rescheduleTarget.meta
+                        const title = meta?.ytTitle?.trim()
+                          || meta?.twitchTitle?.trim()
+                          || (meta?.games?.length ? meta.games.join(' · ') : '')
+                          || rescheduleTarget.folderName
+                          || 'Stream'
+                        const description = meta?.ytDescription ?? ''
+                        // Construct the start time in the user's local TZ,
+                        // then serialize as ISO UTC for the YouTube API.
+                        const [hh, mm] = rescheduleTime.split(':').map(n => parseInt(n, 10))
+                        const [y, m, d] = rescheduleDate.split('-').map(n => parseInt(n, 10))
+                        const scheduledStartTime = new Date(y, m - 1, d, hh, mm, 0, 0).toISOString()
+                        const broadcast = await window.api.youtubeCreateBroadcast({
+                          title, description, scheduledStartTime,
+                          privacyStatus: rescheduleBroadcastPrivacy,
+                        })
+                        await window.api.updateStreamMeta(
+                          result.newFolderPath,
+                          { ytVideoId: broadcast.id },
+                          result.newMetaKey,
+                        )
+                      } catch (e: any) {
+                        setRescheduleError(`Stream rescheduled, but couldn't create the YouTube livestream: ${e?.message ?? String(e)}. You can link a broadcast manually from the stream's metadata.`)
+                        loadFolders(streamsDir)
+                        return
+                      }
+                    }
                     setRescheduleTarget(null)
                     setReschedulePreview(null)
                     loadFolders(streamsDir)
@@ -4367,6 +4568,62 @@ return (
 
             {rescheduleDate === rescheduleTarget.date && (
               <p className="text-xs text-gray-500 italic">Choose a different date to reschedule.</p>
+            )}
+
+            {/* Future-date notice — shown whenever the new date is after
+                today, regardless of YT connection. Tells the user the row's
+                "upcoming" state will return after rescheduling. */}
+            {newDateIsFuture && rescheduleDate !== rescheduleTarget.date && (
+              <div className="flex items-start gap-2 text-xs text-blue-300 bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2 leading-relaxed">
+                <CalendarClock size={12} className="shrink-0 mt-0.5" />
+                <span>This stream will be marked as upcoming after rescheduling.</span>
+              </div>
+            )}
+
+            {/* Optional YT broadcast creation. Gated by canOfferCreateBroadcast
+                so we never silently replace an existing ytVideoId or offer
+                this when YT isn't connected. Time + privacy controls are
+                indented under the checkbox so the relationship is clear. */}
+            {canOfferCreateBroadcast && rescheduleDate !== rescheduleTarget.date && (
+              <div className="flex flex-col gap-2 border border-white/5 rounded-lg px-3 py-2.5 bg-white/[0.02]">
+                <Checkbox
+                  size="sm"
+                  checked={rescheduleCreateBroadcast}
+                  onChange={setRescheduleCreateBroadcast}
+                  label="Also create a scheduled YouTube livestream for this date"
+                />
+                {rescheduleCreateBroadcast && (
+                  <div className="flex flex-col gap-2 pl-6">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-500 w-16 shrink-0">Time</label>
+                      <input
+                        type="time"
+                        value={rescheduleTime}
+                        onChange={e => setRescheduleTime(e.target.value)}
+                        className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+                      />
+                      <span className="text-[10px] text-gray-600">your local time</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 w-16 shrink-0">Privacy</span>
+                      <div className="flex gap-3">
+                        {(['private', 'unlisted', 'public'] as const).map(p => (
+                          <label key={p} className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="rescheduleBroadcastPrivacy"
+                              checked={rescheduleBroadcastPrivacy === p}
+                              onChange={() => setRescheduleBroadcastPrivacy(p)}
+                              className="cursor-pointer accent-purple-500"
+                            />
+                            <span className="text-xs text-gray-300 capitalize">{p}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {rescheduleDate !== rescheduleTarget.date && rescheduleLoading && (
@@ -4427,7 +4684,8 @@ return (
             )}
           </div>
         </Modal>
-      )}
+        )
+      })()}
 
       {deleteTarget && (
         <Modal
@@ -5014,7 +5272,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                     </Tooltip>
                 )}
                 {isPending && (
-                  isNextUpcoming && meta?.ytVideoId ? (
+                  meta?.ytVideoId ? (
                     <Tooltip content={isLive ? 'Live now' : (privacyLabel ? `Open in YouTube Studio · ${privacyLabel}` : 'Open in YouTube Studio')}>
                       <button
                         onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}/livestreaming`) }}
@@ -5393,7 +5651,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                 </Tooltip>
               )}
               {isPending && (
-                isNextUpcoming && meta?.ytVideoId ? (() => {
+                meta?.ytVideoId ? (() => {
                   const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
                   const liveLabel = isLive ? 'Live now' : 'Open in YouTube Studio'
                   const tooltipText = privacyLabel ? `${liveLabel} · ${privacyLabel}` : liveLabel
@@ -5728,11 +5986,9 @@ function ExpandedStreamPanel({
                   for this folder. Player / thumbnail / metadata / open
                   folder / new episode stay live since they're read-only or
                   produce a separate folder. */}
-              {isPending && (
-                <Tooltip content={isArchiving ? 'Reschedule disabled — archive in progress' : 'Reschedule'}>
-                  <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} disabled={isArchiving} />
-                </Tooltip>
-              )}
+              <Tooltip content={isArchiving ? 'Reschedule disabled — archive in progress' : 'Reschedule'}>
+                <Button variant="ghost" size="icon-sm" icon={<CalendarClock size={12} />} onClick={onReschedule} disabled={isArchiving} />
+              </Tooltip>
               {videoCount > 0 && <Tooltip content="Send to Player"><Button variant="ghost" size="icon-sm" icon={<Film size={12} />} onClick={onSendToPlayer} /></Tooltip>}
               {videoCount > 0 && (
                 <Tooltip content={isArchiving ? "Already in the converter — archive in progress" : 'Send to Converter'}>

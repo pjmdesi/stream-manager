@@ -315,23 +315,35 @@ export async function fetchVideoStatuses(
   return map
 }
 
-/** Check whether a specific broadcast is currently live and return its privacy status.
- *  Uses a minimal part=status query — costs 1 quota unit. */
-export async function checkBroadcastIsLive(
-  broadcastId: string,
+/** Check live-status + privacy for a batch of broadcasts in a single call.
+ *  Uses `liveBroadcasts.list?id=a,b,c` — 1 quota unit regardless of ID count,
+ *  so polling N upcoming broadcasts costs the same as polling one. Chunks at
+ *  50 IDs per call to stay under the API's per-request cap. Returns a map
+ *  keyed by broadcast ID; missing IDs (deleted broadcasts, wrong account)
+ *  are simply absent from the result. */
+export async function checkBroadcastsAreLive(
+  broadcastIds: string[],
   clientId: string,
   clientSecret: string
-): Promise<{ isLive: boolean; privacyStatus: string | null }> {
-  const data = await ytRequest(
-    `/liveBroadcasts?${new URLSearchParams({ part: 'status', id: broadcastId })}`,
-    { method: 'GET' },
-    clientId, clientSecret
-  )
-  const status = data?.items?.[0]?.status ?? null
-  return {
-    isLive: status?.lifeCycleStatus === 'live',
-    privacyStatus: status?.privacyStatus ?? null,
+): Promise<Record<string, { isLive: boolean; privacyStatus: string | null }>> {
+  const map: Record<string, { isLive: boolean; privacyStatus: string | null }> = {}
+  if (broadcastIds.length === 0) return map
+  for (let i = 0; i < broadcastIds.length; i += 50) {
+    const chunk = broadcastIds.slice(i, i + 50)
+    const data = await ytRequest(
+      `/liveBroadcasts?${new URLSearchParams({ part: 'status', id: chunk.join(','), maxResults: '50' })}`,
+      { method: 'GET' },
+      clientId, clientSecret
+    )
+    for (const item of (data?.items ?? [])) {
+      if (!item?.id) continue
+      map[item.id] = {
+        isLive: item.status?.lifeCycleStatus === 'live',
+        privacyStatus: item.status?.privacyStatus ?? null,
+      }
+    }
   }
+  return map
 }
 
 /** Update a broadcast's title, description, and gameTitle.
@@ -357,7 +369,13 @@ export async function createBroadcast(
     },
     contentDetails: {
       enableAutoStart: false,
-      enableAutoStop: false,
+      // enableAutoStop = true is a safety net for SM-created broadcasts: if SM
+      // crashes mid-stream and never gets to fire liveBroadcasts.transition,
+      // YouTube will still auto-complete the broadcast ~1 minute after ingest
+      // stops (per https://developers.google.com/youtube/v3/live/life-of-a-broadcast).
+      // SM's normal end-of-stream flow still calls transition('complete') explicitly
+      // so the VOD finalizes immediately instead of waiting for the ~60s timeout.
+      enableAutoStop: true,
     },
   }
   return ytRequest(
@@ -365,6 +383,98 @@ export async function createBroadcast(
     { method: 'POST', body: JSON.stringify(body) },
     clientId, clientSecret
   )
+}
+
+/** Fetch the channel's default persistent stream key via liveStreams.list.
+ *  Returns the first stream owned by the authenticated user — for the vast
+ *  majority of channels this is the "Default ingestion" stream that's been
+ *  there since the channel enabled live streaming.
+ *
+ *  Returns null if the channel has no streams yet (rare — usually means
+ *  the user has never enabled live streaming on the channel). Throws on
+ *  API/auth failure so callers can surface the real reason. */
+export async function getDefaultStreamKey(
+  clientId: string,
+  clientSecret: string,
+): Promise<{ streamId: string; streamName: string; ingestionAddress: string } | null> {
+  const res = await ytRequest(
+    `/liveStreams?${new URLSearchParams({ part: 'id,cdn,snippet', mine: 'true', maxResults: '10' })}`,
+    { method: 'GET' },
+    clientId, clientSecret,
+  )
+  const items = res?.items ?? []
+  if (items.length === 0) return null
+  // Prefer the one whose snippet.title contains "Default" (YouTube creates one
+  // automatically named "Default ingestion"); fall back to the first if no
+  // such match exists (some channels have renamed it).
+  const defaultStream = items.find((s: any) => /default/i.test(s.snippet?.title ?? '')) ?? items[0]
+  const streamName: string | undefined = defaultStream?.cdn?.ingestionInfo?.streamName
+  const ingestionAddress: string | undefined = defaultStream?.cdn?.ingestionInfo?.ingestionAddress
+  if (!streamName) return null
+  return {
+    streamId: defaultStream.id,
+    streamName,
+    ingestionAddress: ingestionAddress ?? 'rtmp://a.rtmp.youtube.com/live2',
+  }
+}
+
+/** Bind a broadcast to a stream. The stream becomes the ingest pipe for the
+ *  broadcast; without binding, calling transition('live') will fail.
+ *  Idempotent — binding a broadcast that's already bound to the same stream
+ *  is a no-op as far as YouTube cares. */
+export async function bindBroadcast(
+  broadcastId: string,
+  streamId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<void> {
+  await ytRequest(
+    `/liveBroadcasts/bind?${new URLSearchParams({ id: broadcastId, part: 'id,status', streamId })}`,
+    { method: 'POST' },
+    clientId, clientSecret,
+  )
+}
+
+/** Transition a broadcast's lifecycle status. Valid targets:
+ *    'testing'   — receive on monitor stream only (we don't use this)
+ *    'live'      — broadcast is visible to viewers
+ *    'complete'  — broadcast is over; finalizes the VOD
+ *
+ *  Pre-conditions YouTube enforces:
+ *    - 'live' requires the bound stream to be in 'active' status (i.e.
+ *      receiving data); if called too soon after bind, fails with an error
+ *      mentioning stream status. Caller should retry with a delay.
+ *    - 'complete' can be called from 'live' (normal end-of-stream) or
+ *      'testing'; idempotent if already 'complete'. */
+export async function transitionBroadcast(
+  broadcastId: string,
+  broadcastStatus: 'testing' | 'live' | 'complete',
+  clientId: string,
+  clientSecret: string,
+): Promise<void> {
+  await ytRequest(
+    `/liveBroadcasts/transition?${new URLSearchParams({ id: broadcastId, part: 'id,status', broadcastStatus })}`,
+    { method: 'POST' },
+    clientId, clientSecret,
+  )
+}
+
+/** Look up a stream's id by its stream key. Used when the user manually
+ *  pasted a key (skipping auto-fill) so we don't have the id cached. */
+export async function findStreamIdByName(
+  streamName: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string | null> {
+  if (!streamName) return null
+  const res = await ytRequest(
+    `/liveStreams?${new URLSearchParams({ part: 'id,cdn', mine: 'true', maxResults: '20' })}`,
+    { method: 'GET' },
+    clientId, clientSecret,
+  )
+  const items = res?.items ?? []
+  const match = items.find((s: any) => s?.cdn?.ingestionInfo?.streamName === streamName)
+  return match?.id ?? null
 }
 
 export async function updateBroadcastSnippet(

@@ -1,0 +1,212 @@
+import React, { useState, useRef, useMemo } from 'react'
+import ReactDOM from 'react-dom'
+import { ChevronDown, Loader2, AlertTriangle, Link2 } from 'lucide-react'
+import type { LiveBroadcast } from '../../types'
+
+/** Cross-link map entry — surfaced under any broadcast in the dropdown that
+ *  is already pointed to by a different stream item. Helps the user spot
+ *  accidental double-links without preventing intentional ones. */
+export interface BroadcastLinkRef {
+  broadcastId: string
+  folderDate: string
+  folderTitle?: string
+}
+
+interface BroadcastPickerProps {
+  value: string
+  onChange: (broadcastId: string) => void
+  broadcasts: LiveBroadcast[]
+  /** Other stream items already linked to broadcasts in this list. Used to
+   *  surface a "Linked to: …" hint under any conflicting option. Should NOT
+   *  include the current stream item — the caller is responsible for
+   *  filtering itself out before passing this in. */
+  otherFolderLinks?: BroadcastLinkRef[]
+  loading?: boolean
+  /** Placeholder text when no broadcast is selected. */
+  placeholder?: string
+  /** Distinguishes the "nothing exists yet" empty state from the "select one"
+   *  prompt. Surfaced in the trigger when value is empty AND broadcasts is empty. */
+  emptyLabel?: string
+  /** Past-streams variant — used by VOD picker. Disables the "future" lens
+   *  on time formatting (so a VOD from last week reads as "Nov 12 2024"
+   *  rather than as a relative day). */
+  showDateOnly?: boolean
+  /** Click handler for opening — used by the VOD picker to lazy-load the
+   *  full list of completed broadcasts on first interaction. */
+  onOpen?: () => void
+}
+
+export function BroadcastPicker({
+  value,
+  onChange,
+  broadcasts,
+  otherFolderLinks = [],
+  loading = false,
+  placeholder = 'Select a broadcast…',
+  emptyLabel,
+  showDateOnly = false,
+  onOpen,
+}: BroadcastPickerProps) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+
+  // Pre-index cross-links for O(1) lookup while rendering rows.
+  const linkMap = useMemo(() => {
+    const m = new Map<string, BroadcastLinkRef[]>()
+    for (const link of otherFolderLinks) {
+      const arr = m.get(link.broadcastId) ?? []
+      arr.push(link)
+      m.set(link.broadcastId, arr)
+    }
+    return m
+  }, [otherFolderLinks])
+
+  const selected = useMemo(
+    () => broadcasts.find(b => b.id === value) ?? null,
+    [broadcasts, value],
+  )
+
+  const handleOpen = () => {
+    if (loading) return
+    if (open) { setOpen(false); return }
+    onOpen?.()
+    setOpen(true)
+  }
+  const pick = (broadcastId: string) => {
+    onChange(broadcastId)
+    setOpen(false)
+  }
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={handleOpen}
+        disabled={loading}
+        className={`w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 disabled:cursor-wait text-left relative ${
+          open ? 'ring-2 ring-purple-500/50' : ''
+        }`}
+      >
+        {selected ? (
+          <RowContent broadcast={selected} showDateOnly={showDateOnly} compact />
+        ) : (
+          <span className="text-gray-500">
+            {broadcasts.length === 0 ? (emptyLabel ?? placeholder) : placeholder}
+          </span>
+        )}
+        {loading
+          ? <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 animate-spin" />
+          : <ChevronDown size={12} className={`absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+        }
+      </button>
+
+      {open && anchorRef.current && ReactDOM.createPortal(
+        (() => {
+          const rect = anchorRef.current.getBoundingClientRect()
+          return (
+            <>
+              {/* Backdrop swallows outside clicks. Below the dropdown z-wise
+                  so clicks on the items still go through. */}
+              <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
+              <div
+                style={{
+                  position: 'fixed',
+                  top: rect.bottom + 4,
+                  left: rect.left,
+                  width: rect.width,
+                  zIndex: 9999,
+                  maxHeight: Math.max(160, window.innerHeight - rect.bottom - 16),
+                }}
+                className="bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-y-auto"
+              >
+                {broadcasts.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-gray-500 italic">
+                    {emptyLabel ?? 'No broadcasts available.'}
+                  </p>
+                ) : broadcasts.map(b => {
+                  const isCurrent = b.id === value
+                  const links = linkMap.get(b.id) ?? []
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => pick(b.id)}
+                      className={`flex flex-col items-start w-full px-3 py-2 text-left transition-colors border-b border-white/5 last:border-b-0 ${
+                        isCurrent ? 'bg-white/10 hover:bg-white/15 text-gray-100' : 'text-gray-300 hover:bg-white/5'
+                      }`}
+                    >
+                      <RowContent broadcast={b} showDateOnly={showDateOnly} />
+                      {links.length > 0 && (
+                        <span className="mt-1 inline-flex items-start gap-1 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5">
+                          <Link2 size={9} className="shrink-0 mt-0.5" />
+                          <span>
+                            Linked to{links.length > 1 ? ` ${links.length} other stream items` : `: ${links[0].folderTitle || links[0].folderDate}`}
+                          </span>
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )
+        })(),
+        document.body,
+      )}
+    </>
+  )
+}
+
+/** Renders title + scheduled time. `compact` truncates the title so the
+ *  closed-anchor state stays single-line. */
+function RowContent({
+  broadcast,
+  showDateOnly,
+  compact,
+}: {
+  broadcast: LiveBroadcast
+  showDateOnly?: boolean
+  compact?: boolean
+}) {
+  const title = broadcast.snippet?.title?.trim() || 'Untitled broadcast'
+  const start = broadcast.snippet?.actualStartTime ?? broadcast.snippet?.scheduledStartTime ?? ''
+  const formatted = start ? (showDateOnly ? formatDateOnly(start) : formatScheduledTime(start)) : ''
+
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0 w-full leading-tight">
+      <span className={`text-xs text-gray-200 ${compact ? 'truncate' : 'break-words'} flex-shrink min-w-0`}>
+        {title}
+      </span>
+      {formatted && (
+        <span className="text-[10px] text-gray-400 tabular-nums shrink-0">
+          {formatted}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** "Today 7:00 PM" / "Tomorrow 8:30 PM" / "Jun 17 7:00 PM". */
+function formatScheduledTime(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const isTomorrow = d.toDateString() === tomorrow.toDateString()
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  if (sameDay) return `Today ${time}`
+  if (isTomorrow) return `Tomorrow ${time}`
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + time
+}
+
+/** Date only, for past streams where the time isn't meaningful. */
+function formatDateOnly(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}

@@ -365,14 +365,17 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetVideoStatuses: (videoIds: string[]) =>
     ipcRenderer.invoke('youtube:getVideoStatuses', videoIds),
 
-  youtubeCheckBroadcastIsLive: (broadcastId: string) =>
-    ipcRenderer.invoke('youtube:checkBroadcastIsLive', broadcastId),
+  youtubeCheckBroadcastsAreLive: (broadcastIds: string[]) =>
+    ipcRenderer.invoke('youtube:checkBroadcastsAreLive', broadcastIds),
 
   youtubeGetBroadcasts: () =>
     ipcRenderer.invoke('youtube:getBroadcasts'),
 
   youtubeCreateBroadcast: (params: { title: string; description: string; scheduledStartTime: string; privacyStatus: 'public' | 'unlisted' | 'private' }) =>
     ipcRenderer.invoke('youtube:createBroadcast', params),
+
+  youtubeGetDefaultStreamKey: () =>
+    ipcRenderer.invoke('youtube:getDefaultStreamKey'),
 
   youtubeGetCompletedBroadcasts: () =>
     ipcRenderer.invoke('youtube:getCompletedBroadcasts'),
@@ -524,6 +527,65 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:getLastFont'),
   thumbnailSetLastFont: (font: string) =>
     ipcRenderer.invoke('thumbnail:setLastFont', font),
+
+  // ── Stream Relay ──────────────────────────────────────────────────────────
+  // Localhost RTMP relay that forwards OBS/Aitum to YouTube. Subscriptions
+  // (onRelayStatus / onRelayStats / etc.) return an unsubscribe function so
+  // callers can clean up in React useEffect teardowns.
+  streamRelayGetStatus: () =>
+    ipcRenderer.invoke('stream-relay:get-status'),
+  streamRelayEnable: () =>
+    ipcRenderer.invoke('stream-relay:enable'),
+  streamRelayDisable: () =>
+    ipcRenderer.invoke('stream-relay:disable'),
+  streamRelayReapplyConfig: () =>
+    ipcRenderer.invoke('stream-relay:reapply-config'),
+  onRelayStatus: (cb: (status: any) => void) => {
+    const listener = (_: unknown, payload: any) => cb(payload)
+    ipcRenderer.on('stream-relay:status', listener)
+    return () => ipcRenderer.removeListener('stream-relay:status', listener)
+  },
+  onRelayStats: (cb: (stats: any) => void) => {
+    const listener = (_: unknown, payload: any) => cb(payload)
+    ipcRenderer.on('stream-relay:stats', listener)
+    return () => ipcRenderer.removeListener('stream-relay:stats', listener)
+  },
+  onRelayStreamStarted: (cb: () => void) => {
+    const listener = () => cb()
+    ipcRenderer.on('stream-relay:stream-started', listener)
+    return () => ipcRenderer.removeListener('stream-relay:stream-started', listener)
+  },
+  onRelayStreamStopped: (cb: (payload: { code: number | null }) => void) => {
+    const listener = (_: unknown, payload: any) => cb(payload)
+    ipcRenderer.on('stream-relay:stream-stopped', listener)
+    return () => ipcRenderer.removeListener('stream-relay:stream-stopped', listener)
+  },
+  onRelayError: (cb: (msg: string) => void) => {
+    const listener = (_: unknown, payload: any) => cb(payload)
+    ipcRenderer.on('stream-relay:error', listener)
+    return () => ipcRenderer.removeListener('stream-relay:error', listener)
+  },
+  streamRelayGetUpcomingBroadcasts: (force?: boolean) =>
+    ipcRenderer.invoke('stream-relay:get-upcoming-broadcasts', force ?? false),
+  streamRelayGetActiveBroadcast: () =>
+    ipcRenderer.invoke('stream-relay:get-active-broadcast'),
+  streamRelaySetActiveBroadcast: (broadcastId: string | null) =>
+    ipcRenderer.invoke('stream-relay:set-active-broadcast', broadcastId),
+  onRelayActiveBroadcastChanged: (cb: (result: any) => void) => {
+    const listener = (_: unknown, payload: any) => cb(payload)
+    ipcRenderer.on('stream-relay:active-changed', listener)
+    return () => ipcRenderer.removeListener('stream-relay:active-changed', listener)
+  },
+  onRelayUpcomingChanged: (cb: (list: any) => void) => {
+    const listener = (_: unknown, payload: any) => cb(payload)
+    ipcRenderer.on('stream-relay:upcoming-changed', listener)
+    return () => ipcRenderer.removeListener('stream-relay:upcoming-changed', listener)
+  },
+  onRelayLifecycle: (cb: (ev: any) => void) => {
+    const listener = (_: unknown, payload: any) => cb(payload)
+    ipcRenderer.on('stream-relay:lifecycle', listener)
+    return () => ipcRenderer.removeListener('stream-relay:lifecycle', listener)
+  },
 
   // ── File utilities ────────────────────────────────────────────────────────
   // File.prototype.path was removed in Electron 34; use webUtils instead.

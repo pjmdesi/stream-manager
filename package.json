@@ -12,7 +12,8 @@
         "dist": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && electron-vite build && electron-builder",
         "release:patch": "npm version patch && npm run dist",
         "release:minor": "npm version minor && npm run dist",
-        "release:major": "npm version major && npm run dist"
+        "release:major": "npm version major && npm run dist",
+        "relay:test": "node scripts/relay-test.cjs"
     },
     "build": {
         "appId": "com.streammanager",

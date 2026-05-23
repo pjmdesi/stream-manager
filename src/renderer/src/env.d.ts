@@ -18,6 +18,10 @@ import type {
   YTTagTemplate,
   LiveBroadcast,
   LauncherGroup,
+  RelayStatus,
+  RelayStats,
+  ActivePickResult,
+  OrchestratorEvent,
 } from './types'
 
 declare global {
@@ -165,7 +169,7 @@ declare global {
         filesToRename: { from: string; to: string; collision: boolean }[]
         hasCollisions: boolean
       }>
-      rescheduleStream(folderPath: string, oldDate: string, newDate: string): Promise<{ newFolderPath: string; renamedCount: number; skippedCount: number }>
+      rescheduleStream(folderPath: string, oldDate: string, newDate: string): Promise<{ newFolderPath: string; newMetaKey: string; renamedCount: number; skippedCount: number }>
       deleteStreamFolder(folderPath: string): Promise<void>
       removeStreamOrphans(streamsDir: string, folderNames: string[]): Promise<void>
       convertDumpFolder(dirPath: string): Promise<{ moved: number; skipped: number; manifest: { moves: { from: string; to: string }[]; createdFolders: string[] } }>
@@ -181,9 +185,10 @@ declare global {
       youtubeConnect(): Promise<void>
       youtubeDisconnect(): Promise<void>
       youtubeGetVideoStatuses(videoIds: string[]): Promise<Record<string, { privacyStatus: string; isLivestream: boolean }>>
-      youtubeCheckBroadcastIsLive(broadcastId: string): Promise<{ isLive: boolean; privacyStatus: string | null }>
+      youtubeCheckBroadcastsAreLive(broadcastIds: string[]): Promise<Record<string, { isLive: boolean; privacyStatus: string | null }>>
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>
       youtubeCreateBroadcast(params: { title: string; description: string; scheduledStartTime: string; privacyStatus: 'public' | 'unlisted' | 'private' }): Promise<LiveBroadcast>
+      youtubeGetDefaultStreamKey(): Promise<{ streamId: string; streamName: string; ingestionAddress: string } | null>
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
       youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[]): Promise<void>
@@ -228,6 +233,23 @@ declare global {
       thumbnailRemoveRecent(folderPath: string, date: string): Promise<ThumbnailRecentEntry[]>
       thumbnailGetLastFont(): Promise<string>
       thumbnailSetLastFont(font: string): Promise<void>
+
+      // ── Stream Relay ─────────────────────────────────────────────────────────
+      streamRelayGetStatus(): Promise<RelayStatus>
+      streamRelayEnable(): Promise<RelayStatus>
+      streamRelayDisable(): Promise<RelayStatus>
+      streamRelayReapplyConfig(): Promise<RelayStatus>
+      onRelayStatus(cb: (status: RelayStatus) => void): () => void
+      onRelayStats(cb: (stats: RelayStats) => void): () => void
+      onRelayStreamStarted(cb: () => void): () => void
+      onRelayStreamStopped(cb: (payload: { code: number | null }) => void): () => void
+      onRelayError(cb: (msg: string) => void): () => void
+      streamRelayGetUpcomingBroadcasts(force?: boolean): Promise<LiveBroadcast[]>
+      streamRelayGetActiveBroadcast(): Promise<ActivePickResult>
+      streamRelaySetActiveBroadcast(broadcastId: string | null): Promise<ActivePickResult>
+      onRelayActiveBroadcastChanged(cb: (result: ActivePickResult) => void): () => void
+      onRelayUpcomingChanged(cb: (list: LiveBroadcast[]) => void): () => void
+      onRelayLifecycle(cb: (ev: OrchestratorEvent) => void): () => void
 
       // ── File utilities ───────────────────────────────────────────────────────
       getPathForFile(file: File): string

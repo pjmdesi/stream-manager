@@ -1222,7 +1222,7 @@ export function registerStreamsIPC(): void {
     folderPath: string,
     oldDate: string,
     newDate: string,
-  ): Promise<{ newFolderPath: string; renamedCount: number; skippedCount: number }> => {
+  ): Promise<{ newFolderPath: string; newMetaKey: string; renamedCount: number; skippedCount: number }> => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
     const isDump = path.resolve(folderPath) === path.resolve(streamsDir)
 
@@ -1316,9 +1316,9 @@ export function registerStreamsIPC(): void {
     }
 
     if (needsFolderRename) {
-      return { newFolderPath: finalFolderPath, renamedCount: performed.length, skippedCount: skipped }
+      return { newFolderPath: finalFolderPath, newMetaKey: newKey, renamedCount: performed.length, skippedCount: skipped }
     }
-    return { newFolderPath: folderPath, renamedCount: performed.length, skippedCount: skipped }
+    return { newFolderPath: folderPath, newMetaKey: newKey, renamedCount: performed.length, skippedCount: skipped }
   })
 
   ipcMain.handle('streams:deleteFolder', async (_event, folderPath: string) => {

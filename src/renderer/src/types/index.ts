@@ -189,6 +189,15 @@ export interface AppConfig {
   listThumbWidth: number
   checkForUpdates: boolean
   skipClipMergeWarning: boolean
+  // Stream Relay — see main-side AppConfig for full context. Mirror kept here
+  // so the renderer's useStore types match what the main process persists.
+  streamRelayEnabled: boolean
+  streamRelayPort: number
+  streamRelayInboundKey: string
+  streamRelayOutboundKey: string
+  streamRelayStreamId: string
+  streamRelayActiveBroadcastId: string
+  streamRelayActivePickedAt: number
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'
@@ -355,6 +364,61 @@ export interface LiveBroadcast {
 }
 
 export type Page = 'streams' | 'player' | 'templates' | 'rules' | 'converter' | 'combine' | 'integrations' | 'settings' | 'launcher' | 'thumbnails'
+
+// ── Stream Relay ──────────────────────────────────────────────────────────────
+// Mirrors the RelayManager's RelayState/RelayStatus/RelayStats in the main
+// process. Kept here so the renderer can type its IPC payloads without
+// importing main-process modules.
+
+export type RelayState =
+  | 'idle'           // not running (feature disabled or not yet started)
+  | 'starting'       // child spawned, waiting to bind the port
+  | 'listening'      // bound, waiting for OBS/Aitum to connect
+  | 'streaming'      // OBS connected, bytes flowing to YouTube
+  | 'restarting'     // ffmpeg died, will respawn shortly
+  | 'error'          // gave up retrying
+
+export interface RelayStatus {
+  state: RelayState
+  error?: string
+  streamStartedAt?: number
+}
+
+export interface RelayStats {
+  kbps: number
+  durationSec: number
+  speed: number  // ffmpeg's speed= value; should hover near 1.0
+}
+
+/** Result of computing which broadcast the relay should bind to. Mirrors the
+ *  main-side ActivePickResult so the renderer can type IPC payloads without
+ *  importing main-process modules. */
+export interface ActivePickResult {
+  broadcast: LiveBroadcast | null
+  isManual: boolean
+  manualPickStale: boolean
+}
+
+/** Lifecycle stages emitted by the relay orchestrator as it walks a broadcast
+ *  through bind → live → grace → complete. Mirrors the main-side enum. */
+export type OrchestratorStage =
+  | 'idle'
+  | 'no-broadcast'
+  | 'binding'
+  | 'going-live'
+  | 'live'
+  | 'grace'
+  | 'completing'
+  | 'completed'
+  | 'error'
+
+export interface OrchestratorEvent {
+  stage: OrchestratorStage
+  broadcastId?: string
+  broadcastTitle?: string
+  error?: string
+  graceRemainingSec?: number
+}
 
 // ── Thumbnail Editor ──────────────────────────────────────────────────────────
 

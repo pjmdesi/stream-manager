@@ -35,6 +35,13 @@ const defaultConfig: AppConfig = {
   listThumbWidth: 85,
   checkForUpdates: true,
   skipClipMergeWarning: false,
+  streamRelayEnabled: false,
+  streamRelayPort: 1935,
+  streamRelayInboundKey: 'live',
+  streamRelayOutboundKey: '',
+  streamRelayStreamId: '',
+  streamRelayActiveBroadcastId: '',
+  streamRelayActivePickedAt: 0,
 }
 
 interface StoreContextValue {

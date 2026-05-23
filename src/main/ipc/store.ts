@@ -43,6 +43,24 @@ export interface AppConfig {
   useBuiltinThumbnailByDefault: boolean
   checkForUpdates: boolean
   skipClipMergeWarning: boolean
+  // ── Stream Relay ──────────────────────────────────────────────────────────
+  // Localhost RTMP server that forwards OBS/Aitum to YouTube while letting SM
+  // orchestrate bind+transition lifecycle. enabled flag gates the whole feature
+  // (no child process spawned when false). outboundKey is the channel's
+  // persistent default stream key (fetched once via liveStreams.list when YT
+  // is connected); activeBroadcastId is the user's manual override of the
+  // auto-picked broadcast — empty string means "auto-pick soonest upcoming".
+  streamRelayEnabled: boolean
+  streamRelayPort: number
+  streamRelayInboundKey: string
+  streamRelayOutboundKey: string
+  /** YouTube liveStreams resource id paired with streamRelayOutboundKey.
+   *  Cached so the orchestrator can call liveBroadcasts.bind without a
+   *  pre-flight liveStreams.list lookup. Populated by auto-fill, or by the
+   *  orchestrator on first use if the user pasted the key manually. */
+  streamRelayStreamId: string
+  streamRelayActiveBroadcastId: string
+  streamRelayActivePickedAt: number
 }
 
 function getDefaultConfig(): AppConfig {
@@ -80,6 +98,13 @@ function getDefaultConfig(): AppConfig {
     useBuiltinThumbnailByDefault: true,
     checkForUpdates: true,
     skipClipMergeWarning: false,
+    streamRelayEnabled: false,
+    streamRelayPort: 1935,
+    streamRelayInboundKey: 'live',
+    streamRelayOutboundKey: '',
+    streamRelayStreamId: '',
+    streamRelayActiveBroadcastId: '',
+    streamRelayActivePickedAt: 0,
   }
 }
 

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastIsLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -57,12 +57,12 @@ export function registerYouTubeIPC(): void {
     }
   })
 
-  ipcMain.handle('youtube:checkBroadcastIsLive', async (_event, broadcastId: string) => {
+  ipcMain.handle('youtube:checkBroadcastsAreLive', async (_event, broadcastIds: string[]) => {
     const { clientId, clientSecret } = getCreds()
     try {
-      return await checkBroadcastIsLive(broadcastId, clientId, clientSecret)
+      return await checkBroadcastsAreLive(broadcastIds, clientId, clientSecret)
     } catch {
-      return { isLive: false, privacyStatus: null }
+      return {}
     }
   })
 
@@ -75,6 +75,20 @@ export function registerYouTubeIPC(): void {
       return result
     } catch (e: any) {
       console.error('[YT main] getBroadcasts — error:', e.message)
+      throw e
+    }
+  })
+
+  // Fetch the channel's default persistent stream key. Used by the Stream
+  // Relay setup flow to auto-fill the outbound key field. One-shot — the
+  // result is cached in electron-store by the caller; this IPC just talks
+  // to YouTube.
+  ipcMain.handle('youtube:getDefaultStreamKey', async () => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      return await getDefaultStreamKey(clientId, clientSecret)
+    } catch (e: any) {
+      console.error('[YT main] getDefaultStreamKey — error:', e.message)
       throw e
     }
   })

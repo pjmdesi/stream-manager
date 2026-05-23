@@ -22,6 +22,7 @@ import { useWatcher } from './context/WatcherContext'
 import { CloudOpsProvider } from './context/CloudOpsContext'
 import { CloudOpsModal } from './components/CloudOpsModal'
 import { CloudOpsWidget } from './components/CloudOpsWidget'
+import { StreamRelayWidget } from './components/StreamRelayWidget'
 import { useStore } from './hooks/useStore'
 import { OnboardingModal } from './components/OnboardingModal'
 import { HelpModal } from './components/HelpModal'
@@ -504,6 +505,7 @@ function AppInner() {
           {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} collapsed={sidebarCollapsed} />}
           <CloudOpsWidget collapsed={sidebarCollapsed} />
           <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
+          <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} />
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
             <button
