@@ -9,13 +9,14 @@ import {
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, SquareDashedText,
   Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid,
-  RadioTower, Clapperboard
+  RadioTower, Clapperboard, Unlink2
 } from 'lucide-react'
 
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { v4 as uuidv4 } from 'uuid'
 import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
+import { ytTagCharCount, YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
@@ -1038,6 +1039,17 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   const titleSg = useFieldSuggestion(ytTitle, handleTitleUserChange, claudeEnabled ? fetchTitle : noop)
   const tagsSg = useFieldSuggestion(ytTagsText, handleTagsUserChange, claudeEnabled ? fetchTags : noop)
 
+  // Auto-resize the tags textarea so it grows with content instead of
+  // forcing an inner scrollbar. min-height on the element handles the floor;
+  // we just set height to scrollHeight on every value change. Reset to 'auto'
+  // first so the textarea can also *shrink* when tags are removed.
+  useLayoutEffect(() => {
+    const el = tagsSg.ref.current as HTMLTextAreaElement | null
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [ytTagsText, tagsSg.ref])
+
   // Description — uses GhostTextArea with inline suggestion state
   const descRef = useRef<GhostTextAreaHandle>(null)
   const [descSuggestion, setDescSuggestion] = useState('')
@@ -1876,22 +1888,42 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                     Use &ldquo;{gameMatchedTagTemplate.name}&rdquo; tags
                   </button>
                 )}
-                {canSaveTagsTemplate && <SaveAsTemplateButton onSave={saveTagsAsTemplate} />}
+                {canSaveTagsTemplate && (
+                  <SaveAsTemplateButton
+                    onSave={saveTagsAsTemplate}
+                    suggestedName={(() => {
+                      const game = games[0]?.trim()
+                      if (!game) return undefined
+                      const exists = ytTagTemplates.some(t => t.name.toLowerCase() === game.toLowerCase())
+                      return exists ? undefined : game
+                    })()}
+                  />
+                )}
                 <InlineTemplateSelect items={ytTagTemplates} value={ytSelectedTagId} onChange={setYtSelectedTagId} />
               </div>
             </div>
             <textarea
               ref={tagsSg.ref as React.RefObject<HTMLTextAreaElement>}
               value={ytTagsText}
-              rows={2}
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none"
+              className="w-full min-h-[3.25rem] bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none overflow-hidden"
               {...tagsSg.props}
             />
             <div className="flex items-center justify-between min-h-[16px]">
               {claudeEnabled && tagsSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-400" />}
               {claudeEnabled && tagsSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-400"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
               {(!claudeEnabled || !tagsSg.hint) && <span />}
-              <p className="text-xs text-gray-400">{ytTagsText.split(',').map(t => t.trim()).filter(Boolean).length} tags</p>
+              {(() => {
+                const tagCount = ytTagsText.split(',').map(t => t.trim()).filter(Boolean).length
+                const charCount = ytTagCharCount(ytTagsText)
+                const overLimit = charCount > YT_TAG_CHAR_LIMIT
+                const nearLimit = !overLimit && charCount >= YT_TAG_CHAR_LIMIT * 0.85
+                const colorCls = overLimit ? 'text-red-400' : nearLimit ? 'text-amber-400' : 'text-gray-400'
+                return (
+                  <p className={`text-xs tabular-nums ${colorCls}`}>
+                    {tagCount} tags · {charCount} / {YT_TAG_CHAR_LIMIT} chars
+                  </p>
+                )
+              })()}
             </div>
           </div>
 
@@ -2414,16 +2446,25 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
 }
 
 /** Inline "Save as template" text-link that expands into a name input with save/cancel. */
-function SaveAsTemplateButton({ onSave }: { onSave: (name: string) => Promise<void> | void }) {
+function SaveAsTemplateButton({ onSave, suggestedName }: { onSave: (name: string) => Promise<void> | void; suggestedName?: string }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (editing) inputRef.current?.focus()
-  }, [editing])
+    if (!editing) return
+    // Focus + select the suggested text so the first keystroke replaces it.
+    // Done in the same effect (rather than at click time) so the value-then-
+    // select order is preserved if the suggestion was empty on first render.
+    inputRef.current?.focus()
+    if (suggestedName) inputRef.current?.select()
+  }, [editing, suggestedName])
 
+  const startEditing = () => {
+    setName(suggestedName ?? '')
+    setEditing(true)
+  }
   const cancel = () => { setEditing(false); setName('') }
   const save = async () => {
     const trimmed = name.trim()
@@ -2437,7 +2478,7 @@ function SaveAsTemplateButton({ onSave }: { onSave: (name: string) => Promise<vo
     return (
       <button
         type="button"
-        onClick={() => setEditing(true)}
+        onClick={startEditing}
         className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
       >
         Save as template
@@ -5332,6 +5373,16 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                     </Tooltip>
                   )
                 })()}
+                {/* "Not linked" indicator — surfaces alongside the scheduled
+                    badge for pending streams, and in the YT slot for past
+                    streams. Non-interactive; tooltip explains the state. */}
+                {!meta?.ytVideoId && (
+                  <Tooltip content={isPending ? 'Not linked to a YouTube broadcast' : 'Not linked to a YouTube video'}>
+                    <span className="inline-flex items-center p-1 rounded bg-gray-700/30 text-gray-400 border border-gray-400/30 shrink-0">
+                      <Unlink2 size={11} />
+                    </span>
+                  </Tooltip>
+                )}
             </div>
             </div>
             {(meta?.ytTitle || meta?.twitchTitle) && (
@@ -5715,6 +5766,13 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                 </Tooltip>
                 )
             })()}
+            {!meta?.ytVideoId && (
+              <Tooltip content={isPending ? 'Not linked to a YouTube broadcast' : 'Not linked to a YouTube video'}>
+                <span className="inline-flex items-center p-0.5 rounded bg-gray-700/30 text-gray-400 border border-gray-400/30 shrink-0">
+                  <Unlink2 size={12} />
+                </span>
+              </Tooltip>
+            )}
           </div>
         </div>
         {(meta?.ytTitle || meta?.twitchTitle) && (() => {

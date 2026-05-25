@@ -8,7 +8,7 @@ import {
   ArrowLeft, Plus, Trash2, Eye, EyeOff,
   Image as ImageIcon, Type, Undo2, Redo2, Download,
   BookMarked, FolderOpen, LayoutTemplate, Sliders, RotateCcw, Copy,
-  Magnet, Grid3x3, Check, X, AlertTriangle, Pencil,
+  Magnet, Grid3x3, Check, X, AlertTriangle, Pencil, Link2, Unlink2,
   Square, Circle, Triangle,
   Frame, BoxSelect,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
@@ -706,68 +706,212 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
 
   const update = (patch: Partial<ThumbnailLayer>) => onChange({ ...layer, ...patch })
 
+  // Aspect-ratio lock for the Width/Height inputs. Ratio is captured the
+  // moment the lock is engaged — for images that's the source file's natural
+  // aspect, for shapes it's the current width÷height (no "natural" to fall
+  // back on). Stored in a ref so updates don't re-render; the boolean state
+  // drives the icon + onChange branching.
+  const [aspectLocked, setAspectLocked] = useState(false)
+  const aspectRatioRef = useRef<number | null>(null)
+
+  // Switching selected layer resets the lock — different layer means a
+  // different ratio, and silently carrying it over would surprise the user.
+  useEffect(() => {
+    setAspectLocked(false)
+    aspectRatioRef.current = null
+  }, [layer.id])
+
+  const toggleAspectLock = async () => {
+    if (aspectLocked) {
+      setAspectLocked(false)
+      aspectRatioRef.current = null
+      return
+    }
+    let ratio: number | null = null
+    if (layer.type === 'image' && layer.src) {
+      ratio = await new Promise<number | null>(resolve => {
+        const img = new Image()
+        img.onload = () => resolve(img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null)
+        img.onerror = () => resolve(null)
+        img.src = `file://${layer.src}`
+      })
+    }
+    if (ratio === null || !isFinite(ratio) || ratio <= 0) {
+      const w = layer.width ?? 0
+      const h = layer.height ?? 0
+      ratio = h > 0 ? w / h : 1
+    }
+    aspectRatioRef.current = ratio
+    setAspectLocked(true)
+  }
+
+  const handleWidthChange = (w: number) => {
+    if (aspectLocked && aspectRatioRef.current) {
+      update({ width: w, height: Math.max(1, Math.round(w / aspectRatioRef.current)) })
+    } else {
+      update({ width: w })
+    }
+  }
+  const handleHeightChange = (h: number) => {
+    if (aspectLocked && aspectRatioRef.current) {
+      update({ height: h, width: Math.max(1, Math.round(h * aspectRatioRef.current)) })
+    } else {
+      update({ height: h })
+    }
+  }
+
+  // Reset position/rotation (and for images, contain-fit scale) to the same
+  // defaults a freshly-added layer would have. Opacity isn't touched — the
+  // user might have intentionally dimmed an overlay and resetting it would
+  // be surprising.
+  const resetTransform = async () => {
+    if (layer.type === 'image' && layer.src) {
+      const { naturalW, naturalH } = await new Promise<{ naturalW: number; naturalH: number }>(resolve => {
+        const img = new Image()
+        img.onload = () => resolve({ naturalW: img.naturalWidth, naturalH: img.naturalHeight })
+        img.onerror = () => resolve({ naturalW: layer.width ?? CANVAS_W, naturalH: layer.height ?? CANVAS_H })
+        img.src = `file://${layer.src}`
+      })
+      const containScale = Math.min(1, CANVAS_W / naturalW, CANVAS_H / naturalH)
+      const width = Math.round(naturalW * containScale)
+      const height = Math.round(naturalH * containScale)
+      update({
+        x: Math.round((CANVAS_W - width) / 2),
+        y: Math.round((CANVAS_H - height) / 2),
+        rotation: 0,
+        width,
+        height,
+      })
+      return
+    }
+    const w = layer.width ?? 0
+    const h = layer.height ?? 0
+    update({
+      x: Math.round((CANVAS_W - w) / 2),
+      y: Math.round((CANVAS_H - h) / 2),
+      rotation: 0,
+    })
+  }
+
   return (
     <div className="p-3 flex flex-col gap-3 overflow-y-auto flex-1 min-h-0">
       {/* Common */}
       <section>
-        <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Transform</p>
-        <div className="grid grid-cols-2 gap-1.5">
-          {[['X', 'x'], ['Y', 'y']].map(([label, key]) => (
-            <label key={key} className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">{label}</span>
-              <input
-                type="number"
-                value={Math.round((layer as any)[key])}
-                onChange={e => update({ [key]: Number(e.target.value) } as any)}
-                className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full"
-              />
-            </label>
-          ))}
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-gray-400">Rotation</span>
-            <input
-              type="number"
-              value={Math.round(layer.rotation)}
-              onChange={e => update({ rotation: Number(e.target.value) })}
-              className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full"
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-gray-400">Opacity %</span>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={layer.opacity}
-              onChange={e => update({ opacity: Math.min(100, Math.max(0, Number(e.target.value))) })}
-              className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full"
-            />
-          </label>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] uppercase tracking-wider text-gray-400">Transform</p>
+          <button
+            type="button"
+            onClick={() => { resetTransform().catch(() => {}) }}
+            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
+            title="Reset position, rotation, and (for images) scale to defaults"
+          >
+            <RotateCcw size={10} />
+            Reset
+          </button>
         </div>
-        {(layer.width !== undefined) && (
-          <div className="grid grid-cols-2 gap-1.5 mt-1.5">
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Width</span>
-              <input
-                type="number"
-                value={Math.round(layer.width ?? 0)}
-                onChange={e => update({ width: Number(e.target.value) })}
-                className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full"
-              />
-            </label>
-            {(layer.type === 'image' || layer.type === 'shape') && layer.height !== undefined && (
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Height</span>
-                <input
-                  type="number"
-                  value={Math.round(layer.height ?? 0)}
-                  onChange={e => update({ height: Number(e.target.value) })}
-                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full"
-                />
-              </label>
-            )}
-          </div>
-        )}
+        {(() => {
+          const hasWH = layer.width !== undefined && (layer.type === 'image' || layer.type === 'shape') && layer.height !== undefined
+          const numInputCls = 'bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full'
+          const labelCls = 'text-[10px] text-gray-400'
+          return (
+            <>
+              {hasWH ? (
+                // Image / shape: X+W on row 1, Y+H on row 2, lock icon spans
+                // both rows on the right (Affinity-style pairing).
+                <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5 items-end">
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>X</span>
+                    <input type="number" value={Math.round(layer.x)}
+                      onChange={e => update({ x: Number(e.target.value) })} className={numInputCls} />
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>Width</span>
+                    <input type="number" value={Math.round(layer.width ?? 0)}
+                      onChange={e => handleWidthChange(Number(e.target.value))} className={numInputCls} />
+                  </label>
+                  <Tooltip
+                    content={aspectLocked
+                      ? 'Aspect ratio locked — changing width or height keeps the other dimension proportional. Click to unlock.'
+                      : (layer.type === 'image'
+                          ? 'Lock aspect ratio. When locked, changing width or height preserves the original image aspect ratio.'
+                          : 'Lock aspect ratio. When locked, changing width or height preserves the current ratio.')}
+                    triggerClassName="row-span-2 self-stretch pt-4"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { toggleAspectLock().catch(() => {}) }}
+                      className={`h-full w-3 relative flex items-center justify-center transition-colors ${
+                        aspectLocked ? 'text-purple-300 hover:text-purple-200' : 'text-gray-400 hover:text-gray-200'
+                      }`}
+                      aria-label={aspectLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+                    >
+                      {/* Bracket: short horizontal stubs at top + bottom connect
+                          to a vertical line broken in the middle where the icon
+                          sits. Implies the icon "owns" both inputs at once.
+                          pt-4 on the parent wrapper shifts the entire button
+                          (and so the SVG + icon together) down by the label
+                          height — top stub aligns with top of W input, bottom
+                          stub aligns with bottom of H input. */}
+                      <svg
+                        className="absolute inset-0 w-full h-full pointer-events-none"
+                        viewBox="0 0 20 100"
+                        preserveAspectRatio="none"
+                      >
+                        <path
+                          d="M 0 4 L 10 4 L 10 38 M 10 62 L 10 96 L 0 96"
+                          stroke="currentColor"
+                          strokeWidth="1"
+                          fill="none"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </svg>
+                      <span className="relative rotate-90">
+                        {aspectLocked ? <Link2 size={14} /> : <Unlink2 size={14} />}
+                      </span>
+                    </button>
+                  </Tooltip>
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>Y</span>
+                    <input type="number" value={Math.round(layer.y)}
+                      onChange={e => update({ y: Number(e.target.value) })} className={numInputCls} />
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>Height</span>
+                    <input type="number" value={Math.round(layer.height ?? 0)}
+                      onChange={e => handleHeightChange(Number(e.target.value))} className={numInputCls} />
+                  </label>
+                </div>
+              ) : (
+                // Text layers (no width/height): just X / Y on one row.
+                <div className="grid grid-cols-2 gap-1.5">
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>X</span>
+                    <input type="number" value={Math.round(layer.x)}
+                      onChange={e => update({ x: Number(e.target.value) })} className={numInputCls} />
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>Y</span>
+                    <input type="number" value={Math.round(layer.y)}
+                      onChange={e => update({ y: Number(e.target.value) })} className={numInputCls} />
+                  </label>
+                </div>
+              )}
+              {/* Rotation + Opacity get their own full-width rows below. */}
+              <div className="flex flex-col gap-1.5 mt-1.5">
+                <label className="flex flex-col gap-0.5">
+                  <span className={labelCls}>Rotation</span>
+                  <input type="number" value={Math.round(layer.rotation)}
+                    onChange={e => update({ rotation: Number(e.target.value) })} className={numInputCls} />
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className={labelCls}>Opacity %</span>
+                  <input type="number" min={0} max={100} value={layer.opacity}
+                    onChange={e => update({ opacity: Math.min(100, Math.max(0, Number(e.target.value))) })} className={numInputCls} />
+                </label>
+              </div>
+            </>
+          )
+        })()}
       </section>
 
       {layer.type === 'text' && (
@@ -1187,6 +1331,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const viewZoomRef = useRef(1)
   const viewPanRef = useRef({ x: 0, y: 0 })
   const fitScaleRef = useRef(1)
+
+  // Snap to a specific zoom level and re-center the canvas inside the
+  // viewport. Used by the quick-zoom button row + reset button; mirrors the
+  // double-middle-click reset behavior so all "jump to a view" affordances
+  // converge on the same end state.
+  const setZoomCentered = useCallback((target: number) => {
+    const { w: cw, h: ch } = containerSizeRef.current
+    const pan = centeredCanvasPan(target, cw, ch)
+    viewZoomRef.current = target
+    viewPanRef.current = pan
+    setViewZoom(target)
+    setViewPan(pan)
+  }, [])
   const containerSizeRef = useRef({ w: 800, h: 600 })
   const isPanningRef = useRef(false)
   const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
@@ -2641,13 +2798,46 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <Layer ref={guideLayerRef} listening={false} />
               </Stage>
 
-              {/* Zoom badge */}
+              {/* Zoom badge + quick-zoom buttons. Outer container stays
+                  pointer-events-none so the badge area doesn't block canvas
+                  clicks; the inner button row opts back in. */}
               <div className="absolute bottom-3 left-3 flex items-center gap-1.5 pointer-events-none">
                 <span className="text-[10px] tabular-nums bg-black/50 text-gray-400 px-1.5 py-0.5 rounded">
                   {Math.round(viewZoom * 100)}%
                   {Math.abs(viewZoom - fitScale) < 0.001 && <span className="text-gray-400 ml-1">fit</span>}
                   {Math.abs(viewZoom - 1) < 0.001 && <span className="text-gray-400 ml-1">1:1</span>}
                 </span>
+                <div className="flex items-center gap-0.5 pointer-events-auto">
+                  {([0.5, 0.75, 1] as const).map(z => {
+                    const active = Math.abs(viewZoom - z) < 0.001
+                    return (
+                      <button
+                        key={z}
+                        onClick={() => setZoomCentered(z)}
+                        className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded transition-colors ${
+                          active ? 'bg-purple-600/30 text-purple-200' : 'bg-black/50 text-gray-400 hover:text-gray-200'
+                        }`}
+                      >
+                        {Math.round(z * 100)}%
+                      </button>
+                    )
+                  })}
+                  <button
+                    onClick={() => setZoomCentered(fitScale)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                      Math.abs(viewZoom - fitScale) < 0.001 ? 'bg-purple-600/30 text-purple-200' : 'bg-black/50 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    Fit
+                  </button>
+                  <button
+                    onClick={() => setZoomCentered(1)}
+                    title="Reset zoom to 100% and re-center"
+                    className="p-1 rounded bg-black/50 text-gray-400 hover:text-gray-200 transition-colors"
+                  >
+                    <RotateCcw size={11} />
+                  </button>
+                </div>
               </div>
             </div>
 

@@ -2584,6 +2584,23 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const [hoverRatio, setHoverRatio] = useState<number | null>(null)
   const isPlayheadDraggingRef = useRef(false)
 
+  // Playback controls row — gap scales with available width so the buttons
+  // breathe on wide layouts (panel collapsed, large windows) and stay tight
+  // on narrow ones (sidebar expanded, small windows). Linear interp from
+  // 2px at 540px width to 12px at 840px+.
+  const controlsRowRef = useRef<HTMLDivElement>(null)
+  const [controlsGap, setControlsGap] = useState(2)
+  useEffect(() => {
+    const el = controlsRowRef.current
+    if (!el) return
+    const observer = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect?.width ?? 0
+      setControlsGap(Math.max(2, Math.min(12, (w - 540) / 30)))
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [videoUrl])
+
   // Track the scrollbar's pixel width so the playhead position can be
   // pixel-snapped — a fractional left would render the 1px playhead
   // across two pixels at half intensity and look invisible.
@@ -4642,7 +4659,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     </span>
                   </Tooltip>
                 )}
-                <div className="flex-1 flex items-center justify-center gap-0.5">
+                <div ref={controlsRowRef} className="flex-1 flex items-center justify-center" style={{ gap: `${controlsGap}px` }}>
                 {/* Skip label/tooltip helpers — keeps the buttons themselves tight.
                     Magnitudes < 60s display as integer seconds (e.g. "-10", "+5");
                     60s and 300s display as minutes ("-1m", "+5m"). */}

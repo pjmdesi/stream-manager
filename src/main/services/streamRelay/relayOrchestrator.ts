@@ -216,13 +216,15 @@ class RelayOrchestrator extends EventEmitter {
       try {
         await transitionBroadcast(broadcastId, 'live', clientId, clientSecret)
         return true
-      } catch (e: any) {
-        const msg: string = e?.message ?? String(e)
-        // YouTube returns this kind of error while the bound stream is still
-        // negotiating; back off and try again. Other errors (auth, permission,
-        // bad broadcast id) won't fix themselves with retries, so abort fast.
-        const isRetryable = /stream.*status|status.*stream|not.*active|redundant.*transition/i.test(msg)
-        if (!isRetryable || attempt === RelayOrchestrator.MAX_LIVE_ATTEMPTS) return false
+      } catch {
+        // Retry on any failure until the whole window is exhausted. Previously
+        // we early-exited on errors that didn't match a "stream not active"
+        // pattern, but YouTube's error wording varies enough that legitimate
+        // "still warming up" failures would sometimes bail after one attempt
+        // and surface a scary red error before the user's stream was even
+        // ready. Wasting ~15s on a genuinely fatal error (auth revoked, bad
+        // broadcast id) is the much better tradeoff.
+        if (attempt === RelayOrchestrator.MAX_LIVE_ATTEMPTS) return false
         await new Promise(r => setTimeout(r, RelayOrchestrator.TRANSITION_RETRY_MS))
       }
     }

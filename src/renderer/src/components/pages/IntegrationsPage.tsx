@@ -5,6 +5,7 @@ import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Modal } from '../ui/Modal'
+import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
 
 
@@ -551,15 +552,17 @@ export function IntegrationsPage() {
                       {revealed.has('sr-key') ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
                   </div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={srAutoFillDefaultKey}
-                    disabled={srFieldsLocked || srFetchingKey}
-                    icon={srFetchingKey ? <Loader2 size={13} className="animate-spin" /> : undefined}
-                  >
-                    {srFetchingKey ? 'Fetching…' : 'Auto-fill'}
-                  </Button>
+                  <Tooltip content="Fetch your channel's default ingestion key from YouTube and fill the field for you.">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={srAutoFillDefaultKey}
+                      disabled={srFieldsLocked || srFetchingKey}
+                      icon={srFetchingKey ? <Loader2 size={13} className="animate-spin" /> : undefined}
+                    >
+                      {srFetchingKey ? 'Fetching…' : 'Auto-fill'}
+                    </Button>
+                  </Tooltip>
                 </div>
                 <p className="text-xs text-gray-400">
                   The persistent key for your channel's default ingestion stream. Click Auto-fill to grab it from YouTube,

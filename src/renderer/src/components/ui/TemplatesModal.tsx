@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid'
 import { Modal } from './Modal'
 import { Button } from './Button'
 import type { YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate } from '../../types'
+import { ytTagCharCount, YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 
 // ─── Inline edit forms ────────────────────────────────────────────────────────
 
@@ -96,6 +97,10 @@ function TagForm({ initial, onSave, onCancel }: {
   const [tagsText, setTagsText] = useState(initial.tags?.join(', ') ?? '')
   const [error, setError] = useState('')
   const tagCount = tagsText.split(',').map(t => t.trim()).filter(Boolean).length
+  const charCount = ytTagCharCount(tagsText)
+  const overLimit = charCount > YT_TAG_CHAR_LIMIT
+  const nearLimit = !overLimit && charCount >= YT_TAG_CHAR_LIMIT * 0.85
+  const countColorCls = overLimit ? 'text-red-400' : nearLimit ? 'text-amber-400' : 'text-gray-400'
   const handleSave = () => {
     if (!name.trim()) { setError('Name is required.'); return }
     onSave({ id: initial.id ?? uuid(), name: name.trim(), tags: tagsText.split(',').map(t => t.trim()).filter(Boolean) })
@@ -112,7 +117,9 @@ function TagForm({ initial, onSave, onCancel }: {
         <p className="text-xs text-gray-400">Comma-separated.</p>
         <textarea value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="gaming, lets play, elden ring, …"
           className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y" />
-        <p className="text-xs text-gray-400 text-right">{tagCount} tags</p>
+        <p className={`text-xs tabular-nums text-right ${countColorCls}`}>
+          {tagCount} tags · {charCount} / {YT_TAG_CHAR_LIMIT} chars
+        </p>
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
@@ -266,7 +273,12 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
         ))}
       </div>
 
-      {/* Tab content */}
+      {/* Tab content — fixed height + internal scroll so the modal stays
+          locked at the same size regardless of which tab is active or how
+          many items it holds. -mx-6 px-6 lets the scrollbar live at the
+          modal's outer edge instead of inset, matching the rest of the
+          modal's padding. */}
+      <div className="h-[540px] overflow-y-auto -mx-6 px-6">
       {tab === 'titles' && (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-gray-400 leading-relaxed">
@@ -328,6 +340,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
           />
         </div>
       )}
+      </div>
     </Modal>
   )
 }
