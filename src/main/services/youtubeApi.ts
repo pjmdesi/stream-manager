@@ -459,6 +459,31 @@ export async function transitionBroadcast(
   )
 }
 
+/** Fetch a liveStream's ingest status. Used by the orchestrator to poll
+ *  until YouTube is actually receiving + validating data before calling
+ *  transition('live') — calling it before the stream is 'active' is the
+ *  most common cause of "couldn't go live" failures.
+ *
+ *  streamStatus progresses: created → ready → active (receiving data).
+ *  healthStatus.status: noData → bad/ok/good as ingest health is assessed.
+ *  Returns nulls if the stream id isn't found. Costs 1 quota unit. */
+export async function getStreamStatus(
+  streamId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<{ streamStatus: string | null; healthStatus: string | null }> {
+  const res = await ytRequest(
+    `/liveStreams?${new URLSearchParams({ part: 'status', id: streamId })}`,
+    { method: 'GET' },
+    clientId, clientSecret,
+  )
+  const status = res?.items?.[0]?.status ?? null
+  return {
+    streamStatus: status?.streamStatus ?? null,
+    healthStatus: status?.healthStatus?.status ?? null,
+  }
+}
+
 /** Look up a stream's id by its stream key. Used when the user manually
  *  pasted a key (skipping auto-fill) so we don't have the id cached. */
 export async function findStreamIdByName(

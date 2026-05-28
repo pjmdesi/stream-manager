@@ -20,6 +20,7 @@ import { ThumbnailPage } from './components/pages/ThumbnailPage'
 import { useConversionJobs } from './context/ConversionContext'
 import { useWatcher } from './context/WatcherContext'
 import { CloudOpsProvider } from './context/CloudOpsContext'
+import { RelayPromptProvider } from './context/RelayPromptContext'
 import { CloudOpsModal } from './components/CloudOpsModal'
 import { CloudOpsWidget } from './components/CloudOpsWidget'
 import { StreamRelayWidget } from './components/StreamRelayWidget'
@@ -636,7 +637,9 @@ export default function App() {
   return (
     <ThumbnailEditorProvider>
       <CloudOpsProvider>
-        <AppInner />
+        <RelayPromptProvider>
+          <AppInner />
+        </RelayPromptProvider>
       </CloudOpsProvider>
     </ThumbnailEditorProvider>
   )

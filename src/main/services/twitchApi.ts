@@ -52,10 +52,13 @@ async function findGameId(
   return (exact ?? results[0])?.id ?? ''
 }
 
-/** Update the channel title and optionally the game/category. */
+/** Update the channel title and optionally the game/category + tags.
+ *  Tags must already conform to Twitch's rules (≤10, ≤25 chars each,
+ *  alphanumeric only) — the renderer filters before sending. */
 export async function updateChannelInfo(
   title: string,
   gameName: string | undefined,
+  tags: string[] | undefined,
   clientId: string,
   clientSecret: string
 ): Promise<void> {
@@ -66,6 +69,7 @@ export async function updateChannelInfo(
     const gameId = await findGameId(gameName, clientId, clientSecret)
     if (gameId) body.game_id = gameId
   }
+  if (tags) body.tags = tags
 
   await twitchRequest(
     `/channels?broadcaster_id=${broadcasterId}`,

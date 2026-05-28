@@ -7,16 +7,17 @@ import {
   RefreshCw, Radio, X, ChevronDown, ImageOff,
   ChevronLeft, ChevronRight, ChevronUp, ChevronsUp, ChevronsDown, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
-  Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, Upload, CalendarClock, Info, Sparkles, SquareDashedText,
+  Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, CalendarClock, Info, Sparkles, SquareDashedText,
   Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid,
   RadioTower, Clapperboard, Unlink2
 } from 'lucide-react'
 
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { v4 as uuidv4 } from 'uuid'
-import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
+import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
 import { ytTagCharCount, YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
+import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
@@ -29,6 +30,7 @@ import { BroadcastPicker, BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
 import { useCloudOps } from '../../context/CloudOpsContext'
+import { useRelayPrompt } from '../../context/RelayPromptContext'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
@@ -752,6 +754,8 @@ interface MetaModalProps {
   tagTextures?: Record<string, string>
   onNewStreamType?: (tag: string) => void
   claudeEnabled?: boolean
+  /** Default HH:MM pre-filled into the broadcast-creation time input. */
+  defaultBroadcastTime?: string
   onSave: (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, builtinTemplateId?: string) => Promise<void>
   onClose: () => void
 }
@@ -895,7 +899,7 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], s
 
 // panelAnimate built inside StreamsPage so duration can react to slowAnimations setting
 
-function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, defaultBroadcastTime = '19:00', onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
 
   // In edit/add mode the folder name is the authoritative date source — the stored meta.date
@@ -955,13 +959,13 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     initialMeta?.preferredThumbnail
   )
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
 
   // ── YouTube state ──────────────────────────────────────────────────────────
   const [ytConnected, setYtConnected] = useState(false)
   const [ytTitleTemplates, setYtTitleTemplates] = useState<YTTitleTemplate[]>([])
   const [ytDescTemplates, setYtDescTemplates] = useState<YTDescriptionTemplate[]>([])
   const [ytTagTemplates, setYtTagTemplates] = useState<YTTagTemplate[]>([])
+  const [twitchTagTemplates, setTwitchTagTemplates] = useState<TwitchTagTemplate[]>([])
   const [ytBroadcasts, setYtBroadcasts] = useState<LiveBroadcast[]>([])
   const [ytVods, setYtVods] = useState<LiveBroadcast[]>([])
   const [ytBroadcastsLoading, setYtBroadcastsLoading] = useState(false)
@@ -973,27 +977,35 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   const [ytManualLoading, setYtManualLoading] = useState(false)
   const [ytManualError, setYtManualError] = useState('')
   const [ytNewPrivacy, setYtNewPrivacy] = useState<'public' | 'unlisted' | 'private'>('public')
-  // 24-hour HH:MM. Defaults to 19:00 local for consistency with the relay's
-  // reschedule modal — most streamers schedule for an evening slot.
-  const [ytNewTime, setYtNewTime] = useState<string>('19:00')
+  // 24-hour HH:MM. Seeded from the user's configured default broadcast time
+  // (Settings), falling back to 19:00.
+  const [ytNewTime, setYtNewTime] = useState<string>(defaultBroadcastTime)
   const [ytCreatingBroadcast, setYtCreatingBroadcast] = useState(false)
   const [ytCreateError, setYtCreateError] = useState('')
 
   const isPastStream = date < today()
+  // True when this stream item is the soonest upcoming one. Previously had
+  // a `mode === 'new'` short-circuit that always returned true for new
+  // items — that defaulted the "Also update Twitch" checkbox to checked
+  // even when the user was creating a stream item scheduled later than an
+  // existing one. Now uses the current `date` state so it stays accurate
+  // as the user picks/changes the date in the modal.
   const isNextUpcomingStream = !isPastStream && (() => {
-    if (mode === 'new') return true
-    if (!folderDate) return false
     const todayStr = today()
     const earliestOther = allFolders.map(f => f.date).filter(d => d >= todayStr).sort()[0]
-    return !earliestOther || folderDate <= earliestOther
+    return !earliestOther || date <= earliestOther
   })()
   const [ytSelectedTitleId, setYtSelectedTitleId] = useState('')
   const [ytSelectedDescId, setYtSelectedDescId] = useState('')
   const [ytSelectedTagId, setYtSelectedTagId] = useState('')
+  const [selectedTwitchTagId, setSelectedTwitchTagId] = useState('')
   const [ytTitle, setYtTitle] = useState(initialMeta?.ytTitle ?? '')
   const [ytDescription, setYtDescription] = useState(initialMeta?.ytDescription ?? '')
   const [ytGameTitle, setYtGameTitle] = useState(initialMeta?.ytGameTitle ?? '')
   const [ytTagsText, setYtTagsText] = useState(initialMeta?.ytTags?.join(', ') ?? '')
+  // Twitch tags live alongside YT tags so the useFieldSuggestion hook below
+  // can reference both fields' state in the order React requires.
+  const [twitchTagsText, setTwitchTagsText] = useState(initialMeta?.twitchTags?.join(', ') ?? '')
 
   // ── Claude AI suggestions ─────────────────────────────────────────────────
   // Build context lazily so each fetch always uses the latest state values
@@ -1020,6 +1032,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   const fetchTitle = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('title', { ...buildContext(), prefix, suffix }), [buildContext])
   const fetchDescription = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('description', { ...buildContext(), prefix, suffix }), [buildContext])
   const fetchTags = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('tags', { ...buildContext(), prefix, suffix }), [buildContext])
+  const fetchTwitchTags = useCallback((prefix: string, suffix: string) => window.api.claudeGenerate('twitch-tags', { ...buildContext(), prefix, suffix }), [buildContext])
 
   // User-input setters — clear the template selection so the dropdown shows the current
   // field as custom (and lets the user re-pick the same template to reset).
@@ -1031,6 +1044,10 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     setYtTagsText(v)
     setYtSelectedTagId(prev => prev ? '' : prev)
   }, [])
+  const handleTwitchTagsUserChange = useCallback((v: string) => {
+    setTwitchTagsText(v)
+    setSelectedTwitchTagId(prev => prev ? '' : prev)
+  }, [])
   const handleDescUserChange = useCallback((v: string) => {
     setYtDescription(v)
     setYtSelectedDescId(prev => prev ? '' : prev)
@@ -1038,6 +1055,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
 
   const titleSg = useFieldSuggestion(ytTitle, handleTitleUserChange, claudeEnabled ? fetchTitle : noop)
   const tagsSg = useFieldSuggestion(ytTagsText, handleTagsUserChange, claudeEnabled ? fetchTags : noop)
+  const twitchTagsSg = useFieldSuggestion(twitchTagsText, handleTwitchTagsUserChange, claudeEnabled ? fetchTwitchTags : noop)
 
   // Auto-resize the tags textarea so it grows with content instead of
   // forcing an inner scrollbar. min-height on the element handles the floor;
@@ -1049,6 +1067,12 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   }, [ytTagsText, tagsSg.ref])
+  useLayoutEffect(() => {
+    const el = twitchTagsSg.ref.current as HTMLTextAreaElement | null
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [twitchTagsText, twitchTagsSg.ref])
 
   // Description — uses GhostTextArea with inline suggestion state
   const descRef = useRef<GhostTextAreaHandle>(null)
@@ -1096,15 +1120,45 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   const ytEpisodeUserEdited = useRef(!!initialMeta?.ytEpisode)
   const [ytTotalEpisodes, setYtTotalEpisodes] = useState(() => String(detectTotalEpisodes(allFolders, games[0] ?? '', ytSeason)))
   const [ytCatchyTitle, setYtCatchyTitle] = useState(initialMeta?.ytCatchyTitle ?? '')
-  const [alsoUpdateTwitch, setAlsoUpdateTwitch] = useState(isNextUpcomingStream)
+  // Push-to-platform checkboxes for the unified save+push action in the
+  // modal footer. Auto-default reactively to the relevant condition; once
+  // the user manually toggles, the touched ref freezes that choice — until
+  // a successful push, which resets both the touched ref and the "has
+  // pending push" flag so the next edit re-auto-checks the box.
+  const [pushYouTube, setPushYouTube] = useState(false)
+  const pushYouTubeTouched = useRef(false)
+  const [pushTwitch, setPushTwitch] = useState(isNextUpcomingStream)
+  const pushTwitchTouched = useRef(false)
+  // Twitch push pending — we can't fetch Twitch's current channel state on
+  // open, so compare the to-be-pushed payload against a snapshot of what
+  // was last known to match (set on mount and after each successful push).
+  // YouTube uses broadcastMismatch instead, which compares against the
+  // actual broadcast resource fetched from YT.
+  const [twitchPushSnapshot, setTwitchPushSnapshot] = useState<string | null>(null)
+
+  const handlePushTwitchChange = (checked: boolean) => {
+    pushTwitchTouched.current = true
+    setPushTwitch(checked)
+  }
+  const handlePushYouTubeChange = (checked: boolean) => {
+    pushYouTubeTouched.current = true
+    setPushYouTube(checked)
+  }
+
   const [pushing, setPushing] = useState(false)
-  const [pushError, setPushError] = useState('')
-  const [pushSuccess, setPushSuccess] = useState(false)
-  // Captures a thumbnail-only failure (typically an active A/B test on the
-  // video). Distinct from `pushError` because the metadata push already
-  // committed successfully — we don't want to imply the whole operation
-  // failed when most of it actually succeeded.
-  const [thumbnailWarning, setThumbnailWarning] = useState('')
+  // Footer banner — single source of truth for save/push outcome messages.
+  // 'success' auto-dismisses after 4s; 'error' sticks until the user closes it.
+  type BannerState = { type: 'success' | 'error'; message: string }
+  const [banner, setBanner] = useState<BannerState | null>(null)
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showBanner = useCallback((b: BannerState) => {
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current)
+    setBanner(b)
+    if (b.type === 'success') {
+      bannerTimerRef.current = setTimeout(() => setBanner(null), 4000)
+    }
+  }, [])
+  useEffect(() => () => { if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current) }, [])
   const [ytQualifyingThumbnails, setYtQualifyingThumbnails] = useState<string[]>([])
   const [ytSelectedThumbnail, setYtSelectedThumbnail] = useState<string | null>(null)
 
@@ -1113,6 +1167,52 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   const [syncTitle, setSyncTitle] = useState(initialMeta?.syncTitle ?? true)
   const [twitchTitle, setTwitchTitle] = useState(initialMeta?.twitchTitle ?? '')
   const [twitchGameName, setTwitchGameName] = useState(initialMeta?.twitchGameName ?? '')
+  // Sync flag for Twitch game field. Twitch tags don't have a sync option —
+  // their format rules (alphanumeric only, ≤25 chars) diverge enough from
+  // YouTube's that sharing a single list mostly produces "X skipped" noise.
+  const [syncGame, setSyncGame] = useState(initialMeta?.syncGame ?? true)
+
+  // ── Pending-push tracking + auto-check effects ────────────────────────
+  // YouTube: broadcastMismatch (defined below) compares local fields against
+  // the fetched YT broadcast resource — that's the source of truth.
+  // Wait for selectedBroadcast to populate before drawing a conclusion
+  // (until then, no mismatch can be detected → checkbox stays unchecked).
+
+  // Twitch: build a payload string of what we'd send. Compare to a snapshot
+  // captured at mount + after each successful push. Mismatch == pending.
+  const currentTwitchPushPayload = useMemo(() => JSON.stringify({
+    title: syncTitle ? ytTitle : twitchTitle,
+    game: syncGame ? ytGameTitle : twitchGameName,
+    tags: twitchTagsText.split(',').map(t => t.trim()).filter(Boolean).slice().sort().join('|'),
+  }), [syncTitle, ytTitle, twitchTitle, syncGame, ytGameTitle, twitchGameName, twitchTagsText])
+  // Initialize the Twitch snapshot once when the modal opens. Done in a
+  // requestAnimationFrame so the auto-sync effects (syncTitle/syncGame
+  // mirroring) have had a chance to run first — otherwise the snapshot
+  // would capture a transient "pre-sync" payload and every later mirror
+  // would look like a user change.
+  useEffect(() => {
+    if (twitchPushSnapshot !== null) return
+    const handle = requestAnimationFrame(() => setTwitchPushSnapshot(currentTwitchPushPayload))
+    return () => cancelAnimationFrame(handle)
+  }, [twitchPushSnapshot, currentTwitchPushPayload])
+  const hasPendingTwitchPush = twitchPushSnapshot !== null && twitchPushSnapshot !== currentTwitchPushPayload
+
+  // Thumbnail-change detection for the YT push. We hash the selected
+  // thumbnail's bytes and compare against the hash recorded at the last
+  // push (persisted as meta.ytThumbnailPushedHash). Differs → the thumbnail
+  // changed → offer to (re)push even when no other metadata changed. A
+  // missing baseline (never pushed) counts as "needs push".
+  const [currentThumbnailHash, setCurrentThumbnailHash] = useState<string | null>(null)
+  const [lastPushedThumbnailHash, setLastPushedThumbnailHash] = useState<string | undefined>(initialMeta?.ytThumbnailPushedHash)
+  useEffect(() => {
+    if (!ytSelectedThumbnail) { setCurrentThumbnailHash(null); return }
+    let cancelled = false
+    window.api.thumbnailHashFile(ytSelectedThumbnail)
+      .then(h => { if (!cancelled) setCurrentThumbnailHash(h) })
+      .catch(() => { if (!cancelled) setCurrentThumbnailHash(null) })
+    return () => { cancelled = true }
+  }, [ytSelectedThumbnail, thumbsKey])
+  const thumbnailNeedsPush = !!ytSelectedThumbnail && currentThumbnailHash !== null && currentThumbnailHash !== lastPushedThumbnailHash
 
   const [isDirty, setIsDirty] = useState(false)
   const initialSnapshot = useRef(JSON.stringify({
@@ -1129,20 +1229,24 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     ytCatchyTitle: initialMeta?.ytCatchyTitle ?? '',
     twitchTitle: initialMeta?.twitchTitle ?? '',
     twitchGameName: initialMeta?.twitchGameName ?? '',
+    twitchTagsText: initialMeta?.twitchTags?.join(', ') ?? '',
     syncTitle: initialMeta?.syncTitle ?? true,
+    syncGame: initialMeta?.syncGame ?? true,
     ytVideoId: initialMeta?.ytVideoId,
     preferredThumbnail: initialMeta?.preferredThumbnail,
   }))
   useEffect(() => {
     const current = JSON.stringify({
       streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
-      ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, syncTitle,
+      ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, twitchTagsText,
+      syncTitle, syncGame,
       ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
       preferredThumbnail: localPreferredThumbnail,
     })
     setIsDirty(current !== initialSnapshot.current)
   }, [streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
-      ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, syncTitle,
+      ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, twitchTagsText,
+      syncTitle, syncGame,
       ytVideoUnlinked, ytSelectedBroadcastId, localPreferredThumbnail])
 
   // Keep Twitch title in sync with YT title when syncTitle is on
@@ -1150,15 +1254,29 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     if (syncTitle) setTwitchTitle(ytTitle)
   }, [syncTitle, ytTitle])
 
-  // Auto-fill twitchGameName from first game (same as ytGameTitle)
+  // Keep Twitch category in sync with YT game when syncGame is on.
+  // (Auto-fill from `games` only seeds it the first time — once the user
+  // edits ytGameTitle manually, that's the source of truth.)
   useEffect(() => {
-    if (games.length > 0) setTwitchGameName(games[0])
-  }, [games])
+    if (syncGame) setTwitchGameName(ytGameTitle)
+  }, [syncGame, ytGameTitle])
+
+  // Seed twitchGameName from `games` when nothing is set yet (parity with
+  // ytGameTitle which has its own auto-fill).
+  useEffect(() => {
+    if (!syncGame && !twitchGameName && games.length > 0) setTwitchGameName(games[0])
+  }, [games, syncGame, twitchGameName])
 
   useEffect(() => {
     window.api.twitchGetStatus?.().then((s: { connected: boolean }) => {
       setTwConnected(s.connected)
     }).catch(() => {})
+  }, [])
+
+  // Twitch tag templates load independently of YT connection — the user
+  // might use them even without YT for local storage / future Twitch push.
+  useEffect(() => {
+    window.api.getTwitchTagTemplates().then(setTwitchTagTemplates).catch(() => {})
   }, [])
 
   const parseYouTubeVideoId = (input: string): string | null => {
@@ -1252,10 +1370,19 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
           if (savedId) {
             setYtSelectedBroadcastId(savedId)
           } else {
-            const dateMatch = items.find(v =>
-              utcToLocalDate(v.snippet.scheduledStartTime ?? '') === date
-            )
-            setYtSelectedBroadcastId(dateMatch?.id ?? '')
+            // Setter callback: if the user has already picked or created a
+            // broadcast while this fetch was in flight, don't clobber their
+            // selection with our auto-pick. This race bit a real bug —
+            // creating a new broadcast in a new-stream modal would have its
+            // id overwritten when this still-pending fetch resolved, and
+            // the stream item would save without ytVideoId.
+            setYtSelectedBroadcastId(prev => {
+              if (prev) return prev
+              const dateMatch = items.find(v =>
+                utcToLocalDate(v.snippet.scheduledStartTime ?? '') === date
+              )
+              return dateMatch?.id ?? ''
+            })
           }
         }).catch((e: any) => {
           setYtBroadcastError(e.message ?? 'Failed to load broadcasts')
@@ -1313,7 +1440,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   useEffect(() => {
     const tmpl = ytTitleTemplates.find(t => t.id === ytSelectedTitleId)
     if (!tmpl) return
-    const rendered = applyMergeFields(tmpl.template, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes })
+    const rendered = applyMergeFields(tmpl.template, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, tagline: ytCatchyTitle, title: ytCatchyTitle, total_episodes: ytTotalEpisodes })
     setYtTitle(rendered)
     requestAnimationFrame(() => {
       const el = titleSg.ref.current as HTMLInputElement | null
@@ -1337,7 +1464,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
         body = body.replace(/\{season_links\}/g, links)
       }
       if (cancelled) return
-      const rendered = applyMergeFields(body, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, title: ytCatchyTitle, total_episodes: ytTotalEpisodes })
+      const rendered = applyMergeFields(body, { game: ytGameTitle, season: ytSeason, episode: ytEpisode, tagline: ytCatchyTitle, title: ytCatchyTitle, total_episodes: ytTotalEpisodes })
       setYtDescription(rendered)
       requestAnimationFrame(() => {
         descRef.current?.focus()
@@ -1358,6 +1485,18 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
       if (el) { el.focus(); el.setSelectionRange(rendered.length, rendered.length) }
     })
   }, [ytSelectedTagId, ytTagTemplates])
+
+  // Apply Twitch tag template
+  useEffect(() => {
+    const tmpl = twitchTagTemplates.find(t => t.id === selectedTwitchTagId)
+    if (!tmpl) return
+    const rendered = tmpl.tags.join(', ')
+    setTwitchTagsText(rendered)
+    requestAnimationFrame(() => {
+      const el = twitchTagsSg.ref.current as HTMLTextAreaElement | null
+      if (el) { el.focus(); el.setSelectionRange(rendered.length, rendered.length) }
+    })
+  }, [selectedTwitchTagId, twitchTagTemplates])
 
   // Find a tag template whose name matches one of the selected games
   const gameMatchedTagTemplate = useMemo(() => {
@@ -1384,6 +1523,13 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     const currentKey = [...tags].sort().join('|').toLowerCase()
     return !ytTagTemplates.some(t => [...t.tags].sort().join('|').toLowerCase() === currentKey)
   }, [ytTagsText, ytTagTemplates])
+  const canSaveTwitchTagsTemplate = useMemo(() => {
+    const entered = twitchTagsText.split(',').map(t => t.trim()).filter(Boolean)
+    const { compat } = toTwitchCompatibleTags(entered)
+    if (compat.length === 0) return false
+    const currentKey = [...compat].sort().join('|').toLowerCase()
+    return !twitchTagTemplates.some(t => [...t.tags].sort().join('|').toLowerCase() === currentKey)
+  }, [twitchTagsText, twitchTagTemplates])
 
   const saveTitleAsTemplate = useCallback(async (name: string) => {
     const tpl: YTTitleTemplate = { id: crypto.randomUUID(), name, template: ytTitle }
@@ -1409,6 +1555,19 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     await window.api.setYTTagTemplates(next)
     setYtSelectedTagId(tpl.id)
   }, [ytTagsText, ytTagTemplates])
+
+  const saveTwitchTagsAsTemplate = useCallback(async (name: string) => {
+    // Save only the Twitch-compatible subset — incompatible tags would never
+    // push anyway, and persisting them sets up future "why are these gone?"
+    // confusion when the template is reapplied.
+    const entered = twitchTagsText.split(',').map(t => t.trim()).filter(Boolean)
+    const { compat } = toTwitchCompatibleTags(entered)
+    const tpl: TwitchTagTemplate = { id: crypto.randomUUID(), name, tags: compat }
+    const next = [...twitchTagTemplates, tpl]
+    setTwitchTagTemplates(next)
+    await window.api.setTwitchTagTemplates(next)
+    setSelectedTwitchTagId(tpl.id)
+  }, [twitchTagsText, twitchTagTemplates])
 
   const selectedBroadcast = useMemo(
     () => (isPastStream ? ytVods : ytBroadcasts).find(b => b.id === ytSelectedBroadcastId) ?? null,
@@ -1445,13 +1604,45 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
 
   const broadcastMismatch = useMemo(() => {
     if (!selectedBroadcast) return false
-    if (selectedBroadcast.snippet.title !== ytTitle) return true
-    if (selectedBroadcast.snippet.description !== ytDescription) return true
+    // Title: direct compare (trim both sides — YT sometimes adds/strips
+    // trailing whitespace on round-trip).
+    if ((selectedBroadcast.snippet.title ?? '').trim() !== ytTitle.trim()) return true
+    // Description: normalize line endings (YT returns \r\n, local can be
+    // either) and trim, so a no-op edit doesn't read as a mismatch.
+    const normDesc = (s: string | undefined) => (s ?? '').replace(/\r\n/g, '\n').trim()
+    if (normDesc(selectedBroadcast.snippet.description) !== normDesc(ytDescription)) return true
     if (selectedBroadcast.snippet.gameTitle && selectedBroadcast.snippet.gameTitle !== ytGameTitle) return true
-    const bcTags = selectedBroadcast.snippet.tags?.join(', ') ?? ''
-    if (bcTags && bcTags !== ytTagsText) return true
+    // Tags: compare as a sorted, case-folded set rather than an ordered
+    // string. Whitespace around commas / casing / order shouldn't count
+    // as "mismatched."
+    const normTagSet = (tags: string[] | undefined) =>
+      [...(tags ?? [])].map(t => t.trim().toLowerCase()).filter(Boolean).sort().join('|')
+    const localTagSet = normTagSet(ytTagsText.split(','))
+    const remoteTagSet = normTagSet(selectedBroadcast.snippet.tags)
+    // Only flag tag mismatch when the remote actually has tags (some YT
+    // broadcasts come back with tags=undefined even though we set them —
+    // tags hydrate from a separate videos.list call that may not have run
+    // yet) OR the local list has tags that the remote doesn't.
+    if (remoteTagSet && remoteTagSet !== localTagSet) return true
+    if (!remoteTagSet && localTagSet) return true
     return false
   }, [selectedBroadcast, ytTitle, ytDescription, ytGameTitle, ytTagsText])
+
+  // Auto-check pushYouTube reactively against broadcastMismatch. No-op once
+  // the user manually toggles. broadcastMismatch is false until the YT
+  // broadcasts list loads, so on a fresh modal mount the checkbox starts
+  // unchecked and only flips on once we've confirmed there are unpushed
+  // differences. Falsifies cleanly after a successful push too — the local
+  // broadcast cache gets updated to match what we sent.
+  useEffect(() => {
+    if (pushYouTubeTouched.current) return
+    setPushYouTube(ytConnected && !!ytSelectedBroadcastId && (broadcastMismatch || thumbnailNeedsPush))
+  }, [ytConnected, ytSelectedBroadcastId, broadcastMismatch, thumbnailNeedsPush])
+  // Auto-check pushTwitch the same way, against the snapshot-driven flag.
+  useEffect(() => {
+    if (pushTwitchTouched.current) return
+    setPushTwitch(twConnected && !isPastStream && isNextUpcomingStream && hasPendingTwitchPush)
+  }, [twConnected, isPastStream, isNextUpcomingStream, hasPendingTwitchPush])
 
   const applyBroadcastToMeta = () => {
     if (!selectedBroadcast) return
@@ -1461,121 +1652,199 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     setYtDescription(selectedBroadcast.snippet.description)
     if (newGame) setYtGameTitle(newGame)
     if (selectedBroadcast.snippet.tags?.length) setYtTagsText(selectedBroadcast.snippet.tags.join(', '))
-    if (alsoUpdateTwitch && twConnected) {
+    if (pushTwitch && twConnected) {
       if (syncTitle) setTwitchTitle(newTitle)
       if (newGame) setTwitchGameName(newGame)
     }
   }
 
-  const handleSave = async () => {
-    if (!date) { setError('Date is required.'); return }
+  // Unified action handler: saves SM meta (when dirty) and pushes to the
+  // platforms whose checkboxes are on. Each stage is wrapped in its own
+  // try/catch so a Twitch failure after a successful YT push doesn't roll
+  // back the YT-pending flag, and the user sees exactly which stage failed.
+  const willPushYouTube = pushYouTube && ytConnected && !!ytSelectedBroadcastId
+  const willPushTwitch = pushTwitch && twConnected && !isPastStream
+  const handleAction = async () => {
+    if (!date) { showBanner({ type: 'error', message: 'Date is required.' }); return }
     setSaving(true)
-    setError('')
-    try {
-      const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
-      const effectiveTwitchTitle = syncTitle ? ytTitle : twitchTitle
-      await onSave(
-        {
-          date, streamType: streamTypes, games, comments,
-          archived: mode === 'edit' ? archived : undefined,
-          preferredThumbnail: localPreferredThumbnail,
-          // Reflect the user's chosen workflow for new streams. In edit/add
-          // we leave smThumbnail untouched (the SM editor manages it via
-          // updateMeta during canvas saves).
-          smThumbnail: mode === 'new' ? (useBuiltinThumbnail || undefined) : initialMeta?.smThumbnail,
-          smThumbnailTemplate: mode === 'new' ? initialMeta?.smThumbnailTemplate : initialMeta?.smThumbnailTemplate,
-          ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
-          ytTitle: ytTitle || undefined,
-          ytDescription: ytDescription || undefined,
-          ytGameTitle: ytGameTitle || undefined,
-          ytCatchyTitle: ytCatchyTitle || undefined,
-          ytSeason: ytSeason !== '1' ? ytSeason : undefined,
-          ytEpisode: ytEpisode || undefined,
-          ytTags: tags.length > 0 ? tags : undefined,
-          twitchTitle: effectiveTwitchTitle || undefined,
-          twitchGameName: twitchGameName || undefined,
-          syncTitle,
-        },
-        date,
-        // External template seed: only when neither built-in nor copy is
-        // selected. The user's default external template (from Settings)
-        // gets copied as `${date} thumbnail.${ext}`.
-        mode === 'new' && !useBuiltinThumbnail && !copyFromSource ? (defaultTemplate?.path || undefined) : undefined,
-        // Copy-from-source path: any *thumbnail* file in the prev folder
-        // gets copied with date renamed (covers SM editor JSON+PNG and
-        // external thumbnails uniformly).
-        mode === 'new' && copyFromSource ? (prevEpisodeFolder?.folderPath ?? undefined) : undefined,
-        // Built-in template ID is no longer asked at modal time — the SM
-        // editor's first-open template picker handles it.
-        undefined,
-      )
-      initialSnapshot.current = JSON.stringify({
-        streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
-        ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, syncTitle,
-        ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
-        preferredThumbnail: localPreferredThumbnail,
-      })
-      setIsDirty(false)
-      setSaving(false)
-      if (mode === 'new') onClose()
-    } catch (e: any) {
-      console.error('[YT debug] error during save:', e)
-      setError(e.message)
-      setSaving(false)
-    }
-  }
-
-  const handlePush = async () => {
-    if (!ytConnected || !ytSelectedBroadcastId) return
     setPushing(true)
-    setPushError('')
-    setPushSuccess(false)
-    setThumbnailWarning('')
-    try {
-      const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
-      if (isPastStream) {
-        await window.api.youtubeUpdateVideo(ytSelectedBroadcastId, ytTitle, ytDescription, tags)
-      } else {
-        await window.api.youtubeUpdateBroadcast(
-          ytSelectedBroadcastId,
-          { title: ytTitle, description: ytDescription },
-          tags
+    setBanner(null)
+
+    const tags = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
+    const twitchOverrideTags = twitchTagsText.split(',').map(t => t.trim()).filter(Boolean)
+    const effectiveTwitchTitle = syncTitle ? ytTitle : twitchTitle
+    const effectiveTwitchGame = syncGame ? ytGameTitle : twitchGameName
+    let savedOK = false
+    let ytPushedOK = false
+    let ytThumbnailWarning = ''
+    let twitchPushedOK = false
+
+    // When we're pushing the thumbnail, record its hash so future opens know
+    // it's already pushed. This also forces a meta save even when nothing
+    // else changed (thumbnail-only push) — otherwise the new hash wouldn't
+    // persist and the modal would keep offering the push.
+    const recordThumbnailHash = willPushYouTube && thumbnailNeedsPush && !!currentThumbnailHash
+    const nextThumbnailPushedHash: string | undefined = recordThumbnailHash
+      ? (currentThumbnailHash ?? undefined)
+      : (lastPushedThumbnailHash ?? initialMeta?.ytThumbnailPushedHash)
+
+    // ── Save SM meta (for new mode, when dirty, or to persist a thumbnail
+    //    hash from a thumbnail-only push) ──
+    if (isDirty || mode === 'new' || recordThumbnailHash) {
+      try {
+        await onSave(
+          {
+            date, streamType: streamTypes, games, comments,
+            archived: mode === 'edit' ? archived : undefined,
+            preferredThumbnail: localPreferredThumbnail,
+            smThumbnail: mode === 'new' ? (useBuiltinThumbnail || undefined) : initialMeta?.smThumbnail,
+            smThumbnailTemplate: mode === 'new' ? initialMeta?.smThumbnailTemplate : initialMeta?.smThumbnailTemplate,
+            ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
+            ytTitle: ytTitle || undefined,
+            ytDescription: ytDescription || undefined,
+            ytGameTitle: ytGameTitle || undefined,
+            ytCatchyTitle: ytCatchyTitle || undefined,
+            ytSeason: ytSeason !== '1' ? ytSeason : undefined,
+            ytEpisode: ytEpisode || undefined,
+            ytTags: tags.length > 0 ? tags : undefined,
+            twitchTitle: effectiveTwitchTitle || undefined,
+            twitchGameName: effectiveTwitchGame || undefined,
+            twitchTags: twitchOverrideTags.length > 0 ? twitchOverrideTags : undefined,
+            syncTitle,
+            syncGame,
+            ytThumbnailPushedHash: nextThumbnailPushedHash,
+          },
+          date,
+          mode === 'new' && !useBuiltinThumbnail && !copyFromSource ? (defaultTemplate?.path || undefined) : undefined,
+          mode === 'new' && copyFromSource ? (prevEpisodeFolder?.folderPath ?? undefined) : undefined,
+          undefined,
         )
+        initialSnapshot.current = JSON.stringify({
+          streamTypes, games, comments, archived, ytTitle, ytDescription, ytGameTitle,
+          ytTagsText, ytSeason, ytEpisode, ytCatchyTitle, twitchTitle, twitchGameName, twitchTagsText,
+          syncTitle, syncGame,
+          ytVideoId: ytVideoUnlinked ? undefined : (ytSelectedBroadcastId || initialMeta?.ytVideoId || undefined),
+          preferredThumbnail: localPreferredThumbnail,
+        })
+        setIsDirty(false)
+        savedOK = true
+      } catch (e: any) {
+        console.error('[modal action] save failed:', e)
+        showBanner({ type: 'error', message: `Save failed: ${e.message ?? e}` })
+        setSaving(false); setPushing(false)
+        return
       }
-      // Thumbnail upload is non-fatal — the metadata above has already
-      // committed. Capture a thumbnail-specific failure separately so the
-      // rest of the push flow (Twitch update, local state refresh, success
-      // indicator) still runs. Typical failure cause is an active A/B test
-      // on the video which YouTube refuses to overwrite via API.
-      if (ytSelectedThumbnail) {
-        try {
-          await window.api.youtubeUploadThumbnail(ytSelectedBroadcastId, ytSelectedThumbnail)
-        } catch (e: any) {
-          setThumbnailWarning(e.message || 'Thumbnail upload failed.')
-        }
-      }
-      if (alsoUpdateTwitch && twConnected) {
-        const effectiveTwitchTitle = syncTitle ? ytTitle : twitchTitle
-        await window.api.twitchUpdateChannel(effectiveTwitchTitle, twitchGameName || undefined)
-      }
-      // Update the local broadcast/VOD entry so the dropdown reflects the new info
-      const updater = (items: LiveBroadcast[]) => items.map(b =>
-        b.id === ytSelectedBroadcastId
-          ? { ...b, snippet: { ...b.snippet, title: ytTitle, description: ytDescription } }
-          : b
-      )
-      if (isPastStream) setYtVods(updater)
-      else setYtBroadcasts(updater)
-      setPushSuccess(true)
-      setTimeout(() => setPushSuccess(false), 4000)
-    } catch (e: any) {
-      setPushError(e.message)
-    } finally {
-      setPushing(false)
     }
+
+    // ── Push to YouTube ───────────────────────────────────────────────────
+    if (willPushYouTube) {
+      try {
+        if (isPastStream) {
+          await window.api.youtubeUpdateVideo(ytSelectedBroadcastId, ytTitle, ytDescription, tags)
+        } else {
+          await window.api.youtubeUpdateBroadcast(
+            ytSelectedBroadcastId,
+            { title: ytTitle, description: ytDescription },
+            tags
+          )
+        }
+        // Thumbnail upload is non-fatal — metadata above has committed.
+        if (ytSelectedThumbnail) {
+          try {
+            await window.api.youtubeUploadThumbnail(ytSelectedBroadcastId, ytSelectedThumbnail)
+            // Record the pushed hash so the thumbnail-change detector knows
+            // this exact thumbnail is now live — unchecks the push offer.
+            if (currentThumbnailHash) setLastPushedThumbnailHash(currentThumbnailHash)
+          } catch (e: any) {
+            ytThumbnailWarning = e.message || 'Thumbnail upload failed.'
+          }
+        }
+        // Refresh the local broadcast/VOD cache to reflect the values we
+        // just pushed. broadcastMismatch is the source of truth for the YT
+        // push checkbox — so this update is what makes the checkbox uncheck
+        // after a successful push. Must include tags + gameTitle, not just
+        // title/description, or the comparison will still see "mismatch."
+        const updater = (items: LiveBroadcast[]) => items.map(b =>
+          b.id === ytSelectedBroadcastId
+            ? {
+                ...b,
+                snippet: {
+                  ...b.snippet,
+                  title: ytTitle,
+                  description: ytDescription,
+                  gameTitle: ytGameTitle || b.snippet.gameTitle,
+                  tags: tags.length > 0 ? tags : undefined,
+                },
+              }
+            : b
+        )
+        if (isPastStream) setYtVods(updater); else setYtBroadcasts(updater)
+        // Reset the manual-touch flag so future field changes re-auto-check
+        // the checkbox via the broadcastMismatch-driven effect.
+        pushYouTubeTouched.current = false
+        ytPushedOK = true
+      } catch (e: any) {
+        console.error('[modal action] yt push failed:', e)
+        showBanner({ type: 'error', message: `YouTube push failed: ${e.message ?? e}` })
+        setSaving(false); setPushing(false)
+        return
+      }
+    }
+
+    // ── Push to Twitch ────────────────────────────────────────────────────
+    if (willPushTwitch) {
+      try {
+        const { compat: twitchSendTags } = toTwitchCompatibleTags(twitchOverrideTags)
+        await window.api.twitchUpdateChannel(
+          effectiveTwitchTitle,
+          effectiveTwitchGame || undefined,
+          twitchSendTags,
+        )
+        // Snapshot the payload we just sent so future renders know there's
+        // nothing pending until the user changes something.
+        setTwitchPushSnapshot(currentTwitchPushPayload)
+        pushTwitchTouched.current = false
+        twitchPushedOK = true
+      } catch (e: any) {
+        console.error('[modal action] twitch push failed:', e)
+        showBanner({ type: 'error', message: `Twitch push failed: ${e.message ?? e}` })
+        setSaving(false); setPushing(false)
+        return
+      }
+    }
+
+    // ── Success banner — describes exactly what happened.
+    const parts: string[] = []
+    if (savedOK) parts.push('Saved')
+    if (ytPushedOK) parts.push(isPastStream ? 'Pushed to YouTube VOD' : 'Pushed to YouTube')
+    if (twitchPushedOK) parts.push('Pushed to Twitch')
+    if (parts.length > 0) {
+      const msg = parts.join(' & ') + (ytThumbnailWarning ? ` (thumbnail upload failed: ${ytThumbnailWarning})` : '')
+      showBanner({ type: 'success', message: msg })
+    }
+    setSaving(false); setPushing(false)
+    if (mode === 'new') onClose()
   }
 
   const title = mode === 'new' ? 'New Stream' : mode === 'add' ? 'Add Metadata' : 'Edit Metadata'
+
+  // Dynamic action-button label reflects exactly what the click will do.
+  // For "new" mode the SM-save is always required (the folder doesn't exist
+  // yet), so the verb is always "Create Stream" with any pushes appended.
+  // For edit/add the verb branches on whether SM meta is dirty.
+  const actionLabel = (() => {
+    const pushParts: string[] = []
+    if (willPushYouTube) pushParts.push('YouTube')
+    if (willPushTwitch) pushParts.push('Twitch')
+    const pushSuffix = pushParts.length > 0 ? ` & Push to ${pushParts.join(' + ')}` : ''
+    if (mode === 'new') return `Create Stream${pushSuffix}`
+    if (isDirty) return `Save${pushSuffix}`
+    if (pushParts.length > 0) return `Push to ${pushParts.join(' + ')}`
+    return 'Save'
+  })()
+  const actionDisabled = mode === 'new'
+    ? !date
+    : !isDirty && !willPushYouTube && !willPushTwitch
 
   return (
     <Modal
@@ -1587,23 +1856,78 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
       dismissible={false}
       autoFocus={mode === 'new' ? 'initial-only' : 'none'}
       footer={
-        <>
-          {mode === 'edit' && isPastStream && (
-            <div className="mr-auto flex flex-row gap-3">
-              <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
-              {archived && !initialMeta?.archived && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-600/30 text-xs text-amber-300/90">
-                  <AlertTriangle size={13} className="shrink-0 mt-0.5 text-amber-400" />
-                  <span>This marks the stream as archived. Use the <strong>Archive</strong> process for a complete archive.</span>
-                </div>
+        <div className="w-full flex flex-col">
+          {/* Banner — attached to the top of the footer. Spans the full
+              modal width via negative horizontal margin that cancels the
+              footer's px-6. Success auto-dismisses; error sticks until
+              the user clicks the X. */}
+          {banner && (
+            <div className={`-mx-6 -mt-4 mb-3 px-6 py-2 border-b text-xs flex items-center gap-2 ${
+              banner.type === 'error'
+                ? 'bg-red-900/30 border-red-400/30 text-red-300'
+                : 'bg-green-900/30 border-green-400/30 text-green-300'
+            }`}>
+              {banner.type === 'error'
+                ? <AlertTriangle size={12} className="shrink-0" />
+                : <CheckCircle2 size={12} className="shrink-0" />}
+              <span className="flex-1 whitespace-pre-wrap">{banner.message}</span>
+              {banner.type === 'error' && (
+                <button
+                  onClick={() => setBanner(null)}
+                  className="shrink-0 p-0.5 rounded hover:bg-white/10 text-red-300 hover:text-red-200 transition-colors"
+                  aria-label="Dismiss"
+                >
+                  <X size={12} />
+                </button>
               )}
             </div>
           )}
-          <Button variant="ghost" onClick={onClose} className={isDirty ? 'text-red-400 hover:text-red-300' : ''}>{isDirty ? 'Cancel' : 'Close'}</Button>
-          <Button variant="primary" loading={saving} onClick={handleSave} disabled={!isDirty}>
-            {mode === 'new' ? 'Create Stream' : 'Save'}
-          </Button>
-        </>
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          {/* Left: Cancel/Close + (edit/past) Archived checkbox */}
+          <div className="flex items-center gap-3 justify-start min-w-0">
+            <Button variant="ghost" onClick={onClose} className={isDirty ? 'text-red-400 hover:text-red-300' : ''}>{isDirty ? 'Cancel' : 'Close'}</Button>
+            {mode === 'edit' && isPastStream && (
+              <>
+                <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
+                {archived && !initialMeta?.archived && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-600/30 text-xs text-amber-300/90">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5 text-amber-400" />
+                    <span>This marks the stream as archived. Use the <strong>Archive</strong> process for a complete archive.</span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {/* Center: per-platform push checkboxes. Stays centered regardless
+              of how wide the left or right groups grow. Past streams hide
+              the Twitch checkbox entirely (pushing finished-stream info to
+              the live channel doesn't make sense). */}
+          <div className="flex items-center gap-3 justify-center">
+            <Checkbox
+              checked={pushYouTube}
+              onChange={handlePushYouTubeChange}
+              disabled={!ytConnected || !ytSelectedBroadcastId}
+              label="Push to YouTube"
+              size="sm"
+            />
+            {!isPastStream && (
+              <Checkbox
+                checked={pushTwitch}
+                onChange={handlePushTwitchChange}
+                disabled={!twConnected}
+                label="Push to Twitch"
+                size="sm"
+              />
+            )}
+          </div>
+          {/* Right: the unified action button */}
+          <div className="flex justify-end">
+            <Button variant="primary" loading={saving || pushing} onClick={handleAction} disabled={actionDisabled}>
+              {actionLabel}
+            </Button>
+          </div>
+          </div>
+        </div>
       }
     >
       <div className="flex flex-col gap-5">
@@ -1725,18 +2049,50 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
 
         {/* ── Publishing Info ──────────────────────────────────────────────── */}
         <div className="flex flex-col gap-4 pt-1 border-t border-white/5">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Publishing Info</h3>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Stream Details</h3>
+            {!twConnected && (
+              <p className="text-[10px] text-gray-400 italic flex items-center gap-1.5">
+                <LucideTwitch size={11} className="text-twitch-400/70" />
+                Twitch not connected — fields save locally only. Configure in Integrations to push to Twitch.
+              </p>
+            )}
+          </div>
 
-          {/* Merge field inputs */}
-          <div className="grid grid-cols-[1fr_auto_auto_1fr] gap-2 items-start">
+          {/* Merge-field params: Game, {tagline}, Season, Episode/Total.
+              Order: Game (the primary metadata input) → tagline (the catchy
+              part that gets templated into titles/descriptions) → season →
+              episode/total. The Game cell hosts the Twitch sync checkbox
+              underneath since it's the only field here that pushes to Twitch. */}
+          <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-start">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">Game Title <span className="font-mono text-purple-400 font-normal">{'{game}'}</span><LucideYoutube size={11} className="text-red-400/70" /></label>
+              <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                Game Title
+                <span className="font-mono text-purple-400 font-normal">{'{game}'}</span>
+                <LucideYoutube size={11} className="text-red-400/70" />
+                {twConnected && syncGame && <LucideTwitch size={11} className="text-twitch-400/70" />}
+              </label>
               <input
                 value={ytGameTitle}
                 onChange={e => setYtGameTitle(e.target.value)}
                 className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
               />
-              <span className="text-[10px] text-gray-400">Set manually in YouTube Studio</span>
+              {twConnected ? (
+                <Checkbox checked={syncGame} onChange={setSyncGame} label="Sync with Twitch" size="sm" />
+              ) : (
+                <span className="text-[10px] text-gray-400">Set manually in YouTube Studio</span>
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">
+                Tagline <span className="font-mono text-purple-400 font-normal">{'{tagline}'}</span>
+              </label>
+              <input
+                value={ytCatchyTitle}
+                onChange={e => setYtCatchyTitle(e.target.value)}
+                placeholder="catchy tagline…"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 placeholder-gray-700"
+              />
             </div>
             <div className="flex flex-col gap-1 items-center">
               <label className="text-xs font-medium text-gray-400 whitespace-nowrap flex items-center gap-1">
@@ -1780,25 +2136,16 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 />
               </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-400"><span className="font-mono text-purple-400">{'{title}'}</span></label>
-              <input
-                value={ytCatchyTitle}
-                onChange={e => setYtCatchyTitle(e.target.value)}
-                placeholder="catchy title…"
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 placeholder-gray-700"
-              />
-            </div>
           </div>
 
-          {/* Title */}
+          {/* Stream/Video Title — the actual title that gets pushed to
+              YouTube + Twitch. Templated via merge fields above. */}
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
-                Title
+                Stream/Video Title
                 <LucideYoutube size={11} className="text-red-400/70" />
-                {(!twConnected || syncTitle) && <LucideTwitch size={11} className="text-twitch-400/70" />}
-                <span className="text-gray-400 font-normal">(editable)</span>
+                {twConnected && syncTitle && <LucideTwitch size={11} className="text-twitch-400/70" />}
               </label>
               <div className="flex items-center gap-3">
                 {twConnected && (
@@ -1927,8 +2274,62 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
             </div>
           </div>
 
-          {/* Twitch category */}
+          {/* Twitch tags — independent field with its own templates + Claude
+              support. Twitch's tag rules diverge enough from YouTube's that
+              syncing the two would just surface "X skipped" everywhere it
+              gets used; better to treat them as separate first-class lists. */}
           {twConnected && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                  Twitch tags
+                  <LucideTwitch size={11} className="text-twitch-400/70" />
+                  <span className="text-gray-400 font-normal">(comma-separated)</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  {canSaveTwitchTagsTemplate && (
+                    <SaveAsTemplateButton
+                      onSave={saveTwitchTagsAsTemplate}
+                      suggestedName={(() => {
+                        const game = games[0]?.trim()
+                        if (!game) return undefined
+                        // Twitch tag names can include spaces in the template label.
+                        const exists = twitchTagTemplates.some(t => t.name.toLowerCase() === game.toLowerCase())
+                        return exists ? undefined : game
+                      })()}
+                    />
+                  )}
+                  <InlineTemplateSelect items={twitchTagTemplates} value={selectedTwitchTagId} onChange={setSelectedTwitchTagId} />
+                </div>
+              </div>
+              <textarea
+                ref={twitchTagsSg.ref as React.RefObject<HTMLTextAreaElement>}
+                value={twitchTagsText}
+                className="w-full min-h-[3.25rem] bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none overflow-hidden"
+                {...twitchTagsSg.props}
+              />
+              <div className="flex items-center justify-between min-h-[16px]">
+                {claudeEnabled && twitchTagsSg.hint === 'loading' && <Loader2 size={10} className="animate-spin text-gray-400" />}
+                {claudeEnabled && twitchTagsSg.hint === 'accept' && <span className="flex items-center gap-1 text-[10px] text-gray-400"><Sparkles size={9} />Tab to accept · Esc to dismiss</span>}
+                {(!claudeEnabled || !twitchTagsSg.hint) && <span />}
+                {(() => {
+                  const entered = twitchTagsText.split(',').map(t => t.trim()).filter(Boolean)
+                  const { compat, skipped } = toTwitchCompatibleTags(entered)
+                  return (
+                    <p className="text-[10px] tabular-nums text-gray-400">
+                      {compat.length} / {TWITCH_TAG_MAX_COUNT} valid
+                      {skipped.length > 0 && <span className="text-amber-400 ml-1">· {skipped.length} invalid (alphanumeric only, ≤25 chars)</span>}
+                    </p>
+                  )
+                })()}
+              </div>
+            </div>
+          )}
+
+          {/* Twitch category override — only shown when syncGame is off.
+              When sync is on, the YouTube game title above is auto-resolved
+              to a Twitch category at push time via /search/categories. */}
+          {twConnected && !syncGame && (
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
                 Twitch category
@@ -1946,10 +2347,21 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
         </div>
 
         {/* ── YouTube ─────────────────────────────────────────────────────── */}
+        {!ytConnected && (
+          <div className="flex flex-col gap-2 pt-1 border-t border-white/5">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+              <LucideYoutube size={13} className="text-red-400" /> YouTube VOD/Video Connection
+              <span className="text-gray-400 font-normal normal-case tracking-normal">— Not connected</span>
+            </h3>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              The fields above will be saved locally. Connect YouTube in <span className="text-gray-200">Integrations</span> to link a broadcast, push metadata, and upload thumbnails.
+            </p>
+          </div>
+        )}
         {ytConnected && (
           <div className="flex flex-col gap-3 pt-1 border-t border-white/5">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-              <LucideYoutube size={13} className="text-red-400" /> YouTube
+              <LucideYoutube size={13} className="text-red-400" /> YouTube VOD/Video Connection
             </h3>
 
             {/* Broadcast / VOD picker.
@@ -2213,54 +2625,10 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                   })}
                 </div>
               )}
-              <p className="text-[10px] text-gray-400">Recommended: 1280×720 or larger. Uploads when you click 'Update YouTube Info'.</p>
-            </div>
-
-            {/* Push action */}
-            <div className="flex flex-col gap-2">
-              {pushError && (
-                <p className="text-xs text-red-400 flex items-start gap-1.5 whitespace-pre-line">
-                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-                  {pushError}
-                </p>
-              )}
-              {thumbnailWarning && (
-                <p className="text-xs text-yellow-400 flex items-start gap-1.5 whitespace-pre-line">
-                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-                  Thumbnail upload failed (other metadata was saved).{'\n'}
-                  {thumbnailWarning}
-                </p>
-              )}
-              {pushSuccess && (
-                <p className="text-xs text-green-400 flex items-center gap-1.5">
-                  <CheckCircle2 size={12} className="shrink-0" />
-                  {isPastStream ? 'YouTube VOD updated.' : 'YouTube stream info updated.'}
-                  {alsoUpdateTwitch && twConnected && ' Twitch updated too.'}
-                </p>
-              )}
-              <div className="flex items-center gap-3 flex-wrap">
-                <Button
-                  variant="primary"
-                  icon={pushing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                  onClick={handlePush}
-                  disabled={!ytSelectedBroadcastId || pushing}
-                >
-                  {pushing ? 'Updating…' : 'Update YouTube Info'}
-                </Button>
-                {twConnected && (
-                  <Checkbox
-                    checked={alsoUpdateTwitch}
-                    onChange={setAlsoUpdateTwitch}
-                    label="Also update Twitch"
-                    size="sm"
-                  />
-                )}
-              </div>
+              <p className="text-[10px] text-gray-400">Recommended: 1280×720 or larger. Uploads alongside the YouTube push from the footer action.</p>
             </div>
           </div>
         )}
-
-        {error && <p className="text-xs text-red-400">{error}</p>}
       </div>
     </Modal>
   )
@@ -2949,6 +3317,9 @@ export function StreamsPage({
 
   // ── YouTube live detection ─────────────────────────────────────────────────
   const [ytConnectedOuter, setYtConnectedOuter] = useState(false)
+  // Twitch connection mirrored at page level so the post-stream auto-update
+  // listener can gate on it without opening a modal.
+  const [twConnectedOuter, setTwConnectedOuter] = useState(false)
   // Map of broadcastId → currently-live? Built from a batched poll over every
   // upcoming linked broadcast plus push updates from the relay orchestrator.
   // Lets us turn the badge green for whichever upcoming stream the user
@@ -2959,6 +3330,7 @@ export function StreamsPage({
 
   useEffect(() => {
     window.api.youtubeGetStatus().then((s: { connected: boolean }) => setYtConnectedOuter(s.connected)).catch(() => {})
+    window.api.twitchGetStatus?.().then((s: { connected: boolean }) => setTwConnectedOuter(s.connected)).catch(() => {})
   }, [])
 
   // Startup warning: archive preset configured but missing
@@ -3012,10 +3384,10 @@ export function StreamsPage({
   // a checkbox + time + privacy picker only when (a) the new date is in the
   // future, (b) YouTube is connected, and (c) the stream isn't already linked
   // to an existing ytVideoId (we never silently replace a live link). Time
-  // defaults to 19:00 local; privacy defaults to private since the user can
-  // change it from YT Studio if they want it public (in-app privacy editing
-  // is tracked as a follow-up — see _todo.md item 7).
-  const [rescheduleTime, setRescheduleTime] = useState('19:00')
+  // defaults to the configured default broadcast time (Settings → fallback
+  // 19:00); privacy defaults to private since the user can change it from YT
+  // Studio if they want it public.
+  const [rescheduleTime, setRescheduleTime] = useState(config.defaultBroadcastTime || '19:00')
   const [rescheduleCreateBroadcast, setRescheduleCreateBroadcast] = useState(false)
   const [rescheduleBroadcastPrivacy, setRescheduleBroadcastPrivacy] = useState<'private' | 'unlisted' | 'public'>('private')
 
@@ -3037,9 +3409,9 @@ export function StreamsPage({
   // fires again on the next reschedule of an unrelated stream).
   useEffect(() => {
     setRescheduleCreateBroadcast(false)
-    setRescheduleTime('19:00')
+    setRescheduleTime(config.defaultBroadcastTime || '19:00')
     setRescheduleBroadcastPrivacy('private')
-  }, [rescheduleTarget])
+  }, [rescheduleTarget, config.defaultBroadcastTime])
 
   const [deleteTarget, setDeleteTarget] = useState<StreamFolder | null>(null)
   const [deleteTree, setDeleteTree] = useState<TreeNode[]>([])
@@ -3832,6 +4204,68 @@ export function StreamsPage({
     })
     return off
   }, [])
+
+  // ── Post-stream Twitch auto-update ─────────────────────────────────────
+  // When a stream completes via the SM relay AND the user has opted in via
+  // the Integrations setting, push the next-soonest upcoming stream's Twitch
+  // info to the channel. Uses refs so the subscription doesn't churn on
+  // every folder change. Twitch isn't pushed for past streams — the
+  // next-soonest filter handles that naturally.
+  const foldersRef = useRef(folders)
+  const twConnectedOuterRef = useRef(twConnectedOuter)
+  const autoUpdateTwitchRef = useRef(!!config.autoUpdateTwitchAfterStream)
+  useEffect(() => { foldersRef.current = folders }, [folders])
+  useEffect(() => { twConnectedOuterRef.current = twConnectedOuter }, [twConnectedOuter])
+  useEffect(() => { autoUpdateTwitchRef.current = !!config.autoUpdateTwitchAfterStream }, [config.autoUpdateTwitchAfterStream])
+  const { setSuggestion: setPostStreamTwitchSuggestion } = useRelayPrompt()
+  useEffect(() => {
+    const off = window.api.onRelayLifecycle(async ev => {
+      // Clear any stale prompt as soon as the next stream session begins
+      // (or errors out) — its target was last session's "next upcoming"
+      // and that's no longer meaningful once the relay has moved on.
+      if (ev.stage === 'binding' || ev.stage === 'going-live' || ev.stage === 'live' || ev.stage === 'no-broadcast' || ev.stage === 'error') {
+        setPostStreamTwitchSuggestion(null)
+        return
+      }
+      if (ev.stage !== 'completed') return
+      if (!twConnectedOuterRef.current) return
+      const justCompletedId = ev.broadcastId
+      const todayStr = today()
+      const candidates = foldersRef.current
+        .filter(f => f.meta?.ytVideoId !== justCompletedId)
+        .filter(f => isPendingStream(f, todayStr))
+        .sort((a, b) => a.date.localeCompare(b.date))
+      const next = candidates[0]
+      if (!next?.meta) return
+      const m = next.meta
+      const syncTitle = m.syncTitle ?? true
+      const syncGame = m.syncGame ?? true
+      const title = (syncTitle ? m.ytTitle : m.twitchTitle) ?? m.ytTitle ?? m.twitchTitle ?? ''
+      const game = (syncGame ? m.ytGameTitle : m.twitchGameName) ?? m.ytGameTitle ?? m.twitchGameName ?? ''
+      // Only push if there's actually a title — Twitch's PATCH /channels
+      // rejects an empty title. Skip silently otherwise.
+      if (!title.trim()) return
+      const { compat: tags } = toTwitchCompatibleTags(m.twitchTags ?? [])
+      const payload = { title, game: game || undefined, tags }
+      if (autoUpdateTwitchRef.current) {
+        // Silent auto-push — setting on means user has opted into automation.
+        try {
+          await window.api.twitchUpdateChannel(payload.title, payload.game, payload.tags)
+        } catch (e) {
+          console.warn('[auto-update Twitch] push failed:', e)
+        }
+      } else {
+        // Setting off — surface a one-time prompt in the relay widget so
+        // the user can decide whether to push and/or enable auto-update.
+        setPostStreamTwitchSuggestion({
+          folderPath: next.folderPath,
+          displayTitle: title,
+          payload,
+        })
+      }
+    })
+    return off
+  }, [setPostStreamTwitchSuggestion])
 
   const toggleGameFilter = (game: string) => {
     setFilterGames(prev => {
@@ -4942,6 +5376,7 @@ return (
               defaultBuiltinTemplateId={config.defaultBuiltinThumbnailTemplate}
               useBuiltinByDefault={config.useBuiltinThumbnailByDefault}
               claudeEnabled={!!config.claudeApiKey}
+              defaultBroadcastTime={config.defaultBroadcastTime || '19:00'}
               tagColors={tagColors}
               tagTextures={tagTextures}
               onNewStreamType={tag => {

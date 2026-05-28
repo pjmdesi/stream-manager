@@ -393,6 +393,17 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
             label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration</div><div className="text-xs text-gray-400">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game</div></div>}
           />
 
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Default broadcast time</label>
+            <input
+              type="time"
+              value={local.defaultBroadcastTime || '19:00'}
+              onChange={e => set('defaultBroadcastTime', e.target.value || '19:00')}
+              className="w-32 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            />
+            <p className="text-xs text-gray-400">Pre-fills the start time when scheduling a YouTube broadcast — both when creating one from a stream item and when rescheduling. You can still change it per-broadcast.</p>
+          </div>
+
           <Checkbox
             checked={local.checkForUpdates ?? true}
             onChange={v => set('checkForUpdates', v)}

@@ -15,6 +15,7 @@ function buildInstruction(field: string, prefix: string, suffix: string): string
       title: 'Generate a YouTube video title for this stream. Keep it under 70 characters, make it engaging and specific to the content. Return ONLY the title text — no quotes, no explanation.',
       description: 'Write a YouTube video description for this stream. 2–4 sentences, informative and engaging. Return ONLY the description text.',
       tags: 'Generate YouTube tags for this stream as a comma-separated list. Include 8–12 relevant tags covering the game, genre, and stream type. Return ONLY the comma-separated tags.',
+      'twitch-tags': 'Generate Twitch channel tags for this stream as a comma-separated list. Twitch rules: alphanumeric only (no spaces, no punctuation), up to 25 characters per tag, maximum 10 tags total. Pick the most relevant tags covering the game, genre, and stream type. Return ONLY the comma-separated tags.',
     }
     return full[field] ?? `Generate the ${field} for this stream. Return ONLY the value.`
   }
@@ -24,6 +25,7 @@ function buildInstruction(field: string, prefix: string, suffix: string): string
     title: `Continue or complete this stream title. Text before cursor: "${prefix}". Text after cursor: "${suffix}". Return ONLY the text to insert at the cursor — no surrounding context, no quotes.`,
     description: `Insert text at the cursor position in this stream description.\nText before cursor:\n${prefix}\nText after cursor:\n${suffix}\nReturn ONLY the text to insert. Do not repeat the prefix or suffix.`,
     tags: `Add more YouTube tags to this list. Tags so far: "${prefix}". Return ONLY additional comma-separated tags to append (no duplicates, no leading comma).`,
+    'twitch-tags': `Add more Twitch channel tags to this list. Tags so far: "${prefix}". Twitch rules: alphanumeric only (no spaces, no punctuation), up to 25 characters per tag, maximum 10 tags total — stay within the remaining budget. Return ONLY additional comma-separated tags to append (no duplicates, no leading comma).`,
   }
   return inline[field] ?? `Insert text at the cursor in the ${field} field. Text before: "${prefix}". Text after: "${suffix}". Return ONLY the inserted text.`
 }

@@ -30,12 +30,22 @@ export interface ActivePickResult {
    *  (e.g., the broadcast was deleted or already aired). UI should surface
    *  this so the user can re-pick or accept the fallback. */
   manualPickStale: boolean
+  /** True while this broadcast is the one the relay is actively streaming to
+   *  this session (pinned by the orchestrator). Distinguishes "currently
+   *  live" from "next auto-pick" in the UI. */
+  isLiveSession?: boolean
 }
 
 class ActiveBroadcastService extends EventEmitter {
   private upcoming: LiveBroadcast[] = []
   private lastFetchAt = 0
   private fetchInFlight: Promise<LiveBroadcast[]> | null = null
+  /** While a stream session is active, the orchestrator pins the bound
+   *  broadcast here. getActive() returns it regardless of the upcoming
+   *  list — otherwise, once YouTube flips its lifeCycleStatus to 'live'
+   *  the doFetch filter drops it and the auto-pick would jump to the next
+   *  upcoming broadcast mid-stream. Cleared when the session ends. */
+  private sessionBroadcast: LiveBroadcast | null = null
 
   /** Stale-while-revalidate cache window. 30s is plenty for "the user just
    *  scheduled a new broadcast and expects to see it in the picker" without
@@ -61,7 +71,28 @@ class ActiveBroadcastService extends EventEmitter {
   /** Compute the effective active broadcast given the current cache + store
    *  state. Doesn't trigger a refetch — pair with getUpcoming() if you want
    *  freshness. */
+  /** Pin the broadcast the relay is streaming to this session. Keeps the
+   *  widget showing the live broadcast even after YouTube flips its status
+   *  to 'live' (which would otherwise drop it from the upcoming list). */
+  lockSession(broadcast: LiveBroadcast): void {
+    this.sessionBroadcast = broadcast
+    this.emit('active-changed', this.getActive())
+  }
+  /** Release the session pin (stream ended). Reverts to the normal
+   *  manual-pick / soonest-upcoming logic. */
+  unlockSession(): void {
+    if (!this.sessionBroadcast) return
+    this.sessionBroadcast = null
+    this.emit('active-changed', this.getActive())
+  }
+
   getActive(): ActivePickResult {
+    // Active stream session pins its broadcast — report it as live so the
+    // widget doesn't jump to the next-upcoming when YouTube marks the
+    // current one 'live' and the fetch filter removes it from `upcoming`.
+    if (this.sessionBroadcast) {
+      return { broadcast: this.sessionBroadcast, isManual: false, manualPickStale: false, isLiveSession: true }
+    }
     const cfg = getStore().get('config') as any
     const manualId: string = cfg?.streamRelayActiveBroadcastId ?? ''
     const upcoming = this.upcoming

@@ -3,8 +3,9 @@ import { Plus, Trash2 } from 'lucide-react'
 import { v4 as uuid } from 'uuid'
 import { Modal } from './Modal'
 import { Button } from './Button'
-import type { YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate } from '../../types'
+import type { YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate } from '../../types'
 import { ytTagCharCount, YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
+import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 
 // ─── Inline edit forms ────────────────────────────────────────────────────────
 
@@ -31,9 +32,9 @@ function TitleForm({ initial, onSave, onCancel }: {
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Title template</label>
         <p className="text-xs text-gray-400">
-          Merge fields: <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span>
+          Merge fields: <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{tagline}'}</span>
         </p>
-        <input value={template} onChange={e => setTemplate(e.target.value)} placeholder="{game} S{season} — Part {episode} of {total_episodes} | {title}"
+        <input value={template} onChange={e => setTemplate(e.target.value)} placeholder="{game} S{season} — Part {episode} of {total_episodes} | {tagline}"
           className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -72,7 +73,7 @@ function DescriptionForm({ initial, onSave, onCancel }: {
           {' '}<span className="font-mono text-purple-400">{'{season}'}</span>,
           {' '}<span className="font-mono text-purple-400">{'{episode}'}</span>,
           {' '}<span className="font-mono text-purple-400">{'{total_episodes}'}</span>,
-          {' '}<span className="font-mono text-purple-400">{'{title}'}</span>,
+          {' '}<span className="font-mono text-purple-400">{'{tagline}'}</span>,
           {' '}<span className="font-mono text-purple-400">{'{season_links}'}</span>
           {' '}(list of previous-episode links, applied once when the template is selected).
         </p>
@@ -119,6 +120,48 @@ function TagForm({ initial, onSave, onCancel }: {
           className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y" />
         <p className={`text-xs tabular-nums text-right ${countColorCls}`}>
           {tagCount} tags · {charCount} / {YT_TAG_CHAR_LIMIT} chars
+        </p>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="flex items-center gap-2">
+        <Button variant="primary" size="sm" onClick={handleSave}>Save</Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
+  )
+}
+
+function TwitchTagForm({ initial, onSave, onCancel }: {
+  initial: Partial<TwitchTagTemplate>
+  onSave: (t: TwitchTagTemplate) => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(initial.name ?? '')
+  const [tagsText, setTagsText] = useState(initial.tags?.join(', ') ?? '')
+  const [error, setError] = useState('')
+  const entered = tagsText.split(',').map(t => t.trim()).filter(Boolean)
+  const { compat, skipped } = toTwitchCompatibleTags(entered)
+  const handleSave = () => {
+    if (!name.trim()) { setError('Name is required.'); return }
+    // Persist only the Twitch-compatible subset — saving incompatible tags
+    // would just defer the disappointment to push time.
+    onSave({ id: initial.id ?? uuid(), name: name.trim(), tags: compat })
+  }
+  return (
+    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-purple-500/20">
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-gray-400">Template name</label>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. EldenRing tags" autoFocus
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-gray-400">Tags</label>
+        <p className="text-xs text-gray-400">Comma-separated. Twitch rules: alphanumeric only (no spaces or punctuation), max {TWITCH_TAG_MAX_COUNT} tags, max 25 chars each.</p>
+        <textarea value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="EldenRing, soulslike, opengame, …"
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y" />
+        <p className="text-xs tabular-nums text-right text-gray-400">
+          {compat.length} / {TWITCH_TAG_MAX_COUNT} valid
+          {skipped.length > 0 && <span className="text-amber-400 ml-1">· {skipped.length} invalid (will be dropped)</span>}
         </p>
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -190,12 +233,13 @@ function TemplateList<T extends { id: string; name: string }>({
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = 'titles' | 'descriptions' | 'tags'
+type Tab = 'titles' | 'descriptions' | 'tags' | 'twitch-tags'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'titles', label: 'Titles' },
   { id: 'descriptions', label: 'Descriptions' },
-  { id: 'tags', label: 'Tags' },
+  { id: 'tags', label: 'YouTube Tags' },
+  { id: 'twitch-tags', label: 'Twitch Tags' },
 ]
 
 // ─── Main modal ───────────────────────────────────────────────────────────────
@@ -212,6 +256,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
   const [titleTemplates, setTitleTemplates] = useState<YTTitleTemplate[]>([])
   const [descTemplates, setDescTemplates] = useState<YTDescriptionTemplate[]>([])
   const [tagTemplates, setTagTemplates] = useState<YTTagTemplate[]>([])
+  const [twitchTagTemplates, setTwitchTagTemplates] = useState<TwitchTagTemplate[]>([])
 
   useEffect(() => {
     if (!isOpen) return
@@ -219,10 +264,12 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
       window.api.getYTTitleTemplates(),
       window.api.getYTDescriptionTemplates(),
       window.api.getYTTagTemplates(),
-    ]).then(([t, d, g]) => {
+      window.api.getTwitchTagTemplates(),
+    ]).then(([t, d, g, twg]) => {
       setTitleTemplates(t)
       setDescTemplates(d)
       setTagTemplates(g)
+      setTwitchTagTemplates(twg)
     }).catch(() => {})
   }, [isOpen])
 
@@ -243,6 +290,10 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
 
   const saveTags = useCallback(async (v: YTTagTemplate[]) => {
     setTagTemplates(v); await window.api.setYTTagTemplates(v); onSaved?.()
+  }, [onSaved])
+
+  const saveTwitchTags = useCallback(async (v: TwitchTagTemplate[]) => {
+    setTwitchTagTemplates(v); await window.api.setTwitchTagTemplates(v); onSaved?.()
   }, [onSaved])
 
   return (
@@ -269,6 +320,9 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
             {t.id === 'tags' && tagTemplates.length > 0 && (
               <span className="ml-1.5 text-xs text-gray-400">{tagTemplates.length}</span>
             )}
+            {t.id === 'twitch-tags' && twitchTagTemplates.length > 0 && (
+              <span className="ml-1.5 text-xs text-gray-400">{twitchTagTemplates.length}</span>
+            )}
           </button>
         ))}
       </div>
@@ -282,7 +336,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
       {tab === 'titles' && (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-gray-400 leading-relaxed">
-            Use <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{title}'}</span> as merge fields.
+            Use <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{tagline}'}</span> as merge fields.
             Title templates are shared between YouTube and Twitch.
           </p>
           <TemplateList
@@ -307,7 +361,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
             {' '}<span className="font-mono text-purple-400">{'{season}'}</span>,
             {' '}<span className="font-mono text-purple-400">{'{episode}'}</span>,
             {' '}<span className="font-mono text-purple-400">{'{total_episodes}'}</span>,
-            {' '}<span className="font-mono text-purple-400">{'{title}'}</span>
+            {' '}<span className="font-mono text-purple-400">{'{tagline}'}</span>
             ), plus
             {' '}<span className="font-mono text-purple-400">{'{season_links}'}</span>
             {' '}— expands to a list of links to previous episodes in the same series+season (one per line, newest first).
@@ -327,7 +381,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
 
       {tab === 'tags' && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-gray-400">Curated tag lists you can mix and match per stream.</p>
+          <p className="text-xs text-gray-400">Curated YouTube tag lists you can mix and match per stream.</p>
           <TemplateList
             items={tagTemplates}
             subtitle={t => <p className="text-xs text-gray-400">{t.tags.length} tags — <span className="text-gray-400 font-mono">{t.tags.slice(0, 5).join(', ')}{t.tags.length > 5 ? '…' : ''}</span></p>}
@@ -336,6 +390,26 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
             newLabel="New tag template"
             renderForm={(initial, onSave, onCancel) => (
               <TagForm initial={initial} onSave={onSave} onCancel={onCancel} />
+            )}
+          />
+        </div>
+      )}
+
+      {tab === 'twitch-tags' && (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-gray-400">
+            Twitch channel-tag lists. Twitch's rules differ from YouTube's:
+            alphanumeric only (no spaces or punctuation), max {TWITCH_TAG_MAX_COUNT} tags,
+            max 25 chars each. Invalid tags get dropped on save.
+          </p>
+          <TemplateList
+            items={twitchTagTemplates}
+            subtitle={t => <p className="text-xs text-gray-400">{t.tags.length} tags — <span className="text-gray-400 font-mono">{t.tags.slice(0, 5).join(', ')}{t.tags.length > 5 ? '…' : ''}</span></p>}
+            onSave={t => saveTwitchTags(upsert(twitchTagTemplates, t))}
+            onDelete={id => saveTwitchTags(twitchTagTemplates.filter(t => t.id !== id))}
+            newLabel="New Twitch tag template"
+            renderForm={(initial, onSave, onCancel) => (
+              <TwitchTagForm initial={initial} onSave={onSave} onCancel={onCancel} />
             )}
           />
         </div>

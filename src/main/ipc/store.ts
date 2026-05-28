@@ -6,6 +6,11 @@ import path from 'path'
 export interface YTTitleTemplate { id: string; name: string; template: string }
 export interface YTDescriptionTemplate { id: string; name: string; description: string }
 export interface YTTagTemplate { id: string; name: string; tags: string[] }
+/** Twitch channel tag template — same shape as YTTagTemplate but kept
+ *  separate because Twitch's tag rules (alphanumeric only, ≤25 chars, ≤10
+ *  tags) are different enough that mixing them with YouTube tag templates
+ *  would lead to confusion at use-time. */
+export interface TwitchTagTemplate { id: string; name: string; tags: string[] }
 
 export type StreamMode = 'folder-per-stream' | 'dump-folder' | ''
 
@@ -41,6 +46,10 @@ export interface AppConfig {
   listThumbWidth: number
   defaultBuiltinThumbnailTemplate: string
   useBuiltinThumbnailByDefault: boolean
+  /** Default start time (24h "HH:MM", local) pre-filled when scheduling a
+   *  YouTube broadcast — both the new-broadcast flow in the MetaModal and the
+   *  reschedule modal. */
+  defaultBroadcastTime: string
   checkForUpdates: boolean
   skipClipMergeWarning: boolean
   // ── Stream Relay ──────────────────────────────────────────────────────────
@@ -61,6 +70,12 @@ export interface AppConfig {
   streamRelayStreamId: string
   streamRelayActiveBroadcastId: string
   streamRelayActivePickedAt: number
+  /** When true, after a SM-orchestrated stream completes the app pushes
+   *  the next-soonest upcoming stream item's Twitch info automatically.
+   *  Default false — most users want explicit control over what their
+   *  Twitch channel shows; the post-stream prompt in the relay widget
+   *  surfaces this setting for users who'd benefit from it. */
+  autoUpdateTwitchAfterStream: boolean
 }
 
 function getDefaultConfig(): AppConfig {
@@ -96,6 +111,7 @@ function getDefaultConfig(): AppConfig {
     listThumbWidth: 85,
     defaultBuiltinThumbnailTemplate: '',
     useBuiltinThumbnailByDefault: true,
+    defaultBroadcastTime: '19:00',
     checkForUpdates: true,
     skipClipMergeWarning: false,
     streamRelayEnabled: false,
@@ -105,6 +121,7 @@ function getDefaultConfig(): AppConfig {
     streamRelayStreamId: '',
     streamRelayActiveBroadcastId: '',
     streamRelayActivePickedAt: 0,
+    autoUpdateTwitchAfterStream: false,
   }
 }
 
@@ -114,6 +131,7 @@ type StoreShape = {
   ytTitleTemplates: YTTitleTemplate[]
   ytDescriptionTemplates: YTDescriptionTemplate[]
   ytTagTemplates: YTTagTemplate[]
+  twitchTagTemplates: TwitchTagTemplate[]
   importedPresets: any[]
   metaMigrated: boolean
   streamTypeTags: Record<string, string>
@@ -135,6 +153,7 @@ export function getStore(): Store<StoreShape> {
         ytTitleTemplates: [],
         ytDescriptionTemplates: [],
         ytTagTemplates: [],
+        twitchTagTemplates: [],
         importedPresets: [],
         metaMigrated: false,
         streamTypeTags: {},
@@ -178,6 +197,9 @@ export function registerStoreIPC(): void {
   ipcMain.handle('store:setYTDescriptionTemplates', async (_e, v: YTDescriptionTemplate[]) => getStore().set('ytDescriptionTemplates', v))
   ipcMain.handle('store:getYTTagTemplates', async () => getStore().get('ytTagTemplates', []))
   ipcMain.handle('store:setYTTagTemplates', async (_e, v: YTTagTemplate[]) => getStore().set('ytTagTemplates', v))
+
+  ipcMain.handle('store:getTwitchTagTemplates', async () => getStore().get('twitchTagTemplates', []))
+  ipcMain.handle('store:setTwitchTagTemplates', async (_e, v: TwitchTagTemplate[]) => getStore().set('twitchTagTemplates', v))
 
   ipcMain.handle('store:getStreamTypeTags', async () => getStore().get('streamTypeTags', {}))
   ipcMain.handle('store:setStreamTypeTags', async (_e, v: Record<string, string>) => getStore().set('streamTypeTags', v))

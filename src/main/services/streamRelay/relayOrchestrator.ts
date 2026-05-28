@@ -22,7 +22,7 @@
 import { EventEmitter } from 'events'
 import { relayManager } from './relayManager'
 import { activeBroadcastService } from './activeBroadcast'
-import { bindBroadcast, transitionBroadcast, findStreamIdByName } from '../youtubeApi'
+import { bindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus } from '../youtubeApi'
 import { getStore } from '../../ipc/store'
 
 /** Stages the renderer can observe via the lifecycle event. Pure information —
@@ -31,7 +31,8 @@ export type OrchestratorStage =
   | 'idle'                   // not in a stream session
   | 'no-broadcast'           // stream started but no active broadcast picked; SM doesn't orchestrate
   | 'binding'                // calling liveBroadcasts.bind
-  | 'going-live'             // calling liveBroadcasts.transition('live')
+  | 'waiting-for-ingest'     // bound; polling liveStreams.status until YouTube reports 'active'
+  | 'going-live'             // stream active; calling liveBroadcasts.transition('live')
   | 'live'                   // broadcast is in the 'live' lifeCycleStatus
   | 'grace'                  // stream-stopped, waiting GRACE_MS before completing
   | 'completing'             // calling liveBroadcasts.transition('complete')
@@ -55,14 +56,26 @@ class RelayOrchestrator extends EventEmitter {
    *  ending the broadcast. */
   private static GRACE_MS = 30_000
 
-  /** Max attempts when transition('live') is rejected for "stream not yet
-   *  active". YouTube needs a few seconds to confirm ingest data; we retry
-   *  every TRANSITION_RETRY_MS until it sticks or we give up. */
-  private static MAX_LIVE_ATTEMPTS = 5
-  private static TRANSITION_RETRY_MS = 3000
+  /** Poll cadence + overall budget while waiting for YouTube to report the
+   *  bound stream as 'active' (i.e. it's receiving + validating ingest data).
+   *  90s of headroom covers slow uplinks / encoder spin-up without hanging
+   *  forever. 2s cadence = ~45 quota units worst case per start — negligible. */
+  private static INGEST_POLL_MS = 2000
+  private static INGEST_TIMEOUT_MS = 90_000
+  /** Fallback retries for transition('live') itself once the stream is
+   *  active — covers the brief window where YouTube reports 'active' but the
+   *  transition still 409s for a beat. */
+  private static MAX_LIVE_ATTEMPTS = 3
+  private static TRANSITION_RETRY_MS = 2000
 
   private liveBroadcastId: string | null = null
   private liveBroadcastTitle: string | null = null
+  // Broadcast we bound this session — set at bind regardless of whether the
+  // subsequent go-live succeeded. Used so a stream that ends WITHOUT a clean
+  // SM go-live (transition failed, or user went live manually) still emits a
+  // session-end 'completed' signal for the renderer's post-stream prompt.
+  private boundBroadcastId: string | null = null
+  private boundBroadcastTitle: string | null = null
   private graceTimer: NodeJS.Timeout | null = null
   private graceTick: NodeJS.Timeout | null = null
   private graceStartedAt = 0
@@ -104,6 +117,15 @@ class RelayOrchestrator extends EventEmitter {
     const broadcastId = broadcast.id
     const broadcastTitle = broadcast.snippet?.title?.trim() || 'Untitled broadcast'
 
+    // Pin this broadcast for the duration of the session so the widget keeps
+    // showing it even after YouTube flips its status to 'live' (which would
+    // otherwise drop it from the upcoming list and bump the auto-pick to the
+    // next stream). Locked before bind so the pin survives a bind/transition
+    // failure too — bytes are still flowing to this broadcast either way.
+    this.boundBroadcastId = broadcastId
+    this.boundBroadcastTitle = broadcastTitle
+    activeBroadcastService.lockSession(broadcast)
+
     // Look up streamId — cached from auto-fill, looked up if missing.
     const streamId = await this.getStreamId()
     if (!streamId) {
@@ -131,9 +153,25 @@ class RelayOrchestrator extends EventEmitter {
       return
     }
 
-    // Transition to live, with retries to ride out the "stream not yet
-    // active" race (YouTube needs a few seconds of ingest data before it
-    // accepts the transition).
+    // Wait for YouTube to actually be receiving the stream before trying to
+    // go live — calling transition('live') before the bound stream is
+    // 'active' is the usual cause of "couldn't go live". Poll the ingest
+    // status, surfacing a 'waiting-for-ingest' stage so the widget can say
+    // "Waiting for YouTube to receive stream…".
+    this.emit('lifecycle', { stage: 'waiting-for-ingest', broadcastId, broadcastTitle })
+    const ingestActive = await this.waitForStreamActive(streamId)
+    if (!ingestActive) {
+      this.emit('lifecycle', {
+        stage: 'error',
+        broadcastId,
+        broadcastTitle,
+        error: "YouTube never started receiving the stream. Check that your streaming app is actually sending to the relay, then try again. (The broadcast wasn't set live.)",
+      })
+      return
+    }
+
+    // Stream is active — transition to live. A couple of quick retries cover
+    // the brief window where 'active' is reported but transition still 409s.
     this.emit('lifecycle', { stage: 'going-live', broadcastId, broadcastTitle })
     const ok = await this.transitionToLiveWithRetry(broadcastId)
     if (ok) {
@@ -145,17 +183,54 @@ class RelayOrchestrator extends EventEmitter {
         stage: 'error',
         broadcastId,
         broadcastTitle,
-        error: "Couldn't go live after multiple attempts. The stream is still flowing — try ending the broadcast in YT Studio if needed.",
+        error: "Couldn't go live — YouTube was receiving the stream but rejected the transition. The stream is still flowing; you can set it live in YT Studio.",
       })
     }
+  }
+
+  /** Poll liveStreams.status until streamStatus === 'active' or we time out.
+   *  Returns true if the stream went active. Aborts early if the relay stops
+   *  mid-wait (graceTimer/no child) — handled implicitly because a later
+   *  stream-stopped clears state, but the poll itself is bounded by the
+   *  timeout regardless. */
+  private async waitForStreamActive(streamId: string): Promise<boolean> {
+    const deadline = Date.now() + RelayOrchestrator.INGEST_TIMEOUT_MS
+    const { clientId, clientSecret } = this.getCreds()
+    while (Date.now() < deadline) {
+      try {
+        const { streamStatus } = await getStreamStatus(streamId, clientId, clientSecret)
+        if (streamStatus === 'active') return true
+        // 'error' is terminal — no point polling further.
+        if (streamStatus === 'error') return false
+      } catch {
+        // Transient API hiccup — keep polling until the deadline.
+      }
+      await new Promise(r => setTimeout(r, RelayOrchestrator.INGEST_POLL_MS))
+    }
+    return false
   }
 
   // ─── Stream-stopped ─────────────────────────────────────────────────────
 
   private handleStreamStopped(): void {
-    // Stream-stopped without ever having gone live (e.g. bind failed earlier,
-    // or no-broadcast scenario) — nothing to finalize.
-    if (!this.liveBroadcastId) return
+    // Stream-stopped without a clean SM go-live (bind/transition failed, or
+    // user went live manually). Nothing to finalize, but the session still
+    // ended — emit 'completed' with the bound broadcast so the renderer's
+    // post-stream Twitch prompt still fires, then release the session pin.
+    if (!this.liveBroadcastId) {
+      if (this.boundBroadcastId) {
+        this.emit('lifecycle', {
+          stage: 'completed',
+          broadcastId: this.boundBroadcastId,
+          broadcastTitle: this.boundBroadcastTitle ?? undefined,
+        })
+      }
+      this.boundBroadcastId = null
+      this.boundBroadcastTitle = null
+      activeBroadcastService.getUpcoming(true).catch(() => {})
+      activeBroadcastService.unlockSession()
+      return
+    }
 
     const broadcastId = this.liveBroadcastId
     const broadcastTitle = this.liveBroadcastTitle ?? undefined
@@ -200,6 +275,14 @@ class RelayOrchestrator extends EventEmitter {
       }
       this.liveBroadcastId = null
       this.liveBroadcastTitle = null
+      this.boundBroadcastId = null
+      this.boundBroadcastTitle = null
+      // Refresh the upcoming list first (still pinned, so the widget doesn't
+      // flicker), then release the pin — getActive() then reports the fresh
+      // next-soonest auto-pick. Order matters: unlocking before the refresh
+      // would briefly surface the just-completed broadcast.
+      await activeBroadcastService.getUpcoming(true).catch(() => {})
+      activeBroadcastService.unlockSession()
     }, RelayOrchestrator.GRACE_MS)
   }
 

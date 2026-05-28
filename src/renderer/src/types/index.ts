@@ -170,6 +170,7 @@ export interface AppConfig {
   defaultThumbnailTemplate: string
   defaultBuiltinThumbnailTemplate: string
   useBuiltinThumbnailByDefault: boolean
+  defaultBroadcastTime: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number
   defaultBleepVolume: number
@@ -198,6 +199,7 @@ export interface AppConfig {
   streamRelayStreamId: string
   streamRelayActiveBroadcastId: string
   streamRelayActivePickedAt: number
+  autoUpdateTwitchAfterStream: boolean
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'
@@ -270,12 +272,26 @@ export interface StreamMeta {
   // Twitch
   twitchTitle?: string
   twitchGameName?: string
-  // Sync flag: when true, twitchTitle mirrors ytTitle
+  /** Twitch channel tags — Twitch's rules: ≤10 tags, ≤25 chars each,
+   *  alphanumeric only. Stored independently from ytTags because Twitch's
+   *  format constraints diverge enough from YouTube's that sharing a list
+   *  produces mostly-incompatible noise. */
+  twitchTags?: string[]
+  /** Sync flags — when true, the corresponding Twitch field mirrors the
+   *  YouTube field at push time. Default to true (match existing UX where
+   *  most users want the same info on both platforms). Tags have no sync
+   *  flag because Twitch + YouTube tag formats are too dissimilar. */
   syncTitle?: boolean
+  syncGame?: boolean
   // Thumbnail
   smThumbnail?: boolean
   smThumbnailTemplate?: string
   preferredThumbnail?: string
+  /** sha1 of the thumbnail file that was last uploaded to YouTube. Compared
+   *  against the current selected thumbnail's hash to detect whether the
+   *  thumbnail has changed since the last push (so the push action can offer
+   *  to re-upload it even when no other metadata changed). */
+  ytThumbnailPushedHash?: string
   // Per-file, per-track audio settings (M/S/volume) for the multi-track
   // playback feature. Outer key = video filename (matching videoMap keys);
   // inner key = track index. Omitted fields use sensible defaults; an
@@ -332,6 +348,17 @@ export interface YTDescriptionTemplate {
 }
 
 export interface YTTagTemplate {
+  id: string
+  name: string
+  tags: string[]
+}
+
+/** Twitch channel tag template. Twitch's rules: ≤10 tags, ≤25 chars each,
+ *  alphanumeric only. Kept separate from YTTagTemplate because the format
+ *  constraints make YouTube tag lists almost always incompatible with
+ *  Twitch — sharing a single template list would surface the rejected
+ *  subset everywhere it gets used. */
+export interface TwitchTagTemplate {
   id: string
   name: string
   tags: string[]
@@ -397,6 +424,9 @@ export interface ActivePickResult {
   broadcast: LiveBroadcast | null
   isManual: boolean
   manualPickStale: boolean
+  /** True while the relay is actively streaming to this broadcast (pinned
+   *  by the orchestrator for the session). */
+  isLiveSession?: boolean
 }
 
 /** Lifecycle stages emitted by the relay orchestrator as it walks a broadcast
@@ -405,6 +435,7 @@ export type OrchestratorStage =
   | 'idle'
   | 'no-broadcast'
   | 'binding'
+  | 'waiting-for-ingest'
   | 'going-live'
   | 'live'
   | 'grace'

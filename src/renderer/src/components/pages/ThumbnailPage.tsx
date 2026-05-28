@@ -1424,11 +1424,23 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         if (cancelled || myToken !== token) return
         const cur = all.find(s => s.folderPath === currentStream.folderPath)
         if (!cur) { setSeasonAssets(null); return }
-        const season = cur.meta?.ytSeason
-        const related = season
+        // "Related episodes" = same game (series) AND same season, mirroring
+        // the streams-page series convention. Matching on season alone is
+        // wrong: it pulls in unrelated games that happen to share a season
+        // number (e.g. Hardspace S2 surfacing Rimworld S2), and excludes
+        // everything when the season is unset. Default season to '1' so
+        // streams without an explicit ytSeason still group together.
+        const curGame = cur.meta?.games?.[0] ?? cur.detectedGames?.[0]
+        const curSeason = cur.meta?.ytSeason ?? '1'
+        const related = curGame
           ? all
-              .filter(s => s.folderPath !== currentStream.folderPath && s.meta?.ytSeason === season)
-              .sort((a, b) => Number(a.meta?.ytEpisode ?? 0) - Number(b.meta?.ytEpisode ?? 0))
+              .filter(s =>
+                s.folderPath !== currentStream.folderPath &&
+                s.meta?.games?.some(g => g.toLowerCase() === curGame.toLowerCase()) &&
+                (s.meta?.ytSeason ?? '1') === curSeason
+              )
+              // Reverse chronological — newest stream items at the top.
+              .sort((a, b) => b.date.localeCompare(a.date))
           : []
         // Skip the SM thumbnail PNG itself (`<date>_sm-thumbnail.png`):
         //   - Current stream: it's the file we're editing — adding it as a
@@ -3003,9 +3015,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     }
                     return groups.map(g => (
                       <div key={g.key} className="border-b border-white/5 last:border-b-0">
-                        <div className="px-3 pt-2 pb-1 flex items-baseline gap-1.5">
+                        <div className="px-3 pt-2 pb-1 flex flex-col gap-0.5">
                           <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{g.label}</span>
-                          {g.sublabel && <span className="text-[10px] text-gray-400 truncate">— {g.sublabel}</span>}
+                          {g.sublabel && <span className="text-[10px] text-gray-400 truncate">{g.sublabel}</span>}
                         </div>
                         <div className="px-2 pb-2 grid grid-cols-2 gap-1">
                           {g.images.map(p => {

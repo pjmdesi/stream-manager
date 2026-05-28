@@ -17,6 +17,7 @@ const defaultConfig: AppConfig = {
   defaultThumbnailTemplate: '',
   defaultBuiltinThumbnailTemplate: '',
   useBuiltinThumbnailByDefault: true,
+  defaultBroadcastTime: '19:00',
   checkEpisodeIteration: true,
   audioCacheLimit: 1_073_741_824,
   youtubeClientId: '',
@@ -42,6 +43,7 @@ const defaultConfig: AppConfig = {
   streamRelayStreamId: '',
   streamRelayActiveBroadcastId: '',
   streamRelayActivePickedAt: 0,
+  autoUpdateTwitchAfterStream: false,
 }
 
 interface StoreContextValue {

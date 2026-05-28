@@ -408,6 +408,9 @@ contextBridge.exposeInMainWorld('api', {
   setYTDescriptionTemplates: (v: any[]) => ipcRenderer.invoke('store:setYTDescriptionTemplates', v),
   getYTTagTemplates: () => ipcRenderer.invoke('store:getYTTagTemplates'),
   setYTTagTemplates: (v: any[]) => ipcRenderer.invoke('store:setYTTagTemplates', v),
+
+  getTwitchTagTemplates: () => ipcRenderer.invoke('store:getTwitchTagTemplates'),
+  setTwitchTagTemplates: (v: any[]) => ipcRenderer.invoke('store:setTwitchTagTemplates', v),
   getStreamTypeTags: (): Promise<Record<string, string>> => ipcRenderer.invoke('store:getStreamTypeTags'),
   setStreamTypeTags: (v: Record<string, string>) => ipcRenderer.invoke('store:setStreamTypeTags', v),
   getStreamTypeTextures: (): Promise<Record<string, string>> => ipcRenderer.invoke('store:getStreamTypeTextures'),
@@ -423,8 +426,8 @@ contextBridge.exposeInMainWorld('api', {
   twitchDisconnect: () =>
     ipcRenderer.invoke('twitch:disconnect'),
 
-  twitchUpdateChannel: (title: string, gameName?: string) =>
-    ipcRenderer.invoke('twitch:updateChannel', title, gameName),
+  twitchUpdateChannel: (title: string, gameName?: string, tags?: string[]) =>
+    ipcRenderer.invoke('twitch:updateChannel', title, gameName, tags),
 
   // ── Video Popup ───────────────────────────────────────────────────────────
   // offerSdp is the WebRTC offer SDP from the main renderer's RTCPeerConnection.
@@ -517,6 +520,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:saveCanvas', folderPath, date, canvasFile, pngDataUrl),
   thumbnailCacheAsset: (streamsDir: string, srcPath: string) =>
     ipcRenderer.invoke('thumbnail:cacheAsset', streamsDir, srcPath),
+  thumbnailHashFile: (filePath: string): Promise<string | null> =>
+    ipcRenderer.invoke('thumbnail:hashFile', filePath),
   thumbnailGetRecents: () =>
     ipcRenderer.invoke('thumbnail:getRecents'),
   thumbnailAddRecent: (entry: any) =>

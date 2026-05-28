@@ -14,10 +14,9 @@ import { useStore } from '../../hooks/useStore'
 export function IntegrationsPage() {
   const { config, updateConfig } = useStore()
 
-  // ── YouTube credentials ───────────────────────────────────────────────────
-  const [ytClientId, setYtClientId] = useState('')
-  const [ytClientSecret, setYtClientSecret] = useState('')
-  const [ytCredsSaved, setYtCredsSaved] = useState(false)
+  // ── YouTube state ─────────────────────────────────────────────────────────
+  // Credential inputs bind directly to config (auto-save on every keystroke).
+  // No local mirror state and no Save button needed.
   const [ytConnected, setYtConnected] = useState(false)
   const [ytTokenValid, setYtTokenValid] = useState(true)
   const [ytTokenError, setYtTokenError] = useState<string | null>(null)
@@ -143,18 +142,17 @@ export function IntegrationsPage() {
     } catch { /* clipboard refused — ignore */ }
   }
 
-  // ── Twitch credentials ────────────────────────────────────────────────────
-  const [twClientId, setTwClientId] = useState('')
-  const [twClientSecret, setTwClientSecret] = useState('')
-  const [twCredsSaved, setTwCredsSaved] = useState(false)
+  // ── Twitch state ──────────────────────────────────────────────────────────
+  // Credential inputs bind directly to config (auto-save on every keystroke
+  // via updateConfig's optimistic-update path) — no local mirror state and
+  // no Save button needed.
   const [twConnected, setTwConnected] = useState(false)
   const [twConnecting, setTwConnecting] = useState(false)
   const [twError, setTwError] = useState<string | null>(null)
 
-  // ── Claude credentials ────────────────────────────────────────────────────
-  const [claudeApiKey, setClaudeApiKey] = useState('')
-  const [claudeSystemPrompt, setClaudeSystemPrompt] = useState('')
-  const [claudeSaved, setClaudeSaved] = useState(false)
+  // ── Claude state ──────────────────────────────────────────────────────────
+  // API key + system prompt bind directly to config (auto-save). Test-key
+  // result is local to this session.
   const [claudeTesting, setClaudeTesting] = useState(false)
   const [claudeTestResult, setClaudeTestResult] = useState<{ valid: boolean; error?: string } | null>(null)
 
@@ -178,17 +176,11 @@ export function IntegrationsPage() {
     setPendingReveal(null)
   }
 
+  // Reset test result when the user changes the Claude key — otherwise a
+  // stale "valid"/"invalid" badge would linger against a different key.
   useEffect(() => {
-    setYtClientId(config.youtubeClientId ?? '')
-    setYtClientSecret(config.youtubeClientSecret ?? '')
-    setTwClientId(config.twitchClientId ?? '')
-    setTwClientSecret(config.twitchClientSecret ?? '')
-  }, [config.youtubeClientId, config.youtubeClientSecret, config.twitchClientId, config.twitchClientSecret])
-
-  useEffect(() => {
-    setClaudeApiKey(config.claudeApiKey ?? '')
-    setClaudeSystemPrompt(config.claudeSystemPrompt ?? '')
-  }, [config.claudeApiKey, config.claudeSystemPrompt])
+    setClaudeTestResult(null)
+  }, [config.claudeApiKey])
 
   useEffect(() => {
     window.api.youtubeGetStatus().then((s: { connected: boolean }) => {
@@ -205,10 +197,6 @@ export function IntegrationsPage() {
   }, [])
 
   // ── YouTube actions ───────────────────────────────────────────────────────
-  const saveYtCredentials = async () => {
-    await updateConfig({ youtubeClientId: ytClientId.trim(), youtubeClientSecret: ytClientSecret.trim() })
-    setYtCredsSaved(true); setTimeout(() => setYtCredsSaved(false), 2000)
-  }
   const connectYt = async () => {
     setYtConnecting(true); setYtError(null)
     try {
@@ -228,30 +216,20 @@ export function IntegrationsPage() {
   }
 
   // ── Claude actions ────────────────────────────────────────────────────────
-  const saveClaudeSettings = async () => {
-    await updateConfig({ claudeApiKey: claudeApiKey.trim(), claudeSystemPrompt: claudeSystemPrompt.trim() })
-    setClaudeSaved(true); setTimeout(() => setClaudeSaved(false), 2000)
-    setClaudeTestResult(null)
-  }
   const disconnectClaude = async () => {
     await updateConfig({ claudeApiKey: '', claudeSystemPrompt: '' })
-    setClaudeApiKey('')
-    setClaudeSystemPrompt('')
     setClaudeTestResult(null)
   }
   const testClaudeKey = async () => {
-    if (!claudeApiKey.trim()) return
+    const key = (config.claudeApiKey ?? '').trim()
+    if (!key) return
     setClaudeTesting(true); setClaudeTestResult(null)
-    const result = await window.api.claudeTestKey(claudeApiKey.trim())
+    const result = await window.api.claudeTestKey(key)
     setClaudeTestResult(result)
     setClaudeTesting(false)
   }
 
   // ── Twitch actions ────────────────────────────────────────────────────────
-  const saveTwCredentials = async () => {
-    await updateConfig({ twitchClientId: twClientId.trim(), twitchClientSecret: twClientSecret.trim() })
-    setTwCredsSaved(true); setTimeout(() => setTwCredsSaved(false), 2000)
-  }
   const connectTw = async () => {
     setTwConnecting(true); setTwError(null)
     try { await window.api.twitchConnect(); setTwConnected(true) }
@@ -358,14 +336,23 @@ export function IntegrationsPage() {
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-400">Client ID</label>
-                  <input value={ytClientId} onChange={e => setYtClientId(e.target.value)} placeholder="…apps.googleusercontent.com"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+                  <input
+                    value={config.youtubeClientId ?? ''}
+                    onChange={e => updateConfig({ youtubeClientId: e.target.value })}
+                    placeholder="…apps.googleusercontent.com"
+                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  />
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-400">Client Secret</label>
                   <div className="relative">
-                    <input type={revealed.has('yt-secret') ? 'text' : 'password'} value={ytClientSecret} onChange={e => setYtClientSecret(e.target.value)} placeholder="GOCSPX-…"
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+                    <input
+                      type={revealed.has('yt-secret') ? 'text' : 'password'}
+                      value={config.youtubeClientSecret ?? ''}
+                      onChange={e => updateConfig({ youtubeClientSecret: e.target.value })}
+                      placeholder="GOCSPX-…"
+                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    />
                     <button onClick={() => requestReveal('yt-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors">
                       {revealed.has('yt-secret') ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
@@ -373,16 +360,12 @@ export function IntegrationsPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="secondary" size="sm" onClick={saveYtCredentials}
-                  icon={ytCredsSaved ? <CheckCircle2 size={13} className="text-green-400" /> : undefined}>
-                  {ytCredsSaved ? 'Saved!' : 'Save credentials'}
-                </Button>
                 {!ytConnected
-                  ? <Button variant="primary" size="sm" onClick={connectYt} disabled={!ytClientId || !ytClientSecret || ytConnecting}
+                  ? <Button variant="primary" size="sm" onClick={connectYt} disabled={!config.youtubeClientId || !config.youtubeClientSecret || ytConnecting}
                       icon={ytConnecting ? <Loader2 size={13} className="animate-spin" /> : <Youtube size={13} />}>
                       {ytConnecting ? 'Connecting…' : 'Connect to YouTube'}
                     </Button>
-                  : <Button variant="ghost" size="sm" onClick={disconnectYt}>Disconnect</Button>
+                  : <Button variant="danger" size="sm" onClick={disconnectYt}>Disconnect</Button>
                 }
               </div>
               {ytConnecting && (
@@ -621,14 +604,23 @@ export function IntegrationsPage() {
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-400">Client ID</label>
-                  <input value={twClientId} onChange={e => setTwClientId(e.target.value)} placeholder="Twitch Client ID"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+                  <input
+                    value={config.twitchClientId ?? ''}
+                    onChange={e => updateConfig({ twitchClientId: e.target.value })}
+                    placeholder="Twitch Client ID"
+                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  />
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-400">Client Secret</label>
                   <div className="relative">
-                    <input type={revealed.has('tw-secret') ? 'text' : 'password'} value={twClientSecret} onChange={e => setTwClientSecret(e.target.value)} placeholder="Twitch Client Secret"
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+                    <input
+                      type={revealed.has('tw-secret') ? 'text' : 'password'}
+                      value={config.twitchClientSecret ?? ''}
+                      onChange={e => updateConfig({ twitchClientSecret: e.target.value })}
+                      placeholder="Twitch Client Secret"
+                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    />
                     <button onClick={() => requestReveal('tw-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors">
                       {revealed.has('tw-secret') ? <EyeOff size={13} /> : <Eye size={13} />}
                     </button>
@@ -636,17 +628,13 @@ export function IntegrationsPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="secondary" size="sm" onClick={saveTwCredentials}
-                  icon={twCredsSaved ? <CheckCircle2 size={13} className="text-green-400" /> : undefined}>
-                  {twCredsSaved ? 'Saved!' : 'Save credentials'}
-                </Button>
                 {!twConnected
-                  ? <Button variant="primary" size="sm" onClick={connectTw} disabled={!twClientId || !twClientSecret || twConnecting}
+                  ? <Button variant="primary" size="sm" onClick={connectTw} disabled={!config.twitchClientId || !config.twitchClientSecret || twConnecting}
                       icon={twConnecting ? <Loader2 size={13} className="animate-spin" /> : <Twitch size={13} />}
                       className="bg-purple-600 hover:bg-purple-500">
                       {twConnecting ? 'Connecting…' : 'Connect to Twitch'}
                     </Button>
-                  : <Button variant="ghost" size="sm" onClick={disconnectTw}>Disconnect</Button>
+                  : <Button variant="danger" size="sm" onClick={disconnectTw}>Disconnect</Button>
                 }
               </div>
               {twConnecting && (
@@ -656,6 +644,21 @@ export function IntegrationsPage() {
                 </p>
               )}
               {twError && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{twError}</p>}
+
+              {/* Auto-update setting — divider keeps it visually grouped
+                  with the connection block above while still distinguishing
+                  the setting from credentials. Toggle is disabled (greyed)
+                  when Twitch isn't connected, but the option is visible so
+                  users discover it exists. */}
+              <div className="pt-3 border-t border-white/5 flex flex-col gap-1">
+                <Checkbox
+                  checked={!!config.autoUpdateTwitchAfterStream}
+                  onChange={v => updateConfig({ autoUpdateTwitchAfterStream: v })}
+                  disabled={!twConnected}
+                  label={<div><div className="text-sm font-medium text-gray-200">Auto-update Twitch details when a stream ends</div><div className="text-xs text-gray-400">After SM detects that a stream has completed, push the next-upcoming stream item's details to your Twitch channel automatically (if there is one).</div></div>}
+                  size="sm"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -684,8 +687,8 @@ export function IntegrationsPage() {
                 <div className="relative">
                   <input
                     type={revealed.has('claude-key') ? 'text' : 'password'}
-                    value={claudeApiKey}
-                    onChange={e => { setClaudeApiKey(e.target.value); setClaudeTestResult(null) }}
+                    value={config.claudeApiKey ?? ''}
+                    onChange={e => updateConfig({ claudeApiKey: e.target.value })}
                     placeholder="sk-ant-…"
                     className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
                   />
@@ -700,8 +703,8 @@ export function IntegrationsPage() {
                   <span className="text-gray-400 font-normal ml-1">(optional)</span>
                 </label>
                 <textarea
-                  value={claudeSystemPrompt}
-                  onChange={e => setClaudeSystemPrompt(e.target.value)}
+                  value={config.claudeSystemPrompt ?? ''}
+                  onChange={e => updateConfig({ claudeSystemPrompt: e.target.value })}
                   rows={4}
                   placeholder="e.g. I stream horror games. Keep titles under 60 characters. Always include the episode number. My channel tagline is …"
                   className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y"
@@ -709,17 +712,13 @@ export function IntegrationsPage() {
                 <p className="text-xs text-gray-400">Tell Claude about your channel, content style, or any preferences for how suggestions should be worded.</p>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <Button variant="secondary" size="sm" onClick={saveClaudeSettings}
-                  icon={claudeSaved ? <CheckCircle2 size={13} className="text-green-400" /> : undefined}>
-                  {claudeSaved ? 'Saved!' : 'Save'}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={testClaudeKey}
-                  disabled={!claudeApiKey.trim() || claudeTesting}
+                <Button variant="secondary" size="sm" onClick={testClaudeKey}
+                  disabled={!(config.claudeApiKey ?? '').trim() || claudeTesting}
                   icon={claudeTesting ? <Loader2 size={13} className="animate-spin" /> : undefined}>
                   {claudeTesting ? 'Testing…' : 'Test connection'}
                 </Button>
                 {config.claudeApiKey && (
-                  <Button variant="ghost" size="sm" onClick={disconnectClaude}>Disconnect</Button>
+                  <Button variant="danger" size="sm" onClick={disconnectClaude}>Disconnect</Button>
                 )}
                 {claudeTestResult && (
                   claudeTestResult.valid

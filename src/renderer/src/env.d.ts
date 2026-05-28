@@ -16,6 +16,7 @@ import type {
   YTTitleTemplate,
   YTDescriptionTemplate,
   YTTagTemplate,
+  TwitchTagTemplate,
   LiveBroadcast,
   LauncherGroup,
   RelayStatus,
@@ -203,11 +204,14 @@ declare global {
       getYTTagTemplates(): Promise<YTTagTemplate[]>
       setYTTagTemplates(v: YTTagTemplate[]): Promise<void>
 
+      getTwitchTagTemplates(): Promise<TwitchTagTemplate[]>
+      setTwitchTagTemplates(v: TwitchTagTemplate[]): Promise<void>
+
       // ── Twitch ───────────────────────────────────────────────────────────────
       twitchGetStatus(): Promise<{ connected: boolean; channelName?: string }>
       twitchConnect(): Promise<void>
       twitchDisconnect(): Promise<void>
-      twitchUpdateChannel(title: string, gameName?: string): Promise<void>
+      twitchUpdateChannel(title: string, gameName?: string, tags?: string[]): Promise<void>
 
       // ── Video Popup ───────────────────────────────────────────────────────────
       openVideoPopup(offerSdp: string, videoWidth: number, videoHeight: number, cropMode?: string, cropX?: number): Promise<void>
@@ -228,6 +232,7 @@ declare global {
       thumbnailLoadCanvas(folderPath: string, date: string): Promise<ThumbnailCanvasFile | null>
       thumbnailSaveCanvas(folderPath: string, date: string, canvasFile: ThumbnailCanvasFile, pngDataUrl: string): Promise<void>
       thumbnailCacheAsset(streamsDir: string, srcPath: string): Promise<string>
+      thumbnailHashFile(filePath: string): Promise<string | null>
       thumbnailGetRecents(): Promise<ThumbnailRecentEntry[]>
       thumbnailAddRecent(entry: ThumbnailRecentEntry): Promise<ThumbnailRecentEntry[]>
       thumbnailRemoveRecent(folderPath: string, date: string): Promise<ThumbnailRecentEntry[]>

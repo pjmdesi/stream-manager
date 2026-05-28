@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react'
 import ReactDOM from 'react-dom'
-import { TrendingUpDown, Calendar, RotateCcw, ChevronDown } from 'lucide-react'
+import { TrendingUpDown, Calendar, RotateCcw, ChevronDown, X, Loader2 } from 'lucide-react'
+import { Twitch as LucideTwitch } from './ui/BrandIcons'
 import { useStore } from '../hooks/useStore'
+import { useRelayPrompt } from '../context/RelayPromptContext'
 import { Tooltip } from './ui/Tooltip'
 import type { RelayStatus, RelayStats, ActivePickResult, OrchestratorEvent, LiveBroadcast, Page } from '../types'
 
@@ -27,7 +29,10 @@ export function StreamRelayWidget({
   collapsed: boolean
   onNavigate: (page: Page) => void
 }) {
-  const { config } = useStore()
+  const { config, updateConfig } = useStore()
+  const { suggestion: twitchPrompt, setSuggestion: setTwitchPrompt } = useRelayPrompt()
+  const [twitchPromptPushing, setTwitchPromptPushing] = useState(false)
+  const [twitchPromptError, setTwitchPromptError] = useState<string | null>(null)
   const [status, setStatus] = useState<RelayStatus>({ state: 'idle' })
   const [stats, setStats] = useState<RelayStats | null>(null)
   const [active, setActive] = useState<ActivePickResult>({ broadcast: null, isManual: false, manualPickStale: false })
@@ -35,6 +40,30 @@ export function StreamRelayWidget({
   const [lifecycle, setLifecycle] = useState<OrchestratorEvent | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const pickerAnchorRef = useRef<HTMLDivElement>(null)
+
+  // Reset transient prompt state whenever the suggestion changes/clears so
+  // a stale error/loading flag from a previous prompt doesn't carry over.
+  useEffect(() => { setTwitchPromptError(null); setTwitchPromptPushing(false) }, [twitchPrompt?.folderPath])
+
+  const pushTwitchSuggestion = async () => {
+    if (!twitchPrompt) return
+    setTwitchPromptPushing(true)
+    setTwitchPromptError(null)
+    try {
+      const { title, game, tags } = twitchPrompt.payload
+      await window.api.twitchUpdateChannel(title, game, tags)
+      setTwitchPrompt(null)
+    } catch (e: any) {
+      setTwitchPromptError(e?.message ?? String(e))
+    } finally {
+      setTwitchPromptPushing(false)
+    }
+  }
+  const enableAutoUpdateAndPush = async () => {
+    await updateConfig({ autoUpdateTwitchAfterStream: true })
+    await pushTwitchSuggestion()
+  }
+  const dismissTwitchPrompt = () => setTwitchPrompt(null)
 
   // Initial fetch + live subscriptions. The cleanup functions returned from
   // each on* call are the preload's removeListener wrappers — composed via
@@ -55,7 +84,15 @@ export function StreamRelayWidget({
       window.api.onRelayUpcomingChanged(setUpcoming),
       window.api.onRelayLifecycle(setLifecycle),
     ]
-    return () => { for (const off of offs) off() }
+    // Safety-net poll — orchestrator already force-refreshes after it
+    // completes a broadcast (instant for SM-routed streams), but this
+    // catches cases the orchestrator doesn't know about: broadcasts
+    // finished via an external streaming app, deleted from YT Studio,
+    // or added on the fly. 1 quota unit per poll = ~1440/day.
+    const poll = setInterval(() => {
+      window.api.streamRelayGetUpcomingBroadcasts(true).catch(() => {})
+    }, 60_000)
+    return () => { for (const off of offs) off(); clearInterval(poll) }
   }, [config.streamRelayEnabled])
 
   // Per-user spec: hide entirely when feature is off.
@@ -164,8 +201,9 @@ export function StreamRelayWidget({
               <span className="text-[11px] text-gray-200 truncate">{broadcastTitle}</span>
               <span className="text-[10px] text-gray-400 tabular-nums">
                 {broadcastTime}
-                {active.isManual && <span className="text-purple-400 ml-1">· picked</span>}
-                {!active.isManual && <span className="text-gray-400 ml-1">· auto</span>}
+                {active.isLiveSession && <span className="text-green-400 ml-1">· live</span>}
+                {!active.isLiveSession && active.isManual && <span className="text-purple-400 ml-1">· picked</span>}
+                {!active.isLiveSession && !active.isManual && <span className="text-gray-400 ml-1">· auto</span>}
               </span>
             </div>
             {!isStreaming && <ChevronDown size={11} className="text-gray-400 shrink-0 mt-1" />}
@@ -200,6 +238,11 @@ export function StreamRelayWidget({
             Connecting broadcast{lifecycle.broadcastTitle ? `: ${lifecycle.broadcastTitle}` : '…'}
           </p>
         )}
+        {lifecycle && lifecycle.stage === 'waiting-for-ingest' && (
+          <p className="px-2 text-[10px] text-amber-400 leading-tight">
+            Waiting for YouTube to receive stream…
+          </p>
+        )}
         {lifecycle && lifecycle.stage === 'going-live' && (
           <p className="px-2 text-[10px] text-amber-400 leading-tight">
             Going live{lifecycle.broadcastTitle ? ` as ${lifecycle.broadcastTitle}` : '…'}
@@ -222,7 +265,7 @@ export function StreamRelayWidget({
         )}
 
         {/* Live stats while streaming */}
-        {isStreaming && stats && lifecycle?.stage !== 'going-live' && lifecycle?.stage !== 'binding' && (
+        {isStreaming && stats && lifecycle?.stage !== 'going-live' && lifecycle?.stage !== 'binding' && lifecycle?.stage !== 'waiting-for-ingest' && (
           <div className="px-2 pt-1 flex items-center gap-2 text-[10px] text-gray-400 tabular-nums">
             <span>{Math.round(stats.kbps)} kbps</span>
             <span>·</span>
@@ -245,6 +288,53 @@ export function StreamRelayWidget({
           <p className="px-2 text-[10px] text-red-400 leading-tight">
             {status.error}
           </p>
+        )}
+
+        {/* Post-stream Twitch suggestion — surfaces after a stream ends when
+            auto-update is OFF and there's a next-upcoming stream with Twitch
+            info to push. Three exits: push now, push + enable auto-update,
+            or dismiss. Hidden once any of those resolves. */}
+        {twitchPrompt && (
+          <div className="mt-1 mx-2 p-2 rounded border border-twitch-400/30 bg-twitch-400/5 flex flex-col gap-1.5">
+            <div className="flex items-start gap-1.5">
+              <LucideTwitch size={11} className="text-twitch-400/80 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-gray-200 leading-tight">Push next stream to Twitch?</p>
+                <p className="text-[10px] text-gray-400 leading-tight truncate" title={twitchPrompt.displayTitle}>
+                  {twitchPrompt.displayTitle}
+                </p>
+              </div>
+              <button
+                onClick={dismissTwitchPrompt}
+                className="shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                aria-label="Dismiss"
+              >
+                <X size={11} />
+              </button>
+            </div>
+            {twitchPromptError && (
+              <p className="text-[10px] text-red-400 leading-tight">{twitchPromptError}</p>
+            )}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={pushTwitchSuggestion}
+                disabled={twitchPromptPushing}
+                className="flex-1 flex items-center justify-center gap-1 text-[10px] px-2 py-1 rounded bg-twitch-400/20 text-twitch-200 hover:bg-twitch-400/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {twitchPromptPushing && <Loader2 size={10} className="animate-spin" />}
+                Update
+              </button>
+              <Tooltip content="Push now + enable auto-update from now on" side="top">
+                <button
+                  onClick={enableAutoUpdateAndPush}
+                  disabled={twitchPromptPushing}
+                  className="flex-1 flex items-center justify-center text-[10px] px-2 py-1 rounded bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Always
+                </button>
+              </Tooltip>
+            </div>
+          </div>
         )}
       </div>
 

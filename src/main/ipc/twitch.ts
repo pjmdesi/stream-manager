@@ -30,9 +30,10 @@ export function registerTwitchIPC(): void {
   ipcMain.handle('twitch:updateChannel', async (
     _event,
     title: string,
-    gameName?: string
+    gameName?: string,
+    tags?: string[]
   ) => {
     const { clientId, clientSecret } = getCreds()
-    await updateChannelInfo(title, gameName, clientId, clientSecret)
+    await updateChannelInfo(title, gameName, tags, clientId, clientSecret)
   })
 }

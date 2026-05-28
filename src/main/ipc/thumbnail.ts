@@ -63,6 +63,19 @@ export function registerThumbnailIPC(): void {
     await fs.promises.mkdir(imagesDir(streamsDir), { recursive: true })
   })
 
+  // Content hash of a file (sha1 of bytes). Used to detect whether a stream's
+  // thumbnail has changed since it was last pushed to YouTube — robust to
+  // mtime touches from cloud-sync clients. Returns null if the file is
+  // missing/unreadable (treated by the caller as "no hash → needs push").
+  ipcMain.handle('thumbnail:hashFile', async (_e, filePath: string): Promise<string | null> => {
+    try {
+      const buf = await fs.promises.readFile(filePath)
+      return crypto.createHash('sha1').update(buf).digest('hex')
+    } catch {
+      return null
+    }
+  })
+
   // ── Templates ────────────────────────────────────────────────────────────
 
   ipcMain.handle('thumbnail:listTemplates', async (_e, streamsDir: string): Promise<ThumbnailTemplate[]> => {
