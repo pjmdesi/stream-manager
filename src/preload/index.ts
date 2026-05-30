@@ -90,6 +90,9 @@ contextBridge.exposeInMainWorld('api', {
   saveScreenshot: (destPath: string, base64Data: string) =>
     ipcRenderer.invoke('files:saveScreenshot', destPath, base64Data),
 
+  trashFile: (filePath: string) =>
+    ipcRenderer.invoke('files:trashFile', filePath),
+
   checkLocalFiles: (filePaths: string[]) =>
     ipcRenderer.invoke('files:checkLocalFiles', filePaths),
 
@@ -400,6 +403,11 @@ contextBridge.exposeInMainWorld('api', {
     snippet: { title: string; description: string },
     tags: string[]
   ) => ipcRenderer.invoke('youtube:updateBroadcast', broadcastId, snippet, tags),
+
+  youtubeUpdateBroadcastStatus: (
+    broadcastId: string,
+    privacyStatus: 'public' | 'unlisted' | 'private',
+  ) => ipcRenderer.invoke('youtube:updateBroadcastStatus', broadcastId, privacyStatus),
 
   // ── YouTube Templates ─────────────────────────────────────────────────────
   getYTTitleTemplates: () => ipcRenderer.invoke('store:getYTTitleTemplates'),

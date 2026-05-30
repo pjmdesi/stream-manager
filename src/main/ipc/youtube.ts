@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -151,6 +151,20 @@ export function registerYouTubeIPC(): void {
     await updateBroadcastSnippet(broadcastId, snippet, clientId, clientSecret)
     if (tags.length > 0) {
       await updateVideoTags(broadcastId, tags, clientId, clientSecret, snippet.title, snippet.description)
+    }
+  })
+
+  ipcMain.handle('youtube:updateBroadcastStatus', async (
+    _event,
+    broadcastId: string,
+    privacyStatus: 'public' | 'unlisted' | 'private',
+  ) => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      await updateBroadcastStatus(broadcastId, privacyStatus, clientId, clientSecret)
+    } catch (e: any) {
+      console.error('[YT main] updateBroadcastStatus — error:', e.message)
+      throw e
     }
   })
 }

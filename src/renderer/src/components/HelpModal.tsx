@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload } from 'lucide-react'
 import { Youtube } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { useStore } from '../hooks/useStore'
@@ -75,11 +75,11 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         <p>The Streams page is the home view — every stream session you've recorded shows up as a row or card. Each stream item is made up of the following elements:</p>
 
         <ElementSection icon={<ImageIcon size={14} />} title="Thumbnail">
-          <p>Stream Manager automatically detects images related to the stream and picks the best one to represent it (typically the first available). Click the thumbnail to view all images {isDumpMode ? 'matching this date in the dump folder' : 'in the stream folder'} and select a different one. The same selection can be made while editing an item's metadata.</p>
+          <p>Stream Manager automatically detects images related to the stream and picks the best one to represent it (typically the first available). Click the thumbnail to view all images {isDumpMode ? 'matching this date in the dump folder' : 'in the stream folder'} and select a different one. The same selection can be made while editing a stream item's details.</p>
         </ElementSection>
 
         <ElementSection icon={<Film size={14} />} title="Video Counter">
-          <p>Shows how many videos belong to the stream item, split into two counters by category:</p>
+          <p>Shows how many videos belong to the stream item, split into two counts by category:</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
             <li className="flex items-baseline gap-2"><Film size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">vid</strong> — full recordings (the original stream or full gameplay video).</span></li>
             <li className="flex items-baseline gap-2"><Scissors size={11} className="shrink-0 text-blue-400 translate-y-0.5" /><span><strong className="text-gray-300">clip</strong> — short edited segments derived from the full video, plus any related shorter videos.</span></li>
@@ -223,8 +223,30 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <Zap size={16} />,
     body: (
       <>
-        <p>Convert video files using built-in or imported HandBrake/ffmpeg presets. Common presets include YouTube-ready H.264, archive AV1/H.265, and audio-only extraction.</p>
-        <p>Jobs queue up sequentially. You can pause, resume, or cancel a running conversion. If you cancel, the partial output can be auto-deleted.</p>
+        <p>The Converter re-encodes one or more video files using a chosen preset. Start a conversion by sending a file from the Streams page with the <Zap size={11} className="inline align-baseline -translate-y-px" /> <em>Send to Converter</em> button, drag-and-dropping a file onto the Converter page, or browsing from the page itself.</p>
+
+        <ElementSection icon={<Layers size={14} />} title="Built-in presets">
+          <p>A handful of presets cover the most common needs out of the box:</p>
+          <ul className="list-none pl-0 flex flex-col gap-1.5">
+            <li><strong className="text-gray-300">YouTube Ready (H.264)</strong> — re-encodes at 8 Mbps H.264 with AAC audio. The general-purpose choice for files you plan to upload to YouTube. Preserves all audio tracks.</li>
+            <li><strong className="text-gray-300">Compress VOD (H.265)</strong> — re-encodes at 4 Mbps H.265 with AAC audio. Roughly half the file size of the YouTube preset at comparable quality. Good for everyday storage when you don't need to upload. Preserves all audio tracks.</li>
+            <li><strong className="text-gray-300">Fast Web Preview</strong> — low-bitrate quick encode. Useful when you just need a watchable preview to share over the web. Preserves all audio tracks.</li>
+            <li><strong className="text-gray-300">Archive (SVT-AV1)</strong> — long-term storage with the strongest size-to-quality ratio. Keeps all audio tracks and subtitles. Automatically swaps to a hardware AV1 encoder (NVENC / QSV / AMF) if your GPU supports it.</li>
+            <li><strong className="text-gray-300">Archive (H.265)</strong> — long-term storage at a slightly larger size than AV1, but with much wider playback compatibility. Pick this instead of AV1 when you need files that play back smoothly on older hardware, phones, TVs, or other devices that may not support AV1 decoding yet. Keeps all audio tracks and subtitles. GPU-accelerated automatically when available.</li>
+            <li><strong className="text-gray-300">Lossless Copy (Remux to MP4)</strong> — wraps the existing video and audio into an MP4 container without re-encoding. This is the same operation as OBS's built-in <em>Remux Recordings</em> utility. Fast and lossless; useful for fixing container compatibility without waiting for a full encode.</li>
+            <li><strong className="text-gray-300">Extract Audio (First Track)</strong> — pulls the first audio track out as a stereo MP3. Other audio tracks are dropped (MP3 supports only a single track); use a video preset if you need to keep them all.</li>
+          </ul>
+          <p>One archive preset can be marked as your <strong className="text-gray-300">default archive preset</strong> in Settings. The Archive action on the Streams page always uses this preset, so it's worth setting it to your preferred archival format. The app recommends AV1 when a compatible GPU is detected.</p>
+        </ElementSection>
+
+        <ElementSection icon={<PencilLine size={14} />} title="Custom presets">
+          <p>Use the <em>New Custom Preset</em> button to create your own. The preset editor walks you through the common settings (codec, bitrate, audio handling, output format) without needing to write any commands. An Advanced section is also available for raw ffmpeg arguments if you need finer control.</p>
+          <p>Custom presets appear alongside built-ins and can be renamed or removed at any time.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Upload size={14} />} title="Importing HandBrake presets">
+          <p>If you already have presets exported from HandBrake, click <em>Import HandBrake JSON</em> and select the <code>.json</code> file. The app translates the HandBrake settings into ffmpeg arguments and adds the preset to your list. Imported presets open in Advanced mode in the editor.</p>
+        </ElementSection>
       </>
     ),
   },

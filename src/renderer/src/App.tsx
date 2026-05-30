@@ -71,8 +71,21 @@ interface PendingConverterFile {
   token: number
 }
 
+/** ETA formatter for the conversion widget. Uses `h m` for ≥ 1 minute and
+ *  drops to `s` for sub-minute so the countdown stays readable as a job
+ *  approaches completion. Negative or NaN inputs render as empty so a
+ *  garbage estimate doesn't leak into the UI. */
+function formatEta(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
 function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; collapsed: boolean }) {
-  const { jobs } = useConversionJobs()
+  const { jobs, jobEtas } = useConversionJobs()
 
   // Include 'downloading' (cloud-hydrate wait) and 'replacing' (atomic swap)
   // as active states so the widget keeps surfacing while files are still
@@ -101,6 +114,23 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
     ? relevant.reduce((sum, j) => sum + j.progress, 0) / relevant.length
     : 0
 
+  // ETA = max of all currently-running job ETAs (jobs run in parallel, so
+  // "time until everything's done" = whenever the slowest finishes, NOT
+  // the sum). Anything paused / queued / downloading / replacing is
+  // indeterminate from here, as is any running job that hasn't yet
+  // produced a first ETA tick — they contribute a "+" suffix instead of
+  // skewing the number.
+  const running = active.filter(j => j.status === 'running')
+  const runningEtas = running
+    .map(j => jobEtas.get(j.id))
+    .filter((e): e is number => typeof e === 'number' && e > 0)
+  const maxEta = runningEtas.length > 0 ? Math.max(...runningEtas) : null
+  const hasIndeterminate = active.some(j => j.status !== 'running') || runningEtas.length < running.length
+  const etaText = maxEta !== null ? `${formatEta(maxEta)}${hasIndeterminate ? '+' : ''}` : ''
+  const etaTitle = etaText
+    ? 'Time remaining for active conversions. Paused, queued, and downloading tasks are not included.'
+    : undefined
+
   const barColor =
     hasError ? 'bg-red-500' :
     allPaused ? 'bg-yellow-400' :
@@ -114,7 +144,7 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
 
   if (collapsed) {
     return (
-      <Tooltip content={`Converting · ${label}${allDownloading ? '' : ` · ${totalProgress.toFixed(0)}%`}`} side="right" triggerClassName="block w-full">
+      <Tooltip content={`Converting · ${label}${allDownloading ? '' : ` · ${totalProgress.toFixed(0)}%`}${etaText ? ` · ${etaText}` : ''}`} side="right" triggerClassName="block w-full">
         <button
           onClick={onNavigate}
           className="w-full flex flex-col items-center gap-0.5 py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors"
@@ -150,8 +180,11 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
           style={{ width: `${totalProgress}%` }}
         />
       </div>
-      <div className="mt-1.5 text-[10px] text-gray-400 tabular-nums">
-        {allDownloading ? `${active.length} downloading` : `${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
+      <div className="mt-1.5 text-[10px] text-gray-400 tabular-nums flex items-center justify-between gap-2">
+        <span>
+          {allDownloading ? `${active.length} downloading` : `${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
+        </span>
+        {etaText && <span title={etaTitle}>{etaText}</span>}
       </div>
     </button>
   )

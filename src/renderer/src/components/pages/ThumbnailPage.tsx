@@ -1038,13 +1038,13 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                     type="color"
                     value={layer.fill ?? '#ffffff'}
                     onChange={e => update({ fill: e.target.value })}
-                    className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer"
+                    className="h-7 w-10 shrink-0 bg-transparent cursor-pointer"
                   />
                   <input
                     type="text"
                     value={layer.fill ?? '#ffffff'}
                     onChange={e => update({ fill: e.target.value })}
-                    className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                    className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
                   />
                 </div>
               </label>
@@ -1055,7 +1055,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                     type="color"
                     value={layer.stroke ?? '#000000'}
                     onChange={e => update({ stroke: e.target.value })}
-                    className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer"
+                    className="h-7 w-10 shrink-0 bg-transparent cursor-pointer"
                   />
                   <input
                     type="number"
@@ -1064,7 +1064,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                     placeholder="0"
                     value={layer.strokeWidth ?? 0}
                     onChange={e => update({ strokeWidth: Number(e.target.value) })}
-                    className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                    className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
                   />
                 </div>
               </label>
@@ -1081,19 +1081,19 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               <span className="text-[10px] text-gray-400">Fill</span>
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
-                  className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer" />
+                  className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
                 <input type="text" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
-                  className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
               </div>
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Stroke</span>
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.stroke ?? '#000000'} onChange={e => update({ stroke: e.target.value })}
-                  className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer" />
+                  className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
                 <input type="number" min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
                   onChange={e => update({ strokeWidth: Number(e.target.value) })}
-                  className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
               </div>
             </label>
             {layer.shapeType === 'rect' && (
@@ -1130,10 +1130,10 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.shadowColor ?? '#000000'}
                   onChange={e => update({ shadowColor: e.target.value })}
-                  className="h-7 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer" />
+                  className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
                 <input type="text" value={layer.shadowColor ?? '#000000'}
                   onChange={e => update({ shadowColor: e.target.value })}
-                  className="flex-1 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
               </div>
             </label>
             <div className="grid grid-cols-2 gap-1.5">
@@ -1258,6 +1258,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // visuals from previous episodes when designing a new thumbnail.
   type SeasonAssetGroup = { folderPath: string; date: string; episode?: string; title?: string; images: string[] }
   const [seasonAssets, setSeasonAssets] = useState<{ current: SeasonAssetGroup | null; related: SeasonAssetGroup[] } | null>(null)
+  // Bumped by the paste-image handler so the asset panel re-fetches and
+  // shows the newly-written file. listStreams is the only way to discover
+  // the change since no streams:changed event fires for ad-hoc file writes.
+  const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
   // Cache image dimensions as the grid <img> elements load — used for the
   // hover tooltip (filename + dimensions). Map<absolutePath, {w, h}>.
   const [assetDims, setAssetDims] = useState<Map<string, { w: number; h: number }>>(new Map())
@@ -1473,7 +1477,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       cancelled = true
       unsubscribe()
     }
-  }, [currentStream, config.streamsDir, config.streamMode])
+  }, [currentStream, config.streamsDir, config.streamMode, assetRefreshTrigger])
 
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null)
   // {id → starting Konva-space (x, y)} for every OTHER node in the current
@@ -2157,6 +2161,56 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (!paths.length) return
     await addImageLayerFromPath(paths[0])
   }, [currentStream, config.streamsDir, addImageLayerFromPath])
+
+  // Paste-from-clipboard: write the image to the stream folder as a PNG,
+  // refresh the asset panel, and add it to the canvas as a new image layer.
+  // Skipped when focus is in a text input so paste-in-textbox still works.
+  // Sources route through canvas → PNG so JPEGs land as PNG (matches the
+  // editor's image handling) and alpha is preserved when present. Placed
+  // below addImageLayerFromPath so the deps reference is in scope.
+  useEffect(() => {
+    if (!currentStream) return
+    const onPaste = async (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      let imgItem: DataTransferItem | null = null
+      for (const it of items) {
+        if (it.kind === 'file' && it.type.startsWith('image/')) { imgItem = it; break }
+      }
+      if (!imgItem) return
+      e.preventDefault()
+      const blob = imgItem.getAsFile()
+      if (!blob) return
+      try {
+        const img = new Image()
+        const url = URL.createObjectURL(blob)
+        img.src = url
+        await img.decode()
+        URL.revokeObjectURL(url)
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        ctx.drawImage(img, 0, 0)
+        const base64 = canvas.toDataURL('image/png').split(',')[1]
+        const now = new Date()
+        const hh = String(now.getHours()).padStart(2, '0')
+        const mm = String(now.getMinutes()).padStart(2, '0')
+        const ss = String(now.getSeconds()).padStart(2, '0')
+        const destPath = `${currentStream.folderPath}/${currentStream.date}_pasted-${hh}${mm}${ss}.png`
+        await window.api.saveScreenshot(destPath, base64)
+        setAssetRefreshTrigger(t => t + 1)
+        await addImageLayerFromPath(destPath)
+      } catch (err) {
+        console.error('Paste image failed', err)
+      }
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [currentStream, addImageLayerFromPath])
 
   const addTextLayer = useCallback(() => {
     const layer: ThumbnailLayer = {

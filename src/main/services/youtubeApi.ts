@@ -502,6 +502,31 @@ export async function findStreamIdByName(
   return match?.id ?? null
 }
 
+/** Update a broadcast's privacy via `liveBroadcasts.update?part=status`.
+ *  The status part is its own writable surface, so we don't need to fetch
+ *  and re-send unrelated snippet fields. Works for upcoming, live, and
+ *  completed broadcasts — completed broadcasts (VODs) are still under the
+ *  liveBroadcasts resource until they're old enough that YouTube migrates
+ *  them to plain videos. */
+export async function updateBroadcastStatus(
+  broadcastId: string,
+  privacyStatus: 'public' | 'unlisted' | 'private',
+  clientId: string,
+  clientSecret: string,
+): Promise<void> {
+  await ytRequest(
+    `/liveBroadcasts?part=status`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: broadcastId,
+        status: { privacyStatus },
+      }),
+    },
+    clientId, clientSecret
+  )
+}
+
 export async function updateBroadcastSnippet(
   broadcastId: string,
   updates: { title: string; description: string },

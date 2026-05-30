@@ -81,7 +81,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   const [archivePresetId, setArchivePresetId] = useState<string>('')
   const [recommendedArchiveId, setRecommendedArchiveId] = useState<string | null>(null)
   const [outputDir, setOutputDir] = useState('')
-  const { jobs, setJobs } = useConversionJobs()
+  const { jobs, setJobs, jobEtas, jobElapsed, jobFinalElapsed } = useConversionJobs()
   const [queuedFiles, setQueuedFiles] = useState<string[]>([])
   const [importing, setImporting] = useState(false)
   // Custom preset editor (form-based; raw-args via the Advanced section).
@@ -93,18 +93,6 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
   const [deleteDialog, setDeleteDialog] = useState<{ jobId: string; outputFile: string } | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
-  const [, setTick] = useState(0)
-  // jobElapsed accumulates ACTIVE-only milliseconds — incremented each tick
-  // by the wall-clock delta IFF the job's status is 'running'. Pause time
-  // never counts. This replaces the previous "single startedAt timestamp +
-  // (now - startedAt)" approach which kept ticking through pauses and
-  // produced inflated ETAs immediately after resume.
-  const jobEtas = useRef<Map<string, number | null>>(new Map())
-  const jobElapsed = useRef<Map<string, number>>(new Map())
-  const jobFinalElapsed = useRef<Map<string, number>>(new Map())
-  const lastTickAt = useRef<number>(Date.now())
-  const ETA_ALPHA = 0.25
-  const jobsRef = useRef(jobs)
 
   useEffect(() => {
     if (initialFile) setQueuedFiles(prev => prev.includes(initialFile.path) ? prev : [...prev, initialFile.path])
@@ -132,67 +120,9 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     })
   }, [])
 
-  useEffect(() => {
-    const unsubProgress = window.api.onJobProgress(({ jobId, percent }: { jobId: string; percent: number }) => {
-      setJobs(prev => prev.map(j => {
-        if (j.id !== jobId) return j
-        // Don't override transient sub-states ('downloading', 'replacing',
-        // 'paused') just because a progress tick arrived. Only nudge
-        // queued → running.
-        const next = (j.status === 'queued') ? 'running' : j.status
-        return { ...j, progress: percent, status: next }
-      }))
-    })
-    // Explicit status transitions from the main process (downloading start/end,
-    // replacing, etc.). Higher priority than the progress event.
-    const unsubStatus = window.api.onJobStatus(({ jobId, status }) => {
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status } : j))
-    })
-    const unsubComplete = window.api.onJobComplete(({ jobId }: { jobId: string }) => {
-      const elapsed = jobElapsed.current.get(jobId)
-      if (elapsed !== undefined) jobFinalElapsed.current.set(jobId, elapsed)
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'done', progress: 100 } : j))
-    })
-    const unsubError = window.api.onJobError(({ jobId, error }: { jobId: string; error: string }) => {
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'error', error } : j))
-    })
-    // Jobs added by auto-rules (background) — append if not already in local state.
-    const unsubAdded = window.api.onJobAdded((job: ConversionJob) => {
-      setJobs(prev => prev.some(j => j.id === job.id) ? prev : [...prev, job])
-    })
-    return () => { unsubProgress(); unsubStatus(); unsubComplete(); unsubError(); unsubAdded() }
-  }, [])
-
-  useEffect(() => { jobsRef.current = jobs }, [jobs])
-
-  // Tick every second — accumulate active-only elapsed time and recompute
-  // ETA. We measure the wall-clock delta between ticks and add it to a
-  // job's elapsed counter only when the job is currently 'running', so
-  // pause / downloading / replacing time is excluded from the rate
-  // calculation that drives the ETA.
-  useEffect(() => {
-    lastTickAt.current = Date.now()
-    const id = setInterval(() => {
-      const now = Date.now()
-      const delta = now - lastTickAt.current
-      lastTickAt.current = now
-      if (!jobsRef.current.some(j => j.status === 'running')) return
-      jobsRef.current.forEach(j => {
-        if (j.status !== 'running') return
-        const elapsed = (jobElapsed.current.get(j.id) ?? 0) + delta
-        jobElapsed.current.set(j.id, elapsed)
-        if (j.progress > 0) {
-          const raw = elapsed / (j.progress / 100) - elapsed
-          const prev = jobEtas.current.get(j.id)
-          jobEtas.current.set(j.id, prev != null ? ETA_ALPHA * raw + (1 - ETA_ALPHA) * prev : raw)
-        } else {
-          jobEtas.current.set(j.id, null)
-        }
-      })
-      setTick(t => t + 1)
-    }, 1000)
-    return () => clearInterval(id)
-  }, [])
+  // Note: IPC job listeners and the 1Hz ETA tick now live in
+  // ConversionContext so the sidebar widget keeps getting fresh data
+  // regardless of which page is mounted.
 
   const importPreset = async () => {
     setImportError('')
@@ -264,17 +194,17 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
 
   const removeJob = (id: string) => {
     setJobs(prev => prev.filter(j => j.id !== id))
-    jobEtas.current.delete(id)
-    jobElapsed.current.delete(id)
-    jobFinalElapsed.current.delete(id)
+    jobEtas.delete(id)
+    jobElapsed.delete(id)
+    jobFinalElapsed.delete(id)
   }
 
   const cancelJob = async (id: string) => {
     const job = jobs.find(j => j.id === id)
     await window.api.cancelJob(id)
     setJobs(prev => prev.map(j => j.id === id ? { ...j, status: 'cancelled' } : j))
-    jobEtas.current.delete(id)
-    jobElapsed.current.delete(id)
+    jobEtas.delete(id)
+    jobElapsed.delete(id)
     if (job?.outputFile) {
       if (autoDeletePartial) {
         window.api.deleteFile(job.outputFile).catch(() => {})
@@ -316,9 +246,9 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     const isDownloading = job.status === 'downloading'
     const isReplacing = job.status === 'replacing'
     const isWorking = isActive || isDownloading || isReplacing
-    const elapsed = jobElapsed.current.get(job.id) ?? 0
-    const finalElapsed = jobFinalElapsed.current.get(job.id) ?? 0
-    const eta = jobEtas.current.get(job.id) ?? null
+    const elapsed = jobElapsed.get(job.id) ?? 0
+    const finalElapsed = jobFinalElapsed.get(job.id) ?? 0
+    const eta = jobEtas.get(job.id) ?? null
     const outputDir = job.outputFile.replace(/[\\/][^\\/]+$/, '')
     const outputName = job.outputFile.split(/[\\/]/).pop()
 

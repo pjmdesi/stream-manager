@@ -226,6 +226,15 @@ export function registerFilesIPC(): void {
     return destPath
   })
 
+  // Single-file recycle-bin move. Used by per-image delete buttons (e.g.
+  // carousel thumbnails) where streams:deleteStreamFiles would be too
+  // broad. Normalize because shell.trashItem on Windows rejects mixed
+  // forward/back-slash paths even though Node's fs handles them. Errors
+  // surface to the caller so the UI can show a failure.
+  ipcMain.handle('files:trashFile', async (_event, filePath: string) => {
+    await shell.trashItem(path.normalize(filePath))
+  })
+
   ipcMain.handle('files:checkLocalFiles', async (_event, filePaths: string[]): Promise<boolean[]> => {
     return checkLocalFiles(filePaths)
   })

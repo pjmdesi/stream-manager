@@ -580,13 +580,17 @@ interface LightboxProps {
   thumbsKey?: number
   preferredThumbnail?: string
   onSetAsThumbnail?: (path: string) => void
+  /** Fired when the user confirms a delete in the inline confirm pair.
+   *  Caller is expected to move the file to the recycle bin and refresh
+   *  the source thumbnails list so the lightbox re-renders without it. */
+  onDeleteImage?: (path: string) => Promise<void> | void
   onClose: () => void
   onNavigate: (index: number) => void
   /** Parallel to `thumbnails`; false → cloud placeholder. */
   localFlags?: boolean[]
 }
 
-function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onClose, onNavigate, localFlags }: LightboxProps) {
+function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onClose, onNavigate, localFlags }: LightboxProps) {
   const total = thumbnails.length
   const currentPath = thumbnails[index]
   const currentIsLocal = localFlags?.[index] ?? true
@@ -595,6 +599,11 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
     ? filename === preferredThumbnail
     : index === 0
   const filmstripBtnRefs = useRef<(HTMLButtonElement | null)[]>([])
+  // Tracks the path that's pending delete confirmation. Cleared whenever the
+  // user navigates away from that image so the confirm pair doesn't carry
+  // over to a different file.
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  useEffect(() => { setDeleteConfirm(null) }, [currentPath])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -667,7 +676,6 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
           leave both visible rather than overflowing them. */}
       <div className="flex flex-col items-center" onClick={e => e.stopPropagation()}>
         <ThumbImage
-          key={currentPath}
           path={currentPath}
           thumbsKey={thumbsKey ?? 0}
           isLocal={currentIsLocal}
@@ -696,6 +704,40 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
                 className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-purple-600/40 border border-white/20 hover:border-purple-500/50 text-gray-300 hover:text-purple-200 text-xs font-medium transition-colors"
               >
                 <ImageIcon size={12} /> Set as item thumbnail
+              </button>
+            )
+          )}
+          {/* Delete control. Hidden for the preferred thumbnail so the user
+              has to demote it before they can trash it — prevents accidentally
+              orphaning the row's main image. The icon button expands inline
+              into a Cancel / Delete pair on first click. */}
+          {!isPreferred && onDeleteImage && (
+            deleteConfirm === currentPath ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-gray-300 text-xs font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    const path = currentPath
+                    setDeleteConfirm(null)
+                    await onDeleteImage(path)
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/40 hover:bg-red-600/60 border border-red-500/50 text-red-100 text-xs font-medium transition-colors"
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setDeleteConfirm(currentPath)}
+                className="flex items-center justify-center p-1.5 rounded-full bg-white/10 hover:bg-red-600/30 border border-white/20 hover:border-red-500/50 text-gray-400 hover:text-red-300 transition-colors"
+                title="Delete image (moves to Recycle Bin)"
+              >
+                <Trash2 size={12} />
               </button>
             )
           )}
@@ -749,18 +791,31 @@ interface ThumbnailCarouselProps {
   thumbsKey?: number
   preferredThumbnail?: string
   onSetAsThumbnail?: (path: string) => void
+  /** Fired when the user confirms a delete in the inline confirm pair.
+   *  Caller is expected to move the file to the recycle bin and refresh
+   *  the source list so the carousel re-renders without it. */
+  onDeleteImage?: (path: string) => Promise<void> | void
   /** Parallel to `thumbnails`. Each element is true if the file's data is local
    *  on disk; false if it's a cloud-provider placeholder. The active image
    *  hydrates on demand; other slots show the cloud icon until they become active. */
   localFlags?: boolean[]
 }
 
-function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail, localFlags }: ThumbnailCarouselProps) {
+function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, localFlags }: ThumbnailCarouselProps) {
   const [index, setIndex] = useState(0)
   const [translateX, setTranslateX] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const imgRefs = useRef<(HTMLElement | null)[]>([])
   const single = thumbnails.length === 1
+
+  // Clamp the active index when the list shrinks (e.g. after a delete).
+  // Without this, deleting the last image leaves index pointing past the end
+  // and currentPath becomes undefined.
+  useEffect(() => {
+    if (thumbnails.length > 0 && index >= thumbnails.length) {
+      setIndex(thumbnails.length - 1)
+    }
+  }, [thumbnails.length, index])
 
   const recenter = useCallback(() => {
     const el = imgRefs.current[index]
@@ -773,10 +828,15 @@ function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsT
   useLayoutEffect(() => { recenter() }, [recenter])
 
   const currentPath = thumbnails[index]
-  const filename = currentPath.split(/[\\/]/).pop() ?? ''
+  const filename = currentPath?.split(/[\\/]/).pop() ?? ''
   const isPreferred = preferredThumbnail
     ? filename === preferredThumbnail
     : index === 0
+
+  // Pending delete-confirm path. Reset when the active image changes so the
+  // confirm pair doesn't carry across navigations or re-renders.
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  useEffect(() => { setDeleteConfirm(null) }, [currentPath])
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -832,20 +892,55 @@ function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsT
         {!single ? (
           <p className="text-xs text-gray-400 truncate flex-1 text-center px-7">{filename}</p>
         ) : <span />}
-        {onSetAsThumbnail && (
-          isPreferred ? (
-            <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-600/25 border border-purple-500/35 text-purple-300 text-xs font-medium whitespace-nowrap ml-2">
-              <Check size={11} /> Currently shown
-            </span>
-          ) : (
-            <button
-              onClick={() => onSetAsThumbnail(currentPath)}
-              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-purple-600/30 border border-white/15 hover:border-purple-500/45 text-gray-400 hover:text-purple-200 text-xs font-medium whitespace-nowrap ml-2 transition-colors"
-            >
-              <ImageIcon size={11} /> Set as item thumbnail
-            </button>
-          )
-        )}
+        <div className="flex items-center gap-1.5 ml-2">
+          {onSetAsThumbnail && (
+            isPreferred ? (
+              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-600/25 border border-purple-500/35 text-purple-300 text-xs font-medium whitespace-nowrap">
+                <Check size={11} /> Currently shown
+              </span>
+            ) : (
+              <button
+                onClick={() => onSetAsThumbnail(currentPath)}
+                className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-purple-600/30 border border-white/15 hover:border-purple-500/45 text-gray-400 hover:text-purple-200 text-xs font-medium whitespace-nowrap transition-colors"
+              >
+                <ImageIcon size={11} /> Set as item thumbnail
+              </button>
+            )
+          )}
+          {/* Delete control — hidden for the preferred thumbnail so the user
+              has to demote it before they can trash it. Icon button expands
+              into a Cancel / Delete pair on first click. */}
+          {!isPreferred && onDeleteImage && currentPath && (
+            deleteConfirm === currentPath ? (
+              <>
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-white/15 border border-white/15 text-gray-400 text-xs font-medium whitespace-nowrap transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    const path = currentPath
+                    setDeleteConfirm(null)
+                    await onDeleteImage(path)
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-600/35 hover:bg-red-600/55 border border-red-500/45 text-red-100 text-xs font-medium whitespace-nowrap transition-colors"
+                >
+                  <Trash2 size={11} /> Delete
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setDeleteConfirm(currentPath)}
+                className="flex items-center justify-center p-1 rounded-full bg-white/8 hover:bg-red-600/25 border border-white/15 hover:border-red-500/45 text-gray-400 hover:text-red-300 transition-colors"
+                title="Delete image (moves to Recycle Bin)"
+              >
+                <Trash2 size={11} />
+              </button>
+            )
+          )}
+        </div>
       </div>
     </div>
   )
@@ -879,6 +974,9 @@ interface MetaModalProps {
   thumbsKey?: number
   preferredThumbnail?: string
   onSetAsThumbnail?: (path: string) => void
+  /** Trash a single carousel image and refresh the modal's thumbnails list.
+   *  Wired through to the embedded ThumbnailCarousel's delete button. */
+  onDeleteImage?: (path: string) => Promise<void> | void
   tagColors?: Record<string, string>
   tagTextures?: Record<string, string>
   onNewStreamType?: (tag: string) => void
@@ -1028,7 +1126,7 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], s
 
 // panelAnimate built inside StreamsPage so duration can react to slowAnimations setting
 
-function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, defaultBroadcastTime = '19:00', onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, tagColors = {}, tagTextures = {}, claudeEnabled = false, defaultBroadcastTime = '19:00', onNewStreamType, onSave, onClose }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
 
   // In edit/add mode the folder name is the authoritative date source — the stored meta.date
@@ -1703,6 +1801,35 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     [isPastStream, ytVods, ytBroadcasts, ytSelectedBroadcastId]
   )
 
+  // Local override for the broadcast's privacy. Used so the selector reflects
+  // the user's just-clicked value before the YT round-trip completes (and
+  // since we don't re-fetch the broadcast resource after save). Cleared on
+  // broadcast change so a freshly-loaded selectedBroadcast.status.privacyStatus
+  // wins again.
+  const [privacyOverride, setPrivacyOverride] = useState<'public' | 'unlisted' | 'private' | null>(null)
+  const [savingPrivacy, setSavingPrivacy] = useState(false)
+  const [privacyError, setPrivacyError] = useState('')
+  useEffect(() => {
+    setPrivacyOverride(null)
+    setPrivacyError('')
+  }, [selectedBroadcast?.id])
+  const currentPrivacy = (privacyOverride ?? selectedBroadcast?.status.privacyStatus) as
+    'public' | 'unlisted' | 'private' | undefined
+  const changePrivacy = useCallback(async (next: 'public' | 'unlisted' | 'private') => {
+    if (!selectedBroadcast || currentPrivacy === next || savingPrivacy) return
+    setPrivacyOverride(next)
+    setSavingPrivacy(true)
+    setPrivacyError('')
+    try {
+      await window.api.youtubeUpdateBroadcastStatus(selectedBroadcast.id, next)
+    } catch (err: any) {
+      setPrivacyOverride(null)
+      setPrivacyError(err?.message ?? 'Failed to update privacy')
+    } finally {
+      setSavingPrivacy(false)
+    }
+  }, [selectedBroadcast, currentPrivacy, savingPrivacy])
+
   // Build the cross-link list so the BroadcastPicker can warn when a broadcast
   // is already linked from another stream item. `allFolders` is pre-filtered
   // by the caller to exclude the current folder (edit mode), so every entry
@@ -2071,6 +2198,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               setLocalPreferredThumbnail(path.split(/[\\/]/).pop() ?? '')
               onSetAsThumbnail(path)
             } : undefined}
+            onDeleteImage={onDeleteImage}
           />
         )}
 
@@ -2579,6 +2707,48 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                       </button>
                     )}
                   </div>
+
+                  {/* Privacy selector — only shown when a broadcast is linked.
+                      Edits the live broadcast's status.privacyStatus via the
+                      YouTube API. Optimistic UI update + revert-on-failure;
+                      the next listStreams refresh re-syncs the row badge. */}
+                  {selectedBroadcast && currentPrivacy && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] text-gray-400 uppercase tracking-wider">Privacy</span>
+                      <div className="flex items-center gap-1.5">
+                        {([
+                          { value: 'public' as const,   label: 'Public',   Icon: Globe },
+                          { value: 'unlisted' as const, label: 'Unlisted', Icon: EyeOff },
+                          { value: 'private' as const,  label: 'Private',  Icon: Lock },
+                        ]).map(({ value, label, Icon }) => {
+                          const active = currentPrivacy === value
+                          return (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => changePrivacy(value)}
+                              disabled={savingPrivacy && !active}
+                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                                active
+                                  ? 'bg-purple-600/25 border-purple-500/40 text-purple-200'
+                                  : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200 disabled:opacity-40 disabled:hover:bg-white/5 disabled:hover:text-gray-400'
+                              }`}
+                            >
+                              <Icon size={11} />
+                              {label}
+                            </button>
+                          )
+                        })}
+                        {savingPrivacy && <Loader2 size={11} className="animate-spin text-gray-400 ml-1" />}
+                      </div>
+                      {privacyError && (
+                        <p className="text-xs text-red-400 flex items-center gap-1.5">
+                          <AlertTriangle size={11} className="shrink-0" />
+                          {privacyError}
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Linked-state multi-link warning — surfaced whenever the
                       currently-selected broadcast is also linked from one or
@@ -5134,6 +5304,26 @@ return (
             await updateFolderMeta(folder, meta)
             setLightbox(prev => prev ? { ...prev, preferredThumbnail: basename } : null)
           }}
+          onDeleteImage={async (filePath) => {
+            // Update the lightbox state FIRST so the carousel navigates to the
+            // next image immediately, rather than waiting for the trash IPC to
+            // return. Closes the lightbox entirely if this was the last image.
+            setLightbox(prev => {
+              if (!prev) return null
+              const remaining = prev.thumbnails.filter(p => p !== filePath)
+              if (remaining.length === 0) return null
+              const remainingFlags = prev.localFlags?.filter((_, i) => prev.thumbnails[i] !== filePath)
+              const nextIndex = Math.min(prev.index, remaining.length - 1)
+              return { ...prev, thumbnails: remaining, localFlags: remainingFlags, index: nextIndex }
+            })
+            try {
+              await window.api.trashFile(filePath)
+            } catch (err) {
+              console.error('Failed to trash image', err)
+              return
+            }
+            await loadFolders(streamsDir)
+          }}
           onClose={() => setLightbox(null)}
           onNavigate={(i) => setLightbox(prev => prev ? { ...prev, index: i } : null)}
         />
@@ -5545,6 +5735,27 @@ return (
                 const basename = filePath.split(/[\\/]/).pop() ?? ''
                 const meta: StreamMeta = { ...folderMetaBase(folder), preferredThumbnail: basename }
                 await updateFolderMeta(folder, meta)
+              } : undefined}
+              onDeleteImage={(modal.mode === 'edit' || modal.mode === 'add') ? async (filePath) => {
+                try {
+                  await window.api.trashFile(filePath)
+                } catch (err) {
+                  console.error('Failed to trash image', err)
+                  return
+                }
+                // Optimistic snapshot update — the MetaModal renders from
+                // modal.folder (a stable snapshot from when it opened), so a
+                // bare loadFolders won't refresh its carousel thumbnails.
+                setModal(prev => {
+                  if (prev.mode !== 'edit' && prev.mode !== 'add') return prev
+                  const oldThumbs = prev.folder.thumbnails
+                  const idx = oldThumbs.indexOf(filePath)
+                  if (idx === -1) return prev
+                  const thumbnails = oldThumbs.filter((_, i) => i !== idx)
+                  const thumbnailLocalFlags = prev.folder.thumbnailLocalFlags?.filter((_, i) => i !== idx)
+                  return { ...prev, folder: { ...prev.folder, thumbnails, thumbnailLocalFlags } }
+                })
+                await loadFolders(streamsDir)
               } : undefined}
               allGames={allGames}
               allStreamTypes={allStreamTypes}

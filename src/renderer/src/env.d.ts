@@ -59,6 +59,7 @@ declare global {
       openInExplorer(filePath: string): Promise<void>
       readFile(filePath: string): Promise<string>
       saveScreenshot(destPath: string, base64Data: string): Promise<string>
+      trashFile(filePath: string): Promise<void>
       checkLocalFiles(filePaths: string[]): Promise<boolean[]>
       startCloudDownload(filePath: string): Promise<void>
       debugFileAttrs(filePath: string): Promise<{
@@ -197,6 +198,7 @@ declare global {
       youtubeGetQualifyingThumbnails(paths: string[]): Promise<string[]>
       youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>
       youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string }, tags: string[]): Promise<void>
+      youtubeUpdateBroadcastStatus(broadcastId: string, privacyStatus: 'public' | 'unlisted' | 'private'): Promise<void>
       getYTTitleTemplates(): Promise<YTTitleTemplate[]>
       setYTTitleTemplates(v: YTTitleTemplate[]): Promise<void>
       getYTDescriptionTemplates(): Promise<YTDescriptionTemplate[]>
