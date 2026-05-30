@@ -1091,7 +1091,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const { config, updateConfig } = useStore()
   const {
     videoRef, state, loadFile,
-    enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction,
+    enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction, cancelTrackExtraction,
     setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, recomputeAudibility,
     clearError, closeVideo, seek, fastSeek, togglePlay,
   } = useVideoPlayer()
@@ -1880,6 +1880,21 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const isExtracting = tracks.some(t => t.status === 'extracting')
   const multiTrack = (videoInfo?.audioTracks.length ?? 0) > 1
 
+  // How many of the file's tracks already have a cached .opus on disk, so the
+  // "Enable Multi-track Audio" button can hint that some are ready instantly.
+  // Re-fetched when multi-track is toggled off since the user may have
+  // extracted (and thus cached) tracks during that session. Track 0 is never
+  // cached (it plays from the video element), so it's naturally excluded.
+  const [cachedTrackCount, setCachedTrackCount] = useState(0)
+  useEffect(() => {
+    if (!state.filePath || !multiTrack) { setCachedTrackCount(0); return }
+    let cancelled = false
+    window.api.getCachedAudioTracks(state.filePath)
+      .then(cached => { if (!cancelled) setCachedTrackCount(cached ? cached.filter(Boolean).length : 0) })
+      .catch(() => { if (!cancelled) setCachedTrackCount(0) })
+    return () => { cancelled = true }
+  }, [state.filePath, multiTrack, multiTrackEnabled])
+
   // Default crop values used when a region has no override yet, or when no region is active.
   const DEFAULT_CROP_X = 0.5
   const DEFAULT_CROP_Y = 0.5
@@ -2622,6 +2637,18 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   // for 100 would otherwise be impossible — parseInt on each keystroke
   // would round-trip a partial value back into the field.
   const [volumeInputs, setVolumeInputs] = useState<Record<number, string>>({})
+  // Per-track waveform collapse (multi-track view). Holds the indices whose
+  // waveform strip is hidden; the controls row stays visible. Reset when the
+  // file changes since track indices aren't comparable across videos.
+  const [collapsedTracks, setCollapsedTracks] = useState<Set<number>>(new Set())
+  useEffect(() => { setCollapsedTracks(new Set()) }, [state.filePath])
+  const toggleTrackCollapsed = useCallback((index: number) => {
+    setCollapsedTracks(prev => {
+      const next = new Set(prev)
+      next.has(index) ? next.delete(index) : next.add(index)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     if (!filmstripEl) return
@@ -3800,6 +3827,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       const label = track.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
                       const effectivelyMuted = anySolo ? !track.solo : track.muted
                       const wfPath = trackPathByIndex.get(track.index) ?? ''
+                      const collapsed = collapsedTracks.has(track.index)
                       // Color resolution: explicit user choice wins; else
                       // fall back to the per-index default rotation so
                       // every track has a distinct look out of the box.
@@ -3825,7 +3853,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                               block. Unextracted rows are slightly lighter
                               so the call-to-action stands out. */}
                           <div
-                            className={`grid items-center gap-2 px-2 py-1 text-[11px] min-h-[24px] border-b border-white/5 ${
+                            className={`grid items-center gap-2 px-2 text-[11px] ${
+                              track.status === 'extracted' ? 'py-1 min-h-[24px]' : 'h-[22px]'
+                            } ${
+                              collapsed ? '' : 'border-b border-white/5'
+                            } ${
                               track.status === 'unextracted' ? 'bg-navy-800/70' : 'bg-black/60'
                             }`}
                             style={{ gridTemplateColumns: `${CTRL_COL} 1fr` }}
@@ -3841,7 +3873,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                   />
                                 </div>
                                 <span className="text-[10px] tabular-nums text-gray-400 shrink-0 w-8 text-right">{track.extractProgress}%</span>
-                                <span className="text-[10px] text-gray-400 truncate ml-1" title={label}>{label}</span>
+                                <span className="text-[10px] text-gray-400 truncate ml-1 min-w-0 flex-shrink" title={label}>{label}</span>
+                                <button
+                                  onClick={() => cancelTrackExtraction(track.index)}
+                                  className="shrink-0 w-4 h-4 flex items-center justify-center rounded text-gray-400 hover:text-red-300 hover:bg-red-600/20 transition-colors"
+                                  title="Cancel extraction"
+                                >
+                                  <X size={12} />
+                                </button>
                               </div>
                             ) : track.status === 'extracted' ? (
                               <>
@@ -3949,7 +3988,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                     )
                                   })()}
                                 </div>
-                                <span className="truncate text-gray-300" title={label}>{label}</span>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="truncate text-gray-300 flex-1" title={label}>{label}</span>
+                                  <button
+                                    onClick={() => toggleTrackCollapsed(track.index)}
+                                    className={`shrink-0 w-5 h-4 flex items-center justify-center rounded transition-colors ${
+                                      collapsed
+                                        ? 'text-gray-400 hover:text-gray-200 hover:bg-white/10'
+                                        : 'text-purple-400 hover:text-purple-300 hover:bg-purple-600/15'
+                                    }`}
+                                    title={collapsed ? 'Expand waveform' : 'Collapse waveform'}
+                                  >
+                                    <AudioLines size={11} className="shrink-0" />
+                                  </button>
+                                </div>
                               </>
                             ) : (
                               <>
@@ -3970,20 +4022,28 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           </div>
                           {/* Waveform — only when extracted. Track 0's source
                               is the video file (its built-in first audio
-                              track), tracks 1+ come from their cached .opus. */}
+                              track), tracks 1+ come from their cached .opus.
+                              Kept mounted while collapsed and clipped via an
+                              animating-height wrapper so the toggle slides
+                              rather than snapping. h-8 strip → 2rem expanded. */}
                           {track.status === 'extracted' && (
-                            <TrackWaveformStrip
-                              path={wfPath}
-                              peakCount={peakCount}
-                              loading={waveformLoading}
-                              dimmed={effectivelyMuted}
-                              volume={track.volume}
-                              fillClass={fillClass}
-                              onSeek={onTrackSeek}
-                              onHover={onTrackHover}
-                              onHoverLeave={onTrackHoverLeave}
-                              onMiddleDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
-                            />
+                            <div
+                              className="overflow-hidden transition-[height] duration-200 ease-in-out"
+                              style={{ height: collapsed ? 0 : '2rem' }}
+                            >
+                              <TrackWaveformStrip
+                                path={wfPath}
+                                peakCount={peakCount}
+                                loading={waveformLoading}
+                                dimmed={effectivelyMuted}
+                                volume={track.volume}
+                                fillClass={fillClass}
+                                onSeek={onTrackSeek}
+                                onHover={onTrackHover}
+                                onHoverLeave={onTrackHoverLeave}
+                                onMiddleDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
+                              />
+                            </div>
                           )}
                         </div>
                       )
@@ -4434,6 +4494,9 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   >
                     <Layers size={11} />
                     Enable Multi-track Audio · {videoInfo?.audioTracks.length} tracks
+                    {cachedTrackCount > 0 && (
+                      <span className="text-purple-300/70">({cachedTrackCount} cached)</span>
+                    )}
                   </button>
                 </div>
               )}
@@ -4444,7 +4507,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     <X size={10} />
-                    Disable Multi-track audio
+                    Disable Multi-track Audio
                   </button>
                 </div>
               )}

@@ -32,7 +32,7 @@ declare global {
       probeFile(filePath: string): Promise<VideoInfo>
       extractAudioTracks(filePath: string, trackIndices?: number[]): Promise<string[]>
       getCachedAudioTracks(filePath: string): Promise<string[] | null>
-      cancelExtractAudioTracks(): Promise<void>
+      cancelExtractAudioTracks(trackIndex?: number): Promise<void>
       cleanupTracks(paths: string[]): Promise<void>
       getWaveform(filePath: string): Promise<Uint8Array>
       clearAudioCache(): Promise<void>

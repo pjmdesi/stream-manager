@@ -8,7 +8,7 @@ import {
   ChevronLeft, ChevronRight, ChevronUp, ChevronsUp, ChevronsDown, Expand, Archive, CheckSquare,
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, CalendarClock, Info, Sparkles, SquareDashedText,
-  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid,
+  Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid, List,
   RadioTower, Clapperboard, Unlink2
 } from 'lucide-react'
 
@@ -434,6 +434,135 @@ function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, chil
                   ) : null}
                 </span>
               </React.Fragment>
+            )
+          })}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+/**
+ * Right-side hover tooltip listing every episode in a series+season. The user
+ * can mouse INTO the tooltip (short hide delay so a brief gap between anchor
+ * and popup doesn't dismiss), and clicking an episode jumps to that row in the
+ * list. The currently-open episode is highlighted and not clickable. Falls
+ * back to rendering just the children when there's only one episode in scope.
+ */
+function SeriesEpisodesTooltip({
+  episodes, currentFolderPath, onJump, children,
+}: {
+  episodes: StreamFolder[]
+  currentFolderPath: string
+  onJump: (folder: StreamFolder) => void
+  children: React.ReactNode
+}) {
+  const [visible, setVisible] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number }>({ top: 0, left: 0 })
+  const anchorRef = useRef<HTMLSpanElement>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const hideTimerRef = useRef<number | null>(null)
+
+  const show = () => {
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null }
+    if (!anchorRef.current) return
+    const rect = anchorRef.current.getBoundingClientRect()
+    setPos({ top: rect.top, left: rect.right + 6 })
+    setVisible(true)
+  }
+  const scheduleHide = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = window.setTimeout(() => setVisible(false), 120)
+  }
+  useEffect(() => () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current) }, [])
+
+  // Right-side preferred; flip left when there's no room. Vertically clamp
+  // into the viewport, capping height with scroll if the list is taller than
+  // the available space. Uses scrollHeight/scrollWidth (not the clamped rect)
+  // to avoid the maxHeight/maxWidth feedback loop noted in VideoCountTooltip.
+  useLayoutEffect(() => {
+    if (!visible || !anchorRef.current || !tooltipRef.current) return
+    const anchor = anchorRef.current.getBoundingClientRect()
+    const tipH = tooltipRef.current.scrollHeight
+    const tipW = tooltipRef.current.scrollWidth
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const GAP = 6
+    const PAD = 8
+
+    const next: { top: number; left: number; maxHeight?: number; maxWidth?: number } = {
+      top: anchor.top,
+      left: anchor.right + GAP,
+    }
+    if (next.left + tipW > vw - PAD) {
+      const leftSide = anchor.left - tipW - GAP
+      if (leftSide >= PAD) {
+        next.left = leftSide
+      } else {
+        next.maxWidth = Math.max(180, vw - next.left - PAD)
+      }
+    }
+    if (tipH > vh - PAD * 2) {
+      next.top = PAD
+      next.maxHeight = vh - PAD * 2
+    } else if (next.top + tipH > vh - PAD) {
+      next.top = Math.max(PAD, vh - tipH - PAD)
+    }
+
+    if (
+      next.top !== pos.top ||
+      next.left !== pos.left ||
+      next.maxHeight !== pos.maxHeight ||
+      next.maxWidth !== pos.maxWidth
+    ) setPos(next)
+  }, [visible, episodes.length, pos.top, pos.left, pos.maxHeight, pos.maxWidth])
+
+  if (episodes.length <= 1) return <>{children}</>
+
+  return (
+    <>
+      <span ref={anchorRef} onMouseEnter={show} onMouseLeave={scheduleHide}>
+        {children}
+      </span>
+      {visible && ReactDOM.createPortal(
+        <div
+          ref={tooltipRef}
+          style={{
+            position: 'fixed',
+            top: pos.top,
+            left: pos.left,
+            zIndex: 9999,
+            maxHeight: pos.maxHeight,
+            maxWidth: pos.maxWidth,
+            overflowY: pos.maxHeight ? 'auto' : undefined,
+          }}
+          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1 min-w-[220px] max-w-md"
+          onMouseEnter={show}
+          onMouseLeave={scheduleHide}
+        >
+          {episodes.map(ep => {
+            const isCurrent = ep.folderPath === currentFolderPath
+            const epNum = ep.meta?.ytEpisode || '?'
+            const title = ep.meta?.ytTitle || ep.meta?.games?.join(', ') || ep.date
+            const inner = (
+              <div className="flex items-baseline gap-2 px-3 py-1 text-xs">
+                <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{epNum}:</span>
+                <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{ep.date}</span>
+                <span className={`shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>·</span>
+                <span className={`truncate ${isCurrent ? 'text-purple-300 font-medium' : 'text-gray-200'}`} title={title}>{title}</span>
+              </div>
+            )
+            return isCurrent ? (
+              <div key={ep.folderPath} className="bg-purple-900/25 cursor-default">{inner}</div>
+            ) : (
+              <button
+                key={ep.folderPath}
+                onClick={() => { setVisible(false); onJump(ep) }}
+                className="block w-full text-left hover:bg-white/5 transition-colors"
+              >
+                {inner}
+              </button>
             )
           })}
         </div>,
@@ -3500,6 +3629,23 @@ export function StreamsPage({
     }
   }, [])
 
+  // Jump to another folder from inside the expanded panel — used by the
+  // Series tooltip when the user clicks another episode. Collapses the
+  // current panel, expands the target, and centers it in the scroll
+  // container so it's visible regardless of where it is in the list.
+  // rAF gives React a tick to commit the expansion state before we read
+  // the row's position.
+  const handleJumpToFolder = useCallback((target: StreamFolder) => {
+    const targetKey = config.streamMode === 'dump-folder' ? target.date : target.folderPath
+    setExpandedFolderKey(targetKey)
+    requestAnimationFrame(() => {
+      const row = document.querySelector(
+        `[data-row-key="${CSS.escape(target.folderPath)}"]`
+      ) as HTMLElement | null
+      row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }, [config.streamMode])
+
   const [templates, setTemplates] = useState<{ name: string; path: string }[]>([])
   const [builtinTemplates, setBuiltinTemplates] = useState<ThumbnailTemplate[]>([])
 
@@ -4060,6 +4206,9 @@ export function StreamsPage({
 
   const gameFilterAnchorRef = useRef<HTMLDivElement>(null)
   const [gameFilterMaxHeight, setGameFilterMaxHeight] = useState(600)
+  // Live "filter the filter" search for the topics/games dropdown — lets the
+  // user narrow a long game list by typing instead of scrolling.
+  const [gameFilterSearch, setGameFilterSearch] = useState('')
 
   const updateGameFilterMaxHeight = useCallback(() => {
     if (gameFilterAnchorRef.current) {
@@ -4070,6 +4219,7 @@ export function StreamsPage({
 
   const openGameFilter = useCallback(() => {
     if (openFilter === 'games') { setOpenFilter(null); return }
+    setGameFilterSearch('')
     updateGameFilterMaxHeight()
     setOpenFilter('games')
   }, [openFilter, updateGameFilterMaxHeight])
@@ -4125,6 +4275,13 @@ export function StreamsPage({
       })
     )
   }, [allGames, filterGames, filterTypes, folders])
+
+  // allGames narrowed by the dropdown's live search box.
+  const searchedGameOptions = useMemo(() => {
+    const q = gameFilterSearch.trim().toLowerCase()
+    if (!q) return allGames
+    return allGames.filter(g => g.toLowerCase().includes(q))
+  }, [allGames, gameFilterSearch])
 
   const nextUpcomingFolderPath = useMemo(() => {
     const todayStr = today()
@@ -4562,10 +4719,20 @@ export function StreamsPage({
                         <p className="px-3 py-2 text-xs text-gray-400">No games tagged yet</p>
                       ) : (
                         <>
+                          <input
+                            autoFocus
+                            value={gameFilterSearch}
+                            onChange={e => setGameFilterSearch(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Escape') setOpenFilter(null) }}
+                            placeholder="Filter topics…"
+                            className="w-full bg-navy-900 border-b border-white/10 text-gray-200 text-xs px-3 py-2 focus:outline-none placeholder-gray-500 sticky top-0"
+                          />
                           <button onClick={() => { setFilterGames(new Set()); setOpenFilter(null) }} disabled={filterGames.size === 0} className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-blue-400 hover:text-blue-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-blue-400">
                             <X size={11} className="shrink-0" /> Clear filters
                           </button>
-                          {allGames.map(g => {
+                          {searchedGameOptions.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-gray-400 italic">No matches</p>
+                          ) : searchedGameOptions.map(g => {
                             const viable = viableGameOptions.has(g)
                             return (
                               <button key={g} onClick={() => viable && toggleGameFilter(g)} className={`flex items-center gap-2 w-full px-3 py-1 text-left text-xs transition-colors ${!viable && !filterGames.has(g) ? 'opacity-30 cursor-default' : filterGames.has(g) ? 'text-blue-300 hover:bg-white/5' : 'text-gray-300 hover:bg-white/5'}`}>
@@ -4786,6 +4953,14 @@ export function StreamsPage({
                             <p className="px-3 py-2 text-xs text-gray-400">No games tagged yet</p>
                           ) : (
                             <>
+                              <input
+                                autoFocus
+                                value={gameFilterSearch}
+                                onChange={e => setGameFilterSearch(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Escape') setOpenFilter(null) }}
+                                placeholder="Filter topics…"
+                                className="w-full bg-navy-900 border-b border-white/10 text-gray-200 text-xs px-3 py-2 focus:outline-none placeholder-gray-500 sticky top-0 font-normal"
+                              />
                               <button
                                 onClick={() => { setFilterGames(new Set()); setOpenFilter(null) }}
                                 disabled={filterGames.size === 0}
@@ -4794,13 +4969,15 @@ export function StreamsPage({
                                 <X size={11} className="shrink-0" />
                                 Clear filters
                               </button>
-                              {allGames.map(g => {
+                              {searchedGameOptions.length === 0 ? (
+                                <p className="px-3 py-2 text-xs text-gray-400 italic font-normal">No matches</p>
+                              ) : searchedGameOptions.map(g => {
                                 const viable = viableGameOptions.has(g)
                                 return (
                                   <button
                                     key={g}
                                     onClick={() => viable && toggleGameFilter(g)}
-                                    className={`flex items-center gap-2 w-full px-3 py-1 text-left text-xs transition-colors ${
+                                    className={`flex items-center gap-2 w-full px-3 py-1 text-left text-xs transition-colors font-normal ${
                                       !viable && !filterGames.has(g)
                                         ? 'opacity-30 cursor-default'
                                         : filterGames.has(g)
@@ -4896,6 +5073,8 @@ return (
                     <ExpandedStreamPanel
                       key={`panel-${rowKey}`}
                       folder={folder}
+                      folders={folders}
+                      onJumpToFolder={handleJumpToFolder}
                       isPending={pending}
                       hasMeta={hasMeta}
                       hasSMThumbnail={hasSMThumb}
@@ -6042,6 +6221,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
 
   return (
     <tr
+      data-row-key={folder.folderPath}
       className={`border-b group transition-colors ${
         isPending
           ? `border-teal-900/30 hover:bg-teal-900/30 ${zebra ? 'bg-teal-900/20' : 'bg-teal-900/15'}`
@@ -6343,6 +6523,13 @@ const PANEL_ACTION_BUTTON_PINK = `${PANEL_ACTION_BUTTON_BASE} hover:text-pink-40
 
 interface ExpandedPanelProps {
   folder: StreamFolder
+  /** All folders in scope — used by the Series tooltip to list every episode
+   *  in the same series+season. Computed inside the panel (not the parent
+   *  loop) so the filter only runs when a panel is actually open. */
+  folders: StreamFolder[]
+  /** Collapse the current panel, expand the target folder's row, and scroll
+   *  it into view. Wired up by the parent. */
+  onJumpToFolder: (target: StreamFolder) => void
   isPending: boolean
   hasMeta: boolean
   hasSMThumbnail: boolean
@@ -6384,7 +6571,7 @@ interface ExpandedPanelProps {
  * is meant to be tight, not exhaustive.
  */
 function ExpandedStreamPanel({
-  folder, isPending, hasMeta, hasSMThumbnail, videoCount, totalEpisodes, selectMode, cloudSyncActive, isArchiving,
+  folder, folders, onJumpToFolder, isPending, hasMeta, hasSMThumbnail, videoCount, totalEpisodes, selectMode, cloudSyncActive, isArchiving,
   onOpenAnimationComplete,
   onSendToPlayer, onSendToConverter, onSendToCombine, onOpenThumbnails,
   onEdit, onAdd, onOpen, onReschedule, onArchive, onDelete, onNewEpisode,
@@ -6400,6 +6587,25 @@ function ExpandedStreamPanel({
   const series = meta?.ytSeason || meta?.ytEpisode
     ? `S${meta?.ytSeason || '1'} · E${meta?.ytEpisode || '?'}${totalEpisodes > 0 ? ` of ${totalEpisodes}` : ''}`
     : null
+  // Episodes in the same series+season, sorted reverse-chronological (newest
+  // first) to match every other episode-listing in the app. Same matching
+  // rules as the MetaModal's previous/next-in-series — case-insensitive game
+  // match against either meta.games or detectedGames, plus same season ('1'
+  // default).
+  const seriesFolders = useMemo(() => {
+    const primaryGame = folder.meta?.games?.[0] ?? folder.detectedGames?.[0]
+    if (!primaryGame) return []
+    const season = folder.meta?.ytSeason ?? '1'
+    const lowerGame = primaryGame.toLowerCase()
+    return folders
+      .filter(f =>
+        !f.isMissing &&
+        ((f.meta?.games?.some(g => g.toLowerCase() === lowerGame)) ||
+         (f.detectedGames?.some(g => g.toLowerCase() === lowerGame))) &&
+        (f.meta?.ytSeason ?? '1') === season
+      )
+      .sort((a, b) => b.date.localeCompare(a.date))
+  }, [folders, folder])
   const showTwitchTitle = meta?.twitchTitle && !meta?.syncTitle && meta.twitchTitle !== meta.ytTitle
   const showTwitchGame = meta?.twitchGameName && meta.twitchGameName !== meta.ytGameTitle
 
@@ -6435,7 +6641,16 @@ function ExpandedStreamPanel({
               {series && (
                 <div className="flex items-baseline gap-2">
                   <span className="text-[10px] uppercase tracking-wide text-gray-400 shrink-0 w-24">Series</span>
-                  <span className="text-gray-200 tabular-nums">{series}</span>
+                  <SeriesEpisodesTooltip
+                    episodes={seriesFolders}
+                    currentFolderPath={folder.folderPath}
+                    onJump={onJumpToFolder}
+                  >
+                    <span className="text-gray-200 tabular-nums cursor-default inline-flex items-baseline gap-1.5">
+                      {series}
+                      {seriesFolders.length > 1 && <List size={13} className="text-gray-400 self-center relative bottom-[1px]" />}
+                    </span>
+                  </SeriesEpisodesTooltip>
                 </div>
               )}
               {meta?.ytTitle && (

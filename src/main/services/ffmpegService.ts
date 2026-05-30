@@ -109,11 +109,17 @@ export async function probeArchiveTag(filePath: string): Promise<string | undefi
 // extractions are safe and cancelExtraction() kills every one of them.
 // Previously this was a single ref, which meant a second concurrent call
 // silently overwrote the first call's cancel — making parallel
-// per-track extractions un-cancellable in aggregate.
-const _extractCancellers = new Set<() => void>()
+// per-track extractions un-cancellable in aggregate. Each handle carries
+// the track indices it covers so a single track can be cancelled on its own.
+interface ExtractCanceller { cancel: () => void; indices: number[] }
+const _extractCancellers = new Set<ExtractCanceller>()
 
-export function cancelExtraction(): void {
-  for (const fn of [..._extractCancellers]) fn()
+// trackIndex omitted → cancel every in-flight extraction; otherwise only
+// cancel the call(s) covering that specific track.
+export function cancelExtraction(trackIndex?: number): void {
+  for (const c of [..._extractCancellers]) {
+    if (trackIndex == null || c.indices.includes(trackIndex)) c.cancel()
+  }
 }
 
 export async function extractAudioTracks(
@@ -143,7 +149,8 @@ export async function extractAudioTracks(
     cancelled = true
     currentKill?.()
   }
-  _extractCancellers.add(ownCancel)
+  const cancellerHandle: ExtractCanceller = { cancel: ownCancel, indices: indicesToExtract }
+  _extractCancellers.add(cancellerHandle)
 
   try {
     for (const i of indicesToExtract) {
@@ -187,7 +194,7 @@ export async function extractAudioTracks(
       currentKill = null
     }
   } finally {
-    _extractCancellers.delete(ownCancel)
+    _extractCancellers.delete(cancellerHandle)
   }
 
   if (cancelled) throw new Error('cancelled')

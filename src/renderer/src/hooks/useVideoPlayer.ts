@@ -217,6 +217,9 @@ export function useVideoPlayer() {
    *  in-state (saved values stay in StreamMeta so a future re-enable still
    *  picks them up). Does NOT delete the cached .opus files. */
   const disableMultiTrack = useCallback(() => {
+    // Kill any in-flight ffmpeg extractions so disabling doesn't leave
+    // orphaned jobs running in the main process after teardown.
+    void window.api.cancelExtractAudioTracks()
     releaseAudioElements()
     if (videoRef.current) {
       videoRef.current.muted = false
@@ -309,6 +312,22 @@ export function useVideoPlayer() {
       ...prev,
         tracks: prev.tracks.map(t =>
         t.status === 'extracting' ? { ...t, status: 'unextracted' as TrackStatus, extractProgress: 0 } : t
+      ),
+    }))
+  }, [])
+
+  /** Cancel a single in-flight track extraction, leaving any others running.
+   *  The matching playTrack() promise will reject with 'cancelled' and reset
+   *  the track too — resetting here first gives immediate UI feedback rather
+   *  than waiting for ffmpeg to die. */
+  const cancelTrackExtraction = useCallback(async (index: number) => {
+    await window.api.cancelExtractAudioTracks(index)
+    setState(prev => ({
+      ...prev,
+      tracks: prev.tracks.map(t =>
+        t.index === index && t.status === 'extracting'
+          ? { ...t, status: 'unextracted' as TrackStatus, extractProgress: 0 }
+          : t
       ),
     }))
   }, [])
@@ -497,6 +516,7 @@ export function useVideoPlayer() {
     disableMultiTrack,
     playTrack,
     cancelExtraction,
+    cancelTrackExtraction,
     setTrackMuted,
     setTrackSolo,
     setTrackVolume,

@@ -12,8 +12,8 @@ contextBridge.exposeInMainWorld('api', {
   getCachedAudioTracks: (filePath: string) =>
     ipcRenderer.invoke('video:getCachedTracks', filePath),
 
-  cancelExtractAudioTracks: () =>
-    ipcRenderer.invoke('video:cancelExtract'),
+  cancelExtractAudioTracks: (trackIndex?: number) =>
+    ipcRenderer.invoke('video:cancelExtract', trackIndex),
 
   cleanupTracks: (paths: string[]) =>
     ipcRenderer.invoke('video:cleanupTracks', paths),

@@ -70,9 +70,9 @@ export function registerVideoIPC(): void {
     }
   )
 
-  ipcMain.handle('video:cancelExtract', async () => {
+  ipcMain.handle('video:cancelExtract', async (_event, trackIndex?: number) => {
     const { cancelExtraction } = await import('../services/ffmpegService')
-    cancelExtraction()
+    cancelExtraction(trackIndex)
   })
 
   // Look up which audio tracks are already in the persistent cache without

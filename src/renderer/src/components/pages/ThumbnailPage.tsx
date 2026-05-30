@@ -696,6 +696,24 @@ function FilterToggle({ label, checked, onChange }: {
 }
 
 function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: PropsPanelProps) {
+  // Aspect-ratio lock for the Width/Height inputs. Ratio is captured the
+  // moment the lock is engaged — for images that's the source file's natural
+  // aspect, for shapes it's the current width÷height (no "natural" to fall
+  // back on). Stored in a ref so updates don't re-render; the boolean state
+  // drives the icon + onChange branching.
+  //
+  // These hooks live ABOVE the `if (!layer)` early return so they always run
+  // — calling them after the guard would change the hook count between
+  // "layer selected" and "nothing selected" renders (Rules of Hooks).
+  const [aspectLocked, setAspectLocked] = useState(false)
+  const aspectRatioRef = useRef<number | null>(null)
+  // Switching selected layer resets the lock — different layer means a
+  // different ratio, and silently carrying it over would surprise the user.
+  useEffect(() => {
+    setAspectLocked(false)
+    aspectRatioRef.current = null
+  }, [layer?.id])
+
   if (!layer) {
     return (
       <div className="p-4 text-xs text-gray-400 text-center">
@@ -705,21 +723,6 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
   }
 
   const update = (patch: Partial<ThumbnailLayer>) => onChange({ ...layer, ...patch })
-
-  // Aspect-ratio lock for the Width/Height inputs. Ratio is captured the
-  // moment the lock is engaged — for images that's the source file's natural
-  // aspect, for shapes it's the current width÷height (no "natural" to fall
-  // back on). Stored in a ref so updates don't re-render; the boolean state
-  // drives the icon + onChange branching.
-  const [aspectLocked, setAspectLocked] = useState(false)
-  const aspectRatioRef = useRef<number | null>(null)
-
-  // Switching selected layer resets the lock — different layer means a
-  // different ratio, and silently carrying it over would surprise the user.
-  useEffect(() => {
-    setAspectLocked(false)
-    aspectRatioRef.current = null
-  }, [layer.id])
 
   const toggleAspectLock = async () => {
     if (aspectLocked) {
@@ -2083,6 +2086,25 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     commitLayers([...display].reverse())
   }, [layers, commitLayers])
 
+  // Move a single layer within the z-order. Storage array: last index =
+  // front/top (renders on top, sits at the top of the layers panel). So
+  // 'up'/'top' move toward the end of the array, 'down'/'bottom' toward the
+  // start. Used by the Photoshop-style Ctrl+[ /] keyboard shortcuts.
+  const moveLayer = useCallback((id: string, direction: 'up' | 'down' | 'top' | 'bottom') => {
+    const idx = layers.findIndex(l => l.id === id)
+    if (idx === -1) return
+    const target =
+      direction === 'up'   ? Math.min(idx + 1, layers.length - 1) :
+      direction === 'down' ? Math.max(idx - 1, 0) :
+      direction === 'top'  ? layers.length - 1 :
+      /* bottom */           0
+    if (target === idx) return
+    const next = [...layers]
+    const [item] = next.splice(idx, 1)
+    next.splice(target, 0, item)
+    commitLayers(next)
+  }, [layers, commitLayers])
+
   const duplicateLayer = useCallback((id: string) => {
     const src = layers.find(l => l.id === id)
     if (!src) return
@@ -2366,10 +2388,20 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       }
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
       if (e.key === 'g' || e.key === 'G') setGridSnapEnabled(v => !v)
+      // Layer z-order (Photoshop-style). e.code is layout-independent — with
+      // Shift held, e.key becomes '}'/'{', so matching on code avoids that.
+      // ] = forward/up, [ = backward/down; Shift = all the way to front/back.
+      if ((e.ctrlKey || e.metaKey) && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+        if (selectedIds.length === 1) {
+          e.preventDefault()
+          const forward = e.code === 'BracketRight'
+          moveLayer(selectedIds[0], e.shiftKey ? (forward ? 'top' : 'bottom') : (forward ? 'up' : 'down'))
+        }
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds])
+  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer])
 
   // ── Selected layer ────────────────────────────────────────────────────────
   const selectedLayer = useMemo(() => {

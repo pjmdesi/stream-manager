@@ -161,8 +161,11 @@ export function IntegrationsPage() {
 
   // ── Secret reveal ─────────────────────────────────────────────────────────
   type RevealField = 'yt-secret' | 'tw-secret' | 'claude-key' | 'sr-key'
+  const ALL_REVEAL_FIELDS: RevealField[] = ['yt-secret', 'tw-secret', 'claude-key', 'sr-key']
   const [revealed, setRevealed] = useState<Set<RevealField>>(new Set())
-  const [pendingReveal, setPendingReveal] = useState<RevealField | null>(null)
+  // 'all' is the sentinel for the header "Reveal all" action — the
+  // confirmation modal is shared with the per-field reveal.
+  const [pendingReveal, setPendingReveal] = useState<RevealField | 'all' | null>(null)
 
   const requestReveal = (field: RevealField) => {
     if (revealed.has(field)) {
@@ -171,8 +174,15 @@ export function IntegrationsPage() {
       setPendingReveal(field)
     }
   }
+  const allRevealed = ALL_REVEAL_FIELDS.every(f => revealed.has(f))
+  const toggleRevealAll = () => {
+    // Hiding needs no confirmation; revealing routes through the warning modal.
+    if (allRevealed) setRevealed(new Set())
+    else setPendingReveal('all')
+  }
   const confirmReveal = () => {
-    if (pendingReveal) setRevealed(prev => new Set(prev).add(pendingReveal))
+    if (pendingReveal === 'all') setRevealed(new Set(ALL_REVEAL_FIELDS))
+    else if (pendingReveal) setRevealed(prev => new Set(prev).add(pendingReveal))
     setPendingReveal(null)
   }
 
@@ -246,6 +256,15 @@ export function IntegrationsPage() {
           <h1 className="text-lg font-semibold">Integrations</h1>
           <p className="text-xs text-gray-400 mt-0.5">Connect and manage your streaming platform accounts.</p>
         </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="ml-auto"
+          onClick={toggleRevealAll}
+          icon={allRevealed ? <EyeOff size={13} /> : <Eye size={13} />}
+        >
+          {allRevealed ? 'Hide all' : 'Reveal all'}
+        </Button>
       </div>
 
       <div className="flex-1 overflow-hidden pr-2">
@@ -738,18 +757,20 @@ export function IntegrationsPage() {
       <Modal
         isOpen={pendingReveal !== null}
         onClose={() => setPendingReveal(null)}
-        title="Reveal sensitive value?"
+        title={pendingReveal === 'all' ? 'Reveal all sensitive values?' : 'Reveal sensitive value?'}
         width="sm"
         footer={
           <>
             <Button variant="ghost" onClick={() => setPendingReveal(null)}>Cancel</Button>
-            <Button variant="primary" onClick={confirmReveal}>Reveal</Button>
+            <Button variant="primary" onClick={confirmReveal}>{pendingReveal === 'all' ? 'Reveal all' : 'Reveal'}</Button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           <p className="text-sm text-gray-300 leading-relaxed">
-            This value is sensitive and should be kept private.
+            {pendingReveal === 'all'
+              ? 'These values are sensitive and should be kept private.'
+              : 'This value is sensitive and should be kept private.'}
           </p>
           <ul className="flex flex-col gap-1.5 text-xs text-gray-400 leading-relaxed list-disc list-inside marker:text-gray-600">
             <li>Never share this with anyone.</li>
