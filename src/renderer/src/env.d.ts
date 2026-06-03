@@ -60,6 +60,8 @@ declare global {
       readFile(filePath: string): Promise<string>
       saveScreenshot(destPath: string, base64Data: string): Promise<string>
       trashFile(filePath: string): Promise<void>
+      getFileSizes(paths: string[]): Promise<(number | null)[]>
+      getNativeThumbnail(filePath: string, size?: number): Promise<string | null>
       checkLocalFiles(filePaths: string[]): Promise<boolean[]>
       startCloudDownload(filePath: string): Promise<void>
       debugFileAttrs(filePath: string): Promise<{
@@ -195,10 +197,11 @@ declare global {
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
       youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[]): Promise<void>
       youtubeValidateToken(): Promise<{ valid: boolean; error?: string }>
-      youtubeGetQualifyingThumbnails(paths: string[]): Promise<string[]>
+      youtubeGetQualifyingThumbnails(paths: string[]): Promise<{ bestFit: string[]; rest: string[] }>
       youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>
       youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string }, tags: string[]): Promise<void>
       youtubeUpdateBroadcastStatus(broadcastId: string, privacyStatus: 'public' | 'unlisted' | 'private'): Promise<void>
+      youtubeDeleteVideo(videoId: string): Promise<void>
       getYTTitleTemplates(): Promise<YTTitleTemplate[]>
       setYTTitleTemplates(v: YTTitleTemplate[]): Promise<void>
       getYTDescriptionTemplates(): Promise<YTDescriptionTemplate[]>

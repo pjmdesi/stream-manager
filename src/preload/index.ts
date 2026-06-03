@@ -93,6 +93,12 @@ contextBridge.exposeInMainWorld('api', {
   trashFile: (filePath: string) =>
     ipcRenderer.invoke('files:trashFile', filePath),
 
+  getFileSizes: (paths: string[]) =>
+    ipcRenderer.invoke('files:getFileSizes', paths),
+
+  getNativeThumbnail: (filePath: string, size?: number) =>
+    ipcRenderer.invoke('files:getNativeThumbnail', filePath, size),
+
   checkLocalFiles: (filePaths: string[]) =>
     ipcRenderer.invoke('files:checkLocalFiles', filePaths),
 
@@ -408,6 +414,9 @@ contextBridge.exposeInMainWorld('api', {
     broadcastId: string,
     privacyStatus: 'public' | 'unlisted' | 'private',
   ) => ipcRenderer.invoke('youtube:updateBroadcastStatus', broadcastId, privacyStatus),
+
+  youtubeDeleteVideo: (videoId: string) =>
+    ipcRenderer.invoke('youtube:deleteVideo', videoId),
 
   // ── YouTube Templates ─────────────────────────────────────────────────────
   getYTTitleTemplates: () => ipcRenderer.invoke('store:getYTTitleTemplates'),

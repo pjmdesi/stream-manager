@@ -664,19 +664,42 @@ export function IntegrationsPage() {
               )}
               {twError && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{twError}</p>}
 
-              {/* Auto-update setting — divider keeps it visually grouped
-                  with the connection block above while still distinguishing
-                  the setting from credentials. Toggle is disabled (greyed)
-                  when Twitch isn't connected, but the option is visible so
-                  users discover it exists. */}
-              <div className="pt-3 border-t border-white/5 flex flex-col gap-1">
-                <Checkbox
-                  checked={!!config.autoUpdateTwitchAfterStream}
-                  onChange={v => updateConfig({ autoUpdateTwitchAfterStream: v })}
-                  disabled={!twConnected}
-                  label={<div><div className="text-sm font-medium text-gray-200">Auto-update Twitch details when a stream ends</div><div className="text-xs text-gray-400">After SM detects that a stream has completed, push the next-upcoming stream item's details to your Twitch channel automatically (if there is one).</div></div>}
-                  size="sm"
-                />
+              {/* Post-stream Twitch behavior — divider keeps it visually
+                  grouped with the connection block above. Disabled when
+                  Twitch isn't connected, but the option is visible so
+                  users discover it exists. Tri-state: Always silently
+                  pushes, Ask shows the post-stream modal, Never skips
+                  entirely. Mirrors the buttons shown inside the modal. */}
+              <div className="pt-3 border-t border-white/5 flex flex-col gap-2">
+                <div>
+                  <div className="text-sm font-medium text-gray-200">After a stream ends, push the next stream's Twitch details</div>
+                  <div className="text-xs text-gray-400">When a SM-orchestrated stream completes, the next-upcoming stream item's title, game, and tags can be pushed to your Twitch channel.</div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {([
+                    { value: 'always' as const, label: 'Always', desc: 'Push silently after every stream' },
+                    { value: 'ask' as const,    label: 'Ask',    desc: 'Show a confirmation modal each time' },
+                    { value: 'never' as const,  label: 'Never',  desc: "Don't push, don't ask" },
+                  ]).map(({ value, label, desc }) => {
+                    const active = (config.autoUpdateTwitchAfterStream ?? 'ask') === value
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        disabled={!twConnected}
+                        onClick={() => updateConfig({ autoUpdateTwitchAfterStream: value })}
+                        title={desc}
+                        className={`flex items-center justify-center px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                          active
+                            ? 'bg-purple-600/25 border-purple-500/40 text-purple-200'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200'
+                        } disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/5 disabled:hover:text-gray-400`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </div>

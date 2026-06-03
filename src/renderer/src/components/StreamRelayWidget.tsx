@@ -1,9 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import { TrendingUpDown, Calendar, RotateCcw, ChevronDown, X, Loader2 } from 'lucide-react'
-import { Twitch as LucideTwitch } from './ui/BrandIcons'
 import { useStore } from '../hooks/useStore'
-import { useRelayPrompt } from '../context/RelayPromptContext'
 import { Tooltip } from './ui/Tooltip'
 import type { RelayStatus, RelayStats, ActivePickResult, OrchestratorEvent, LiveBroadcast, Page } from '../types'
 
@@ -29,10 +27,7 @@ export function StreamRelayWidget({
   collapsed: boolean
   onNavigate: (page: Page) => void
 }) {
-  const { config, updateConfig } = useStore()
-  const { suggestion: twitchPrompt, setSuggestion: setTwitchPrompt } = useRelayPrompt()
-  const [twitchPromptPushing, setTwitchPromptPushing] = useState(false)
-  const [twitchPromptError, setTwitchPromptError] = useState<string | null>(null)
+  const { config } = useStore()
   const [status, setStatus] = useState<RelayStatus>({ state: 'idle' })
   const [stats, setStats] = useState<RelayStats | null>(null)
   const [active, setActive] = useState<ActivePickResult>({ broadcast: null, isManual: false, manualPickStale: false })
@@ -40,30 +35,6 @@ export function StreamRelayWidget({
   const [lifecycle, setLifecycle] = useState<OrchestratorEvent | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const pickerAnchorRef = useRef<HTMLDivElement>(null)
-
-  // Reset transient prompt state whenever the suggestion changes/clears so
-  // a stale error/loading flag from a previous prompt doesn't carry over.
-  useEffect(() => { setTwitchPromptError(null); setTwitchPromptPushing(false) }, [twitchPrompt?.folderPath])
-
-  const pushTwitchSuggestion = async () => {
-    if (!twitchPrompt) return
-    setTwitchPromptPushing(true)
-    setTwitchPromptError(null)
-    try {
-      const { title, game, tags } = twitchPrompt.payload
-      await window.api.twitchUpdateChannel(title, game, tags)
-      setTwitchPrompt(null)
-    } catch (e: any) {
-      setTwitchPromptError(e?.message ?? String(e))
-    } finally {
-      setTwitchPromptPushing(false)
-    }
-  }
-  const enableAutoUpdateAndPush = async () => {
-    await updateConfig({ autoUpdateTwitchAfterStream: true })
-    await pushTwitchSuggestion()
-  }
-  const dismissTwitchPrompt = () => setTwitchPrompt(null)
 
   // Initial fetch + live subscriptions. The cleanup functions returned from
   // each on* call are the preload's removeListener wrappers — composed via
@@ -290,52 +261,8 @@ export function StreamRelayWidget({
           </p>
         )}
 
-        {/* Post-stream Twitch suggestion — surfaces after a stream ends when
-            auto-update is OFF and there's a next-upcoming stream with Twitch
-            info to push. Three exits: push now, push + enable auto-update,
-            or dismiss. Hidden once any of those resolves. */}
-        {twitchPrompt && (
-          <div className="mt-1 mx-2 p-2 rounded border border-twitch-400/30 bg-twitch-400/5 flex flex-col gap-1.5">
-            <div className="flex items-start gap-1.5">
-              <LucideTwitch size={11} className="text-twitch-400/80 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-gray-200 leading-tight">Push next stream to Twitch?</p>
-                <p className="text-[10px] text-gray-400 leading-tight truncate" title={twitchPrompt.displayTitle}>
-                  {twitchPrompt.displayTitle}
-                </p>
-              </div>
-              <button
-                onClick={dismissTwitchPrompt}
-                className="shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
-                aria-label="Dismiss"
-              >
-                <X size={11} />
-              </button>
-            </div>
-            {twitchPromptError && (
-              <p className="text-[10px] text-red-400 leading-tight">{twitchPromptError}</p>
-            )}
-            <div className="flex items-center gap-1">
-              <button
-                onClick={pushTwitchSuggestion}
-                disabled={twitchPromptPushing}
-                className="flex-1 flex items-center justify-center gap-1 text-[10px] px-2 py-1 rounded bg-twitch-400/20 text-twitch-200 hover:bg-twitch-400/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {twitchPromptPushing && <Loader2 size={10} className="animate-spin" />}
-                Update
-              </button>
-              <Tooltip content="Push now + enable auto-update from now on" side="top">
-                <button
-                  onClick={enableAutoUpdateAndPush}
-                  disabled={twitchPromptPushing}
-                  className="flex-1 flex items-center justify-center text-[10px] px-2 py-1 rounded bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Always
-                </button>
-              </Tooltip>
-            </div>
-          </div>
-        )}
+        {/* Post-stream Twitch push prompt now lives in PostStreamTwitchModal
+            (rendered at AppInner level), surfaced over the whole window. */}
       </div>
 
       {/* Picker dropdown — portalled out of the sidebar so the overflow-hidden

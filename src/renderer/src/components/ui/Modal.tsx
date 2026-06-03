@@ -9,6 +9,11 @@ interface ModalProps {
   width?: 'sm' | 'md' | 'lg' | 'xl' | '2xl'
   footer?: React.ReactNode
   dismissible?: boolean
+  /** Optional content rendered in the header to the right of the title.
+   *  Sits next to (or in place of) the dismissible X button — useful for
+   *  modal-scoped actions like "Clear all fields" that should always be
+   *  reachable regardless of where the user is in the body. */
+  headerExtra?: React.ReactNode
   /** When true, skip the fixed overlay + backdrop (caller handles positioning and animation) */
   noOverlay?: boolean
   /**
@@ -34,6 +39,7 @@ export const Modal: React.FC<ModalProps> = ({
   width = 'md',
   footer,
   dismissible = true,
+  headerExtra,
   noOverlay = false,
   autoFocus = 'default',
 }) => {
@@ -145,14 +151,17 @@ export const Modal: React.FC<ModalProps> = ({
     <div className={`relative w-full ${widthClasses[width]} bg-navy-700 border border-white/10 rounded-xl shadow-2xl shadow-black/50 flex flex-col max-h-[90vh]`}>
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
         <h2 className="text-lg font-semibold text-white">{title}</h2>
-        {dismissible && (
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
-          >
-            <X size={16} />
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {headerExtra}
+          {dismissible && (
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
       </div>
       <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-4">
         {children}

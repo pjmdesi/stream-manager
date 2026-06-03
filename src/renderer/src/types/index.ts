@@ -199,7 +199,13 @@ export interface AppConfig {
   streamRelayStreamId: string
   streamRelayActiveBroadcastId: string
   streamRelayActivePickedAt: number
-  autoUpdateTwitchAfterStream: boolean
+  /** Post-stream Twitch push behavior:
+   *  - 'always' — silently push the next-upcoming item's Twitch details
+   *  - 'ask'    — show the post-stream modal (default)
+   *  - 'never'  — never push, never ask
+   *  Legacy boolean values still persisted in old configs are migrated on
+   *  read in the store layer (true → 'always', false → 'ask'). */
+  autoUpdateTwitchAfterStream: 'always' | 'ask' | 'never'
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'

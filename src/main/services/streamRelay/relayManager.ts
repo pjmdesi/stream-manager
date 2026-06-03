@@ -22,7 +22,13 @@ import { EventEmitter } from 'events'
 import os from 'os'
 import ffmpegStatic from 'ffmpeg-static'
 
-const FFMPEG_PATH = ffmpegStatic as unknown as string
+// In a packaged Electron build, ffmpeg-static resolves to a path inside
+// app.asar/. asarUnpack pulls the binary out to app.asar.unpacked/, but the
+// raw path string still points at the asar one — spawning that path errors
+// with ENOENT since asar contents aren't directly executable. Same fix is
+// applied in ffmpegService.ts and ipc/combine.ts.
+const FFMPEG_PATH = (ffmpegStatic as unknown as string)
+  ?.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
 
 export interface RelayConfig {
   port: number

@@ -1,5 +1,7 @@
 import fs from 'fs'
 import path from 'path'
+import { imageSize } from 'image-size'
+import { checkLocalFiles } from '../ipc/files'
 import { getValidToken } from './youtubeAuth'
 
 const BASE = 'https://www.googleapis.com/youtube/v3'
@@ -39,16 +41,78 @@ const MIME: Record<string, string> = {
   '.webp': 'image/webp',
 }
 
-/** Filter a list of image paths to those that meet YouTube's thumbnail requirements:
- *  - Accepted format: JPG, PNG, GIF, WebP
- *  - Max file size: 2 MB
- *  (Resolution ≥ 1280×720 is recommended but not enforced here — YouTube will reject if too small.) */
-export function filterYouTubeThumbnails(paths: string[]): string[] {
-  return paths.filter(p => {
+/** Aspect ratios we treat as "thumbnail-shaped": 16:9 (YT widescreen), 1:1
+ *  (podcast / square cover), 9:16 (vertical / Shorts). Anything outside these
+ *  (banners, sidebars, tall logos) is filtered out of the best-fit list.
+ *  ±5% tolerance accommodates near-misses from cropping tools. */
+const THUMBNAIL_ASPECTS = [16 / 9, 1, 9 / 16]
+const ASPECT_TOLERANCE = 0.05
+/** Lower bound on the longer side of a "real" thumbnail. Excludes favicons
+ *  and tiny inline icons without rejecting downscaled screenshots from older
+ *  recordings. */
+const MIN_LONGER_SIDE = 720
+
+function matchesThumbnailAspect(w: number, h: number): boolean {
+  if (w <= 0 || h <= 0) return false
+  const longer = Math.max(w, h)
+  if (longer < MIN_LONGER_SIDE) return false
+  const ratio = w / h
+  return THUMBNAIL_ASPECTS.some(a => Math.abs(ratio - a) / a <= ASPECT_TOLERANCE)
+}
+
+/** Split a list of image paths into two buckets based on how well each one
+ *  fits the typical thumbnail shape. Both buckets are restricted to files
+ *  that pass the basic YT upload requirements (accepted extension + ≤2 MB).
+ *
+ *  - `bestFit` — files whose pixel aspect ratio matches 16:9 / 1:1 / 9:16
+ *    within ±5% AND whose longer side is ≥720px. Cloud-only files always
+ *    fall into this bucket since we don't probe their dimensions (reading
+ *    bytes would trigger hydration); we lean inclusive so a cloud-hosted
+ *    thumbnail isn't hidden behind "Show all".
+ *  - `rest` — everything else that passes the basic check (off-aspect images,
+ *    small icons / logos). Surfaced behind the picker's "Show all" link.
+ *
+ *  Files failing the basic ext + size check are excluded from both buckets. */
+export async function categorizeYouTubeThumbnails(
+  paths: string[],
+): Promise<{ bestFit: string[]; rest: string[] }> {
+  const basic = paths.filter(p => {
     const ext = path.extname(p).toLowerCase()
     if (!YT_THUMBNAIL_EXTS.has(ext)) return false
     try { return fs.statSync(p).size <= YT_THUMBNAIL_MAX_BYTES } catch { return false }
   })
+  if (basic.length === 0) return { bestFit: [], rest: [] }
+
+  // Local-flag lookup is what gates dimension probing — reading a cloud
+  // placeholder triggers a download, which we explicitly want to avoid here.
+  const localFlags = await checkLocalFiles(basic)
+
+  const bestFit: string[] = []
+  const rest: string[] = []
+  for (let i = 0; i < basic.length; i++) {
+    const p = basic[i]
+    const isLocal = localFlags[i]
+    if (!isLocal) {
+      // Cloud-only — be inclusive; the picker will show a cloud icon and
+      // hydration only happens if the user actually picks this file.
+      bestFit.push(p)
+      continue
+    }
+    try {
+      const buf = fs.readFileSync(p)
+      const dims = imageSize(buf)
+      if (matchesThumbnailAspect(dims.width, dims.height)) {
+        bestFit.push(p)
+      } else {
+        rest.push(p)
+      }
+    } catch {
+      // Couldn't read or parse — keep it visible behind "Show all" so the
+      // user can still pick it if they know what it is.
+      rest.push(p)
+    }
+  }
+  return { bestFit, rest }
 }
 
 /** Upload a local image file as the thumbnail for a YouTube broadcast / video. */
@@ -523,6 +587,24 @@ export async function updateBroadcastStatus(
         status: { privacyStatus },
       }),
     },
+    clientId, clientSecret
+  )
+}
+
+/** Delete a YouTube video (including the VOD of a completed livestream).
+ *  Irreversible — there's no recycle bin on YouTube. Quota cost: 50 units.
+ *  Works for both regular videos and finished livestream VODs since both
+ *  live under the videos resource once the broadcast completes. Throws on
+ *  any non-2xx so the caller can surface the failure (most commonly
+ *  "video not found" if the user already deleted it elsewhere). */
+export async function deleteVideo(
+  videoId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<void> {
+  await ytRequest(
+    `/videos?${new URLSearchParams({ id: videoId })}`,
+    { method: 'DELETE' },
     clientId, clientSecret
   )
 }

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoTags, filterYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -133,7 +133,7 @@ export function registerYouTubeIPC(): void {
   })
 
   ipcMain.handle('youtube:getQualifyingThumbnails', (_event, paths: string[]) => {
-    return filterYouTubeThumbnails(paths)
+    return categorizeYouTubeThumbnails(paths)
   })
 
   ipcMain.handle('youtube:uploadThumbnail', async (_event, videoId: string, imagePath: string) => {
@@ -164,6 +164,16 @@ export function registerYouTubeIPC(): void {
       await updateBroadcastStatus(broadcastId, privacyStatus, clientId, clientSecret)
     } catch (e: any) {
       console.error('[YT main] updateBroadcastStatus — error:', e.message)
+      throw e
+    }
+  })
+
+  ipcMain.handle('youtube:deleteVideo', async (_event, videoId: string) => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      await deleteVideo(videoId, clientId, clientSecret)
+    } catch (e: any) {
+      console.error('[YT main] deleteVideo — error:', e.message)
       throw e
     }
   })

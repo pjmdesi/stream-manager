@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Component } from 'react'
+import React, { useState, useEffect, useCallback, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
 import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud } from 'lucide-react'
@@ -27,6 +27,7 @@ import { StreamRelayWidget } from './components/StreamRelayWidget'
 import { useStore } from './hooks/useStore'
 import { OnboardingModal } from './components/OnboardingModal'
 import { HelpModal } from './components/HelpModal'
+import { PostStreamTwitchModal } from './components/PostStreamTwitchModal'
 import { ThumbnailEditorProvider, useThumbnailEditor } from './context/ThumbnailEditorContext'
 import type { PendingThumbnailStream } from './context/ThumbnailEditorContext'
 
@@ -354,7 +355,25 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
 ]
 
 function AppInner() {
-  const [page, setPage] = useState<Page>('streams')
+  const [page, setPageRaw] = useState<Page>('streams')
+  // Tracks whether SettingsPage has unsaved changes — reported up via its
+  // onDirtyChange callback. When true and the user attempts to navigate
+  // anywhere, the wrapped setPage below intercepts and stashes the target
+  // in pendingNav; SettingsPage then renders a Save/Discard/Cancel modal.
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const [pendingNav, setPendingNav] = useState<Page | null>(null)
+  // Stable wrapper that all existing setPage() callsites already use. When
+  // we're on settings AND dirty, redirect the navigation request to
+  // pendingNav so SettingsPage can prompt before actually changing pages.
+  // Otherwise behaves identically to the raw setter.
+  const setPage = useCallback((target: Page) => {
+    if (target === page) return
+    if (page === 'settings' && settingsDirty) {
+      setPendingNav(target)
+      return
+    }
+    setPageRaw(target)
+  }, [page, settingsDirty])
   const [aboutOpen, setAboutOpen] = useState(false)
   // Update detection — fires once on mount, results cached for 6h in the
   // store. Honors the `checkForUpdates` config opt-out. Failures are silent.
@@ -582,7 +601,15 @@ function AppInner() {
           {page === 'combine'   && <CombinePage initialFiles={pendingCombine} />}
           {page === 'launcher'  && <LauncherPage />}
           {page === 'integrations'   && <IntegrationsPage />}
-          {page === 'settings'  && <SettingsPage onOpenOnboarding={() => setOnboardingOpen(true)} />}
+          {page === 'settings'  && (
+            <SettingsPage
+              onOpenOnboarding={() => setOnboardingOpen(true)}
+              onDirtyChange={setSettingsDirty}
+              pendingNav={pendingNav}
+              onConfirmNav={(target) => { setPageRaw(target); setPendingNav(null); setSettingsDirty(false) }}
+              onCancelNav={() => setPendingNav(null)}
+            />
+          )}
         </PageErrorBoundary>
         </main>
       </div>
@@ -625,6 +652,8 @@ function AppInner() {
       <HelpModal isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <CloudOpsModal />
+
+      <PostStreamTwitchModal />
 
       <Modal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} title="About Stream Manager" width="sm">
         <div className="flex flex-col items-center gap-4 py-2 text-center">

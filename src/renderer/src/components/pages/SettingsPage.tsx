@@ -8,7 +8,7 @@ import { Checkbox } from '../ui/Checkbox'
 import { Input } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { DumpConvertExplainer } from '../DumpConvertExplainer'
-import type { ConversionPreset, ThumbnailTemplate } from '../../types'
+import type { ConversionPreset, ThumbnailTemplate, Page } from '../../types'
 import { isClipExportCompatible } from '../../lib/clipExport'
 
 function formatBytes(bytes: number): string {
@@ -69,9 +69,22 @@ interface SettingsPageProps {
    *  directory has no _meta.json. The app interprets this as "the user is
    *  pointing at an uninitialized folder" and re-opens the onboarding flow. */
   onOpenOnboarding?: () => void
+  /** Reports the page's dirty state to App so the global setPage wrapper
+   *  can intercept nav-away clicks. Fires on every isDirty transition. */
+  onDirtyChange?: (dirty: boolean) => void
+  /** Set by App's setPage wrapper when the user tries to navigate while
+   *  there are unsaved changes — the modal below prompts Save / Discard /
+   *  Cancel and resolves via onConfirmNav / onCancelNav. */
+  pendingNav?: Page | null
+  /** Called when the user picks Save or Discard in the prompt. App is
+   *  expected to perform the actual page change (bypassing the wrapper). */
+  onConfirmNav?: (target: Page) => void
+  /** Called when the user picks Cancel. App should clear pendingNav so the
+   *  modal closes and the user stays on Settings. */
+  onCancelNav?: () => void
 }
 
-export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
+export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onConfirmNav, onCancelNav }: SettingsPageProps = {}) {
   const { config, updateConfig, loading } = useStore()
   const [local, setLocal] = useState(config)
   // Snapshot the streamsDir as it was when the page mounted (or after the
@@ -134,6 +147,14 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
   }
 
   const isDirty = JSON.stringify(local) !== JSON.stringify(config)
+
+  // Bubble the dirty state up so App can intercept nav clicks. Single
+  // signal (boolean) — App doesn't need the local diff itself.
+  useEffect(() => { onDirtyChange?.(isDirty) }, [isDirty, onDirtyChange])
+
+  // True while the nav-prompt's Save action is mid-flight. Disables the
+  // modal buttons so the user can't double-click and trigger two saves.
+  const [navSaving, setNavSaving] = useState(false)
 
   const set = (key: keyof typeof config, value: any) => {
     setLocal(prev => ({ ...prev, [key]: value }))
@@ -484,7 +505,7 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
           <Checkbox
             checked={local.skipClipMergeWarning ?? false}
             onChange={v => set('skipClipMergeWarning', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Skip multi-track merge warning</div><div className="text-xs text-gray-400">Enter clip mode immediately on multi-track videos instead of prompting to merge audio first. You can still merge from the audio tracks panel inside clip mode.</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Skip multi-track confirmation on entering clip mode</div><div className="text-xs text-gray-400">Enter clip mode immediately on videos with multiple audio tracks instead of prompting to enable multi-track mode. You can still enable multi-track mode when clip mode is active.</div></div>}
           />
         </section>
 
@@ -680,6 +701,63 @@ export function SettingsPage({ onOpenOnboarding }: SettingsPageProps = {}) {
               <span>{convertError}</span>
             </div>
           )}
+        </Modal>
+      )}
+
+      {/* Nav-away unsaved-changes prompt. Surfaces only when App has set
+          pendingNav (which it only does when this page is dirty). Three
+          exits: Save (commit then navigate), Discard (drop local edits
+          then navigate), Cancel (stay). Closing via X behaves as Cancel. */}
+      {pendingNav && (
+        <Modal
+          isOpen
+          onClose={() => { if (!navSaving) onCancelNav?.() }}
+          title="Unsaved changes"
+          width="sm"
+          dismissible={!navSaving}
+          footer={
+            <>
+              <Button variant="ghost" size="sm" disabled={navSaving} onClick={() => onCancelNav?.()}>
+                Cancel
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={navSaving}
+                onClick={() => {
+                  // Drop unsaved edits — revert local to whatever's in
+                  // config — then proceed with the navigation.
+                  setLocal(config)
+                  onConfirmNav?.(pendingNav)
+                }}
+                className="text-red-400 hover:text-red-300"
+              >
+                Discard changes
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={navSaving}
+                onClick={async () => {
+                  setNavSaving(true)
+                  try {
+                    await save()
+                    onConfirmNav?.(pendingNav)
+                  } catch (err) {
+                    console.error('Save before nav failed', err)
+                  } finally {
+                    setNavSaving(false)
+                  }
+                }}
+              >
+                Save & continue
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-300">
+            You have unsaved changes on the Settings page. What would you like to do?
+          </p>
         </Modal>
       )}
     </div>

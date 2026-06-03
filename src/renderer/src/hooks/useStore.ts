@@ -43,7 +43,7 @@ const defaultConfig: AppConfig = {
   streamRelayStreamId: '',
   streamRelayActiveBroadcastId: '',
   streamRelayActivePickedAt: 0,
-  autoUpdateTwitchAfterStream: false,
+  autoUpdateTwitchAfterStream: 'ask',
 }
 
 interface StoreContextValue {

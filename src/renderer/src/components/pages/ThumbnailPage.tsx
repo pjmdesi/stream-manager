@@ -1265,6 +1265,42 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // Cache image dimensions as the grid <img> elements load — used for the
   // hover tooltip (filename + dimensions). Map<absolutePath, {w, h}>.
   const [assetDims, setAssetDims] = useState<Map<string, { w: number; h: number }>>(new Map())
+  // Cache file sizes (bytes). Batched fetch via files:getFileSizes whenever
+  // the seasonAssets list changes — same lifecycle as the panel itself.
+  // null = stat failed for that path.
+  const [assetSizes, setAssetSizes] = useState<Map<string, number | null>>(new Map())
+  // Pending-delete confirmation for an asset-panel image. Holds the path
+  // being confirmed; null when no confirmation is active.
+  const [assetDeleteTarget, setAssetDeleteTarget] = useState<string | null>(null)
+
+  // Refresh size cache whenever the asset list changes. Batched IPC: one
+  // round-trip for every visible image rather than N. Only fetches for
+  // paths we haven't already cached so flipping between expanded sections
+  // doesn't re-stat known files.
+  useEffect(() => {
+    if (!seasonAssets) return
+    const allPaths: string[] = []
+    if (seasonAssets.current) allPaths.push(...seasonAssets.current.images)
+    for (const g of seasonAssets.related) allPaths.push(...g.images)
+    const missing = allPaths.filter(p => !assetSizes.has(p))
+    if (missing.length === 0) return
+    let cancelled = false
+    window.api.getFileSizes(missing)
+      .then(sizes => {
+        if (cancelled) return
+        setAssetSizes(prev => {
+          const next = new Map(prev)
+          missing.forEach((p, i) => next.set(p, sizes[i]))
+          return next
+        })
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  // assetSizes intentionally NOT in deps — including it would re-fire after
+  // every setAssetSizes (the very thing we trigger), looping. The seasonAssets
+  // identity change is the correct trigger for fetching missing entries.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasonAssets])
   // Forward layer changes from undo/redo into the autosave pipeline. Uses a
   // ref because triggerAutoSave is defined later in this function — the
   // useUndoRedo hook needs a stable callback at construction time, but the
@@ -3078,12 +3114,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     if (!seasonAssets) {
                       return <div className="px-3 py-3 text-[11px] text-gray-400">Loading…</div>
                     }
-                    const groups: Array<{ key: string; label: string; sublabel?: string; images: string[] }> = []
+                    const groups: Array<{ key: string; label: string; sublabel?: string; date?: string; images: string[] }> = []
                     if (seasonAssets.current && seasonAssets.current.images.length > 0) {
                       groups.push({
                         key: seasonAssets.current.folderPath,
                         label: 'This stream',
                         sublabel: seasonAssets.current.title,
+                        date: seasonAssets.current.date,
                         images: seasonAssets.current.images,
                       })
                     }
@@ -3093,31 +3130,65 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                         key: g.folderPath,
                         label: g.episode ? `Episode ${g.episode}` : g.date,
                         sublabel: g.title,
+                        date: g.date,
                         images: g.images,
                       })
                     }
                     if (groups.length === 0) {
                       return <div className="px-3 py-3 text-[11px] text-gray-400">No images in this stream{seasonAssets.related.length > 0 ? ' or its season' : ''}.</div>
                     }
-                    return groups.map(g => (
-                      <div key={g.key} className="border-b border-white/5 last:border-b-0">
+                    return groups.map(g => {
+                      // Tooltip on the section header surfaces the full title
+                      // (which gets `truncate`d in the panel), plus the date
+                      // when the label is "Episode X" / "This stream" and
+                      // doesn't already include it. Gated on having any
+                      // content beyond the visible label so we don't show a
+                      // redundant single-line tooltip.
+                      const hasExtraInfo = !!g.sublabel || (g.date && g.date !== g.label)
+                      const headerTooltip = hasExtraInfo ? (
+                        <div className="flex flex-col gap-1 max-w-[300px]">
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{g.label}</span>
+                            {g.date && g.date !== g.label && (
+                              <span className="text-[10px] text-gray-400 tabular-nums">{g.date}</span>
+                            )}
+                          </div>
+                          {g.sublabel && <span className="text-xs text-gray-100 break-words">{g.sublabel}</span>}
+                        </div>
+                      ) : null
+                      const header = (
                         <div className="px-3 pt-2 pb-1 flex flex-col gap-0.5">
                           <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{g.label}</span>
                           {g.sublabel && <span className="text-[10px] text-gray-400 truncate">{g.sublabel}</span>}
                         </div>
+                      )
+                      return (
+                      <div key={g.key} className="border-b border-white/5 last:border-b-0">
+                        {headerTooltip
+                          ? <Tooltip content={headerTooltip} side="left" triggerClassName="block">{header}</Tooltip>
+                          : header}
                         <div className="px-2 pb-2 grid grid-cols-2 gap-1">
                           {g.images.map(p => {
                             const basename = p.split(/[\\/]/).pop() ?? p
                             const dims = assetDims.get(p)
+                            const sizeBytes = assetSizes.get(p)
+                            const sizeText = sizeBytes == null
+                              ? null
+                              : sizeBytes >= 1e9 ? `${(sizeBytes / 1e9).toFixed(1)} GB`
+                              : sizeBytes >= 1e6 ? `${(sizeBytes / 1e6).toFixed(1)} MB`
+                              : `${(sizeBytes / 1e3).toFixed(0)} KB`
                             const tooltipContent = (
                               <div className="flex flex-col gap-0.5">
                                 <span className="font-mono text-[11px] text-gray-200 break-all">{basename}</span>
-                                <span className="text-[10px] text-gray-400 tabular-nums">{dims ? `${dims.w} × ${dims.h}` : 'Loading…'}</span>
+                                <span className="text-[10px] text-gray-400 tabular-nums">
+                                  {dims ? `${dims.w} × ${dims.h}` : 'Loading…'}
+                                  {sizeText && <span className="text-gray-500"> · {sizeText}</span>}
+                                </span>
                               </div>
                             )
                             return (
                               <Tooltip key={p} content={tooltipContent} side="left">
-                                <div className="aspect-square bg-navy-900 border border-white/5 hover:border-purple-500/60 rounded overflow-hidden flex items-center justify-center transition-colors">
+                                <div className="group relative aspect-square bg-navy-900 border border-white/5 hover:border-purple-500/60 rounded overflow-hidden flex items-center justify-center transition-colors">
                                   <img
                                     src={`file://${p}`}
                                     alt=""
@@ -3138,18 +3209,130 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                     }}
                                     className="max-w-full max-h-full object-contain cursor-grab active:cursor-grabbing"
                                   />
+                                  {/* Hover overlay — fades in on tile hover, hosts
+                                      quick "+ add as layer" and "trash" actions
+                                      so the user doesn't have to drag-and-drop or
+                                      open the file in Explorer. Pointer-events
+                                      stay off until visible to keep the drag
+                                      affordance on the image itself unimpeded. */}
+                                  <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 pointer-events-none group-hover:pointer-events-auto">
+                                    <button
+                                      type="button"
+                                      onClick={e => { e.stopPropagation(); addImageLayerFromPath(p).catch(() => {}) }}
+                                      title="Add as layer"
+                                      className="flex items-center justify-center w-7 h-7 rounded-full bg-white/10 hover:bg-purple-600/60 border border-white/20 hover:border-purple-400/70 text-gray-200 hover:text-white transition-colors"
+                                    >
+                                      <Plus size={14} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={e => { e.stopPropagation(); setAssetDeleteTarget(p) }}
+                                      title="Move to Recycle Bin"
+                                      className="flex items-center justify-center w-7 h-7 rounded-full bg-white/10 hover:bg-red-600/60 border border-white/20 hover:border-red-400/70 text-gray-200 hover:text-white transition-colors"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
                                 </div>
                               </Tooltip>
                             )
                           })}
                         </div>
                       </div>
-                    ))
+                      )
+                    })
                   })()}
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Asset-panel image delete confirmation. Same visual treatment as
+              the SM thumbnail delete modal — small, warning-themed, single
+              Cancel + red Delete button. Uses the shared trashFile IPC so
+              the file lands in the user's Recycle Bin (recoverable). When
+              the target is the stream item's preferred thumbnail, a warning
+              banner surfaces and on confirm the meta is auto-cleared so the
+              row doesn't end up pointing at a ghost file.
+              Canvas layers are unaffected by deletion — addImageLayerFromPath
+              caches each source into _thumbnail-assets/images/<hash> and
+              stores the cached path on the layer, so the original can vanish
+              without breaking the canvas. */}
+          {assetDeleteTarget && (() => {
+            const targetBasename = assetDeleteTarget.split(/[\\/]/).pop() ?? ''
+            const isPreferredThumb = !!currentStream
+              && (currentStream.meta?.preferredThumbnail ?? '') === targetBasename
+            return (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="bg-navy-800 border border-white/10 rounded-xl shadow-2xl w-[420px] flex flex-col overflow-hidden">
+                <div className="flex items-start gap-3 px-5 pt-5 pb-4">
+                  <div className="shrink-0 mt-0.5 p-2 rounded-lg bg-red-500/15">
+                    <AlertTriangle size={18} className="text-red-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold text-gray-200 mb-1">Move image to Recycle Bin?</h2>
+                    <p className="text-xs text-gray-400 leading-relaxed mb-2">
+                      The following file will be moved to your Recycle Bin:
+                    </p>
+                    <p className="text-[11px] text-gray-300 font-mono break-all bg-white/5 rounded px-2 py-1">
+                      {targetBasename}
+                    </p>
+                    {isPreferredThumb && (
+                      <div className="mt-3 flex items-start gap-1.5 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 leading-relaxed">
+                        <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                        <span>
+                          This image is currently set as the stream item's thumbnail.
+                          Deleting it will fall back to another image and clear the
+                          preferred-thumbnail setting.
+                        </span>
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-400 mt-2">This action can be undone from the Recycle Bin.</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/10">
+                  <Button variant="ghost" size="sm" onClick={() => setAssetDeleteTarget(null)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" size="sm" icon={<Trash2 size={12} />}
+                    onClick={async () => {
+                      const target = assetDeleteTarget
+                      setAssetDeleteTarget(null)
+                      try {
+                        await window.api.trashFile(target)
+                        // Auto-clear the meta pointer if we just trashed the
+                        // preferred thumbnail. Empty string clears via the
+                        // partial-merge IPC (undefined would be stripped by
+                        // JSON serialization). Best-effort: a failure here
+                        // doesn't undo the file delete, just leaves the meta
+                        // dangling which the next open will fall back from.
+                        if (isPreferredThumb && currentStream) {
+                          await window.api.updateStreamMeta(
+                            currentStream.folderPath,
+                            { preferredThumbnail: '' },
+                            streamMetaKey(currentStream.folderPath, currentStream.date, config.streamsDir),
+                          ).catch(err => console.error('Failed to clear preferredThumbnail', err))
+                        }
+                        // Drop the dimensions/size cache entry for the deleted
+                        // file so a re-created file at the same path doesn't
+                        // show stale data, and bump the refresh trigger so the
+                        // panel re-fetches without it.
+                        setAssetDims(prev => { const n = new Map(prev); n.delete(target); return n })
+                        setAssetSizes(prev => { const n = new Map(prev); n.delete(target); return n })
+                        setAssetRefreshTrigger(t => t + 1)
+                      } catch (err) {
+                        console.error('Failed to trash asset image', err)
+                      }
+                    }}
+                    className="bg-red-600 hover:bg-red-500 border-red-600 hover:border-red-500"
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            </div>
+            )
+          })()}
 
           {/* Delete thumbnail confirmation modal */}
           {deleteThumbOpen && currentStream && (

@@ -176,6 +176,78 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
   )
 }
 
+/** Module-level cache for shell-thumbnail data URLs, keyed by
+ *  `${path}@${thumbsKey}`. OS thumbnails are stable until the underlying
+ *  file changes, so the cache is valid for the session — and re-opening the
+ *  picker doesn't re-issue IPC calls. Bust by bumping thumbsKey. */
+const NATIVE_THUMB_CACHE = new Map<string, string | null>()
+const NATIVE_THUMB_INFLIGHT = new Map<string, Promise<string | null>>()
+
+/** Lightweight <img> wrapper that displays the OS shell thumbnail for a file
+ *  via files:getNativeThumbnail. Decodes a few-KB PNG instead of the full
+ *  source image — drops the picker's per-image bitmap cost by ~100×, which
+ *  is the difference between a snappy grid and a stalled renderer when
+ *  there are 50+ thumbnails. Falls back to the raw file:// URL if the OS
+ *  has no cached thumbnail (rare on Windows; reasonable cross-platform). */
+function PickerThumbImage({ path, thumbsKey, alt }: { path: string; thumbsKey?: number; alt: string }) {
+  const cacheKey = `${path}@${thumbsKey ?? 0}`
+  // Lazy useState initializer — runs once per mount, pulls any cached value
+  // synchronously so the <img> renders with a real src on the first paint.
+  const [dataUrl, setDataUrl] = useState<string | null | undefined>(() => NATIVE_THUMB_CACHE.get(cacheKey))
+  // Tracks whether the underlying <img> finished decoding. Stays false while
+  // the IPC is in flight, AND while the <img> is loading/decoding the data
+  // URL — including the indefinite period when loading="lazy" is deferring
+  // the load because the element is offscreen. We use it to keep a spinner
+  // visible the entire time and avoid the broken-image flash.
+  const [imgLoaded, setImgLoaded] = useState(false)
+
+  useEffect(() => {
+    // Cached values are already in state via the useState initializer. Don't
+    // touch imgLoaded here — the <img>'s onLoad can fire synchronously for
+    // a data URL on the same render, and an effect-level reset would race
+    // against (and clobber) that onLoad, leaving the spinner stuck forever.
+    if (NATIVE_THUMB_CACHE.has(cacheKey)) return
+    let cancelled = false
+    // Dedupe in-flight requests so React strict-mode double-mount or
+    // multiple visible instances of the same path don't fire duplicate IPC.
+    let p = NATIVE_THUMB_INFLIGHT.get(cacheKey)
+    if (!p) {
+      p = window.api.getNativeThumbnail(path).catch(() => null).then(url => {
+        NATIVE_THUMB_CACHE.set(cacheKey, url)
+        NATIVE_THUMB_INFLIGHT.delete(cacheKey)
+        return url
+      })
+      NATIVE_THUMB_INFLIGHT.set(cacheKey, p)
+    }
+    p.then(url => { if (!cancelled) setDataUrl(url) })
+    return () => { cancelled = true }
+  }, [cacheKey, path])
+
+  // Fall back to the direct file:// URL when the OS has no thumbnail to give
+  // (still rendered with loading="lazy" so it defers until near-viewport).
+  const fallback = `${toFileUrl(path)}${thumbsKey ? `?t=${thumbsKey}` : ''}`
+  const src = dataUrl === undefined ? undefined : (dataUrl ?? fallback)
+  return (
+    <>
+      {src !== undefined && (
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setImgLoaded(true)}
+          className="w-full h-full object-cover"
+        />
+      )}
+      {!imgLoaded && (
+        <div className="absolute inset-0 flex items-center justify-center bg-navy-900 pointer-events-none">
+          <Loader2 size={12} className="animate-spin text-gray-400" />
+        </div>
+      )}
+    </>
+  )
+}
+
 /** Returns the stream index from a folder name: 1 for base, 2+ for -N suffixed. */
 function streamIndex(folderName: string): number {
   const m = folderName.match(/^\d{4}-\d{2}-\d{2}-(\d+)$/)
@@ -584,13 +656,17 @@ interface LightboxProps {
    *  Caller is expected to move the file to the recycle bin and refresh
    *  the source thumbnails list so the lightbox re-renders without it. */
   onDeleteImage?: (path: string) => Promise<void> | void
+  /** Opens the SM thumbnail editor for the folder. Surfaced as an "Edit
+   *  thumbnail" button only when the current image is an SM thumbnail.
+   *  Caller is expected to close the lightbox as part of the transition. */
+  onEditThumbnail?: () => void
   onClose: () => void
   onNavigate: (index: number) => void
   /** Parallel to `thumbnails`; false → cloud placeholder. */
   localFlags?: boolean[]
 }
 
-function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onClose, onNavigate, localFlags }: LightboxProps) {
+function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, onClose, onNavigate, localFlags }: LightboxProps) {
   const total = thumbnails.length
   const currentPath = thumbnails[index]
   const currentIsLocal = localFlags?.[index] ?? true
@@ -693,6 +769,18 @@ function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThu
         />
         <div className="mt-3 flex items-center gap-3">
           <p className="text-sm text-gray-400 font-mono">{filename}</p>
+          {/* Edit control — only for SM-generated thumbnails (matches the
+              `<date>_sm-thumbnail.png` pattern). Opens the thumbnail editor
+              for the stream item via the parent's callback. Same gate used
+              in the inline ThumbnailCarousel below. */}
+          {onEditThumbnail && SM_THUMB_REGEX.test(currentPath) && (
+            <button
+              onClick={() => onEditThumbnail()}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-purple-600/40 border border-white/20 hover:border-purple-500/50 text-gray-300 hover:text-purple-200 text-xs font-medium transition-colors"
+            >
+              <PencilLine size={12} /> Edit thumbnail
+            </button>
+          )}
           {onSetAsThumbnail && (
             isPreferred ? (
               <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-600/30 border border-purple-500/40 text-purple-300 text-xs font-medium">
@@ -795,13 +883,21 @@ interface ThumbnailCarouselProps {
    *  Caller is expected to move the file to the recycle bin and refresh
    *  the source list so the carousel re-renders without it. */
   onDeleteImage?: (path: string) => Promise<void> | void
+  /** Opens the thumbnail editor for the current SM-generated thumbnail.
+   *  The carousel only renders the Edit button when the displayed image
+   *  is an SM thumbnail (matches `<date>_sm-thumbnail.png` pattern); the
+   *  caller decides what "edit" means (typically closes the modal and
+   *  navigates to the thumbnail editor for the folder). */
+  onEditThumbnail?: () => void
   /** Parallel to `thumbnails`. Each element is true if the file's data is local
    *  on disk; false if it's a cloud-provider placeholder. The active image
    *  hydrates on demand; other slots show the cloud icon until they become active. */
   localFlags?: boolean[]
 }
 
-function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, localFlags }: ThumbnailCarouselProps) {
+const SM_THUMB_REGEX = /[_-]sm-thumbnail\./i
+
+function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, localFlags }: ThumbnailCarouselProps) {
   const [index, setIndex] = useState(0)
   const [translateX, setTranslateX] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -893,6 +989,20 @@ function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsT
           <p className="text-xs text-gray-400 truncate flex-1 text-center px-7">{filename}</p>
         ) : <span />}
         <div className="flex items-center gap-1.5 ml-2">
+          {/* Edit control — only for SM-generated thumbnails (matches
+              `<date>_sm-thumbnail.png`). Opens the thumbnail editor for
+              the stream item via the parent's callback. Hidden otherwise
+              because there's nothing for the SM editor to load for non-SM
+              images. */}
+          {onEditThumbnail && currentPath && SM_THUMB_REGEX.test(currentPath) && (
+            <button
+              onClick={() => onEditThumbnail()}
+              title="Edit thumbnail"
+              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-purple-600/30 border border-white/15 hover:border-purple-500/45 text-gray-400 hover:text-purple-200 text-xs font-medium whitespace-nowrap transition-colors"
+            >
+              <PencilLine size={11} /> Edit thumbnail
+            </button>
+          )}
           {onSetAsThumbnail && (
             isPreferred ? (
               <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-600/25 border border-purple-500/35 text-purple-300 text-xs font-medium whitespace-nowrap">
@@ -977,6 +1087,11 @@ interface MetaModalProps {
   /** Trash a single carousel image and refresh the modal's thumbnails list.
    *  Wired through to the embedded ThumbnailCarousel's delete button. */
   onDeleteImage?: (path: string) => Promise<void> | void
+  /** Open the thumbnail editor for the current stream item. Wired through
+   *  to the embedded ThumbnailCarousel — surfaces an Edit button when the
+   *  user is looking at the SM-generated thumbnail. Parent is expected to
+   *  close the metamodal as part of this transition. */
+  onEditThumbnail?: () => void
   tagColors?: Record<string, string>
   tagTextures?: Record<string, string>
   onNewStreamType?: (tag: string) => void
@@ -985,6 +1100,19 @@ interface MetaModalProps {
   defaultBroadcastTime?: string
   onSave: (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, builtinTemplateId?: string) => Promise<void>
   onClose: () => void
+  /** New-mode only: true when the current `initialMeta` came from the
+   *  parent's in-memory draft rather than a fresh source. Drives the
+   *  "Resumed from previous session" hint + "Start fresh" link. */
+  newDraftPresent?: boolean
+  /** New-mode only: called on any user-initiated close (Cancel / X) with
+   *  the modal's current field values so the parent can stash a draft.
+   *  Pass `null` to explicitly clear the draft (e.g. closing an empty
+   *  form after "Clear all fields"). Save-success path skips this and
+   *  goes straight to onClose. */
+  onDraftCapture?: (meta: Partial<StreamMeta> | null) => void
+  /** New-mode only: clears the parent's draft AND forces the modal to
+   *  remount with empty fields (parent bumps a session counter). */
+  onDraftClear?: () => void
 }
 
 function applyMergeFields(template: string, fields: Record<string, string>): string {
@@ -1126,7 +1254,7 @@ function getPrevEpisodeFolder(gamesList: string[], allFolders: StreamFolder[], s
 
 // panelAnimate built inside StreamsPage so duration can react to slowAnimations setting
 
-function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, tagColors = {}, tagTextures = {}, claudeEnabled = false, defaultBroadcastTime = '19:00', onNewStreamType, onSave, onClose }: MetaModalProps) {
+function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames = [], allGames = [], allStreamTypes = [], allFolders = [], templates = [], defaultTemplateName = '', builtinTemplates = [], defaultBuiltinTemplateId = '', useBuiltinByDefault = true, thumbnails = [], thumbnailLocalFlags, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, tagColors = {}, tagTextures = {}, claudeEnabled = false, defaultBroadcastTime = '19:00', onNewStreamType, onSave, onClose, newDraftPresent = false, onDraftCapture, onDraftClear }: MetaModalProps) {
   const defaultTemplate = templates.find(t => t.name === defaultTemplateName) ?? templates[0] ?? null
 
   // In edit/add mode the folder name is the authoritative date source — the stored meta.date
@@ -1386,8 +1514,36 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     }
   }, [])
   useEffect(() => () => { if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current) }, [])
-  const [ytQualifyingThumbnails, setYtQualifyingThumbnails] = useState<string[]>([])
+  // Thumbnails the picker can show: bestFit are aspect-matched (16:9 / 1:1 /
+  // 9:16, ≥720px on the longer side) and shown by default; rest gates behind
+  // a "Show all" link so logos and other non-thumbnail assets don't clutter
+  // the picker. Cloud-only files always land in bestFit since we can't probe
+  // their dimensions without triggering a download.
+  const [ytQualifyingThumbnails, setYtQualifyingThumbnails] = useState<{ bestFit: string[]; rest: string[] }>({ bestFit: [], rest: [] })
+  const [ytShowAllThumbs, setYtShowAllThumbs] = useState(false)
   const [ytSelectedThumbnail, setYtSelectedThumbnail] = useState<string | null>(null)
+  // When checked (default) the YT thumbnail upload reuses whatever image is
+  // currently shown as the stream item's thumbnail in the streams list — no
+  // separate pick needed. Unchecking reveals the manual picker. Independent
+  // of ytSelectedThumbnail: toggling off → on → off preserves the previous
+  // manual pick, only the upload-effective selection swaps.
+  const [useStreamItemThumb, setUseStreamItemThumb] = useState(true)
+  // Resolve the stream item's "main" thumbnail the same way the row does:
+  // preferredThumbnail basename → matching path → first thumbnail. The local
+  // override (from clicking "Set as item thumbnail" inside the modal) wins
+  // over the persisted prop so toggling reflects the current choice.
+  const resolvedStreamItemThumb = useMemo<string | null>(() => {
+    if (thumbnails.length === 0) return null
+    const preferredName = localPreferredThumbnail ?? preferredThumbnail
+    if (preferredName) {
+      const match = thumbnails.find(p => (p.split(/[\\/]/).pop() ?? '') === preferredName)
+      if (match) return match
+    }
+    return thumbnails[0]
+  }, [thumbnails, localPreferredThumbnail, preferredThumbnail])
+  // The actual path used for the YouTube upload. handleAction and the
+  // thumbnail-hash detection both source from this.
+  const effectiveYtThumb = useStreamItemThumb ? resolvedStreamItemThumb : ytSelectedThumbnail
 
   // ── Twitch state ───────────────────────────────────────────────────────────
   const [twConnected, setTwConnected] = useState(false)
@@ -1432,14 +1588,14 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
   const [currentThumbnailHash, setCurrentThumbnailHash] = useState<string | null>(null)
   const [lastPushedThumbnailHash, setLastPushedThumbnailHash] = useState<string | undefined>(initialMeta?.ytThumbnailPushedHash)
   useEffect(() => {
-    if (!ytSelectedThumbnail) { setCurrentThumbnailHash(null); return }
+    if (!effectiveYtThumb) { setCurrentThumbnailHash(null); return }
     let cancelled = false
-    window.api.thumbnailHashFile(ytSelectedThumbnail)
+    window.api.thumbnailHashFile(effectiveYtThumb)
       .then(h => { if (!cancelled) setCurrentThumbnailHash(h) })
       .catch(() => { if (!cancelled) setCurrentThumbnailHash(null) })
     return () => { cancelled = true }
-  }, [ytSelectedThumbnail, thumbsKey])
-  const thumbnailNeedsPush = !!ytSelectedThumbnail && currentThumbnailHash !== null && currentThumbnailHash !== lastPushedThumbnailHash
+  }, [effectiveYtThumb, thumbsKey])
+  const thumbnailNeedsPush = !!effectiveYtThumb && currentThumbnailHash !== null && currentThumbnailHash !== lastPushedThumbnailHash
 
   const [isDirty, setIsDirty] = useState(false)
   const initialSnapshot = useRef(JSON.stringify({
@@ -1628,12 +1784,24 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     }).catch((e: any) => { console.error('[YT renderer] getStatus failed:', e) })
   }, [])
 
-  // Fetch qualifying thumbnails for YouTube upload
+  // Fetch qualifying thumbnails for YouTube upload — categorized into
+  // bestFit (aspect-correct) and rest (everything else that still passes the
+  // basic ext + size check). Reset state synchronously at the top of every
+  // cycle so a "Show all" click on one stream's modal doesn't carry over
+  // when the user navigates between siblings via the prev/next arrows. If
+  // bestFit ends up empty we auto-expand so the picker is never accidentally
+  // blank when files actually exist.
   useEffect(() => {
-    if (thumbnails.length === 0) return
+    setYtQualifyingThumbnails({ bestFit: [], rest: [] })
+    setYtShowAllThumbs(false)
+    if (thumbnails.length === 0) {
+      setYtSelectedThumbnail(null)
+      return
+    }
     window.api.youtubeGetQualifyingThumbnails(thumbnails).then(qualified => {
       setYtQualifyingThumbnails(qualified)
-      setYtSelectedThumbnail(qualified[0] ?? null)
+      setYtSelectedThumbnail(qualified.bestFit[0] ?? qualified.rest[0] ?? null)
+      if (qualified.bestFit.length === 0) setYtShowAllThumbs(true)
     })
   }, [thumbnails])
 
@@ -2005,9 +2173,9 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
           )
         }
         // Thumbnail upload is non-fatal — metadata above has committed.
-        if (ytSelectedThumbnail) {
+        if (effectiveYtThumb) {
           try {
-            await window.api.youtubeUploadThumbnail(ytSelectedBroadcastId, ytSelectedThumbnail)
+            await window.api.youtubeUploadThumbnail(ytSelectedBroadcastId, effectiveYtThumb)
             // Record the pushed hash so the thumbnail-change detector knows
             // this exact thumbnail is now live — unchecks the push offer.
             if (currentThumbnailHash) setLastPushedThumbnailHash(currentThumbnailHash)
@@ -2102,14 +2270,77 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     ? !date
     : !isDirty && !willPushYouTube && !willPushTwitch
 
+  // User-initiated close in new mode: hand the parent a draft snapshot of
+  // the current form fields before letting the modal unmount, so reopening
+  // the new-stream modal can restore the in-progress work. Edit/add mode
+  // doesn't need this (saves are explicit; dirty changes are lost on
+  // cancel as before). Save-success uses bare onClose() so the freshly-
+  // cleared draft in the parent isn't immediately re-populated.
+  const closeWithDraft = () => {
+    if (mode === 'new' && onDraftCapture) {
+      const ytTagsArr = ytTagsText.split(',').map(t => t.trim()).filter(Boolean)
+      const twitchTagsArr = twitchTagsText.split(',').map(t => t.trim()).filter(Boolean)
+      // Treat the form as "empty" when none of the user-input fields have
+      // meaningful content. Without this guard, closing a freshly-cleared
+      // modal would re-capture the blank state as a draft and the
+      // "draft in progress" caption under the New Stream button would
+      // stay stuck on. Excludes:
+      //   - date / syncTitle / syncGame — always have defaults
+      //   - ytEpisode / ytSeason '1' — auto-detected defaults
+      //   - ytGameTitle — auto-populated from games[0] when games is set
+      // Detection of "user actually entered something" relies on the
+      // text-input fields the user has to actively type into.
+      const hasContent =
+        !!ytTitle || !!ytDescription || !!ytCatchyTitle ||
+        (!!ytEpisode && ytEpisode !== '1') ||
+        (!!ytSeason && ytSeason !== '1') ||
+        ytTagsArr.length > 0 ||
+        !!twitchTitle || !!twitchGameName || twitchTagsArr.length > 0 ||
+        !!comments || games.length > 0 || streamTypes.length > 0
+      if (!hasContent) {
+        onDraftCapture(null)
+      } else {
+        onDraftCapture({
+          date,
+          streamType: streamTypes,
+          games,
+          comments,
+          ytTitle: ytTitle || undefined,
+          ytDescription: ytDescription || undefined,
+          ytGameTitle: ytGameTitle || undefined,
+          ytCatchyTitle: ytCatchyTitle || undefined,
+          ytSeason: ytSeason !== '1' ? ytSeason : undefined,
+          ytEpisode: ytEpisode || undefined,
+          ytTags: ytTagsArr.length > 0 ? ytTagsArr : undefined,
+          twitchTitle: twitchTitle || undefined,
+          twitchGameName: twitchGameName || undefined,
+          twitchTags: twitchTagsArr.length > 0 ? twitchTagsArr : undefined,
+          syncTitle,
+          syncGame,
+          preferredThumbnail: localPreferredThumbnail,
+        })
+      }
+    }
+    onClose()
+  }
+
   return (
     <Modal
       isOpen
       noOverlay
-      onClose={onClose}
+      onClose={closeWithDraft}
       title={title}
       width="2xl"
       dismissible={false}
+      headerExtra={mode === 'new' && onDraftClear ? (
+        <button
+          type="button"
+          onClick={() => onDraftClear()}
+          className="text-xs text-gray-400 hover:text-red-300 hover:bg-red-500/10 px-2.5 py-1 rounded-md border border-white/10 hover:border-red-500/40 transition-colors"
+        >
+          Clear all fields
+        </button>
+      ) : undefined}
       autoFocus={mode === 'new' ? 'initial-only' : 'none'}
       footer={
         <div className="w-full flex flex-col">
@@ -2141,7 +2372,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
           {/* Left: Cancel/Close + (edit/past) Archived checkbox */}
           <div className="flex items-center gap-3 justify-start min-w-0">
-            <Button variant="ghost" onClick={onClose} className={isDirty ? 'text-red-400 hover:text-red-300' : ''}>{isDirty ? 'Cancel' : 'Close'}</Button>
+            <Button variant="ghost" onClick={closeWithDraft} className={(mode !== 'new' && isDirty) ? 'text-red-400 hover:text-red-300' : ''}>{(mode !== 'new' && isDirty) ? 'Cancel' : 'Close'}</Button>
             {mode === 'edit' && isPastStream && (
               <>
                 <Checkbox checked={archived} onChange={setArchived} label="Archived" color="green" />
@@ -2199,6 +2430,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               onSetAsThumbnail(path)
             } : undefined}
             onDeleteImage={onDeleteImage}
+            onEditThumbnail={onEditThumbnail}
           />
         )}
 
@@ -2891,41 +3123,95 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               )
             })()}
 
-            {/* Thumbnail picker */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-gray-400">Thumbnail to upload</label>
-              {ytQualifyingThumbnails.length === 0 ? (
-                <p className="text-xs text-gray-400 italic">
-                  {thumbnails.length === 0
-                    ? 'No images found in this stream folder.'
-                    : 'No images meet YouTube\'s requirements (JPG/PNG/GIF/WebP, max 2 MB).'}
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {ytQualifyingThumbnails.map(p => {
-                    const isSelected = p === ytSelectedThumbnail
-                    const name = p.split(/[\\/]/).pop() ?? ''
-                    return (
-                      <Tooltip key={p} content={name}>
-                        <button
-                          type="button"
-                          onClick={() => setYtSelectedThumbnail(isSelected ? null : p)}
-                          className={`relative w-20 h-14 rounded overflow-hidden border-2 transition-all shrink-0 ${isSelected ? 'border-red-400 ring-1 ring-red-400/50' : 'border-white/10 hover:border-white/30'}`}
-                        >
-                          <img src={`${toFileUrl(p)}${thumbsKey ? `?t=${thumbsKey}` : ''}`} alt={name} className="w-full h-full object-cover" />
-                          {isSelected && (
-                            <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
-                              <Check size={14} className="text-white drop-shadow" />
+            {/* Thumbnail picker — gated behind a checkbox so the common case
+                (just use the stream item's existing thumbnail) is one click,
+                and the full carousel-style picker only appears for users who
+                want to upload a different image to YouTube. */}
+            {(() => {
+              const totalQualifying = ytQualifyingThumbnails.bestFit.length + ytQualifyingThumbnails.rest.length
+              const shown = ytShowAllThumbs
+                ? [...ytQualifyingThumbnails.bestFit, ...ytQualifyingThumbnails.rest]
+                : ytQualifyingThumbnails.bestFit
+              const hiddenCount = ytQualifyingThumbnails.rest.length
+              const resolvedName = resolvedStreamItemThumb?.split(/[\\/]/).pop() ?? ''
+              return (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-400">Thumbnail to upload</label>
+                  {thumbnails.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">No images found in this stream folder.</p>
+                  ) : (
+                    <>
+                      <Checkbox
+                        checked={useStreamItemThumb}
+                        onChange={setUseStreamItemThumb}
+                        size="sm"
+                        label={
+                          <div>
+                            <div className="text-sm font-medium text-gray-200">Use the stream item thumbnail</div>
+                            <div className="text-xs text-gray-400 font-mono truncate">{resolvedName || '(none)'}</div>
+                          </div>
+                        }
+                      />
+                      {!useStreamItemThumb && (
+                        totalQualifying === 0 ? (
+                          <p className="text-xs text-gray-400 italic">
+                            No images meet YouTube's requirements (JPG/PNG/GIF/WebP, max 2 MB).
+                          </p>
+                        ) : (
+                          <>
+                            <div className="flex flex-wrap gap-1.5">
+                              {shown.map(p => {
+                                const isSelected = p === ytSelectedThumbnail
+                                const name = p.split(/[\\/]/).pop() ?? ''
+                                return (
+                                  <Tooltip key={p} content={name}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setYtSelectedThumbnail(isSelected ? null : p)}
+                                      className={`relative w-20 h-14 rounded overflow-hidden border-2 transition-all shrink-0 ${isSelected ? 'border-red-400 ring-1 ring-red-400/50' : 'border-white/10 hover:border-white/30'}`}
+                                    >
+                                      {/* Display the OS shell thumbnail (a few-KB PNG
+                                          Windows already cached) instead of decoding
+                                          the full-res source. With 40+ images, source
+                                          decode could be hundreds of MB of bitmap data
+                                          and stall the renderer; the shell thumb is
+                                          ~256×256 and trivially fast. */}
+                                      <PickerThumbImage path={p} thumbsKey={thumbsKey} alt={name} />
+                                      {isSelected && (
+                                        <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
+                                          <Check size={14} className="text-white drop-shadow" />
+                                        </div>
+                                      )}
+                                    </button>
+                                  </Tooltip>
+                                )
+                              })}
                             </div>
-                          )}
-                        </button>
-                      </Tooltip>
-                    )
-                  })}
+                            {/* Bidirectional toggle — only useful when there's a
+                                rest bucket to expand to (or collapse back from).
+                                Skips rendering entirely when bestFit covers
+                                everything so the link doesn't say "Show all" when
+                                nothing more would appear. */}
+                            {hiddenCount > 0 && ytQualifyingThumbnails.bestFit.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setYtShowAllThumbs(v => !v)}
+                                className="self-start text-[11px] text-gray-400 hover:text-gray-200 underline underline-offset-2 transition-colors"
+                              >
+                                {ytShowAllThumbs
+                                  ? 'Show best fit only'
+                                  : `Show all ${totalQualifying} images`}
+                              </button>
+                            )}
+                          </>
+                        )
+                      )}
+                    </>
+                  )}
+                  <p className="text-[10px] text-gray-400">Recommended: 1280×720 or larger. Uploads alongside the YouTube push from the footer action.</p>
                 </div>
-              )}
-              <p className="text-[10px] text-gray-400">Recommended: 1280×720 or larger. Uploads alongside the YouTube push from the footer action.</p>
-            </div>
+              )
+            })()}
           </div>
         )}
       </div>
@@ -3608,6 +3894,16 @@ export function StreamsPage({
   const [loading, setLoading] = useState(false)
   const [modal, setModal] = useState<ModalState>({ mode: 'none' })
   const [slideDirection, setSlideDirection] = useState<'up' | 'down' | null>(null)
+  // In-memory new-stream draft. Cancelling/closing the new-stream modal
+  // stashes its current form fields here; reopening the new-stream modal
+  // restores them. Survives modal close/reopen during a session (dies on
+  // app reload — persisting to disk would be a separate enhancement).
+  // Cleared on successful Create, or via the modal's "Start fresh" link.
+  const [newStreamDraft, setNewStreamDraft] = useState<Partial<StreamMeta> | null>(null)
+  // Bumped to force a remount of the new-stream modal (motion.div key swap)
+  // when the user picks "Start fresh", so all internal field useStates
+  // re-init from a now-empty draft / source.
+  const [newStreamSession, setNewStreamSession] = useState(0)
   const [showManageTags, setShowManageTags] = useState(false)
   const [showTemplatesModal, setShowTemplatesModal] = useState(false)
   const [tagColors, setTagColors] = useState<Record<string, string>>({})
@@ -3715,9 +4011,21 @@ export function StreamsPage({
   const [deleteTarget, setDeleteTarget] = useState<StreamFolder | null>(null)
   const [deleteTree, setDeleteTree] = useState<TreeNode[]>([])
   const [deleteFileList, setDeleteFileList] = useState<string[]>([])
+  // Opt-in checkbox for also deleting the linked YouTube VOD/video. Defaults
+  // off because YouTube delete is irreversible (no Recycle Bin) — explicit
+  // opt-in only. Reset whenever the delete target changes.
+  const [alsoDeleteYtVod, setAlsoDeleteYtVod] = useState(false)
+  // In-flight + partial-failure state. Set when the YT delete fails after
+  // the local delete already succeeded — the modal stays open with the
+  // error so the user knows the YT video wasn't removed.
+  const [deletingInFlight, setDeletingInFlight] = useState(false)
+  const [deleteYtError, setDeleteYtError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!deleteTarget) { setDeleteTree([]); setDeleteFileList([]); return }
+    // Fresh target → reset the opt-in + any prior error
+    setAlsoDeleteYtVod(false)
+    setDeleteYtError(null)
     if (isDumpMode) {
       window.api.listFilesForDate(deleteTarget.folderPath, deleteTarget.date).then(setDeleteFileList)
     } else {
@@ -4297,6 +4605,9 @@ export function StreamsPage({
       const finalMeta = builtinTemplateId ? { ...meta, smThumbnailTemplate: builtinTemplateId } : meta
       await window.api.createStreamFolder(streamsDir, date, finalMeta, thumbnailTemplatePath, prevEpisodeFolderPath, streamMode as any)
       await loadFolders(streamsDir)
+      // Successful Create — the in-progress draft has been committed as a
+      // real stream item, so nothing left to preserve.
+      setNewStreamDraft(null)
     } else if (modal.mode === 'edit' || modal.mode === 'add') {
       await updateFolderMeta(modal.folder, meta)
     }
@@ -4540,10 +4851,10 @@ export function StreamsPage({
   // next-soonest filter handles that naturally.
   const foldersRef = useRef(folders)
   const twConnectedOuterRef = useRef(twConnectedOuter)
-  const autoUpdateTwitchRef = useRef(!!config.autoUpdateTwitchAfterStream)
+  const autoUpdateTwitchRef = useRef<'always' | 'ask' | 'never'>(config.autoUpdateTwitchAfterStream ?? 'ask')
   useEffect(() => { foldersRef.current = folders }, [folders])
   useEffect(() => { twConnectedOuterRef.current = twConnectedOuter }, [twConnectedOuter])
-  useEffect(() => { autoUpdateTwitchRef.current = !!config.autoUpdateTwitchAfterStream }, [config.autoUpdateTwitchAfterStream])
+  useEffect(() => { autoUpdateTwitchRef.current = config.autoUpdateTwitchAfterStream ?? 'ask' }, [config.autoUpdateTwitchAfterStream])
   const { setSuggestion: setPostStreamTwitchSuggestion } = useRelayPrompt()
   useEffect(() => {
     const off = window.api.onRelayLifecycle(async ev => {
@@ -4574,22 +4885,24 @@ export function StreamsPage({
       if (!title.trim()) return
       const { compat: tags } = toTwitchCompatibleTags(m.twitchTags ?? [])
       const payload = { title, game: game || undefined, tags }
-      if (autoUpdateTwitchRef.current) {
-        // Silent auto-push — setting on means user has opted into automation.
+      const mode = autoUpdateTwitchRef.current
+      if (mode === 'always') {
+        // Silent auto-push — user opted into automation in Settings or via
+        // the modal's "Always" button.
         try {
           await window.api.twitchUpdateChannel(payload.title, payload.game, payload.tags)
         } catch (e) {
           console.warn('[auto-update Twitch] push failed:', e)
         }
-      } else {
-        // Setting off — surface a one-time prompt in the relay widget so
-        // the user can decide whether to push and/or enable auto-update.
+      } else if (mode === 'ask') {
+        // Surface the modal so the user can decide per-stream.
         setPostStreamTwitchSuggestion({
           folderPath: next.folderPath,
           displayTitle: title,
           payload,
         })
       }
+      // mode === 'never' — skip silently.
     })
     return off
   }, [setPostStreamTwitchSuggestion])
@@ -4803,16 +5116,27 @@ export function StreamsPage({
                 <span className="hidden wide:inline">Select</span>
               </Button>
             </Tooltip>
-            <Tooltip content="Create a new stream entry" side="bottom">
-              <Button
-                variant="primary"
-                size="sm"
-                icon={<Plus size={14} />}
-                onClick={() => setModal({ mode: 'new' })}
-              >
-                <span className="hidden wide:inline">New Stream</span>
-              </Button>
-            </Tooltip>
+            <div className="relative">
+              <Tooltip content={newStreamDraft ? "Resume your in-progress new stream draft" : "Create a new stream entry"} side="bottom">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  icon={<Plus size={14} />}
+                  onClick={() => setModal({ mode: 'new' })}
+                >
+                  <span className="hidden wide:inline">New Stream</span>
+                </Button>
+              </Tooltip>
+              {/* Absolute so the caption doesn't change the toolbar row height
+                  when the draft state toggles. Sits just below the button,
+                  centered, in a muted purple to match the "new stream"
+                  primary action's color family. */}
+              {newStreamDraft && (
+                <span className="absolute left-0 right-0 top-full mt-0.5 text-[9px] text-purple-300/70 text-center pointer-events-none whitespace-nowrap leading-none">
+                  draft in progress
+                </span>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -5324,6 +5648,19 @@ return (
             }
             await loadFolders(streamsDir)
           }}
+          onEditThumbnail={() => {
+            const folder = folders.find(f => f.folderPath === lightbox.folderPath && f.date === lightbox.folderDate)
+            if (!folder) return
+            // Close the lightbox first so the thumbnail editor takes focus.
+            setLightbox(null)
+            openThumbnailEditor({
+              folderPath: folder.folderPath,
+              date: folder.date,
+              title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
+              meta: folder.meta ?? undefined,
+              totalEpisodes: seriesEpisodeCount(folders, folder),
+            })
+          }}
           onClose={() => setLightbox(null)}
           onNavigate={(i) => setLightbox(prev => prev ? { ...prev, index: i } : null)}
         />
@@ -5549,31 +5886,66 @@ return (
         )
       })()}
 
-      {deleteTarget && (
+      {deleteTarget && (() => {
+        const linkedVideoId = deleteTarget.meta?.ytVideoId
+        return (
         <Modal
           isOpen
-          onClose={() => setDeleteTarget(null)}
+          onClose={() => { if (!deletingInFlight) setDeleteTarget(null) }}
           title={isDumpMode ? 'Move files to Recycle Bin?' : 'Move folder to Recycle Bin?'}
           width="sm"
           footer={
             <>
-              <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={async () => {
-                  const target = deleteTarget
-                  setDeleteTarget(null)
-                  if (isDumpMode) {
-                    await window.api.deleteStreamFiles(target.folderPath, target.date)
-                  } else {
-                    await window.api.deleteStreamFolder(target.folderPath)
-                  }
-                  await loadFolders(streamsDir)
-                }}
-              >
-                Move to Recycle Bin
+              <Button variant="ghost" size="sm" disabled={deletingInFlight} onClick={() => setDeleteTarget(null)}>
+                {deleteYtError ? 'Close' : 'Cancel'}
               </Button>
+              {!deleteYtError && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  loading={deletingInFlight}
+                  onClick={async () => {
+                    const target = deleteTarget
+                    const wantYtDelete = alsoDeleteYtVod && !!linkedVideoId
+                    setDeletingInFlight(true)
+                    setDeleteYtError(null)
+                    // Local delete first (recoverable from Recycle Bin) so a
+                    // YT-delete failure later still leaves the user's files
+                    // safe. Doing YT first risks losing the VOD if local
+                    // delete then errors.
+                    try {
+                      if (isDumpMode) {
+                        await window.api.deleteStreamFiles(target.folderPath, target.date)
+                      } else {
+                        await window.api.deleteStreamFolder(target.folderPath)
+                      }
+                    } catch (err: any) {
+                      setDeletingInFlight(false)
+                      setDeleteYtError(`Local delete failed: ${err?.message ?? String(err)}`)
+                      return
+                    }
+                    if (wantYtDelete && linkedVideoId) {
+                      try {
+                        await window.api.youtubeDeleteVideo(linkedVideoId)
+                      } catch (err: any) {
+                        // Local already gone — surface the YT error inside the
+                        // modal so the user knows to clean up on YT Studio.
+                        setDeletingInFlight(false)
+                        setDeleteYtError(`Files moved to Recycle Bin, but deleting the YouTube video failed: ${err?.message ?? String(err)}`)
+                        await loadFolders(streamsDir)
+                        return
+                      }
+                    }
+                    setDeletingInFlight(false)
+                    setDeleteTarget(null)
+                    await loadFolders(streamsDir)
+                  }}
+                >
+                  {alsoDeleteYtVod && linkedVideoId
+                    ? 'Move to Recycle Bin & Delete from YouTube'
+                    : 'Move to Recycle Bin'}
+                </Button>
+              )}
             </>
           }
         >
@@ -5594,9 +5966,48 @@ return (
               <TreeView nodes={deleteTree} depth={0} rootName={deleteTarget.folderName} />
             )}
           </div>
-          <p className="text-xs text-gray-400">This action can be undone from the Recycle Bin.</p>
+          <p className="text-xs text-gray-400 mb-3">This action can be undone from the Recycle Bin.</p>
+
+          {/* Linked-YT delete opt-in — only when there's actually a video to
+              delete on YouTube. Defaults off; checking it adds the YT delete
+              to the same action. Warning surfaces when checked to make the
+              irreversibility explicit. */}
+          {linkedVideoId && (
+            <div className="border-t border-white/10 pt-3 flex flex-col gap-2">
+              <Checkbox
+                checked={alsoDeleteYtVod}
+                onChange={setAlsoDeleteYtVod}
+                disabled={deletingInFlight}
+                size="sm"
+                label={
+                  <div>
+                    <div className="text-sm font-medium text-gray-200">Also delete the linked YouTube video</div>
+                    <div className="text-xs text-gray-400 font-mono break-all">{linkedVideoId}</div>
+                  </div>
+                }
+              />
+              {alsoDeleteYtVod && (
+                <div className="flex items-start gap-1.5 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 leading-relaxed">
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                  <span>
+                    YouTube does not have a Recycle Bin — deleting the video here
+                    is <strong>permanent</strong> and cannot be undone, even from YouTube
+                    Studio.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {deleteYtError && (
+            <div className="mt-3 flex items-start gap-1.5 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 leading-relaxed">
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+              <span>{deleteYtError}</span>
+            </div>
+          )}
         </Modal>
-      )}
+        )
+      })()}
 
       {/* Missing folders confirmation modal */}
       <Modal
@@ -5701,7 +6112,12 @@ return (
       <AnimatePresence mode="wait">
         {modal.mode !== 'none' && (
           <motion.div
-            key={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.folderPath : 'new'}
+            key={(modal.mode === 'edit' || modal.mode === 'add')
+              ? modal.folder.folderPath
+              // Include session counter for new mode so "Start fresh" can
+              // force a full remount (resetting all internal field useStates
+              // back to whatever the new initialMeta says — usually empty).
+              : `new-${newStreamSession}`}
             className="fixed inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center p-4"
             initial={noAnimation ? false : { opacity: 0, y: slideDirection === 'up' ? 60 : slideDirection === 'down' ? -60 : 0 }}
             animate={noAnimation ? {} : panelAnimate}
@@ -5712,10 +6128,22 @@ return (
               initialMeta={
                 modal.mode === 'edit' || modal.mode === 'add'
                   ? modal.folder.meta
-                  : modal.mode === 'new' && modal.sourceFolder
-                    ? buildNewEpisodeMeta(modal.sourceFolder)
+                  : modal.mode === 'new'
+                    // Draft wins over source-folder defaults — the user
+                    // started editing those defaults, the draft holds their
+                    // changes. If no draft, derive from sourceFolder (e.g.
+                    // "+ New Episode") or null for a totally blank new stream.
+                    ? (newStreamDraft as StreamMeta | null)
+                      ?? (modal.sourceFolder ? buildNewEpisodeMeta(modal.sourceFolder) : null)
                     : null
               }
+              newDraftPresent={modal.mode === 'new' && !!newStreamDraft}
+              onDraftCapture={modal.mode === 'new'
+                ? (meta) => setNewStreamDraft(meta)
+                : undefined}
+              onDraftClear={modal.mode === 'new'
+                ? () => { setNewStreamDraft(null); setNewStreamSession(s => s + 1) }
+                : undefined}
               folderDate={(modal.mode === 'edit' || modal.mode === 'add') ? modal.folder.date : undefined}
               sourceFolder={modal.mode === 'new' ? modal.sourceFolder : undefined}
               detectedGames={
@@ -5756,6 +6184,20 @@ return (
                   return { ...prev, folder: { ...prev.folder, thumbnails, thumbnailLocalFlags } }
                 })
                 await loadFolders(streamsDir)
+              } : undefined}
+              onEditThumbnail={(modal.mode === 'edit' || modal.mode === 'add') ? () => {
+                if (modal.mode !== 'edit' && modal.mode !== 'add') return
+                const folder = modal.folder
+                // Close the metamodal first so the thumbnail page takes focus.
+                setModal({ mode: 'none' })
+                setSlideDirection(null)
+                openThumbnailEditor({
+                  folderPath: folder.folderPath,
+                  date: folder.date,
+                  title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
+                  meta: folder.meta ?? undefined,
+                  totalEpisodes: seriesEpisodeCount(folders, folder),
+                })
               } : undefined}
               allGames={allGames}
               allStreamTypes={allStreamTypes}

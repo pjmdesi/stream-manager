@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow, shell } from 'electron'
+import { ipcMain, dialog, BrowserWindow, shell, nativeImage } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { spawnSync, spawn, ChildProcess } from 'child_process'
@@ -226,6 +226,16 @@ export function registerFilesIPC(): void {
     return destPath
   })
 
+  // Batch fs.statSync across a list of paths, returning each file's size
+  // in bytes (or null on stat failure). Batched because the asset panel
+  // renders dozens of images at a time — N IPC round-trips would be wasteful.
+  ipcMain.handle('files:getFileSizes', async (_event, paths: string[]): Promise<(number | null)[]> => {
+    return paths.map(p => {
+      try { return fs.statSync(p).size }
+      catch { return null }
+    })
+  })
+
   // Single-file recycle-bin move. Used by per-image delete buttons (e.g.
   // carousel thumbnails) where streams:deleteStreamFiles would be too
   // broad. Normalize because shell.trashItem on Windows rejects mixed
@@ -233,6 +243,23 @@ export function registerFilesIPC(): void {
   // surface to the caller so the UI can show a failure.
   ipcMain.handle('files:trashFile', async (_event, filePath: string) => {
     await shell.trashItem(path.normalize(filePath))
+  })
+
+  // Pull the OS-cached shell thumbnail for a file (the same image Explorer
+  // shows). Returns a data URL the renderer can use directly as <img src>.
+  // Avoids the renderer decoding full-resolution images (1920×1080+ PNGs)
+  // just to display them at picker thumbnail sizes — typical bitmap is a
+  // few-KB PNG instead of multi-MB. Falls back to null on platforms /
+  // formats where the OS has no thumbnail, so callers can revert to a
+  // direct file:// URL.
+  ipcMain.handle('files:getNativeThumbnail', async (_event, filePath: string, size: number = 256): Promise<string | null> => {
+    try {
+      const img = await nativeImage.createThumbnailFromPath(path.normalize(filePath), { width: size, height: size })
+      if (img.isEmpty()) return null
+      return img.toDataURL()
+    } catch {
+      return null
+    }
   })
 
   ipcMain.handle('files:checkLocalFiles', async (_event, filePaths: string[]): Promise<boolean[]> => {

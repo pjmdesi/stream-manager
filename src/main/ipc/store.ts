@@ -70,12 +70,11 @@ export interface AppConfig {
   streamRelayStreamId: string
   streamRelayActiveBroadcastId: string
   streamRelayActivePickedAt: number
-  /** When true, after a SM-orchestrated stream completes the app pushes
-   *  the next-soonest upcoming stream item's Twitch info automatically.
-   *  Default false — most users want explicit control over what their
-   *  Twitch channel shows; the post-stream prompt in the relay widget
-   *  surfaces this setting for users who'd benefit from it. */
-  autoUpdateTwitchAfterStream: boolean
+  /** Post-stream Twitch push behavior — see renderer types/index.ts for
+   *  full doc. Default 'ask' so users discover the feature via the modal
+   *  the first time a SM-orchestrated stream completes. Legacy boolean
+   *  configs are migrated to this shape inside store:getConfig. */
+  autoUpdateTwitchAfterStream: 'always' | 'ask' | 'never'
 }
 
 function getDefaultConfig(): AppConfig {
@@ -121,7 +120,7 @@ function getDefaultConfig(): AppConfig {
     streamRelayStreamId: '',
     streamRelayActiveBroadcastId: '',
     streamRelayActivePickedAt: 0,
-    autoUpdateTwitchAfterStream: false,
+    autoUpdateTwitchAfterStream: 'ask',
   }
 }
 
@@ -169,7 +168,16 @@ export function getStore(): Store<StoreShape> {
 
 export function registerStoreIPC(): void {
   ipcMain.handle('store:getConfig', async () => {
-    return getStore().get('config', getDefaultConfig())
+    const stored = getStore().get('config', getDefaultConfig())
+    // Migrate the legacy boolean shape of autoUpdateTwitchAfterStream to the
+    // new tri-state. Users with `true` previously meant "always"; everyone
+    // else (default or `false`) gets the new 'ask' default so they discover
+    // the modal next time a stream ends.
+    const raw = stored.autoUpdateTwitchAfterStream as unknown
+    if (raw === true) stored.autoUpdateTwitchAfterStream = 'always'
+    else if (raw === false) stored.autoUpdateTwitchAfterStream = 'ask'
+    else if (raw !== 'always' && raw !== 'ask' && raw !== 'never') stored.autoUpdateTwitchAfterStream = 'ask'
+    return stored
   })
 
   ipcMain.handle('store:setConfig', async (_event, partial: Partial<AppConfig>) => {
