@@ -34,6 +34,10 @@ interface BroadcastPickerProps {
   /** Click handler for opening — used by the VOD picker to lazy-load the
    *  full list of completed broadcasts on first interaction. */
   onOpen?: () => void
+  /** Open the dropdown above the trigger instead of below. For the new
+   *  streams page's sidebar where the picker sits low in the viewport
+   *  and the downward dropdown would clip against the window edge. */
+  dropUp?: boolean
 }
 
 export function BroadcastPicker({
@@ -46,6 +50,7 @@ export function BroadcastPicker({
   emptyLabel,
   showDateOnly = false,
   onOpen,
+  dropUp = false,
 }: BroadcastPickerProps) {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
@@ -112,11 +117,16 @@ export function BroadcastPicker({
               <div
                 style={{
                   position: 'fixed',
-                  top: rect.bottom + 4,
                   left: rect.left,
                   width: rect.width,
                   zIndex: 9999,
-                  maxHeight: Math.max(160, window.innerHeight - rect.bottom - 16),
+                  // `dropUp` flips the anchor edge: the dropdown grows
+                  // upward from the trigger, max height capped by space
+                  // above the trigger so it never clips past the
+                  // viewport top.
+                  ...(dropUp
+                    ? { bottom: window.innerHeight - rect.top + 4, maxHeight: Math.max(160, rect.top - 16) }
+                    : { top: rect.bottom + 4, maxHeight: Math.max(160, window.innerHeight - rect.bottom - 16) }),
                 }}
                 className="bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-y-auto"
               >

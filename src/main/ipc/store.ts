@@ -75,6 +75,10 @@ export interface AppConfig {
    *  the first time a SM-orchestrated stream completes. Legacy boolean
    *  configs are migrated to this shape inside store:getConfig. */
   autoUpdateTwitchAfterStream: 'always' | 'ask' | 'never'
+  /** Persisted collapse-state of the new streams page's right sidebar.
+   *  Only effective when no item is selected; selecting forces the
+   *  sidebar open regardless. Default false (open). */
+  streamsNewSidebarCollapsed: boolean
 }
 
 function getDefaultConfig(): AppConfig {
@@ -121,6 +125,7 @@ function getDefaultConfig(): AppConfig {
     streamRelayActiveBroadcastId: '',
     streamRelayActivePickedAt: 0,
     autoUpdateTwitchAfterStream: 'ask',
+    streamsNewSidebarCollapsed: false,
   }
 }
 

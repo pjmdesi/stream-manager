@@ -20,6 +20,11 @@
 8. Add a "Widgets" section to the help modal that includes documentation for the widgets in the app.
 9. The widgets all have slightly different functionality in terms of visibility and what clicking on them does. I think we need to think about how to make them more consistent and intuitive for users.
 10. Add ability for the user to create alternative thumbnails for stream items. It should be a dropdown next to the "Delete thumbnail" button in the thumbnail editor toolbar. It should say "New Thumbnail" or similar. When clicked, it should open the template selection modal that shows the available thumbnail templates, the same one that's used when clicking the thumbnail action button on the streams page stream item row when that stream item has no thumbnail created by SM yet. The modal in this case should also offer the ability to create a new thumbnail based on the current one, essentially duplicating it.
+11. Add more drop shadow options in the thumbnail editor. The current one is a bit too subtle by default. A spread option would be ideal, but if that's not possible, maybe just add the ability to have multiple drop shadows on the same thumbnail, so the user could layer them to create a stronger shadow effect.
+12. Add a "flip" option in the thumbnail editor that allows the user to flip layers horizontally or vertically. These 2 buttons would live next to the alignment buttons in the toolbar.
+13. When double clicking the resize element for the youtube description field in the stream item edit page, it should reset the size to the default (showing all the text without scrolling).
+14. Update the textarea for the Claude AI preferences / system prompt textarea to match the design & functionality of the YouTube description textarea in the details sidebar of the new streams page. The auto resize to fix text and the drag-to-resize functionality. This textarea field is also having performance issues as text is typed, possibly because of the auto-save functionality perhaps we should use the save on blur approach for this field instead of saving on every change, since it's not as critical to save immediately.
+15. Add the jump to episode button like on the player page to the stream details sidebar (next to the skip buttons). This will only show the other episodes in the same season as the current stream item.
 
 ## Ongoing Tasks
 
@@ -37,7 +42,7 @@
 
 ## Bugs
 
-None for now
+Getting an error in prod for going live. This may have been an issue with timing, but I'm not sure. This is Couldn't go live — YouTube was receiving the stream but rejected the transition. The stream is still flowing; you can set it live in YT Studio.
 
 ## Other ideas (small)
 

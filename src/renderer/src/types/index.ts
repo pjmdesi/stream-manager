@@ -206,6 +206,9 @@ export interface AppConfig {
    *  Legacy boolean values still persisted in old configs are migrated on
    *  read in the store layer (true → 'always', false → 'ask'). */
   autoUpdateTwitchAfterStream: 'always' | 'ask' | 'never'
+  /** Persisted collapse-state of the new streams page's right sidebar.
+   *  Only effective when no item is selected. */
+  streamsNewSidebarCollapsed: boolean
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'
@@ -275,6 +278,15 @@ export interface StreamMeta {
   ytSeason?: string
   ytEpisode?: string
   ytTags?: string[]
+  /** Id of the YouTube-title template currently bound to this stream.
+   *  When set, the streams sidebar re-renders the template against the
+   *  live merge fields (game / tagline / season / episode / …) and
+   *  pushes the result into `ytTitle` on every change — so editing any
+   *  merge field automatically updates the title. Cleared when the user
+   *  picks "Clear" in the dropdown OR hand-edits `ytTitle` away from
+   *  the templated value. Persists across stream switches and app
+   *  restarts; ephemeral selection-state lives in the renderer only. */
+  ytTitleTemplateId?: string
   // Twitch
   twitchTitle?: string
   twitchGameName?: string
