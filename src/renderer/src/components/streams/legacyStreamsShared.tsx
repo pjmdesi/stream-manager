@@ -31,6 +31,7 @@ import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTa
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { GhostTextArea } from '../ui/GhostTextArea'
 import type { GhostTextAreaHandle } from '../ui/GhostTextArea'
 import { Button } from '../ui/Button'
@@ -72,6 +73,22 @@ function toFileUrl(absPath: string): string {
 //   - When `isLocal` is true → renders <img> normally. If the load fails (file
 //     was supposedly local but isn't), falls back to the cloud-download flow.
 
+// Session-level set of paths the cloud provider has finished downloading
+// during this app run. Populated by a module-scoped subscription to the
+// main-process IPC event. Reads from here let a freshly-mounted
+// ThumbImage know that a sibling instance (or a previous mount) already
+// got the file local, even though the `isLocal` prop coming from
+// folder.thumbnailLocalFlags is still stale (the folder data hasn't been
+// re-scanned yet). Treating "downloaded this session" as equivalent to
+// `isLocal` here avoids re-triggering the cloud download when, e.g., the
+// lightbox opens on the same path the inline carousel just hydrated.
+const DOWNLOADED_PATHS = new Set<string>()
+if (typeof window !== 'undefined' && window.api?.onCloudDownloadDone) {
+  window.api.onCloudDownloadDone((filePath: string) => {
+    DOWNLOADED_PATHS.add(filePath)
+  })
+}
+
 function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, className, style, placeholderClassName, placeholderStyle, draggable, iconSize = 14, onLoad }: {
   path: string
   thumbsKey: number
@@ -97,27 +114,34 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
   iconSize?: number
   onLoad?: () => void
 }) {
+  // Effective "is local" combines the prop (from folder.thumbnailLocalFlags)
+  // with the session-level downloaded-paths set. A path that's been
+  // downloaded earlier this session is treated as local even if the
+  // folder data hasn't been re-scanned to flip the flag yet — that's
+  // what stops the lightbox from re-downloading a file the inline
+  // carousel just hydrated.
+  const effectiveIsLocal = isLocal || DOWNLOADED_PATHS.has(path)
   const [status, setStatus] = useState<'loading' | 'loaded' | 'syncing' | 'cloud' | 'error'>(
-    isLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud')
+    effectiveIsLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud')
   )
   const [reloadKey, setReloadKey] = useState(0)
 
   // Reset whenever the file identity (path / cache-key / local-ness) changes —
   // a different file means the loaded image is stale.
   useEffect(() => {
-    setStatus(isLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud'))
+    setStatus(effectiveIsLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud'))
     // hydrate intentionally NOT in deps: it flips for every carousel slot when
     // the active item changes, and resetting a local file to 'loading' would
     // re-show the placeholder over a cached <img> whose onLoad never re-fires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, thumbsKey, isLocal])
+  }, [path, thumbsKey, effectiveIsLocal])
 
   // Hydrate transitions (cloud → syncing or back) only matter for non-local
   // files that haven't loaded yet. Never disturb 'loaded'/'loading' here.
   useEffect(() => {
-    if (isLocal) return
+    if (effectiveIsLocal) return
     setStatus(prev => prev === 'loaded' || prev === 'loading' ? prev : (hydrate ? 'syncing' : 'cloud'))
-  }, [hydrate, isLocal])
+  }, [hydrate, effectiveIsLocal])
 
   // Listen for cloud-download-done events whenever we're showing a placeholder.
   // The active hydrate instance kicks off the download; other instances of the
@@ -144,6 +168,32 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
     }
   }, [status, path])
 
+  const src = `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  // Catch the "cached on second visit" case: when the user navigates
+  // away from this stream and back, the <img> remounts with the same
+  // src. The browser serves it from cache and the load event can fire
+  // BEFORE React attaches its `onLoad` handler — leaving status stuck
+  // at 'loading' and the dark placeholder permanently overlaying the
+  // image. Reading `img.complete && naturalHeight > 0` after mount
+  // detects images that already finished loading and flips status to
+  // 'loaded' even when no load event ever reached our handler.
+  //
+  // MUST live above the cloud/syncing/error early-return below — those
+  // states don't render the <img>, but React tracks hook order across
+  // ALL renders of this component, so hooks gated behind a conditional
+  // return would change the call sequence when status transitions
+  // (e.g., cloud → loading during hydration) and trip Rules of Hooks.
+  useLayoutEffect(() => {
+    if (status !== 'loading') return
+    const el = imgRef.current
+    if (el && el.complete && el.naturalHeight > 0) {
+      setStatus('loaded')
+      onLoad?.()
+    }
+  }, [src, status, onLoad])
+
   // Cloud / syncing / error → render a sized placeholder. NEVER a file://
   // request here — that's what avoids hanging Chromium on a stuck cloud
   // provider. The caller controls the placeholder's shape via
@@ -165,11 +215,10 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
     )
   }
 
-  const src = `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
-
   return (
     <>
       <img
+        ref={imgRef}
         src={src}
         className={className}
         style={style}
@@ -199,7 +248,7 @@ const NATIVE_THUMB_INFLIGHT = new Map<string, Promise<string | null>>()
  *  is the difference between a snappy grid and a stalled renderer when
  *  there are 50+ thumbnails. Falls back to the raw file:// URL if the OS
  *  has no cached thumbnail (rare on Windows; reasonable cross-platform). */
-function PickerThumbImage({ path, thumbsKey, alt }: { path: string; thumbsKey?: number; alt: string }) {
+export function PickerThumbImage({ path, thumbsKey, alt }: { path: string; thumbsKey?: number; alt: string }) {
   const cacheKey = `${path}@${thumbsKey ?? 0}`
   // Lazy useState initializer — runs once per mount, pulls any cached value
   // synchronously so the <img> renders with a real src on the first paint.
@@ -676,7 +725,7 @@ interface LightboxProps {
   localFlags?: boolean[]
 }
 
-function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, onClose, onNavigate, localFlags }: LightboxProps) {
+export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, onClose, onNavigate, localFlags }: LightboxProps) {
   const total = thumbnails.length
   const currentPath = thumbnails[index]
   const currentIsLocal = localFlags?.[index] ?? true
@@ -903,16 +952,27 @@ interface ThumbnailCarouselProps {
    *  on disk; false if it's a cloud-provider placeholder. The active image
    *  hydrates on demand; other slots show the cloud icon until they become active. */
   localFlags?: boolean[]
+  /** Click on the currently-active image opens the full-screen Lightbox
+   *  at the given index. Inactive images still navigate to themselves
+   *  (matches the carousel's existing inline browsing UX). Optional —
+   *  carousels rendered without a parent-managed lightbox just no-op. */
+  onOpenLightbox?: (index: number) => void
 }
 
 const SM_THUMB_REGEX = /[_-]sm-thumbnail\./i
 
-export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, localFlags }: ThumbnailCarouselProps) {
+export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, localFlags, onOpenLightbox }: ThumbnailCarouselProps) {
   const [index, setIndex] = useState(0)
   const [translateX, setTranslateX] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
   const imgRefs = useRef<(HTMLElement | null)[]>([])
   const single = thumbnails.length === 1
+  // Animation duration honors the user's "Disable animations" /
+  // "Slow animations (5x)" settings via the shared useAnimationConfig
+  // hook — keeps thumbnail navigation in lockstep with the rest of the
+  // app's transitions.
+  const animDurationMs = useAnimationConfig().duration(200)
 
   // Clamp the active index when the list shrinks (e.g. after a delete).
   // Without this, deleting the last image leaves index pointing past the end
@@ -933,6 +993,47 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
 
   useLayoutEffect(() => { recenter() }, [recenter])
 
+  // Re-center on container resize. Without this, dragging the window
+  // narrower/wider leaves the active thumbnail offset until the user
+  // clicks something that triggers another layout pass. Width changes
+  // only — height never moves the centerline so we don't need to react
+  // to them.
+  //
+  // Resize-driven recenters bypass React state and the carousel's
+  // transform transition: a `setTranslateX` here would queue a 200ms
+  // animation for every resize tick, and the parent sidebar transition
+  // fires the observer ~60 times — the carousel would chase a moving
+  // target and never settle. Writing transform directly with
+  // `transition: none` keeps it visually pinned to the active item
+  // throughout the parent's animation. React state is also synced so
+  // the next index-change recenter starts from the correct position.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    let lastWidth = container.clientWidth
+    const obs = new ResizeObserver(() => {
+      if (container.clientWidth === lastWidth) return
+      lastWidth = container.clientWidth
+      const el = imgRefs.current[index]
+      const inner = innerRef.current
+      if (!el || !inner) return
+      const itemCenter = el.offsetLeft + el.offsetWidth / 2
+      const newX = container.clientWidth / 2 - itemCenter
+      const prevDuration = inner.style.transitionDuration
+      inner.style.transitionDuration = '0s'
+      inner.style.transform = `translateX(${newX}px)`
+      // Force a layout flush so the zero-duration write commits before
+      // the next style mutation re-enables the animation. Without the
+      // reflow read, the browser would collapse both writes into one
+      // paint and the transform transition would still play.
+      void inner.offsetHeight
+      inner.style.transitionDuration = prevDuration
+      setTranslateX(newX)
+    })
+    obs.observe(container)
+    return () => obs.disconnect()
+  }, [index])
+
   const currentPath = thumbnails[index]
   const filename = currentPath?.split(/[\\/]/).pop() ?? ''
   const isPreferred = preferredThumbnail
@@ -946,30 +1047,45 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="relative overflow-hidden" style={{ height: 200 }} ref={containerRef}>
+      <div className="relative overflow-hidden" style={{ height: 100 }} ref={containerRef}>
         <div
-          className="flex items-center gap-2 h-full transition-transform duration-200"
-          style={{ transform: `translateX(${translateX}px)` }}
+          ref={innerRef}
+          className="flex items-center gap-2 h-full transition-transform"
+          style={{ transform: `translateX(${translateX}px)`, transitionDuration: `${animDurationMs}ms` }}
         >
           {thumbnails.map((t, i) => {
             const slotIsLocal = localFlags?.[i] ?? true
             // Cloud placeholders need an explicit shape since there's no <img>
             // to size the slot. Default to 16:9 with a faint background.
             const slotShapeClasses = slotIsLocal ? 'h-full' : 'h-full aspect-video bg-navy-800/40 rounded'
+            // Inactive-slot opacity goes on the SLOT WRAPPER, not the
+            // individual ThumbImage children, so it cascades through
+            // EVERYTHING inside — including the loading placeholder
+            // that ThumbImage stacks over the <img> until onLoad
+            // fires. Otherwise the placeholder's full-opacity
+            // bg-navy-900 stays solid dark on inactive slots,
+            // producing what looks like a dark overlay on the
+            // currently-loading thumbnail.
+            const slotOpacityClasses = i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'
             return (
               <div
                 key={t}
                 ref={el => { imgRefs.current[i] = el }}
-                className={`relative shrink-0 ${slotShapeClasses}`}
-                onClick={() => setIndex(i)}
+                className={`group relative shrink-0 cursor-pointer transition-opacity duration-150 ${slotOpacityClasses} ${slotShapeClasses}`}
+                onClick={() => {
+                  // Active image → open lightbox; inactive → navigate to it.
+                  // Falls back to navigate when no lightbox handler is wired.
+                  if (i === index && onOpenLightbox) onOpenLightbox(i)
+                  else setIndex(i)
+                }}
               >
                 <ThumbImage
                   path={t}
                   thumbsKey={thumbsKey ?? 0}
                   isLocal={slotIsLocal}
                   hydrate={i === index}
-                  className={`h-full w-auto cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
-                  placeholderClassName={`w-full h-full rounded cursor-pointer transition-opacity duration-150 ${i === index ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
+                  className="h-full w-auto"
+                  placeholderClassName="w-full h-full rounded"
                   iconSize={20}
                   onLoad={recenter}
                 />
@@ -994,11 +1110,11 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
           </>
         )}
       </div>
-      <div className="flex items-center justify-between px-1 min-h-[20px]">
-        {!single ? (
-          <p className="text-xs text-gray-400 truncate flex-1 text-center px-7">{filename}</p>
-        ) : <span />}
-        <div className="flex items-center gap-1.5 ml-2">
+      <div className="flex items-center justify-center gap-2 px-1 min-h-[20px] flex-wrap">
+        {!single && (
+          <p className="text-xs text-gray-400 truncate max-w-[14rem]" title={filename}>{filename}</p>
+        )}
+        <div className="flex items-center gap-1.5">
           {/* Edit control — only for SM-generated thumbnails (matches
               `<date>_sm-thumbnail.png`). Opens the thumbnail editor for
               the stream item via the parent's callback. Hidden otherwise

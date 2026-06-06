@@ -121,9 +121,26 @@ input.volume-slider-mt::-webkit-slider-runnable-track {
 }
 .survivor-pulse {
   --pulse-color: rgba(250, 204, 21, 0.65);
-  animation: outline-pulse 1.8s ease-in-out infinite;
+  animation: outline-pulse 1.8s linear infinite;
 }
 .save-attention {
   --pulse-color: rgba(255, 255, 255, 0.45);
-  animation: outline-pulse 1.8s ease-in-out infinite;
+  animation: outline-pulse 1.8s linear infinite;
+}
+
+/* Fade-in utility for elements whose CSS opacity transition should fire
+   on the very first paint after mount. CSS transitions only animate
+   property CHANGES, so without a "from" value the element pops in at
+   its target opacity. `@starting-style` gives the element an explicit
+   starting style on first paint — Chromium then sees the change to the
+   regular `opacity: 1` and transitions between them.
+
+   Used by the streams page detail sidebar so we can fade in the
+   SidebarDetail content as the sidebar slides over the list, without
+   needing a React state flip (which forces a re-render of the heavy
+   SidebarDetail subtree mid-slide and causes a noticeable hitch). */
+@starting-style {
+  .opacity-mount-from-0 {
+    opacity: 0;
+  }
 }

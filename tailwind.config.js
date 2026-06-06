@@ -54,7 +54,18 @@ module.exports = {
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-      }
+      },
+      // App-wide default timing function for transitions. App preference
+      // is linear — eased transitions caused visible drift when multiple
+      // elements of different sizes animated together. This overrides
+      // Tailwind's built-in cubic-bezier(0.4, 0, 0.2, 1) default that's
+      // baked into the `transition` / `transition-all` shorthands. Note:
+      // `transition-[<property>]` classes still need `ease-linear`
+      // explicitly because they don't pull in the default timing-function
+      // (only `transition-property`).
+      transitionTimingFunction: {
+        DEFAULT: 'linear',
+      },
     }
   },
   plugins: [

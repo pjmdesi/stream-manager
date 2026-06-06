@@ -11,6 +11,7 @@ import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
 import { useWaveform } from '../../hooks/useWaveform'
 import { FileDropZone } from '../ui/FileDropZone'
 import { Button } from '../ui/Button'
+import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { Checkbox } from '../ui/Checkbox'
@@ -3381,7 +3382,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       className="flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded text-[11px] font-medium text-gray-300 border border-white/15 bg-white/5 hover:bg-white/10 transition-colors"
                     >
                       <X size={12} />
-                      Stop<span className="hidden 2xl:inline"> Clipping</span>
+                      Stop<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Clipping</CollapsibleLabel>
                     </button>
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
 
@@ -3403,7 +3404,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                 disabled={!canSplit}
                                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-purple-400 border border-purple-500/30 hover:bg-purple-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                               >
-                                <Scissors size={11} /> Split<span className="hidden 2xl:inline"> Segment</span>
+                                <Scissors size={11} /> Split<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Segment</CollapsibleLabel>
                               </button>
                             </Tooltip>
                             {!canSplit && (
@@ -3423,7 +3424,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             disabled={noRoom}
                             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400 border border-blue-500/30 hover:bg-blue-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            <PlusSquare size={11} /> Add<span className="hidden 2xl:inline"> Segment</span>
+                            <PlusSquare size={11} /> Add<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Segment</CollapsibleLabel>
                           </button>
                           {(noRoom || addSegmentError) && (
                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -3468,7 +3469,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       }}
                         className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors"
                       >
-                        <AudioWaveform size={11} /> <span className="hidden 2xl:inline">Add </span>Bleep
+                        <AudioWaveform size={11} /> <CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">Add{' '}</CollapsibleLabel>Bleep
                       </button>
                     </Tooltip>
 
@@ -3675,7 +3676,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         disabled={clipState.clipRegions.length === 0}
                         className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-purple-300 border-purple-600/30 bg-purple-600/20 hover:bg-purple-600/35 disabled:hover:bg-transparent"
                       >
-                        <Upload size={11} /> Export<span className="hidden 2xl:inline"> Clip</span>
+                        <Upload size={11} /> Export<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Clip</CollapsibleLabel>
                       </button>
                     </Tooltip>
                   </div>
@@ -3731,7 +3732,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           >
                             <img
                               src={thumb.dataUrl}
-                              className={`absolute inset-0 w-full h-full object-cover transition-transform duration-150 ease-out origin-bottom ${isHovered ? 'scale-[2.25]' : ''}`}
+                              className={`absolute inset-0 w-full h-full object-cover transition-transform duration-150 ease-linear origin-bottom ${isHovered ? 'scale-[2.25]' : ''}`}
                               draggable={false}
                             />
                           </div>
@@ -4028,7 +4029,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                               rather than snapping. h-8 strip → 2rem expanded. */}
                           {track.status === 'extracted' && (
                             <div
-                              className="overflow-hidden transition-[height] duration-200 ease-in-out"
+                              className="overflow-hidden transition-[height] duration-200 ease-linear"
                               style={{ height: collapsed ? 0 : '2rem' }}
                             >
                               <TrackWaveformStrip

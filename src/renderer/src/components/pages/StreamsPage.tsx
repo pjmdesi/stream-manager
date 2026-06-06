@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom'
+import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
   Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ChevronsDown, ChevronsUp, X,
   Film, Zap, Combine, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
@@ -8,6 +9,7 @@ import {
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { Tooltip } from '../ui/Tooltip'
 import { Button } from '../ui/Button'
+import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { Checkbox } from '../ui/Checkbox'
 import { TagComboBox } from '../ui/TagComboBox'
 import { Modal } from '../ui/Modal'
@@ -16,14 +18,14 @@ import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
-import { PresetPickerModal, ThumbnailCarousel, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton } from '../streams/legacyStreamsShared'
+import { PresetPickerModal, ThumbnailCarousel, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage } from '../streams/legacyStreamsShared'
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
 import { BroadcastPicker, BroadcastLinkRef } from '../ui/BroadcastPicker'
-import { Globe, Lock, EyeOff, Sparkles } from 'lucide-react'
+import { Globe, Lock, EyeOff } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
@@ -170,7 +172,17 @@ function isPendingStream(folder: StreamFolder, today: string): boolean {
 // new sidebar matches the row's hover-revealed action panel design verbatim.
 // Keeping these as local constants avoids cross-file coupling while we
 // iterate on the new page; if the colors drift we'll consolidate later.
-const PANEL_ACTION_BUTTON_BASE = 'p-2 rounded-lg text-gray-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'
+// `shrink-0` keeps the button from shrinking as a flex item of its
+// section, and `min-w-max` forces its intrinsic width to its full
+// max-content. Together these stop the inner CollapsibleLabel's
+// `min-w-0` (needed for the 0fr↔1fr collapse animation) from
+// propagating up through the inline-grid and letting Chromium
+// resolve the button's content width to "just the icon" — without
+// `min-w-max` the button was sizing to ~icon+gap and the label was
+// rendering outside the button's box (label overflow, not actual
+// overlap; visually identical to overlap when the bg-on-hover
+// extended past the box).
+const PANEL_ACTION_BUTTON_BASE = 'inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-200'
 const PANEL_ACTION_BUTTON_GREEN = `${PANEL_ACTION_BUTTON_BASE} hover:text-green-400 hover:bg-green-500/10`
 const PANEL_ACTION_BUTTON_BLUE = `${PANEL_ACTION_BUTTON_BASE} hover:text-blue-400 hover:bg-blue-500/10`
 const PANEL_ACTION_BUTTON_RED = `${PANEL_ACTION_BUTTON_BASE} hover:text-red-400 hover:bg-red-500/10`
@@ -298,6 +310,24 @@ export function StreamsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.listThumbWidth])
   const listScrollRef = useRef<HTMLDivElement>(null)
+  // Auto-scroll the streams list so the currently-selected row stays in
+  // view as the user navigates (sidebar prev/next episode buttons,
+  // duplicate-to-new-episode, etc). `block: 'nearest'` is a no-op when
+  // the row is already visible — it only nudges enough to bring an
+  // off-screen row into the scroll container. The data-folder-path
+  // marker on each <tr> is the lookup key.
+  useEffect(() => {
+    if (!selectedFolderPath) return
+    const scrollEl = listScrollRef.current
+    if (!scrollEl) return
+    // Defer one frame so the row exists in the DOM after the selection
+    // state change triggers its render.
+    const id = requestAnimationFrame(() => {
+      const row = scrollEl.querySelector<HTMLElement>(`tr[data-folder-path="${CSS.escape(selectedFolderPath)}"]`)
+      row?.scrollIntoView({ block: 'nearest', behavior: anim.scrollBehavior })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [selectedFolderPath])
   const dragThumbElRef = useRef<HTMLElement | null>(null)
   const dragStartThumbTopRef = useRef<number>(0)
   useLayoutEffect(() => {
@@ -880,7 +910,7 @@ export function StreamsPage({
   // succeeded. The old MetaModal has a much richer push pipeline (dirty
   // detection, broadcast picker integration, push-snapshot tracking) — those
   // will land alongside the inline broadcast picker in a later phase.
-  const handlePushToYoutube = useCallback(async (folder: StreamFolder) => {
+  const handlePushToYoutube = useCallback(async (folder: StreamFolder, customThumbPath?: string | null) => {
     const meta = folder.meta
     if (!meta?.ytVideoId) {
       showBanner({ type: 'error', message: 'No linked YouTube broadcast or video. Link one before pushing.' })
@@ -889,14 +919,21 @@ export function StreamsPage({
     const title = meta.ytTitle?.trim() ?? ''
     const description = meta.ytDescription ?? ''
     const tags = meta.ytTags ?? []
+    // Thumbnail to upload: caller's explicit pick (from the picker
+    // section in the sidebar) overrides the implicit "use the stream
+    // item's preferred thumbnail" fallback. `null` from the caller
+    // means "I have nothing valid to upload" — skip the thumbnail
+    // step entirely instead of falling back, otherwise the picker's
+    // unchecked-but-empty state would silently push the item thumb.
+    const thumbToUpload = customThumbPath === undefined ? meta.preferredThumbnail : customThumbPath
     try {
       try {
         await window.api.youtubeUpdateBroadcast(meta.ytVideoId, { title, description }, tags)
       } catch {
         await window.api.youtubeUpdateVideo(meta.ytVideoId, title, description, tags)
       }
-      if (meta.preferredThumbnail) {
-        try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, meta.preferredThumbnail) }
+      if (thumbToUpload) {
+        try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload) }
         catch (thumbErr: any) {
           showBanner({ type: 'error', message: `Pushed metadata, but thumbnail upload failed: ${thumbErr?.message ?? String(thumbErr)}` })
           return
@@ -1321,6 +1358,150 @@ export function StreamsPage({
     }
   }, [folders, selectedFolder])
 
+  // Width of the visible-when-selected portion of the list (the area
+  // NOT covered by the sidebar overlay). Equals the sum of the always-
+  // visible columns: thumbnail (user-resizable) + video count (44px) +
+  // date (220px). The sidebar's left edge is anchored exactly to this
+  // value so the date column's right edge aligns flush with the
+  // overlay — keeps the selected-row indicator (border-r on the date
+  // <td>) flush with the sidebar and prevents narrower columns past
+  // date (Type, etc.) from peeking out between the two.
+  //
+  // The vertical scrollbar reservation that used to be added here
+  // (`+ 8`) is no longer needed: in the overlay layout the list keeps
+  // its full width and the scrollbar lives way to the right of the
+  // sidebar's left edge, hidden under the overlay.
+  const rowWidth = thumbWidth + 44 + 220;
+
+  // Animation config — respects the user's "Disable animations" setting
+  // (or OS prefers-reduced-motion) AND the dev-only "Slow animations (5x)"
+  // multiplier. Shared by every CSS transition on this page (sidebar
+  // slide, list resize, header reflow, detail fade), the fade-out
+  // timer below, and the row autoscroll behavior. Tailwind's static
+  // `duration-200` classes are dropped from those elements so the
+  // dynamic value wins.
+  const anim = useAnimationConfig()
+  const animDurationMs = anim.duration(200)
+  // Slight buffer past the slide so the renderedFolder clear lands AFTER
+  // the opacity transition completes — protects against tearing down
+  // content while it's still fading in slow-anim mode.
+  const fadeOutHoldMs = anim.duration(230)
+
+  // ─── Sidebar overlay layout ─────────────────────────────────────────
+  // The streams list + sidebar are absolutely positioned siblings inside
+  // a `relative overflow-hidden` container, rather than a CSS grid with
+  // animated column tracks. The reason: when a row is selected, the
+  // user wants the list to NOT visually resize — instead the sidebar
+  // grows leftward and slides on top of the list's right portion. This
+  // keeps container queries on the list constant across the open/close
+  // animation, so the "hidden at narrow widths" columns don't pop
+  // in/out the moment the animation starts. They're physically rendered
+  // (and react normally to window resize via container queries) — they
+  // just happen to be covered by the sidebar overlay when one is open.
+  //
+  // Widths are computed from a measured `containerWidth` so the
+  // selected sidebar can exactly fill from `rowWidth` to the right
+  // edge regardless of the page's actual horizontal space.
+  //
+  // - `normalSidebarWidth`: the sidebar's settled width when nothing is
+  //   selected (288 expanded, 40 collapsed rail). Depends on the user
+  //   pref ONLY — not on selection — so the list never reflows when
+  //   the user opens or closes a stream.
+  // - `selectedSidebarWidth`: the sidebar's settled width when something
+  //   IS selected (fills from rowWidth to the right edge of the page).
+  // - `listWidth`: the constant width of the list area, computed from
+  //   the pref. Only changes when the user toggles the collapse rail.
+  // - `currentSidebarWidth`: what's animating — `selectedSidebarWidth`
+  //   when a stream is selected, `normalSidebarWidth` otherwise.
+  // Callback ref + ResizeObserver: fires whenever the outer container
+  // mounts (more reliable than `useLayoutEffect` with `[]` deps when the
+  // page is conditionally rendered or remounted by the app shell). The
+  // observer keeps `containerWidth` in sync with window-resize without
+  // the layout-effect ordering subtleties.
+  const containerElRef = useRef<HTMLDivElement | null>(null)
+  const containerObsRef = useRef<ResizeObserver | null>(null)
+  const [containerWidth, setContainerWidth] = useState(0)
+  const containerRef = useCallback((el: HTMLDivElement | null) => {
+    if (containerObsRef.current) {
+      containerObsRef.current.disconnect()
+      containerObsRef.current = null
+    }
+    containerElRef.current = el
+    if (!el) return
+    setContainerWidth(el.offsetWidth)
+    const obs = new ResizeObserver(() => {
+      setContainerWidth(el.offsetWidth)
+    })
+    obs.observe(el)
+    containerObsRef.current = obs
+  }, [])
+
+  const normalSidebarWidth = sidebarCollapsedPref ? 40 : 288
+  // Structural widths use CSS calc() — they're correct on first paint
+  // without depending on the JS-measured containerWidth. Transitions
+  // between `calc(100% - Npx)` and `${M}px` interpolate (both are
+  // <length-percentage>), so the open/close/collapse animations work.
+  const listWidthCss = `calc(100% - ${normalSidebarWidth}px)`
+  const currentSidebarWidthCss = selectedFolderPath
+    ? `calc(100% - ${rowWidth}px)`
+    : `${normalSidebarWidth}px`
+  // The detail layer's width DOES need a pixel value — it must equal
+  // the OUTER container's `100% - rowWidth`, but the layer lives inside
+  // the aside where CSS `100%` refers to the aside (animating). 0 until
+  // measured is fine because the detail layer is `opacity: 0` and
+  // `pointer-events: none` until a selection happens; by the time the
+  // user clicks a row, the layout effect has already populated
+  // containerWidth from the ResizeObserver.
+  const selectedSidebarWidthPx = Math.max(0, containerWidth - rowWidth)
+
+  // Keep the most-recently-selected folder mounted in the sidebar through
+  // the close fade-out. Without this, the SidebarDetail would unmount the
+  // instant the user clicks X and there'd be nothing left to fade. The
+  // fade timer is the source of truth for "now safe to drop the content";
+  // matches the 200ms opacity transition with a small buffer.
+  const [renderedFolder, setRenderedFolder] = useState<StreamFolder | null>(selectedFolder)
+  const fadeTimerRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (selectedFolder) {
+      setRenderedFolder(selectedFolder)
+      if (fadeTimerRef.current !== null) {
+        clearTimeout(fadeTimerRef.current)
+        fadeTimerRef.current = null
+      }
+      return
+    }
+    if (renderedFolder === null) return
+    if (fadeTimerRef.current !== null) clearTimeout(fadeTimerRef.current)
+    fadeTimerRef.current = window.setTimeout(() => {
+      setRenderedFolder(null)
+      fadeTimerRef.current = null
+    }, fadeOutHoldMs)
+    return () => {
+      if (fadeTimerRef.current !== null) {
+        clearTimeout(fadeTimerRef.current)
+        fadeTimerRef.current = null
+      }
+    }
+    // selectedFolder is the trigger; renderedFolder is intentionally read
+    // not depended on so the timer only restarts when the SELECTION
+    // changes, not when we clear renderedFolder ourselves. fadeOutHoldMs
+    // is read live via closure capture each render — including it here
+    // would reset the timer when slow-anim toggles mid-close, which is
+    // never the intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFolder])
+
+  // Detail layer fade-in is handled entirely in CSS via `@starting-style`
+  // (see `.opacity-mount-from-0` in index.css). The element mounts with
+  // its starting style at opacity 0; Chromium then applies the regular
+  // `opacity: 1` from the inline style and the existing
+  // `transition-opacity` plays the 0→1 fade. Doing this in CSS instead
+  // of React state means no re-render fires mid-slide, so the heavy
+  // SidebarDetail subtree never reconciles during the animation —
+  // killing the halfway hitch the state-based approach produced. Close
+  // direction is just an opacity change driven by inline style, which
+  // CSS transitions handle as before.
+
   if (!streamsDir) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 text-gray-400">
@@ -1330,10 +1511,44 @@ export function StreamsPage({
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Main area: stream list */}
-      <div className={`@container flex-1 flex flex-col overflow-hidden border-r border-white/5 min-w-[412px] ${selectedFolderPath ? 'max-w-[412px]' : ''}`}>
-        <div className="px-6 py-4 border-b border-white/5 shrink-0 flex flex-col gap-3">
+    <div
+      ref={containerRef}
+      className="relative h-full overflow-hidden"
+    >
+      {/* Main area: stream list.
+          Absolutely positioned at the left, width is `containerWidth -
+          normalSidebarWidth`. Does NOT depend on whether anything is
+          selected, so the list never visually resizes when the sidebar
+          opens/closes — the sidebar simply slides over it. The width
+          transition is for the collapse-rail toggle (no-selection
+          case only). */}
+      <div
+        className="@container absolute top-0 left-0 bottom-0 flex flex-col overflow-hidden border-r border-white/5 transition-[width] ease-linear"
+        style={{ width: listWidthCss, transitionDuration: `${animDurationMs}ms` }}
+      >
+        {/* Page header — when a stream is selected the sidebar overlays
+            the right portion of the list, so the header shrinks to the
+            visible width (`rowWidth`) instead of letting its controls
+            hide under the overlay. Width transitions in lockstep with
+            the sidebar animation so the search/sort/buttons reflow as
+            the overlay slides in.
+
+            Header buttons collapse to icon-only via `labelCollapsed`
+            keyed on `selectedFolderPath`. The button's label transition
+            fires at t=0 of the selection, matching the slide. Their
+            container-query fallback (`@2xl:` on the OUTER list area)
+            handles the window-resize case when nothing is selected,
+            so the labels still hide naturally on narrow windows.
+            (Putting @container on the header itself caused the labels
+            to switch mid-slide once the header's animating width
+            crossed the breakpoint — visibly late vs. the slide.) */}
+        <div
+          className="px-6 py-4 border-b border-white/5 shrink-0 flex flex-col gap-3 transition-[width] ease-linear"
+          style={{
+            width: selectedFolderPath ? `${rowWidth}px` : '100%',
+            transitionDuration: `${animDurationMs}ms`,
+          }}
+        >
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-lg font-semibold flex items-center gap-2">
@@ -1372,8 +1587,10 @@ export function StreamsPage({
                     icon={<CheckCheck size={14} />}
                     onClick={selectAllVisible}
                     disabled={selectedPaths.size === visibleFolders.length}
+                    collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}
                   >
-                    <span className="hidden @2xl:inline">Select All</span>
+                    Select All
                   </Button>
                 </Tooltip>
                 <Tooltip content="Clear current selection" side="bottom">
@@ -1383,8 +1600,10 @@ export function StreamsPage({
                     icon={<Square size={14} />}
                     onClick={clearSelection}
                     disabled={selectedPaths.size === 0}
+                    collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}
                   >
-                    <span className="hidden @2xl:inline">Clear</span>
+                    Clear
                   </Button>
                 </Tooltip>
                 <Tooltip content="Add or remove stream-type / topic tags across the selection" side="bottom">
@@ -1394,8 +1613,10 @@ export function StreamsPage({
                     icon={<Tags size={14} />}
                     onClick={() => setShowBulkTag(true)}
                     disabled={selectedPaths.size === 0}
+                    collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}
                   >
-                    <span className="hidden @2xl:inline">Edit Tags</span>
+                    Edit Tags
                   </Button>
                 </Tooltip>
                 {cloudSyncActive && (
@@ -1407,8 +1628,10 @@ export function StreamsPage({
                         icon={<Cloud size={14} />}
                         onClick={clickBulkOffload}
                         disabled={selectedPaths.size === 0 || selectionContainsArchiving}
+                        collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}
                       >
-                        <span className="hidden @2xl:inline">Offload</span>
+                        Offload
                       </Button>
                     </Tooltip>
                     <Tooltip content={selectionContainsArchiving ? 'One or more selected streams are being archived' : 'Pin selected streams local'} side="bottom">
@@ -1418,8 +1641,10 @@ export function StreamsPage({
                         icon={<CloudDownload size={14} />}
                         onClick={clickBulkPinLocal}
                         disabled={selectedPaths.size === 0 || selectionContainsArchiving}
+                        collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}
                       >
-                        <span className="hidden @2xl:inline">Pin Local</span>
+                        Pin Local
                       </Button>
                     </Tooltip>
                   </>
@@ -1438,35 +1663,42 @@ export function StreamsPage({
                     icon={<Archive size={14} />}
                     onClick={clickBulkArchive}
                     disabled={selectedPaths.size === 0 || selectionContainsArchiving || selectionAllArchived}
+                    collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}
                   >
-                    <span className="hidden @2xl:inline">Archive</span>
+                    Archive
                   </Button>
                 </Tooltip>
                 <Tooltip content="Exit selection mode" side="bottom">
-                  <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode}>
-                    <span className="hidden @2xl:inline">Stop</span>
+                  <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}>
+                    Stop
                   </Button>
                 </Tooltip>
               </div>
             ) : (
               <div className="flex items-center gap-1">
                 <Tooltip content="Manage title, description, and tag templates" side="bottom">
-                  <Button variant="ghost" size="sm" icon={<SquareDashedText size={14} />} onClick={() => setShowTemplatesModal(true)}>
-                    <span className="hidden @2xl:inline">Templates</span>
+                  <Button variant="ghost" size="sm" icon={<SquareDashedText size={14} />} onClick={() => setShowTemplatesModal(true)} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}>
+                    Templates
                   </Button>
                 </Tooltip>
                 <Tooltip content="Manage stream type tags" side="bottom">
-                  <Button variant="ghost" size="sm" icon={<Tags size={14} />} onClick={() => setShowManageTags(true)}>
-                    <span className="hidden @2xl:inline">Manage Tags</span>
+                  <Button variant="ghost" size="sm" icon={<Tags size={14} />} onClick={() => setShowManageTags(true)} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}>
+                    Manage Tags
                   </Button>
                 </Tooltip>
                 <Tooltip content="Select multiple streams for bulk actions" side="bottom">
-                  <Button variant="ghost" size="sm" icon={<CheckCheck size={14} />} onClick={toggleSelectMode}>
-                    <span className="hidden @2xl:inline">Select</span>
+                  <Button variant="ghost" size="sm" icon={<CheckCheck size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}>
+                    Select
                   </Button>
                 </Tooltip>
-                <Button variant="primary" size="sm" icon={<Plus size={14} />} onClick={() => setNewStreamOpen(true)}>
-                  <span className="hidden @2xl:inline">New stream</span>
+                <Button variant="primary" size="sm" icon={<Plus size={14} />} onClick={() => setNewStreamOpen(true)} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}>
+                  New stream
                 </Button>
               </div>
             )}
@@ -1522,13 +1754,14 @@ export function StreamsPage({
                   <th className="p-0" style={{ width: thumbWidth }}>Thumbnail</th>
                   <th className="p-1 w-[44px]" />
                   <th className="text-left p-1 w-[220px]">Date</th>
-                  {selectedFolderPath ? (
-                    // Filler column absorbs leftover width so the three real
-                    // columns stay at their natural sizes instead of stretching.
-                    <th className="p-0" />
-                  ) : (
-                    <>
-                      <th className="text-left p-1 min-w-[120px] hidden @xl:table-cell">
+                  {/* Extra columns stay rendered regardless of selection — the
+                      sidebar overlay covers them visually but they remain in
+                      layout so opening/closing the sidebar doesn't trigger a
+                      column-pop or stretch the visible columns. Container
+                      queries on the list area still control which ones show
+                      based on the page's actual width (window resize). */}
+                  <>
+                      <th className="text-left py-1 pl-3 pr-1 min-w-[120px] hidden @xl:table-cell">
                         <div ref={typeFilterAnchorRef} className="relative flex items-center gap-1">
                           <span>Type</span>
                           <Tooltip content="Filter by type" side="bottom">
@@ -1587,7 +1820,7 @@ export function StreamsPage({
                           )}
                         </div>
                       </th>
-                      <th className="text-left p-1 min-w-[120px] hidden @3xl:table-cell">
+                      <th className="text-left py-1 pl-3 pr-1 min-w-[120px] hidden @3xl:table-cell">
                         <div ref={gameFilterAnchorRef} className="relative flex items-center gap-1">
                           <span>Topics / Games</span>
                           <Tooltip content="Filter by topic or game" side="bottom">
@@ -1655,7 +1888,6 @@ export function StreamsPage({
                       <th className="text-left p-1 min-w-[100px] hidden @5xl:table-cell">Notes</th>
                       <th className="text-right p-1 min-w-[160px]">Actions</th>
                     </>
-                  )}
                 </tr>
               </thead>
               <tbody>
@@ -1670,7 +1902,8 @@ export function StreamsPage({
                         key={f.folderPath}
                         folder={f}
                         selected={f.folderPath === selectedFolderPath}
-                        compact={!!selectedFolderPath}
+                        animDurationMs={animDurationMs}
+                        compact={false}
                         selectMode={selectMode}
                         multiSelected={selectedPaths.has(key)}
                         onToggleMultiSelect={() => toggleSelected(key)}
@@ -1703,19 +1936,27 @@ export function StreamsPage({
         </div>
       </div>
 
-      {/* Right sidebar — width transitions between a collapsed thin rail
-          (no selection + collapsed pref) and the full detail panel. A
-          selection always forces the sidebar to full width. Toggle button
-          lives on the left edge, mirroring the Player page's pattern. */}
+      {/* Sidebar overlay — absolutely positioned on the right, slides
+          over the streams list as it grows. Composed of two layers:
+            1. No-selection layer (always at `normalSidebarWidth`,
+               opacity 1, anchored left). Shows the collapsed rail or
+               the empty-state hint depending on the user's pref.
+            2. Detail layer (at `selectedSidebarWidth`, opacity fades
+               between 0 ↔ 1, anchored left, bg opaque so it covers
+               layer 1 when visible). Rendered as long as
+               `renderedFolder` is set, which lingers through the
+               close fade-out so the user actually sees the detail
+               content disappear instead of vanishing instantly.
+          The aside itself only animates its `width` — content layers
+          stay at their final widths so they don't reflow during the
+          slide. */}
       <aside
-        className={`relative flex flex-col overflow-hidden bg-navy-800/30 transition-[width] duration-200 pe-2 ${
-          sidebarCollapsed ? 'w-10' : selectedFolderPath ? 'grow' : 'w-72'
-        }`}
+        className="absolute top-0 right-0 bottom-0 z-30 overflow-hidden bg-navy-800 pe-2 transition-[width] ease-linear"
+        style={{ width: currentSidebarWidthCss, transitionDuration: `${animDurationMs}ms` }}
       >
-        {/* Edge toggle — only present when no stream is selected, since the
-            sidebar isn't collapsible while a stream is open (the user has
-            to deselect first via the sidebar's close X or by re-clicking
-            the row in the list). */}
+        {/* Edge toggle — only present when no stream is selected. The
+            sidebar isn't collapsible while a stream is open (the user
+            has to deselect first via the X). */}
         {!selectedFolderPath && (
           <Tooltip
             content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -1732,73 +1973,102 @@ export function StreamsPage({
           </Tooltip>
         )}
 
-        {sidebarCollapsed ? (
-          // Collapsed rail — just an icon. Clicking the chevron also expands.
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="flex flex-col items-center justify-start pt-4 gap-2 h-full text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
-            aria-label="Expand sidebar"
-            title="Expand sidebar"
+        {/* Layer 1: no-selection content. Anchored left, sized to the
+            settled-small width. Stays at opacity 1 always — the detail
+            layer above just covers it during the open animation. */}
+        <div
+          className="absolute top-0 left-0 bottom-0"
+          style={{ width: normalSidebarWidth }}
+        >
+          {sidebarCollapsedPref ? (
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className="flex flex-col items-center justify-start pt-4 gap-2 h-full w-full text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+            >
+              <ChevronLeft size={16} />
+              <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] uppercase tracking-wider text-gray-500 mt-2">Details</span>
+            </button>
+          ) : (
+            <div className="flex h-full items-center justify-center text-xs text-gray-500 px-6 text-center">
+              Pick a stream from the list to view its details here.
+            </div>
+          )}
+        </div>
+
+        {/* Layer 2: detail content. Anchored left at the FINAL selected
+            width so the content doesn't reflow as the sidebar grows —
+            its right portion is simply clipped by the aside's
+            `overflow-hidden` while the sidebar is mid-animation. Stays
+            mounted (`renderedFolder`) through the close fade so the
+            user sees the content fade out instead of pop. */}
+        {renderedFolder && (
+          <div
+            className={`opacity-mount-from-0 absolute top-0 left-0 bottom-0 bg-navy-800 transition-opacity ease-linear ${selectedFolderPath ? '' : 'opacity-0'}`}
+            style={{
+              width: selectedSidebarWidthPx,
+              // `opacity` is intentionally NOT set inline — inline styles
+              // have higher specificity than the `@starting-style` rule
+              // and would override its frame-0 opacity:0, killing the
+              // fade-in. Opacity is class-driven: default (no class) = 1,
+              // `opacity-0` for the close fade-out.
+              pointerEvents: selectedFolderPath ? 'auto' : 'none',
+              transitionDuration: `${animDurationMs}ms`,
+            }}
           >
-            <ChevronLeft size={16} />
-            <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] uppercase tracking-wider text-gray-500 mt-2">Details</span>
-          </button>
-        ) : selectedFolder ? (
-          <SidebarDetail
-            folder={selectedFolder}
-            folders={folders}
-            prevEpisode={seriesNav.prev}
-            nextEpisode={seriesNav.next}
-            onPickEpisode={(f) => setSelectedFolderPath(f.folderPath)}
-            onClose={() => setSelectedFolderPath(null)}
-            onUpdateMeta={partial => updateMeta(selectedFolder.folderPath, partial)}
-            cloudSyncActive={cloudSyncActive}
-            allGames={allGames}
-            allStreamTypes={allStreamTypes}
-            tagColors={tagColors}
-            tagTextures={tagTextures}
-            onReschedule={() => setRescheduleTargetPath(selectedFolder.folderPath)}
-            onNewEpisode={() => setNewEpisodeSourcePath(selectedFolder.folderPath)}
-            onOffload={() => handleOffload(selectedFolder)}
-            onPinLocal={() => handlePinLocal(selectedFolder)}
-            onArchive={() => handleArchive(selectedFolder)}
-            isArchiving={isFolderArchiving(selectedFolder)}
-            thumbsKey={thumbsKey}
-            onDeleteThumbnail={(filePath) => handleDeleteThumbnail(selectedFolder, filePath)}
-            ytBroadcasts={ytBroadcasts}
-            ytVods={ytVods}
-            setYtVods={setYtVods}
-            setYtBroadcasts={setYtBroadcasts}
-            broadcastLinks={broadcastLinks}
-            ytBroadcastsLoading={ytBroadcastsLoading}
-            onLoadAllVods={loadAllVods}
-            defaultBroadcastTime={config.defaultBroadcastTime || '19:00'}
-            claudeEnabled={claudeEnabled}
-            onSendToPlayer={() => handleSendToPlayer(selectedFolder)}
-            onSendToConverter={() => handleSendToConverter(selectedFolder)}
-            onSendToCombine={() => handleSendToCombine(selectedFolder)}
-            onOpenFolder={() => handleOpenFolder(selectedFolder)}
-            onOpenThumbnails={() => handleOpenThumbnails(selectedFolder)}
-            onDelete={() => setDeleteTargetPath(selectedFolder.folderPath)}
-            onPushToYoutube={() => handlePushToYoutube(selectedFolder)}
-            onPushToTwitch={() => handlePushToTwitch(selectedFolder)}
-            ytConnected={ytConnected}
-            twConnected={twConnected}
-            banner={banner}
-            onDismissBanner={() => setBanner(null)}
-            ytTitleTemplates={ytTitleTemplates}
-            ytDescTemplates={ytDescTemplates}
-            ytTagTemplates={ytTagTemplates}
-            twitchTagTemplates={twitchTagTemplates}
-            onSaveYtTitleTemplate={saveYtTitleTemplate}
-            onSaveYtDescTemplate={saveYtDescTemplate}
-            onSaveYtTagsTemplate={saveYtTagsTemplate}
-            onSaveTwitchTagsTemplate={saveTwitchTagsTemplate}
-          />
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-xs text-gray-500 px-6 text-center">
-            Pick a stream from the list to view its details here.
+            <SidebarDetail
+              folder={renderedFolder}
+              folders={folders}
+              prevEpisode={seriesNav.prev}
+              nextEpisode={seriesNav.next}
+              onPickEpisode={(f) => setSelectedFolderPath(f.folderPath)}
+              onClose={() => setSelectedFolderPath(null)}
+              onUpdateMeta={partial => updateMeta(renderedFolder.folderPath, partial)}
+              cloudSyncActive={cloudSyncActive}
+              allGames={allGames}
+              allStreamTypes={allStreamTypes}
+              tagColors={tagColors}
+              tagTextures={tagTextures}
+              onReschedule={() => setRescheduleTargetPath(renderedFolder.folderPath)}
+              onNewEpisode={() => setNewEpisodeSourcePath(renderedFolder.folderPath)}
+              onOffload={() => handleOffload(renderedFolder)}
+              onPinLocal={() => handlePinLocal(renderedFolder)}
+              onArchive={() => handleArchive(renderedFolder)}
+              isArchiving={isFolderArchiving(renderedFolder)}
+              thumbsKey={thumbsKey}
+              onDeleteThumbnail={(filePath) => handleDeleteThumbnail(renderedFolder, filePath)}
+              ytBroadcasts={ytBroadcasts}
+              ytVods={ytVods}
+              setYtVods={setYtVods}
+              setYtBroadcasts={setYtBroadcasts}
+              broadcastLinks={broadcastLinks}
+              ytBroadcastsLoading={ytBroadcastsLoading}
+              onLoadAllVods={loadAllVods}
+              defaultBroadcastTime={config.defaultBroadcastTime || '19:00'}
+              claudeEnabled={claudeEnabled}
+              onSendToPlayer={() => handleSendToPlayer(renderedFolder)}
+              onSendToConverter={() => handleSendToConverter(renderedFolder)}
+              onSendToCombine={() => handleSendToCombine(renderedFolder)}
+              onOpenFolder={() => handleOpenFolder(renderedFolder)}
+              onOpenThumbnails={() => handleOpenThumbnails(renderedFolder)}
+              onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
+              onPushToYoutube={(customThumb) => handlePushToYoutube(renderedFolder, customThumb)}
+              onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
+              ytConnected={ytConnected}
+              twConnected={twConnected}
+              banner={banner}
+              onDismissBanner={() => setBanner(null)}
+              ytTitleTemplates={ytTitleTemplates}
+              ytDescTemplates={ytDescTemplates}
+              ytTagTemplates={ytTagTemplates}
+              twitchTagTemplates={twitchTagTemplates}
+              onSaveYtTitleTemplate={saveYtTitleTemplate}
+              onSaveYtDescTemplate={saveYtDescTemplate}
+              onSaveYtTagsTemplate={saveYtTagsTemplate}
+              onSaveTwitchTagsTemplate={saveTwitchTagsTemplate}
+            />
           </div>
         )}
       </aside>
@@ -2081,9 +2351,14 @@ function StreamListItem({
   isPending, isNextUpcoming, isLive, privacyStatus, isLivestream,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
+  animDurationMs,
 }: {
   folder: StreamFolder
   selected: boolean
+  /** Page-level sidebar transition duration. Drives the delay before
+   *  the selected-row indicator appears on open (so it lands after the
+   *  sidebar finishes sliding into place rather than racing it). */
+  animDurationMs: number
   compact: boolean
   /** When true, rows render a checkbox in the first cell instead of
    *  reacting to a click as sidebar-open. Row click toggles selection. */
@@ -2129,6 +2404,22 @@ function StreamListItem({
   onOpenThumbnails: () => void
   onThumbResizeStart: (e: React.MouseEvent) => void
 }) {
+  // Selected-row indicator timing — drives the purple bar on the date
+  // cell. Lags behind `selected` on open (waits for the sidebar to
+  // finish sliding so the indicator just pops into place rather than
+  // racing the slide) but matches it instantly on close. The close
+  // path runs in useLayoutEffect so the className updates before the
+  // next paint and the user doesn't see a one-frame stale indicator.
+  const [indicatorVisible, setIndicatorVisible] = useState(false)
+  useLayoutEffect(() => {
+    if (!selected) {
+      setIndicatorVisible(false)
+      return
+    }
+    const t = window.setTimeout(() => setIndicatorVisible(true), animDurationMs)
+    return () => clearTimeout(t)
+  }, [selected, animDurationMs])
+
   if (folder.isMissing) {
     const missingColSpan = compact ? 2 : 5
     return (
@@ -2177,6 +2468,7 @@ function StreamListItem({
 
   return (
     <tr
+      data-folder-path={folder.folderPath}
       onClick={handleRowClick}
       onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart() } : undefined}
       onMouseEnter={selectMode ? onDragEnter : undefined}
@@ -2186,7 +2478,10 @@ function StreamListItem({
           ? 'border-b border-teal-900/30 bg-teal-900/15 hover:bg-teal-900/30'
           : 'border-b border-white/10 hover:bg-white/[0.03]'
       } ${selected ? (
-        `border-r-2 border-r-purple-600 ${isPending ? 'border-b border-teal-700/40 !bg-teal-700/30 hover:!bg-teal-700/40' : '!bg-purple-900/20'}`
+        // Right-edge indicator lives on the date cell below (search for
+        // `selected-row-indicator`) so it stays visible when the sidebar
+        // overlay covers the row's actual right edge.
+        `${isPending ? 'border-b border-teal-700/40 !bg-teal-700/30 hover:!bg-teal-700/40' : '!bg-purple-900/20'}`
       ) : ''} ${selectMode && multiSelected ? '!bg-purple-900/15' : ''}`}
     >
       {/* Checkbox column — only renders in select mode. The pl-3 keeps
@@ -2275,8 +2570,21 @@ function StreamListItem({
         </VideoCountTooltip>
       </td>
 
-      {/* Date + status badges + title clamp */}
-      <td className="p-1 align-middle min-w-[220px]">
+      {/* Date + status badges + title clamp.
+          selected-row-indicator: the right-edge purple bar that marks
+          the selected row lives HERE rather than on the <tr> so it
+          sits inside the date column (always visible) instead of at
+          the row's actual right edge (covered by the sidebar overlay
+          when one is open). Uses an `::after` pseudo-element instead
+          of `border-r-2` because `border-collapse:collapse` straddles
+          the cell boundary with the border — half on each side — so a
+          2px border-r ends up 1px to the LEFT of the cell's right edge
+          and 1px PAST it, misaligning with the sidebar's left edge.
+          A pseudo-element pinned to `right:0` sits flush. Visibility
+          is gated on `indicatorVisible` (lags `selected` on open,
+          instant on close) so the bar lands once the sidebar settles
+          rather than racing the slide. */}
+      <td className={`p-1 align-middle min-w-[220px] ${indicatorVisible ? 'relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-purple-600' : ''}`}>
         <div className="flex items-center justify-between gap-1.5 w-full">
           <div className="inline-flex gap-1 mt-0.5">
             <Tooltip content={friendlyDate(date)} side="top">
@@ -2410,7 +2718,7 @@ function StreamListItem({
           <td className="px-2 py-2 align-middle hidden @5xl:table-cell">
             {meta?.comments ? (
               <div
-                className="text-[10px] leading-tight text-gray-400 overflow-hidden"
+                className="text-[10px] leading-tight text-gray-400 overflow-hidden whitespace-pre-line"
                 style={{ display: '-webkit-box', WebkitLineClamp: Math.max(2, Math.floor((thumbWidth * 9 / 16) / 12.5)), WebkitBoxOrient: 'vertical' }}
                 title={meta.comments}
               >
@@ -2446,7 +2754,6 @@ function StreamListItem({
           </td>
         </>
       )}
-      {compact && <td className="p-0" />}
     </tr>
   )
 }
@@ -2515,7 +2822,7 @@ function SidebarDetail({
   onOpenFolder: () => void
   onOpenThumbnails: () => void
   onDelete: () => void
-  onPushToYoutube: () => void
+  onPushToYoutube: (customThumbPath: string | null) => void
   onPushToTwitch: () => void
   ytConnected: boolean
   twConnected: boolean
@@ -2861,6 +3168,57 @@ function SidebarDetail({
   // etc.) the user can paste any YouTube URL or bare 11-char ID and the
   // matching video is fetched + seeded into ytVods + selected. Same
   // parser as the old metamodal so every legal URL shape just works.
+  // Full-screen image viewer. null = closed; number = index into
+  // folder.thumbnails of the open image. Driven by clicking the active
+  // image in the ThumbnailCarousel.
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+
+  // ── YouTube thumbnail picker ─────────────────────────────────────────
+  // Mirrors the legacy MetaModal's picker: the YT push uploads whatever
+  // is set as the stream item's preferred thumbnail by default; toggling
+  // off the "use the stream item thumbnail" checkbox reveals a picker
+  // grid of qualifying images (16:9 / 1:1 / 9:16, ≥720px, ≤2MB). Picker
+  // state is intentionally LOCAL (not persisted to meta) — matching the
+  // legacy modal, the choice is treated as "what to push right now",
+  // not a stream-level setting.
+  const [ytQualifyingThumbnails, setYtQualifyingThumbnails] = useState<{ bestFit: string[]; rest: string[] }>({ bestFit: [], rest: [] })
+  const [ytShowAllThumbs, setYtShowAllThumbs] = useState(false)
+  const [ytSelectedThumbnail, setYtSelectedThumbnail] = useState<string | null>(null)
+  const [useStreamItemThumb, setUseStreamItemThumb] = useState(true)
+  // Resolve the stream item's "main" thumbnail the same way the row
+  // does: preferredThumbnail basename → matching path → first thumbnail.
+  // What gets uploaded when the checkbox is on.
+  const resolvedStreamItemThumb = useMemo<string | null>(() => {
+    if (folder.thumbnails.length === 0) return null
+    const preferredName = meta?.preferredThumbnail
+    if (preferredName) {
+      const match = folder.thumbnails.find(p => (p.split(/[\\/]/).pop() ?? '') === preferredName)
+      if (match) return match
+    }
+    return folder.thumbnails[0]
+  }, [folder.thumbnails, meta?.preferredThumbnail])
+  const effectiveYtThumb = useStreamItemThumb ? resolvedStreamItemThumb : ytSelectedThumbnail
+  // Fetch qualifying thumbnails when the folder's thumbnail list
+  // changes (stream switch, delete, new image added). Reset all picker
+  // state so the new folder starts fresh.
+  useEffect(() => {
+    setYtQualifyingThumbnails({ bestFit: [], rest: [] })
+    setYtShowAllThumbs(false)
+    setYtSelectedThumbnail(null)
+    setUseStreamItemThumb(true)
+    if (folder.thumbnails.length === 0) return
+    let cancelled = false
+    window.api.youtubeGetQualifyingThumbnails(folder.thumbnails).then(qualified => {
+      if (cancelled) return
+      setYtQualifyingThumbnails(qualified)
+      setYtSelectedThumbnail(qualified.bestFit[0] ?? qualified.rest[0] ?? null)
+      // If nothing fits the recommended aspect ratios, default to
+      // showing the full list so the picker isn't suddenly empty.
+      if (qualified.bestFit.length === 0) setYtShowAllThumbs(true)
+    })
+    return () => { cancelled = true }
+  }, [folder.thumbnails])
+
   const [manualUrl, setManualUrl] = useState('')
   const [manualUrlLoading, setManualUrlLoading] = useState(false)
   const [manualUrlError, setManualUrlError] = useState('')
@@ -2963,7 +3321,7 @@ function SidebarDetail({
   }, [selectedBroadcast, meta?.ytTitle, meta?.ytDescription, meta?.ytGameTitle, meta?.ytTags])
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="@container flex flex-col h-full overflow-hidden">
       {/* Header — top row: date (left) · episode nav (center) · close X
           (right). Bottom row: full title. The series label "S1 · E3" is
           surfaced as a metadata row below rather than here, since it's
@@ -3030,46 +3388,70 @@ function SidebarDetail({
           window's right edge so the window-resize cursor doesn't win over
           clicks meant for the scrollbar thumb (same fix as the streams
           list's outer wrapper on the old page). */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 flex text-xs [scrollbar-gutter:stable]">
-        <div className="flex flex-col gap-3 w-full max-w-[80rem] mx-auto">
+      {/* Chromium quirk: padding-bottom on a flex+overflow scroll
+          container is clipped from the scrollable area, so `pb-*` on
+          this outer wrapper or the inner content div is invisible at
+          the end of scroll. The breathing room above the footer is
+          enforced via `pb-8` on the Notes section itself (last child).
+          Top padding still works fine on the inner content div.
+
+          The inner div is where the section grouping lives:
+          gap-8 separates the five top-level sections (Thumbnails,
+          Tags, YouTube, Twitch, Notes); each section uses gap-3
+          internally so rows within a section keep their original
+          breathing room. No labels per the user's preference — the
+          extra vertical space alone signals the boundary. */}
+      <div className="flex-1 overflow-y-auto px-5 flex text-xs [scrollbar-gutter:stable]">
+        <div className="flex flex-col gap-8 w-full max-w-[80rem] mx-auto pt-4">
+            {/* — Thumbnails — */}
             {folder.thumbnails.length > 0 && (
-              <MetaRow label="Thumbnails">
-                <ThumbnailCarousel
-                  thumbnails={folder.thumbnails}
-                  thumbsKey={thumbsKey}
-                  preferredThumbnail={meta?.preferredThumbnail}
-                  localFlags={folder.thumbnailLocalFlags}
-                  onSetAsThumbnail={(filePath) => {
-                    const basename = filePath.split(/[\\/]/).pop() ?? ''
-                    onUpdateMeta({ preferredThumbnail: basename })
-                  }}
-                  onDeleteImage={onDeleteThumbnail}
-                  onEditThumbnail={onOpenThumbnails}
-                />
-              </MetaRow>
+              <div className="flex flex-col gap-3">
+                <MetaRow label="Thumbnails">
+                  <ThumbnailCarousel
+                    thumbnails={folder.thumbnails}
+                    thumbsKey={thumbsKey}
+                    preferredThumbnail={meta?.preferredThumbnail}
+                    localFlags={folder.thumbnailLocalFlags}
+                    onSetAsThumbnail={(filePath) => {
+                      const basename = filePath.split(/[\\/]/).pop() ?? ''
+                      onUpdateMeta({ preferredThumbnail: basename })
+                    }}
+                    onDeleteImage={onDeleteThumbnail}
+                    onEditThumbnail={onOpenThumbnails}
+                    onOpenLightbox={i => setLightboxIndex(i)}
+                  />
+                </MetaRow>
+              </div>
             )}
-            <MetaRow label="Topics / Games">
-              <TagComboBox
-                values={meta?.games ?? []}
-                onChange={next => onUpdateMeta({ games: next })}
-                allOptions={allGames}
-                placeholder="Add topic or game…"
-                emptyLabel="No topics added"
-                compact
-              />
-            </MetaRow>
-            <MetaRow label="Stream type">
-              <TagComboBox
-                values={normalizeStreamTypes(meta?.streamType)}
-                onChange={next => onUpdateMeta({ streamType: next })}
-                allOptions={allStreamTypes}
-                placeholder="e.g. games, other…"
-                emptyLabel="No types"
-                tagColors={tagColors}
-                tagTextures={tagTextures}
-                compact
-              />
-            </MetaRow>
+            {/* — Tags (SM-level: topics/games + stream type) — */}
+            <div className="flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-2">
+                <MetaRow label="Topics / Games">
+                  <TagComboBox
+                    values={meta?.games ?? []}
+                    onChange={next => onUpdateMeta({ games: next })}
+                    allOptions={allGames}
+                    placeholder="Add topic or game…"
+                    emptyLabel="No topics added"
+                    compact
+                  />
+                </MetaRow>
+                <MetaRow label="Stream type">
+                  <TagComboBox
+                    values={normalizeStreamTypes(meta?.streamType)}
+                    onChange={next => onUpdateMeta({ streamType: next })}
+                    allOptions={allStreamTypes}
+                    placeholder="e.g. games, other…"
+                    emptyLabel="No types"
+                    tagColors={tagColors}
+                    tagTextures={tagTextures}
+                    compact
+                  />
+                </MetaRow>
+              </div>
+            </div>
+            {/* — YouTube — */}
+            <div className="flex flex-col gap-3">
             {/* Merge-field params on one row (matches the old metamodal):
                 Game Title · Tagline · Season · Episode. Together these feed
                 the YouTube title / description / tag templates below, so they
@@ -3140,6 +3522,93 @@ function SidebarDetail({
                 aiFetcher={aiFetchTitle}
               />
             </MetaRow>
+            {/* YouTube thumbnail picker — sits between title and
+                description because the upload goes alongside the YT
+                push from the footer. Default checkbox: reuse whatever's
+                set as the stream item's thumbnail (preferredThumbnail
+                or first thumb). Unchecking reveals a grid of qualifying
+                images (YouTube requires JPG/PNG/GIF/WebP, ≤2MB; the
+                IPC further filters to common video aspect ratios at
+                ≥720px on the longer side). Picker state is transient
+                and resets on stream switch — picking a thumbnail is
+                "which one to push now," not a persisted preference. */}
+            {(() => {
+              const totalQualifying = ytQualifyingThumbnails.bestFit.length + ytQualifyingThumbnails.rest.length
+              const shown = ytShowAllThumbs
+                ? [...ytQualifyingThumbnails.bestFit, ...ytQualifyingThumbnails.rest]
+                : ytQualifyingThumbnails.bestFit
+              const hiddenCount = ytQualifyingThumbnails.rest.length
+              const resolvedName = resolvedStreamItemThumb?.split(/[\\/]/).pop() ?? ''
+              return (
+                <MetaRow label="YouTube thumbnail">
+                  {folder.thumbnails.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">No images found in this stream folder.</p>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <Checkbox
+                        checked={useStreamItemThumb}
+                        onChange={setUseStreamItemThumb}
+                        size="sm"
+                        label={
+                          <div>
+                            <div className="text-[11px] text-gray-200">Use the stream item thumbnail</div>
+                            <div className="text-[10px] text-gray-400 font-mono truncate">{resolvedName || '(none)'}</div>
+                          </div>
+                        }
+                      />
+                      {!useStreamItemThumb && (
+                        totalQualifying === 0 ? (
+                          <p className="text-[11px] text-gray-400 italic">
+                            No images meet YouTube's requirements (JPG/PNG/GIF/WebP, max 2 MB).
+                          </p>
+                        ) : (
+                          <>
+                            <div className="flex flex-wrap gap-1.5">
+                              {shown.map(p => {
+                                const isSelected = p === ytSelectedThumbnail
+                                const name = p.split(/[\\/]/).pop() ?? ''
+                                return (
+                                  <Tooltip key={p} content={name}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setYtSelectedThumbnail(isSelected ? null : p)}
+                                      className={`relative w-20 h-14 rounded overflow-hidden border-2 transition-all shrink-0 ${isSelected ? 'border-red-400 ring-1 ring-red-400/50' : 'border-white/10 hover:border-white/30'}`}
+                                    >
+                                      {/* OS shell thumbnail (a few-KB PNG
+                                          Windows already cached) instead of
+                                          decoding the full-res source — keeps
+                                          large galleries snappy. */}
+                                      <PickerThumbImage path={p} thumbsKey={thumbsKey} alt={name} />
+                                      {isSelected && (
+                                        <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
+                                          <Check size={14} className="text-white drop-shadow" />
+                                        </div>
+                                      )}
+                                    </button>
+                                  </Tooltip>
+                                )
+                              })}
+                            </div>
+                            {hiddenCount > 0 && ytQualifyingThumbnails.bestFit.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setYtShowAllThumbs(v => !v)}
+                                className="self-start text-[10px] text-gray-400 hover:text-gray-200 underline underline-offset-2 transition-colors"
+                              >
+                                {ytShowAllThumbs
+                                  ? 'Show best fit only'
+                                  : `Show all ${totalQualifying} images`}
+                              </button>
+                            )}
+                          </>
+                        )
+                      )}
+                      <p className="text-[10px] text-gray-400">Recommended: 1280×720 or larger. Uploads alongside the YouTube push from the footer.</p>
+                    </div>
+                  )}
+                </MetaRow>
+              )
+            })()}
             <MetaRow
               label="YouTube description"
               attachRight
@@ -3173,52 +3642,6 @@ function SidebarDetail({
                 aiFetcher={aiFetchDescription}
               />
             </MetaRow>
-            {/* Twitch title — sync flag defaults to true (undefined → synced).
-                When synced, the field is hidden and a preview of the effective
-                ytTitle is shown instead, so users can see what would be pushed
-                without clicking off the sync. */}
-            <MetaRow label="Twitch title">
-              <div className="flex flex-col gap-1.5">
-                <Checkbox
-                  size="sm"
-                  checked={meta?.syncTitle !== false}
-                  onChange={v => onUpdateMeta({ syncTitle: v })}
-                  label={<span className="text-[11px] text-gray-400">Same as YouTube title</span>}
-                />
-                {meta?.syncTitle === false ? (
-                  <EditableTextField
-                    value={meta?.twitchTitle ?? ''}
-                    placeholder="Title for Twitch broadcast…"
-                    onSave={v => onUpdateMeta({ twitchTitle: v })}
-                  />
-                ) : (
-                  <span className="text-[11px] text-gray-500 italic px-2 py-1 truncate" title={meta?.ytTitle || undefined}>
-                    {meta?.ytTitle?.trim() || '(no YouTube title set)'}
-                  </span>
-                )}
-              </div>
-            </MetaRow>
-            <MetaRow label="Twitch category">
-              <div className="flex flex-col gap-1.5">
-                <Checkbox
-                  size="sm"
-                  checked={meta?.syncGame !== false}
-                  onChange={v => onUpdateMeta({ syncGame: v })}
-                  label={<span className="text-[11px] text-gray-400">Same as YouTube game</span>}
-                />
-                {meta?.syncGame === false ? (
-                  <EditableTextField
-                    value={meta?.twitchGameName ?? ''}
-                    placeholder="Twitch category override…"
-                    onSave={v => onUpdateMeta({ twitchGameName: v })}
-                  />
-                ) : (
-                  <span className="text-[11px] text-gray-500 italic px-2 py-1 truncate" title={meta?.ytGameTitle || undefined}>
-                    {meta?.ytGameTitle?.trim() || '(no YouTube game set)'}
-                  </span>
-                )}
-              </div>
-            </MetaRow>
             <MetaRow
               label="YouTube tags"
               attachRight
@@ -3242,21 +3665,64 @@ function SidebarDetail({
                   onChange={next => onUpdateMeta({ ytTags: next })}
                   tabAttached
                   aiFetcher={aiFetchTags}
+                  footerRight={(() => {
+                    const tags = meta?.ytTags ?? []
+                    const chars = tags.reduce((n, t) => n + t.length + (/\s/.test(t) ? 2 : 0), 0) + Math.max(0, tags.length - 1)
+                    const over = chars > YT_TAG_CHAR_LIMIT
+                    const atMax = chars === YT_TAG_CHAR_LIMIT
+                    const cls = over ? 'text-red-400' : atMax ? 'text-amber-400' : 'text-gray-400'
+                    return (
+                      <p className={`text-[10px] tabular-nums ${cls}`}>
+                        {tags.length} tags · {chars} / {YT_TAG_CHAR_LIMIT} chars
+                      </p>
+                    )
+                  })()}
                 />
-                {(() => {
-                  const tags = meta?.ytTags ?? []
-                  const chars = tags.reduce((n, t) => n + t.length + (/\s/.test(t) ? 2 : 0), 0) + Math.max(0, tags.length - 1)
-                  const over = chars > YT_TAG_CHAR_LIMIT
-                  const near = !over && chars >= YT_TAG_CHAR_LIMIT * 0.85
-                  const cls = over ? 'text-red-400' : near ? 'text-amber-400' : 'text-gray-500'
-                  return (
-                    <p className={`text-[10px] tabular-nums ${cls}`}>
-                      {tags.length} tags · {chars} / {YT_TAG_CHAR_LIMIT} chars
-                    </p>
-                  )
-                })()}
               </div>
             </MetaRow>
+            </div>
+            {/* — Twitch — */}
+            <div className="flex flex-col gap-3">
+            {/* Sync flag defaults to true (undefined → synced); when synced,
+                the override input is hidden — only the checkbox stays —
+                since the effective value is whatever was set on the YouTube
+                side above. */}
+            <div className="grid grid-cols-2 gap-2 items-start">
+              <MetaRow label="Twitch title">
+                <div className="flex flex-col gap-1.5">
+                  <Checkbox
+                    size="sm"
+                    checked={meta?.syncTitle !== false}
+                    onChange={v => onUpdateMeta({ syncTitle: v })}
+                    label={<span className="text-[11px] text-gray-400">Same as YouTube title</span>}
+                  />
+                  {meta?.syncTitle === false && (
+                    <EditableTextField
+                      value={meta?.twitchTitle ?? ''}
+                      placeholder="Title for Twitch broadcast…"
+                      onSave={v => onUpdateMeta({ twitchTitle: v })}
+                    />
+                  )}
+                </div>
+              </MetaRow>
+              <MetaRow label="Twitch category">
+                <div className="flex flex-col gap-1.5">
+                  <Checkbox
+                    size="sm"
+                    checked={meta?.syncGame !== false}
+                    onChange={v => onUpdateMeta({ syncGame: v })}
+                    label={<span className="text-[11px] text-gray-400">Same as YouTube game</span>}
+                  />
+                  {meta?.syncGame === false && (
+                    <EditableTextField
+                      value={meta?.twitchGameName ?? ''}
+                      placeholder="Twitch category override…"
+                      onSave={v => onUpdateMeta({ twitchGameName: v })}
+                    />
+                  )}
+                </div>
+              </MetaRow>
+            </div>
             <MetaRow
               label="Twitch tags"
               attachRight
@@ -3280,102 +3746,58 @@ function SidebarDetail({
                   onChange={next => onUpdateMeta({ twitchTags: next })}
                   tabAttached
                   aiFetcher={aiFetchTwitchTags}
+                  footerRight={(() => {
+                    const tags = meta?.twitchTags ?? []
+                    const { compat, skipped } = toTwitchCompatibleTags(tags)
+                    return (
+                      <p className="text-[10px] tabular-nums text-gray-400 text-right">
+                        {compat.length} / {TWITCH_TAG_MAX_COUNT} valid
+                        {skipped.length > 0 && <span className="text-amber-400 ml-1">· {skipped.length} invalid (alphanumeric only, ≤25 chars)</span>}
+                      </p>
+                    )
+                  })()}
                 />
-                {(() => {
-                  const tags = meta?.twitchTags ?? []
-                  const { compat, skipped } = toTwitchCompatibleTags(tags)
-                  return (
-                    <p className="text-[10px] tabular-nums text-gray-500">
-                      {compat.length} / {TWITCH_TAG_MAX_COUNT} valid
-                      {skipped.length > 0 && <span className="text-amber-400 ml-1">· {skipped.length} invalid (alphanumeric only, ≤25 chars)</span>}
-                    </p>
-                  )
-                })()}
               </div>
             </MetaRow>
-            <MetaRow label="Notes">
-              <EditableTextField
-                multiline
-                rows={3}
-                value={meta?.comments ?? ''}
-                placeholder="Free-form notes for this stream…"
-                onSave={v => onUpdateMeta({ comments: v })}
-              />
-            </MetaRow>
+            </div>
+            {/* — Notes —
+                pb-8 lives on THIS section instead of the scroll wrapper.
+                Chromium clips padding-bottom from a flex+overflow scroll
+                container, so the only way to leave breathing room above
+                the footer when scrolled all the way down is to put it on
+                the last child. */}
+            <div className="flex flex-col gap-3 pb-8">
+              <MetaRow label="Notes">
+                <EditableTextField
+                  key={`notes-${folder.folderPath}`}
+                  autoGrow
+                  multiline
+                  rows={3}
+                  value={meta?.comments ?? ''}
+                  placeholder="Free-form notes for this stream…"
+                  onSave={v => onUpdateMeta({ comments: v })}
+                />
+              </MetaRow>
+            </div>
         </div>
       </div>
 
-      {/* Sticky bottom action area — two rows. Row 1: row-level action
-          icons (matches the ExpandedStreamPanel design verbatim). Row 2:
-          push pills for YouTube + Twitch. Pinned to the bottom so they
-          stay reachable while scrolling the metadata above. */}
-      <div className="shrink-0 border-t border-white/5 bg-navy-800/60 px-3 py-2 flex flex-col gap-2">
-        <div className="flex items-center gap-0.5 flex-wrap">
-          {videoCount > 0 && (
-            <Tooltip content="Send to Player">
-              <Button variant="ghost" size="icon-sm" icon={<Film size={12} />} onClick={onSendToPlayer} />
-            </Tooltip>
-          )}
-          {videoCount > 0 && (
-            <Tooltip content="Send to Converter">
-              <Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} />
-            </Tooltip>
-          )}
-          {videoCount > 1 && (
-            <Tooltip content="Send to Combine">
-              <Button variant="ghost" size="icon-sm" icon={<Combine size={12} />} onClick={onSendToCombine} />
-            </Tooltip>
-          )}
-          <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
-            <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
-          </Tooltip>
-          <div className="w-px h-3.5 bg-white/10 mx-1" />
-          <Tooltip content="New episode based on this stream">
-            <button onClick={onNewEpisode} className={PANEL_ACTION_BUTTON_BLUE}>
-              <CopyPlus size={12} />
-            </button>
-          </Tooltip>
-          {cloudSyncActive && videoCount > 0 && (
-            <>
-              <Tooltip content="Offload to cloud">
-                <button onClick={onOffload} className={PANEL_ACTION_BUTTON_PINK}>
-                  <Cloud size={12} />
-                </button>
-              </Tooltip>
-              <Tooltip content="Pin local">
-                <button onClick={onPinLocal} className={PANEL_ACTION_BUTTON_CYAN}>
-                  <CloudDownload size={12} />
-                </button>
-              </Tooltip>
-            </>
-          )}
-          <Tooltip content="Open folder">
-            <button onClick={onOpenFolder} className={PANEL_ACTION_BUTTON_YELLOW}>
-              <FolderOpen size={12} />
-            </button>
-          </Tooltip>
-          <div className="w-px h-3.5 bg-white/10 mx-1" />
-          {videoCount > 0 && (
-            <Tooltip content={isArchiving ? 'Already in the converter — archive in progress' : 'Archive'}>
-              <button onClick={onArchive} disabled={isArchiving} className={PANEL_ACTION_BUTTON_GREEN}>
-                <Archive size={12} />
-              </button>
-            </Tooltip>
-          )}
-          <Tooltip content="Delete this stream and all its contents">
-            <button onClick={onDelete} className={PANEL_ACTION_BUTTON_RED}>
-              <Trash2 size={12} />
-            </button>
-          </Tooltip>
-        </div>
-
-        {/* Broadcast picker — sits between the action row and the push
-            pills since picking a broadcast IS the prerequisite for the
-            YouTube push. Only renders when YT is connected. */}
+      {/* Sticky bottom action area. Top → bottom:
+            1. Broadcast picker (YouTube linkage + privacy controls)
+            2. Push pills (YouTube + Twitch — the publishing climax of the sidebar)
+            3. Row-level action buttons (Player/Converter/folder/Archive/Delete)
+          Action row sits at the very bottom so destructive verbs
+          (Delete, Archive) are last in the visual flow — and the
+          broadcast-picker → push-pills publishing path reads
+          top-to-bottom uninterrupted. */}
+      <div className="shrink-0 border-t border-white/5 bg-navy-700 px-3 py-2 flex flex-col gap-2">
+        {/* Broadcast picker — first item in the footer because picking
+            a broadcast IS the prerequisite for the YouTube push pill
+            directly below it. Only renders when YT is connected. */}
         {ytConnected && (
-          <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
+          <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-gray-200 flex items-center gap-1.5">
                 <LucideYoutube size={11} className="text-red-400/70" />
                 {isPastStream ? 'Linked video' : 'Linked broadcast'}
               </span>
@@ -3410,12 +3832,11 @@ function SidebarDetail({
             {!linkedId && (
               <>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] text-gray-400 uppercase tracking-wider">Or paste a URL</span>
                   <input
                     value={manualUrl}
                     onChange={e => handleManualUrlChange(e.target.value)}
-                    placeholder="https://youtube.com/watch?v=… or video ID"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-600"
+                    placeholder="Or paste a URL or Video ID"
+                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-500"
                   />
                   {manualUrlLoading && (
                     <p className="text-[10px] text-gray-400 flex items-center gap-1">
@@ -3565,7 +3986,7 @@ function SidebarDetail({
           }>
             <button
               type="button"
-              onClick={onPushToYoutube}
+              onClick={() => onPushToYoutube(effectiveYtThumb)}
               disabled={!ytConnected || !meta?.ytVideoId || !selectedBroadcast || !broadcastMismatch}
               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 hover:border-red-500/40 text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/10"
             >
@@ -3585,7 +4006,149 @@ function SidebarDetail({
             </button>
           </Tooltip>
         </div>
+
+        {/* Row-level action buttons. Pinned to the bottom of the footer
+            so destructive verbs (Archive, Delete) sit at the very end of
+            the visual flow.
+
+            Layout is three equal-width columns (`grid-cols-3`) spanning
+            the footer, each group's buttons centered within its column:
+              · Col 1 — Send-to: Player / Converter / Combine / Thumbnail
+              · Col 2 — Stream ops: New episode / Offload / Pin local / Open folder
+              · Col 3 — Lifecycle: Archive / Delete
+
+            All three columns collapse to icon-only at the SAME
+            container-query breakpoint (@5xl). Since the columns are
+            equal width, mismatched thresholds would have one column
+            reflowing while the others stay put — staggered and ugly.
+            @5xl is dictated by Col 3 (the narrowest button group still
+            fits its labels at that width); the wider groups stay
+            consistent with it. `-ms-1.5` cancels the parent button's
+            `gap-1.5` while collapsed so the icon-only state has no
+            leftover whitespace.
+
+            `divide-x divide-white/5` adds a subtle vertical hairline
+            between columns — replaces the inline divider dots from the
+            old flex-wrap layout.
+
+            Sizing: flex with `flex-1` on each column. The default
+            `min-width: auto` (= min-content) on flex items means cols
+            1 and 2 won't shrink below their buttons' natural width.
+            Col 3 has `min-w-0` overriding that, so it gives up space
+            first when cols 1/2 need more than their 1/3 share. When
+            everything fits at 1/3 each, the three columns sit equal. */}
+        <div className="flex divide-x divide-white/5 border-t border-white/15 pt-2">
+          <div className="flex-1 flex items-center justify-center gap-1 px-3">
+            {videoCount > 0 && (
+              <Tooltip content="Send to Player">
+                <button onClick={onSendToPlayer} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
+                  <Film size={13} />
+                  <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Player</CollapsibleLabel>
+                </button>
+              </Tooltip>
+            )}
+            {videoCount > 0 && (
+              <Tooltip content="Send to Converter">
+                <button onClick={onSendToConverter} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
+                  <Zap size={13} />
+                  <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Converter</CollapsibleLabel>
+                </button>
+              </Tooltip>
+            )}
+            {videoCount > 1 && (
+              <Tooltip content="Send to Combine">
+                <button onClick={onSendToCombine} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
+                  <Combine size={13} />
+                  <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Combine</CollapsibleLabel>
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
+              <button onClick={onOpenThumbnails} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
+                <ImageIcon size={13} />
+                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Thumbnail</CollapsibleLabel>
+              </button>
+            </Tooltip>
+          </div>
+          <div className="flex-1 flex items-center justify-center gap-1 px-3">
+            <Tooltip content="New episode based on this stream">
+              <button onClick={onNewEpisode} className={PANEL_ACTION_BUTTON_BLUE}>
+                <CopyPlus size={13} />
+                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">New episode</CollapsibleLabel>
+              </button>
+            </Tooltip>
+            {cloudSyncActive && videoCount > 0 && (
+              <>
+                <Tooltip content="Offload to cloud">
+                  <button onClick={onOffload} className={PANEL_ACTION_BUTTON_PINK}>
+                    <Cloud size={13} />
+                    <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Offload</CollapsibleLabel>
+                  </button>
+                </Tooltip>
+                <Tooltip content="Pin local">
+                  <button onClick={onPinLocal} className={PANEL_ACTION_BUTTON_CYAN}>
+                    <CloudDownload size={13} />
+                    <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Pin local</CollapsibleLabel>
+                  </button>
+                </Tooltip>
+              </>
+            )}
+            <Tooltip content="Open folder">
+              <button onClick={onOpenFolder} className={PANEL_ACTION_BUTTON_YELLOW}>
+                <FolderOpen size={13} />
+                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Open folder</CollapsibleLabel>
+              </button>
+            </Tooltip>
+          </div>
+          <div className="flex-1 min-w-0 flex items-center justify-center gap-0.5">
+            {videoCount > 0 && (
+              <Tooltip content={isArchiving ? 'Already in the converter — archive in progress' : 'Archive'}>
+                <button onClick={onArchive} disabled={isArchiving} className={PANEL_ACTION_BUTTON_GREEN}>
+                  <Archive size={13} />
+                  <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Archive</CollapsibleLabel>
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip content="Delete this stream and all its contents">
+              <button onClick={onDelete} className={PANEL_ACTION_BUTTON_RED}>
+                <Trash2 size={13} />
+                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Delete</CollapsibleLabel>
+              </button>
+            </Tooltip>
+          </div>
+        </div>
       </div>
+
+      {/* Full-screen image viewer. Opened by clicking the active image in
+          the carousel above. Renders inside the sidebar so it overlays
+          the streams page but stays inside the app's titlebar offset
+          (Lightbox positions itself fixed inset-x-0 bottom-0 top-10). */}
+      {lightboxIndex !== null && folder.thumbnails.length > 0 && (
+        <Lightbox
+          thumbnails={folder.thumbnails}
+          localFlags={folder.thumbnailLocalFlags}
+          index={Math.min(lightboxIndex, folder.thumbnails.length - 1)}
+          thumbsKey={thumbsKey}
+          preferredThumbnail={meta?.preferredThumbnail}
+          onSetAsThumbnail={(filePath) => {
+            const basename = filePath.split(/[\\/]/).pop() ?? ''
+            onUpdateMeta({ preferredThumbnail: basename })
+          }}
+          onDeleteImage={async (filePath) => {
+            await onDeleteThumbnail(filePath)
+            // After delete, if the list will be empty, close the lightbox;
+            // otherwise the index gets clamped on the next render via the
+            // Math.min above.
+            if (folder.thumbnails.length <= 1) setLightboxIndex(null)
+          }}
+          onEditThumbnail={() => {
+            setLightboxIndex(null)
+            onOpenThumbnails()
+          }}
+          onClose={() => setLightboxIndex(null)}
+          onNavigate={(i) => setLightboxIndex(i)}
+        />
+      )}
     </div>
   )
 }
@@ -3688,7 +4251,20 @@ function EditableTextField({
 }) {
   const [local, setLocal] = useState(value)
   const [saving, setSaving] = useState(false)
-  const ref = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
+
+  // AI suggestion plumbing — declared first so its ref is the canonical
+  // textarea/input ref that the auto-grow + focus-aware-refresh effects
+  // below read from. Having a separate `useRef` and syncing it via a
+  // layout effect caused a mount-order bug: the grow useLayoutEffect ran
+  // before the sync effect, so on first mount it saw `null` and bailed
+  // out — leaving the textarea at its initial `rows=4` height until a
+  // window resize fired the ResizeObserver. Always-called per hooks
+  // rule; when no fetcher is provided we use a noop that resolves null
+  // so Ctrl+Space is a no-op and the hint line doesn't render.
+  const noopFetcher = useCallback((_p: string, _s: string) => Promise.resolve(null), [])
+  const sg = useFieldSuggestion(local, setLocal, aiFetcher ?? noopFetcher)
+  const aiEnabled = !!aiFetcher
+  const ref = sg.ref
 
   // Auto-grow control. Starts on per mount; a manual drag of the resize
   // handle (detected by ResizeObserver seeing a height we didn't write)
@@ -3785,25 +4361,11 @@ function EditableTextField({
   const cornerCls = tabAttached ? 'rounded rounded-tr-none' : 'rounded'
   const sharedCls = `w-full bg-navy-900/70 border ${borderCls} ${cornerCls} px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''} ${className ?? ''}`
 
-  // AI suggestion plumbing. Always called (hooks rule); when no fetcher
-  // is provided we use a noop that resolves null, so Ctrl+Space is a
-  // no-op and the hint line doesn't render. useFieldSuggestion attaches
-  // its own onKeyDown/onChange/onBlur — we merge ours after each so the
-  // autosave + auto-grow behavior still fires.
-  const noopFetcher = useCallback((_p: string, _s: string) => Promise.resolve(null), [])
-  const sg = useFieldSuggestion(local, setLocal, aiFetcher ?? noopFetcher)
-  const aiEnabled = !!aiFetcher
-  // Replace the local ref with the hook's ref so both auto-grow and the
-  // focus-aware refresh effect still read the same DOM node. Type-cast
-  // mirrors the existing pattern (input vs textarea).
+  // Type-cast aliases for the input vs textarea render branches. Both
+  // resolve to the same `sg.ref` DOM node — useFieldSuggestion attaches
+  // its own onKeyDown/onChange/onBlur which we merge with ours below.
   const inputRef = sg.ref as React.RefObject<HTMLInputElement>
   const textareaRef = sg.ref as React.RefObject<HTMLTextAreaElement>
-  // Auto-grow / focus-aware refresh effects read from `ref.current`;
-  // keep them pointed at sg.ref via a layout effect so the existing
-  // useEffect chains don't need rewiring.
-  useLayoutEffect(() => {
-    (ref as React.MutableRefObject<HTMLInputElement | HTMLTextAreaElement | null>).current = sg.ref.current
-  })
 
   const mergedChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     // sg.props.onChange both clears any pending suggestion AND calls our
@@ -3816,10 +4378,10 @@ function EditableTextField({
     await handleBlur()      // then autosave if dirty
   }
   const aiHint = aiEnabled && (sg.hint || true) ? (
-    <p className="flex items-center gap-1 text-[10px] text-gray-500 mt-0.5 min-h-[14px]">
+    <p className="flex items-center gap-1 text-[10px] text-gray-400 mt-0.5 min-h-[14px]">
       {sg.hint === 'loading' && <><Loader2 size={9} className="animate-spin" />Generating…</>}
-      {sg.hint === 'accept' && <><Sparkles size={9} />Tab to accept · Esc to dismiss</>}
-      {!sg.hint && <><Sparkles size={9} className="opacity-60" /><span className="opacity-60">Ctrl+Space for AI suggestion</span></>}
+      {sg.hint === 'accept' && <>Tab to accept · Esc to dismiss</>}
+      {!sg.hint && <span>Ctrl+Space for AI suggestion</span>}
     </p>
   ) : null
 
@@ -3843,7 +4405,7 @@ function EditableTextField({
       />
       <div
         onMouseDown={handleResizeStart}
-        className="group cursor-ns-resize flex items-center justify-center h-1.75 bg-navy-900/70 rounded-b hover:bg-white/5 transition-colors pt-[2px] mt-[-2px]"
+        className="group cursor-ns-resize flex items-center justify-center h-1.75 rounded-b hover:bg-white/5 transition-colors pt-[2px] mt-[-2px]"
         title="Drag to resize"
       >
         <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
@@ -3885,6 +4447,7 @@ function TagChipEditor({
   placeholder,
   tabAttached,
   aiFetcher,
+  footerRight,
 }: {
   value: string[]
   onChange: (next: string[]) => Promise<void> | void
@@ -3899,6 +4462,10 @@ function TagChipEditor({
    *  commit logic splits on commas so a multi-tag suggestion becomes
    *  multiple chips in a single round-trip). */
   aiFetcher?: (prefix: string, suffix: string) => Promise<string | null>
+  /** Rendered flush-right on the same row as the AI hint (or alone in
+   *  that row when no AI fetcher is wired). Caller supplies the char-
+   *  count / valid-tag-count summary for the field. */
+  footerRight?: React.ReactNode
 }) {
   const [input, setInput] = useState('')
 
@@ -3978,12 +4545,17 @@ function TagChipEditor({
           className="flex-1 min-w-[80px] bg-transparent text-[11px] text-gray-200 placeholder-gray-500 outline-none border-none p-0.5"
         />
       </div>
-      {aiEnabled && (
-        <p className="flex items-center gap-1 text-[10px] text-gray-500 mt-0.5 min-h-[14px]">
-          {sg.hint === 'loading' && <><Loader2 size={9} className="animate-spin" />Generating…</>}
-          {sg.hint === 'accept' && <><Sparkles size={9} />Tab to accept · Esc to dismiss · then Enter to commit</>}
-          {!sg.hint && <><Sparkles size={9} className="opacity-60" /><span className="opacity-60">Ctrl+Space for AI suggestion</span></>}
-        </p>
+      {(aiEnabled || footerRight) && (
+        <div className="flex items-center justify-between gap-2 mt-0.5 min-h-[14px]">
+          {aiEnabled ? (
+            <p className="flex items-center gap-1 text-[10px] text-gray-400">
+              {sg.hint === 'loading' && <><Loader2 size={9} className="animate-spin" />Generating…</>}
+              {sg.hint === 'accept' && <>Tab to accept · Esc to dismiss · then Enter to commit</>}
+              {!sg.hint && <span>Ctrl+Space for AI suggestion</span>}
+            </p>
+          ) : <span />}
+          {footerRight}
+        </div>
       )}
     </div>
   )
@@ -4252,7 +4824,7 @@ function RescheduleModal({
       isOpen
       onClose={() => { if (!busy) onClose() }}
       title="Reschedule stream"
-      width="sm"
+      width="2xl"
       footer={
         <>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>Cancel</Button>

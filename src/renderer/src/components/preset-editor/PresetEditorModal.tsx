@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Slider } from '../ui/Slider'
+import { useAutoGrowTextarea } from '../ui/Input'
 import type { ConversionPreset, CustomPresetForm } from '../../types'
 import { v4 as uuidv4 } from 'uuid'
 import { buildFfmpegArgs, resolveQuality, PROBE_ENCODERS, pickBestEncoder, computeQualityStops, snapQualityToStop } from './presetArgs'
@@ -386,6 +387,7 @@ export function PresetEditorModal({ isOpen, onClose, onSave, editing }: Props) {
                   : 'Auto-generated from the form above. Toggle "Edit raw" to override and disable the form.'}
               </p>
               <textarea
+                ref={useAutoGrowTextarea(rawArgs)}
                 value={rawArgs}
                 readOnly={!advancedMode}
                 onChange={e => setRawArgs(e.target.value)}

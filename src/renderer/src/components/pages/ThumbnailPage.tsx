@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
+import { useAutoGrowTextarea } from '../ui/Input'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useStore } from '../../hooks/useStore'
 import { theme, rgba } from '../../theme'
@@ -922,6 +923,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
           <section>
             <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Text</p>
             <textarea
+              ref={useAutoGrowTextarea(layer.text ?? '')}
               value={layer.text ?? ''}
               onChange={e => update({ text: e.target.value })}
               rows={3}

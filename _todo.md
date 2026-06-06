@@ -18,13 +18,15 @@
 6. Add a "default" tags template system where upon creating a new stream item, certain fields are automatically filled in with default values that can be chosen by a user in the templates dialog. Show a star icon next to each of the tag template items and when clicked, it sets that template as the default (similar to how the app handles the default launch group in the launcher page). Then when a new stream item is created, it checks if there is a default template set, and if so, it fills in the tags field with the values from that template.
 7. Make audio-track extraction more useful by letting the user choose which audio track to pull out, rather than being locked to the first track. The current "Extract Audio (First Track)" preset is limited because MP3 only supports a single track, so the picker / additional logic likely needs to live outside the Converter page (e.g. a per-track export option in the Player) — design is open. Possibly there could be a new button added to each audio track row in the player page when in the Multi-track mode, allowing the user to save the extracted audio as an MP3 file (or maybe others). These would be sent to the converter with any necessary parameters to specify which track to extract and in what format.
 8. Add a "Widgets" section to the help modal that includes documentation for the widgets in the app.
-9. The widgets all have slightly different functionality in terms of visibility and what clicking on them does. I think we need to think about how to make them more consistent and intuitive for users.
+9. The widgets all have slightly different functionality in terms of visibility and what clicking on them does. I need to think about how to make them more consistent and intuitive for users.
 10. Add ability for the user to create alternative thumbnails for stream items. It should be a dropdown next to the "Delete thumbnail" button in the thumbnail editor toolbar. It should say "New Thumbnail" or similar. When clicked, it should open the template selection modal that shows the available thumbnail templates, the same one that's used when clicking the thumbnail action button on the streams page stream item row when that stream item has no thumbnail created by SM yet. The modal in this case should also offer the ability to create a new thumbnail based on the current one, essentially duplicating it.
 11. Add more drop shadow options in the thumbnail editor. The current one is a bit too subtle by default. A spread option would be ideal, but if that's not possible, maybe just add the ability to have multiple drop shadows on the same thumbnail, so the user could layer them to create a stronger shadow effect.
 12. Add a "flip" option in the thumbnail editor that allows the user to flip layers horizontally or vertically. These 2 buttons would live next to the alignment buttons in the toolbar.
 13. When double clicking the resize element for the youtube description field in the stream item edit page, it should reset the size to the default (showing all the text without scrolling).
 14. Update the textarea for the Claude AI preferences / system prompt textarea to match the design & functionality of the YouTube description textarea in the details sidebar of the new streams page. The auto resize to fix text and the drag-to-resize functionality. This textarea field is also having performance issues as text is typed, possibly because of the auto-save functionality perhaps we should use the save on blur approach for this field instead of saving on every change, since it's not as critical to save immediately.
 15. Add the jump to episode button like on the player page to the stream details sidebar (next to the skip buttons). This will only show the other episodes in the same season as the current stream item.
+16. In the linked broadcast dropdown in the streams page details sidebar, the app needs to positively identify the "default" Youtube livestream (as opposed to scheduled broadcasts) because it's confusing when seeing an item that has out of date info and doesn't appear to be linked to anything. Use a design similar to the "already linked to x" element that appears underneath the broadcast details but make the coloring more neutral.
+17. Currently, if a tag chip is too long to fit in the available space, it wraps and causes a bad visual. They need to show ellipsis instead and not wrap. Then a tooltip can show the full tag on hover.
 
 ## Ongoing Tasks
 
@@ -42,7 +44,7 @@
 
 ## Bugs
 
-Getting an error in prod for going live. This may have been an issue with timing, but I'm not sure. This is Couldn't go live — YouTube was receiving the stream but rejected the transition. The stream is still flowing; you can set it live in YT Studio.
+1. Getting an error in prod for going live. This may have been an issue with timing, but I'm not sure. This is Couldn't go live — YouTube was receiving the stream but rejected the transition. The stream is still flowing; you can set it live in YT Studio.
 
 ## Other ideas (small)
 

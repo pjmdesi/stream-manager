@@ -3,6 +3,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { v4 as uuid } from 'uuid'
 import { Modal } from './Modal'
 import { Button } from './Button'
+import { useAutoGrowTextarea } from './Input'
 import type { YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate } from '../../types'
 import { ytTagCharCount, YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
@@ -77,8 +78,8 @@ function DescriptionForm({ initial, onSave, onCancel }: {
           {' '}<span className="font-mono text-purple-400">{'{season_links}'}</span>
           {' '}(list of previous-episode links, applied once when the template is selected).
         </p>
-        <textarea value={description} onChange={e => setDescription(e.target.value)} rows={6} placeholder="Stream description…"
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y" />
+        <textarea ref={useAutoGrowTextarea(description)} value={description} onChange={e => setDescription(e.target.value)} rows={6} placeholder="Stream description…"
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none" />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
@@ -116,8 +117,8 @@ function TagForm({ initial, onSave, onCancel }: {
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Tags</label>
         <p className="text-xs text-gray-400">Comma-separated.</p>
-        <textarea value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="gaming, lets play, elden ring, …"
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y" />
+        <textarea ref={useAutoGrowTextarea(tagsText)} value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="gaming, lets play, elden ring, …"
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none" />
         <p className={`text-xs tabular-nums text-right ${countColorCls}`}>
           {tagCount} tags · {charCount} / {YT_TAG_CHAR_LIMIT} chars
         </p>
@@ -157,8 +158,8 @@ function TwitchTagForm({ initial, onSave, onCancel }: {
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Tags</label>
         <p className="text-xs text-gray-400">Comma-separated. Twitch rules: alphanumeric only (no spaces or punctuation), max {TWITCH_TAG_MAX_COUNT} tags, max 25 chars each.</p>
-        <textarea value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="EldenRing, soulslike, opengame, …"
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y" />
+        <textarea ref={useAutoGrowTextarea(tagsText)} value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="EldenRing, soulslike, opengame, …"
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none" />
         <p className="text-xs tabular-nums text-right text-gray-400">
           {compat.length} / {TWITCH_TAG_MAX_COUNT} valid
           {skipped.length > 0 && <span className="text-amber-400 ml-1">· {skipped.length} invalid (will be dropped)</span>}

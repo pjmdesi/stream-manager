@@ -4,6 +4,7 @@ import type { RelayStatus } from '../../types'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
+import { useAutoGrowTextarea } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
@@ -745,11 +746,12 @@ export function IntegrationsPage() {
                   <span className="text-gray-400 font-normal ml-1">(optional)</span>
                 </label>
                 <textarea
+                  ref={useAutoGrowTextarea(config.claudeSystemPrompt ?? '')}
                   value={config.claudeSystemPrompt ?? ''}
                   onChange={e => updateConfig({ claudeSystemPrompt: e.target.value })}
                   rows={4}
                   placeholder="e.g. I stream horror games. Keep titles under 60 characters. Always include the episode number. My channel tagline is …"
-                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-y"
+                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none"
                 />
                 <p className="text-xs text-gray-400">Tell Claude about your channel, content style, or any preferences for how suggestions should be worded.</p>
               </div>
