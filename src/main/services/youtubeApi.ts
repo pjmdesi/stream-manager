@@ -261,6 +261,30 @@ export async function getLiveBroadcasts(
   return broadcasts
 }
 
+/** Fetch a single broadcast by ID from /liveBroadcasts. Returns the full
+ *  LiveBroadcast (incl. scheduledStartTime) for upcoming/active/completed
+ *  states. Use this — NOT getVideoById — when you need the broadcast's
+ *  scheduledStartTime; the /videos endpoint doesn't carry that field.
+ *  Tags are hydrated from the videos resource the same way the bulk
+ *  fetch does. */
+export async function getBroadcastById(
+  broadcastId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<LiveBroadcast | null> {
+  const data = await ytRequest(
+    `/liveBroadcasts?${new URLSearchParams({ part: 'snippet,status', id: broadcastId })}`,
+    { method: 'GET' },
+    clientId, clientSecret,
+  )
+  const item = data?.items?.[0]
+  if (!item) return null
+  const tagsMap = await fetchTagsForVideos([broadcastId], clientId, clientSecret)
+  const tags = tagsMap.get(broadcastId)
+  if (tags) item.snippet.tags = tags
+  return item as LiveBroadcast
+}
+
 /** Fetch a single video by ID and return it as a LiveBroadcast-shaped object, or null if not found. */
 export async function getVideoById(
   videoId: string,
@@ -611,7 +635,7 @@ export async function deleteVideo(
 
 export async function updateBroadcastSnippet(
   broadcastId: string,
-  updates: { title: string; description: string },
+  updates: { title: string; description: string; scheduledStartTime?: string },
   clientId: string,
   clientSecret: string
 ): Promise<void> {
@@ -629,8 +653,12 @@ export async function updateBroadcastSnippet(
     title: updates.title,
     description: updates.description,
   }
-  if (currentSnippet.scheduledStartTime) {
-    snippet.scheduledStartTime = currentSnippet.scheduledStartTime
+  // Caller-supplied scheduledStartTime wins (e.g., reschedule push); else
+  // preserve the existing one. scheduledStartTime is a required field on
+  // upcoming broadcasts, so omitting it entirely 400s.
+  const nextScheduled = updates.scheduledStartTime ?? currentSnippet.scheduledStartTime
+  if (nextScheduled) {
+    snippet.scheduledStartTime = nextScheduled
   }
 
   await ytRequest(

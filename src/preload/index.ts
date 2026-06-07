@@ -392,6 +392,9 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetVideoById: (videoId: string) =>
     ipcRenderer.invoke('youtube:getVideoById', videoId),
 
+  youtubeGetBroadcastById: (broadcastId: string) =>
+    ipcRenderer.invoke('youtube:getBroadcastById', broadcastId),
+
   youtubeUpdateVideo: (videoId: string, title: string, description: string, tags: string[]) =>
     ipcRenderer.invoke('youtube:updateVideo', videoId, title, description, tags),
 
@@ -406,7 +409,7 @@ contextBridge.exposeInMainWorld('api', {
 
   youtubeUpdateBroadcast: (
     broadcastId: string,
-    snippet: { title: string; description: string },
+    snippet: { title: string; description: string; scheduledStartTime?: string },
     tags: string[]
   ) => ipcRenderer.invoke('youtube:updateBroadcast', broadcastId, snippet, tags),
 

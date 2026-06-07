@@ -705,12 +705,19 @@ export function StreamsPage({
     const folder = folders.find(f => f.folderPath === folderPath)
     if (!folder) return
     const key = streamMetaKey(folder.folderPath, folder.date, streamsDir)
-    await window.api.updateStreamMeta(folder.folderPath, partial, key)
+    // Update in-memory state FIRST so two concurrent calls land in the
+    // order they were invoked, not the order their disk writes finish.
+    // Otherwise a slower earlier write can stomp a faster later write:
+    // e.g., the description field's autosave-on-blur starts its IPC,
+    // then the user clicks Pull-from-YouTube which fires its own write;
+    // if Pull's IPC resolves first the user sees the pulled values
+    // briefly, then the slower blur write completes and reverts them.
     setFolders(prev => prev.map(f =>
       f.folderPath === folderPath
         ? { ...f, meta: { ...(f.meta ?? {} as StreamMeta), ...partial }, hasMeta: true }
         : f
     ))
+    await window.api.updateStreamMeta(folder.folderPath, partial, key)
   }, [folders, streamsDir])
 
   // ── Action handlers ──────────────────────────────────────────────────────
@@ -910,7 +917,11 @@ export function StreamsPage({
   // succeeded. The old MetaModal has a much richer push pipeline (dirty
   // detection, broadcast picker integration, push-snapshot tracking) — those
   // will land alongside the inline broadcast picker in a later phase.
-  const handlePushToYoutube = useCallback(async (folder: StreamFolder, customThumbPath?: string | null) => {
+  const handlePushToYoutube = useCallback(async (
+    folder: StreamFolder,
+    customThumbPath?: string | null,
+    newScheduledStartTime?: string,
+  ) => {
     const meta = folder.meta
     if (!meta?.ytVideoId) {
       showBanner({ type: 'error', message: 'No linked YouTube broadcast or video. Link one before pushing.' })
@@ -927,9 +938,16 @@ export function StreamsPage({
     // unchecked-but-empty state would silently push the item thumb.
     const thumbToUpload = customThumbPath === undefined ? meta.preferredThumbnail : customThumbPath
     try {
+      const snippet: { title: string; description: string; scheduledStartTime?: string } = { title, description }
+      if (newScheduledStartTime) snippet.scheduledStartTime = newScheduledStartTime
       try {
-        await window.api.youtubeUpdateBroadcast(meta.ytVideoId, { title, description }, tags)
+        await window.api.youtubeUpdateBroadcast(meta.ytVideoId, snippet, tags)
       } catch {
+        // VOD path — no scheduledStartTime to update on a past video; the
+        // sidebar's mismatch check already gates the date diff on
+        // !actualStartTime, so we won't reach here with a date change
+        // intended. The videos.update endpoint is the right one for
+        // past streams.
         await window.api.youtubeUpdateVideo(meta.ytVideoId, title, description, tags)
       }
       if (thumbToUpload) {
@@ -939,11 +957,42 @@ export function StreamsPage({
           return
         }
       }
+      // Refresh the local copy of this broadcast so the sidebar's
+      // broadcastMismatch check re-evaluates against what's now on
+      // YouTube — without this, a push of e.g. just a rescheduled date
+      // succeeds remotely but the cached selectedBroadcast still has
+      // the old scheduledStartTime, so the push button stays enabled
+      // and looks like nothing happened.
+      //
+      // Try the /liveBroadcasts resource first — that's the only place
+      // `scheduledStartTime` lives. `getVideoById` (which queries
+      // /videos) doesn't carry that field and returns nothing useful
+      // for an upcoming broadcast. Fall back to the video resource only
+      // if the broadcast lookup yields nothing (e.g., the user manually
+      // linked a video-id that was never a broadcast).
+      try {
+        const refreshed = (await window.api.youtubeGetBroadcastById(meta.ytVideoId))
+          ?? (await window.api.youtubeGetVideoById(meta.ytVideoId))
+        if (refreshed) {
+          setYtBroadcasts(prev => prev.some(b => b.id === refreshed.id)
+            ? prev.map(b => b.id === refreshed.id ? refreshed : b)
+            : prev
+          )
+          setYtVods(prev => prev.some(v => v.id === refreshed.id)
+            ? prev.map(v => v.id === refreshed.id ? refreshed : v)
+            : prev
+          )
+        }
+      } catch {
+        // Refresh failure is non-fatal — the push already succeeded.
+        // The next stream reload (manual or via the reload button) will
+        // pick up the new server state.
+      }
       showBanner({ type: 'success', message: 'Pushed to YouTube.' })
     } catch (err: any) {
       showBanner({ type: 'error', message: `YouTube push failed: ${err?.message ?? String(err)}` })
     }
-  }, [showBanner])
+  }, [showBanner, setYtBroadcasts, setYtVods])
 
   // Push to Twitch. Honours syncTitle/syncGame: when sync is on (or
   // undefined), the YouTube title/game stand in for the Twitch fields. Tags
@@ -2054,7 +2103,7 @@ export function StreamsPage({
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
               onOpenThumbnails={() => handleOpenThumbnails(renderedFolder)}
               onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
-              onPushToYoutube={(customThumb) => handlePushToYoutube(renderedFolder, customThumb)}
+              onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
               onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
               ytConnected={ytConnected}
               twConnected={twConnected}
@@ -2822,7 +2871,7 @@ function SidebarDetail({
   onOpenFolder: () => void
   onOpenThumbnails: () => void
   onDelete: () => void
-  onPushToYoutube: (customThumbPath: string | null) => void
+  onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => void
   onPushToTwitch: () => void
   ytConnected: boolean
   twConnected: boolean
@@ -3300,6 +3349,17 @@ function SidebarDetail({
   // normalizing line endings + folding tags to a sorted lowercase set
   // matches the old metamodal's mismatch logic exactly, so a no-op edit
   // doesn't falsely flag as pending.
+  // Extracts the LOCAL calendar date (YYYY-MM-DD) from a broadcast's
+  // scheduledStartTime ISO string. We compare against `folder.date`
+  // which is also a local YYYY-MM-DD string; doing the comparison in
+  // UTC would misclassify any broadcast whose scheduled time straddles
+  // midnight in the user's timezone.
+  const localDateFromIso = useCallback((iso: string): string => {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ''
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }, [])
+
   const broadcastMismatch = useMemo(() => {
     if (!selectedBroadcast) return false
     const localTitle = (meta?.ytTitle ?? '').trim()
@@ -3317,8 +3377,19 @@ function SidebarDetail({
     // run yet) OR the local list has tags the remote doesn't.
     if (remoteTagSet && remoteTagSet !== localTagSet) return true
     if (!remoteTagSet && localTagSet) return true
+    // Scheduled date mismatch — only relevant when the broadcast hasn't
+    // gone live yet. Past streams (actualStartTime set) keep their
+    // scheduled time as historical record; YouTube rejects edits to
+    // their schedule and the user can't reschedule a VOD anyway.
+    if (
+      !selectedBroadcast.snippet.actualStartTime &&
+      selectedBroadcast.snippet.scheduledStartTime
+    ) {
+      const remoteLocalDate = localDateFromIso(selectedBroadcast.snippet.scheduledStartTime)
+      if (remoteLocalDate && remoteLocalDate !== folder.date) return true
+    }
     return false
-  }, [selectedBroadcast, meta?.ytTitle, meta?.ytDescription, meta?.ytGameTitle, meta?.ytTags])
+  }, [selectedBroadcast, meta?.ytTitle, meta?.ytDescription, meta?.ytGameTitle, meta?.ytTags, folder.date, localDateFromIso])
 
   return (
     <div className="@container flex flex-col h-full overflow-hidden">
@@ -3801,16 +3872,73 @@ function SidebarDetail({
                 <LucideYoutube size={11} className="text-red-400/70" />
                 {isPastStream ? 'Linked video' : 'Linked broadcast'}
               </span>
-              {selectedBroadcast && (
-                <button
-                  type="button"
-                  onClick={() => onUpdateMeta({ ytVideoId: '' })}
-                  className="text-[10px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1"
-                  title="Unlink from broadcast"
-                >
-                  <X size={11} /> Unlink
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {/* Pull info from YouTube — only when there's actually a
+                    mismatch worth pulling. Title and description are
+                    overwritten unconditionally (the user reaches for
+                    this when they've edited in Studio and want SM in
+                    sync); gameTitle and tags are skipped when remote
+                    is empty so we don't clobber local values with a
+                    "no value" YT default. Date isn't pulled — that
+                    requires renaming the folder via the dedicated
+                    reschedule flow, so the date click in the header is
+                    the right path for it. */}
+                {selectedBroadcast && broadcastMismatch && (
+                  <Tooltip content={isPastStream
+                    ? 'Replace local title / description / game / tags with what is on YouTube right now'
+                    : 'Replace local title / description / game / tags with what is on YouTube right now (does not pull date — use the date in the header to reschedule)'}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedBroadcast) return
+                        // Force any focused textarea/input to commit its
+                        // autosave-on-blur BEFORE our pull writes meta,
+                        // so the two updates land in a deterministic
+                        // order (autosave first, pull second). Browser
+                        // mousedown fires blur synchronously in most
+                        // cases, but Tooltip + portal mounts have
+                        // produced flaky timing where the blur event
+                        // races our click handler.
+                        const active = document.activeElement as HTMLElement | null
+                        if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
+                          active.blur()
+                        }
+                        const update: Partial<StreamMeta> = {
+                          ytTitle: selectedBroadcast.snippet.title,
+                          ytDescription: selectedBroadcast.snippet.description,
+                          // Clear the title-template binding. The YT
+                          // title is now the authoritative value;
+                          // without this, the auto-re-apply effect
+                          // (search for `lastAppliedTitleRef`) would
+                          // immediately re-render the bound template
+                          // against the current merge fields and
+                          // overwrite the pulled title. That effect
+                          // sees an empty `ytTitleTemplateId` and
+                          // early-returns, leaving the pulled title
+                          // in place.
+                          ytTitleTemplateId: '',
+                        }
+                        if (selectedBroadcast.snippet.gameTitle) update.ytGameTitle = selectedBroadcast.snippet.gameTitle
+                        if (selectedBroadcast.snippet.tags?.length) update.ytTags = selectedBroadcast.snippet.tags
+                        onUpdateMeta(update)
+                      }}
+                      className="text-[10px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1"
+                    >
+                      <RefreshCw size={11} /> Pull stream details from YouTube
+                    </button>
+                  </Tooltip>
+                )}
+                {selectedBroadcast && (
+                  <button
+                    type="button"
+                    onClick={() => onUpdateMeta({ ytVideoId: '' })}
+                    className="text-[10px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1"
+                    title="Unlink from broadcast"
+                  >
+                    <X size={11} /> Unlink
+                  </button>
+                )}
+              </div>
             </div>
             <BroadcastPicker
               value={linkedId}
@@ -3824,6 +3952,32 @@ function SidebarDetail({
               onOpen={isPastStream ? onLoadAllVods : undefined}
               dropUp
             />
+
+            {/* Date mismatch warning — only for upcoming broadcasts.
+                Reads the broadcast's scheduled date and compares against
+                the stream item's date. Date pull isn't part of the
+                "Pull from YouTube" button because changing the SM date
+                renames the folder (handled by the dedicated reschedule
+                modal). Push covers the other direction. */}
+            {(() => {
+              if (isPastStream) return null
+              if (!selectedBroadcast?.snippet.scheduledStartTime) return null
+              if (selectedBroadcast.snippet.actualStartTime) return null
+              const remoteLocalDate = localDateFromIso(selectedBroadcast.snippet.scheduledStartTime)
+              if (!remoteLocalDate || remoteLocalDate === folder.date) return null
+              // Pretty-print the remote date as `Mon DD` to match the
+              // header style without having to import a date library.
+              const [ry, rm, rd] = remoteLocalDate.split('-').map(n => parseInt(n, 10))
+              const remotePretty = new Date(ry, rm - 1, rd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+              return (
+                <p className="flex items-start gap-1.5 text-[10px] text-amber-300 leading-snug">
+                  <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                  <span>
+                    YouTube has this scheduled for <strong className="text-amber-200">{remotePretty}</strong>. Click the date in the header to reschedule the stream item, or push to update YouTube.
+                  </span>
+                </p>
+              )
+            })()}
 
             {/* Unlinked-state alternatives: paste URL + (future-dated
                 streams only) inline create-broadcast. Both fall away
@@ -3986,7 +4140,35 @@ function SidebarDetail({
           }>
             <button
               type="button"
-              onClick={() => onPushToYoutube(effectiveYtThumb)}
+              onClick={() => {
+                // Compute a new scheduledStartTime only when the local
+                // date and the broadcast's scheduled-date disagree (and
+                // the broadcast hasn't gone live yet). We preserve the
+                // broadcast's existing time-of-day from its current ISO
+                // so a date-only reschedule doesn't accidentally move
+                // the start hour. For everything else, undefined is
+                // passed and the main process keeps the existing
+                // scheduledStartTime.
+                let newScheduled: string | undefined
+                if (
+                  selectedBroadcast?.snippet.scheduledStartTime &&
+                  !selectedBroadcast.snippet.actualStartTime
+                ) {
+                  const existing = new Date(selectedBroadcast.snippet.scheduledStartTime)
+                  if (!isNaN(existing.getTime())) {
+                    const remoteLocalDate = `${existing.getFullYear()}-${String(existing.getMonth() + 1).padStart(2, '0')}-${String(existing.getDate()).padStart(2, '0')}`
+                    if (remoteLocalDate !== folder.date) {
+                      const [y, mo, d] = folder.date.split('-').map(n => parseInt(n, 10))
+                      const next = new Date(
+                        y, mo - 1, d,
+                        existing.getHours(), existing.getMinutes(), existing.getSeconds(), existing.getMilliseconds(),
+                      )
+                      newScheduled = next.toISOString()
+                    }
+                  }
+                }
+                onPushToYoutube(effectiveYtThumb, newScheduled)
+              }}
               disabled={!ytConnected || !meta?.ytVideoId || !selectedBroadcast || !broadcastMismatch}
               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 hover:border-red-500/40 text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/10"
             >

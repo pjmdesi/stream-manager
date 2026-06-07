@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey } from '../services/youtubeApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -121,6 +121,11 @@ export function registerYouTubeIPC(): void {
     return getVideoById(videoId, clientId, clientSecret)
   })
 
+  ipcMain.handle('youtube:getBroadcastById', async (_event, broadcastId: string) => {
+    const { clientId, clientSecret } = getCreds()
+    return getBroadcastById(broadcastId, clientId, clientSecret)
+  })
+
   ipcMain.handle('youtube:updateVideo', async (
     _event,
     videoId: string,
@@ -144,7 +149,7 @@ export function registerYouTubeIPC(): void {
   ipcMain.handle('youtube:updateBroadcast', async (
     _event,
     broadcastId: string,
-    snippet: { title: string; description: string },
+    snippet: { title: string; description: string; scheduledStartTime?: string },
     tags: string[]
   ) => {
     const { clientId, clientSecret } = getCreds()

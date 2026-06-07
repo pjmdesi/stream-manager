@@ -195,11 +195,12 @@ declare global {
       youtubeGetDefaultStreamKey(): Promise<{ streamId: string; streamName: string; ingestionAddress: string } | null>
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
+      youtubeGetBroadcastById(broadcastId: string): Promise<LiveBroadcast | null>
       youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[]): Promise<void>
       youtubeValidateToken(): Promise<{ valid: boolean; error?: string }>
       youtubeGetQualifyingThumbnails(paths: string[]): Promise<{ bestFit: string[]; rest: string[] }>
       youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>
-      youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string }, tags: string[]): Promise<void>
+      youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string; scheduledStartTime?: string }, tags: string[]): Promise<void>
       youtubeUpdateBroadcastStatus(broadcastId: string, privacyStatus: 'public' | 'unlisted' | 'private'): Promise<void>
       youtubeDeleteVideo(videoId: string): Promise<void>
       getYTTitleTemplates(): Promise<YTTitleTemplate[]>
