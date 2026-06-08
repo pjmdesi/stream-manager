@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useLayoutEffect } from 'react'
+import React, { useState, useRef, useCallback, useLayoutEffect, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
 type TooltipSide = 'top' | 'bottom' | 'left' | 'right'
@@ -13,6 +13,12 @@ interface TooltipProps {
   maxWidth?: string
   /** Extra classes applied to the trigger wrapper div (e.g. 'w-full block' for full-width triggers) */
   triggerClassName?: string
+  /** When true, the tooltip body becomes pointer-event-active and stays
+   *  open while the cursor is over it (with a brief grace period to
+   *  traverse the gap from trigger to tooltip). A click anywhere inside
+   *  the tooltip auto-dismisses it, so consumers can wire selection
+   *  handlers on inner buttons without managing tooltip visibility. */
+  interactive?: boolean
   children: React.ReactNode
 }
 
@@ -54,20 +60,43 @@ function fits(rect: DOMRect, vw: number, vh: number): boolean {
          rect.top  >= GAP && rect.bottom <= vh - GAP
 }
 
-export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'max-w-xs', triggerClassName, children }: TooltipProps) {
+export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'max-w-xs', triggerClassName, interactive, children }: TooltipProps) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos]         = useState({ top: 0, left: 0 })
   const triggerRef            = useRef<HTMLDivElement>(null)
   const tooltipRef            = useRef<HTMLDivElement>(null)
   const arrowRef              = useRef<HTMLDivElement>(null)
+  const closeTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+  }, [])
 
   const show = useCallback(() => {
+    cancelClose()
     if (!triggerRef.current) return
     const r = triggerRef.current.getBoundingClientRect()
     const { top, left } = computeAnchor(r, side)
     setPos({ top, left })
     setVisible(true)
-  }, [side])
+  }, [side, cancelClose])
+
+  // For interactive tooltips the user needs a moment to traverse the
+  // gap between the trigger and the tooltip body without it disappearing.
+  // Non-interactive tooltips close instantly to match prior behavior.
+  const close = useCallback(() => {
+    if (!interactive) { setVisible(false); return }
+    cancelClose()
+    closeTimerRef.current = setTimeout(() => {
+      setVisible(false)
+      closeTimerRef.current = null
+    }, 140)
+  }, [interactive, cancelClose])
+
+  useEffect(() => () => cancelClose(), [cancelClose])
 
   // After the tooltip portal renders, try each fallback side in priority order
   // until one fits inside the viewport. Runs before paint — no visible flash.
@@ -91,14 +120,17 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
 
   return (
     <>
-      <div ref={triggerRef} className={triggerClassName ?? 'inline-flex'} onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
+      <div ref={triggerRef} className={triggerClassName ?? 'inline-flex'} onMouseEnter={show} onMouseLeave={close}>
         {children}
       </div>
       {visible && createPortal(
         <div
           ref={tooltipRef}
-          className={`fixed pointer-events-none z-[10001] ${width} ${maxWidth} rounded-lg bg-navy-800 border border-white/10 px-3 py-2.5 text-xs text-gray-300 leading-relaxed shadow-xl`}
+          className={`fixed ${interactive ? 'pointer-events-auto' : 'pointer-events-none'} z-[10001] ${width} ${maxWidth} rounded-lg bg-navy-800 border border-white/10 px-3 py-2.5 text-xs text-gray-300 leading-relaxed shadow-xl`}
           style={{ top: pos.top, left: pos.left, transform: TRANSFORM[side] }}
+          onMouseEnter={interactive ? cancelClose : undefined}
+          onMouseLeave={interactive ? close : undefined}
+          onClick={interactive ? () => setVisible(false) : undefined}
         >
           {content}
           <div ref={arrowRef} className={ARROW[side]} />

@@ -22,7 +22,7 @@
 import { EventEmitter } from 'events'
 import { relayManager } from './relayManager'
 import { activeBroadcastService } from './activeBroadcast'
-import { bindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus } from '../youtubeApi'
+import { bindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus, getBroadcastContentDetails } from '../youtubeApi'
 import { getStore } from '../../ipc/store'
 
 /** Stages the renderer can observe via the lifecycle event. Pure information —
@@ -168,6 +168,48 @@ class RelayOrchestrator extends EventEmitter {
         error: "YouTube never started receiving the stream. Check that your streaming app is actually sending to the relay, then try again. (The broadcast wasn't set live.)",
       })
       return
+    }
+
+    // Broadcasts with enableMonitorStream:true (YouTube Studio's default
+    // for manually-created broadcasts) MUST go ready → testing → live;
+    // calling transition('live') from 'ready' directly is rejected with
+    // an "invalid transition" error. SM-created broadcasts set
+    // enableMonitorStream:false so they go straight ready → live, but
+    // the user can also pick a broadcast they created externally — so
+    // we check per-broadcast rather than assuming our own default.
+    let needsTestingTransition = false
+    try {
+      const { clientId, clientSecret } = this.getCreds()
+      const cd = await getBroadcastContentDetails(broadcastId, clientId, clientSecret)
+      // Default-true semantics from YouTube: treat an undefined value as
+      // monitor-on. Better to do a no-op testing transition on a
+      // ready-direct broadcast (YouTube returns a redundant-transition
+      // response that we retry past) than to skip and 100% fail on a
+      // monitor-on broadcast.
+      needsTestingTransition = cd?.enableMonitorStream !== false
+    } catch {
+      // ContentDetails lookup failed — fall back to assuming testing is
+      // needed. Same reasoning as above: an extra testing call is far
+      // less harmful than skipping a required one.
+      needsTestingTransition = true
+    }
+
+    if (needsTestingTransition) {
+      try {
+        const { clientId, clientSecret } = this.getCreds()
+        await transitionBroadcast(broadcastId, 'testing', clientId, clientSecret)
+      } catch {
+        // If the broadcast doesn't actually need testing (enableMonitorStream:
+        // false but our fallback assumed true), YouTube returns a
+        // redundantTransition error — safe to ignore and proceed to live.
+        // Any other failure surfaces on the live transition below, with
+        // the same error message the user already knows how to recover
+        // from (set live in YT Studio).
+      }
+      // Brief settle window — testStarting → testing can take a beat
+      // before transition('live') is accepted. Same magnitude as the
+      // existing transition retry cadence so the failure window is small.
+      await new Promise(r => setTimeout(r, RelayOrchestrator.TRANSITION_RETRY_MS))
     }
 
     // Stream is active — transition to live. A couple of quick retries cover

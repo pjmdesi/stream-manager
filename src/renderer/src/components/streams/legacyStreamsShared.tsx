@@ -991,22 +991,43 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
     setTranslateX(container.clientWidth / 2 - itemCenter)
   }, [index])
 
+  // Snap the carousel to the centered position WITHOUT the
+  // transform transition. Used for events where the item's "real"
+  // dimensions just became known (image onLoad, container resize) —
+  // animating from a position the user briefly saw with 0-width
+  // items would call attention to the layout shift. Mirrors the
+  // resize path's strategy below: write transform direct to the
+  // DOM, force a layout flush, then restore the transition. React
+  // state is also synced so the next index-change animation starts
+  // from the correct origin.
+  const recenterInstant = useCallback(() => {
+    const el = imgRefs.current[index]
+    const container = containerRef.current
+    const inner = innerRef.current
+    if (!el || !container || !inner) return
+    const itemCenter = el.offsetLeft + el.offsetWidth / 2
+    const newX = container.clientWidth / 2 - itemCenter
+    const prevDuration = inner.style.transitionDuration
+    inner.style.transitionDuration = '0s'
+    inner.style.transform = `translateX(${newX}px)`
+    // Force a layout flush so the zero-duration write commits before
+    // the next style mutation re-enables the animation. Without the
+    // reflow read, the browser would collapse both writes into one
+    // paint and the transform transition would still play.
+    void inner.offsetHeight
+    inner.style.transitionDuration = prevDuration
+    setTranslateX(newX)
+  }, [index])
+
   useLayoutEffect(() => { recenter() }, [recenter])
 
   // Re-center on container resize. Without this, dragging the window
   // narrower/wider leaves the active thumbnail offset until the user
   // clicks something that triggers another layout pass. Width changes
   // only — height never moves the centerline so we don't need to react
-  // to them.
-  //
-  // Resize-driven recenters bypass React state and the carousel's
-  // transform transition: a `setTranslateX` here would queue a 200ms
-  // animation for every resize tick, and the parent sidebar transition
-  // fires the observer ~60 times — the carousel would chase a moving
-  // target and never settle. Writing transform directly with
-  // `transition: none` keeps it visually pinned to the active item
-  // throughout the parent's animation. React state is also synced so
-  // the next index-change recenter starts from the correct position.
+  // to them. Uses recenterInstant so the parent sidebar's slide-in
+  // (which fires the observer ~60 times) doesn't queue 60 stacked
+  // 200ms animations on the carousel.
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -1014,25 +1035,11 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
     const obs = new ResizeObserver(() => {
       if (container.clientWidth === lastWidth) return
       lastWidth = container.clientWidth
-      const el = imgRefs.current[index]
-      const inner = innerRef.current
-      if (!el || !inner) return
-      const itemCenter = el.offsetLeft + el.offsetWidth / 2
-      const newX = container.clientWidth / 2 - itemCenter
-      const prevDuration = inner.style.transitionDuration
-      inner.style.transitionDuration = '0s'
-      inner.style.transform = `translateX(${newX}px)`
-      // Force a layout flush so the zero-duration write commits before
-      // the next style mutation re-enables the animation. Without the
-      // reflow read, the browser would collapse both writes into one
-      // paint and the transform transition would still play.
-      void inner.offsetHeight
-      inner.style.transitionDuration = prevDuration
-      setTranslateX(newX)
+      recenterInstant()
     })
     obs.observe(container)
     return () => obs.disconnect()
-  }, [index])
+  }, [recenterInstant])
 
   const currentPath = thumbnails[index]
   const filename = currentPath?.split(/[\\/]/).pop() ?? ''
@@ -1087,7 +1094,11 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
                   className="h-full w-auto"
                   placeholderClassName="w-full h-full rounded"
                   iconSize={20}
-                  onLoad={recenter}
+                  // Instant (no transition): the layout just learned the
+                  // image's true dimensions, so any animation here would
+                  // be chasing a position the user only briefly saw at
+                  // the wrong location.
+                  onLoad={recenterInstant}
                 />
               </div>
             )

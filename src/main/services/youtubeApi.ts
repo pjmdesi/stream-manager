@@ -464,6 +464,17 @@ export async function createBroadcast(
       // SM's normal end-of-stream flow still calls transition('complete') explicitly
       // so the VOD finalizes immediately instead of waiting for the ~60s timeout.
       enableAutoStop: true,
+      // Skip the broadcast's "testing" phase so transition('live') works
+      // straight from 'ready'. With enableMonitorStream:true (YouTube
+      // Studio's default for manually-created broadcasts) the broadcast
+      // has to go ready → testing → live; calling transition('live')
+      // from 'ready' is rejected. SM doesn't show a monitor preview
+      // anyway — it's just routing bytes through to YouTube — so the
+      // testing phase has no UX value for our use case. Externally-
+      // created broadcasts that the user picks may still have this on,
+      // so the orchestrator also checks contentDetails at bind time and
+      // does the testing transition for those.
+      enableMonitorStream: false,
     },
   }
   return ytRequest(
@@ -545,6 +556,35 @@ export async function transitionBroadcast(
     { method: 'POST' },
     clientId, clientSecret,
   )
+}
+
+/** Fetch a broadcast's `contentDetails` — currently used by the relay
+ *  orchestrator to decide whether to do the `testing` transition before
+ *  `live`. `enableMonitorStream` defaults to true on YouTube-Studio-
+ *  created broadcasts: with it enabled the broadcast MUST be moved
+ *  through `ready → testing → live`; calling `transition('live')` from
+ *  `ready` directly is the most common cause of "rejected the transition"
+ *  errors. SM-created broadcasts explicitly opt out (see createBroadcast),
+ *  but users can also pick broadcasts they made elsewhere — so we check
+ *  per-broadcast rather than assuming our default. */
+export async function getBroadcastContentDetails(
+  broadcastId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<{ enableMonitorStream?: boolean; enableAutoStart?: boolean; enableAutoStop?: boolean } | null> {
+  const data = await ytRequest(
+    `/liveBroadcasts?${new URLSearchParams({ part: 'contentDetails', id: broadcastId })}`,
+    { method: 'GET' },
+    clientId, clientSecret,
+  )
+  const item = data?.items?.[0]
+  if (!item) return null
+  const cd = item.contentDetails ?? {}
+  return {
+    enableMonitorStream: cd.enableMonitorStream,
+    enableAutoStart: cd.enableAutoStart,
+    enableAutoStop: cd.enableAutoStop,
+  }
 }
 
 /** Fetch a liveStream's ingest status. Used by the orchestrator to poll

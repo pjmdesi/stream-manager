@@ -26,6 +26,8 @@
 14. Add the jump to episode button like on the player page to the stream details sidebar (next to the skip buttons). This will only show the other episodes in the same season as the current stream item.
 15. In the linked broadcast dropdown in the streams page details sidebar, the app needs to positively identify the "default" Youtube livestream (as opposed to scheduled broadcasts) because it's confusing when seeing an item that has out of date info and doesn't appear to be linked to anything. Use a design similar to the "already linked to x" element that appears underneath the broadcast details but make the coloring more neutral.
 16. Currently, if a tag chip is too long to fit in the available space, it wraps and causes a bad visual. They need to show ellipsis instead and not wrap. Then a tooltip can show the full tag on hover.
+17. Add detection for duplicate tags in the YouTube & Twitch tag fields in the stream item details sidebar. The tags with duplicates should be colored with a warning color and have a tooltip on hover that says "Duplicate tag".
+18. Add indicators to the player, converter, & thumbnails nav items to indicate if there's something open in those pages. For instance, if the user has a thumbnail open in the thumbnail editor, the "Thumbnails" nav item could have a small dot on the right side of the button to indicate that there's an open thumbnail.
 
 ## Ongoing Tasks
 
@@ -43,15 +45,18 @@
 
 ## Bugs
 
-1. Getting an error in prod for going live. This may have been an issue with timing, but I'm not sure. This is Couldn't go live — YouTube was receiving the stream but rejected the transition. The stream is still flowing; you can set it live in YT Studio.
+1. Getting an error in prod for going live. This may have been an issue with timing, but I'm not sure. The error message was: Couldn't go live — YouTube was receiving the stream but rejected the transition. The stream is still flowing; you can set it live in YT Studio.
+2. In the details sidebar on the streams page. When the user selects a Topics/games tag that has a long name, the "{game}" field is also supposed to be automatically filled in with that tag's name.
 
 ## Other ideas (small)
 
 1. Update the "Comments" section in the How to Use modal to reflect the rename to "Notes" and the removal of the old metadata edit modal — the section block (`<ElementSection title="Comments">` in HelpModal.tsx) and the surrounding "Edit / Add metadata" bullet both still describe the pre-rebuild UI.
-2. Maybe add a button to a completed conversion task to send the source and output files to my other app ClpChk if it's detected on the user's machine. Since it's a deployable app, I may need to update it to add a registry key or something to indicate its location for other apps to find it. This button would send the current stream item or video file to ClpChk for checking and fixing any issues with the clips before uploading.
-3. Add a main process console viewer for the production version of the app, accessible with a keyboard shortcut.
-4. Maybe add a "streaming mode" that detects if there's an app that's currently recording (like OBS, Xsplit, or Streamlabs). This would allow the app to adapt in order to obscure sensitive info and perhaps even enter into a streamlined UI.
-5. Relay feature ideas:
+2. Stream stats surface (location TBD — probably NOT the streams page sidebar; that's high-visibility real estate better used for workflow surfaces). Stream count, total hours streamed, top games/topics per month/year, longest stream, most-streamed game of all time, etc. Could live in its own page, a stats modal accessible from the streams page header, or a small "year in review" type card on the dashboard/launcher page.
+3. Series momentum panel — likely lives in the streams page sidebar empty-state (alongside the planned month calendar). Lists active series (with at least one episode in the last N days) with last-streamed date + episode count, plus stalled series (last episode > 30d ago, never marked complete) with a "resume?" badge. Click a series → filter the streams list to it. Prerequisite: a way to mark a series as COMPLETE so finished games don't show up as stalled forever. Needs a new per-series "completed" flag (probably keyed off the game/topic tag, since series are inferred from {game, season}). UI for marking complete is open — right-click context menu on the panel entry, an action in the per-stream sidebar's metadata section, or a dedicated "series manager" view. Whatever shape it takes, "completed" should also influence the series-nav buttons in the detail sidebar header (last episode of a completed series shouldn't show a next-arrow that goes nowhere).
+4. Maybe add a button to a completed conversion task to send the source and output files to my other app ClpChk if it's detected on the user's machine. Since it's a deployable app, I may need to update it to add a registry key or something to indicate its location for other apps to find it. This button would send the current stream item or video file to ClpChk for checking and fixing any issues with the clips before uploading.
+5. Add a main process console viewer for the production version of the app, accessible with a keyboard shortcut.
+6. Maybe add a "streaming mode" that detects if there's an app that's currently recording (like OBS, Xsplit, or Streamlabs). This would allow the app to adapt in order to obscure sensitive info and perhaps even enter into a streamlined UI.
+7. Relay feature ideas:
    * Add the ability to allow to the to add a "technical difficulties" fallback image so if the stream app (like OBS) crashes or the signal fails, it will instead push that image to YouTube as a backup until the stream app reconnects.
    * If it's possible to integrate Twitch's enhanced broadcast mode, allow the relay to send to multiple platforms (just Twitch and YouTube for now) at the same time
    * Allow the user to manage the editable details for each platform straight from SM. Maybe they change up what game they're playing or topic they're doing or otherwise what to flexibly update the details while streaming or right before.

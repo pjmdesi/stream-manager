@@ -715,6 +715,15 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
     aspectRatioRef.current = null
   }, [layer?.id])
 
+  // Auto-grow ref for the text-layer textarea below. Must be called
+  // unconditionally — the textarea only renders for text layers, but
+  // calling the hook inside that conditional would change the hook count
+  // when the user clicks between layer types.
+  const textAreaRef = useAutoGrowTextarea(
+    layer?.type === 'text' ? layer.text ?? '' : '',
+    layer?.type === 'text',
+  )
+
   if (!layer) {
     return (
       <div className="p-4 text-xs text-gray-400 text-center">
@@ -923,7 +932,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
           <section>
             <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Text</p>
             <textarea
-              ref={useAutoGrowTextarea(layer.text ?? '')}
+              ref={textAreaRef}
               value={layer.text ?? ''}
               onChange={e => update({ text: e.target.value })}
               rows={3}

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
@@ -121,7 +121,7 @@ export function registerThumbnailIPC(): void {
   })
 
   ipcMain.handle('thumbnail:saveCanvas', async (
-    _e,
+    event,
     folderPath: string,
     date: string,
     canvasFile: ThumbnailCanvasFile,
@@ -142,6 +142,13 @@ export function registerThumbnailIPC(): void {
     // Save PNG
     const base64 = pngDataUrl.replace(/^data:image\/png;base64,/, '')
     await fs.promises.writeFile(canvasPngPath(folderPath, date), Buffer.from(base64, 'base64'))
+    // Explicit notify so the streams page refreshes immediately. The
+    // chokidar watcher would also catch this PNG write, but only after
+    // ~1.8s (awaitWriteFinish + debounce) and it can miss the event on
+    // some setups (cloud-sync'd folders, ReadDirectoryChangesW handle
+    // churn). Firing here is deterministic.
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win && !win.isDestroyed()) win.webContents.send('streams:changed')
   })
 
   // ── Asset cache ───────────────────────────────────────────────────────────

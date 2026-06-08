@@ -956,6 +956,15 @@ export function StreamsPage({
           showBanner({ type: 'error', message: `Pushed metadata, but thumbnail upload failed: ${thumbErr?.message ?? String(thumbErr)}` })
           return
         }
+        // Record the SHA-1 of the bytes we just pushed so the sidebar's
+        // thumbnail-needs-push detection knows the file is now in sync.
+        // If the hash IPC fails (file gone, race), skip silently — the
+        // next compare will treat it as "needs push" again and the user
+        // can re-trigger the push, no data lost.
+        try {
+          const newHash = await window.api.thumbnailHashFile(thumbToUpload)
+          if (newHash) await updateMeta(folder.folderPath, { ytThumbnailPushedHash: newHash })
+        } catch {}
       }
       // Refresh the local copy of this broadcast so the sidebar's
       // broadcastMismatch check re-evaluates against what's now on
@@ -992,7 +1001,7 @@ export function StreamsPage({
     } catch (err: any) {
       showBanner({ type: 'error', message: `YouTube push failed: ${err?.message ?? String(err)}` })
     }
-  }, [showBanner, setYtBroadcasts, setYtVods])
+  }, [showBanner, setYtBroadcasts, setYtVods, updateMeta])
 
   // Push to Twitch. Honours syncTitle/syncGame: when sync is on (or
   // undefined), the YouTube title/game stand in for the Twitch fields. Tags
@@ -2003,6 +2012,14 @@ export function StreamsPage({
         className="absolute top-0 right-0 bottom-0 z-30 overflow-hidden bg-navy-800 pe-2 transition-[width] ease-linear"
         style={{ width: currentSidebarWidthCss, transitionDuration: `${animDurationMs}ms` }}
       >
+        {/* Always-on left border. Sits above the detail layer (which has
+            no explicit z-index) so it stays visible when a stream is
+            selected. When no selection, the edge toggle's own indicator
+            (z-20) renders on top at the same position with the same
+            color — visually identical — and replaces this with the
+            purple hover state. */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/5 z-10" />
+
         {/* Edge toggle — only present when no stream is selected. The
             sidebar isn't collapsible while a stream is open (the user
             has to deselect first via the X). */}
@@ -2041,9 +2058,10 @@ export function StreamsPage({
               <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] uppercase tracking-wider text-gray-500 mt-2">Details</span>
             </button>
           ) : (
-            <div className="flex h-full items-center justify-center text-xs text-gray-500 px-6 text-center">
-              Pick a stream from the list to view its details here.
-            </div>
+            <SidebarMonthCalendar
+              folders={folders}
+              onSelectStream={(f) => setSelectedFolderPath(f.folderPath)}
+            />
           )}
         </div>
 
@@ -2105,6 +2123,10 @@ export function StreamsPage({
               onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
               onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
               onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
+              // The two callbacks above already return the promise from
+              // their inner handler call (no explicit return because the
+              // arrow expression is the promise itself). Loading state in
+              // SidebarDetail awaits these to drive the spinner.
               ytConnected={ytConnected}
               twConnected={twConnected}
               banner={banner}
@@ -2807,6 +2829,358 @@ function StreamListItem({
   )
 }
 
+// ── Sidebar empty state: month calendar ─────────────────────────────────────
+
+/** Month-view calendar shown in the sidebar when no stream is selected.
+ *  Past streams render as gray dots under the day number; future streams
+ *  as purple dots. Clicking a day with streams selects the first one. */
+function SidebarMonthCalendar({
+  folders,
+  onSelectStream,
+}: {
+  folders: StreamFolder[]
+  onSelectStream: (folder: StreamFolder) => void
+}) {
+  const today = todayStr()
+  const now = useMemo(() => new Date(), [])
+  const [viewYear, setViewYear] = useState(now.getFullYear())
+  const [viewMonth, setViewMonth] = useState(now.getMonth()) // 0-indexed
+
+  // Month picker (opens on month-label click)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerYear, setPickerYear] = useState(now.getFullYear())
+  const pickerRef = useRef<HTMLDivElement>(null)
+
+  // Date → folders[] index (a date can host multiple streams)
+  const byDate = useMemo(() => {
+    const map = new Map<string, StreamFolder[]>()
+    for (const f of folders) {
+      if (!f.date) continue
+      const arr = map.get(f.date) ?? []
+      arr.push(f)
+      map.set(f.date, arr)
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => a.folderName.localeCompare(b.folderName))
+    }
+    return map
+  }, [folders])
+
+  // Earliest stream date constrains how far back the picker can navigate.
+  // Future direction is unbounded — users may have streams scheduled far
+  // ahead, and an empty future month is still meaningful to plan into.
+  const earliestDate = useMemo(() => {
+    let min: string | null = null
+    for (const f of folders) {
+      if (!f.date) continue
+      if (!min || f.date < min) min = f.date
+    }
+    return min
+  }, [folders])
+  const earliestY = earliestDate ? parseInt(earliestDate.slice(0, 4), 10) : null
+  const earliestM = earliestDate ? parseInt(earliestDate.slice(5, 7), 10) - 1 : null
+
+  // 6-week grid starting on the Sunday on/before the 1st of the viewed month
+  const cells = useMemo(() => {
+    const first = new Date(viewYear, viewMonth, 1)
+    const startDow = first.getDay()
+    const out: Array<{
+      iso: string
+      day: number
+      inMonth: boolean
+      isToday: boolean
+      streams: StreamFolder[]
+    }> = []
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(viewYear, viewMonth, 1 - startDow + i)
+      const yyyy = d.getFullYear()
+      const mm = String(d.getMonth() + 1).padStart(2, '0')
+      const dd = String(d.getDate()).padStart(2, '0')
+      const iso = `${yyyy}-${mm}-${dd}`
+      out.push({
+        iso,
+        day: d.getDate(),
+        inMonth: d.getMonth() === viewMonth,
+        isToday: iso === today,
+        streams: byDate.get(iso) ?? [],
+      })
+    }
+    return out
+  }, [viewYear, viewMonth, byDate, today])
+
+  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  })
+  const isCurrentMonth = now.getFullYear() === viewYear && now.getMonth() === viewMonth
+
+  const prevMonthDisabled =
+    earliestY !== null && (viewYear < earliestY || (viewYear === earliestY && viewMonth <= earliestM!))
+
+  const prevMonth = () => {
+    if (prevMonthDisabled) return
+    if (viewMonth === 0) {
+      setViewYear(viewYear - 1)
+      setViewMonth(11)
+    } else {
+      setViewMonth(viewMonth - 1)
+    }
+  }
+  const nextMonth = () => {
+    if (viewMonth === 11) {
+      setViewYear(viewYear + 1)
+      setViewMonth(0)
+    } else {
+      setViewMonth(viewMonth + 1)
+    }
+  }
+  const goToToday = () => {
+    const n = new Date()
+    setViewYear(n.getFullYear())
+    setViewMonth(n.getMonth())
+  }
+
+  const openPicker = () => {
+    setPickerYear(viewYear)
+    setPickerOpen(true)
+  }
+  const pickMonth = (y: number, m: number) => {
+    setViewYear(y)
+    setViewMonth(m)
+    setPickerOpen(false)
+  }
+  const isPickerMonthDisabled = (y: number, m: number) => {
+    if (earliestY === null) return false
+    if (y < earliestY) return true
+    if (y === earliestY && m < earliestM!) return true
+    return false
+  }
+  const prevPickerYearDisabled = earliestY !== null && pickerYear <= earliestY
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!pickerOpen) return
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [pickerOpen])
+
+  const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+  const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+  return (
+    <div className="flex h-full flex-col px-3 pt-3 pb-4">
+      {/* Month header with nav. Relative so the picker dropdown can anchor
+          below the label. */}
+      <div className="relative flex items-center justify-between mb-2">
+        <button
+          type="button"
+          onClick={prevMonth}
+          disabled={prevMonthDisabled}
+          className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+          aria-label="Previous month"
+        >
+          <ChevronLeft size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={openPicker}
+          className="text-xs font-medium text-gray-200 hover:text-white px-2 py-0.5 rounded hover:bg-white/5 transition-colors"
+        >
+          {monthLabel}
+        </button>
+        <button
+          type="button"
+          onClick={nextMonth}
+          className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          aria-label="Next month"
+        >
+          <ChevronRight size={14} />
+        </button>
+
+        {pickerOpen && (
+          <div
+            ref={pickerRef}
+            className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-30 bg-navy-900 border border-white/10 rounded-lg shadow-lg p-2 w-56"
+          >
+            {/* Year nav */}
+            <div className="flex items-center justify-between mb-2">
+              <button
+                type="button"
+                onClick={() => setPickerYear(pickerYear - 1)}
+                disabled={prevPickerYearDisabled}
+                className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                aria-label="Previous year"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-xs font-medium text-gray-200">{pickerYear}</span>
+              <button
+                type="button"
+                onClick={() => setPickerYear(pickerYear + 1)}
+                className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                aria-label="Next year"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+            {/* Month grid */}
+            <div className="grid grid-cols-3 gap-1">
+              {MONTHS_SHORT.map((m, i) => {
+                const disabled = isPickerMonthDisabled(pickerYear, i)
+                const isSelected = pickerYear === viewYear && i === viewMonth
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => pickMonth(pickerYear, i)}
+                    className={[
+                      'py-1.5 rounded text-xs transition-colors',
+                      disabled
+                        ? 'text-gray-700 cursor-not-allowed'
+                        : isSelected
+                          ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40'
+                          : 'text-gray-300 hover:bg-white/5',
+                    ].join(' ')}
+                  >
+                    {m}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Day-of-week header row */}
+      <div className="grid grid-cols-7 gap-0.5 mb-1">
+        {DOW.map((d, i) => (
+          <div
+            key={i}
+            className="text-center text-[10px] uppercase tracking-wider text-gray-500"
+          >
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Day grid */}
+      <div className="grid grid-cols-7 gap-0.5">
+        {cells.map((c) => {
+          const has = c.streams.length > 0
+          const isFuture = c.iso > today
+          // Match the upcoming-stream badge color from the list rows
+          // (bg-teal-900/30 + text-teal-400) so the two surfaces read as
+          // the same status at a glance.
+          const dotColor = isFuture ? 'bg-teal-400' : 'bg-gray-400'
+          const dayNumberClass = c.isToday
+            ? 'text-purple-300 font-semibold'
+            : !c.inMonth
+              ? 'text-gray-600'
+              : has
+                ? 'text-gray-200'
+                : 'text-gray-400'
+
+          const cell = (
+            <button
+              type="button"
+              disabled={!has}
+              onClick={() => has && onSelectStream(c.streams[0])}
+              className={[
+                'relative aspect-square w-full flex items-center justify-center rounded transition-colors',
+                has ? 'cursor-pointer hover:bg-white/10' : 'cursor-default',
+                c.isToday ? 'ring-1 ring-purple-500/50' : '',
+              ].join(' ')}
+            >
+              <span className={`text-xs leading-none ${dayNumberClass}`}>{c.day}</span>
+              {has && (
+                // One dot per stream on this day. Cap at 4 to keep the
+                // row fitting; the tooltip lists exact titles. Archived
+                // streams get a 1px green ring (matching the archive
+                // badge's icon color from the list rows). Ring is used
+                // instead of border so the dot's layout size doesn't
+                // change — unringed neighbors stay aligned.
+                <span className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5">
+                  {c.streams.slice(0, 4).map((f) => {
+                    const archived = !!f.meta?.archived
+                    return (
+                      <span
+                        key={f.folderPath}
+                        className={`w-1.5 h-1.5 rounded-full ${dotColor} ${archived ? 'ring-1 ring-green-400' : ''}`}
+                      />
+                    )
+                  })}
+                </span>
+              )}
+            </button>
+          )
+
+          if (!has) {
+            return (
+              <div key={c.iso} className="flex items-center justify-center">
+                {cell}
+              </div>
+            )
+          }
+
+          // Single stream: read-only tooltip (just the title).
+          // Multiple streams: interactive tooltip — each row is a button
+          // that picks that stream, so the user can choose between
+          // them rather than being locked into the default first-click.
+          const multi = c.streams.length > 1
+          const tooltipContent = multi ? (
+            <div className="flex flex-col gap-0.5 -mx-2 -my-1.5 py-1">
+              {c.streams.map((f) => {
+                const title =
+                  f.meta?.ytTitle?.trim() || f.meta?.games?.join(', ') || f.folderName
+                return (
+                  <button
+                    key={f.folderPath}
+                    type="button"
+                    onClick={() => onSelectStream(f)}
+                    className="text-left text-xs text-gray-100 hover:bg-white/10 rounded px-2 py-1 truncate max-w-[260px] transition-colors"
+                  >
+                    {title}
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="text-xs text-gray-100 truncate max-w-[240px]">
+              {c.streams[0].meta?.ytTitle?.trim()
+                || c.streams[0].meta?.games?.join(', ')
+                || c.streams[0].folderName}
+            </div>
+          )
+
+          return (
+            <Tooltip key={c.iso} content={tooltipContent} side="top" interactive={multi}>
+              {cell}
+            </Tooltip>
+          )
+        })}
+      </div>
+
+      {/* Jump back to the current month */}
+      <div className="mt-3 flex justify-center">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={goToToday}
+          disabled={isCurrentMonth}
+        >
+          Go to today
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 // ── Sidebar detail ──────────────────────────────────────────────────────────
 
 /** All sidebar content when an item is selected. Extracted so the empty
@@ -2871,8 +3245,8 @@ function SidebarDetail({
   onOpenFolder: () => void
   onOpenThumbnails: () => void
   onDelete: () => void
-  onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => void
-  onPushToTwitch: () => void
+  onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => Promise<void> | void
+  onPushToTwitch: () => Promise<void> | void
   ytConnected: boolean
   twConnected: boolean
   banner: { type: 'success' | 'error'; message: string } | null
@@ -3247,6 +3621,41 @@ function SidebarDetail({
     return folder.thumbnails[0]
   }, [folder.thumbnails, meta?.preferredThumbnail])
   const effectiveYtThumb = useStreamItemThumb ? resolvedStreamItemThumb : ytSelectedThumbnail
+
+  // Thumbnail-change detection for the YT push button. SHA-1 the
+  // currently-selected thumbnail's bytes; compare against
+  // meta.ytThumbnailPushedHash (set after every successful push). A
+  // hash difference → the thumbnail has changed since it was last
+  // pushed (or was never pushed) → the button should offer to push
+  // even when title/desc/tags are otherwise in sync. Hashing rather
+  // than mtime is intentional: cloud-sync clients touch mtimes when
+  // mirroring files, so an mtime check would flag every cloud-synced
+  // thumbnail as "changed" even when the bytes are identical.
+  // Re-runs on `thumbsKey` so the thumbnail-editor save flow refreshes
+  // it: the editor writes a new PNG, the streams page bumps thumbsKey,
+  // this effect fires, and the button updates without a manual reload.
+  const [currentThumbnailHash, setCurrentThumbnailHash] = useState<string | null>(null)
+  useEffect(() => {
+    if (!effectiveYtThumb) { setCurrentThumbnailHash(null); return }
+    let cancelled = false
+    window.api.thumbnailHashFile(effectiveYtThumb)
+      .then(h => { if (!cancelled) setCurrentThumbnailHash(h) })
+      .catch(() => { if (!cancelled) setCurrentThumbnailHash(null) })
+    return () => { cancelled = true }
+  }, [effectiveYtThumb, thumbsKey])
+  const thumbnailNeedsPush =
+    !!effectiveYtThumb &&
+    currentThumbnailHash !== null &&
+    currentThumbnailHash !== meta?.ytThumbnailPushedHash
+
+  // Per-button push-in-flight state. Drives the spinner icon and
+  // disables the button while the network call is outstanding, so the
+  // user knows the click registered (banner only appears AFTER the
+  // request settles, which can be several seconds for a thumbnail
+  // upload).
+  const [ytPushing, setYtPushing] = useState(false)
+  const [twPushing, setTwPushing] = useState(false)
+
   // Fetch qualifying thumbnails when the folder's thumbnail list
   // changes (stream switch, delete, new image added). Reset all picker
   // state so the new folder starts fresh.
@@ -4135,12 +4544,13 @@ function SidebarDetail({
             !ytConnected ? 'YouTube not connected (Settings → Integrations)'
               : !meta?.ytVideoId ? 'No linked broadcast or video — link one first'
               : !selectedBroadcast ? 'Loading broadcast info…'
-              : !broadcastMismatch ? 'Already in sync with YouTube'
+              : !broadcastMismatch && !thumbnailNeedsPush ? 'Already in sync with YouTube'
+              : !broadcastMismatch && thumbnailNeedsPush ? 'Push updated thumbnail to YouTube'
               : 'Push title / description / tags to YouTube'
           }>
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 // Compute a new scheduledStartTime only when the local
                 // date and the broadcast's scheduled-date disagree (and
                 // the broadcast hasn't gone live yet). We preserve the
@@ -4167,23 +4577,29 @@ function SidebarDetail({
                     }
                   }
                 }
-                onPushToYoutube(effectiveYtThumb, newScheduled)
+                setYtPushing(true)
+                try { await onPushToYoutube(effectiveYtThumb, newScheduled) }
+                finally { setYtPushing(false) }
               }}
-              disabled={!ytConnected || !meta?.ytVideoId || !selectedBroadcast || !broadcastMismatch}
+              disabled={ytPushing || !ytConnected || !meta?.ytVideoId || !selectedBroadcast || (!broadcastMismatch && !thumbnailNeedsPush)}
               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 hover:border-red-500/40 text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/10"
             >
-              <LucideYoutube size={11} />
+              {ytPushing ? <Loader2 size={11} className="animate-spin" /> : <LucideYoutube size={11} />}
               Push to YouTube
             </button>
           </Tooltip>
           <Tooltip content={!twConnected ? 'Twitch not connected (Settings → Integrations)' : 'Push title/category/tags to Twitch channel'}>
             <button
               type="button"
-              onClick={onPushToTwitch}
-              disabled={!twConnected}
+              onClick={async () => {
+                setTwPushing(true)
+                try { await onPushToTwitch() }
+                finally { setTwPushing(false) }
+              }}
+              disabled={twPushing || !twConnected}
               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/25 hover:border-purple-500/40 text-purple-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-purple-500/10"
             >
-              <LucideTwitch size={11} />
+              {twPushing ? <Loader2 size={11} className="animate-spin" /> : <LucideTwitch size={11} />}
               Push to Twitch
             </button>
           </Tooltip>
