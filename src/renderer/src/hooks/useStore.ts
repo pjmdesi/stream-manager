@@ -45,6 +45,11 @@ const defaultConfig: AppConfig = {
   streamRelayActivePickedAt: 0,
   autoUpdateTwitchAfterStream: 'ask',
   streamsNewSidebarCollapsed: false,
+  startupPage: 'streams',
+  calendarFirstDayOfWeek: 'sunday',
+  calendarShowWeekNumbers: false,
+  calendarShowAdjacentMonthDays: true,
+  twitchSkipCategoryRenamePrompt: false,
 }
 
 interface StoreContextValue {

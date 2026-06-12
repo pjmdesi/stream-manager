@@ -103,11 +103,19 @@ export function StreamRelayWidget({
         <Tooltip content="Stream Relay" side="right" triggerClassName="block w-full">
           <button
             onClick={() => onNavigate('integrations')}
-            className="flex items-center justify-center w-full py-2.5 text-sm font-medium transition-colors text-gray-400 hover:text-gray-200"
+            // Nav-item pattern: icon at x=16 from the left, label
+            // always rendered + cropped by the parent nav's
+            // overflow-hidden. Keeps the icon visually anchored to
+            // the same column as the rest of the sidebar.
+            className="relative flex items-center gap-3 w-full px-4 h-10 text-sm font-medium transition-colors text-gray-400 hover:text-gray-200"
           >
-            <TrendingUpDown size={18} />
+            <span className="shrink-0 inline-flex"><TrendingUpDown size={18} /></span>
+            <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">Stream Relay</span>
           </button>
         </Tooltip>
+        {/* Status dot stays centered in the 48px rail — it's a small
+            decorative indicator, not a primary icon, so the visual
+            convention here is centered rather than left-aligned. */}
         <div className="flex items-center justify-center gap-1 pb-2">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
             isStreaming ? 'bg-green-400 animate-pulse' :

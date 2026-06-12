@@ -718,7 +718,11 @@ interface LightboxProps {
   /** Opens the SM thumbnail editor for the folder. Surfaced as an "Edit
    *  thumbnail" button only when the current image is an SM thumbnail.
    *  Caller is expected to close the lightbox as part of the transition. */
-  onEditThumbnail?: () => void
+  /** Receives the variant ordinal (1 = primary `_sm-thumbnail.png`,
+   *  N ≥ 2 = `_sm-thumbnail-N.png`) of the carousel image the user
+   *  clicked from, so the editor can open the matching variant
+   *  instead of always defaulting to the preferred one. */
+  onEditThumbnail?: (variantOrdinal?: number) => void
   onClose: () => void
   onNavigate: (index: number) => void
   /** Parallel to `thumbnails`; false → cloud placeholder. */
@@ -834,7 +838,7 @@ export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onS
               in the inline ThumbnailCarousel below. */}
           {onEditThumbnail && SM_THUMB_REGEX.test(currentPath) && (
             <button
-              onClick={() => onEditThumbnail()}
+              onClick={() => onEditThumbnail(parseSmThumbnailOrdinal(currentPath) ?? undefined)}
               className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-purple-600/40 border border-white/20 hover:border-purple-500/50 text-gray-300 hover:text-purple-200 text-xs font-medium transition-colors"
             >
               <PencilLine size={12} /> Edit thumbnail
@@ -947,7 +951,11 @@ interface ThumbnailCarouselProps {
    *  is an SM thumbnail (matches `<date>_sm-thumbnail.png` pattern); the
    *  caller decides what "edit" means (typically closes the modal and
    *  navigates to the thumbnail editor for the folder). */
-  onEditThumbnail?: () => void
+  /** Receives the variant ordinal (1 = primary `_sm-thumbnail.png`,
+   *  N ≥ 2 = `_sm-thumbnail-N.png`) of the carousel image the user
+   *  clicked from, so the editor can open the matching variant
+   *  instead of always defaulting to the preferred one. */
+  onEditThumbnail?: (variantOrdinal?: number) => void
   /** Parallel to `thumbnails`. Each element is true if the file's data is local
    *  on disk; false if it's a cloud-provider placeholder. The active image
    *  hydrates on demand; other slots show the cloud icon until they become active. */
@@ -959,7 +967,20 @@ interface ThumbnailCarouselProps {
   onOpenLightbox?: (index: number) => void
 }
 
-const SM_THUMB_REGEX = /[_-]sm-thumbnail\./i
+// Matches both the primary `<date>_sm-thumbnail.png` and any
+// `<date>_sm-thumbnail-N.png` ordinal variants. The optional `(?:-\d+)?`
+// captures the suffix without consuming non-numeric ad-hoc names.
+const SM_THUMB_REGEX = /[_-]sm-thumbnail(?:-\d+)?\./i
+
+/** Pull the variant ordinal from a thumbnail's filename — e.g.
+ *  `…_sm-thumbnail.png` → 1, `…_sm-thumbnail-3.png` → 3. Returns null
+ *  if the path isn't an SM-created thumbnail at all. Used by the
+ *  carousel + lightbox to tell the editor WHICH variant to open. */
+function parseSmThumbnailOrdinal(path: string): number | null {
+  const m = path.match(/[_-]sm-thumbnail(?:-(\d+))?\.[a-z0-9]+$/i)
+  if (!m) return null
+  return m[1] ? parseInt(m[1], 10) : 1
+}
 
 export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, localFlags, onOpenLightbox }: ThumbnailCarouselProps) {
   const [index, setIndex] = useState(0)
@@ -1133,7 +1154,7 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
               images. */}
           {onEditThumbnail && currentPath && SM_THUMB_REGEX.test(currentPath) && (
             <button
-              onClick={() => onEditThumbnail()}
+              onClick={() => onEditThumbnail(parseSmThumbnailOrdinal(currentPath) ?? undefined)}
               title="Edit thumbnail"
               className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-purple-600/30 border border-white/15 hover:border-purple-500/45 text-gray-400 hover:text-purple-200 text-xs font-medium whitespace-nowrap transition-colors"
             >
@@ -1228,7 +1249,11 @@ interface MetaModalProps {
    *  to the embedded ThumbnailCarousel — surfaces an Edit button when the
    *  user is looking at the SM-generated thumbnail. Parent is expected to
    *  close the metamodal as part of this transition. */
-  onEditThumbnail?: () => void
+  /** Receives the variant ordinal (1 = primary `_sm-thumbnail.png`,
+   *  N ≥ 2 = `_sm-thumbnail-N.png`) of the carousel image the user
+   *  clicked from, so the editor can open the matching variant
+   *  instead of always defaulting to the preferred one. */
+  onEditThumbnail?: (variantOrdinal?: number) => void
   tagColors?: Record<string, string>
   tagTextures?: Record<string, string>
   onNewStreamType?: (tag: string) => void
@@ -3587,7 +3612,7 @@ export function SaveAsTemplateButton({ onSave, suggestedName }: { onSave: (name:
           else if (e.key === 'Escape') { e.preventDefault(); cancel() }
         }}
         placeholder="Template name…"
-        className="text-xs bg-navy-900 border border-white/10 text-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500/40 w-32"
+        className="text-xs bg-navy-900 border border-white/10 text-gray-200 rounded-lg px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500/40 w-32"
       />
       <button
         type="button"
@@ -5936,7 +5961,7 @@ return (
                         type="time"
                         value={rescheduleTime}
                         onChange={e => setRescheduleTime(e.target.value)}
-                        className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+                        className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
                       />
                       <span className="text-[10px] text-gray-400">your local time</span>
                     </div>
@@ -6524,6 +6549,66 @@ return (
               })
             ).then(() => loadFolders(streamsDir))
           }}
+          // Global rename of a stream type. Rewrites every folder whose
+          // streamType array contains the old name, then re-keys the
+          // color + texture maps so the chip styling moves with the
+          // renamed tag. Mirrors the delete/combine bulk-write pattern.
+          onRenameTag={(oldName, newName) => {
+            const affected = folders.filter(f =>
+              normalizeStreamTypes(f.meta?.streamType).includes(oldName)
+            )
+            Promise.all(
+              affected.map(f =>
+                window.api.writeStreamMeta(f.folderPath, {
+                  ...f.meta!,
+                  streamType: normalizeStreamTypes(f.meta?.streamType)
+                    .map(t => t === oldName ? newName : t),
+                }, f.relativePath)
+              )
+            ).then(() => {
+              if (oldName in tagColors) {
+                const updatedColors = { ...tagColors, [newName]: tagColors[oldName] }
+                delete updatedColors[oldName]
+                saveTagColors(updatedColors)
+              }
+              if (oldName in tagTextures) {
+                const updatedTextures = { ...tagTextures, [newName]: tagTextures[oldName] }
+                delete updatedTextures[oldName]
+                saveTagTextures(updatedTextures)
+              }
+              loadFolders(streamsDir)
+            })
+          }}
+          // Global rename of a topic/game tag. Touches games[] plus the
+          // YouTube + Twitch sync fields and the twitchLastPushed
+          // snapshot so a stream that's been pushed doesn't trip the
+          // snapshot's staleness guard after the rename.
+          onRenameGame={(oldName, newName) => {
+            const affected = folders.filter(f => {
+              const m = f.meta
+              if (!m) return false
+              return (m.games ?? []).includes(oldName)
+                || m.ytGameTitle === oldName
+                || m.twitchGameName === oldName
+                || m.twitchLastPushedGame === oldName
+                || m.primaryGame === oldName
+            })
+            Promise.all(
+              affected.map(f => {
+                const m = f.meta
+                if (!m) return Promise.resolve()
+                const next: StreamMeta = { ...m }
+                if (m.games?.includes(oldName)) {
+                  next.games = m.games.map(g => g === oldName ? newName : g)
+                }
+                if (m.ytGameTitle === oldName) next.ytGameTitle = newName
+                if (m.twitchGameName === oldName) next.twitchGameName = newName
+                if (m.twitchLastPushedGame === oldName) next.twitchLastPushedGame = newName
+                if (m.primaryGame === oldName) next.primaryGame = newName
+                return window.api.writeStreamMeta(f.folderPath, next, f.relativePath)
+              })
+            ).then(() => loadFolders(streamsDir))
+          }}
           onClose={() => setShowManageTags(false)}
         />
       )}
@@ -6634,6 +6719,79 @@ function ClampedComment({ text, maxLines = 3 }: { text: string; maxLines?: numbe
       ) : span}
     </div>
   )
+}
+
+/**
+ * DisplayTagChip — single non-editable tag chip with truncation-aware
+ * Tooltip. Measures scrollWidth > clientWidth on the chip element after
+ * layout and on resize; only wraps in a Tooltip when the chip is actually
+ * clipped. Callers pass the chip's full className (including `truncate
+ * max-w-full` so the chip stays a single line and clips with ellipsis).
+ * For "detected from filename" games, pass `detectedTooltip` — the tip
+ * always shows the detection note, and appends the full tag text when
+ * the chip is truncated.
+ */
+export function DisplayTagChip({
+  text, className, style, detectedTooltip,
+}: {
+  text: string
+  className: string
+  style?: React.CSSProperties
+  detectedTooltip?: string
+}) {
+  const [truncated, setTruncated] = useState(false)
+  // The chip element changes identity when `truncated` toggles
+  // (React unmounts the bare span and remounts a new one inside the
+  // Tooltip wrapper, or vice versa). useRef + useLayoutEffect with
+  // [text] deps wouldn't catch that — the effect doesn't re-run, so
+  // the observer would stay bound to the detached previous element.
+  // A callback ref re-fires on every element attach/detach, so the
+  // observer always tracks whatever span is currently in the DOM.
+  const obsCleanupRef = useRef<(() => void) | null>(null)
+  const setRef = useCallback((el: HTMLSpanElement | null) => {
+    obsCleanupRef.current?.()
+    obsCleanupRef.current = null
+    if (!el) return
+    const check = () => setTruncated(el.scrollWidth > el.clientWidth)
+    check()
+    // Defer ResizeObserver-driven re-checks to the next frame to
+    // avoid the "ResizeObserver loop completed with undelivered
+    // notifications" warning.
+    let raf = 0
+    const obs = new ResizeObserver(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(check)
+    })
+    obs.observe(el)
+    obsCleanupRef.current = () => {
+      cancelAnimationFrame(raf)
+      obs.disconnect()
+    }
+  }, [])
+  // Final cleanup on component unmount
+  useEffect(() => () => { obsCleanupRef.current?.() }, [])
+
+  const chip = <span ref={setRef} className={className} style={style}>{text}</span>
+
+  // Tooltip's default trigger wrapper is `inline-flex` which shrinks to
+  // fit the chip's content. The chip's `max-w-full` then resolves to
+  // the wrapper's width (= chip natural), so no clamp happens and the
+  // truncation reading oscillates each render.
+  //
+  // Fix: make the wrapper an inline-block (regular flow box, not a flex
+  // container itself) with `max-w-full` + `min-w-0`. As a flex item in
+  // the original flex-wrap parent, the wrapper's `min-width: auto`
+  // would otherwise resolve to its content's min-content (= chip
+  // natural width with `white-space: nowrap`), defeating the `max-w-full`
+  // cap. `min-w-0` overrides that so the cascade actually reaches the
+  // chip and truncation stays stable.
+  const triggerCls = 'inline-block max-w-full min-w-0'
+
+  if (detectedTooltip) {
+    const content = truncated ? `${detectedTooltip} · ${text}` : detectedTooltip
+    return <Tooltip content={content} side="top" triggerClassName={triggerCls}>{chip}</Tooltip>
+  }
+  return truncated ? <Tooltip content={text} side="top" triggerClassName={triggerCls}>{chip}</Tooltip> : chip
 }
 
 // ─── Stream card (grid view) ─────────────────────────────────────────────────
@@ -6802,9 +6960,12 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
             {normalizeStreamTypes(meta.streamType).map(t => {
               const color = getTagColor(tagColors[t])
               return (
-                <span key={t} className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
-                  {t}
-                </span>
+                <DisplayTagChip
+                  key={t}
+                  text={t}
+                  className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border truncate max-w-full ${color.chip}`}
+                  style={getTagTextureStyle(tagTextures[t])}
+                />
               )
             })}
           </div>
@@ -6815,11 +6976,18 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
           <div className="flex flex-wrap gap-1">
             {displayGames.map(g =>
               meta?.games?.includes(g) ? (
-                <span key={g} className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30">{g}</span>
+                <DisplayTagChip
+                  key={g}
+                  text={g}
+                  className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30 truncate max-w-full"
+                />
               ) : (
-                <Tooltip key={g} content="Detected from filename">
-                  <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic">{g}</span>
-                </Tooltip>
+                <DisplayTagChip
+                  key={g}
+                  text={g}
+                  className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic truncate max-w-full"
+                  detectedTooltip="Detected from filename"
+                />
               )
             )}
           </div>
@@ -7210,9 +7378,12 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
             {normalizeStreamTypes(meta.streamType).map(t => {
               const color = getTagColor(tagColors[t])
               return (
-                <span key={t} className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
-                  {t}
-                </span>
+                <DisplayTagChip
+                  key={t}
+                  text={t}
+                  className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border truncate max-w-full ${color.chip}`}
+                  style={getTagTextureStyle(tagTextures[t])}
+                />
               )
             })}
           </div>
@@ -7227,18 +7398,18 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
           <div className="flex flex-wrap gap-1">
             {displayGames.map(g =>
               meta?.games?.includes(g) ? (
-                <span
+                <DisplayTagChip
                   key={g}
-                  className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30"
-                >
-                  {g}
-                </span>
+                  text={g}
+                  className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30 truncate max-w-full"
+                />
               ) : (
-                <Tooltip key={g} content="Detected from filename">
-                  <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic">
-                    {g}
-                  </span>
-                </Tooltip>
+                <DisplayTagChip
+                  key={g}
+                  text={g}
+                  className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic truncate max-w-full"
+                  detectedTooltip="Detected from filename"
+                />
               )
             )}
           </div>

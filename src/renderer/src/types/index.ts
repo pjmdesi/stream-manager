@@ -209,6 +209,24 @@ export interface AppConfig {
   /** Persisted collapse-state of the new streams page's right sidebar.
    *  Only effective when no item is selected. */
   streamsNewSidebarCollapsed: boolean
+  /** Which page the app opens to on launch. One of the functional Page
+   *  ids (streams / player / converter / combine / thumbnails /
+   *  launcher). Defaults to 'streams'. Settings + integrations are
+   *  intentionally not user-selectable as a startup page. */
+  startupPage: string
+  // ── Sidebar calendar prefs ───────────────────────────────────────────────
+  /** First column of the calendar grid + day-of-week header. */
+  calendarFirstDayOfWeek: 'sunday' | 'monday'
+  /** Prepend an ISO week-number column to the calendar grid. */
+  calendarShowWeekNumbers: boolean
+  /** Render days from the prior/next month in the leading + trailing
+   *  cells of the grid. When false, those cells render blank. */
+  calendarShowAdjacentMonthDays: boolean
+  /** When true, suppress the after-Twitch-push modal that offers to
+   *  rename the local game tag to Twitch's canonical category. Set
+   *  via the "Don't ask again" button in that same modal or via the
+   *  Streams section of Settings. */
+  twitchSkipCategoryRenamePrompt: boolean
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'
@@ -277,6 +295,28 @@ export interface StreamMeta {
   ytCatchyTitle?: string
   ytSeason?: string
   ytEpisode?: string
+  /** Opt-in flag for the series / season / episode system. `true` =
+   *  this stream is part of a series and should appear in series math
+   *  (episode numbering, season-links merge field, prev/next nav,
+   *  total-episodes count). `false` = standalone one-off; excluded
+   *  from series math and the Season/Episode inputs are hidden in the
+   *  sidebar UI. `undefined` = legacy default — also treated as series
+   *  so existing streams keep working without an explicit migration
+   *  pass over every saved file. New streams created via the "New
+   *  Episode" button always seed `true`; new streams created via the
+   *  regular "New stream" button leave this undefined and the first
+   *  game-tag add triggers a one-time auto-detect against the user's
+   *  prior streams in the same game. */
+  isSeries?: boolean
+  /** Transient marker for the one-time "first-game-add" auto-detect.
+   *  Set to `true` by NewStreamModal in regular "New stream" mode (NOT
+   *  "New Episode" mode — that path sets `isSeries: true` directly at
+   *  creation). When the user later adds their first game tag in the
+   *  sidebar, an effect checks siblings of that game and bumps
+   *  `isSeries` to `true` if a series exists, then clears this flag.
+   *  Also cleared the moment the user manually toggles the Series
+   *  checkbox. Never read after first detection. */
+  seriesAutoDetectPending?: boolean
   ytTags?: string[]
   /** Id of the YouTube-title template currently bound to this stream.
    *  When set, the streams sidebar re-renders the template against the
@@ -301,6 +341,28 @@ export interface StreamMeta {
    *  flag because Twitch + YouTube tag formats are too dissimilar. */
   syncTitle?: boolean
   syncGame?: boolean
+  /** User-selected "primary" entry in `games[]` — the one promoted to
+   *  Twitch's category at push time (Twitch only supports a single
+   *  category) AND used as the `{game}` merge field for YouTube title
+   *  templates. Separate from array position so the user can keep
+   *  `games[]` ordered to match their actual play order during the
+   *  stream while still controlling which one is "active" for pushes.
+   *  Resolution: if set AND present in `games[]`, use it; otherwise
+   *  fall back to `games[0]`. Cleared (effectively) when its referent
+   *  is removed from `games[]`. */
+  primaryGame?: string
+  /** Snapshot of the effective values at the last successful Push to
+   *  Twitch. Used by the Push to Twitch button's in-sync check so it
+   *  stays disabled when the local meta still matches the last successful
+   *  push, even when Twitch normalizes a field (most notably game name,
+   *  which goes through a search → game_id round-trip and can come back
+   *  as a different canonical category name like "Assassin's Creed Black
+   *  Flag" → "Assassin's Creed IV Black Flag"). Compared *in addition to*
+   *  the live Twitch channel snapshot, so external changes to Twitch
+   *  details (made outside this app) still register as out-of-sync. */
+  twitchLastPushedTitle?: string
+  twitchLastPushedGame?: string
+  twitchLastPushedTags?: string[]
   // Thumbnail
   smThumbnail?: boolean
   smThumbnailTemplate?: string
@@ -471,6 +533,18 @@ export interface OrchestratorEvent {
 
 // ── Thumbnail Editor ──────────────────────────────────────────────────────────
 
+/** A single drop-shadow pass on a thumbnail layer. Renders as a clone of
+ *  the layer placed behind the original with Konva's native
+ *  shadowColor/shadowBlur/shadowOffset/shadowOpacity attached — stacks
+ *  with sibling passes for heavier / multi-direction shadow effects. */
+export interface ThumbnailShadow {
+  color: string
+  offsetX: number
+  offsetY: number
+  blur: number
+  opacity: number   // 0–100
+}
+
 export interface ThumbnailLayer {
   id: string
   name: string
@@ -484,6 +558,24 @@ export interface ThumbnailLayer {
   src?: string          // absolute path on disk
   width?: number
   height?: number
+  /** Horizontal / vertical flip flags. Width and height are stored as
+   *  positive numbers regardless of flip state; rendering applies
+   *  scaleX(-1) / scaleY(-1) via Konva with offset compensation so the
+   *  layer flips in place around its center. The PropertiesPanel
+   *  displays the W/H inputs as negative when the flag is set, as a
+   *  visual signal that the layer is flipped — but the stored width
+   *  itself never goes negative, so snapping/alignment/aspect math
+   *  doesn't need special-casing. */
+  flipX?: boolean
+  flipY?: boolean
+  /** Per-layer aspect-ratio lock. Treated as `true` when undefined so
+   *  newly-added image/shape layers start locked to their natural
+   *  aspect (matching the convention in every other vector editor).
+   *  Drives both the W/H input handlers in PropertiesPanel AND the
+   *  Transformer's `boundBoxFunc` enforcement during drag resize.
+   *  Shift held during a drag inverts the effective lock state for
+   *  that gesture. */
+  aspectLocked?: boolean
   // Text
   text?: string
   fontFamily?: string
@@ -497,13 +589,32 @@ export interface ThumbnailLayer {
   fill?: string
   stroke?: string
   strokeWidth?: number
-  // Drop shadow (all layer types). Disabled when shadowEnabled is false/undefined.
+  // Drop shadow (all layer types). Legacy single-shadow fields below are
+  // still read for backwards compat (one-time migrated into `shadows[0]`
+  // on first edit) but no longer written. New thumbnails use the
+  // `shadows` array. Disabled when `shadowEnabled` is false/undefined
+  // AND `shadows` is empty.
+  /** @deprecated Migrated into `shadows[0]` on load. Kept on disk so old
+   *  files round-trip during the migration window. */
   shadowEnabled?: boolean
-  shadowColor?: string
-  shadowOffsetX?: number
-  shadowOffsetY?: number
-  shadowBlur?: number
-  shadowOpacity?: number    // 0–100
+  /** @deprecated */ shadowColor?: string
+  /** @deprecated */ shadowOffsetX?: number
+  /** @deprecated */ shadowOffsetY?: number
+  /** @deprecated */ shadowBlur?: number
+  /** @deprecated */ shadowOpacity?: number    // 0–100
+  /** Ordered back-to-front. Each entry renders as its own ghost clone of
+   *  the layer behind the original, so the shadows visually stack
+   *  (multiple soft halos / heavier drop). Combine with the outline
+   *  effect below for spread — the shadow attaches to the dilated
+   *  silhouette, giving a wider footprint than offset+blur alone can. */
+  shadows?: ThumbnailShadow[]
+  // Outline (all layer types). For text + shape, implemented via Konva's
+  // native stroke; for image, via a custom alpha-dilation filter. When
+  // enabled together with shadows, the shadows radiate from the dilated
+  // silhouette → effective spread shadow.
+  outlineEnabled?: boolean
+  outlineColor?: string
+  outlineWidth?: number     // pixels (in layer-local space)
   // Konva filters (image layers only). Master toggle so all slider values
   // persist when the user temporarily disables effects without losing them.
   filtersEnabled?: boolean

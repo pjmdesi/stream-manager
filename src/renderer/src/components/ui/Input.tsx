@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { GripHorizontal, ChevronUp, ChevronDown } from 'lucide-react'
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string
@@ -129,7 +130,44 @@ export const Textarea: React.FC<TextareaProps> = ({
   ...props
 }) => {
   const inputId = id || label?.toLowerCase().replace(/\s+/g, '-')
-  const ref = useAutoGrowTextarea(value as string | undefined, autoGrow)
+  // Auto-grow is paused once the user manually drags the resize
+  // handle below — their explicit choice should stick until they
+  // double-click the handle to re-engage content-fitting.
+  const [manuallyResized, setManuallyResized] = useState(false)
+  const ref = useAutoGrowTextarea(value as string | undefined, autoGrow && !manuallyResized)
+
+  // Drag-to-resize via a custom handle strip below the textarea. Mirrors
+  // the EditableTextField pattern from the streams sidebar — full-bottom-
+  // edge hit target instead of the native bottom-right corner. The
+  // mousedown flips off auto-grow so subsequent content changes don't
+  // fight the user's chosen height. Double-click re-enables auto-grow
+  // and the useAutoGrowTextarea hook re-fires its grow() (the hook
+  // re-runs when its `enabled` arg flips back on), snapping the
+  // textarea back to content height.
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    if (!autoGrow) return
+    e.preventDefault()
+    const ta = ref.current
+    if (!ta) return
+    setManuallyResized(true)
+    const startY = e.clientY
+    const startHeight = ta.offsetHeight
+    const onMove = (me: MouseEvent) => {
+      const next = Math.max(40, startHeight + me.clientY - startY)
+      ta.style.height = `${next}px`
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [autoGrow, ref])
+
+  const handleResizeReset = useCallback(() => {
+    if (!autoGrow) return
+    setManuallyResized(false)
+  }, [autoGrow])
 
   return (
     <div className="flex flex-col gap-1">
@@ -138,20 +176,41 @@ export const Textarea: React.FC<TextareaProps> = ({
           {label}
         </label>
       )}
-      <textarea
-        id={inputId}
-        ref={ref}
-        value={value}
-        className={`
-          w-full bg-navy-900 border text-gray-200 text-sm rounded-lg
-          px-3 py-2 placeholder-gray-600 resize-none
-          focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50
-          transition-colors duration-200
-          ${error ? 'border-red-500/50' : 'border-white/10'}
-          ${className}
-        `}
-        {...props}
-      />
+      <div className="flex flex-col">
+        <textarea
+          id={inputId}
+          ref={ref}
+          value={value}
+          className={`
+            relative z-10
+            w-full bg-navy-900 border text-gray-200 text-sm rounded-lg
+            px-3 py-2 placeholder-gray-600 resize-none
+            focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50
+            transition-colors duration-200
+            ${error ? 'border-red-500/50' : 'border-white/10'}
+            ${className}
+          `}
+          {...props}
+        />
+        {autoGrow && (
+          // Tucks 8px (= the textarea's bottom corner radius) up into
+          // the textarea so the handle's top edges sit BEHIND the
+          // textarea's rounded bottom corners. The textarea has
+          // `relative z-10` so its opaque background covers the
+          // tucked top of the handle except in the rounded-corner
+          // cutouts — so the hover tint only peeks through where the
+          // textarea's bg ends due to the rounded shape, and the
+          // visible portion of the handle continues below.
+          <div
+            onMouseDown={handleResizeStart}
+            onDoubleClick={handleResizeReset}
+            className="group relative z-0 cursor-ns-resize flex items-center justify-center h-4 rounded-b-lg hover:bg-white/5 transition-colors pt-[8px] mt-[-8px]"
+            title="Drag to resize · double-click to reset"
+          >
+            <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+          </div>
+        )}
+      </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       {hint && !error && <p className="text-xs text-gray-400">{hint}</p>}
     </div>
@@ -200,6 +259,113 @@ export const Select: React.FC<SelectProps> = ({
         ))}
       </select>
       {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+interface NumberInputProps {
+  value: number
+  onChange: (next: number) => void
+  min?: number
+  max?: number
+  /** Per-click increment for the +/- buttons (and arrow keys when the
+   *  input is focused). Defaults to 1. */
+  step?: number
+  placeholder?: string
+  disabled?: boolean
+  /** Extra classes on the outer flex wrapper — typically used to set
+   *  width (e.g. `w-full`, `w-20`). */
+  className?: string
+  title?: string
+  'aria-label'?: string
+}
+
+/**
+ * NumberInput — number field with custom vertical +/- buttons stacked
+ * on the right edge. Replaces the native Chromium number-spinner with
+ * a styled control consistent with the rest of the app's inputs.
+ * Pair with `min`/`max` to clamp; the buttons disable at the extremes.
+ *
+ * The component is a primitive: it owns no label/error/hint. Wrap it
+ * in your own layout to add those. Used in the thumbnail editor's
+ * properties panel (x, y, width, height, rotation, opacity, font
+ * size, stroke, shadow offsets, etc.) and intended for any other
+ * single-row number field that needs the +/- affordance.
+ */
+export const NumberInput: React.FC<NumberInputProps> = ({
+  value, onChange, min, max, step = 1, placeholder, disabled, className = '', title,
+  'aria-label': ariaLabel,
+}) => {
+  const clamp = (n: number) => {
+    let next = n
+    if (min !== undefined) next = Math.max(min, next)
+    if (max !== undefined) next = Math.min(max, next)
+    return next
+  }
+  // Step amount honors Shift for a 10× nudge — matches the convention
+  // in Photoshop / Affinity / Figma's number fields.
+  const stepBy = (dir: 1 | -1, shift: boolean) =>
+    onChange(clamp(value + dir * step * (shift ? 10 : 1)))
+  const atMin = min !== undefined && value <= min
+  const atMax = max !== undefined && value >= max
+
+  return (
+    <div className={`flex items-stretch ${className}`} title={title}>
+      <input
+        type="number"
+        value={Number.isFinite(value) ? value : ''}
+        onChange={e => {
+          const n = Number(e.target.value)
+          onChange(Number.isFinite(n) ? clamp(n) : 0)
+        }}
+        // Arrow keys nudge the value (Shift → 10× step). We preventDefault
+        // so the browser's native step doesn't fire alongside ours
+        // (would double-step). Native step is also stripped from the
+        // Chromium spinner via the arbitrary selectors below, but
+        // arrow keys still trigger it on a focused number input.
+        onKeyDown={e => {
+          if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            stepBy(1, e.shiftKey)
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            stepBy(-1, e.shiftKey)
+          }
+        }}
+        min={min}
+        max={max}
+        step={step}
+        placeholder={placeholder}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        // The arbitrary selectors strip Chromium's native spin buttons
+        // since we render our own vertical +/- buttons to the right.
+        className={`w-full bg-navy-900 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+      />
+      <div className="flex flex-col shrink-0">
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={e => stepBy(1, e.shiftKey)}
+          disabled={disabled || atMax}
+          title="Increment (Shift = ×10)"
+          className="flex-1 flex items-center justify-center w-4 bg-navy-900 border border-l-0 border-b-0 border-white/10 rounded-tr-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+          aria-label="Increment"
+        >
+          <ChevronUp size={10} strokeWidth={2.5} />
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={e => stepBy(-1, e.shiftKey)}
+          disabled={disabled || atMin}
+          title="Decrement (Shift = ×10)"
+          className="flex-1 flex items-center justify-center w-4 bg-navy-900 border border-l-0 border-white/10 rounded-br-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+          aria-label="Decrement"
+        >
+          <ChevronDown size={10} strokeWidth={2.5} />
+        </button>
+      </div>
     </div>
   )
 }

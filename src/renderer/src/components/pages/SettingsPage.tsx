@@ -443,6 +443,12 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
             />
             <p className="text-xs text-gray-400">Videos at or under this length are classified as clips in the stream video map. Default is 5 minutes.</p>
           </div>
+
+          <Checkbox
+            checked={local.twitchSkipCategoryRenamePrompt ?? false}
+            onChange={v => set('twitchSkipCategoryRenamePrompt', v)}
+            label={<div><div className="text-sm font-medium text-gray-200">Skip "rename category" prompt after Twitch pushes</div><div className="text-xs text-gray-400">Twitch fuzzy-matches the pushed game name through its search → game_id round-trip, so a typed "Black Flag" may come back as "Assassin's Creed IV Black Flag." When this is unchecked and the canonical name differs from what you sent, a modal asks whether to rename your local game tag to match. The modal also has its own "Don't ask again" button that sets this option.</div></div>}
+          />
         </section>
 
         {/* Video Player */}

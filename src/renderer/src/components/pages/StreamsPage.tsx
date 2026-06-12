@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
   Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ChevronsDown, ChevronsUp, X,
   Film, Zap, Combine, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
-  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, Scissors, Tags, SquareDashedText, RefreshCw,
+  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon,
 } from 'lucide-react'
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { Tooltip } from '../ui/Tooltip'
@@ -18,14 +18,15 @@ import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
-import { PresetPickerModal, ThumbnailCarousel, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage } from '../streams/legacyStreamsShared'
+import { PresetPickerModal, ThumbnailCarousel, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip } from '../streams/legacyStreamsShared'
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
+import { TwitchCategoryRenamePrompt } from '../ui/TwitchCategoryRenamePrompt'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
 import { BroadcastPicker, BroadcastLinkRef } from '../ui/BroadcastPicker'
-import { Globe, Lock, EyeOff } from 'lucide-react'
+import { Globe, Lock, Link as LinkIcon } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
@@ -50,6 +51,36 @@ function streamMetaKey(folderPath: string, date: string, streamsDir: string | un
 function normalizeStreamTypes(v: string | string[] | undefined): string[] {
   if (!v) return []
   return Array.isArray(v) ? v : [v]
+}
+
+/** Single source of truth for "is this stream explicitly NOT part of a
+ *  series." Drives the sidebar UI (hide season/episode inputs, disable
+ *  series-nav + New Episode controls), the merge-field substitutions
+ *  (`{season}`, `{episode}`, `{total_episodes}` resolve to '' for
+ *  standalone), and every series-math helper (filter the candidate
+ *  pool). Legacy `undefined` is intentionally NOT standalone — keeps
+ *  existing thumbnails / saved files working as series like they did
+ *  before this flag existed. */
+function isStandalone(meta: StreamMeta | null | undefined): boolean {
+  return meta?.isSeries === false
+}
+
+/** Effective "primary" topic/game for a stream — drives both the Twitch
+ *  category push and the `{game}` merge field in YouTube title templates.
+ *  Single source of truth so the sidebar's "selected chip" indicator, the
+ *  push handlers, and the in-sync comparisons all agree on which entry
+ *  is active. Resolution:
+ *    1. `meta.primaryGame` if set AND still present in `games[]`.
+ *    2. `games[0]` otherwise.
+ *    3. `''` when neither is available.
+ *  Returning `''` (not undefined) so callers can do `?? ''` without an
+ *  extra branch — the empty case is functionally equivalent to "no game
+ *  to push" in every consumer.
+ */
+function resolvePrimaryGame(meta: StreamMeta | null | undefined): string {
+  const games = meta?.games ?? []
+  if (meta?.primaryGame && games.includes(meta.primaryGame)) return meta.primaryGame
+  return games[0] ?? ''
 }
 
 /** Today's date in local YYYY-MM-DD form. */
@@ -77,6 +108,7 @@ function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, seaso
   const s = season || '1'
   return allFolders.filter(f =>
     !f.isMissing &&
+    !isStandalone(f.meta) &&
     ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
      (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
     (f.meta?.ytSeason || '1') === s &&
@@ -94,6 +126,7 @@ function detectTotalEpisodes(allFolders: StreamFolder[], gameName: string, seaso
   const s = season || '1'
   const count = allFolders.filter(f =>
     !f.isMissing &&
+    !isStandalone(f.meta) &&
     ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
      (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
     (f.meta?.ytSeason || '1') === s
@@ -118,6 +151,7 @@ async function computeSeasonLinks(
   const s = season || '1'
   const previous = allFolders.filter(f =>
     !f.isMissing &&
+    !isStandalone(f.meta) &&
     ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
      (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
     (f.meta?.ytSeason || '1') === s &&
@@ -254,6 +288,13 @@ export function StreamsPage({
   const [ytVodsLoaded, setYtVodsLoaded] = useState(false)
   const [ytBroadcastsLoading, setYtBroadcastsLoading] = useState(false)
   const [twConnected, setTwConnected] = useState(false)
+  // Cached Twitch channel snapshot — the title / category / tags
+  // currently set on the channel. Compared against local stream meta
+  // to determine whether the Push to Twitch button has anything to
+  // push. Fetched once when Twitch becomes connected and refreshed
+  // optimistically after a successful push (so the button immediately
+  // reflects the new in-sync state without a roundtrip).
+  const [twitchChannel, setTwitchChannel] = useState<{ title: string; gameName: string; tags: string[] } | null>(null)
   // Sidebar feedback banner — auto-dismisses 4 s after the last set.
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -267,6 +308,12 @@ export function StreamsPage({
   // folder by path (not reference) so the modal survives a folders refresh.
   const [rescheduleTargetPath, setRescheduleTargetPath] = useState<string | null>(null)
   const [deleteTargetPath, setDeleteTargetPath] = useState<string | null>(null)
+  // After-push rename prompt state. Set when a Twitch push's canonical
+  // game name differs from what we sent — surfaces the
+  // TwitchCategoryRenamePrompt modal. Gated against
+  // `config.twitchSkipCategoryRenamePrompt` at the prop callback level
+  // so a suppressed prompt is never even staged here.
+  const [categoryRenamePrompt, setCategoryRenamePrompt] = useState<{ sent: string; canonical: string } | null>(null)
   const [newStreamOpen, setNewStreamOpen] = useState(false)
   // When set, the New Stream modal opens in "New episode" mode with this
   // folder as the source. Cleared on close. The path-based key (not the
@@ -435,7 +482,18 @@ export function StreamsPage({
           .finally(() => setYtBroadcastsLoading(false))
       }
     }).catch(() => {})
-    window.api.twitchGetStatus?.().then(s => setTwConnected(s.connected)).catch(() => {})
+    window.api.twitchGetStatus?.().then(s => {
+      setTwConnected(s.connected)
+      // Prime the channel-info cache so the Push to Twitch button
+      // can compare against actual Twitch state on first sidebar
+      // open. Errors are non-fatal — the button just stays enabled
+      // (which is the same behavior we had before the in-sync check).
+      if (s.connected) {
+        window.api.twitchGetChannel?.()
+          .then(info => { if (info) setTwitchChannel(info) })
+          .catch(() => {})
+      }
+    }).catch(() => {})
     window.api.getYTTitleTemplates().then(setYtTitleTemplates).catch(() => {})
     window.api.getYTDescriptionTemplates().then(setYtDescTemplates).catch(() => {})
     window.api.getYTTagTemplates().then(setYtTagTemplates).catch(() => {})
@@ -891,22 +949,25 @@ export function StreamsPage({
     setArchiveTargetPaths([folder.folderPath])
   }, [])
 
-  const handleOpenThumbnails = useCallback((folder: StreamFolder) => {
+  const handleOpenThumbnails = useCallback((folder: StreamFolder, variantOrdinal?: number) => {
     openThumbnailEditor({
       folderPath: folder.folderPath,
       date: folder.date,
       title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
       meta: folder.meta ?? undefined,
       totalEpisodes: (() => {
+        if (isStandalone(folder.meta)) return 0
         const game = folder.meta?.games?.[0] ?? folder.detectedGames?.[0]
         if (!game) return 0
         const lower = game.toLowerCase()
         const season = folder.meta?.ytSeason ?? '1'
         return folders.filter(f =>
+          !isStandalone(f.meta) &&
           f.meta?.games?.some(g => g.toLowerCase() === lower) &&
           (f.meta?.ytSeason ?? '1') === season
         ).length
       })(),
+      variantOrdinal,
     })
   }, [folders, openThumbnailEditor])
 
@@ -1012,18 +1073,29 @@ export function StreamsPage({
     const meta = folder.meta
     if (!meta) {
       showBanner({ type: 'error', message: 'No metadata to push.' })
-      return
+      throw new Error('No metadata to push.')
     }
     const syncTitle = meta.syncTitle !== false
     const syncGame = meta.syncGame !== false
     const effectiveTitle = syncTitle ? (meta.ytTitle ?? '') : (meta.twitchTitle ?? '')
-    const effectiveGame = syncGame ? (meta.ytGameTitle ?? '') : (meta.twitchGameName ?? '')
+    // Twitch category now reads directly from the selected Topic/Game
+    // tag rather than routing through `ytGameTitle`. Removes the hidden
+    // YouTube-coupling that made the dependency invisible in the UI;
+    // the syncGame checkbox is correspondingly relabelled "Same as
+    // Topic / Game" in the sidebar.
+    const effectiveGame = syncGame ? resolvePrimaryGame(meta) : (meta.twitchGameName ?? '')
     const { compat: twitchSendTags } = toTwitchCompatibleTags(meta.twitchTags ?? [])
     try {
       await window.api.twitchUpdateChannel(effectiveTitle, effectiveGame || undefined, twitchSendTags)
       showBanner({ type: 'success', message: 'Pushed to Twitch.' })
     } catch (err: any) {
       showBanner({ type: 'error', message: `Twitch push failed: ${err?.message ?? String(err)}` })
+      // Re-throw so the sidebar's wrapper handler can skip the
+      // post-push refetch + last-pushed snapshot. Without this the
+      // snapshot would record values that never made it to Twitch,
+      // causing the in-sync check to lie afterwards. The banner is
+      // already on screen — callers don't need to surface it again.
+      throw err
     }
   }, [showBanner])
 
@@ -1042,12 +1114,25 @@ export function StreamsPage({
   useEffect(() => {
     if (!streamsDir) return
     loadFolders()
+    // Start the main-process chokidar watcher on the streams root —
+    // a single recursive watcher (depth 6 in folder-per-stream mode,
+    // depth 0 in dump mode) is cheaper than per-folder watchers and
+    // matches what the legacy page did. Without this, streams:changed
+    // never fires for file-system events (only for explicit
+    // webContents.send calls like thumbnail saves), so the per-row
+    // video count, thumbnail list, etc. go stale until something else
+    // (a reschedule, a thumbnail save, etc.) accidentally pushes the
+    // event manually.
+    void window.api.watchStreamsDir(streamsDir, streamMode as 'folder-per-stream' | 'dump-folder')
     const off = window.api.onStreamsChanged(() => {
       loadFolders()
       setThumbsKey(Date.now())
     })
-    return off
-  }, [streamsDir, loadFolders])
+    return () => {
+      off()
+      void window.api.unwatchStreamsDir()
+    }
+  }, [streamsDir, streamMode, loadFolders])
 
   // Trash a single thumbnail file + refresh. If the deleted file was
   // the preferred thumbnail, also clear meta.preferredThumbnail so the
@@ -1389,9 +1474,14 @@ export function StreamsPage({
   // reverse-chronological order, but navigation uses episode order so the
   // semantics of prev/next match user expectation.
   const seriesNav = useMemo(() => {
-    if (!selectedFolder) return { prev: null as StreamFolder | null, next: null as StreamFolder | null }
+    const empty = { prev: null as StreamFolder | null, next: null as StreamFolder | null, siblings: [] as StreamFolder[] }
+    if (!selectedFolder) return empty
+    // Standalone streams have no siblings concept — short-circuit so the
+    // sidebar header renders its empty state (no prev/next arrows, no
+    // picker, New Episode button disabled).
+    if (isStandalone(selectedFolder.meta)) return empty
     const primaryGame = selectedFolder.meta?.games?.[0] ?? selectedFolder.detectedGames?.[0]
-    if (!primaryGame) return { prev: null, next: null }
+    if (!primaryGame) return empty
     // `|| '1'` (not `?? '1'`) so empty strings also collapse to the first
     // season — clearing the field via the input should still associate
     // with siblings that have season undefined OR ''.
@@ -1400,6 +1490,7 @@ export function StreamsPage({
     const list = folders
       .filter(f =>
         !f.isMissing &&
+        !isStandalone(f.meta) &&
         ((f.meta?.games?.some(g => g.toLowerCase() === lowerGame)) ||
          (f.detectedGames?.some(g => g.toLowerCase() === lowerGame))) &&
         (f.meta?.ytSeason || '1') === season
@@ -1413,6 +1504,11 @@ export function StreamsPage({
     return {
       prev: idx > 0 ? list[idx - 1] : null,
       next: idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null,
+      // Full episode list (same game + season as the selected stream),
+      // sorted by episode number. Surfaced to the sidebar so the
+      // jump-to-episode picker can list siblings beyond the immediate
+      // prev/next pair.
+      siblings: list,
     }
   }, [folders, selectedFolder])
 
@@ -1457,9 +1553,10 @@ export function StreamsPage({
   // (and react normally to window resize via container queries) — they
   // just happen to be covered by the sidebar overlay when one is open.
   //
-  // Widths are computed from a measured `containerWidth` so the
-  // selected sidebar can exactly fill from `rowWidth` to the right
-  // edge regardless of the page's actual horizontal space.
+  // Widths are computed from a CSS variable that tracks the outer
+  // container's measured width, so the selected sidebar can exactly
+  // fill from `rowWidth` to the right edge regardless of the page's
+  // actual horizontal space.
   //
   // - `normalSidebarWidth`: the sidebar's settled width when nothing is
   //   selected (288 expanded, 40 collapsed rail). Depends on the user
@@ -1471,25 +1568,27 @@ export function StreamsPage({
   //   the pref. Only changes when the user toggles the collapse rail.
   // - `currentSidebarWidth`: what's animating — `selectedSidebarWidth`
   //   when a stream is selected, `normalSidebarWidth` otherwise.
-  // Callback ref + ResizeObserver: fires whenever the outer container
-  // mounts (more reliable than `useLayoutEffect` with `[]` deps when the
-  // page is conditionally rendered or remounted by the app shell). The
-  // observer keeps `containerWidth` in sync with window-resize without
-  // the layout-effect ordering subtleties.
-  const containerElRef = useRef<HTMLDivElement | null>(null)
+  // ResizeObserver pushes the measured container width into a CSS
+  // variable (`--sm-container-width`) on the outer element rather than
+  // React state. This was previously a `setState` which caused a full
+  // StreamsPage re-render every time the observer fired — and the
+  // observer fires repeatedly during any width-changing animation
+  // (collapse/expand the app's nav rail, drag the window edge, etc.),
+  // which would hitch the nav animation as ~10 re-renders piled up over
+  // its 200ms duration. With a CSS variable the browser handles the
+  // width recompute natively, no React reconciliation involved.
   const containerObsRef = useRef<ResizeObserver | null>(null)
-  const [containerWidth, setContainerWidth] = useState(0)
+  const writeContainerWidth = (el: HTMLElement) => {
+    el.style.setProperty('--sm-container-width', `${el.offsetWidth}px`)
+  }
   const containerRef = useCallback((el: HTMLDivElement | null) => {
     if (containerObsRef.current) {
       containerObsRef.current.disconnect()
       containerObsRef.current = null
     }
-    containerElRef.current = el
     if (!el) return
-    setContainerWidth(el.offsetWidth)
-    const obs = new ResizeObserver(() => {
-      setContainerWidth(el.offsetWidth)
-    })
+    writeContainerWidth(el)
+    const obs = new ResizeObserver(() => { writeContainerWidth(el) })
     obs.observe(el)
     containerObsRef.current = obs
   }, [])
@@ -1503,14 +1602,15 @@ export function StreamsPage({
   const currentSidebarWidthCss = selectedFolderPath
     ? `calc(100% - ${rowWidth}px)`
     : `${normalSidebarWidth}px`
-  // The detail layer's width DOES need a pixel value — it must equal
-  // the OUTER container's `100% - rowWidth`, but the layer lives inside
-  // the aside where CSS `100%` refers to the aside (animating). 0 until
-  // measured is fine because the detail layer is `opacity: 0` and
-  // `pointer-events: none` until a selection happens; by the time the
-  // user clicks a row, the layout effect has already populated
-  // containerWidth from the ResizeObserver.
-  const selectedSidebarWidthPx = Math.max(0, containerWidth - rowWidth)
+  // The detail layer's width MUST equal the OUTER container's
+  // `100% - rowWidth`, but the layer lives inside the aside where CSS
+  // `100%` would refer to the aside (which animates open/closed). So
+  // we pull the outer width in via the CSS variable set above. Falls
+  // back to 0px (Math.max(0, …) equivalent — `0px - Npx` clamps to 0
+  // for `width` per CSS spec) for the first frame before the observer
+  // has measured. That's fine since the detail layer is opacity:0 and
+  // pointer-events:none until a selection happens.
+  const selectedSidebarWidthCss = `calc(var(--sm-container-width, 0px) - ${rowWidth}px)`
 
   // Keep the most-recently-selected folder mounted in the sidebar through
   // the close fade-out. Without this, the SidebarDetail would unmount the
@@ -1768,7 +1868,7 @@ export function StreamsPage({
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Search title, games, notes, date…"
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-md pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
               />
               {searchQuery && (
                 <button
@@ -1784,7 +1884,7 @@ export function StreamsPage({
             <select
               value={sortMode}
               onChange={e => setSortMode(e.target.value as typeof sortMode)}
-              className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+              className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
               title="Sort"
             >
               <option value="date-desc">Newest first</option>
@@ -2055,7 +2155,7 @@ export function StreamsPage({
               title="Expand sidebar"
             >
               <ChevronLeft size={16} />
-              <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] uppercase tracking-wider text-gray-500 mt-2">Details</span>
+              <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] font-semibold uppercase tracking-wider text-gray-500 mt-2">Calendar</span>
             </button>
           ) : (
             <SidebarMonthCalendar
@@ -2075,7 +2175,7 @@ export function StreamsPage({
           <div
             className={`opacity-mount-from-0 absolute top-0 left-0 bottom-0 bg-navy-800 transition-opacity ease-linear ${selectedFolderPath ? '' : 'opacity-0'}`}
             style={{
-              width: selectedSidebarWidthPx,
+              width: selectedSidebarWidthCss,
               // `opacity` is intentionally NOT set inline — inline styles
               // have higher specificity than the `@starting-style` rule
               // and would override its frame-0 opacity:0, killing the
@@ -2090,6 +2190,7 @@ export function StreamsPage({
               folders={folders}
               prevEpisode={seriesNav.prev}
               nextEpisode={seriesNav.next}
+              seriesEpisodes={seriesNav.siblings}
               onPickEpisode={(f) => setSelectedFolderPath(f.folderPath)}
               onClose={() => setSelectedFolderPath(null)}
               onUpdateMeta={partial => updateMeta(renderedFolder.folderPath, partial)}
@@ -2098,6 +2199,7 @@ export function StreamsPage({
               allStreamTypes={allStreamTypes}
               tagColors={tagColors}
               tagTextures={tagTextures}
+              onNewStreamType={handleNewStreamType}
               onReschedule={() => setRescheduleTargetPath(renderedFolder.folderPath)}
               onNewEpisode={() => setNewEpisodeSourcePath(renderedFolder.folderPath)}
               onOffload={() => handleOffload(renderedFolder)}
@@ -2119,7 +2221,7 @@ export function StreamsPage({
               onSendToConverter={() => handleSendToConverter(renderedFolder)}
               onSendToCombine={() => handleSendToCombine(renderedFolder)}
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
-              onOpenThumbnails={() => handleOpenThumbnails(renderedFolder)}
+              onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
               onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
               onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
               onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
@@ -2129,8 +2231,14 @@ export function StreamsPage({
               // SidebarDetail awaits these to drive the spinner.
               ytConnected={ytConnected}
               twConnected={twConnected}
+              twitchChannel={twitchChannel}
+              setTwitchChannel={setTwitchChannel}
               banner={banner}
               onDismissBanner={() => setBanner(null)}
+              onSuggestCategoryRename={(sent, canonical) => {
+                if (config.twitchSkipCategoryRenamePrompt) return
+                setCategoryRenamePrompt({ sent, canonical })
+              }}
               ytTitleTemplates={ytTitleTemplates}
               ytDescTemplates={ytDescTemplates}
               ytTagTemplates={ytTagTemplates}
@@ -2154,12 +2262,66 @@ export function StreamsPage({
         return (
           <RescheduleModal
             target={target}
+            folders={folders}
+            ytConnected={ytConnected}
+            twConnected={twConnected}
+            ytBroadcasts={ytBroadcasts}
             onClose={() => setRescheduleTargetPath(null)}
             onSuccess={(newFolderPath) => {
               setRescheduleTargetPath(null)
               setSelectedFolderPath(newFolderPath)
+              // Bump thumbsKey so every <ThumbImage> URL invalidates
+              // alongside the folder refresh. Without this, the
+              // chokidar-driven streams:changed listener is the only
+              // thing that bumps it, and its awaitWriteFinish +
+              // debounce window (~1.8s) is long enough for the user
+              // to see stale thumbnail URLs after a rename — especially
+              // bad in back-to-back reschedules that swap dates between
+              // streams, where the renderer can briefly serve cached
+              // bytes for paths that no longer exist.
+              setThumbsKey(Date.now())
               void loadFolders()
             }}
+            onPushYoutube={async (newScheduledStartTime, privacy) => {
+              // Find the linked broadcast (might have already shifted
+              // in ytBroadcasts since the modal opened — recheck).
+              const broadcastId = target.meta?.ytVideoId
+              if (!broadcastId) throw new Error('No linked broadcast')
+              const bc = ytBroadcasts.find(b => b.id === broadcastId)
+              if (!bc) throw new Error('Linked broadcast not in cache')
+              // Snippet update first — preserves existing title /
+              // description / tags so the user's in-progress edits
+              // don't get published. Only scheduledStartTime changes.
+              await window.api.youtubeUpdateBroadcast(
+                broadcastId,
+                {
+                  title: bc.snippet.title,
+                  description: bc.snippet.description,
+                  scheduledStartTime: newScheduledStartTime,
+                },
+                bc.snippet.tags ?? [],
+              )
+              // Privacy change is a separate API call. Skipping it
+              // when the value didn't change spares a redundant
+              // request but is harmless either way.
+              if (privacy !== bc.status?.privacyStatus) {
+                await window.api.youtubeUpdateBroadcastStatus(broadcastId, privacy)
+              }
+              // Refresh the cached broadcast so the sidebar's
+              // mismatch detection sees the new scheduledStartTime +
+              // privacy without waiting for a reload.
+              try {
+                const refreshed = await window.api.youtubeGetBroadcastById(broadcastId)
+                if (refreshed) {
+                  setYtBroadcasts(prev => prev.map(b => b.id === refreshed.id ? refreshed : b))
+                }
+              } catch {
+                // Refresh failure is non-fatal — the writes themselves
+                // succeeded. Next manual reload will pick up server
+                // state.
+              }
+            }}
+            onPushTwitch={() => handlePushToTwitch(target)}
           />
         )
       })()}
@@ -2316,9 +2478,153 @@ export function StreamsPage({
               })
             ).then(() => loadFolders())
           }}
+          // Global rename of a stream type. Rewrites every folder whose
+          // streamType array contains the old name, replacing it
+          // positionally so the user's preferred ordering is preserved.
+          // Then re-keys the color + texture maps so the chip styling
+          // moves with the renamed tag. Mirrors the delete/combine
+          // bulk-write pattern above.
+          onRenameTag={(oldName, newName) => {
+            const affected = folders.filter(f =>
+              normalizeStreamTypes(f.meta?.streamType).includes(oldName)
+            )
+            Promise.all(
+              affected.map(f =>
+                window.api.writeStreamMeta(f.folderPath, {
+                  ...(f.meta ?? { date: f.date, streamType: [], games: [], comments: '' }),
+                  streamType: normalizeStreamTypes(f.meta?.streamType)
+                    .map(t => t === oldName ? newName : t),
+                }, f.relativePath)
+              )
+            ).then(() => {
+              if (oldName in tagColors) {
+                const updatedColors = { ...tagColors, [newName]: tagColors[oldName] }
+                delete updatedColors[oldName]
+                saveTagColors(updatedColors)
+              }
+              if (oldName in tagTextures) {
+                const updatedTextures = { ...tagTextures, [newName]: tagTextures[oldName] }
+                delete updatedTextures[oldName]
+                saveTagTextures(updatedTextures)
+              }
+              void loadFolders()
+            })
+          }}
+          // Global rename of a topic/game tag. Mirrors the rename
+          // performed by the after-push category-rename prompt — touches
+          // games[] plus the YouTube + Twitch sync fields and the
+          // twitchLastPushed snapshot, so a stream that's been pushed
+          // doesn't trip the snapshot's staleness guard after the
+          // rename. Strict (case-sensitive) equality so case-only
+          // renames don't accidentally rope in unrelated tags.
+          onRenameGame={(oldName, newName) => {
+            const affected = folders.filter(f => {
+              const m = f.meta
+              if (!m) return false
+              return (m.games ?? []).includes(oldName)
+                || m.ytGameTitle === oldName
+                || m.twitchGameName === oldName
+                || m.twitchLastPushedGame === oldName
+                || m.primaryGame === oldName
+            })
+            Promise.all(
+              affected.map(f => {
+                const m = f.meta
+                if (!m) return Promise.resolve()
+                const next: StreamMeta = { ...m }
+                if (m.games?.includes(oldName)) {
+                  next.games = m.games.map(g => g === oldName ? newName : g)
+                }
+                if (m.ytGameTitle === oldName) next.ytGameTitle = newName
+                if (m.twitchGameName === oldName) next.twitchGameName = newName
+                if (m.twitchLastPushedGame === oldName) next.twitchLastPushedGame = newName
+                if (m.primaryGame === oldName) next.primaryGame = newName
+                return window.api.writeStreamMeta(f.folderPath, next, f.relativePath)
+              })
+            ).then(() => loadFolders())
+          }}
           onClose={() => setShowManageTags(false)}
         />
       )}
+
+      <TwitchCategoryRenamePrompt
+        isOpen={categoryRenamePrompt !== null}
+        sent={categoryRenamePrompt?.sent ?? ''}
+        canonical={categoryRenamePrompt?.canonical ?? ''}
+        onKeep={() => setCategoryRenamePrompt(null)}
+        onDontAskAgain={() => {
+          // Persist the suppression + close. Don't perform the rename
+          // — "don't ask again" only changes the prompt policy, the
+          // current tag stays as the user typed it. They can re-enable
+          // via Settings → Streams.
+          void updateConfig({ twitchSkipCategoryRenamePrompt: true })
+          setCategoryRenamePrompt(null)
+        }}
+        onConfirm={() => {
+          if (!categoryRenamePrompt) return
+          const { sent, canonical } = categoryRenamePrompt
+          // Global rename: replace every case-insensitive match of the
+          // old name with the canonical name across all game-related
+          // meta fields on every folder, then re-key tagColors and
+          // tagTextures so the chip styling moves with the tag. Mirrors
+          // the bulk-write pattern used by onDeleteGame / onCombineGames
+          // above. The reach across fields (games / ytGameTitle /
+          // twitchGameName / twitchLastPushedGame) handles both
+          // syncGame=true (rename traces back through games[]) and
+          // syncGame=false (twitchGameName is the source of truth) so a
+          // future push doesn't re-trigger the same prompt.
+          const oldNorm = sent.trim().toLowerCase()
+          const matches = (s: string | undefined) =>
+            s !== undefined && s.trim().toLowerCase() === oldNorm
+          const affected = folders.filter(f => {
+            const m = f.meta
+            if (!m) return false
+            return (m.games ?? []).some(matches)
+              || matches(m.ytGameTitle)
+              || matches(m.twitchGameName)
+              || matches(m.twitchLastPushedGame)
+              || matches(m.primaryGame)
+          })
+          Promise.all(
+            affected.map(f => {
+              const m = f.meta
+              if (!m) return Promise.resolve()
+              const next: StreamMeta = { ...m }
+              if (m.games?.some(matches)) {
+                next.games = m.games.map(g => matches(g) ? canonical : g)
+              }
+              if (matches(m.ytGameTitle)) next.ytGameTitle = canonical
+              if (matches(m.twitchGameName)) next.twitchGameName = canonical
+              if (matches(m.twitchLastPushedGame)) next.twitchLastPushedGame = canonical
+              if (matches(m.primaryGame)) next.primaryGame = canonical
+              return window.api.writeStreamMeta(f.folderPath, next, f.relativePath)
+            })
+          ).then(() => {
+            // Re-key the per-tag color + texture maps. Find the existing
+            // key by case-insensitive match (the user could have typed
+            // the tag with different capitalization than is stored).
+            // Drop the old key, copy its value to the new key, persist.
+            setTagColors(prev => {
+              const key = Object.keys(prev).find(k => k.trim().toLowerCase() === oldNorm)
+              if (!key) return prev
+              const updated = { ...prev, [canonical]: prev[key] }
+              delete updated[key]
+              window.api.setStreamTypeTags(updated)
+              return updated
+            })
+            setTagTextures(prev => {
+              const key = Object.keys(prev).find(k => k.trim().toLowerCase() === oldNorm)
+              if (!key) return prev
+              const updated = { ...prev, [canonical]: prev[key] }
+              delete updated[key]
+              window.api.setStreamTypeTextures(updated)
+              return updated
+            })
+            void loadFolders()
+          })
+          setCategoryRenamePrompt(null)
+        }}
+      />
 
       <TemplatesModal
         isOpen={showTemplatesModal}
@@ -2681,7 +2987,7 @@ function StreamListItem({
                 const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
                 const liveLabel = isLive ? 'Live now' : 'Open in YouTube Studio'
                 const tooltipText = privacyLabel ? `${liveLabel} · ${privacyLabel}` : liveLabel
-                const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
+                const PrivacyIcon = privacyStatus === 'unlisted' ? LinkIcon : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
                 return (
                   <Tooltip content={tooltipText}>
                     <button
@@ -2710,7 +3016,7 @@ function StreamListItem({
                 for regular video uploads. Both go red. */}
             {!isPending && meta?.ytVideoId && (() => {
               const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
-              const PrivacyIcon = privacyStatus === 'unlisted' ? EyeOff : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
+              const PrivacyIcon = privacyStatus === 'unlisted' ? LinkIcon : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
               const KindIcon = isLivestream ? Radio : Clapperboard
               const kindLabel = isLivestream ? 'Livestream' : 'Video'
               const tooltipText = privacyLabel ? `Edit on YouTube · ${kindLabel} · ${privacyLabel}` : `Edit on YouTube · ${kindLabel}`
@@ -2757,9 +3063,12 @@ function StreamListItem({
                 {normalizeStreamTypes(meta.streamType).map(t => {
                   const color = getTagColor(tagColors[t])
                   return (
-                    <span key={t} className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border ${color.chip}`} style={getTagTextureStyle(tagTextures[t])}>
-                      {t}
-                    </span>
+                    <DisplayTagChip
+                      key={t}
+                      text={t}
+                      className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border truncate max-w-full ${color.chip}`}
+                      style={getTagTextureStyle(tagTextures[t])}
+                    />
                   )
                 })}
               </div>
@@ -2773,11 +3082,18 @@ function StreamListItem({
               <div className="flex flex-wrap gap-1">
                 {displayGames.map(g =>
                   meta?.games?.includes(g) ? (
-                    <span key={g} className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30">{g}</span>
+                    <DisplayTagChip
+                      key={g}
+                      text={g}
+                      className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30 truncate max-w-full"
+                    />
                   ) : (
-                    <Tooltip key={g} content="Detected from filename">
-                      <span className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic">{g}</span>
-                    </Tooltip>
+                    <DisplayTagChip
+                      key={g}
+                      text={g}
+                      className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic truncate max-w-full"
+                      detectedTooltip="Detected from filename"
+                    />
                   )
                 )}
               </div>
@@ -2851,6 +3167,17 @@ function SidebarMonthCalendar({
   const [pickerYear, setPickerYear] = useState(now.getFullYear())
   const pickerRef = useRef<HTMLDivElement>(null)
 
+  // User prefs for the calendar — first day of week, week-numbers
+  // column, adjacent-month days. Stored alongside other per-user UI
+  // prefs in the app config and edited via the gear popover at the
+  // bottom of this widget.
+  const { config, updateConfig } = useStore()
+  const firstDayMondayBased = config.calendarFirstDayOfWeek === 'monday'
+  const showWeekNumbers = !!config.calendarShowWeekNumbers
+  const showAdjacent = config.calendarShowAdjacentMonthDays !== false
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsRef = useRef<HTMLDivElement>(null)
+
   // Date → folders[] index (a date can host multiple streams)
   const byDate = useMemo(() => {
     const map = new Map<string, StreamFolder[]>()
@@ -2880,10 +3207,13 @@ function SidebarMonthCalendar({
   const earliestY = earliestDate ? parseInt(earliestDate.slice(0, 4), 10) : null
   const earliestM = earliestDate ? parseInt(earliestDate.slice(5, 7), 10) - 1 : null
 
-  // 6-week grid starting on the Sunday on/before the 1st of the viewed month
+  // 6-week grid starting on the first-day-of-week column on/before the
+  // 1st of the viewed month. `firstDayMondayBased` shifts the start
+  // index: Sunday-first uses getDay() directly (0=Sun..6=Sat); Monday-
+  // first remaps so Monday=0..Sunday=6 via `(getDay() + 6) % 7`.
   const cells = useMemo(() => {
     const first = new Date(viewYear, viewMonth, 1)
-    const startDow = first.getDay()
+    const startDow = firstDayMondayBased ? (first.getDay() + 6) % 7 : first.getDay()
     const out: Array<{
       iso: string
       day: number
@@ -2906,7 +3236,7 @@ function SidebarMonthCalendar({
       })
     }
     return out
-  }, [viewYear, viewMonth, byDate, today])
+  }, [viewYear, viewMonth, byDate, today, firstDayMondayBased])
 
   const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString(undefined, {
     month: 'long',
@@ -2969,8 +3299,35 @@ function SidebarMonthCalendar({
     return () => document.removeEventListener('mousedown', handler)
   }, [pickerOpen])
 
-  const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+  // Close settings popover on outside click
+  useEffect(() => {
+    if (!settingsOpen) return
+    const handler = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [settingsOpen])
+
+  // Day-of-week header. Sunday-first is `['S','M','T','W','T','F','S']`;
+  // Monday-first rotates by one (`['M','T','W','T','F','S','S']`).
+  const DOW = firstDayMondayBased
+    ? ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+    : ['S', 'M', 'T', 'W', 'T', 'F', 'S']
   const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+  // ISO 8601 week number — the week that contains the year's first
+  // Thursday is week 1. Used for the optional week-number column.
+  const isoWeekNumber = (iso: string): number => {
+    const d = new Date(iso + 'T00:00:00')
+    // Shift to nearest Thursday so the year boundary is unambiguous.
+    d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7))
+    const week1 = new Date(d.getFullYear(), 0, 4)
+    week1.setDate(week1.getDate() + 3 - ((week1.getDay() + 6) % 7))
+    return 1 + Math.round((d.getTime() - week1.getTime()) / (7 * 24 * 60 * 60 * 1000))
+  }
 
   return (
     <div className="flex h-full flex-col px-3 pt-3 pb-4">
@@ -3057,8 +3414,14 @@ function SidebarMonthCalendar({
         )}
       </div>
 
-      {/* Day-of-week header row */}
-      <div className="grid grid-cols-7 gap-0.5 mb-1">
+      {/* Day-of-week header row. Grid template column count flips
+          between 7 (week numbers off) and 8 (week numbers on); the
+          leading column when on is an empty header above the wk# col
+          so the rest of the day labels stay aligned with their cells. */}
+      <div className={`grid ${showWeekNumbers ? 'grid-cols-[auto_repeat(7,minmax(0,1fr))]' : 'grid-cols-7'} gap-0.5 mb-1`}>
+        {showWeekNumbers && (
+          <div className="text-center text-[10px] uppercase tracking-wider text-gray-600 pr-1">wk</div>
+        )}
         {DOW.map((d, i) => (
           <div
             key={i}
@@ -3069,9 +3432,63 @@ function SidebarMonthCalendar({
         ))}
       </div>
 
-      {/* Day grid */}
-      <div className="grid grid-cols-7 gap-0.5">
-        {cells.map((c) => {
+      {/* Day grid — same column shape as the header, rendered week-by-
+          week (7 cells per row) so each row can prefix a wk-number cell
+          when enabled.
+          `containerType: inline-size` makes the grid itself the
+          reference for its descendants' `cqi` calculations. The day
+          cells (below) then get an explicit fixed height computed
+          from the grid's width — what a 7-column (no-week-numbers)
+          cell would be — so the cells stay the same height whether
+          the wk# column is showing or not. Without this, `gridAutoRows`
+          alone gets overridden by the grid's default
+          `align-content: stretch` because the calendar widget's
+          flex-col parent hands the grid more vertical space than the
+          rows naturally need. */}
+      <div
+        className={`grid ${showWeekNumbers ? 'grid-cols-[auto_repeat(7,minmax(0,1fr))]' : 'grid-cols-7'} gap-0.5 content-start`}
+        style={{ containerType: 'inline-size' }}
+      >
+        {Array.from({ length: 6 }, (_, weekIdx) => {
+          const weekStart = weekIdx * 7
+          const weekCells = cells.slice(weekStart, weekStart + 7)
+          // Keep every row mounted so the calendar stays a fixed
+          // 6-row height regardless of which prefs are on. A row with
+          // no in-month days (when adjacent-month rendering is off)
+          // still occupies a full grid row whose height is fixed by
+          // the parent's `gridAutoRows` setting — the empty spacer
+          // divs inside don't need their own sizing.
+          const rowHasInMonth = weekCells.some(c => c.inMonth)
+          // Week number derived from the first cell of the row. ISO
+          // weeks always span Monday→Sunday regardless of the user's
+          // first-day-of-week preference, so the number is consistent
+          // even when the visible row starts on Sunday. Skip the
+          // number only when the row would be visually blank (no
+          // in-month days AND adjacent-day rendering is off) — when
+          // adjacent days ARE rendered the row has visible content
+          // so the week number belongs there too.
+          const wkNum = showWeekNumbers && (rowHasInMonth || showAdjacent) ? isoWeekNumber(weekCells[0].iso) : null
+          // Fragment needs a key, so use the long-form Fragment. The
+          // file imports named hooks from react (no default `React`),
+          // so referencing `React.Fragment` here would be undefined —
+          // import Fragment by name instead.
+          return (
+            <Fragment key={weekIdx}>
+              {showWeekNumbers && (
+                <div className="flex items-center justify-end pr-1 text-[10px] tabular-nums text-gray-600">
+                  {wkNum}
+                </div>
+              )}
+              {weekCells.map((c) => {
+          // Hide leading/trailing adjacent-month cells if the user
+          // turned that off — keep the grid slot so columns stay
+          // aligned with the day-of-week header.
+          if (!c.inMonth && !showAdjacent) {
+            // Empty spacer takes the same fixed height as a real
+            // day cell so the row's vertical footprint is identical
+            // whether the row is populated or blank.
+            return <div key={c.iso} style={{ height: 'calc((100cqi - 12px) / 7)' }} />
+          }
           const has = c.streams.length > 0
           const isFuture = c.iso > today
           // Match the upcoming-stream badge color from the list rows
@@ -3091,8 +3508,15 @@ function SidebarMonthCalendar({
               type="button"
               disabled={!has}
               onClick={() => has && onSelectStream(c.streams[0])}
+              // Explicit pixel height computed from the grid's own
+              // width (via container queries): the height a cell
+              // would have if there were 7 equal-width columns and
+              // no wk# column. Toggling the wk# column only changes
+              // the cell's width — height stays put, calendar height
+              // stays put, popover anchor stays put.
+              style={{ height: 'calc((100cqi - 12px) / 7)' }}
               className={[
-                'relative aspect-square w-full flex items-center justify-center rounded transition-colors',
+                'relative w-full flex items-center justify-center rounded transition-colors',
                 has ? 'cursor-pointer hover:bg-white/10' : 'cursor-default',
                 c.isToday ? 'ring-1 ring-purple-500/50' : '',
               ].join(' ')}
@@ -3163,11 +3587,16 @@ function SidebarMonthCalendar({
               {cell}
             </Tooltip>
           )
+              })}
+            </Fragment>
+          )
         })}
       </div>
 
-      {/* Jump back to the current month */}
-      <div className="mt-3 flex justify-center">
+      {/* Footer: centered "Go to today" with the calendar-settings gear
+          floated to the right edge. The gear is absolutely positioned
+          so its width doesn't push the Button off-center. */}
+      <div ref={settingsRef} className="relative mt-3 flex justify-center">
         <Button
           variant="secondary"
           size="sm"
@@ -3176,6 +3605,59 @@ function SidebarMonthCalendar({
         >
           Go to today
         </Button>
+        <Tooltip content="Calendar settings" side="top">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(v => !v)}
+            className={`absolute right-0 top-1/2 -translate-y-1/2 p-1.5 rounded transition-colors ${
+              settingsOpen
+                ? 'bg-white/10 text-gray-200'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+            }`}
+            aria-label="Calendar settings"
+          >
+            <SettingsIcon size={14} />
+          </button>
+        </Tooltip>
+        {settingsOpen && (
+          // Anchored to both edges of the footer (which is bounded by
+          // the calendar widget's px-3 inset, same as the day grid),
+          // so the popover's width naturally matches the calendar
+          // content width regardless of the sidebar's overall width.
+          <div className="absolute top-full left-0 right-0 mt-1.5 z-20 bg-navy-900 border border-white/10 rounded-lg shadow-lg p-2.5 flex flex-col gap-2.5">
+            {/* First day of week — two-button segmented control */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">First day of week</span>
+              <div className="flex bg-navy-800 border border-white/5 rounded overflow-hidden">
+                {(['sunday', 'monday'] as const).map(opt => {
+                  const selected = (config.calendarFirstDayOfWeek || 'sunday') === opt
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => updateConfig({ calendarFirstDayOfWeek: opt })}
+                      className={`flex-1 py-1 text-xs capitalize transition-colors ${
+                        selected ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                      }`}
+                    >
+                      {opt}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <Checkbox
+              checked={showWeekNumbers}
+              onChange={v => updateConfig({ calendarShowWeekNumbers: v })}
+              label="Show week numbers"
+            />
+            <Checkbox
+              checked={showAdjacent}
+              onChange={v => updateConfig({ calendarShowAdjacentMonthDays: v })}
+              label="Show days from adjacent months"
+            />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -3187,12 +3669,13 @@ function SidebarMonthCalendar({
  *  state stays cleanly separated and the metadata + action layout can
  *  evolve independently. */
 function SidebarDetail({
-  folder, folders, prevEpisode, nextEpisode, onPickEpisode, onClose, onUpdateMeta, cloudSyncActive,
-  allGames, allStreamTypes, tagColors, tagTextures, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
+  folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, onClose, onUpdateMeta, cloudSyncActive,
+  allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
   onSendToPlayer, onSendToConverter, onSendToCombine, onOpenFolder, onOpenThumbnails, onDelete,
-  onPushToYoutube, onPushToTwitch, ytConnected, twConnected, banner, onDismissBanner,
+  onPushToYoutube, onPushToTwitch, ytConnected, twConnected, twitchChannel, setTwitchChannel, banner, onDismissBanner,
+  onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
   onSaveYtTitleTemplate, onSaveYtDescTemplate, onSaveYtTagsTemplate, onSaveTwitchTagsTemplate,
 }: {
@@ -3200,6 +3683,10 @@ function SidebarDetail({
   folders: StreamFolder[]
   prevEpisode: StreamFolder | null
   nextEpisode: StreamFolder | null
+  /** Full sibling list (current stream + every other stream in the
+   *  same game + season, sorted by episode number). Drives the
+   *  jump-to-episode picker in the sidebar header. */
+  seriesEpisodes: StreamFolder[]
   onPickEpisode: (f: StreamFolder) => void
   onClose: () => void
   onUpdateMeta: (partial: Partial<StreamMeta>) => Promise<void> | void
@@ -3208,6 +3695,12 @@ function SidebarDetail({
   allStreamTypes: string[]
   tagColors: Record<string, string>
   tagTextures: Record<string, string>
+  /** Called when a stream type that isn't in the global tagColors map
+   *  is entered inline. Persists the new tag with an auto-picked color
+   *  so it's available in the autocomplete pool and the Manage Tags
+   *  surface — without this, inline-added types are invisible to those
+   *  flows. */
+  onNewStreamType: (tag: string) => void
   onReschedule: () => void
   onNewEpisode: () => void
   onOffload: () => void
@@ -3243,14 +3736,35 @@ function SidebarDetail({
   onSendToConverter: () => void
   onSendToCombine: () => void
   onOpenFolder: () => void
-  onOpenThumbnails: () => void
+  /** Open the thumbnail editor for the current stream. The optional
+   *  variantOrdinal lets the carousel's per-image edit buttons open
+   *  the specific alternative the user clicked from instead of
+   *  always defaulting to the preferred one. */
+  onOpenThumbnails: (variantOrdinal?: number) => void
   onDelete: () => void
   onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => Promise<void> | void
   onPushToTwitch: () => Promise<void> | void
   ytConnected: boolean
   twConnected: boolean
+  /** Cached Twitch channel snapshot, fetched once on connect. The
+   *  Push to Twitch button compares local meta against this to decide
+   *  whether it has anything to push. Null means "not fetched yet" —
+   *  treated as "might need push" so we don't lock the user out. */
+  twitchChannel: { title: string; gameName: string; tags: string[] } | null
+  /** Lets the push handler optimistically update the cache to the
+   *  pushed values after a successful update, so the button
+   *  immediately disables without a fetch roundtrip. */
+  setTwitchChannel: React.Dispatch<React.SetStateAction<{ title: string; gameName: string; tags: string[] } | null>>
   banner: { type: 'success' | 'error'; message: string } | null
   onDismissBanner: () => void
+  /** Page-level hook for surfacing the post-push category-rename prompt
+   *  modal. The sidebar detects the local-vs-canonical divergence (it
+   *  has both values in hand right after the refetch) but the modal is
+   *  hosted at page level since the global rename touches every folder
+   *  and re-keys tagColors/tagTextures — work the page already owns.
+   *  The page also gates the call against the user's "don't ask again"
+   *  setting before showing anything. */
+  onSuggestCategoryRename: (sent: string, canonical: string) => void
   ytTitleTemplates: Array<{ id: string; name: string; template: string }>
   ytDescTemplates: Array<{ id: string; name: string; description: string }>
   ytTagTemplates: Array<{ id: string; name: string; tags: string[] }>
@@ -3268,6 +3782,16 @@ function SidebarDetail({
   const hasSMThumbnail = folder.thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
   const videoCount = folder.videoCount
 
+  // Jump-to-episode picker (sidebar header) — click-based dropdown
+  // listing every sibling in the current series + season. Mirrors the
+  // PlayerPage's stream picker UX (click List icon → portal-rendered
+  // dropdown → click outside or pick row to close). Reset whenever the
+  // selected stream changes so a click in one stream doesn't leave the
+  // picker open in the next.
+  const [episodePickerOpen, setEpisodePickerOpen] = useState(false)
+  const episodePickerAnchorRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => { setEpisodePickerOpen(false) }, [folder.folderPath])
+
   // Title's template binding lives in meta (`ytTitleTemplateId`) so it
   // survives stream switches and app restarts. Description / tag template
   // selections stay ephemeral for now (the user only asked for title to
@@ -3277,6 +3801,21 @@ function SidebarDetail({
   const [tagsTplId, setTagsTplId] = useState('')
   const [twitchTagsTplId, setTwitchTagsTplId] = useState('')
 
+  // Auto-fill the {game} field (ytGameTitle) from the *selected* Topic/
+  // Game tag (the one with the ring indicator in the chip row). Source
+  // of truth is `resolvePrimaryGame`, which prefers `meta.primaryGame`
+  // when it's still present in `games[]` and falls back to `games[0]`
+  // otherwise — same value the Twitch push uses, so the YT title
+  // template's {game} merge field and the Twitch category stay aligned.
+  // The "already equal" guard prevents a no-op write churn when the
+  // games array reference shifts due to an unrelated meta refresh.
+  useEffect(() => {
+    const primary = resolvePrimaryGame(meta)
+    if (!primary) return
+    if (meta?.ytGameTitle === primary) return
+    onUpdateMeta({ ytGameTitle: primary })
+  }, [meta?.games, meta?.primaryGame, meta?.ytGameTitle, onUpdateMeta])
+
   // Merge-field substitution values, derived from the current folder's
   // meta. Matches the StreamsPage names exactly so existing user templates
   // ({game}, {season}, {episode}, etc.) keep working as the page switches.
@@ -3285,15 +3824,20 @@ function SidebarDetail({
   // folders and can hit the YouTube API for missing titles).
   const mergeFields = useMemo<Record<string, string>>(() => {
     const primaryGame = meta?.ytGameTitle?.trim() || meta?.games?.[0] || folder.detectedGames?.[0] || ''
+    // Series-specific merge fields collapse to '' on standalone streams
+    // so user templates that reference {season}/{episode}/{total_episodes}
+    // render cleanly (no "Season 1 Episode " stub text). Game / tagline /
+    // title aren't series-specific and stay populated.
+    const standalone = isStandalone(meta)
     return {
       game: meta?.ytGameTitle ?? meta?.games?.[0] ?? '',
-      season: meta?.ytSeason ?? '1',
-      episode: meta?.ytEpisode ?? '',
+      season: standalone ? '' : (meta?.ytSeason ?? '1'),
+      episode: standalone ? '' : (meta?.ytEpisode ?? ''),
       tagline: meta?.ytCatchyTitle ?? '',
       title: meta?.ytCatchyTitle ?? '',
-      total_episodes: String(detectTotalEpisodes(folders, primaryGame, meta?.ytSeason || '1')),
+      total_episodes: standalone ? '' : String(detectTotalEpisodes(folders, primaryGame, meta?.ytSeason || '1')),
     }
-  }, [folder.detectedGames, meta?.ytGameTitle, meta?.games, meta?.ytSeason, meta?.ytEpisode, meta?.ytCatchyTitle, folders])
+  }, [folder.detectedGames, meta?.ytGameTitle, meta?.games, meta?.ytSeason, meta?.ytEpisode, meta?.ytCatchyTitle, meta?.isSeries, folders])
 
   // Tracks the title string we most recently produced from a template. When
   // the user blurs the title field with a value that DOESN'T match this, we
@@ -3325,6 +3869,34 @@ function SidebarDetail({
     lastAppliedTitleRef.current = next
     if (next !== meta?.ytTitle) onUpdateMetaRef.current({ ytTitle: next })
   }, [titleTplId, mergeFields, ytTitleTemplates, meta?.ytTitle])
+
+  // One-shot series auto-detect on first game-add. Only fires for streams
+  // explicitly marked `seriesAutoDetectPending: true` at creation (the
+  // regular "New stream" path) — existing legacy streams (no flag) are
+  // left alone. Once a game tag exists, we look across all other folders
+  // for siblings of the same game that are already series (explicit
+  // `isSeries: true` OR legacy with a non-empty `ytEpisode` field, which
+  // is the strongest signal that the legacy stream was actually being
+  // used as a series). Match → bump this stream to series; no match →
+  // leave standalone. Either way, clear the pending flag so the effect
+  // never re-fires.
+  useEffect(() => {
+    if (!meta?.seriesAutoDetectPending) return
+    const primary = meta?.games?.[0]
+    if (!primary) return
+    const lower = primary.toLowerCase()
+    const matched = folders.some(f =>
+      f.folderPath !== folder.folderPath &&
+      !f.isMissing &&
+      ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
+       (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
+      (f.meta?.isSeries === true || (f.meta?.isSeries === undefined && !!f.meta?.ytEpisode))
+    )
+    onUpdateMetaRef.current({
+      isSeries: matched ? true : false,
+      seriesAutoDetectPending: undefined,
+    })
+  }, [meta?.seriesAutoDetectPending, meta?.games, folder.folderPath, folders])
 
   // Reset the ephemeral (non-persisted) template selections when the
   // user switches streams. Title's selection isn't reset here — it lives
@@ -3435,8 +4007,17 @@ function SidebarDetail({
     // tokens ({game}, {season}, etc.) layer in normally afterward.
     let body = tpl.description
     if (body.includes('{season_links}')) {
-      const primaryGame = meta?.ytGameTitle?.trim() || meta?.games?.[0] || folder.detectedGames?.[0] || ''
-      const links = await computeSeasonLinks(folders, primaryGame, meta?.ytSeason || '1', folder.date)
+      // Standalone streams have no series concept — collapse the merge
+      // field to '' so the template body doesn't carry a stub "Prior
+      // episodes:" header pointing at unrelated streams.
+      const links = isStandalone(meta)
+        ? ''
+        : await computeSeasonLinks(
+            folders,
+            meta?.ytGameTitle?.trim() || meta?.games?.[0] || folder.detectedGames?.[0] || '',
+            meta?.ytSeason || '1',
+            folder.date,
+          )
       body = body.replace(/\{season_links\}/g, links)
     }
     onUpdateMeta({ ytDescription: applyMergeFields(body, mergeFields) })
@@ -3735,14 +4316,54 @@ function SidebarDetail({
       const target = new Date(y, mo - 1, d, hh, mm, 0, 0).getTime()
       const future = Date.now() + 5 * 60 * 1000
       const scheduledStartTime = new Date(Math.max(target, future)).toISOString()
+      const title = meta?.ytTitle || 'Untitled stream'
+      const description = meta?.ytDescription || ''
+      const tags = meta?.ytTags ?? []
       const created = await window.api.youtubeCreateBroadcast({
-        title: meta?.ytTitle || 'Untitled stream',
-        description: meta?.ytDescription || '',
+        title,
+        description,
         scheduledStartTime,
         privacyStatus: newBroadcastPrivacy,
       })
-      setYtBroadcasts(prev => [created, ...prev])
-      onUpdateMeta({ ytVideoId: created.id })
+
+      // youtubeCreateBroadcast only sets title/description/scheduled
+      // time/privacy. Tags and the thumbnail need a separate
+      // updateBroadcast + uploadThumbnail pair, otherwise the new
+      // broadcast is missing those until the user manually runs Push
+      // to YouTube. Do the follow-up here so the broadcast is fully
+      // configured in a single user action.
+      let thumbnailPushedHash: string | undefined
+      let followupWarning = ''
+      try {
+        if (tags.length > 0) {
+          await window.api.youtubeUpdateBroadcast(created.id, { title, description }, tags)
+        }
+        if (effectiveYtThumb) {
+          await window.api.youtubeUploadThumbnail(created.id, effectiveYtThumb)
+          // Record the hash so the sidebar's thumbnail-needs-push
+          // detection sees the new broadcast as already in sync.
+          try {
+            const hash = await window.api.thumbnailHashFile(effectiveYtThumb)
+            if (hash) thumbnailPushedHash = hash
+          } catch {}
+        }
+      } catch (err: any) {
+        // The broadcast itself was created — only the follow-up push
+        // failed. Surface the warning but keep the linkage so the
+        // user can retry from the regular Push to YouTube button.
+        followupWarning = `Broadcast created, but follow-up push failed: ${err?.message ?? String(err)}`
+      }
+
+      // Inject tags into the cached broadcast so the broadcastMismatch
+      // detection treats it as in-sync without waiting for a reload.
+      const enriched = tags.length > 0
+        ? { ...created, snippet: { ...created.snippet, tags } }
+        : created
+      setYtBroadcasts(prev => [enriched, ...prev])
+      const metaPatch: Partial<StreamMeta> = { ytVideoId: created.id }
+      if (thumbnailPushedHash) metaPatch.ytThumbnailPushedHash = thumbnailPushedHash
+      onUpdateMeta(metaPatch)
+      if (followupWarning) setCreateError(followupWarning)
     } catch (err: any) {
       setCreateError(err?.message ?? 'Failed to create broadcast')
     } finally {
@@ -3819,8 +4440,33 @@ function SidebarDetail({
               <PencilLine size={9} className="opacity-50" />
             </button>
           </Tooltip>
-          {(prevEpisode || nextEpisode) && (
+          {(prevEpisode || nextEpisode || isStandalone(meta)) && (
             <div className="flex items-center gap-0.5">
+              {/* Jump-to-episode — only meaningful when there are
+                  siblings beyond the immediate prev/next. With exactly
+                  two episodes the chevrons already cover the navigation
+                  and a picker would be redundant. Sits to the LEFT of
+                  the chevrons to match PlayerPage's [List, Prev, Next]
+                  ordering. Not rendered for standalone streams (no
+                  siblings concept) — just the disabled chevrons remain
+                  as a visible affordance. */}
+              {seriesEpisodes.length > 2 && (
+                <Tooltip content="Jump to episode…" side="bottom">
+                  <button
+                    ref={episodePickerAnchorRef}
+                    type="button"
+                    onClick={() => setEpisodePickerOpen(v => !v)}
+                    className={`p-1 rounded transition-colors ${
+                      episodePickerOpen
+                        ? 'bg-white/10 text-gray-200'
+                        : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                    }`}
+                    aria-label="Jump to episode"
+                  >
+                    <List size={13} />
+                  </button>
+                </Tooltip>
+              )}
               <Tooltip content={prevEpisode ? `Previous episode (E${prevEpisode.meta?.ytEpisode || '?'})` : 'No previous episode'} side="bottom">
                 <button
                   type="button"
@@ -3842,6 +4488,80 @@ function SidebarDetail({
                 </button>
               </Tooltip>
             </div>
+          )}
+          {/* Picker dropdown — portal-rendered so the sidebar's
+              overflow-hidden + scrolling content can't clip it.
+              Anchored to the List button's screen rect; flips to drop
+              up if the button is in the bottom half of the viewport,
+              and clamps height into the available space either way.
+              Click outside or pick a row → close. */}
+          {episodePickerOpen && episodePickerAnchorRef.current && ReactDOM.createPortal(
+            (() => {
+              const r = episodePickerAnchorRef.current.getBoundingClientRect()
+              const dropUp = r.top > window.innerHeight / 2
+              const positionStyle: React.CSSProperties = dropUp
+                ? {
+                    position: 'fixed',
+                    bottom: window.innerHeight - r.top + 4,
+                    right: Math.max(8, window.innerWidth - r.right),
+                    zIndex: 61,
+                    maxHeight: Math.max(160, r.top - 16),
+                  }
+                : {
+                    position: 'fixed',
+                    top: r.bottom + 4,
+                    right: Math.max(8, window.innerWidth - r.right),
+                    zIndex: 61,
+                    maxHeight: Math.max(160, window.innerHeight - r.bottom - 16),
+                  }
+              return (
+                <>
+                  <div className="fixed inset-0 z-[60]" onClick={() => setEpisodePickerOpen(false)} />
+                  <div
+                    style={positionStyle}
+                    className="bg-navy-700 border border-white/10 rounded-lg shadow-xl min-w-[240px] max-w-[320px] overflow-y-auto py-1"
+                  >
+                    {/* Reverse-chronological display order — newest
+                        episode at top — even though seriesEpisodes is
+                        sorted ascending by episode number for the
+                        prev/next semantics elsewhere. `.slice()` copies
+                        the array so the reverse() doesn't mutate the
+                        memoized list. */}
+                    {seriesEpisodes.slice().reverse().map(ep => {
+                      const isCurrent = ep.folderPath === folder.folderPath
+                      const epNum = ep.meta?.ytEpisode || '?'
+                      const epTitle = ep.meta?.ytTitle?.trim()
+                        || (ep.meta?.games && ep.meta.games.length > 0 ? ep.meta.games.join(' · ') : '')
+                        || ep.folderName
+                      return (
+                        <button
+                          key={ep.folderPath}
+                          type="button"
+                          onClick={() => {
+                            if (isCurrent) return
+                            onPickEpisode(ep)
+                            setEpisodePickerOpen(false)
+                          }}
+                          disabled={isCurrent}
+                          className={`flex items-baseline gap-2 w-full px-3 py-1 text-xs text-left transition-colors ${
+                            isCurrent
+                              ? 'bg-purple-900/25 text-purple-300 cursor-default'
+                              : 'text-gray-300 hover:bg-white/5'
+                          }`}
+                          title={epTitle}
+                        >
+                          <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{epNum}:</span>
+                          <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{ep.date}</span>
+                          <span className={`shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>·</span>
+                          <span className={`truncate ${isCurrent ? 'text-purple-300 font-medium' : 'text-gray-200'}`}>{epTitle}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )
+            })(),
+            document.body,
           )}
           <Tooltip content="Close" side="bottom" triggerClassName="ml-auto">
             <button
@@ -3888,6 +4608,12 @@ function SidebarDetail({
               <div className="flex flex-col gap-3">
                 <MetaRow label="Thumbnails">
                   <ThumbnailCarousel
+                    // Force a remount on stream switch so the
+                    // carousel's internal `index` resets to 0 — without
+                    // the key, React reuses the same instance and the
+                    // user sees position N from the previous stream's
+                    // thumbnails list.
+                    key={folder.folderPath}
                     thumbnails={folder.thumbnails}
                     thumbsKey={thumbsKey}
                     preferredThumbnail={meta?.preferredThumbnail}
@@ -3903,19 +4629,11 @@ function SidebarDetail({
                 </MetaRow>
               </div>
             )}
-            {/* — Tags (SM-level: topics/games + stream type) — */}
+            {/* — Tags (SM-level: stream type + topics/games) — Order
+                matches the streams list columns (Type, then Games) so
+                the eye lands in the same place in both views. */}
             <div className="flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-2">
-                <MetaRow label="Topics / Games">
-                  <TagComboBox
-                    values={meta?.games ?? []}
-                    onChange={next => onUpdateMeta({ games: next })}
-                    allOptions={allGames}
-                    placeholder="Add topic or game…"
-                    emptyLabel="No topics added"
-                    compact
-                  />
-                </MetaRow>
                 <MetaRow label="Stream type">
                   <TagComboBox
                     values={normalizeStreamTypes(meta?.streamType)}
@@ -3925,7 +4643,27 @@ function SidebarDetail({
                     emptyLabel="No types"
                     tagColors={tagColors}
                     tagTextures={tagTextures}
+                    onNewTag={onNewStreamType}
                     compact
+                  />
+                </MetaRow>
+                <MetaRow label="Topics / Games">
+                  <TagComboBox
+                    values={meta?.games ?? []}
+                    onChange={next => onUpdateMeta({ games: next })}
+                    allOptions={allGames}
+                    placeholder="Add topic or game…"
+                    emptyLabel="No topics added"
+                    compact
+                    // Selection drives `meta.primaryGame` — the value
+                    // used by both the YT title's {game} merge field and
+                    // the Twitch category push. `resolvePrimaryGame`
+                    // falls back to games[0] when no explicit primary
+                    // exists, so the ring is always on *some* chip when
+                    // the list is non-empty.
+                    selectedValue={resolvePrimaryGame(meta)}
+                    onSelectValue={v => onUpdateMeta({ primaryGame: v })}
+                    reorderable
                   />
                 </MetaRow>
               </div>
@@ -3937,8 +4675,22 @@ function SidebarDetail({
                 the YouTube title / description / tag templates below, so they
                 sit above the title field rather than scattered through the
                 metadata. Grid uses two flexible columns for Game + Tagline and
-                two auto columns for the small Season + Episode steppers. */}
-            <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-start">
+                two auto columns for the small Season + Episode steppers.
+                The Series checkbox above gates whether the season + episode
+                columns render at all — standalone streams collapse the grid
+                to 2 columns to keep the row visually tidy. */}
+            <div className="flex items-center justify-end -mb-1">
+              <Checkbox
+                checked={meta?.isSeries !== false}
+                // Also clear the auto-detect pending flag — a manual
+                // toggle means the user owns the value going forward.
+                // Without this, clearing then re-adding games[] later
+                // could silently flip the user's choice.
+                onChange={v => onUpdateMeta({ isSeries: v, seriesAutoDetectPending: undefined })}
+                label={<span className="text-[11px] text-gray-400">Series</span>}
+              />
+            </div>
+            <div className={`grid gap-2 items-start ${isStandalone(meta) ? 'grid-cols-[1fr_1fr]' : 'grid-cols-[1fr_1fr_auto_auto]'}`}>
               <MetaRow mergeHint="{game}" highlighted={activeTitleMergeKeys.has('game')}>
                 <EditableTextField
                   value={meta?.ytGameTitle ?? ''}
@@ -3953,22 +4705,26 @@ function SidebarDetail({
                   onSave={v => onUpdateMeta({ ytCatchyTitle: v })}
                 />
               </MetaRow>
-              <MetaRow mergeHint="{season}" highlighted={activeTitleMergeKeys.has('season')}>
-                <NumberStepperField
-                  value={meta?.ytSeason ?? ''}
-                  placeholder="1"
-                  onSave={handleSeasonSave}
-                  className="w-16"
-                />
-              </MetaRow>
-              <MetaRow mergeHint="{episode}" highlighted={activeTitleMergeKeys.has('episode')}>
-                <NumberStepperField
-                  value={meta?.ytEpisode ?? ''}
-                  placeholder="—"
-                  onSave={v => onUpdateMeta({ ytEpisode: v })}
-                  className="w-16"
-                />
-              </MetaRow>
+              {!isStandalone(meta) && (
+                <>
+                  <MetaRow mergeHint="{season}" highlighted={activeTitleMergeKeys.has('season')}>
+                    <NumberStepperField
+                      value={meta?.ytSeason ?? ''}
+                      placeholder="1"
+                      onSave={handleSeasonSave}
+                      className="w-16"
+                    />
+                  </MetaRow>
+                  <MetaRow mergeHint="{episode}" highlighted={activeTitleMergeKeys.has('episode')}>
+                    <NumberStepperField
+                      value={meta?.ytEpisode ?? ''}
+                      placeholder="—"
+                      onSave={v => onUpdateMeta({ ytEpisode: v })}
+                      className="w-16"
+                    />
+                  </MetaRow>
+                </>
+              )}
             </div>
             {/* YouTube title — pushed below the merge-field params since the
                 title is normally derived from them via a template. The
@@ -4191,7 +4947,7 @@ function SidebarDetail({
                     size="sm"
                     checked={meta?.syncGame !== false}
                     onChange={v => onUpdateMeta({ syncGame: v })}
-                    label={<span className="text-[11px] text-gray-400">Same as YouTube game</span>}
+                    label={<span className="text-[11px] text-gray-400">Same as Topic / Game</span>}
                   />
                   {meta?.syncGame === false && (
                     <EditableTextField
@@ -4399,7 +5155,7 @@ function SidebarDetail({
                     value={manualUrl}
                     onChange={e => handleManualUrlChange(e.target.value)}
                     placeholder="Or paste a URL or Video ID"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-500"
+                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-500"
                   />
                   {manualUrlLoading && (
                     <p className="text-[10px] text-gray-400 flex items-center gap-1">
@@ -4429,24 +5185,16 @@ function SidebarDetail({
                           // Asymmetric padding compensates for the native
                           // time-input chrome — pt-[5px] pb-1 lines up
                           // with neighboring controls.
-                          className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]"
+                          className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]"
                         />
                       </div>
                       <div className="flex items-center gap-1">
                         <label className="text-[10px] text-gray-400 shrink-0">Privacy</label>
-                        <div className="relative">
-                          <select
-                            value={newBroadcastPrivacy}
-                            onChange={e => setNewBroadcastPrivacy(e.target.value as 'public' | 'unlisted' | 'private')}
-                            disabled={creatingBroadcast}
-                            className="appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50"
-                          >
-                            <option value="public">Public</option>
-                            <option value="unlisted">Unlisted</option>
-                            <option value="private">Private</option>
-                          </select>
-                          <ChevronDown size={10} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                        </div>
+                        <PrivacyDropdown
+                          value={newBroadcastPrivacy}
+                          onChange={setNewBroadcastPrivacy}
+                          disabled={creatingBroadcast}
+                        />
                       </div>
                       <Button
                         variant="primary"
@@ -4475,7 +5223,7 @@ function SidebarDetail({
               <div className="flex items-center gap-1.5 flex-wrap">
                 {([
                   { value: 'public' as const,   label: 'Public',   Icon: Globe },
-                  { value: 'unlisted' as const, label: 'Unlisted', Icon: EyeOff },
+                  { value: 'unlisted' as const, label: 'Unlisted', Icon: LinkIcon },
                   { value: 'private' as const,  label: 'Private',  Icon: Lock },
                 ]).map(({ value, label, Icon }) => {
                   const active = currentPrivacy === value
@@ -4539,71 +5287,316 @@ function SidebarDetail({
             {banner.message}
           </button>
         )}
-        <div className="flex items-center gap-1.5">
-          <Tooltip content={
-            !ytConnected ? 'YouTube not connected (Settings → Integrations)'
-              : !meta?.ytVideoId ? 'No linked broadcast or video — link one first'
-              : !selectedBroadcast ? 'Loading broadcast info…'
-              : !broadcastMismatch && !thumbnailNeedsPush ? 'Already in sync with YouTube'
-              : !broadcastMismatch && thumbnailNeedsPush ? 'Push updated thumbnail to YouTube'
-              : 'Push title / description / tags to YouTube'
-          }>
-            <button
-              type="button"
-              onClick={async () => {
-                // Compute a new scheduledStartTime only when the local
-                // date and the broadcast's scheduled-date disagree (and
-                // the broadcast hasn't gone live yet). We preserve the
-                // broadcast's existing time-of-day from its current ISO
-                // so a date-only reschedule doesn't accidentally move
-                // the start hour. For everything else, undefined is
-                // passed and the main process keeps the existing
-                // scheduledStartTime.
-                let newScheduled: string | undefined
-                if (
-                  selectedBroadcast?.snippet.scheduledStartTime &&
-                  !selectedBroadcast.snippet.actualStartTime
-                ) {
-                  const existing = new Date(selectedBroadcast.snippet.scheduledStartTime)
-                  if (!isNaN(existing.getTime())) {
-                    const remoteLocalDate = `${existing.getFullYear()}-${String(existing.getMonth() + 1).padStart(2, '0')}-${String(existing.getDate()).padStart(2, '0')}`
-                    if (remoteLocalDate !== folder.date) {
-                      const [y, mo, d] = folder.date.split('-').map(n => parseInt(n, 10))
-                      const next = new Date(
-                        y, mo - 1, d,
-                        existing.getHours(), existing.getMinutes(), existing.getSeconds(), existing.getMilliseconds(),
-                      )
-                      newScheduled = next.toISOString()
-                    }
-                  }
+        {(() => {
+          // Hoisted disabled flags + push handlers so they can be reused
+          // by the platform buttons individually AND the "Push to all"
+          // button that wraps them. Each handler owns its per-platform
+          // loading state so the spinners stay accurate even when
+          // triggered together by Push to all.
+          const ytDisabled = ytPushing || !ytConnected || !meta?.ytVideoId || !selectedBroadcast
+            || (!broadcastMismatch && !thumbnailNeedsPush)
+          // Effective Twitch values for the in-sync comparison —
+          // matches what handlePushToTwitch above would actually send.
+          // syncTitle/syncGame default ON when undefined (meta from
+          // older streams) so the YT title/game stand in for Twitch.
+          const twSyncTitle = meta?.syncTitle !== false
+          const twSyncGame = meta?.syncGame !== false
+          const twEffectiveTitle = twSyncTitle ? (meta?.ytTitle ?? '') : (meta?.twitchTitle ?? '')
+          // Source-of-truth alignment with handlePushToTwitch above: when
+          // syncGame is on, the comparison reads from the selected Topic/
+          // Game tag (resolvePrimaryGame) — same value the push handler
+          // would actually send.
+          const twEffectiveGame = twSyncGame ? resolvePrimaryGame(meta) : (meta?.twitchGameName ?? '')
+          const { compat: twEffectiveTags } = toTwitchCompatibleTags(meta?.twitchTags ?? [])
+          // Comparison normalizers. Twitch canonicalizes a few fields:
+          //   • Game name — user supplies a search term, the push
+          //     resolves it to a game_id, and the channel-info API
+          //     returns the platform-canonical name. Case + whitespace
+          //     may differ from what's in the local meta, so compare
+          //     case- and trim-insensitive.
+          //   • Title — case is preserved as supplied, but trim
+          //     defensively in case Twitch strips trailing whitespace.
+          //   • Tags — order is arbitrary in the response, so sort,
+          //     and case-fold for the same reason as game name.
+          const twNormalize = (s: string) => s.trim().toLowerCase()
+          const twTagKey = (arr: string[]) => arr.slice().map(twNormalize).sort().join(',')
+          // Per-field sync checks against the live Twitch channel
+          // snapshot. The empty-local short-circuits on game + tags
+          // mirror the push handler's actual behavior:
+          //   • Empty game is passed as `undefined` to the IPC and
+          //     dropped from the request body, so Twitch's existing
+          //     game is preserved untouched — comparing "" vs
+          //     <preserved> would always mismatch even after a
+          //     successful push (e.g. for streams with no YT broadcast
+          //     linked where ytGameTitle was never filled in).
+          //   • Empty tags arrays follow the same logic for safety.
+          // Title is always pushed verbatim (even ""), so its
+          // comparison stays strict.
+          const titleInSync = twEffectiveTitle.trim() === twitchChannel?.title.trim()
+          const gameInSync = !twEffectiveGame.trim()
+            || twNormalize(twEffectiveGame) === twNormalize(twitchChannel?.gameName ?? '')
+          const tagsInSync = twEffectiveTags.length === 0
+            || twTagKey(twEffectiveTags) === twTagKey(twitchChannel?.tags ?? [])
+          const matchesActualTwitch = twitchChannel !== null && titleInSync && gameInSync && tagsInSync
+          // Fallback: match the snapshot of what we last pushed (stored
+          // in meta on every successful push). Necessary because Twitch
+          // fuzzy-matches game names via search → game_id, so a
+          // "Black Flag" push can come back as canonical "IV Black
+          // Flag" on the channel — the cache comparison fails strictly
+          // even though the user just pushed and considers themselves
+          // synced. The user's typed name stays untouched here; only
+          // the in-sync verdict accommodates the canonicalization.
+          // Gated on `twitchLastPushedTitle` being defined so a
+          // never-pushed stream that happens to byte-match an empty
+          // snapshot doesn't read as in-sync.
+          //
+          // Staleness guard: the snapshot is only authoritative as long
+          // as Twitch's channel still reflects THIS stream's push.
+          // Pushing a different stream overwrites the channel's title/
+          // game/tags, but the inactive stream's snapshot stays put in
+          // its own meta file — without the guard, every previously-
+          // pushed stream would read as in-sync forever after, even
+          // after their data has been displaced by a newer push. We
+          // compare `twitchChannel.title` to the snapshot's title (the
+          // cheapest signal: Twitch preserves title verbatim, so a
+          // title mismatch is a definitive "Twitch state has moved on"
+          // signal) and gate the whole snapshot match on it.
+          const hasLastPushedSnapshot = meta?.twitchLastPushedTitle !== undefined
+          const snapshotStillReflectsTwitch = twitchChannel !== null
+            && twitchChannel.title.trim() === (meta?.twitchLastPushedTitle ?? '').trim()
+          const matchesLastPushed = hasLastPushedSnapshot
+            && snapshotStillReflectsTwitch
+            && twEffectiveTitle.trim() === (meta?.twitchLastPushedTitle ?? '').trim()
+            && twEffectiveGame.trim() === (meta?.twitchLastPushedGame ?? '').trim()
+            && twTagKey(twEffectiveTags) === twTagKey(meta?.twitchLastPushedTags ?? [])
+          const twitchInSync = matchesActualTwitch || matchesLastPushed
+          // Twitch channel info is one global blob — pushing for a
+          // past stream would overwrite whatever's currently set on
+          // the channel (for the actual current / next stream) with
+          // stale metadata from a stream that already aired. Mirrors
+          // the legacy page's behavior which hid the Twitch push
+          // option entirely for past streams. Also disable when local
+          // meta already matches what's on Twitch (nothing to push).
+          const twDisabled = twPushing || !twConnected || isPastStream || twitchInSync
+          const handleYouTubePush = async () => {
+            // Compute a new scheduledStartTime only when the local date
+            // and the broadcast's scheduled-date disagree (and the
+            // broadcast hasn't gone live yet). Preserves the broadcast's
+            // existing time-of-day so a date-only reschedule doesn't
+            // move the start hour.
+            let newScheduled: string | undefined
+            if (
+              selectedBroadcast?.snippet.scheduledStartTime &&
+              !selectedBroadcast.snippet.actualStartTime
+            ) {
+              const existing = new Date(selectedBroadcast.snippet.scheduledStartTime)
+              if (!isNaN(existing.getTime())) {
+                const remoteLocalDate = `${existing.getFullYear()}-${String(existing.getMonth() + 1).padStart(2, '0')}-${String(existing.getDate()).padStart(2, '0')}`
+                if (remoteLocalDate !== folder.date) {
+                  const [y, mo, d] = folder.date.split('-').map(n => parseInt(n, 10))
+                  const next = new Date(
+                    y, mo - 1, d,
+                    existing.getHours(), existing.getMinutes(), existing.getSeconds(), existing.getMilliseconds(),
+                  )
+                  newScheduled = next.toISOString()
                 }
-                setYtPushing(true)
-                try { await onPushToYoutube(effectiveYtThumb, newScheduled) }
-                finally { setYtPushing(false) }
-              }}
-              disabled={ytPushing || !ytConnected || !meta?.ytVideoId || !selectedBroadcast || (!broadcastMismatch && !thumbnailNeedsPush)}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 hover:border-red-500/40 text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/10"
-            >
-              {ytPushing ? <Loader2 size={11} className="animate-spin" /> : <LucideYoutube size={11} />}
-              Push to YouTube
-            </button>
-          </Tooltip>
-          <Tooltip content={!twConnected ? 'Twitch not connected (Settings → Integrations)' : 'Push title/category/tags to Twitch channel'}>
-            <button
-              type="button"
-              onClick={async () => {
-                setTwPushing(true)
-                try { await onPushToTwitch() }
-                finally { setTwPushing(false) }
-              }}
-              disabled={twPushing || !twConnected}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/25 hover:border-purple-500/40 text-purple-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-purple-500/10"
-            >
-              {twPushing ? <Loader2 size={11} className="animate-spin" /> : <LucideTwitch size={11} />}
-              Push to Twitch
-            </button>
-          </Tooltip>
-        </div>
+              }
+            }
+            setYtPushing(true)
+            try { await onPushToYoutube(effectiveYtThumb, newScheduled) }
+            finally { setYtPushing(false) }
+          }
+          const handleTwitchPush = async () => {
+            setTwPushing(true)
+            try {
+              // `onPushToTwitch` (parent's handlePushToTwitch) now
+              // rethrows on failure — so this `await` either resolves
+              // (push succeeded, banner shown) or throws (banner
+              // already shown by the parent). On throw we skip both
+              // the refetch and the last-pushed snapshot so we don't
+              // record values that never actually made it to Twitch.
+              await onPushToTwitch()
+              // Refetch Twitch's canonical state instead of
+              // optimistically caching what we sent. Twitch
+              // canonicalizes a few fields (most notably game name,
+              // since it's resolved through a search → game_id
+              // round-trip), and storing what we SENT here would
+              // make this cache disagree with what a fresh page load
+              // would fetch.
+              const refreshed = await window.api.twitchGetChannel?.()
+              if (refreshed) setTwitchChannel(refreshed)
+              // Persist what we just pushed into meta so the in-sync
+              // check stays valid across page reloads even when
+              // Twitch's canonical state byte-differs from local
+              // (the fuzzy-game-match case: user enters "Assassin's
+              // Creed Black Flag", Twitch stores "Assassin's Creed
+              // IV Black Flag"). The cache comparison would fail
+              // strictly; the last-pushed comparison succeeds because
+              // local still matches what we sent. Stored alongside
+              // (not replacing) the user's typed values so we don't
+              // overwrite their preferred naming.
+              await onUpdateMeta({
+                twitchLastPushedTitle: twEffectiveTitle,
+                twitchLastPushedGame: twEffectiveGame,
+                twitchLastPushedTags: twEffectiveTags,
+              })
+              // After-push fuzzy-match detection. Twitch resolves the
+              // pushed game name through a search → game_id round-trip,
+              // so the canonical name stored on the channel can byte-
+              // differ from what we sent (e.g. "Black Flag" → "Assassin's
+              // Creed IV Black Flag"). When that happens with both sides
+              // non-empty, offer the user the chance to rename their
+              // local tag globally to match. The page-level handler
+              // gates this against the don't-ask-again preference.
+              const sent = twEffectiveGame.trim()
+              const canonical = (refreshed?.gameName ?? '').trim()
+              if (sent && canonical && twNormalize(sent) !== twNormalize(canonical)) {
+                onSuggestCategoryRename(sent, canonical)
+              }
+            }
+            catch { /* push failed; parent already surfaced the error */ }
+            finally { setTwPushing(false) }
+          }
+          const handlePushAll = async () => {
+            // Parallel — they hit independent APIs and we don't want
+            // a YouTube failure to stop the Twitch push (or vice
+            // versa). Each handler owns its own loading + error
+            // state, so allSettled here is purely a "wait for both"
+            // signal.
+            const tasks: Promise<unknown>[] = []
+            if (!ytDisabled) tasks.push(handleYouTubePush())
+            if (!twDisabled) tasks.push(handleTwitchPush())
+            await Promise.allSettled(tasks)
+          }
+          const allDisabled = ytDisabled && twDisabled
+          return (
+            // Outer @container so the inner layout can switch between
+            // row (wide) and column (narrow) via container queries.
+            // The trio sizes to content (no `w-full`), so when the
+            // sidebar is wider than the trio's natural width there's
+            // empty space to the right; when narrower, items wrap.
+            <div className="@container">
+              {/*
+                Layered design (z-stack, bottom → top):
+                  1. Frame layer — `frameBg` (white/10 or white/5)
+                     on both halves. Each half rounds only the OUTSIDE
+                     corners of the trio. The two halves share the
+                     same color and meet flush — no divider — so they
+                     read as one connected pill.
+                  2. Sidebar-bg overlay — `bg-navy-800` inset 1px on
+                     the wrapper half only, with corners matching the
+                     frame's rounded sides. It hides the frame layer
+                     inside the wrapper so the interior reads as the
+                     sidebar's own bg, with a 1px frame ring visible
+                     around the perimeter.
+                  3. Buttons — the YT + Twitch platform buttons sit
+                     above the overlay; the Push-to-all label sits on
+                     top of the frame layer.
+
+                Wrap behavior: at <280px the inner flex switches to
+                column, and each half's rounded corners swap from
+                left/right to top/bottom via explicit per-corner
+                classes (avoids the `rounded-t-none` + `rounded-l-lg`
+                top-left precedence conflict that left the corner
+                un-rounded in row mode).
+              */}
+              {/* `group` lets the wrapper sibling react to the
+                  Push-to-all button's state via `group-has-[…]:`
+                  modifiers (CSS `:has()`). `peer-*` doesn't work here
+                  because the button is wrapped in a Tooltip's own
+                  div, so the button isn't actually a DOM-sibling of
+                  the wrapper. With `:has()` on a common ancestor we
+                  can target the button by its `.push-all-btn` class
+                  no matter how deeply it's nested. */}
+              <div className="group flex flex-col @[280px]:flex-row items-stretch w-fit">
+                {/* WRAPPER half — frame layer + sidebar-bg overlay +
+                    platform buttons. The frame's bg mirrors the
+                    Push-to-all button's state via `group-has-[…]:`
+                    modifiers reaching down through the Tooltip
+                    wrapper to the actual button. The hover and
+                    focus selectors include `:not(:disabled)` so
+                    pointer / keyboard interactions on a disabled
+                    button don't visually "activate" the wrapper —
+                    `:hover` still fires on disabled elements in
+                    modern browsers, which would otherwise let the
+                    hover bg win over the disabled bg. */}
+                <div className="relative bg-purple-800 group-has-[.push-all-btn:hover:not(:disabled)]:bg-purple-700 group-has-[.push-all-btn:focus-visible:not(:disabled)]:bg-purple-700 group-has-[.push-all-btn:disabled]:bg-purple-800/50 transition-colors rounded-tl-lg rounded-tr-lg @[280px]:rounded-tr-none @[280px]:rounded-bl-lg">
+                  {/* Layer 2: sidebar-bg overlay, 1px inset, all four
+                      corners rounded — gives the inner "transparent"
+                      area its soft pill shape regardless of which
+                      sides of the frame are rounded. */}
+                  <div className="absolute inset-px bg-navy-800 rounded-[7px]" />
+                  {/* Layer 3: platform buttons. `p-[5px]` (1px more
+                      than the previous `p-1`) gives the buttons a
+                      touch more breathing room inside the wrapper —
+                      makes the trio 2px taller overall. */}
+                  <div className="relative z-10 flex items-center gap-1.5 p-[5px]">
+                    <Tooltip content={
+                      !ytConnected ? 'YouTube not connected (Settings → Integrations)'
+                        : !meta?.ytVideoId ? 'No linked broadcast or video — link one first'
+                        : !selectedBroadcast ? 'Loading broadcast info…'
+                        : !broadcastMismatch && !thumbnailNeedsPush ? 'Already in sync with YouTube'
+                        : !broadcastMismatch && thumbnailNeedsPush ? 'Push updated thumbnail to YouTube'
+                        : 'Push title / description / tags to YouTube'
+                    }>
+                      <button
+                        type="button"
+                        onClick={handleYouTubePush}
+                        disabled={ytDisabled}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 hover:border-red-500/40 text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/10"
+                      >
+                        {ytPushing ? <Loader2 size={11} className="animate-spin" /> : <LucideYoutube size={11} />}
+                        Push to YouTube
+                      </button>
+                    </Tooltip>
+                    <Tooltip content={
+                      !twConnected ? 'Twitch not connected (Settings → Integrations)'
+                        : isPastStream ? 'Past stream — Twitch only reflects the channel’s current state'
+                        : twitchInSync ? 'Twitch channel info already matches this stream'
+                        : 'Push title/category/tags to Twitch channel'
+                    }>
+                      <button
+                        type="button"
+                        onClick={handleTwitchPush}
+                        disabled={twDisabled}
+                        // Twitch brand purple (#9146FF — `twitch-500` in
+                        // the tailwind config) for the border + text,
+                        // transparent bg with a subtle on-hover wash.
+                        // Distinct from the YouTube button's red-on-tint
+                        // treatment because the app's `purple-*` scale
+                        // was rethemed to a cool gray, so the literal
+                        // brand purple has to come from `twitch-*`.
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-transparent hover:bg-twitch-500/10 border border-twitch-500/50 hover:border-twitch-500 text-twitch-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                      >
+                        {twPushing ? <Loader2 size={11} className="animate-spin" /> : <LucideTwitch size={11} />}
+                        Push to Twitch
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
+
+                {/* PUSH TO ALL — `.push-all-btn` class is the hook
+                    that the wrapper's `group-has-[…]:` modifiers
+                    above use to mirror this button's state. Styled
+                    like the primary Button (purple-800 → purple-700
+                    on hover, soft purple-900 shadow). */}
+                <Tooltip content={
+                  allDisabled ? 'Nothing to push on any connected platform'
+                    : 'Push to every connected platform with pending changes. Skips platforms that are already in sync or not connected.'
+                }>
+                  <button
+                    type="button"
+                    onClick={handlePushAll}
+                    disabled={allDisabled}
+                    className="push-all-btn flex items-center justify-center px-3 py-1.5 rounded-bl-lg rounded-br-lg @[280px]:rounded-bl-none @[280px]:rounded-tr-lg text-xs font-medium bg-purple-800 hover:bg-purple-700 text-white shadow-lg shadow-purple-900/30 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 focus:ring-offset-navy-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-purple-800 whitespace-nowrap"
+                  >
+                    Push to all
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Row-level action buttons. Pinned to the bottom of the footer
             so destructive verbs (Archive, Delete) sit at the very end of
@@ -4662,15 +5655,19 @@ function SidebarDetail({
               </Tooltip>
             )}
             <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
-              <button onClick={onOpenThumbnails} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
+              <button onClick={() => onOpenThumbnails()} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
                 <ImageIcon size={13} />
-                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Thumbnail</CollapsibleLabel>
+                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Thumbnails</CollapsibleLabel>
               </button>
             </Tooltip>
           </div>
           <div className="flex-1 flex items-center justify-center gap-1 px-3">
-            <Tooltip content="New episode based on this stream">
-              <button onClick={onNewEpisode} className={PANEL_ACTION_BUTTON_BLUE}>
+            <Tooltip content={isStandalone(meta) ? 'Standalone streams don’t have episodes — enable Series above to use this' : 'New episode based on this stream'}>
+              <button
+                onClick={onNewEpisode}
+                disabled={isStandalone(meta)}
+                className={PANEL_ACTION_BUTTON_BLUE}
+              >
                 <CopyPlus size={13} />
                 <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">New episode</CollapsibleLabel>
               </button>
@@ -4944,6 +5941,17 @@ function EditableTextField({
     window.addEventListener('mouseup', onUp)
   }, [multiline])
 
+  // Double-click the resize handle to undo a manual drag: re-enable
+  // auto-grow and snap the textarea back to its content-fit height
+  // (no scrollbar). The mousedown handlers above fire first and
+  // disable auto-grow as part of the dblclick sequence — this handler
+  // runs after them and wins.
+  const handleResizeReset = useCallback(() => {
+    if (!multiline) return
+    autoGrowEnabledRef.current = true
+    grow()
+  }, [multiline, grow])
+
   const handleBlur = async () => {
     if (local === value) return
     setSaving(true)
@@ -4956,7 +5964,7 @@ function EditableTextField({
   }
 
   const borderCls = tabActive ? 'border-white/[0.18]' : 'border-white/10'
-  const cornerCls = tabAttached ? 'rounded rounded-tr-none' : 'rounded'
+  const cornerCls = tabAttached ? 'rounded-lg rounded-tr-none' : 'rounded-lg'
   const sharedCls = `w-full bg-navy-900/70 border ${borderCls} ${cornerCls} px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''} ${className ?? ''}`
 
   // Type-cast aliases for the input vs textarea render branches. Both
@@ -4999,12 +6007,13 @@ function EditableTextField({
         // edge). The scrollbar-corner arbitrary selector keeps the
         // bottom-right tile from rendering as a bright Chromium square
         // when content overflows past a user-shrunk height.
-        className={`${sharedCls} resize-none leading-snug [&::-webkit-scrollbar-corner]:bg-transparent z-10`}
+        className={`${sharedCls} relative z-10 resize-none leading-snug [&::-webkit-scrollbar-corner]:bg-transparent`}
       />
       <div
         onMouseDown={handleResizeStart}
-        className="group cursor-ns-resize flex items-center justify-center h-1.75 rounded-b hover:bg-white/5 transition-colors pt-[2px] mt-[-2px]"
-        title="Drag to resize"
+        onDoubleClick={handleResizeReset}
+        className="group relative z-0 cursor-ns-resize flex items-center justify-center h-4 rounded-b-lg hover:bg-white/5 transition-colors pt-[8px] mt-[-8px]"
+        title="Drag to resize · double-click to reset"
       >
         <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
       </div>
@@ -5026,6 +6035,67 @@ function EditableTextField({
       {aiHint}
     </div>
   )
+}
+
+/**
+ * EditorTagChip — single chip with truncation-aware Tooltip. Detects
+ * overflow via scrollWidth > clientWidth on the inner text span. Tooltip
+ * only renders when the chip is actually clipped, so short tags don't
+ * carry a redundant hover tip with the same text. Pulled out of
+ * TagChipEditor's .map because hooks can't be called inside a loop.
+ */
+function EditorTagChip({
+  tag, chipCls, onRemove,
+}: {
+  tag: string
+  chipCls: string
+  onRemove: () => void
+}) {
+  const [truncated, setTruncated] = useState(false)
+  // Callback ref so the observer follows whichever inner span is
+  // currently mounted — see DisplayTagChip in legacyStreamsShared for
+  // the long version.
+  const obsCleanupRef = useRef<(() => void) | null>(null)
+  const setTextRef = useCallback((el: HTMLSpanElement | null) => {
+    obsCleanupRef.current?.()
+    obsCleanupRef.current = null
+    if (!el) return
+    const check = () => setTruncated(el.scrollWidth > el.clientWidth)
+    check()
+    let raf = 0
+    const obs = new ResizeObserver(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(check)
+    })
+    obs.observe(el)
+    obsCleanupRef.current = () => {
+      cancelAnimationFrame(raf)
+      obs.disconnect()
+    }
+  }, [])
+  useEffect(() => () => { obsCleanupRef.current?.() }, [])
+
+  const chip = (
+    <span className={chipCls}>
+      <span ref={setTextRef} className="truncate min-w-0">{tag}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="text-gray-500 hover:text-red-400 transition-colors leading-none shrink-0"
+        aria-label={`Remove ${tag}`}
+      >
+        <X size={9} />
+      </button>
+    </span>
+  )
+  // inline-block + max-w-full + min-w-0 on the Tooltip wrapper — see
+  // DisplayTagChip in legacyStreamsShared for the long version.
+  // Default inline-flex wrapper would collapse to chip natural width
+  // and break truncation; min-w-0 overrides the flex-item min-content
+  // default so max-w-full actually cascades.
+  return truncated ? (
+    <Tooltip content={tag} side="top" triggerClassName="inline-block max-w-full min-w-0">{chip}</Tooltip>
+  ) : chip
 }
 
 /**
@@ -5114,23 +6184,18 @@ function TagChipEditor({
   // Both YouTube + Twitch tag editors share the brighter purple chip
   // styling. The earlier gray-on-white/5 treatment for YouTube tags read
   // as disabled, so it's been unified.
-  const chipCls = 'inline-flex items-center gap-1 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/25 rounded px-1.5 py-0.5'
+  const chipCls = 'inline-flex items-center gap-1 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/25 rounded px-1.5 py-0.5 max-w-full'
 
   return (
     <div className="flex flex-col">
-      <div className={`flex flex-wrap gap-1 items-center min-h-[1.75rem] bg-navy-900/70 border border-white/10 px-1.5 py-1 focus-within:border-purple-500/50 focus-within:bg-navy-900 transition-colors ${tabAttached ? 'rounded rounded-tr-none' : 'rounded'}`}>
+      <div className={`flex flex-wrap gap-1 items-center min-h-[1.75rem] bg-navy-900/70 border border-white/10 px-1.5 py-1 focus-within:border-purple-500/50 focus-within:bg-navy-900 transition-colors ${tabAttached ? 'rounded-lg rounded-tr-none' : 'rounded-lg'}`}>
         {value.map((tag, i) => (
-          <span key={`${tag}-${i}`} className={chipCls}>
-            <span>{tag}</span>
-            <button
-              type="button"
-              onClick={() => removeAt(i)}
-              className="text-gray-500 hover:text-red-400 transition-colors leading-none"
-              aria-label={`Remove ${tag}`}
-            >
-              <X size={9} />
-            </button>
-          </span>
+          <EditorTagChip
+            key={`${tag}-${i}`}
+            tag={tag}
+            chipCls={chipCls}
+            onRemove={() => removeAt(i)}
+          />
         ))}
         <input
           ref={sg.ref as React.RefObject<HTMLInputElement>}
@@ -5315,6 +6380,22 @@ function NumberStepperField({
     void commit(local)
   }
 
+  // Arrow Up/Down nudge the value. Shift gives a 10× step — matches
+  // the shared NumberInput primitive's keyboard behavior so every
+  // number-ish field in the app responds the same way. The input is
+  // type="text" (the underlying meta fields ytSeason/ytEpisode are
+  // strings, and the empty state matters), so native number-spinner
+  // keys don't apply — we handle it manually.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      step(e.shiftKey ? 10 : 1)
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      step(e.shiftKey ? -10 : -1)
+    }
+  }
+
   return (
     <div className={`flex items-stretch ${className ?? ''}`}>
       <input
@@ -5323,17 +6404,25 @@ function NumberStepperField({
         inputMode="numeric"
         value={local}
         onChange={e => setLocal(e.target.value)}
+        onKeyDown={handleKeyDown}
         onBlur={handleBlur}
         placeholder={placeholder}
-        disabled={saving}
-        className={`w-full bg-navy-900/70 border border-r-0 border-white/10 rounded-l px-2 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''}`}
+        // Intentionally NOT disabling the input while saving — the
+        // browser blurs a focused input the moment `disabled` flips
+        // true, which kicks the user out of the field on every arrow-
+        // key press (each press triggers a commit). The opacity-60
+        // class still signals saving state; any keystrokes the user
+        // makes during the in-flight save just update local state and
+        // commit on the next blur, so concurrent edits aren't lost.
+        className={`w-full bg-navy-900/70 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''}`}
       />
       <div className="flex flex-col">
         <button
           type="button"
           tabIndex={-1}
-          onClick={() => step(1)}
-          className="flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-b-0 border-white/10 rounded-tr text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          onClick={e => step(e.shiftKey ? 10 : 1)}
+          title="Increment (Shift = ×10)"
+          className="flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-b-0 border-white/10 rounded-tr-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
           aria-label="Increment"
         >
           <ChevronUp size={10} strokeWidth={2.5} />
@@ -5341,13 +6430,91 @@ function NumberStepperField({
         <button
           type="button"
           tabIndex={-1}
-          onClick={() => step(-1)}
-          className="flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-white/10 rounded-br text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          onClick={e => step(e.shiftKey ? -10 : -1)}
+          title="Decrement (Shift = ×10)"
+          className="flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-white/10 rounded-br-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
           aria-label="Decrement"
         >
           <ChevronDown size={10} strokeWidth={2.5} />
         </button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * PrivacyDropdown — custom dropdown for YouTube broadcast privacy
+ * (Public / Unlisted / Private). Replaces the native `<select>`
+ * because native options don't support per-option icons cross-browser.
+ * Icon set matches YouTube Studio (Globe / Link / Lock). Height is
+ * aligned with the neighbouring `Button` variant=primary size=sm
+ * (py-1.5 on the trigger) so the create-broadcast row's controls
+ * read as a single visual band.
+ */
+type PrivacyValue = 'public' | 'unlisted' | 'private'
+const PRIVACY_OPTIONS: Array<{ value: PrivacyValue; label: string; Icon: typeof Globe }> = [
+  { value: 'public',   label: 'Public',   Icon: Globe },
+  { value: 'unlisted', label: 'Unlisted', Icon: LinkIcon },
+  { value: 'private',  label: 'Private',  Icon: Lock },
+]
+function PrivacyDropdown({
+  value, onChange, disabled,
+}: {
+  value: PrivacyValue
+  onChange: (next: PrivacyValue) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const current = PRIVACY_OPTIONS.find(o => o.value === value) ?? PRIVACY_OPTIONS[0]
+
+  // Close on outside click. The container ref scopes the check so
+  // clicking inside the menu still selects a value.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const CurrentIcon = current.Icon
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        disabled={disabled}
+        className="flex items-center gap-1.5 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-1.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50"
+      >
+        <CurrentIcon size={11} className="shrink-0 text-gray-400" />
+        <span>{current.label}</span>
+        <ChevronDown size={10} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-20 min-w-full bg-navy-800 border border-white/10 rounded-lg shadow-lg overflow-hidden">
+          {PRIVACY_OPTIONS.map(opt => {
+            const OptIcon = opt.Icon
+            const active = opt.value === value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => { onChange(opt.value); setOpen(false) }}
+                className={`flex items-center gap-1.5 w-full px-2 py-1.5 text-xs text-left transition-colors ${
+                  active ? 'bg-white/10 text-gray-100' : 'text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                <OptIcon size={11} className="shrink-0 text-gray-400" />
+                <span>{opt.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -5366,13 +6533,34 @@ function NumberStepperField({
  */
 function RescheduleModal({
   target,
+  folders,
+  ytConnected,
+  twConnected,
+  ytBroadcasts,
   onClose,
   onSuccess,
+  onPushYoutube,
+  onPushTwitch,
 }: {
   target: StreamFolder
+  folders: StreamFolder[]
+  ytConnected: boolean
+  twConnected: boolean
+  ytBroadcasts: LiveBroadcast[]
   onClose: () => void
   onSuccess: (newFolderPath: string) => void
+  /** Push the linked YT broadcast's scheduled time + privacy. Title /
+   *  description / tags / thumbnail are intentionally untouched so the
+   *  user can keep iterating on those without an accidental publish. */
+  onPushYoutube: (
+    newScheduledStartTime: string,
+    privacy: 'public' | 'unlisted' | 'private',
+  ) => Promise<void>
+  /** Push title / game / tags to the Twitch channel — used when the
+   *  rescheduled stream becomes the new "next upcoming". */
+  onPushTwitch: () => Promise<void>
 }) {
+  const [step, setStep] = useState<'date' | 'platforms'>('date')
   const [newDate, setNewDate] = useState(target.date)
   const [preview, setPreview] = useState<{
     folderRename: { from: string; to: string } | null
@@ -5383,6 +6571,17 @@ function RescheduleModal({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Saved across the step transition: step 1's IPC returns the new
+  // folder path; step 2 hands it off to onSuccess once the user
+  // confirms or skips the platform pushes.
+  const [newFolderPath, setNewFolderPath] = useState<string | null>(null)
+  // Step 2 state
+  const [pushYoutube, setPushYoutube] = useState(true)
+  const [pushTwitch, setPushTwitch] = useState(true)
+  const [pushTime, setPushTime] = useState('19:00')
+  const [pushPrivacy, setPushPrivacy] = useState<'public' | 'unlisted' | 'private'>('public')
+  const [pushing, setPushing] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!newDate || newDate === target.date) { setPreview(null); return }
@@ -5395,16 +6594,67 @@ function RescheduleModal({
     return () => { cancelled = true }
   }, [newDate, target.folderPath, target.date])
 
+  // Linked YouTube broadcast for the target stream, if any. Used to
+  // gate the YouTube checkbox and to seed the time/privacy inputs.
+  const linkedBroadcast = useMemo(() => {
+    const id = target.meta?.ytVideoId
+    if (!id) return null
+    return ytBroadcasts.find(b => b.id === id) ?? null
+  }, [target.meta?.ytVideoId, ytBroadcasts])
+
+  // Initialize time + privacy from the linked broadcast whenever it
+  // changes (e.g. switching streams in the sidebar without closing).
+  // Only resets when the underlying broadcast id changes, so a user
+  // edit to either field isn't clobbered by an unrelated re-render.
+  useEffect(() => {
+    if (!linkedBroadcast) return
+    const iso = linkedBroadcast.snippet.scheduledStartTime
+    if (iso) {
+      const d = new Date(iso)
+      if (!isNaN(d.getTime())) {
+        setPushTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`)
+      }
+    }
+    const p = linkedBroadcast.status?.privacyStatus
+    if (p === 'public' || p === 'unlisted' || p === 'private') setPushPrivacy(p)
+  }, [linkedBroadcast?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const today = todayStr()
+  const newDateIsFuture = !!newDate && newDate >= today
+  const canShowYouTube = ytConnected
+    && !!linkedBroadcast
+    && (linkedBroadcast.status?.lifeCycleStatus === 'ready' || linkedBroadcast.status?.lifeCycleStatus === 'created')
+    && newDateIsFuture
+  // "Was target the next upcoming stream BEFORE this reschedule?"
+  // True iff target's existing date is today/future AND every other
+  // future-dated stream is at-or-after target. Ties count target as
+  // first (matches the user's preference: SM can't disambiguate
+  // same-date streams so it assumes the rescheduled one is next).
+  const wasNextUpcoming = !!newDate && target.date >= today && folders.every(f =>
+    f.folderPath === target.folderPath || f.date < today || f.date >= target.date
+  )
+  // "Will target be next upcoming AFTER the reschedule?"
+  const willBeNextUpcoming = newDateIsFuture && folders.every(f =>
+    f.folderPath === target.folderPath || f.date < today || f.date >= newDate
+  )
+  const canShowTwitch = twConnected && willBeNextUpcoming && !wasNextUpcoming
+  const showStep2 = canShowYouTube || canShowTwitch
+
   const sameDate = newDate === target.date
-  const disabled = busy || sameDate || !preview || !!preview.folderConflict || !!preview.hasCollisions
+  const stepOneDisabled = busy || sameDate || !preview || !!preview.folderConflict || !!preview.hasCollisions
 
   const confirm = async () => {
-    if (disabled || !newDate) return
+    if (stepOneDisabled || !newDate) return
     setBusy(true)
     setError(null)
     try {
       const result = await window.api.rescheduleStream(target.folderPath, target.date, newDate)
-      onSuccess(result.newFolderPath)
+      if (showStep2) {
+        setNewFolderPath(result.newFolderPath)
+        setStep('platforms')
+      } else {
+        onSuccess(result.newFolderPath)
+      }
     } catch (err: any) {
       const msg: string = err?.message ?? String(err)
       if (/EPERM|EBUSY/.test(msg) && /rename/.test(msg)) {
@@ -5417,92 +6667,224 @@ function RescheduleModal({
     }
   }
 
+  const confirmPushes = async () => {
+    if (!newFolderPath || pushing) return
+    const wantYT = pushYoutube && canShowYouTube && !!linkedBroadcast
+    const wantTW = pushTwitch && canShowTwitch
+    if (!wantYT && !wantTW) return
+    setPushing(true)
+    setPushError(null)
+    const errors: string[] = []
+    if (wantYT && linkedBroadcast) {
+      try {
+        const [hh, mm] = pushTime.split(':').map(n => parseInt(n, 10))
+        const [y, mo, d] = newDate.split('-').map(n => parseInt(n, 10))
+        // Build the new ISO from the user-edited time at the new date.
+        // The seconds default to 0; YouTube doesn't need sub-minute
+        // precision for scheduledStartTime.
+        const newScheduled = new Date(y, mo - 1, d, hh, mm, 0).toISOString()
+        await onPushYoutube(newScheduled, pushPrivacy)
+      } catch (err: any) {
+        errors.push(`YouTube: ${err?.message ?? String(err)}`)
+      }
+    }
+    if (wantTW) {
+      try { await onPushTwitch() }
+      catch (err: any) { errors.push(`Twitch: ${err?.message ?? String(err)}`) }
+    }
+    setPushing(false)
+    if (errors.length > 0) {
+      setPushError(errors.join(' · '))
+    } else {
+      onSuccess(newFolderPath)
+    }
+  }
+
+  // Skip = treat as "done" without pushing. The reschedule itself was
+  // already committed in step 1.
+  const skipPushes = () => {
+    if (newFolderPath) onSuccess(newFolderPath)
+  }
+
+  const stepTwoDisabled = pushing || (!pushYoutube && !pushTwitch)
+
   return (
     <Modal
       isOpen
-      onClose={() => { if (!busy) onClose() }}
-      title="Reschedule stream"
+      onClose={() => {
+        if (busy || pushing) return
+        if (step === 'platforms' && newFolderPath) {
+          // Modal-close mid-step-2 is a skip — the reschedule is
+          // committed, we just don't push anywhere.
+          onSuccess(newFolderPath)
+        } else {
+          onClose()
+        }
+      }}
+      title={step === 'date' ? 'Reschedule stream' : 'Push to connected platforms?'}
       width="2xl"
       footer={
-        <>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>Cancel</Button>
-          <Button variant="primary" size="sm" loading={busy} disabled={disabled} onClick={confirm}>
-            Confirm reschedule
-          </Button>
-        </>
+        step === 'date' ? (
+          <>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>Cancel</Button>
+            <Button variant="primary" size="sm" loading={busy} disabled={stepOneDisabled} onClick={confirm}>
+              Confirm reschedule
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" size="sm" disabled={pushing} onClick={skipPushes}>Skip</Button>
+            <Button variant="primary" size="sm" loading={pushing} disabled={stepTwoDisabled} onClick={confirmPushes}>
+              Confirm pushes
+            </Button>
+          </>
+        )
       }
     >
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-gray-400">New date</label>
-          <input
-            type="date"
-            value={newDate}
-            onChange={e => setNewDate(e.target.value)}
-            disabled={busy}
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
-          />
-        </div>
+      {step === 'date' ? (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-gray-400">New date</label>
+            <input
+              type="date"
+              value={newDate}
+              onChange={e => setNewDate(e.target.value)}
+              disabled={busy}
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+            />
+          </div>
 
-        {sameDate && (
-          <p className="text-xs text-gray-400 italic">Choose a different date to reschedule.</p>
-        )}
+          {sameDate && (
+            <p className="text-xs text-gray-400 italic">Choose a different date to reschedule.</p>
+          )}
 
-        {!sameDate && previewLoading && (
-          <p className="text-xs text-gray-400 flex items-center gap-1.5">
-            <Loader2 size={11} className="animate-spin shrink-0" />
-            Checking…
-          </p>
-        )}
-
-        {!sameDate && !previewLoading && preview && (
-          preview.folderConflict ? (
-            <p className="text-xs text-red-400 flex items-start gap-1.5">
-              <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-              A stream folder already exists for {newDate}. Choose a different date.
+          {!sameDate && previewLoading && (
+            <p className="text-xs text-gray-400 flex items-center gap-1.5">
+              <Loader2 size={11} className="animate-spin shrink-0" />
+              Checking…
             </p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-gray-400">
-                The following will be renamed from <span className="font-mono text-gray-300">{target.date}</span> to <span className="font-mono text-gray-300">{newDate}</span>:
+          )}
+
+          {/* Informational notice when the new date already has another
+              stream. Reschedule can still proceed — the folder gets a
+              numeric suffix from nextFolderName — but surfacing it as
+              an amber callout (mirroring the NewStreamModal pattern)
+              so the user isn't surprised by the `-2` in the rename
+              list below. */}
+          {!sameDate && !previewLoading && preview && !preview.folderConflict
+            && preview.folderRename && preview.folderRename.to !== newDate && (
+            <p className="text-xs text-amber-400 flex items-start gap-1.5">
+              <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+              A stream already exists for {newDate}. This stream will be placed alongside it as <span className="font-mono text-amber-300">{preview.folderRename.to}</span>.
+            </p>
+          )}
+
+          {!sameDate && !previewLoading && preview && (
+            preview.folderConflict ? (
+              <p className="text-xs text-red-400 flex items-start gap-1.5">
+                <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                A stream folder already exists for {newDate}. Choose a different date.
               </p>
-              <ul className="flex flex-col gap-0.5 max-h-48 overflow-y-auto">
-                {preview.folderRename && (
-                  <li className="text-xs font-mono text-gray-400 bg-navy-900 rounded px-2 py-1">
-                    📁 {preview.folderRename.from}/ → {preview.folderRename.to}/
-                  </li>
-                )}
-                {preview.filesToRename.map(f => (
-                  <li
-                    key={f.from}
-                    className={`text-xs font-mono px-2 py-0.5 ${f.collision ? 'text-red-400' : 'text-gray-400'}`}
-                    title={f.collision ? 'Skipped: a file with that name already exists.' : undefined}
-                  >
-                    {f.collision && <AlertTriangle size={10} className="inline mr-1 mb-0.5" />}
-                    {f.from} → {f.to}
-                  </li>
-                ))}
-                {preview.filesToRename.length === 0 && (
-                  <li className="text-xs text-gray-400 italic px-2 py-0.5">No files to rename inside folder.</li>
-                )}
-              </ul>
-              {preview.hasCollisions && (
-                <p className="text-xs text-red-400 flex items-start gap-1.5">
-                  <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-                  Some target filenames already exist. Resolve those conflicts before rescheduling.
+            ) : (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-gray-400">
+                  The following will be renamed from <span className="font-mono text-gray-300">{target.date}</span> to <span className="font-mono text-gray-300">{newDate}</span>:
                 </p>
+                <ul className="flex flex-col gap-0.5 max-h-48 overflow-y-auto">
+                  {preview.folderRename && (
+                    <li className="text-xs font-mono text-gray-400 bg-navy-900 rounded px-2 py-1">
+                      📁 {preview.folderRename.from}/ → {preview.folderRename.to}/
+                    </li>
+                  )}
+                  {preview.filesToRename.map(f => (
+                    <li
+                      key={f.from}
+                      className={`text-xs font-mono px-2 py-0.5 ${f.collision ? 'text-red-400' : 'text-gray-400'}`}
+                      title={f.collision ? 'Skipped: a file with that name already exists.' : undefined}
+                    >
+                      {f.collision && <AlertTriangle size={10} className="inline mr-1 mb-0.5" />}
+                      {f.from} → {f.to}
+                    </li>
+                  ))}
+                  {preview.filesToRename.length === 0 && (
+                    <li className="text-xs text-gray-400 italic px-2 py-0.5">No files to rename inside folder.</li>
+                  )}
+                </ul>
+                {preview.hasCollisions && (
+                  <p className="text-xs text-red-400 flex items-start gap-1.5">
+                    <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                    Some target filenames already exist. Resolve those conflicts before rescheduling.
+                  </p>
+                )}
+              </div>
+            )
+          )}
+
+          {error && (
+            <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 leading-relaxed">
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-gray-400">
+            The stream has been rescheduled to <span className="font-mono text-gray-300">{newDate}</span>. Want to push the update to your connected platforms?
+          </p>
+
+          {canShowYouTube && linkedBroadcast && (
+            <div className="flex flex-col gap-2 p-3 rounded-lg border border-white/10 bg-navy-900/50">
+              <Checkbox
+                checked={pushYoutube}
+                onChange={setPushYoutube}
+                label="Update YouTube broadcast"
+              />
+              <p className="text-[10px] text-gray-400 pl-6 leading-snug">
+                Only the scheduled time and privacy will be sent. Title, description, tags, and thumbnail will be left unchanged — keep iterating on those without an accidental publish.
+              </p>
+              {pushYoutube && (
+                <div className="flex items-center gap-3 pl-6 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] text-gray-400 shrink-0">Time</label>
+                    <input
+                      type="time"
+                      value={pushTime}
+                      onChange={e => setPushTime(e.target.value)}
+                      disabled={pushing}
+                      className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] text-gray-400 shrink-0">Privacy</label>
+                    <PrivacyDropdown value={pushPrivacy} onChange={setPushPrivacy} disabled={pushing} />
+                  </div>
+                </div>
               )}
             </div>
-          )
-        )}
+          )}
 
-        {error && (
-          <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 leading-relaxed">
-            <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-            <span>{error}</span>
-          </div>
-        )}
-      </div>
+          {canShowTwitch && (
+            <div className="flex flex-col gap-2 p-3 rounded-lg border border-white/10 bg-navy-900/50">
+              <Checkbox
+                checked={pushTwitch}
+                onChange={setPushTwitch}
+                label="Update Twitch channel"
+              />
+              <p className="text-[10px] text-gray-400 pl-6 leading-snug">
+                This stream will be next up after the reschedule. Twitch will be set to this stream's title, game, and tags so the channel info matches when you go live.
+              </p>
+            </div>
+          )}
+
+          {pushError && (
+            <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 leading-relaxed">
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+              <span>{pushError}</span>
+            </div>
+          )}
+        </div>
+      )}
     </Modal>
   )
 }
@@ -5721,7 +7103,17 @@ function NewStreamModal({
   // picked (the next-available number depends on how many siblings
   // already exist strictly before this date).
   const buildInheritedMeta = (): StreamMeta => {
-    const base: StreamMeta = { date, streamType: [], games: [], comments: '' }
+    // Regular "New stream" path: standalone by default, but armed for
+    // a one-time auto-upgrade to series if the user later adds a game
+    // tag that matches an existing series (handled by an effect in
+    // SidebarDetail). Tracking "armed" via `seriesAutoDetectPending`
+    // avoids touching existing legacy streams where isSeries is
+    // undefined — those keep behaving as series like they always did.
+    const base: StreamMeta = {
+      date, streamType: [], games: [], comments: '',
+      isSeries: false,
+      seriesAutoDetectPending: true,
+    }
     if (!source) return base
 
     const m = source.meta ?? ({} as StreamMeta)
@@ -5744,6 +7136,10 @@ function NewStreamModal({
       comments: '',  // notes start fresh per episode
       ytSeason: season,
       ytEpisode,
+      // New Episode mode is always a series — set explicitly so the
+      // sidebar Series checkbox shows as on from the first render
+      // (rather than depending on the legacy-undefined fallback path).
+      isSeries: true,
     }
     // Only attach optional fields when the source actually has them, so
     // we don't write a bunch of '' / undefined keys for nothing.

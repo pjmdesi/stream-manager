@@ -426,7 +426,7 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
               }}
               onBlur={commitRename}
               onClick={e => e.stopPropagation()}
-              className="w-full bg-navy-900 border border-purple-500/50 text-gray-200 text-sm rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
+              className="w-full bg-navy-900 border border-purple-500/50 text-gray-200 text-sm rounded-lg px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
               autoFocus
             />
           ) : (

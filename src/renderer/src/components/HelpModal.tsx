@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid } from 'lucide-react'
 import { Youtube } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { useStore } from '../hooks/useStore'
@@ -55,7 +55,7 @@ function ShortcutGroup({ title, rows }: { title: string; rows: { keys: React.Rea
 
 type HelpKey =
   | 'streams' | 'player' | 'converter' | 'combine'
-  | 'thumbnails' | 'launcher' | 'integrations' | 'rules'
+  | 'thumbnails' | 'launcher' | 'integrations' | 'rules' | 'widgets'
 
 interface HelpItem {
   id: HelpKey
@@ -72,10 +72,10 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <Radio size={16} />,
     body: (
       <>
-        <p>The Streams page is the home view — every stream session you've recorded shows up as a row or card. Each stream item is made up of the following elements:</p>
+        <p>The Streams page is the home view — every stream session you've recorded or upcoming session you've scheduled shows up as a row. Each stream item is made up of the following elements:</p>
 
         <ElementSection icon={<ImageIcon size={14} />} title="Thumbnail">
-          <p>Stream Manager automatically detects images related to the stream and picks the best one to represent it (typically the first available). Click the thumbnail to view all images {isDumpMode ? 'matching this date in the dump folder' : 'in the stream folder'} and select a different one. The same selection can be made while editing a stream item's details.</p>
+          <p>Stream Manager automatically detects images related to the stream and picks the best one to represent it (typically the first available). Click the stream item row to see a carousel containing all the images in the folder and manually pick a new thumbnail for the item.</p>
         </ElementSection>
 
         <ElementSection icon={<Film size={14} />} title="Video Counter">
@@ -105,18 +105,17 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           <p>Further detail about what the stream covered. Like Type Tags, you can create new ones on the fly while creating or editing a stream, or through the <strong className="text-gray-300">Manage Tags</strong> button.</p>
         </ElementSection>
 
-        <ElementSection icon={<MessageSquare size={14} />} title="Comments">
-          <p>Free-form notes for anything the other fields don't cover. Edit a stream item with the <PencilLine size={11} className="inline align-baseline -translate-y-px" /> action button to add or update comments.</p>
+        <ElementSection icon={<MessageSquare size={14} />} title="Notes">
+          <p>Free-form notes for anything the other fields don't cover. Click a stream item to open the details sidebar — notes (and every other field) are edited inline there.</p>
         </ElementSection>
 
         <ElementSection icon={<Zap size={14} />} title="Action Buttons">
-          <p>Hover over a stream item to reveal its actions:</p>
+          <p>Click a stream item to open the details sidebar — that's where all editing happens. Hover over a stream to reveal its quick actions:</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
             <li className="flex items-baseline gap-2"><Film size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Player</strong> — open the stream's video in the Player page for review or clipping.</span></li>
             <li className="flex items-baseline gap-2"><Zap size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Converter</strong> — queue the stream's video for conversion using a chosen preset.</span></li>
             <li className="flex items-baseline gap-2"><Combine size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Combine videos</strong> — merge multi-part recordings into one file (only shown when there are 2+ videos).</span></li>
             <li className="flex items-baseline gap-2"><ImageIcon size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Create / Edit thumbnail</strong> — open the built-in thumbnail editor for this stream.</span></li>
-            <li className="flex items-baseline gap-2"><PencilLine size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Edit / Add metadata</strong> — open the metadata modal to set title, episode info, comments, tags, and broadcast links.</span></li>
             <li className="flex items-baseline gap-2"><FolderOpen size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Open folder</strong> — reveal the stream's folder in your OS file explorer.</span></li>
             <li className="flex items-baseline gap-2"><CalendarClock size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Reschedule</strong> — change the date of an upcoming stream (only shown for upcoming items).</span></li>
             <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — remove the stream item and its files. You'll be asked to confirm.</span></li>
@@ -305,6 +304,39 @@ function getItems(isDumpMode: boolean): HelpItem[] {
       </>
     ),
   },
+  {
+    id: 'widgets',
+    label: 'Widgets',
+    icon: <LayoutGrid size={16} />,
+    body: (
+      <>
+        <p>Widgets are the live-status panels that show up in the bottom of the left sidebar. Some only appear when they have something to show (a file conversion, active cloud syncing, a pinned launch group, etc.). Click any widget's header to navigate to the page it is related to.</p>
+
+        <ElementSection icon={<Zap size={14} />} title="Converting">
+          <p>Visible while at least one conversion job is queued, running, paused, or errored. Shows the combined progress bar, a status label, job count, and an ETA when one is available. Cloud-placeholder files that need to download before encoding can start are surfaced separately.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Cloud size={14} />} title="Cloud sync">
+          <p>Visible during a cloud-sync operation — either offloading local files to the cloud or downloading (hydrating) placeholders to disk.</p>
+          <p>Click the widget to open the Cloud Operations dialog.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Rocket size={14} />} title="Launcher">
+          <p>Visible only after you've pinned one of your launch groups to the sidebar (the star icon next to a group on the Launcher page). Shows the pinned group's icon and name in the widget header.</p>
+          <p>Click <em>Launch</em> to spin up every app, window, and URL in the group in one shot.</p>
+        </ElementSection>
+
+        <ElementSection icon={<TrendingUpDown size={14} />} title="Stream Relay">
+          <p>Visible only when the relay is enabled in Integrations → Stream Relay. Shows the relay's current status (<em>Idle</em>, <em>Listening</em>, <em>Starting</em>, <em>Streaming</em>, <em>Error</em>), the active YouTube broadcast, and — once you go live — running kbps + duration stats.</p>
+          <p>Click the title row to jump to the Integrations page where the relay's setup and stream key live. Click the active-broadcast row to pick a different broadcast or use auto-pick mode.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Shuffle size={14} />} title="Auto-Rules">
+          <p>Visible when you have one or more rules configured on the Auto-Rules page. The header row links to the Auto-Rules page; a <em>Start / Stop</em> button toggles the file-watcher; the bottom row shows the watcher's running state with a colored dot and the number of currently-enabled rules.</p>
+        </ElementSection>
+      </>
+    ),
+  },
   ]
 }
 
@@ -339,8 +371,11 @@ export function HelpModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
           })}
         </nav>
 
-        {/* Content */}
-        <div className="flex-1 min-w-0 flex flex-col gap-3 text-sm text-gray-400 leading-relaxed [&_p]:m-0 overflow-y-auto pr-2">
+        {/* Content. `text-pretty` (= text-wrap: pretty) inherits to
+            every descendant block element, so all paragraphs + list
+            items in every section get the orphan-avoiding wrap rule
+            without scattering the class through each section body. */}
+        <div className="flex-1 min-w-0 flex flex-col gap-3 text-sm text-gray-400 leading-relaxed text-pretty [&_p]:m-0 overflow-y-auto pr-2">
           <div className="flex items-center gap-2 text-gray-200">
             <span className="text-purple-300">{item.icon}</span>
             <h3 className="text-base font-semibold">{item.label}</h3>

@@ -4,6 +4,7 @@ import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, C
 import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass } from '../../constants/tagColors'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
+import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, TimelineViewport } from '../../types'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
@@ -943,7 +944,7 @@ function DraftSessionItem({
                 }}
                 onBlur={commit}
                 onClick={e => e.stopPropagation()}
-                className={`w-full text-[11px] font-medium bg-navy-900 border rounded px-1.5 py-0.5 text-gray-200 focus:outline-none focus:ring-1 ${
+                className={`w-full text-[11px] font-medium bg-navy-900 border rounded-lg px-1.5 py-0.5 text-gray-200 focus:outline-none focus:ring-1 ${
                   error ? 'border-red-500/60 focus:ring-red-500/40' : 'border-white/15 focus:ring-purple-500/40'
                 }`}
                 title={error ? 'Name already in use by another clip draft' : undefined}
@@ -1096,6 +1097,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, recomputeAudibility,
     clearError, closeVideo, seek, fastSeek, togglePlay,
   } = useVideoPlayer()
+  // Publish "player has video loaded" to the page-activity bus so
+  // App.tsx can drive the nav's activity indicator. filePath is null
+  // before load + after closeVideo, so the boolean is always in sync
+  // with whether the user has work open in the player.
+  const { setPlayerHasVideo } = usePageActivity()
+  useEffect(() => {
+    setPlayerHasVideo(state.filePath !== null)
+  }, [state.filePath, setPlayerHasVideo])
   const [editingTimecode, setEditingTimecode] = useState(false)
   const [timecodeInput, setTimecodeInput] = useState('')
   const timecodeInputRef = useRef<HTMLInputElement>(null)

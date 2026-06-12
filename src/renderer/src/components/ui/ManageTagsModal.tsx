@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { SwatchBook, Trash2, Star, X, GitMerge, Check, Plus, Layers } from 'lucide-react'
+import { SwatchBook, Trash2, Star, X, GitMerge, Check, Plus, Layers, PencilLine } from 'lucide-react'
 import { Modal } from './Modal'
 import { Button } from './Button'
 import { Tooltip } from './Tooltip'
@@ -159,6 +159,12 @@ interface TagListPanelProps {
   /** Returns the default color key for a new tag (least-used rule) */
   getDefaultColor?: () => string
   getDefaultTexture?: () => string
+  /** Inline-rename handler. When provided, each row shows a pencil
+   *  button that swaps the chip for an input field. Save commits via
+   *  this callback (parent does the global rewrite across folders +
+   *  re-keys the color/texture maps for stream-type tags). Omit on
+   *  panels where rename isn't supported. */
+  onRenameItem?: (oldName: string, newName: string) => void
 }
 
 function TagListPanel({
@@ -184,11 +190,19 @@ function TagListPanel({
   onAddItem,
   getDefaultColor,
   getDefaultTexture,
+  onRenameItem,
 }: TagListPanelProps) {
   const [openColorPicker, setOpenColorPicker] = useState<string | null>(null)
   const [openTexturePicker, setOpenTexturePicker] = useState<string | null>(null)
   const swatchBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const textureBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  // Rename mode: one row at a time. `renameDraft` holds the in-progress
+  // new name; `renameError` surfaces validation problems (empty / duplicate).
+  // Cleared together on cancel + commit.
+  const [renamingItem, setRenamingItem] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [renameError, setRenameError] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
 
   // New-tag inline state
   const [newTag, setNewTag] = useState<{ name: string; colorKey: string; textureKey: string } | null>(null)
@@ -231,6 +245,47 @@ function TagListPanel({
     setNewTagColorOpen(false)
     setNewTagTextureOpen(false)
   }
+
+  const startRename = (item: string) => {
+    setRenamingItem(item)
+    setRenameDraft(item)
+    setRenameError('')
+    // Close any open swatch / texture pickers — their anchor button
+    // disappears in rename mode and they'd float orphaned otherwise.
+    setOpenColorPicker(null)
+    setOpenTexturePicker(null)
+  }
+
+  const cancelRename = () => {
+    setRenamingItem(null)
+    setRenameDraft('')
+    setRenameError('')
+  }
+
+  const commitRename = () => {
+    if (!renamingItem || !onRenameItem) return
+    const next = renameDraft.trim()
+    if (!next) { setRenameError('Name is required.'); return }
+    if (next === renamingItem) { cancelRename(); return }
+    // Duplicate check — case-sensitive to match the new-tag rule above,
+    // so case-only renames ("Black Flag" → "BLACK FLAG") are allowed.
+    if (items.includes(next)) { setRenameError('Already exists.'); return }
+    onRenameItem(renamingItem, next)
+    cancelRename()
+  }
+
+  // Autofocus + select-all when rename mode opens so the user can either
+  // type over the existing name or position the caret instantly.
+  useEffect(() => {
+    if (renamingItem !== null) {
+      renameInputRef.current?.focus()
+      renameInputRef.current?.select()
+    }
+  }, [renamingItem])
+
+  // Bail out of rename mode if combine mode takes over (the combine
+  // checkbox would otherwise overlap the rename input).
+  useEffect(() => { if (combineMode) cancelRename() }, [combineMode])
 
   const sorted = [...items].sort((a, b) => a.localeCompare(b))
   const survivor = selected[0]
@@ -275,6 +330,7 @@ function TagListPanel({
           const isSurvivor = survivor === item
           const isDying = isSelected && !isSurvivor
           const isPendingDelete = deleteTarget === item
+          const isRenaming = renamingItem === item
 
           return (
             <div
@@ -283,6 +339,8 @@ function TagListPanel({
                 flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors
                 ${isPendingDelete
                   ? 'bg-red-900/20 border-red-800/40'
+                  : isRenaming
+                  ? 'bg-navy-700/80 border-purple-700/40'
                   : isSurvivor
                   ? 'bg-navy-700/80 border-yellow-700/40 survivor-pulse'
                   : isDying
@@ -316,24 +374,56 @@ function TagListPanel({
                 </button>
               )}
 
-              {/* Chip */}
-              <span
-                className={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${resolvedChip}`}
-                style={chipClass ? {} : getTagTextureStyle(tagTextures?.[item])}
-              >
-                {item}
-              </span>
+              {/* Chip / rename input */}
+              {isRenaming ? (
+                <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                  <input
+                    ref={renameInputRef}
+                    type="text"
+                    value={renameDraft}
+                    onChange={e => { setRenameDraft(e.target.value); if (renameError) setRenameError('') }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+                      else if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
+                    }}
+                    className="bg-navy-900 border border-white/10 text-sm text-gray-100 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/40 w-full min-w-0"
+                  />
+                  {renameError && (
+                    <span className="text-[11px] text-red-400">{renameError}</span>
+                  )}
+                </div>
+              ) : (
+                <span
+                  className={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${resolvedChip}`}
+                  style={chipClass ? {} : getTagTextureStyle(tagTextures?.[item])}
+                >
+                  {item}
+                </span>
+              )}
 
-              {/* Usage */}
-              <span className="text-xs text-gray-400 shrink-0">
-                {usageCounts[item] ?? 0} stream{(usageCounts[item] ?? 0) !== 1 ? 's' : ''}
-              </span>
+              {/* Usage — hidden in rename mode to keep the input wide */}
+              {!isRenaming && (
+                <span className="text-xs text-gray-400 shrink-0">
+                  {usageCounts[item] ?? 0} stream{(usageCounts[item] ?? 0) !== 1 ? 's' : ''}
+                </span>
+              )}
 
-              <div className="flex-1" />
+              {!isRenaming && <div className="flex-1" />}
 
               {/* Action buttons */}
-              {!combineMode && !isPendingDelete && (
+              {!combineMode && !isPendingDelete && !isRenaming && (
                 <div className="flex items-center gap-1">
+                  {onRenameItem && (
+                    <Tooltip content="Rename">
+                      <button
+                        type="button"
+                        onClick={() => startRename(item)}
+                        className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                      >
+                        <PencilLine size={14} />
+                      </button>
+                    </Tooltip>
+                  )}
                   {onColorChange && (
                     <Tooltip content="Change color">
                       <button
@@ -365,6 +455,30 @@ function TagListPanel({
                       className="p-1.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-colors"
                     >
                       <Trash2 size={14} />
+                    </button>
+                  </Tooltip>
+                </div>
+              )}
+
+              {/* Rename-mode action buttons */}
+              {isRenaming && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Tooltip content="Save (Enter)">
+                    <button
+                      type="button"
+                      onClick={commitRename}
+                      className="p-1.5 rounded text-gray-400 hover:text-green-400 hover:bg-green-900/20 transition-colors"
+                    >
+                      <Check size={14} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Cancel (Esc)">
+                    <button
+                      type="button"
+                      onClick={cancelRename}
+                      className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                    >
+                      <X size={14} />
                     </button>
                   </Tooltip>
                 </div>
@@ -583,6 +697,11 @@ interface Props {
   onCombineTags: (dying: string[], survivor: string) => void
   onDeleteGame: (game: string) => void
   onCombineGames: (dying: string[], survivor: string) => void
+  /** Global rename. Parent rewrites every folder's meta to replace the
+   *  old name with the new one (and, for stream types, re-keys the
+   *  color + texture maps). Mirrors the delete/combine pattern. */
+  onRenameTag: (oldName: string, newName: string) => void
+  onRenameGame: (oldName: string, newName: string) => void
   onClose: () => void
 }
 
@@ -592,6 +711,7 @@ export function ManageTagsModal({
   tags, tagColors, tagTextures, games, folders,
   onColorChange, onTextureChange, onAddTag, onDeleteTag, onCombineTags,
   onDeleteGame, onCombineGames,
+  onRenameTag, onRenameGame,
   onClose,
 }: Props) {
   const [activeTab, setActiveTab] = useState<'types' | 'topics'>('types')
@@ -714,7 +834,7 @@ export function ManageTagsModal({
   ]
 
   return (
-    <Modal title="Manage Tags" onClose={onClose} isOpen width="md">
+    <Modal title="Manage Tags" onClose={onClose} isOpen width="lg">
       {/* Tab switcher */}
       <div className="flex gap-1 p-1 bg-navy-900/60 rounded-lg mb-4">
         {tabs.map(t => (
@@ -761,6 +881,7 @@ export function ManageTagsModal({
           onAddItem={onAddTag}
           getDefaultColor={() => pickColorForNewTag(tagColors)}
           getDefaultTexture={() => pickTextureForNewTag(tagTextures)}
+          onRenameItem={onRenameTag}
         />
       )}
 
@@ -781,6 +902,7 @@ export function ManageTagsModal({
           onSetCombineMode={v => { setCombineMode(v); if (!v) setSelected([]) }}
           onConfirmCombine={handleConfirmCombine}
           chipClass={TOPIC_CHIP}
+          onRenameItem={onRenameGame}
         />
       )}
     </Modal>

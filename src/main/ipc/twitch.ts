@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected } from '../services/twitchAuth'
-import { updateChannelInfo } from '../services/twitchApi'
+import { getChannelInfo, updateChannelInfo } from '../services/twitchApi'
 import { getStore } from './store'
 
 function getCreds() {
@@ -35,5 +35,10 @@ export function registerTwitchIPC(): void {
   ) => {
     const { clientId, clientSecret } = getCreds()
     await updateChannelInfo(title, gameName, tags, clientId, clientSecret)
+  })
+
+  ipcMain.handle('twitch:getChannel', async () => {
+    const { clientId, clientSecret } = getCreds()
+    return getChannelInfo(clientId, clientSecret)
   })
 }

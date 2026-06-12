@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { getStore } from './store'
+import { suppressNextStreamsChokidarFire } from './streams'
 
 // ── Types (mirrored from renderer) ───────────────────────────────────────────
 
@@ -10,6 +11,8 @@ interface ThumbnailLayer {
   id: string; name: string; type: 'image' | 'text'; visible: boolean; opacity: number
   x: number; y: number; rotation: number
   src?: string; width?: number; height?: number
+  flipX?: boolean; flipY?: boolean
+  aspectLocked?: boolean
   text?: string; fontFamily?: string; fontSize?: number; fontStyle?: string
   fill?: string; stroke?: string; strokeWidth?: number; align?: string
 }
@@ -32,11 +35,34 @@ function assetsDir(streamsDir: string) { return path.join(streamsDir, '_thumbnai
 function templatesDir(streamsDir: string) { return path.join(assetsDir(streamsDir), 'templates') }
 function imagesDir(streamsDir: string) { return path.join(assetsDir(streamsDir), 'images') }
 
-function canvasJsonPath(folderPath: string, date: string) {
-  return path.join(folderPath, `${date}_sm-thumbnail.json`)
+// Variant 1 keeps the legacy unsuffixed names so existing thumbnails
+// continue to load without migration; variants 2+ get an `-N` ordinal
+// before the extension. The ordinal embedded in the filename is the
+// STABLE identifier — deleting variant 2 doesn't renumber 3, so
+// `meta.preferredThumbnail` references and external links survive.
+function suffix(ordinal: number) { return ordinal <= 1 ? '' : `-${ordinal}` }
+function canvasJsonPath(folderPath: string, date: string, ordinal: number = 1) {
+  return path.join(folderPath, `${date}_sm-thumbnail${suffix(ordinal)}.json`)
 }
-function canvasPngPath(folderPath: string, date: string) {
-  return path.join(folderPath, `${date}_sm-thumbnail.png`)
+function canvasPngPath(folderPath: string, date: string, ordinal: number = 1) {
+  return path.join(folderPath, `${date}_sm-thumbnail${suffix(ordinal)}.png`)
+}
+/** Scan a stream folder for all SM-thumbnail variants. Returns the
+ *  ordinals in ascending order — `[1]` for a legacy single-thumbnail
+ *  stream, `[1, 2, 3]` for one with two alternatives, etc. Holes are
+ *  preserved (e.g. `[1, 3]` if the user deleted variant 2). */
+function listThumbnailVariants(folderPath: string, date: string): number[] {
+  let entries: string[]
+  try { entries = fs.readdirSync(folderPath) } catch { return [] }
+  const re = new RegExp(`^${date.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}_sm-thumbnail(?:-(\\d+))?\\.png$`, 'i')
+  const ordinals = new Set<number>()
+  for (const name of entries) {
+    const m = name.match(re)
+    if (!m) continue
+    const n = m[1] ? parseInt(m[1], 10) : 1
+    if (n >= 1) ordinals.add(n)
+  }
+  return Array.from(ordinals).sort((a, b) => a - b)
 }
 
 // ── Store helpers ─────────────────────────────────────────────────────────────
@@ -111,9 +137,9 @@ export function registerThumbnailIPC(): void {
 
   // ── Canvas (per-stream) ───────────────────────────────────────────────────
 
-  ipcMain.handle('thumbnail:loadCanvas', async (_e, folderPath: string, date: string): Promise<ThumbnailCanvasFile | null> => {
+  ipcMain.handle('thumbnail:loadCanvas', async (_e, folderPath: string, date: string, ordinal: number = 1): Promise<ThumbnailCanvasFile | null> => {
     try {
-      const raw = await fs.promises.readFile(canvasJsonPath(folderPath, date), 'utf-8')
+      const raw = await fs.promises.readFile(canvasJsonPath(folderPath, date, ordinal), 'utf-8')
       return JSON.parse(raw) as ThumbnailCanvasFile
     } catch {
       return null
@@ -125,7 +151,8 @@ export function registerThumbnailIPC(): void {
     folderPath: string,
     date: string,
     canvasFile: ThumbnailCanvasFile,
-    pngDataUrl: string
+    pngDataUrl: string,
+    ordinal: number = 1,
   ) => {
     // Bail if the stream's folder no longer exists. The previous behavior
     // (mkdir -p) silently re-created deleted streams whenever an autosave
@@ -137,11 +164,16 @@ export function registerThumbnailIPC(): void {
       console.warn(`[thumbnail:saveCanvas] folder gone — skipping save: ${folderPath}`)
       return
     }
+    // Suppress the chokidar echo for the PNG we're about to write.
+    // We send `streams:changed` explicitly below for instant feedback;
+    // without this guard, chokidar would also fire ~1.8s later on the
+    // same write and the renderer would reload twice per save.
+    suppressNextStreamsChokidarFire()
     // Save JSON
-    await fs.promises.writeFile(canvasJsonPath(folderPath, date), JSON.stringify(canvasFile, null, 2), 'utf-8')
+    await fs.promises.writeFile(canvasJsonPath(folderPath, date, ordinal), JSON.stringify(canvasFile, null, 2), 'utf-8')
     // Save PNG
     const base64 = pngDataUrl.replace(/^data:image\/png;base64,/, '')
-    await fs.promises.writeFile(canvasPngPath(folderPath, date), Buffer.from(base64, 'base64'))
+    await fs.promises.writeFile(canvasPngPath(folderPath, date, ordinal), Buffer.from(base64, 'base64'))
     // Explicit notify so the streams page refreshes immediately. The
     // chokidar watcher would also catch this PNG write, but only after
     // ~1.8s (awaitWriteFinish + debounce) and it can miss the event on
@@ -149,6 +181,10 @@ export function registerThumbnailIPC(): void {
     // churn). Firing here is deterministic.
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win && !win.isDestroyed()) win.webContents.send('streams:changed')
+  })
+
+  ipcMain.handle('thumbnail:listVariants', async (_e, folderPath: string, date: string): Promise<number[]> => {
+    return listThumbnailVariants(folderPath, date)
   })
 
   // ── Asset cache ───────────────────────────────────────────────────────────

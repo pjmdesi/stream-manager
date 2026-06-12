@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { ChevronDown, Loader2, AlertTriangle, Link2 } from 'lucide-react'
+import { ChevronDown, Loader2, AlertTriangle, Link2, Radio } from 'lucide-react'
 import type { LiveBroadcast } from '../../types'
 
 /** Cross-link map entry — surfaced under any broadcast in the dropdown that
@@ -147,6 +147,12 @@ export function BroadcastPicker({
                       }`}
                     >
                       <RowContent broadcast={b} showDateOnly={showDateOnly} />
+                      {isLikelyDefaultBroadcast(b) && (
+                        <span className="mt-1 inline-flex items-start gap-1 text-[10px] text-gray-300 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">
+                          <Radio size={9} className="shrink-0 mt-0.5" />
+                          <span>Default livestream (no scheduled time)</span>
+                        </span>
+                      )}
                       {links.length > 0 && (
                         <span className="mt-1 inline-flex items-start gap-1 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5">
                           <Link2 size={9} className="shrink-0 mt-0.5" />
@@ -198,6 +204,17 @@ function RowContent({
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** YouTube's persistent "Stream now" default broadcast has no
+ *  scheduledStartTime — event broadcasts always do (it's required at
+ *  creation). YouTube's own `snippet.isDefaultBroadcast` field is
+ *  deprecated and no longer reliably returned, so we lean on the
+ *  data we already have. A broadcast in 'live' state that's the
+ *  default will have actualStartTime but still no
+ *  scheduledStartTime, so this check works across lifecycle states. */
+function isLikelyDefaultBroadcast(b: LiveBroadcast): boolean {
+  return !b.snippet?.scheduledStartTime
+}
 
 /** "Today 7:00 PM" / "Tomorrow 8:30 PM" / "Jun 17 7:00 PM". */
 function formatScheduledTime(iso: string): string {

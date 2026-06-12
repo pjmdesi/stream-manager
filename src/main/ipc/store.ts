@@ -79,6 +79,28 @@ export interface AppConfig {
    *  Only effective when no item is selected; selecting forces the
    *  sidebar open regardless. Default false (open). */
   streamsNewSidebarCollapsed: boolean
+  /** Which page the app opens to on launch. Set via the hover-revealed
+   *  star icon next to each functional nav item (streams, player,
+   *  converter, combine, thumbnails, launcher — integrations + settings
+   *  are intentionally excluded). Defaults to 'streams'. */
+  startupPage: string
+  // ── Sidebar calendar prefs ───────────────────────────────────────────────
+  /** First column of the calendar grid + day-of-week header.
+   *  'sunday' (default) matches US convention; 'monday' matches
+   *  ISO 8601 / most of Europe. */
+  calendarFirstDayOfWeek: 'sunday' | 'monday'
+  /** Prepend an ISO week-number column to the calendar grid. */
+  calendarShowWeekNumbers: boolean
+  /** Render days from the prior/next month in the leading + trailing
+   *  cells of the 6-row grid. When false, those cells render blank
+   *  (the grid stays 6 rows × 7 columns either way). */
+  calendarShowAdjacentMonthDays: boolean
+  /** When true, suppress the post-Twitch-push modal that offers to
+   *  rename the local game tag to Twitch's canonical category name
+   *  (Twitch fuzzy-matches the game via search → game_id, so a
+   *  user-typed "Black Flag" can come back as "Assassin's Creed IV
+   *  Black Flag"). Surfaced + toggleable from Settings → Streams. */
+  twitchSkipCategoryRenamePrompt: boolean
 }
 
 function getDefaultConfig(): AppConfig {
@@ -126,6 +148,11 @@ function getDefaultConfig(): AppConfig {
     streamRelayActivePickedAt: 0,
     autoUpdateTwitchAfterStream: 'ask',
     streamsNewSidebarCollapsed: false,
+    startupPage: 'streams',
+    calendarFirstDayOfWeek: 'sunday',
+    calendarShowWeekNumbers: false,
+    calendarShowAdjacentMonthDays: true,
+    twitchSkipCategoryRenamePrompt: false,
   }
 }
 

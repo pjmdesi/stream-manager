@@ -449,6 +449,9 @@ contextBridge.exposeInMainWorld('api', {
   twitchUpdateChannel: (title: string, gameName?: string, tags?: string[]) =>
     ipcRenderer.invoke('twitch:updateChannel', title, gameName, tags),
 
+  twitchGetChannel: () =>
+    ipcRenderer.invoke('twitch:getChannel'),
+
   // ── Video Popup ───────────────────────────────────────────────────────────
   // offerSdp is the WebRTC offer SDP from the main renderer's RTCPeerConnection.
   // The popup receives it, answers, and streams the video from the main window.
@@ -534,10 +537,15 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:saveTemplate', streamsDir, template, pngDataUrl),
   thumbnailDeleteTemplate: (streamsDir: string, templateId: string) =>
     ipcRenderer.invoke('thumbnail:deleteTemplate', streamsDir, templateId),
-  thumbnailLoadCanvas: (folderPath: string, date: string) =>
-    ipcRenderer.invoke('thumbnail:loadCanvas', folderPath, date),
-  thumbnailSaveCanvas: (folderPath: string, date: string, canvasFile: any, pngDataUrl: string) =>
-    ipcRenderer.invoke('thumbnail:saveCanvas', folderPath, date, canvasFile, pngDataUrl),
+  thumbnailLoadCanvas: (folderPath: string, date: string, ordinal: number = 1) =>
+    ipcRenderer.invoke('thumbnail:loadCanvas', folderPath, date, ordinal),
+  thumbnailSaveCanvas: (folderPath: string, date: string, canvasFile: any, pngDataUrl: string, ordinal: number = 1) =>
+    ipcRenderer.invoke('thumbnail:saveCanvas', folderPath, date, canvasFile, pngDataUrl, ordinal),
+  /** List the ordinals of every SM-thumbnail variant present in the
+   *  stream's folder. `[1]` for a legacy single-thumbnail stream, `[]`
+   *  for none, `[1, 2]` for one + first alternative, etc. */
+  thumbnailListVariants: (folderPath: string, date: string): Promise<number[]> =>
+    ipcRenderer.invoke('thumbnail:listVariants', folderPath, date),
   thumbnailCacheAsset: (streamsDir: string, srcPath: string) =>
     ipcRenderer.invoke('thumbnail:cacheAsset', streamsDir, srcPath),
   thumbnailHashFile: (filePath: string): Promise<string | null> =>

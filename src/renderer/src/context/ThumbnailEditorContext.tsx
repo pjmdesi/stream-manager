@@ -10,6 +10,12 @@ export interface PendingThumbnailStream {
    *  Pre-computed at navigation time because the thumbnail editor doesn't
    *  load the full streams list. Used for the {total_episodes} merge field. */
   totalEpisodes?: number
+  /** Specific thumbnail variant the editor should open (1-indexed). When
+   *  set, overrides the default behavior of picking whichever variant
+   *  matches `meta.preferredThumbnail`. Used by the carousel / lightbox
+   *  edit buttons so clicking edit on alternative 2 opens alternative 2,
+   *  not the preferred one. */
+  variantOrdinal?: number
 }
 
 interface ThumbnailEditorContextValue {

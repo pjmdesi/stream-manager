@@ -1,7 +1,8 @@
 import React, {
   useState, useEffect, useRef, useCallback, useMemo
 } from 'react'
-import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, RegularPolygon as KonvaRegularPolygon, Shape as KonvaShape } from 'react-konva'
+import { flushSync } from 'react-dom'
+import { Stage, Layer, Group as KonvaGroup, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, RegularPolygon as KonvaRegularPolygon, Shape as KonvaShape } from 'react-konva'
 import useImage from 'use-image'
 import Konva from 'konva'
 import {
@@ -13,14 +14,17 @@ import {
   Frame, BoxSelect,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
+  FlipHorizontal2, FlipVertical2,
+  ChevronDown,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
-import { useAutoGrowTextarea } from '../ui/Input'
+import { useAutoGrowTextarea, NumberInput } from '../ui/Input'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
+import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import { theme, rgba } from '../../theme'
-import type { ThumbnailLayer, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta } from '../../types'
+import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta } from '../../types'
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
 const CANVAS_W = 1280
@@ -246,19 +250,180 @@ export function applyThumbnailMergeFields(text: string, fields: Record<string, s
 
 function snapGrid(v: number) { return Math.round(v / GRID_SIZE) * GRID_SIZE }
 
-/** Returns the Konva shadow props for a layer. Konva has first-class shadow
- *  support — we just pass these through to any Image/Text/Shape node. The
- *  `shadowEnabled` prop is the master switch; setting it false leaves
- *  shadow values intact in JSON so the user can toggle on/off without
- *  losing settings. */
-function shadowProps(layer: ThumbnailLayer) {
+/** Resolves a layer's effective shadow stack. Reads the new `shadows`
+ *  array preferentially, but falls back to migrating the legacy single-
+ *  shadow fields (`shadowEnabled` + `shadow*`) into a single-element
+ *  array on read — so existing thumbnails keep rendering correctly
+ *  without a one-shot migration pass over every saved file. Returns an
+ *  empty array when no shadow is configured; the renderer then skips
+ *  the clone-stack entirely (no perf cost). */
+function resolveShadows(layer: ThumbnailLayer): ThumbnailShadow[] {
+  if (Array.isArray(layer.shadows) && layer.shadows.length > 0) return layer.shadows
+  if (layer.shadowEnabled) {
+    return [{
+      color: layer.shadowColor ?? '#000000',
+      offsetX: layer.shadowOffsetX ?? 4,
+      offsetY: layer.shadowOffsetY ?? 4,
+      blur: layer.shadowBlur ?? 8,
+      opacity: layer.shadowOpacity ?? 100,
+    }]
+  }
+  return []
+}
+
+/** Spreads a single shadow config onto a Konva shape node's shadow props.
+ *  Passed `null` for the original (top) clone in the multi-shadow stack —
+ *  Konva treats `shadowEnabled: false` as "skip shadow," so the original
+ *  renders without any shadow attached. */
+function shadowPropsFor(shadow: ThumbnailShadow | null) {
+  if (!shadow) return { shadowEnabled: false }
   return {
-    shadowEnabled: !!layer.shadowEnabled,
-    shadowColor: layer.shadowColor ?? '#000000',
-    shadowOffsetX: layer.shadowOffsetX ?? 4,
-    shadowOffsetY: layer.shadowOffsetY ?? 4,
-    shadowBlur: layer.shadowBlur ?? 8,
-    shadowOpacity: (layer.shadowOpacity ?? 100) / 100,
+    shadowEnabled: true,
+    shadowColor: shadow.color,
+    shadowOffsetX: shadow.offsetX,
+    shadowOffsetY: shadow.offsetY,
+    shadowBlur: shadow.blur,
+    shadowOpacity: shadow.opacity / 100,
+  }
+}
+
+/** #rgb / #rrggbb → {r,g,b}. Returns black on parse failure so the
+ *  outline filter still produces visible output rather than silently
+ *  punching transparent pixels. */
+function parseHexColor(hex: string): { r: number; g: number; b: number } {
+  const clean = (hex || '').replace('#', '')
+  if (clean.length === 3) {
+    return {
+      r: parseInt(clean[0] + clean[0], 16) || 0,
+      g: parseInt(clean[1] + clean[1], 16) || 0,
+      b: parseInt(clean[2] + clean[2], 16) || 0,
+    }
+  }
+  if (clean.length === 6) {
+    return {
+      r: parseInt(clean.slice(0, 2), 16) || 0,
+      g: parseInt(clean.slice(2, 4), 16) || 0,
+      b: parseInt(clean.slice(4, 6), 16) || 0,
+    }
+  }
+  return { r: 0, g: 0, b: 0 }
+}
+
+/** 1D squared Euclidean distance transform — writes `out[q] = min over
+ *  j of ((q-j)² + f[j])` for `q in [0, n)`. Lower envelope of parabolas
+ *  technique (Felzenszwalb & Huttenlocher 2004): each input position j
+ *  contributes a parabola centered at j with offset f[j], and the
+ *  envelope of all parabolas IS the distance function. Maintains a
+ *  stack of parabolas (`v` = vertex positions, `z` = intersection
+ *  x-coords); for each new parabola, pop from the stack while it
+ *  subsumes the previous, then push the new one. Second sweep reads
+ *  the envelope at each q.
+ *
+ *  O(n) — both loops amortize to constant work per element. `v` and
+ *  `z` are scratch buffers passed in by the caller so the 2D wrapper
+ *  can reuse them across row/column passes. */
+function edt1d(f: Float64Array, n: number, v: Int32Array, z: Float64Array, out: Float64Array): void {
+  let k = 0
+  v[0] = 0
+  z[0] = -Infinity
+  z[1] = Infinity
+  for (let q = 1; q < n; q++) {
+    let s: number
+    while (true) {
+      const vq = v[k]
+      // Intersection x-coord of parabolas at q and v[k]. q > v[k]
+      // always, so the denominator is strictly positive.
+      s = ((f[q] + q * q) - (f[vq] + vq * vq)) / (2 * (q - vq))
+      if (s > z[k]) break
+      k--
+    }
+    k++
+    v[k] = q
+    z[k] = s
+    z[k + 1] = Infinity
+  }
+  k = 0
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++
+    const dq = q - v[k]
+    out[q] = dq * dq + f[v[k]]
+  }
+}
+
+/** 2D squared Euclidean distance transform of a binary mask. Returns
+ *  `distSq[i]` = squared Euclidean distance from pixel `i` to the
+ *  nearest set bit in `src`. Two 1D passes (columns then rows) compose
+ *  to give the full 2D result, total O(W·H). */
+function edt2d(src: Uint8Array, w: number, h: number): Float64Array {
+  // Stand-in for +∞ — keeps the arithmetic in finite-float land so the
+  // (f[q]+q²) - (f[v[k]]+v[k]²) computation doesn't produce NaN when
+  // both terms are "infinity." Safely large for any canvas dimension
+  // we'd ever process: 1e10 + (1280)² is still well within float64
+  // precision (max integer is 2^53 ≈ 9e15).
+  const LARGE = 1e10
+  const len = w * h
+  const distSq = new Float64Array(len)
+  const maxDim = Math.max(w, h)
+  const buf = new Float64Array(maxDim)
+  const out = new Float64Array(maxDim)
+  const v = new Int32Array(maxDim)
+  const z = new Float64Array(maxDim + 1)
+
+  // Pass 1 — vertical (per-column 1D EDT). Source pixels seed the
+  // column with 0; everything else starts at LARGE. After this pass
+  // distSq[i] = squared distance from i to nearest source in its
+  // column only.
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) buf[y] = src[y * w + x] ? 0 : LARGE
+    edt1d(buf, h, v, z, out)
+    for (let y = 0; y < h; y++) distSq[y * w + x] = out[y]
+  }
+
+  // Pass 2 — horizontal (per-row 1D EDT). Each row's input is the
+  // column-pass result; the 1D EDT then minimizes across columns to
+  // produce the full 2D distance.
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) buf[x] = distSq[y * w + x]
+    edt1d(buf, w, v, z, out)
+    for (let x = 0; x < w; x++) distSq[y * w + x] = out[x]
+  }
+  return distSq
+}
+
+/** Outline filter — dilates the source alpha mask by `radius` pixels
+ *  (true Euclidean → round corners) and paints the dilated region in
+ *  `color`. Original opaque pixels are preserved untouched; only
+ *  transparent pixels within `radius` of an opaque one are overwritten.
+ *
+ *  Round dilation via Euclidean distance transform (Felzenszwalb &
+ *  Huttenlocher) — O(W·H), independent of radius. Earlier brute-force
+ *  Euclidean was O(W·H·r²) which made thick outlines visibly stutter;
+ *  separable Chebyshev was fast but gave square corners that read
+ *  unnatural on rounded silhouettes. EDT is the right middle ground:
+ *  exact Euclidean output, linear time. */
+function makeOutlineFilter(radius: number, color: string): (data: ImageData) => void {
+  const { r: cr, g: cg, b: cb } = parseHexColor(color)
+  const r2 = radius * radius
+  return function (imageData: ImageData) {
+    if (radius <= 0) return
+    const data = imageData.data
+    const w = imageData.width
+    const h = imageData.height
+    const len = w * h
+    const src = new Uint8Array(len)
+    for (let i = 0; i < len; i++) src[i] = data[i * 4 + 3] >= 128 ? 1 : 0
+    const distSq = edt2d(src, w, h)
+    // Paint outline where distance ≤ radius and source was transparent.
+    // Squared comparison avoids a per-pixel sqrt.
+    for (let i = 0; i < len; i++) {
+      if (src[i]) continue
+      if (distSq[i] > r2) continue
+      const p = i * 4
+      data[p] = cr
+      data[p + 1] = cg
+      data[p + 2] = cb
+      data[p + 3] = 255
+    }
   }
 }
 
@@ -289,22 +454,103 @@ function activeFilters(layer: ThumbnailLayer): KonvaFilterFn[] {
   return out
 }
 
-function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
-  // isSelected is intentionally unused — the shared parent-level Transformer
-  // attaches itself to selected nodes via its own useEffect, so per-node
-  // Transformer mounts are gone. Kept in the props for symmetry across the
-  // three node components (and so a future filter-on-select etc. can reuse it).
-  void isSelected
-  const [img] = useImage(layer.src ? `file://${layer.src}` : '', 'anonymous')
+/** Builds a static HTMLCanvas with the outline pre-baked into the
+ *  image's alpha. Returns null when outline is disabled / image isn't
+ *  loaded yet — callers fall back to the raw `img` source.
+ *
+ *  Why pre-process instead of using a Konva filter:
+ *  Konva's `cache()` calls `drawScene` on its offscreen canvas, which
+ *  honors the node's `shadow*` props — so the cached bitmap already
+ *  includes the shadow halo by the time the filter chain runs. An
+ *  alpha-dilating filter (like outline) then sees the combined
+ *  silhouette and paints outline color around the shadow too. And we
+ *  can't simply toggle `shadowEnabled` around the cache call: any
+ *  shadow-property setter triggers `_afterShadowChange` which clears
+ *  the cache, so the restore call invalidates the work we just did.
+ *
+ *  Baking the outline into the source canvas BEFORE Konva sees it
+ *  side-steps the whole ordering problem. Konva still caches whatever
+ *  it likes for color filters / shadow, but the dilated alpha is
+ *  already in the source — so the shadow naturally attaches to the
+ *  outlined silhouette (spread shadow effect for free). */
+function useOutlinedCanvas(
+  img: HTMLImageElement | undefined,
+  outlineEnabled: boolean | undefined,
+  outlineColor: string | undefined,
+  outlineWidth: number | undefined,
+  layerWidth: number,
+  layerHeight: number,
+): HTMLCanvasElement | null {
+  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
+  const active = !!outlineEnabled && (outlineWidth ?? 0) > 0
+  useEffect(() => {
+    if (!img || !active) {
+      setCanvas(null)
+      return
+    }
+    if (!img.naturalWidth || !img.naturalHeight || !layerWidth || !layerHeight) {
+      setCanvas(null)
+      return
+    }
+    // Generate the outlined canvas at LAYER resolution, not natural
+    // resolution. The earlier "match natural res with scaled pad"
+    // approach blew up perf: a 2000×2000 source displayed at 200×200
+    // with outline=10 ended up generating a ~2200×2200 canvas and
+    // running a filter at radius ~100 — millions of times more work
+    // than necessary, all to produce pixels that Konva immediately
+    // downscaled to 220×220 anyway. Generating at layer resolution
+    // means the canvas is exactly the size Konva will render it at,
+    // and the filter radius matches the user's slider value directly.
+    //
+    // Trade-off: outline is at 1× layer resolution rather than the
+    // source's native DPI, so it can look slightly soft when the
+    // editor is zoomed in. Acceptable for interactive editing — the
+    // final exported thumbnail rasterizes from the same canvas anyway,
+    // so what the user sees is what they get.
+    const padPx = Math.max(1, Math.round(outlineWidth ?? 0))
+    const layerW = Math.max(1, Math.round(layerWidth))
+    const layerH = Math.max(1, Math.round(layerHeight))
+    const c = document.createElement('canvas')
+    c.width = layerW + padPx * 2
+    c.height = layerH + padPx * 2
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(img, padPx, padPx, layerW, layerH)
+    const data = ctx.getImageData(0, 0, c.width, c.height)
+    makeOutlineFilter(padPx, outlineColor ?? '#000000')(data)
+    ctx.putImageData(data, 0, 0)
+    setCanvas(c)
+  }, [img, active, outlineColor, outlineWidth, layerWidth, layerHeight])
+  return canvas
+}
+
+/** One KonvaImage instance — used for both the original image and each
+ *  ghost-shadow clone behind it. Owns its own color-filter cache so
+ *  brightness/contrast/etc. apply independently per node. Outline is
+ *  NOT in the filter chain here — it's pre-baked into `imageSource`
+ *  upstream (see `useOutlinedCanvas`).
+ *
+ *  Passing `shadow={null}` renders the original (no shadow attached);
+ *  passing a shadow config renders a ghost that contributes only its
+ *  shadow halo to the visible result. */
+function ImageInner({
+  layer, imageSource, renderW, renderH, offsetX, offsetY, shadow,
+}: {
+  layer: ThumbnailLayer
+  imageSource: HTMLImageElement | HTMLCanvasElement | undefined
+  renderW: number
+  renderH: number
+  offsetX: number
+  offsetY: number
+  shadow: ThumbnailShadow | null
+}) {
   const nodeRef = useRef<Konva.Image>(null)
 
-  // Apply Konva filters. Konva requires the node to be cached before filters
-  // are applied (filters operate on the rasterized bitmap). We re-cache
-  // whenever filter parameters change. If no filters are active, clear the
-  // cache so the image renders directly without rasterization overhead.
+  // Color filters via Konva's standard cache+filter chain. No outline
+  // here — that's already baked into `imageSource`.
   useEffect(() => {
     const node = nodeRef.current
-    if (!node || !img) return
+    if (!node || !imageSource) return
     const filters = activeFilters(layer)
     if (filters.length === 0) {
       node.filters([])
@@ -312,10 +558,11 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
       node.getLayer()?.batchDraw()
       return
     }
-    // Skip caching when the node has no measurable dimensions yet — Konva
-    // would create a 0×0 cache canvas, and any subsequent draw call (even
-    // from another component on the page after a route change) hits
-    // "drawImage: image argument is a canvas with width/height of 0".
+    // Skip caching when the node has no measurable dimensions yet —
+    // Konva would create a 0×0 cache canvas, and any subsequent draw
+    // call (even from another component on the page after a route
+    // change) hits "drawImage: image argument is a canvas with width/
+    // height of 0".
     const nw = node.width()
     const nh = node.height()
     if (!nw || !nh) {
@@ -324,7 +571,6 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
       node.getLayer()?.batchDraw()
       return
     }
-    // Map our schema values to Konva's filter API.
     if (layer.filterBrightness !== undefined) node.brightness(layer.filterBrightness)
     if (layer.filterContrast !== undefined) node.contrast(layer.filterContrast)
     if (layer.filterBlur !== undefined) node.blurRadius(layer.filterBlur)
@@ -339,16 +585,44 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
     node.filters(filters)
     node.getLayer()?.batchDraw()
   }, [
-    img,
+    imageSource,
     layer.filtersEnabled,
     layer.filterBrightness, layer.filterContrast, layer.filterBlur,
     layer.filterHue, layer.filterSaturation, layer.filterLuminance,
     layer.filterPixelate, layer.filterPosterize, layer.filterEnhance,
     layer.filterThreshold,
     layer.filterGrayscale, layer.filterSepia, layer.filterInvert, layer.filterEmboss,
-    // Re-cache when image dimensions change so the cached bitmap matches.
-    layer.width, layer.height,
+    renderW, renderH,
   ])
+
+  return (
+    <KonvaImage
+      ref={nodeRef}
+      image={imageSource as CanvasImageSource | undefined}
+      width={renderW}
+      height={renderH}
+      // Flip in place: pair scaleX(-1) with offsetX=renderW so the
+      // mirror axis sits at the layer's right edge, keeping the
+      // bounding box stable. Same idea for Y. With outline padding the
+      // canvas is `2 * outlinePad` wider than the image content, so
+      // the caller offsets back by outlinePad to keep the visible image
+      // content registered at (0,0) of the inner Group.
+      scaleX={layer.flipX ? -1 : 1}
+      scaleY={layer.flipY ? -1 : 1}
+      offsetX={offsetX}
+      offsetY={offsetY}
+      {...shadowPropsFor(shadow)}
+    />
+  )
+}
+
+function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
+  // isSelected is intentionally unused — the shared parent-level Transformer
+  // attaches itself to selected nodes via its own useEffect, so per-node
+  // Transformer mounts are gone. Kept in the props for symmetry across the
+  // three node components (and so a future filter-on-select etc. can reuse it).
+  void isSelected
+  const [img] = useImage(layer.src ? `file://${layer.src}` : '', 'anonymous')
 
   // Render the Konva node even before the image bitmap finishes loading.
   // `useImage` is async: returning null until it resolves would mean the
@@ -359,32 +633,64 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
   // are all that the Transformer needs to attach correctly.
   const w = layer.width ?? img?.naturalWidth ?? 100
   const h = layer.height ?? img?.naturalHeight ?? 100
+  const shadows = resolveShadows(layer)
+
+  // Pre-baked outlined canvas (or null when outline is off). Shared
+  // across all clones in the multi-shadow stack so we only build it
+  // once per param change, not once per shadow entry.
+  const outlinedCanvas = useOutlinedCanvas(img, layer.outlineEnabled, layer.outlineColor, layer.outlineWidth, w, h)
+  const useOutlined = outlinedCanvas !== null
+  const imageSource = useOutlined ? outlinedCanvas : img
+  // When using the outlined canvas, expand the rendered KonvaImage to
+  // accommodate the canvas's padding (the dilated rim sits outside the
+  // image's natural bounds) and shift the registration point back by
+  // the same amount so the image content stays anchored at (0,0) of
+  // the inner Group. Flip just adds the rendered size to the offset,
+  // same as without outline.
+  const outlinePad = useOutlined ? (layer.outlineWidth ?? 0) : 0
+  const renderW = w + 2 * outlinePad
+  const renderH = h + 2 * outlinePad
+  const offX = (layer.flipX ? w : 0) + outlinePad
+  const offY = (layer.flipY ? h : 0) + outlinePad
 
   return (
-    <>
-      <KonvaImage
-        ref={nodeRef}
-        id={layer.id}
-        name="snap-target"
-        image={img}
-        x={layer.x}
-        y={layer.y}
-        width={w}
-        height={h}
-        rotation={layer.rotation}
-        opacity={layer.opacity / 100}
-        visible={layer.visible}
-        {...shadowProps(layer)}
-        draggable
-        onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
-        onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
-        onTap={() => onSelect(layer.id, false)}
-        onDragStart={onDragStart}
-        onDragMove={onSnapDragMove}
-        onDragEnd={e => { onClearGuides(); onDragEnd(e) }}
-        onTransformEnd={onTransformEnd}
-      />
-    </>
+    // Group owns everything Konva's Transformer touches (position,
+    // rotation, scale during a resize, drag handlers). The flip lives
+    // on the inner KonvaImage only — Konva's Transformer otherwise
+    // normalizes a negative scaleX on the same node by adding 180° to
+    // rotation, which fights our flip prop on re-render and produces
+    // a visible jump after every resize. Group's baseline scale is
+    // always +1, so no normalization happens.
+    //
+    // Multi-shadow render: each shadow renders as a separate KonvaImage
+    // clone behind the original, with that one shadow attached. The
+    // clones' shape pixels are occluded by the original on top (same
+    // size + filters + position), so only the shadow halos contribute
+    // to the visible result. Stacking multiple shadows this way is the
+    // only way to get the effect — Konva's shadow API allows only one
+    // shadow per node.
+    <KonvaGroup
+      id={layer.id}
+      name="snap-target"
+      x={layer.x}
+      y={layer.y}
+      rotation={layer.rotation}
+      opacity={layer.opacity / 100}
+      visible={layer.visible}
+      draggable
+      onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
+      onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
+      onTap={() => onSelect(layer.id, false)}
+      onDragStart={onDragStart}
+      onDragMove={onSnapDragMove}
+      onDragEnd={e => { onClearGuides(); onDragEnd(e) }}
+      onTransformEnd={onTransformEnd}
+    >
+      {shadows.map((s, i) => (
+        <ImageInner key={`shadow-${i}`} layer={layer} imageSource={imageSource} renderW={renderW} renderH={renderH} offsetX={offX} offsetY={offY} shadow={s} />
+      ))}
+      <ImageInner layer={layer} imageSource={imageSource} renderW={renderW} renderH={renderH} offsetX={offX} offsetY={offY} shadow={null} />
+    </KonvaGroup>
   )
 }
 
@@ -392,86 +698,150 @@ function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, on
   void isSelected
   const nodeRef = useRef<Konva.Text>(null)
 
+  // Outline override: when the Outline effect is enabled and has a
+  // non-zero width, it takes over the Konva stroke props. The legacy
+  // layer.stroke / layer.strokeWidth fields remain as a "design stroke"
+  // and only render when Outline is disabled. Konva supports only one
+  // stroke per node, so layering both would require an extra clone —
+  // not worth it given the visual result of either is identical.
+  const outlineActive = !!layer.outlineEnabled && (layer.outlineWidth ?? 0) > 0
+  const effectiveStroke = outlineActive ? (layer.outlineColor ?? '#000000') : (layer.stroke ?? '#000000')
+  const effectiveStrokeWidth = outlineActive ? (layer.outlineWidth ?? 0) : (layer.strokeWidth ?? 0)
+
+  // Shared text props — every shadow clone + the original render with
+  // identical content; only the shadow attachment differs per clone.
+  // Pulling this out of the JSX avoids drift between clones and keeps
+  // the multi-shadow loop trivial.
+  const textProps = {
+    text: applyThumbnailMergeFields(layer.text ?? '', mergeFields),
+    width: layer.width ?? undefined,
+    fontFamily: layer.fontFamily ?? 'Arial',
+    fontSize: layer.fontSize ?? 48,
+    fontStyle: layer.fontStyle ?? 'normal',
+    fill: layer.fill ?? '#ffffff',
+    stroke: effectiveStroke,
+    strokeWidth: effectiveStrokeWidth,
+    fillAfterStrokeEnabled: true,
+    align: (layer.align ?? 'left') as 'left' | 'center' | 'right',
+    // Flip in place — text has no stored height, so fall back to the
+    // measured height from the ref. (offsetY for unflipped text is 0,
+    // so the fallback only matters in the flipped branch.) Shadow
+    // clones reuse the same value: they render the same text at the
+    // same font, so their measured dimensions match the original's.
+    scaleX: layer.flipX ? -1 : 1,
+    scaleY: layer.flipY ? -1 : 1,
+    offsetX: layer.flipX ? (layer.width ?? (nodeRef.current?.width() ?? 0)) : 0,
+    offsetY: layer.flipY ? (nodeRef.current?.height() ?? 0) : 0,
+  }
+  const shadows = resolveShadows(layer)
+
   return (
-    <>
-      <KonvaText
-        ref={nodeRef}
-        id={layer.id}
-        name="snap-target"
-        text={applyThumbnailMergeFields(layer.text ?? '', mergeFields)}
-        x={layer.x}
-        y={layer.y}
-        width={layer.width ?? undefined}
-        rotation={layer.rotation}
-        opacity={layer.opacity / 100}
-        visible={layer.visible}
-        fontFamily={layer.fontFamily ?? 'Arial'}
-        fontSize={layer.fontSize ?? 48}
-        fontStyle={layer.fontStyle ?? 'normal'}
-        fill={layer.fill ?? '#ffffff'}
-        stroke={layer.stroke ?? '#000000'}
-        strokeWidth={layer.strokeWidth ?? 0}
-        fillAfterStrokeEnabled
-        align={layer.align ?? 'left'}
-        {...shadowProps(layer)}
-        draggable
-        onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
-        onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
-        onTap={() => onSelect(layer.id, false)}
-        onDragStart={onDragStart}
-        onDragMove={onSnapDragMove}
-        onDragEnd={e => { onClearGuides(); onDragEnd(e) }}
-        onTransformEnd={onTransformEnd}
-      />
-    </>
+    // See ImageNode for the Group-wrap rationale: keeps the flip prop
+    // off the node the Transformer manipulates, so resize doesn't
+    // trigger Konva's rotation-normalization side effect.
+    //
+    // Multi-shadow render: shadow clones first (behind), original last
+    // (on top). See ImageNode for the rationale; same pattern.
+    <KonvaGroup
+      id={layer.id}
+      name="snap-target"
+      x={layer.x}
+      y={layer.y}
+      rotation={layer.rotation}
+      opacity={layer.opacity / 100}
+      visible={layer.visible}
+      draggable
+      onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
+      onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
+      onTap={() => onSelect(layer.id, false)}
+      onDragStart={onDragStart}
+      onDragMove={onSnapDragMove}
+      onDragEnd={e => { onClearGuides(); onDragEnd(e) }}
+      onTransformEnd={onTransformEnd}
+    >
+      {shadows.map((s, i) => (
+        <KonvaText key={`shadow-${i}`} {...textProps} {...shadowPropsFor(s)} />
+      ))}
+      <KonvaText ref={nodeRef} {...textProps} {...shadowPropsFor(null)} />
+    </KonvaGroup>
   )
 }
 
 function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides }: KonvaLayerNodeProps) {
   void isSelected
-  const nodeRef = useRef<any>(null)
   const w = layer.width ?? 200
   const h = layer.height ?? 200
   const shapeType = layer.shapeType ?? 'rect'
   // Ellipse and triangle are centered on x/y in Konva; we store top-left
   const isCentered = shapeType === 'ellipse' || shapeType === 'triangle'
 
-  const sharedProps = {
-    ref: nodeRef,
-    id: layer.id,
-    name: 'snap-target',
-    x: isCentered ? layer.x + w / 2 : layer.x,
-    y: isCentered ? layer.y + h / 2 : layer.y,
-    rotation: layer.rotation,
-    opacity: layer.opacity / 100,
-    visible: layer.visible,
+  // Flip in place. Centered shapes (ellipse, triangle) already have
+  // their origin at the center, so scale alone mirrors around the
+  // shape's center. Rect is top-left anchored, so it needs the same
+  // offsetX=w / offsetY=h treatment as KonvaImage to keep the
+  // bounding box stable after flipping.
+  const scaleX = layer.flipX ? -1 : 1
+  const scaleY = layer.flipY ? -1 : 1
+  const offsetX = !isCentered && layer.flipX ? w : 0
+  const offsetY = !isCentered && layer.flipY ? h : 0
+
+  // Outline override — see TextNode comment for rationale.
+  const outlineActive = !!layer.outlineEnabled && (layer.outlineWidth ?? 0) > 0
+  const effectiveStroke = outlineActive ? (layer.outlineColor ?? '#000000') : (layer.stroke ?? '#000000')
+  const effectiveStrokeWidth = outlineActive ? (layer.outlineWidth ?? 0) : (layer.strokeWidth ?? 0)
+
+  // Inner-shape props (without shadow) — no id/name/position/rotation/
+  // handlers; those live on the Group. Centered shapes still get their
+  // own center offset inside the Group so Konva's ellipse/polygon math
+  // (centered around x/y) lines up with our top-left-stored coords.
+  const baseInnerProps = {
+    x: isCentered ? w / 2 : 0,
+    y: isCentered ? h / 2 : 0,
     fill: layer.fill ?? '#6366f1',
-    stroke: layer.stroke ?? '#000000',
-    strokeWidth: layer.strokeWidth ?? 0,
+    stroke: effectiveStroke,
+    strokeWidth: effectiveStrokeWidth,
     fillAfterStrokeEnabled: true,
-    ...shadowProps(layer),
-    draggable: true,
-    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button !== 0) e.target.stopDrag() },
-    onClick: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) },
-    onTap: () => onSelect(layer.id, false),
-    onDragStart,
-    onDragMove: onSnapDragMove,
-    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => { onClearGuides(); onDragEnd(e) },
-    onTransformEnd,
+    scaleX, scaleY, offsetX, offsetY,
+  }
+
+  const shadows = resolveShadows(layer)
+
+  // Render one shape primitive for a single shadow pass (or `null` for
+  // the original on top). Pulled out so the multi-shadow loop is a
+  // simple map without re-doing the shapeType switch each time.
+  const renderShape = (shadow: ThumbnailShadow | null, key?: string) => {
+    const props = { ...baseInnerProps, ...shadowPropsFor(shadow) }
+    if (shapeType === 'rect') {
+      return <KonvaRect key={key} {...props} width={w} height={h} cornerRadius={layer.cornerRadius ?? 0} />
+    }
+    if (shapeType === 'ellipse') {
+      return <KonvaEllipse key={key} {...props} radiusX={w / 2} radiusY={h / 2} />
+    }
+    return <KonvaRegularPolygon key={key} {...props} sides={3} radius={Math.min(w, h) / 2} />
   }
 
   return (
-    <>
-      {shapeType === 'rect' && (
-        <KonvaRect {...sharedProps} width={w} height={h} cornerRadius={layer.cornerRadius ?? 0} />
-      )}
-      {shapeType === 'ellipse' && (
-        <KonvaEllipse {...sharedProps} radiusX={w / 2} radiusY={h / 2} />
-      )}
-      {shapeType === 'triangle' && (
-        <KonvaRegularPolygon {...sharedProps} sides={3} radius={Math.min(w, h) / 2} />
-      )}
-    </>
+    // See ImageNode for the Group-wrap rationale + multi-shadow pattern.
+    <KonvaGroup
+      id={layer.id}
+      name="snap-target"
+      x={layer.x}
+      y={layer.y}
+      rotation={layer.rotation}
+      opacity={layer.opacity / 100}
+      visible={layer.visible}
+      draggable
+      onMouseDown={(e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button !== 0) e.target.stopDrag() }}
+      onClick={(e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
+      onTap={() => onSelect(layer.id, false)}
+      onDragStart={onDragStart}
+      onDragMove={onSnapDragMove}
+      onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => { onClearGuides(); onDragEnd(e) }}
+      onTransformEnd={onTransformEnd}
+    >
+      {shadows.map((s, i) => renderShape(s, `shadow-${i}`))}
+      {renderShape(null)}
+    </KonvaGroup>
   )
 }
 
@@ -675,7 +1045,7 @@ function FilterSlider({ label, min, max, step, value, onChange }: {
         <input
           type="number" min={min} max={max} step={step} value={value}
           onChange={e => onChange(Number(e.target.value))}
-          className="w-14 bg-navy-900 border border-white/10 rounded px-1 py-0.5 text-[10px] text-gray-200 tabular-nums"
+          className="w-14 bg-navy-900 border border-white/10 rounded-lg px-1 py-0.5 text-[10px] text-gray-200 tabular-nums"
         />
       </div>
     </label>
@@ -697,24 +1067,6 @@ function FilterToggle({ label, checked, onChange }: {
 }
 
 function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: PropsPanelProps) {
-  // Aspect-ratio lock for the Width/Height inputs. Ratio is captured the
-  // moment the lock is engaged — for images that's the source file's natural
-  // aspect, for shapes it's the current width÷height (no "natural" to fall
-  // back on). Stored in a ref so updates don't re-render; the boolean state
-  // drives the icon + onChange branching.
-  //
-  // These hooks live ABOVE the `if (!layer)` early return so they always run
-  // — calling them after the guard would change the hook count between
-  // "layer selected" and "nothing selected" renders (Rules of Hooks).
-  const [aspectLocked, setAspectLocked] = useState(false)
-  const aspectRatioRef = useRef<number | null>(null)
-  // Switching selected layer resets the lock — different layer means a
-  // different ratio, and silently carrying it over would surprise the user.
-  useEffect(() => {
-    setAspectLocked(false)
-    aspectRatioRef.current = null
-  }, [layer?.id])
-
   // Auto-grow ref for the text-layer textarea below. Must be called
   // unconditionally — the textarea only renders for text layers, but
   // calling the hook inside that conditional would change the hook count
@@ -734,42 +1086,46 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
 
   const update = (patch: Partial<ThumbnailLayer>) => onChange({ ...layer, ...patch })
 
-  const toggleAspectLock = async () => {
-    if (aspectLocked) {
-      setAspectLocked(false)
-      aspectRatioRef.current = null
-      return
-    }
-    let ratio: number | null = null
-    if (layer.type === 'image' && layer.src) {
-      ratio = await new Promise<number | null>(resolve => {
-        const img = new Image()
-        img.onload = () => resolve(img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null)
-        img.onerror = () => resolve(null)
-        img.src = `file://${layer.src}`
-      })
-    }
-    if (ratio === null || !isFinite(ratio) || ratio <= 0) {
-      const w = layer.width ?? 0
-      const h = layer.height ?? 0
-      ratio = h > 0 ? w / h : 1
-    }
-    aspectRatioRef.current = ratio
-    setAspectLocked(true)
-  }
+  // Aspect-ratio lock is per-layer + persisted on the layer itself.
+  // Undefined defaults to `true` — newly added images/shapes start
+  // locked to their natural aspect, matching every other vector
+  // editor's convention. Toggling persists via `update`.
+  const aspectLocked = layer.aspectLocked ?? true
+  const toggleAspectLock = () => update({ aspectLocked: !aspectLocked })
 
+  // The locked ratio is always derived from the layer's current
+  // width/height (not a separately stored "original"). So if the
+  // user unlocks, resizes weirdly, then re-locks, the new lock pins
+  // to whatever ratio is current — matches expected vector-editor
+  // behavior and avoids stale-ratio bugs.
+  const lockedRatio = (() => {
+    const w = layer.width ?? 0
+    const h = layer.height ?? 0
+    return h > 0 ? w / h : 1
+  })()
+
+  // Width/height inputs accept signed values: a negative number sets
+  // the corresponding flip flag and stores the absolute magnitude.
+  // Zero leaves the flip state alone so typing "-" → "0" → digits
+  // doesn't bounce flip state mid-keystroke. Positive values
+  // explicitly unflip — typing a fresh positive number reads as
+  // "remove the flip and resize."
   const handleWidthChange = (w: number) => {
-    if (aspectLocked && aspectRatioRef.current) {
-      update({ width: w, height: Math.max(1, Math.round(w / aspectRatioRef.current)) })
+    const abs = Math.abs(w)
+    const flipX = w < 0 ? true : (w > 0 ? false : !!layer.flipX)
+    if (aspectLocked && lockedRatio > 0) {
+      update({ width: abs, height: Math.max(1, Math.round(abs / lockedRatio)), flipX })
     } else {
-      update({ width: w })
+      update({ width: abs, flipX })
     }
   }
   const handleHeightChange = (h: number) => {
-    if (aspectLocked && aspectRatioRef.current) {
-      update({ height: h, width: Math.max(1, Math.round(h * aspectRatioRef.current)) })
+    const abs = Math.abs(h)
+    const flipY = h < 0 ? true : (h > 0 ? false : !!layer.flipY)
+    if (aspectLocked && lockedRatio > 0) {
+      update({ height: abs, width: Math.max(1, Math.round(abs * lockedRatio)), flipY })
     } else {
-      update({ height: h })
+      update({ height: abs, flipY })
     }
   }
 
@@ -824,7 +1180,6 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
         </div>
         {(() => {
           const hasWH = layer.width !== undefined && (layer.type === 'image' || layer.type === 'shape') && layer.height !== undefined
-          const numInputCls = 'bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full'
           const labelCls = 'text-[10px] text-gray-400'
           return (
             <>
@@ -834,13 +1189,15 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                 <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5 items-end">
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>X</span>
-                    <input type="number" value={Math.round(layer.x)}
-                      onChange={e => update({ x: Number(e.target.value) })} className={numInputCls} />
+                    <NumberInput value={Math.round(layer.x)} onChange={x => update({ x })} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Width</span>
-                    <input type="number" value={Math.round(layer.width ?? 0)}
-                      onChange={e => handleWidthChange(Number(e.target.value))} className={numInputCls} />
+                    <NumberInput
+                      value={layer.flipX ? -Math.round(layer.width ?? 0) : Math.round(layer.width ?? 0)}
+                      onChange={handleWidthChange}
+                      className="w-full"
+                    />
                   </label>
                   <Tooltip
                     content={aspectLocked
@@ -852,7 +1209,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                   >
                     <button
                       type="button"
-                      onClick={() => { toggleAspectLock().catch(() => {}) }}
+                      onClick={toggleAspectLock}
                       className={`h-full w-3 relative flex items-center justify-center transition-colors ${
                         aspectLocked ? 'text-purple-300 hover:text-purple-200' : 'text-gray-400 hover:text-gray-200'
                       }`}
@@ -885,13 +1242,15 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                   </Tooltip>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Y</span>
-                    <input type="number" value={Math.round(layer.y)}
-                      onChange={e => update({ y: Number(e.target.value) })} className={numInputCls} />
+                    <NumberInput value={Math.round(layer.y)} onChange={y => update({ y })} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Height</span>
-                    <input type="number" value={Math.round(layer.height ?? 0)}
-                      onChange={e => handleHeightChange(Number(e.target.value))} className={numInputCls} />
+                    <NumberInput
+                      value={layer.flipY ? -Math.round(layer.height ?? 0) : Math.round(layer.height ?? 0)}
+                      onChange={handleHeightChange}
+                      className="w-full"
+                    />
                   </label>
                 </div>
               ) : (
@@ -899,13 +1258,11 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                 <div className="grid grid-cols-2 gap-1.5">
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>X</span>
-                    <input type="number" value={Math.round(layer.x)}
-                      onChange={e => update({ x: Number(e.target.value) })} className={numInputCls} />
+                    <NumberInput value={Math.round(layer.x)} onChange={x => update({ x })} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Y</span>
-                    <input type="number" value={Math.round(layer.y)}
-                      onChange={e => update({ y: Number(e.target.value) })} className={numInputCls} />
+                    <NumberInput value={Math.round(layer.y)} onChange={y => update({ y })} className="w-full" />
                   </label>
                 </div>
               )}
@@ -913,13 +1270,11 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               <div className="flex flex-col gap-1.5 mt-1.5">
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Rotation</span>
-                  <input type="number" value={Math.round(layer.rotation)}
-                    onChange={e => update({ rotation: Number(e.target.value) })} className={numInputCls} />
+                  <NumberInput value={Math.round(layer.rotation)} onChange={rotation => update({ rotation })} className="w-full" />
                 </label>
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Opacity %</span>
-                  <input type="number" min={0} max={100} value={layer.opacity}
-                    onChange={e => update({ opacity: Math.min(100, Math.max(0, Number(e.target.value))) })} className={numInputCls} />
+                  <NumberInput value={layer.opacity} onChange={opacity => update({ opacity })} min={0} max={100} className="w-full" />
                 </label>
               </div>
             </>
@@ -936,7 +1291,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               value={layer.text ?? ''}
               onChange={e => update({ text: e.target.value })}
               rows={3}
-              className="w-full bg-navy-900 border border-white/10 rounded px-2 py-1.5 text-xs text-gray-200 resize-none"
+              className="w-full bg-navy-900 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-gray-200 resize-none"
             />
             <p className="text-[10px] text-gray-400 mt-1 leading-snug">
               Merge fields:
@@ -970,7 +1325,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                     update({ fontFamily: fam })
                   }
                 }}
-                className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full"
+                className="bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200 w-full"
                 style={{ fontFamily: layer.fontFamily ?? 'Arial' }}
               >
                 {systemFonts.map(f => (
@@ -980,13 +1335,11 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               <div className="grid grid-cols-2 gap-1.5">
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] text-gray-400">Size</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={8}
                     max={500}
                     value={layer.fontSize ?? 48}
-                    onChange={e => update({ fontSize: Number(e.target.value) })}
-                    className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                    onChange={fontSize => update({ fontSize })}
                   />
                 </label>
                 <label className="flex flex-col gap-0.5">
@@ -1000,7 +1353,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                         <select
                           value={matched.css}
                           onChange={e => update({ fontStyle: e.target.value })}
-                          className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                          className="bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
                         >
                           {variants.map(v => (
                             <option key={v.name} value={v.css}>{v.name}</option>
@@ -1012,7 +1365,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                       <select
                         value={layer.fontStyle ?? 'normal'}
                         onChange={e => update({ fontStyle: e.target.value })}
-                        className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                        className="bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
                       >
                         <option value="normal">Normal</option>
                         <option value="bold">Bold</option>
@@ -1029,7 +1382,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                   <select
                     value={layer.align ?? 'left'}
                     onChange={e => update({ align: e.target.value as any })}
-                    className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                    className="bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
                   >
                     <option value="left">Left</option>
                     <option value="center">Center</option>
@@ -1055,7 +1408,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                     type="text"
                     value={layer.fill ?? '#ffffff'}
                     onChange={e => update({ fill: e.target.value })}
-                    className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                    className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
                   />
                 </div>
               </label>
@@ -1075,7 +1428,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                     placeholder="0"
                     value={layer.strokeWidth ?? 0}
                     onChange={e => update({ strokeWidth: Number(e.target.value) })}
-                    className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200"
+                    className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
                   />
                 </div>
               </label>
@@ -1094,7 +1447,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
                 <input type="color" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
                   className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
                 <input type="text" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
-                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200" />
               </div>
             </label>
             <label className="flex flex-col gap-0.5">
@@ -1102,77 +1455,182 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
               <div className="flex items-center gap-1.5">
                 <input type="color" value={layer.stroke ?? '#000000'} onChange={e => update({ stroke: e.target.value })}
                   className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
-                <input type="number" min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
-                  onChange={e => update({ strokeWidth: Number(e.target.value) })}
-                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+                <NumberInput min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
+                  onChange={strokeWidth => update({ strokeWidth })}
+                  className="flex-1 min-w-0" />
               </div>
             </label>
             {layer.shapeType === 'rect' && (
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">Corner radius</span>
-                <input type="number" min={0} max={999} value={layer.cornerRadius ?? 0}
-                  onChange={e => update({ cornerRadius: Number(e.target.value) })}
-                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
+                <NumberInput min={0} max={999} value={layer.cornerRadius ?? 0}
+                  onChange={cornerRadius => update({ cornerRadius })}
+                  className="w-full" />
               </label>
             )}
           </div>
         </section>
       )}
 
-      {/* Drop Shadow — works on every layer type. Konva handles the rendering
-          natively via shadow* props; we just persist the values. */}
+      {/* Drop Shadows — multi-shadow stack. Each entry renders as its
+          own ghost clone of the layer behind the original (Konva only
+          supports one shadow per node, so stacking is the only way to
+          combine multiple). Use `resolveShadows` so the panel sees the
+          same migrated list the renderer does — first edit converts
+          the legacy single-shadow fields into a one-entry array. */}
+      <section>
+        {(() => {
+          const shadows = resolveShadows(layer)
+          // Migrate-on-write: any change here drops the legacy single-
+          // shadow fields so we don't keep two sources of truth on disk.
+          const writeShadows = (next: ThumbnailShadow[]) => update({
+            shadows: next,
+            shadowEnabled: undefined,
+            shadowColor: undefined,
+            shadowOffsetX: undefined,
+            shadowOffsetY: undefined,
+            shadowBlur: undefined,
+            shadowOpacity: undefined,
+          })
+          const updateAt = (idx: number, patch: Partial<ThumbnailShadow>) =>
+            writeShadows(shadows.map((s, i) => i === idx ? { ...s, ...patch } : s))
+          const removeAt = (idx: number) =>
+            writeShadows(shadows.filter((_, i) => i !== idx))
+          const addShadow = () =>
+            writeShadows([
+              ...shadows,
+              // New shadow inherits the last entry's params when one
+              // exists — easier to stack subtle variations than to
+              // restart from defaults every time.
+              shadows.length > 0
+                ? { ...shadows[shadows.length - 1] }
+                : { color: '#000000', offsetX: 4, offsetY: 4, blur: 8, opacity: 100 },
+            ])
+          return (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] uppercase tracking-wider text-gray-400">
+                  Drop Shadows {shadows.length > 0 && <span className="text-gray-500 normal-case tracking-normal">({shadows.length})</span>}
+                </p>
+                <button
+                  type="button"
+                  onClick={addShadow}
+                  className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
+                  title="Add a shadow pass"
+                >
+                  <Plus size={11} />
+                  Add
+                </button>
+              </div>
+              {shadows.length === 0 && (
+                <p className="text-[11px] text-gray-500 italic">No shadows. Click "Add" to stack one or more behind the layer.</p>
+              )}
+              <div className="flex flex-col gap-2.5">
+                {shadows.map((s, idx) => (
+                  <div key={idx} className="rounded-lg border border-white/5 p-2 flex flex-col gap-1.5 bg-navy-900/40">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-wider text-gray-500">Shadow {idx + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAt(idx)}
+                        className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+                        title="Remove this shadow"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-gray-400">Color</span>
+                      <div className="flex items-center gap-1.5">
+                        <input type="color" value={s.color}
+                          onChange={e => updateAt(idx, { color: e.target.value })}
+                          className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
+                        <input type="text" value={s.color}
+                          onChange={e => updateAt(idx, { color: e.target.value })}
+                          className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200" />
+                      </div>
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10px] text-gray-400">Offset X</span>
+                        <NumberInput value={s.offsetX}
+                          onChange={offsetX => updateAt(idx, { offsetX })} className="w-full" />
+                      </label>
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10px] text-gray-400">Offset Y</span>
+                        <NumberInput value={s.offsetY}
+                          onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
+                      </label>
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10px] text-gray-400">Blur</span>
+                        <NumberInput min={0} value={s.blur}
+                          onChange={blur => updateAt(idx, { blur })} className="w-full" />
+                      </label>
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10px] text-gray-400">Opacity %</span>
+                        <NumberInput min={0} max={100} value={s.opacity}
+                          onChange={opacity => updateAt(idx, { opacity })} className="w-full" />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )
+        })()}
+      </section>
+
+      {/* Outline — alpha-dilation stroke. Works on every layer type:
+          text + shape route to Konva's native stroke (overriding the
+          design-stroke in the fill/stroke section above when enabled);
+          image runs the custom alpha-dilation filter from
+          `makeOutlineFilter`. When stacked with shadows above, the
+          shadows attach to the dilated silhouette — that's how you get
+          spread shadow without a dedicated spread parameter on each
+          shadow entry. */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] uppercase tracking-wider text-gray-400">Drop Shadow</p>
+          <p className="text-[10px] uppercase tracking-wider text-gray-400">Outline</p>
           <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
             <input
               type="checkbox"
-              checked={!!layer.shadowEnabled}
-              onChange={e => update({ shadowEnabled: e.target.checked })}
+              checked={!!layer.outlineEnabled}
+              onChange={e => update({ outlineEnabled: e.target.checked })}
               className="accent-purple-600"
             />
             Enable
           </label>
         </div>
-        {layer.shadowEnabled && (
+        {layer.outlineEnabled && (
           <div className="flex flex-col gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Color</span>
               <div className="flex items-center gap-1.5">
-                <input type="color" value={layer.shadowColor ?? '#000000'}
-                  onChange={e => update({ shadowColor: e.target.value })}
+                <input type="color" value={layer.outlineColor ?? '#000000'}
+                  onChange={e => update({ outlineColor: e.target.value })}
                   className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
-                <input type="text" value={layer.shadowColor ?? '#000000'}
-                  onChange={e => update({ shadowColor: e.target.value })}
-                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200" />
+                <input type="text" value={layer.outlineColor ?? '#000000'}
+                  onChange={e => update({ outlineColor: e.target.value })}
+                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200" />
               </div>
             </label>
-            <div className="grid grid-cols-2 gap-1.5">
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Offset X</span>
-                <input type="number" value={layer.shadowOffsetX ?? 4}
-                  onChange={e => update({ shadowOffsetX: Number(e.target.value) })}
-                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Offset Y</span>
-                <input type="number" value={layer.shadowOffsetY ?? 4}
-                  onChange={e => update({ shadowOffsetY: Number(e.target.value) })}
-                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Blur</span>
-                <input type="number" min={0} value={layer.shadowBlur ?? 8}
-                  onChange={e => update({ shadowBlur: Math.max(0, Number(e.target.value)) })}
-                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Opacity %</span>
-                <input type="number" min={0} max={100} value={layer.shadowOpacity ?? 100}
-                  onChange={e => update({ shadowOpacity: Math.min(100, Math.max(0, Number(e.target.value))) })}
-                  className="bg-navy-900 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 w-full" />
-              </label>
-            </div>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-400">Width</span>
+              <NumberInput min={0} max={50} value={layer.outlineWidth ?? 0}
+                onChange={outlineWidth => update({ outlineWidth })} className="w-full" />
+            </label>
+            {layer.type === 'image' && (
+              <p className="text-[10px] text-gray-500 leading-snug">
+                Wider outlines on large images can briefly stutter while the
+                filter recomputes. Konva caches the result, so only changes
+                trigger a recompute.
+              </p>
+            )}
+            {layer.type !== 'image' && (layer.strokeWidth ?? 0) > 0 && (
+              <p className="text-[10px] text-yellow-400/80 leading-snug">
+                Overrides the design stroke ({layer.strokeWidth}px) above while enabled.
+              </p>
+            )}
           </div>
         )}
       </section>
@@ -1252,6 +1710,7 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
 export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const { pendingStream, clearPendingStream } = useThumbnailEditor()
   const { config } = useStore()
+  const { setThumbnailHasCanvas } = usePageActivity()
 
   // ── Mode ─────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<'overview' | 'editor'>('overview')
@@ -1264,6 +1723,36 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Editor state ──────────────────────────────────────────────────────────
   const [currentStream, setCurrentStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number } | null>(null)
   const [currentTemplateId, setCurrentTemplateId] = useState<string | undefined>(undefined)
+  // Multi-thumbnail support: a stream can have N SM-thumbnails on
+  // disk, named `<date>_sm-thumbnail.png` (variant 1, legacy) and
+  // `<date>_sm-thumbnail-N.png` for N≥2. `variants` holds every
+  // ordinal currently present in the folder; `currentVariant` is the
+  // one being edited. Both default to [1] / 1 so legacy single-
+  // thumbnail streams behave identically without any migration.
+  const [variants, setVariants] = useState<number[]>([1])
+  const [currentVariant, setCurrentVariant] = useState<number>(1)
+  // Variant switcher dropdown state. `variantPickerOpen` toggles the
+  // popover; an outside-click effect (further down) closes it.
+  // `variantPreviewKey` is bumped after each successful canvas save so
+  // every preview <img> in the popover re-fetches the underlying PNG —
+  // the browser caches `file://` URLs aggressively, so without a
+  // querystring bump the user would see the old thumbnail.
+  const [variantPickerOpen, setVariantPickerOpen] = useState(false)
+  const variantPickerRef = useRef<HTMLDivElement>(null)
+  const [variantPreviewKey, setVariantPreviewKey] = useState(0)
+  useEffect(() => {
+    if (!variantPickerOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (variantPickerRef.current && !variantPickerRef.current.contains(e.target as Node)) {
+        setVariantPickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [variantPickerOpen])
+  // Close the picker when the editor switches streams — avoids the
+  // dropdown lingering open across an unrelated open/load.
+  useEffect(() => { setVariantPickerOpen(false) }, [currentStream?.folderPath, currentStream?.date])
   // Asset library data: images from the current stream's folder + images
   // from same-season stream folders (other episodes), so the user can pull
   // visuals from previous episodes when designing a new thumbnail.
@@ -1373,7 +1862,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [clipboardLayers, setClipboardLayers] = useState<ThumbnailLayer[]>([])
 
   // ── Template picker (shown when opening a new stream with no existing canvas) ─
-  const [templatePickerStream, setTemplatePickerStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number } | null>(null)
+  // `templatePickerStream` carries an optional `targetVariant`. When
+  // undefined, the picker is in its initial-thumbnail flow (writes
+  // ordinal 1). When set (≥2), it's the "+ New thumbnail" flow that
+  // creates an alternative at the next available ordinal.
+  const [templatePickerStream, setTemplatePickerStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number; targetVariant?: number } | null>(null)
 
   // ── Container / zoom / pan ────────────────────────────────────────────────
   const canvasContainerRef = useRef<HTMLDivElement>(null)
@@ -1425,6 +1918,28 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const transformerRef = useRef<Konva.Transformer>(null)
   const pendingTransformsRef = useRef<Map<string, Konva.Node>>(new Map())
   const commitTransformScheduledRef = useRef(false)
+
+  // Shift state observable from inside boundBoxFunc (which doesn't
+  // carry event info). When Shift is held during a resize-handle drag,
+  // we invert the layer's aspectLocked flag for that gesture only —
+  // matches the Photoshop/Affinity convention.
+  const shiftPressedRef = useRef(false)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftPressedRef.current = true }
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftPressedRef.current = false }
+    // Some focus-shift sequences can leave the keyup unfired (e.g. user
+    // alt-tabs while holding Shift). Reset on blur to avoid a stale
+    // "always shifted" state.
+    const onBlur = () => { shiftPressedRef.current = false }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
 
   // ── Snapping ──────────────────────────────────────────────────────────────
   const [smartSnapEnabled, setSmartSnapEnabled] = useState(true)
@@ -1501,7 +2016,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         //     layer would render the canvas inside itself, infinitely.
         //   - Other streams: the rendered thumb isn't useful as source
         //     material; the underlying screenshots are already in the list.
-        const isSmThumb = (p: string) => /(?:^|[\\/])[^\\/]*_sm-thumbnail\.png$/i.test(p)
+        // Match both `<date>_sm-thumbnail.png` and the
+        // `<date>_sm-thumbnail-N.png` ordinal variants — they're whole
+        // finished thumbnails, not building-block assets.
+        const isSmThumb = (p: string) => /(?:^|[\\/])[^\\/]*_sm-thumbnail(?:-\d+)?\.png$/i.test(p)
         const toGroup = (s: typeof cur): SeasonAssetGroup => ({
           folderPath: s.folderPath,
           date: s.date,
@@ -1754,9 +2272,17 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Handle pending stream navigation ─────────────────────────────────────
   useEffect(() => {
     if (!pendingStream || !isVisible) return
-    openStreamEditor(pendingStream.folderPath, pendingStream.date, pendingStream.title, pendingStream.meta, pendingStream.totalEpisodes)
+    openStreamEditor(pendingStream.folderPath, pendingStream.date, pendingStream.title, pendingStream.meta, pendingStream.totalEpisodes, pendingStream.variantOrdinal)
     clearPendingStream()
   }, [pendingStream, isVisible])
+
+  // ── Publish editor-open signal to App.tsx's nav activity bus ─────────────
+  // "Has a canvas open" = the editor is in editor mode AND there's a stream
+  // bound to the canvas. Overview mode (template gallery) doesn't count —
+  // the user isn't actively editing anything specific then.
+  useEffect(() => {
+    setThumbnailHasCanvas(mode === 'editor' && currentStream !== null)
+  }, [mode, currentStream, setThumbnailHasCanvas])
 
   // ── Fit scale + container size ────────────────────────────────────────────
   useEffect(() => {
@@ -1893,9 +2419,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setIsDirty(true)
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(() => {
-      doSave(newLayers, currentStream.folderPath, currentStream.date, currentTemplateId)
+      doSave(newLayers, currentStream.folderPath, currentStream.date, currentTemplateId, currentVariant)
     }, 500)
-  }, [currentStream, currentTemplateId])
+  }, [currentStream, currentTemplateId, currentVariant])
   // Expose the latest triggerAutoSave to the undo/redo hook via the
   // construction-time ref. `doSave` and the unwritten currentStream/
   // currentTemplateId are captured via closure inside triggerAutoSave, so
@@ -1931,7 +2457,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     saveLayers: ThumbnailLayer[],
     folderPath: string,
     date: string,
-    templateId: string | undefined
+    templateId: string | undefined,
+    ordinal: number,
   ) => {
     if (!stageRef.current) return
     const canvasFile: ThumbnailCanvasFile = {
@@ -1942,7 +2469,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     const pngDataUrl = getCanvasDataUrl()
     try {
-      await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl)
+      await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl, ordinal)
       // Merge only the thumbnail flags — prevents closure-stale `currentStream.meta` from
       // clobbering fields edited concurrently in other UI (e.g. MetaModal).
       await window.api.updateStreamMeta(folderPath, {
@@ -1950,6 +2477,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         smThumbnailTemplate: templateId,
       }, streamMetaKey(folderPath, date, config.streamsDir))
       setIsDirty(false)
+      // Bump the variant-preview cache buster so the switcher dropdown
+      // shows the fresh PNG for whichever variant we just wrote.
+      setVariantPreviewKey(k => k + 1)
     } catch (err) {
       console.error('Auto-save failed:', err)
     }
@@ -1985,17 +2515,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       if (node) positions.set(id, { x: node.x(), y: node.y() })
     }
 
+    // Group wrappers around every layer mean node.x/y is now the
+    // layer's top-left in every case — including centered shapes
+    // (the center offset lives on the inner Konva element, inside
+    // the Group). No center→top-left conversion needed here anymore.
     const next = layers.map(l => {
       const np = positions.get(l.id)
       if (!np) return l
-      if (l.type === 'shape') {
-        const w = l.width ?? 200
-        const h = l.height ?? 200
-        const isCentered = l.shapeType === 'ellipse' || l.shapeType === 'triangle'
-        const x = isCentered ? Math.round(np.x - w / 2) : Math.round(np.x)
-        const y = isCentered ? Math.round(np.y - h / 2) : Math.round(np.y)
-        return { ...l, x, y }
-      }
       return { ...l, x: np.x, y: np.y }
     })
     commitLayers(next)
@@ -2019,43 +2545,54 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       const next = layers.map(l => {
         const node = nodeMap.get(l.id)
         if (!node) return l
-        const sx = node.scaleX(), sy = node.scaleY()
+        // The Transformer attaches to the Group wrapper, never to the
+        // inner shape that carries the flip transforms. So node.scaleX
+        // here is purely the user's drag factor (always positive) —
+        // no need to abs() against a baseline or detect Konva's
+        // rotation-normalization. Same story for x/y/rotation: they're
+        // the Group's, which is anchored at the layer's top-left in
+        // every case (including centered shapes — the center offset
+        // lives on the inner Konva element inside the Group).
+        const dragScaleX = node.scaleX()
+        const dragScaleY = node.scaleY()
         const rot = node.rotation()
         let x = node.x(), y = node.y()
         if (l.type === 'image') {
-          let w = Math.round((l.width ?? node.width()) * sx)
-          let h = Math.round((l.height ?? node.height()) * sy)
+          let w = Math.round((l.width ?? 0) * dragScaleX)
+          let h = Math.round((l.height ?? 0) * dragScaleY)
           if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w = snapGrid(w); h = snapGrid(h) }
           return { ...l, x, y, width: w, height: h, rotation: rot }
         }
         if (l.type === 'text') {
-          let w = Math.round((l.width ?? node.width()) * sx)
+          let w = Math.round((l.width ?? 0) * dragScaleX)
           if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w = snapGrid(w) }
           return { ...l, x, y, width: w, rotation: rot }
         }
-        // shape: layer.width/height are authoritative, node.width()/height()
-        // doesn't apply to ellipse/triangle. Centered shapes also need the
-        // center→top-left offset applied to the new size.
+        // shape: layer.width/height are authoritative.
         const w0 = l.width ?? 200
         const h0 = l.height ?? 200
-        let newW = Math.round(w0 * Math.abs(sx))
-        let newH = Math.round(h0 * Math.abs(sy))
+        let newW = Math.round(w0 * dragScaleX)
+        let newH = Math.round(h0 * dragScaleY)
         if (gridSnapEnabled) { newW = snapGrid(newW); newH = snapGrid(newH) }
-        const isCentered = l.shapeType === 'ellipse' || l.shapeType === 'triangle'
-        const nx = isCentered ? Math.round(x - newW / 2) : Math.round(x)
-        const ny = isCentered ? Math.round(y - newH / 2) : Math.round(y)
-        return { ...l, x: nx, y: ny, width: newW, height: newH, rotation: rot }
+        return { ...l, x: Math.round(x), y: Math.round(y), width: newW, height: newH, rotation: rot }
       })
 
-      commitLayers(next)
+      // flushSync forces React/react-konva to commit the new widths
+      // and positions to the underlying Konva nodes IMMEDIATELY,
+      // before the next line resets the Group's scale. Without it,
+      // the imperative scaleX(1) below would land on the OLD node
+      // state (still has the pre-commit width), and the browser
+      // would paint a one-frame snapshot of "old width × scale 1 =
+      // old size" before React caught up — visible as a jarring
+      // snap-back jump after every resize-handle release.
+      flushSync(() => { commitLayers(next) })
       clearSnapGuides()
-      // Bake scale into width/height; reset Konva node scale + skew so
-      // subsequent transforms start fresh. Skew is reset because Konva can
-      // produce non-zero skewX/skewY when a non-uniform group scale is
-      // applied to a rotated child — those values aren't part of our layer
-      // schema, so leaving them on the node would persist a shear that
-      // survives undo (layer state restores fine, but the Konva node still
-      // has the stale skew).
+      // Now safely reset Konva-side scale + skew. The flip lives on
+      // the inner Konva element, not the Group, so a plain reset
+      // here can't un-flip anything visually. Skew is reset because
+      // Konva can produce non-zero skewX/skewY when a non-uniform
+      // group scale is applied to a rotated child — those values
+      // aren't part of our layer schema.
       nodeMap.forEach(node => {
         node.scaleX(1)
         node.scaleY(1)
@@ -2165,6 +2702,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     commitLayers(next)
     setSelectedIds([copy.id])
   }, [layers, commitLayers])
+
+  /** Toggle flipX / flipY on every selected layer. Each click on the
+   *  toolbar button is a single undo entry that flips all selected
+   *  layers' state for that axis — matches the alignment-ops UX
+   *  (operate on the whole selection, one entry per click). */
+  const handleFlip = useCallback((axis: 'x' | 'y') => {
+    if (selectedIds.length === 0) return
+    const key = axis === 'x' ? 'flipX' : 'flipY'
+    const next = layers.map(l =>
+      selectedIds.includes(l.id) ? { ...l, [key]: !l[key] } : l
+    )
+    commitLayers(next)
+  }, [layers, selectedIds, commitLayers])
 
   // ── Add layers ────────────────────────────────────────────────────────────
   /** Shared helper for both the image-picker button and asset-library
@@ -2297,13 +2847,41 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   }, [])
 
   // ── Open editor for a stream ───────────────────────────────────────────────
-  const openStreamEditor = useCallback(async (folderPath: string, date: string, title?: string, meta?: StreamMeta, totalEpisodes?: number) => {
-    // Load canvas + fresh template list in parallel (avoids race with isVisible effect)
-    const [canvas, freshTemplates] = await Promise.all([
-      window.api.thumbnailLoadCanvas(folderPath, date),
+  // Pull the ordinal out of a thumbnail basename, e.g.
+  //   `2026-06-15_sm-thumbnail.png`    → 1
+  //   `2026-06-15_sm-thumbnail-3.png`  → 3
+  //   anything else                    → null
+  const parseVariantOrdinal = (basename: string, date: string): number | null => {
+    const escaped = date.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const m = basename.match(new RegExp(`^${escaped}_sm-thumbnail(?:-(\\d+))?\\.png$`, 'i'))
+    if (!m) return null
+    return m[1] ? parseInt(m[1], 10) : 1
+  }
+
+  const openStreamEditor = useCallback(async (folderPath: string, date: string, title?: string, meta?: StreamMeta, totalEpisodes?: number, requestedVariantOrdinal?: number) => {
+    // Scan for existing variants in parallel with everything else.
+    // The variant the user sees first is whichever the streams page
+    // currently considers "preferred" — `meta.preferredThumbnail`
+    // holds a basename, which we parse back into an ordinal. Falls
+    // back to the lowest available ordinal if no preference matches.
+    const [foundVariants, freshTemplates] = await Promise.all([
+      window.api.thumbnailListVariants(folderPath, date).catch(() => [] as number[]),
       window.api.thumbnailListTemplates(config.streamsDir).catch(() => [] as ThumbnailTemplate[]),
     ])
     setTemplates(freshTemplates)
+    const preferredOrdinal = meta?.preferredThumbnail
+      ? parseVariantOrdinal(meta.preferredThumbnail, date)
+      : null
+    // Priority: explicit request (from a carousel / lightbox edit
+    // button click) → `meta.preferredThumbnail` → first available.
+    const initialVariant = requestedVariantOrdinal && foundVariants.includes(requestedVariantOrdinal)
+      ? requestedVariantOrdinal
+      : preferredOrdinal && foundVariants.includes(preferredOrdinal)
+        ? preferredOrdinal
+        : (foundVariants[0] ?? 1)
+    const canvas = foundVariants.length > 0
+      ? await window.api.thumbnailLoadCanvas(folderPath, date, initialVariant)
+      : null
 
     // If meta carries a pre-selected built-in template (set during stream creation)
     // and there's no saved canvas yet, auto-load that template — skip the picker.
@@ -2319,12 +2897,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
 
     setCurrentStream({ folderPath, date, title, meta, totalEpisodes })
+    setVariants(foundVariants.length > 0 ? foundVariants : [1])
+    setCurrentVariant(initialVariant)
     setSelectedIds([])
+    // Local layer ref so the eager-save path below can pass the new
+    // layers directly without waiting on a state read.
+    let seededLayers: ThumbnailLayer[] | null = null
     if (canvas) {
       resetLayers(canvas.layers)
       setCurrentTemplateId(canvas.templateId)
     } else if (presetTemplate) {
-      resetLayers(presetTemplate.layers.map((l: ThumbnailLayer) => ({ ...l, id: newId() })))
+      const fresh = presetTemplate.layers.map((l: ThumbnailLayer) => ({ ...l, id: newId() }))
+      seededLayers = fresh
+      resetLayers(fresh)
       setCurrentTemplateId(presetTemplate.id)
     } else {
       resetLayers([])
@@ -2335,31 +2920,135 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     // Add to recents
     const entry: ThumbnailRecentEntry = { folderPath, date, title, updatedAt: Date.now() }
     window.api.thumbnailAddRecent(entry).then(setRecents).catch(() => {})
-  }, [resetLayers, config.streamsDir])
+    // Eager save for the preset-template path so a stream item bound
+    // to a built-in template at creation time gets its PNG + JSON on
+    // disk immediately — without this the thumbnail only persists
+    // after the user nudges a layer. Same rAF wait as
+    // confirmPickTemplate so react-konva commits the seeded layers
+    // to the stage before getCanvasDataUrl reads it.
+    if (seededLayers !== null && presetTemplate) {
+      // Capture as a non-nullable const before the await so TS keeps
+      // the narrow across the suspension point.
+      const layersToSave: ThumbnailLayer[] = seededLayers
+      const templateIdToSave: string = presetTemplate.id
+      await new Promise<void>(r => requestAnimationFrame(() => r()))
+      await doSave(layersToSave, folderPath, date, templateIdToSave, initialVariant)
+    }
+  }, [resetLayers, config.streamsDir, doSave])
 
   const openFromRecent = useCallback((entry: ThumbnailRecentEntry) => {
     openStreamEditor(entry.folderPath, entry.date, entry.title)
   }, [openStreamEditor])
 
   // ── Confirm template picker choice ────────────────────────────────────────
-  const confirmPickTemplate = useCallback((t: ThumbnailTemplate | null) => {
+  const confirmPickTemplate = useCallback(async (t: ThumbnailTemplate | null) => {
     if (!templatePickerStream) return
-    const { folderPath, date, title, meta, totalEpisodes } = templatePickerStream
+    const { folderPath, date, title, meta, totalEpisodes, targetVariant } = templatePickerStream
     setTemplatePickerStream(null)
     setCurrentStream({ folderPath, date, title, meta, totalEpisodes })
     setSelectedIds([])
-    if (t) {
-      resetLayers(t.layers.map(l => ({ ...l, id: newId() })))
-      setCurrentTemplateId(t.id)
+    // Compute the layers locally so we can both seed the editor AND
+    // pass them straight to the eager save below — avoids waiting on
+    // a React state read after `resetLayers`.
+    const newLayers = t ? t.layers.map(l => ({ ...l, id: newId() })) : []
+    resetLayers(newLayers)
+    setCurrentTemplateId(t?.id)
+    setIsDirty(false)
+    setMode('editor')
+    // Variant accounting: in the new-alternative flow `targetVariant`
+    // is set to the next-available ordinal; otherwise default to 1.
+    const ordinal = targetVariant ?? 1
+    setCurrentVariant(ordinal)
+    setVariants(prev => prev.includes(ordinal) ? prev : [...prev, ordinal].sort((a, b) => a - b))
+    const entry: ThumbnailRecentEntry = { folderPath, date, title, updatedAt: Date.now() }
+    window.api.thumbnailAddRecent(entry).then(setRecents).catch(() => {})
+    // Eager save: stream items previously only got an on-disk PNG +
+    // JSON after the user nudged a layer (triggerAutoSave). With
+    // alternative thumbnails the user can create one and immediately
+    // navigate away, expecting it to persist; saving here makes the
+    // freshly-templated variant exist on disk right after the picker
+    // closes. Skip for the "Start blank" path — there are no layers
+    // to render, so the save would just write an empty PNG. The rAF
+    // gives react-konva a frame to commit the new layers to the
+    // stage so `getCanvasDataUrl` reads them instead of the previous
+    // contents.
+    if (newLayers.length > 0) {
+      await new Promise<void>(r => requestAnimationFrame(() => r()))
+      await doSave(newLayers, folderPath, date, t?.id, ordinal)
+    }
+  }, [templatePickerStream, resetLayers, doSave])
+
+  // Switch the editor to a different already-existing variant. Auto-
+  // save fires for the current variant first (no work lost if the
+  // user was mid-edit), then we load the target variant's canvas.
+  const switchVariant = useCallback(async (ordinal: number) => {
+    if (!currentStream) return
+    if (ordinal === currentVariant) return
+    // Flush any pending auto-save against the CURRENT variant so we
+    // don't lose unsaved changes when we swap to the next one.
+    if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
+    if (isDirty) {
+      await doSave(layers, currentStream.folderPath, currentStream.date, currentTemplateId, currentVariant)
+    }
+    const canvas = await window.api.thumbnailLoadCanvas(currentStream.folderPath, currentStream.date, ordinal)
+    setCurrentVariant(ordinal)
+    if (canvas) {
+      resetLayers(canvas.layers)
+      setCurrentTemplateId(canvas.templateId)
     } else {
       resetLayers([])
       setCurrentTemplateId(undefined)
     }
     setIsDirty(false)
+  }, [currentStream, currentVariant, currentTemplateId, isDirty, layers, doSave, resetLayers])
+
+  // Open the template picker in "new alternative" mode. Computes the
+  // next available ordinal from the variants list (gaps left by a
+  // delete don't get backfilled — we always take max + 1 so the
+  // numbering is stable across the session and prior `preferredThumbnail`
+  // references stay valid).
+  const startNewVariant = useCallback(() => {
+    if (!currentStream) return
+    const nextOrdinal = variants.length > 0 ? Math.max(...variants) + 1 : 1
+    setTemplatePickerStream({
+      folderPath: currentStream.folderPath,
+      date: currentStream.date,
+      title: currentStream.title,
+      meta: currentStream.meta,
+      totalEpisodes: currentStream.totalEpisodes,
+      targetVariant: nextOrdinal,
+    })
+  }, [currentStream, variants])
+
+  // Duplicate the currently-open variant into a new alternative at
+  // `templatePickerStream.targetVariant`. Used by the "Duplicate
+  // current" card in the picker modal. Flushes any pending save on
+  // the source variant first (so its latest state is on disk),
+  // clones the layers with fresh ids, writes the new variant to
+  // disk immediately, and switches the editor to it. Preserves the
+  // source's template binding so future template-driven updates
+  // still apply to the duplicate by default.
+  const duplicateCurrentToNewVariant = useCallback(async () => {
+    if (!templatePickerStream || !templatePickerStream.targetVariant) return
+    const { folderPath, date, title, meta, totalEpisodes, targetVariant } = templatePickerStream
+    if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
+    if (isDirty) {
+      await doSave(layers, folderPath, date, currentTemplateId, currentVariant)
+    }
+    const dupLayers = layers.map(l => ({ ...l, id: newId() }))
+    setTemplatePickerStream(null)
+    setCurrentStream({ folderPath, date, title, meta, totalEpisodes })
+    setSelectedIds([])
+    resetLayers(dupLayers)
+    setCurrentVariant(targetVariant)
+    setVariants(prev => prev.includes(targetVariant) ? prev : [...prev, targetVariant].sort((a, b) => a - b))
     setMode('editor')
+    // Eager save so the new variant's PNG + JSON exist on disk even
+    // if the user navigates away before the next auto-save tick.
+    await doSave(dupLayers, folderPath, date, currentTemplateId, targetVariant)
     const entry: ThumbnailRecentEntry = { folderPath, date, title, updatedAt: Date.now() }
     window.api.thumbnailAddRecent(entry).then(setRecents).catch(() => {})
-  }, [templatePickerStream, resetLayers])
+  }, [templatePickerStream, currentVariant, currentTemplateId, isDirty, layers, doSave, resetLayers])
 
   const openFromTemplate = useCallback((t: ThumbnailTemplate) => {
     // Open editor with template layers but no stream association
@@ -2426,36 +3115,73 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const manualSave = useCallback(async () => {
     if (!currentStream) return
     if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
-    await doSave(layers, currentStream.folderPath, currentStream.date, currentTemplateId)
-  }, [currentStream, layers, currentTemplateId, doSave])
+    await doSave(layers, currentStream.folderPath, currentStream.date, currentTemplateId, currentVariant)
+  }, [currentStream, layers, currentTemplateId, currentVariant, doSave])
 
   // ── Delete thumbnail files ────────────────────────────────────────────────
   const confirmDeleteThumbnail = useCallback(async () => {
     if (!currentStream) return
     setDeleteThumbOpen(false)
     const { folderPath, date } = currentStream
+    const variantToDelete = currentVariant
+    const suffix = variantToDelete <= 1 ? '' : `-${variantToDelete}`
     // Cancel any pending auto-save first
     if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
-    // Delete both files; ignore errors if a file doesn't exist yet
+    // Delete the JSON + PNG for the CURRENTLY-OPEN variant only.
+    // Other variants are left alone — multi-thumbnail stream items
+    // keep the remaining alternatives intact.
     await Promise.allSettled([
-      window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.json`),
-      window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail.png`),
+      window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail${suffix}.json`),
+      window.api.deleteFile(`${folderPath}/${date}_sm-thumbnail${suffix}.png`),
     ])
-    // Clear only the thumbnail flags via merge — preserves any other fields edited concurrently.
+    // Re-scan for what's left after the delete.
+    const remaining = await window.api.thumbnailListVariants(folderPath, date).catch(() => [] as number[])
+    if (remaining.length > 0) {
+      // Other variants still exist → switch to the lowest-ordinal one
+      // so the user lands on something rather than the overview.
+      const nextOrdinal = remaining[0]
+      const canvas = await window.api.thumbnailLoadCanvas(folderPath, date, nextOrdinal)
+      setVariants(remaining)
+      setCurrentVariant(nextOrdinal)
+      if (canvas) {
+        resetLayers(canvas.layers)
+        setCurrentTemplateId(canvas.templateId)
+      } else {
+        resetLayers([])
+        setCurrentTemplateId(undefined)
+      }
+      setIsDirty(false)
+      // If the deleted variant was the streams page's preferred
+      // thumbnail, clear that meta key so the row falls back to
+      // another available thumbnail instead of pointing at a now-
+      // missing file. Don't touch the smThumbnail flag — the stream
+      // still has SM thumbnails, just not THIS one.
+      const wasPreferred = currentStream.meta?.preferredThumbnail
+        === `${date}_sm-thumbnail${suffix}.png`
+      if (wasPreferred) {
+        await window.api.updateStreamMeta(folderPath, {
+          preferredThumbnail: undefined,
+        } as any, streamMetaKey(folderPath, date, config.streamsDir)).catch(() => {})
+      }
+      return
+    }
+    // No variants left → clear the thumbnail flags, drop the recents
+    // entry, and return to overview (same as the legacy delete flow).
     await window.api.updateStreamMeta(folderPath, {
       smThumbnail: undefined,
       smThumbnailTemplate: undefined,
     } as any, streamMetaKey(folderPath, date, config.streamsDir)).catch(() => {})
-    // Remove from persisted recents store and sync local state
     window.api.thumbnailRemoveRecent(folderPath, date).then(setRecents).catch(() => {
       setRecents(prev => prev.filter(r => !(r.folderPath === folderPath && r.date === date)))
     })
     setCurrentStream(null)
+    setVariants([1])
+    setCurrentVariant(1)
     resetLayers([])
     setCurrentTemplateId(undefined)
     setIsDirty(false)
     setMode('overview')
-  }, [currentStream, resetLayers])
+  }, [currentStream, currentVariant, resetLayers])
 
   // ── Export PNG ────────────────────────────────────────────────────────────
   const exportPng = useCallback(async () => {
@@ -2550,48 +3276,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             onDeleteTemplate={deleteTemplate}
             loading={overviewLoading}
           />
-          {/* Template picker — shown when navigating from a stream with no existing canvas */}
-          {templatePickerStream && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-              <div className="bg-navy-800 border border-white/10 rounded-xl shadow-2xl w-[640px] max-h-[80vh] flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
-                  <div>
-                    <h2 className="text-sm font-semibold text-gray-200">Choose a starting template</h2>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">
-                      {templatePickerStream.title ?? templatePickerStream.date}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setTemplatePickerStream(null)}
-                    className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-                <div className="overflow-y-auto p-5 flex flex-col gap-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    {templates.map(t => (
-                      <div
-                        key={t.id}
-                        className="group bg-navy-900 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-purple-500/60 transition-colors"
-                        onClick={() => confirmPickTemplate(t)}
-                      >
-                        <TemplatePreview streamsDir={config.streamsDir} templateId={t.id} name={t.name} cacheKey={t.updatedAt} />
-                        <div className="px-2 py-1.5">
-                          <span className="text-xs text-gray-300 truncate block">{t.name}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="px-5 py-3 border-t border-white/10 shrink-0 flex justify-end">
-                  <Button variant="ghost" size="sm" onClick={() => confirmPickTemplate(null)}>
-                    Start blank
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Template picker modal was moved out of this branch so
+              it renders in editor mode too — needed for the "+ New
+              thumbnail" alternative flow from the variant switcher
+              dropdown. See the lifted copy at the end of this
+              component's render. */}
         </div>
       ) : (
         <>
@@ -2620,6 +3309,79 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <span className="text-xs text-gray-400 italic">Unsaved canvas</span>
               )}
               {isDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
+              {/* Variant switcher + Delete — only when editing a
+                  stream (templates-only sessions don't have variants).
+                  The switcher's button displays a 1-indexed position
+                  in the visible variants list, not the file ordinal,
+                  so users see "Thumbnail 1, Thumbnail 2…" contiguously
+                  even when a delete leaves a gap in the file ordinals. */}
+              {currentStream && (
+                <div ref={variantPickerRef} className="relative flex items-center gap-1 ml-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setVariantPickerOpen(v => !v)}
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                      variantPickerOpen
+                        ? 'bg-white/10 text-gray-200'
+                        : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-gray-100'
+                    }`}
+                  >
+                    Thumbnail {Math.max(1, variants.indexOf(currentVariant) + 1)}
+                    <ChevronDown size={11} className={`text-gray-400 transition-transform ${variantPickerOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  <Tooltip content="Delete this thumbnail" side="bottom">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteThumbOpen(true)}
+                      className="p-1.5 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                      aria-label="Delete this thumbnail"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </Tooltip>
+                  {variantPickerOpen && (
+                    <div className="absolute top-full left-0 mt-1.5 z-30 min-w-[200px] bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1">
+                      {variants.map((ord, i) => {
+                        const isCurrent = ord === currentVariant
+                        const suffix = ord <= 1 ? '' : `-${ord}`
+                        const src = `file://${currentStream.folderPath.replace(/\\/g, '/')}/${currentStream.date}_sm-thumbnail${suffix}.png?v=${variantPreviewKey}`
+                        return (
+                          <button
+                            key={ord}
+                            type="button"
+                            onClick={() => { void switchVariant(ord); setVariantPickerOpen(false) }}
+                            disabled={isCurrent}
+                            className={`flex items-center gap-2 w-full px-2 py-1.5 text-xs text-left transition-colors ${
+                              isCurrent
+                                ? 'bg-white/10 text-gray-100 cursor-default'
+                                : 'text-gray-300 hover:bg-white/5'
+                            }`}
+                          >
+                            <img
+                              src={src}
+                              alt=""
+                              className="w-12 h-7 object-cover rounded bg-navy-900 border border-white/5 shrink-0"
+                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }}
+                            />
+                            <span>Thumbnail {i + 1}</span>
+                          </button>
+                        )
+                      })}
+                      <div className="my-1 border-t border-white/5" />
+                      <button
+                        type="button"
+                        onClick={() => { startNewVariant(); setVariantPickerOpen(false) }}
+                        className="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-left text-purple-300 hover:bg-white/5 transition-colors"
+                      >
+                        <span className="w-12 h-7 rounded border border-dashed border-white/10 flex items-center justify-center shrink-0">
+                          <Plus size={12} />
+                        </span>
+                        New thumbnail
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <Tooltip content="Undo (Ctrl+Z)" side="bottom">
@@ -2631,7 +3393,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Undo2 size={14} />
                 </button>
               </Tooltip>
-              <Tooltip content="Redo (Ctrl+Y)" side="bottom">
+              <Tooltip content="Redo (Ctrl+Shift+Z)" side="bottom">
                 <button
                   onClick={redo}
                   disabled={!canRedo}
@@ -2695,6 +3457,36 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   </button>
                 </Tooltip>
               ))}
+              {/* Flip ops — operate on every selected layer, one undo
+                  entry per click. Lit-state styling matches the
+                  snap/alignment-mode toggles above so a flipped
+                  selection reads at a glance. */}
+              {([
+                ['x', <FlipHorizontal2 size={14} />, 'Flip horizontally', (l: ThumbnailLayer) => !!l.flipX],
+                ['y', <FlipVertical2 size={14} />,   'Flip vertically',   (l: ThumbnailLayer) => !!l.flipY],
+              ] as const).map(([axis, icon, label, isLit]) => {
+                const allSelectedAreFlipped =
+                  selectedIds.length > 0 &&
+                  selectedIds.every(id => {
+                    const l = layers.find(ll => ll.id === id)
+                    return l ? isLit(l) : false
+                  })
+                return (
+                  <Tooltip key={axis} content={label} side="bottom">
+                    <button
+                      onClick={() => handleFlip(axis)}
+                      disabled={selectedIds.length === 0}
+                      className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                        allSelectedAreFlipped
+                          ? 'bg-purple-600/30 text-purple-300'
+                          : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'
+                      }`}
+                    >
+                      {icon}
+                    </button>
+                  </Tooltip>
+                )
+              })}
               <div className="w-px h-4 bg-white/10 mx-1" />
               {saveTemplateOpen ? (
                 <div className="flex items-center gap-1">
@@ -2708,7 +3500,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       if (e.key === 'Escape') setSaveTemplateOpen(false)
                     }}
                     placeholder="Template name…"
-                    className="h-6 px-2 rounded bg-navy-900 border border-purple-500/50 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-purple-400 w-36"
+                    className="h-6 px-2 rounded-lg bg-navy-900 border border-purple-500/50 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-purple-400 w-36"
                   />
                   <button
                     onClick={commitSaveTemplate}
@@ -2748,13 +3540,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   Update template
                 </Button>
               )}
-              {currentStream && (
-                <Button variant="ghost" size="sm" icon={<Trash2 size={12} />} onClick={() => setDeleteThumbOpen(true)}
-                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                >
-                  Delete Thumbnail
-                </Button>
-              )}
+              {/* Delete-thumbnail control moved to the header next to
+                  the variant switcher — both manage "which / how many
+                  thumbnails for this stream", so they belong in the
+                  same zone instead of the toolbar's canvas-ops band. */}
             </div>
           </div>
 
@@ -2924,6 +3713,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Transformer
                     ref={transformerRef}
                     rotateEnabled
+                    // Disable Konva's drag-past-the-opposite-handle flip
+                    // gesture. We have explicit flip buttons + signed
+                    // W/H inputs, so a stray cross-over flip while
+                    // dragging the resize handles of an already-flipped
+                    // layer is unwanted (and one of the sources of
+                    // the rotation/position glitch the Transformer
+                    // produces on negative-scaled nodes).
+                    flipEnabled={false}
                     boundBoxFunc={(oldBox, newBox) => {
                       // Universal min size + per-selection text-height lock.
                       const constrained: KonvaBox = {
@@ -2935,6 +3732,68 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       if (sel.length === 1) {
                         const l = layers.find(x => x.id === sel[0])
                         if (l?.type === 'text') constrained.height = oldBox.height
+                        // Aspect-ratio enforcement (single-layer selection only;
+                        // multi-select treats as freeform because honoring
+                        // multiple individual ratios at once in a single bbox
+                        // is ambiguous). Lock state defaults to true when
+                        // undefined; Shift inverts for this gesture.
+                        if (l && l.type !== 'text') {
+                          const layerLocked = l.aspectLocked ?? true
+                          const effectiveLock = layerLocked !== shiftPressedRef.current
+                          if (effectiveLock) {
+                            const ratio = oldBox.height > 0 ? oldBox.width / oldBox.height : 1
+                            // Compare oldBox vs newBox edges to figure out which
+                            // edges the user is dragging. Side handles change
+                            // exactly one of width/height; corner handles
+                            // change both.
+                            const widthChanged = Math.abs(constrained.width - oldBox.width) > 0.5
+                            const heightChanged = Math.abs(constrained.height - oldBox.height) > 0.5
+                            if (widthChanged && heightChanged) {
+                              // Corner handle: use the projection of the
+                              // user's cursor (encoded in newBox's far corner)
+                              // onto the ratio-locked diagonal from the
+                              // anchor corner. This is continuous — small
+                              // cursor moves produce small box changes
+                              // regardless of which dimension dominates. The
+                              // previous "pick whichever delta is larger"
+                              // approach flipped between width-driven and
+                              // height-driven mid-drag, which made the
+                              // anchor visibly jump around.
+                              //
+                              // Math: closest (w, h) to (cw, ch) on the line
+                              // w = ratio * h is found by minimizing
+                              // (ratio*h − cw)² + (h − ch)², which gives
+                              // h = (ratio·cw + ch) / (ratio² + 1).
+                              const cw = constrained.width
+                              const ch = constrained.height
+                              const t = (ratio * cw + ch) / (ratio * ratio + 1)
+                              const newH = Math.max(10, Math.round(t))
+                              const newW = Math.max(10, Math.round(ratio * newH))
+                              // Anchor: which corner of oldBox is fixed?
+                              // Whichever didn't move from oldBox in
+                              // `constrained`.
+                              const leftFixed = Math.abs(constrained.x - oldBox.x) < 0.5
+                              const topFixed = Math.abs(constrained.y - oldBox.y) < 0.5
+                              constrained.x = leftFixed ? oldBox.x : (oldBox.x + oldBox.width - newW)
+                              constrained.y = topFixed ? oldBox.y : (oldBox.y + oldBox.height - newH)
+                              constrained.width = newW
+                              constrained.height = newH
+                            } else if (widthChanged) {
+                              // Side handle (left or right): adjust height to
+                              // match ratio, expanding symmetrically from the
+                              // vertical center so the drag feels balanced.
+                              const newH = Math.max(10, Math.round(constrained.width / ratio))
+                              constrained.y = oldBox.y - (newH - oldBox.height) / 2
+                              constrained.height = newH
+                            } else if (heightChanged) {
+                              // Side handle (top or bottom): adjust width
+                              // around the horizontal center.
+                              const newW = Math.max(10, Math.round(constrained.height * ratio))
+                              constrained.x = oldBox.x - (newW - oldBox.width) / 2
+                              constrained.width = newW
+                            }
+                          }
+                        }
                       }
                       return handleSnapTransformBoundBox(oldBox, constrained)
                     }}
@@ -3385,6 +4244,93 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             </div>
           )}
         </>
+      )}
+
+      {/* Template picker — used both for the initial-thumbnail flow
+          (navigating from a stream with no canvas) AND for the "+ New
+          thumbnail" alternative flow from the variant switcher.
+          Rendered outside the mode ternary so it's available in
+          either overview or editor mode. `targetVariant` on the
+          picker stream distinguishes the two flows; both end at the
+          same `confirmPickTemplate`. */}
+      {templatePickerStream && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-navy-800 border border-white/10 rounded-xl shadow-2xl w-[640px] max-h-[80vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-white/10 shrink-0">
+              {/* min-w-0 + flex-1 on the title wrapper so the truncate
+                  rule has a real width constraint that follows the
+                  modal's body width minus the close button, instead
+                  of capping at an arbitrary 20rem (`max-w-xs`). */}
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-semibold text-gray-200 truncate">
+                  {templatePickerStream.targetVariant && templatePickerStream.targetVariant > 1
+                    ? 'Choose a template for the new thumbnail'
+                    : 'Choose a starting template'}
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5 truncate">
+                  {templatePickerStream.title ?? templatePickerStream.date}
+                </p>
+              </div>
+              <button
+                onClick={() => setTemplatePickerStream(null)}
+                className="shrink-0 p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5 flex flex-col gap-4">
+              <div className="grid grid-cols-3 gap-3">
+                {/* "Duplicate current thumbnail" card — only available
+                    in the new-alternative flow (targetVariant set)
+                    AND when we have a current stream + layers to copy
+                    from. Rendered first so it sits in the most visible
+                    grid slot. Purple border + label make it visually
+                    distinct from the template cards. */}
+                {templatePickerStream.targetVariant
+                  && templatePickerStream.targetVariant > 1
+                  && currentStream
+                  && layers.length > 0 && (
+                  <div
+                    className="group bg-navy-900 border border-purple-500/50 rounded-lg overflow-hidden cursor-pointer hover:border-purple-400 transition-colors"
+                    onClick={duplicateCurrentToNewVariant}
+                  >
+                    <div className="relative aspect-video bg-black">
+                      <img
+                        src={(() => {
+                          const suffix = currentVariant <= 1 ? '' : `-${currentVariant}`
+                          return `file://${currentStream.folderPath.replace(/\\/g, '/')}/${currentStream.date}_sm-thumbnail${suffix}.png?v=${variantPreviewKey}`
+                        })()}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }}
+                      />
+                    </div>
+                    <div className="px-2 py-1.5">
+                      <span className="text-xs text-purple-300 truncate block">Duplicate current</span>
+                    </div>
+                  </div>
+                )}
+                {templates.map(t => (
+                  <div
+                    key={t.id}
+                    className="group bg-navy-900 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-purple-500/60 transition-colors"
+                    onClick={() => confirmPickTemplate(t)}
+                  >
+                    <TemplatePreview streamsDir={config.streamsDir} templateId={t.id} name={t.name} cacheKey={t.updatedAt} />
+                    <div className="px-2 py-1.5">
+                      <span className="text-xs text-gray-300 truncate block">{t.name}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-white/10 shrink-0 flex justify-end">
+              <Button variant="ghost" size="sm" onClick={() => confirmPickTemplate(null)}>
+                Start blank
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

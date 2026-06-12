@@ -52,6 +52,30 @@ async function findGameId(
   return (exact ?? results[0])?.id ?? ''
 }
 
+/** Fetch the authenticated user's current channel info: title,
+ *  category/game name, and tags. Used by the renderer to compare against
+ *  local stream metadata and decide whether the "Push to Twitch" button
+ *  has anything to push. Returns null if Twitch responds without the
+ *  expected payload (rare — usually a not-yet-affiliated account). */
+export async function getChannelInfo(
+  clientId: string,
+  clientSecret: string,
+): Promise<{ title: string; gameName: string; tags: string[] } | null> {
+  const broadcasterId = await getBroadcasterId(clientId, clientSecret)
+  const data = await twitchRequest(
+    `/channels?broadcaster_id=${broadcasterId}`,
+    { method: 'GET' },
+    clientId, clientSecret,
+  )
+  const row = data?.data?.[0]
+  if (!row) return null
+  return {
+    title: typeof row.title === 'string' ? row.title : '',
+    gameName: typeof row.game_name === 'string' ? row.game_name : '',
+    tags: Array.isArray(row.tags) ? row.tags.filter((t: unknown): t is string => typeof t === 'string') : [],
+  }
+}
+
 /** Update the channel title and optionally the game/category + tags.
  *  Tags must already conform to Twitch's rules (≤10, ≤25 chars each,
  *  alphanumeric only) — the renderer filters before sending. */

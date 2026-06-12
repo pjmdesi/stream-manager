@@ -1310,6 +1310,16 @@ export function registerStreamsIPC(): void {
         }
         updated.videoMap = newVideoMap
       }
+      // Rewrite preferredThumbnail to track its rename — the file on
+      // disk was renamed (date prefix updated), so the stored basename
+      // would otherwise point at a non-existent file and the row +
+      // sidebar would fall back to whatever happens to sort first in
+      // folder.thumbnails. That fallback is what produces the "wrong
+      // stream's thumbnail" symptom after back-to-back reschedules.
+      if (entry.preferredThumbnail) {
+        const renamed = replaceFirstDate(entry.preferredThumbnail, oldDate, newDate)
+        if (renamed !== null) updated.preferredThumbnail = renamed
+      }
       if (oldKey !== newKey) delete allMeta[oldKey]
       allMeta[newKey] = updated
       writeAllMeta(streamsDir, allMeta)
@@ -1425,8 +1435,26 @@ export function registerStreamsIPC(): void {
   function notifyChange(win: BrowserWindow) {
     if (debounceTimer) clearTimeout(debounceTimer)
     debounceTimer = setTimeout(() => {
+      // Skip the chokidar echo when a known local write just fired its
+      // own explicit streams:changed (thumbnail save, converter
+      // completion, etc.) — without this guard the renderer reloads
+      // twice for every such action: once instantly via the explicit
+      // send, then again ~1.8s later when chokidar settles on the same
+      // file. The window is set via `suppressChokidarFireFor` from
+      // those handlers. Check is at FIRE time (inside the debounce
+      // callback) rather than at notifyChange entry — that handles
+      // the converter case where chokidar's `add` event can arrive
+      // *before* the completion handler sets the suppression window,
+      // since the encoding finished a while before the handler runs.
+      if (Date.now() < suppressChokidarUntil) return
       if (!win.isDestroyed()) win.webContents.send('streams:changed')
     }, DEBOUNCE_MS)
+  }
+
+  suppressChokidarFireFor = (durationMs: number) => {
+    // `max` so overlapping calls (e.g. a thumbnail save midway through
+    // a converter completion) extend the window rather than shorten it.
+    suppressChokidarUntil = Math.max(suppressChokidarUntil, Date.now() + durationMs)
   }
 
   function startDirWatcher(dir: string, mode: 'folder-per-stream' | 'dump-folder', win: BrowserWindow) {
@@ -1514,3 +1542,23 @@ let pauseDirWatcher: () => Promise<() => void> = async () => () => {}
  *  module-let pattern is closed-over by registerStreamsIPC, so callers must
  *  import this wrapper rather than the variable directly. */
 export const pauseStreamsWatcher = (): Promise<() => void> => pauseDirWatcher()
+
+// Suppression-window state — checked by the chokidar `notifyChange` to skip
+// echoes after a known local write. Set via the exported
+// `suppressChokidarFireFor` from handlers that do their own explicit
+// `streams:changed` send (thumbnail save, converter completion). The closure
+// inside registerStreamsIPC reassigns `suppressChokidarFireFor` to the real
+// implementation; the default noop covers the very brief window before
+// registration runs.
+let suppressChokidarUntil = 0
+let suppressChokidarFireFor: (durationMs: number) => void = () => {}
+
+/** Suppress the chokidar `streams:changed` echo for the next `durationMs`.
+ *  Call this BEFORE a local file write that you're going to explicitly
+ *  follow with `webContents.send('streams:changed')` — chokidar will see
+ *  the same write ~1-2s later and would otherwise fire a redundant
+ *  reload. 3000ms is the safe default (covers awaitWriteFinish 1000ms +
+ *  debounce 800ms + slack). */
+export const suppressNextStreamsChokidarFire = (durationMs: number = 3000): void => {
+  suppressChokidarFireFor(durationMs)
+}

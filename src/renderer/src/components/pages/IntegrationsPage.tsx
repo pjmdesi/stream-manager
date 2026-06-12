@@ -4,7 +4,7 @@ import type { RelayStatus } from '../../types'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
-import { useAutoGrowTextarea } from '../ui/Input'
+import { Textarea } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
@@ -152,10 +152,21 @@ export function IntegrationsPage() {
   const [twError, setTwError] = useState<string | null>(null)
 
   // ── Claude state ──────────────────────────────────────────────────────────
-  // API key + system prompt bind directly to config (auto-save). Test-key
-  // result is local to this session.
+  // API key binds directly to config (single-line input, no perceptible
+  // typing lag). The system-prompt textarea is much longer-form, and
+  // saving on every keystroke noticeably lagged typing — it now mirrors
+  // into local state and commits on blur. Test-key result is local to
+  // this session.
   const [claudeTesting, setClaudeTesting] = useState(false)
   const [claudeTestResult, setClaudeTestResult] = useState<{ valid: boolean; error?: string } | null>(null)
+  // Mirror the persisted prompt into local state so typing doesn't
+  // hit IPC on every keystroke. Resync when the persisted value
+  // changes externally (only happens here via Disconnect, but kept
+  // robust in case another writer appears).
+  const [claudePromptLocal, setClaudePromptLocal] = useState(config.claudeSystemPrompt ?? '')
+  useEffect(() => {
+    setClaudePromptLocal(config.claudeSystemPrompt ?? '')
+  }, [config.claudeSystemPrompt])
 
   // ── YouTube instructions toggle ───────────────────────────────────────────
   const [ytInstructionsExpanded, setYtInstructionsExpanded] = useState(false)
@@ -439,8 +450,8 @@ export function IntegrationsPage() {
             </div>
             <div className="px-4 py-4 flex flex-col gap-4">
               <p className="text-xs text-gray-400 leading-relaxed">
-                Routes your stream to YouTube and automatically connects it to the next scheduled
-                broadcast — so the right video goes live, with the right title, every time.
+                Routes your stream to YouTube with the option to automatically connect to the next scheduled
+                broadcast in Stream Manager.
               </p>
 
               {/* Disconnected gate */}
@@ -745,13 +756,17 @@ export function IntegrationsPage() {
                   Preferences / System Prompt
                   <span className="text-gray-400 font-normal ml-1">(optional)</span>
                 </label>
-                <textarea
-                  ref={useAutoGrowTextarea(config.claudeSystemPrompt ?? '')}
-                  value={config.claudeSystemPrompt ?? ''}
-                  onChange={e => updateConfig({ claudeSystemPrompt: e.target.value })}
+                <Textarea
+                  value={claudePromptLocal}
+                  onChange={e => setClaudePromptLocal(e.target.value)}
+                  onBlur={() => {
+                    if (claudePromptLocal !== (config.claudeSystemPrompt ?? '')) {
+                      updateConfig({ claudeSystemPrompt: claudePromptLocal })
+                    }
+                  }}
                   rows={4}
                   placeholder="e.g. I stream horror games. Keep titles under 60 characters. Always include the episode number. My channel tagline is …"
-                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none"
+                  className="text-xs"
                 />
                 <p className="text-xs text-gray-400">Tell Claude about your channel, content style, or any preferences for how suggestions should be worded.</p>
               </div>

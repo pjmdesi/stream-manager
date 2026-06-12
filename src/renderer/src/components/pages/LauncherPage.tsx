@@ -53,7 +53,7 @@ function EditableLabel({
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel() }}
           onBlur={commit}
-          className="flex-1 min-w-0 bg-navy-900 border border-purple-500/50 rounded px-2 py-0.5 text-sm text-gray-200 outline-none focus:ring-1 focus:ring-purple-500/50"
+          className="flex-1 min-w-0 bg-navy-900 border border-purple-500/50 rounded-lg px-2 py-0.5 text-sm text-gray-200 outline-none focus:ring-1 focus:ring-purple-500/50"
           placeholder={placeholder}
           autoFocus
         />

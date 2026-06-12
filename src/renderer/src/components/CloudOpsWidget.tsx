@@ -36,11 +36,20 @@ export function CloudOpsWidget({ collapsed }: { collapsed: boolean }) {
       <Tooltip content={tooltipLabel} side="right" triggerClassName="block w-full">
         <button
           onClick={openModal}
-          className="w-full flex flex-col items-center gap-0.5 py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors"
+          // Two-container layout: primary Cloud icon left-aligned at
+          // x=16 (matches nav icon column), secondary indicators
+          // (count, refresh spinner) centered below. Mirrors the
+          // ConversionWidget / AutoRulesWidget split between primary
+          // icons (left) and decorative status content (centered).
+          className="w-full py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors"
         >
-          <Cloud size={14} className="text-cyan-300" />
-          <span className="text-[10px] tabular-nums text-cyan-300">{completed}/{total}</span>
-          <RefreshCw size={10} className="text-cyan-300 animate-spin" />
+          <div className="flex items-center px-4 mb-0.5">
+            <Cloud size={14} className="text-cyan-300" />
+          </div>
+          <div className="flex flex-col items-center gap-0.5">
+            <span className="text-[10px] tabular-nums text-cyan-300">{completed}/{total}</span>
+            <RefreshCw size={10} className="text-cyan-300 animate-spin" />
+          </div>
         </button>
       </Tooltip>
     )

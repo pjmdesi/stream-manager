@@ -1,7 +1,129 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react'
+import React, { useState, useRef, useMemo, useEffect, useLayoutEffect, useCallback } from 'react'
 import ReactDOM from 'react-dom'
 import { X } from 'lucide-react'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
+import { Tooltip } from './Tooltip'
+
+/**
+ * Single chip with truncation-aware Tooltip. Detects overflow via
+ * scrollWidth > clientWidth on the inner text span; only renders the
+ * Tooltip when the chip is actually clipped, so short tags don't
+ * carry a redundant hover tip with the same text. Pulled into its own
+ * component because hooks can't be called inside the .map() loop.
+ *
+ * Optional selection + reorder:
+ *   - `onSelect` flips the chip into a clickable affordance; `isSelected`
+ *     adds a purple ring (the app's themed `purple-400/70`, NOT the real
+ *     twitch purple — see StreamsPage's Topics/Games row where this is
+ *     used: selection drives both YT title's {game} merge field AND the
+ *     Twitch category, so a Twitch-specific accent would mis-signal the
+ *     scope).
+ *   - When `onSelect` is present the truncation-only tooltip is
+ *     replaced with a contextual "click to select / push to apply"
+ *     hint (full chip text is still readable inline).
+ *   - `draggable` + `onDragStart/Enter/End` make the chip a drag source
+ *     for reorder; the parent splices the array on dragenter so the row
+ *     animates a live preview rather than waiting for drop.
+ */
+function ComboTagChip({
+  text, chipClassName, textureStyle, onRemove,
+  isSelected, onSelect,
+  draggable, onDragStart, onDragEnter, onDragEnd, onDragOver,
+}: {
+  text: string
+  chipClassName: string
+  textureStyle?: React.CSSProperties
+  onRemove: () => void
+  isSelected?: boolean
+  onSelect?: () => void
+  draggable?: boolean
+  onDragStart?: () => void
+  onDragEnter?: () => void
+  onDragEnd?: () => void
+  onDragOver?: (e: React.DragEvent) => void
+}) {
+  const [truncated, setTruncated] = useState(false)
+  // Callback ref so the observer follows whichever inner span is
+  // currently mounted — see DisplayTagChip in legacyStreamsShared for
+  // the long version. useRef + useLayoutEffect would leave the
+  // observer bound to the previous detached span across the
+  // wrap-toggle remount.
+  const obsCleanupRef = useRef<(() => void) | null>(null)
+  const setTextRef = useCallback((el: HTMLSpanElement | null) => {
+    obsCleanupRef.current?.()
+    obsCleanupRef.current = null
+    if (!el) return
+    const check = () => setTruncated(el.scrollWidth > el.clientWidth)
+    check()
+    let raf = 0
+    const obs = new ResizeObserver(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(check)
+    })
+    obs.observe(el)
+    obsCleanupRef.current = () => {
+      cancelAnimationFrame(raf)
+      obs.disconnect()
+    }
+  }, [])
+  useEffect(() => () => { obsCleanupRef.current?.() }, [])
+
+  const selectionRing = isSelected ? 'ring-2 ring-purple-400/70 ring-offset-1 ring-offset-navy-900' : ''
+  // Cursor signals primary affordance: drag wins when both are present
+  // (matches OS convention — visible grab handle suggests reorder, the
+  // click still works on mouseup-without-drag).
+  const cursorClass = draggable ? 'cursor-grab active:cursor-grabbing' : (onSelect ? 'cursor-pointer' : '')
+  const chip = (
+    <span
+      className={`${chipClassName} ${selectionRing} ${cursorClass}`}
+      style={textureStyle}
+      draggable={draggable}
+      onDragStart={draggable ? (e => {
+        // Without setData Firefox refuses to start the drag. Empty
+        // string is fine — the parent tracks the source index in React
+        // state, not via DataTransfer.
+        e.dataTransfer.setData('text/plain', text)
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart?.()
+      }) : undefined}
+      onDragEnter={draggable ? (() => onDragEnter?.()) : undefined}
+      onDragOver={draggable ? (e => { e.preventDefault(); onDragOver?.(e) }) : undefined}
+      onDragEnd={draggable ? (() => onDragEnd?.()) : undefined}
+      onClick={onSelect ? (() => onSelect()) : undefined}
+    >
+      <span ref={setTextRef} className="truncate min-w-0">{text}</span>
+      <button
+        type="button"
+        // stopPropagation so removing a chip doesn't also select it on
+        // its way out. preventDefault keeps the input from losing
+        // focus when the user mousedowns the X.
+        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onRemove() }}
+        // Inert during drag — HTML5 DnD on a child button can hijack
+        // the parent span's drag handlers in some browsers.
+        draggable={false}
+        className="opacity-60 hover:opacity-100 transition-opacity shrink-0"
+      >
+        <X size={10} />
+      </button>
+    </span>
+  )
+  // Tooltip selection: when selectable, show contextual affordance
+  // hint; otherwise fall back to the truncation-only behaviour so
+  // short chips don't carry a redundant tip echoing their own text.
+  const tooltipContent = onSelect
+    ? (isSelected
+        ? 'Active topic / game — push YouTube + Twitch to apply'
+        : 'Click to set as active topic / game · Drag to reorder')
+    : (truncated ? text : null)
+  // inline-block + max-w-full + min-w-0 on the Tooltip wrapper — see
+  // DisplayTagChip in legacyStreamsShared for the long version. Default
+  // inline-flex wrapper would collapse to chip natural width and break
+  // the truncation cascade; min-w-0 overrides the flex-item
+  // min-content default so max-w-full actually cascades.
+  return tooltipContent
+    ? <Tooltip content={tooltipContent} side="top" triggerClassName="inline-block max-w-full min-w-0">{chip}</Tooltip>
+    : chip
+}
 
 function HighlightMatch({ text, query }: { text: string; query: string }) {
   const idx = text.toLowerCase().indexOf(query.toLowerCase())
@@ -105,6 +227,17 @@ interface TagComboBoxProps {
   onNewTag?: (tag: string) => void
   /** Renders chips at a slightly smaller size — for high-volume lists like Topics/Games */
   compact?: boolean
+  /** When set, the chip whose value equals this gets a purple ring and
+   *  the chips become click-to-select. Used for the Topics/Games row to
+   *  expose `meta.primaryGame` selection (which drives the YT title's
+   *  `{game}` merge field AND the Twitch category push). */
+  selectedValue?: string
+  onSelectValue?: (value: string) => void
+  /** When true, chips become drag-source for reorder. The parent's
+   *  `onChange` is called with the new array on every drag-enter so the
+   *  row animates a live reorder preview during the drag, not only on
+   *  drop. */
+  reorderable?: boolean
 }
 
 export function TagComboBox({
@@ -117,12 +250,19 @@ export function TagComboBox({
   tagTextures,
   onNewTag,
   compact,
+  selectedValue,
+  onSelectValue,
+  reorderable,
 }: TagComboBoxProps) {
   const [input, setInput] = useState('')
   const [open, setOpen] = useState(false)
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  // Index of the chip currently being dragged. Updated on each
+  // drag-enter so we can keep splicing relative to the chip's most
+  // recent position rather than its original start position.
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
 
   const suggestions = useMemo(() => {
     const q = input.toLowerCase()
@@ -143,6 +283,19 @@ export function TagComboBox({
 
   const remove = (v: string) => onChange(values.filter(x => x !== v))
 
+  // Splice-and-insert reorder. Called on drag-enter against a different
+  // chip — moves the dragged chip to the target index immediately so the
+  // user sees a continuous preview, then updates dragIndex to the new
+  // position so subsequent drag-enters move from there.
+  const reorder = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0) return
+    const next = [...values]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    onChange(next)
+    setDragIndex(to)
+  }
+
   const showAddNew = input.trim() !== '' &&
     !allOptions.some(o => o.toLowerCase() === input.trim().toLowerCase()) &&
     !values.includes(input.trim())
@@ -155,23 +308,22 @@ export function TagComboBox({
       className="flex flex-wrap items-center gap-1.5 min-h-[38px] w-full bg-navy-900 border border-white/10 rounded-lg px-2 py-1.5 cursor-text focus-within:ring-2 focus-within:ring-purple-500/50"
       onClick={() => inputRef.current?.focus()}
     >
-      {values.map(v => {
+      {values.map((v, idx) => {
         const color = getTagColor(tagColors?.[v])
         return (
-          <span
+          <ComboTagChip
             key={v}
-            className={`inline-flex items-center gap-1 border rounded-full shrink-0 ${color.chip} ${chipSize}`}
-            style={getTagTextureStyle(tagTextures?.[v])}
-          >
-            {v}
-            <button
-              type="button"
-              onMouseDown={e => { e.preventDefault(); remove(v) }}
-              className="opacity-60 hover:opacity-100 transition-opacity"
-            >
-              <X size={10} />
-            </button>
-          </span>
+            text={v}
+            chipClassName={`inline-flex items-center gap-1 border rounded-full shrink-0 max-w-full ${color.chip} ${chipSize}`}
+            textureStyle={getTagTextureStyle(tagTextures?.[v])}
+            onRemove={() => remove(v)}
+            isSelected={selectedValue !== undefined && selectedValue === v}
+            onSelect={onSelectValue ? () => onSelectValue(v) : undefined}
+            draggable={reorderable && values.length > 1}
+            onDragStart={() => setDragIndex(idx)}
+            onDragEnter={() => { if (dragIndex !== null) reorder(dragIndex, idx) }}
+            onDragEnd={() => setDragIndex(null)}
+          />
         )
       })}
 

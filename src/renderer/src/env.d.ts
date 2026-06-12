@@ -218,6 +218,7 @@ declare global {
       twitchConnect(): Promise<void>
       twitchDisconnect(): Promise<void>
       twitchUpdateChannel(title: string, gameName?: string, tags?: string[]): Promise<void>
+      twitchGetChannel(): Promise<{ title: string; gameName: string; tags: string[] } | null>
 
       // ── Video Popup ───────────────────────────────────────────────────────────
       openVideoPopup(offerSdp: string, videoWidth: number, videoHeight: number, cropMode?: string, cropX?: number): Promise<void>
@@ -235,8 +236,9 @@ declare global {
       thumbnailListTemplates(streamsDir: string): Promise<ThumbnailTemplate[]>
       thumbnailSaveTemplate(streamsDir: string, template: ThumbnailTemplate, pngDataUrl?: string): Promise<ThumbnailTemplate>
       thumbnailDeleteTemplate(streamsDir: string, templateId: string): Promise<void>
-      thumbnailLoadCanvas(folderPath: string, date: string): Promise<ThumbnailCanvasFile | null>
-      thumbnailSaveCanvas(folderPath: string, date: string, canvasFile: ThumbnailCanvasFile, pngDataUrl: string): Promise<void>
+      thumbnailLoadCanvas(folderPath: string, date: string, ordinal?: number): Promise<ThumbnailCanvasFile | null>
+      thumbnailSaveCanvas(folderPath: string, date: string, canvasFile: ThumbnailCanvasFile, pngDataUrl: string, ordinal?: number): Promise<void>
+      thumbnailListVariants(folderPath: string, date: string): Promise<number[]>
       thumbnailCacheAsset(streamsDir: string, srcPath: string): Promise<string>
       thumbnailHashFile(filePath: string): Promise<string | null>
       thumbnailGetRecents(): Promise<ThumbnailRecentEntry[]>

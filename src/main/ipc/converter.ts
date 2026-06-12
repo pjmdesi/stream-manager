@@ -4,6 +4,7 @@ import path from 'path'
 import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import { getStore } from './store'
+import { suppressNextStreamsChokidarFire } from './streams'
 
 /** Form state for the simplified custom-preset editor. Stored on the preset so
  *  the user can re-open and edit it in form mode later, and so exports preserve
@@ -726,7 +727,11 @@ async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void>
     if (isWin) {
       try { (await import('child_process')).spawnSync('attrib', ['+H', metaPath], { timeout: 2000 }) } catch {}
     }
-    // Tell the renderer to refresh the streams page.
+    // Tell the renderer to refresh the streams page. Suppress the
+    // chokidar echo for the final output file (chokidar fires on the
+    // tmp→final rename ~1.8s later — the explicit send below already
+    // covers it).
+    suppressNextStreamsChokidarFire()
     for (const w of BrowserWindow.getAllWindows()) {
       if (!w.isDestroyed()) w.webContents.send('streams:changed')
     }
