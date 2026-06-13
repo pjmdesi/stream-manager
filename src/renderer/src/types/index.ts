@@ -227,6 +227,10 @@ export interface AppConfig {
    *  via the "Don't ask again" button in that same modal or via the
    *  Streams section of Settings. */
   twitchSkipCategoryRenamePrompt: boolean
+  /** YouTube video category id (numeric string, e.g. '20' = Gaming)
+   *  to pre-fill `meta.ytCategoryId` on newly-created streams. Empty
+   *  = no default. Surfaced under Settings → Streams. */
+  defaultYouTubeCategoryId: string
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'
@@ -318,6 +322,51 @@ export interface StreamMeta {
    *  checkbox. Never read after first detection. */
   seriesAutoDetectPending?: boolean
   ytTags?: string[]
+  /** YouTube video category id (numeric string, e.g. `"20"` = Gaming,
+   *  `"24"` = Entertainment, `"22"` = People & Blogs). Drives the
+   *  `snippet.categoryId` field on `videos.update` during YT push, and
+   *  also triggers a category-specific reminder in the post-push
+   *  banner for categories that have an additional Studio sub-field
+   *  the API can't set (currently just Gaming → "Game"). Seeded from
+   *  the linked broadcast's existing categoryId the first time the
+   *  user opens the sidebar so the first push doesn't surprise-change
+   *  what YouTube auto-derived. */
+  ytCategoryId?: string
+  /** Snapshot of the per-field values at the last successful YouTube
+   *  sync — either a push OR a pull, both represent "local and remote
+   *  agreed at this moment." Used by the direction-aware mismatch
+   *  indicator: a field with `local !== lastPushed` but `remote ===
+   *  lastPushed` means local is ahead (user edited in SM, needs push);
+   *  the inverse means remote is ahead (user edited in Studio, needs
+   *  pull); both differing means a real conflict. Undefined for legacy
+   *  streams or streams never sync'd with the snapshot in place —
+   *  those render the neutral "unknown direction" dot instead.
+   *
+   *  Stored verbatim as we sent / pulled — the mismatch comparator
+   *  applies the same trim / whitespace / tag-sort normalization at
+   *  compare time as it does for the local-vs-remote check. */
+  ytLastPushedTitle?: string
+  ytLastPushedDescription?: string
+  ytLastPushedTags?: string[]
+  ytLastPushedCategoryId?: string
+  /** Local override for the broadcast's scheduled time-of-day (HH:MM,
+   *  24-hour, user's local timezone). When undefined, the time picker
+   *  in the sidebar falls back to the linked broadcast's existing
+   *  scheduledStartTime; when set, drives the push (folder.date +
+   *  scheduledTime → ISO string). Only meaningful for upcoming
+   *  broadcasts — past / VOD broadcasts can't have their schedule
+   *  edited via the YT API. */
+  scheduledTime?: string
+  /** Sync snapshots for the date + time. Same direction-aware mismatch
+   *  logic as the title/description/tags/category snapshots: a field
+   *  with `local === lastPushed && remote !== lastPushed` flags as
+   *  "remote ahead" (Studio edit); the inverse flags as "local ahead."
+   *  Date snapshot is YYYY-MM-DD; time snapshot is HH:MM, both in the
+   *  user's local timezone (matches how folder.date + scheduledTime
+   *  are stored). Written on every successful push AND pull, since
+   *  both represent a sync moment. */
+  ytLastPushedDate?: string
+  ytLastPushedScheduledTime?: string
   /** Id of the YouTube-title template currently bound to this stream.
    *  When set, the streams sidebar re-renders the template against the
    *  live merge fields (game / tagline / season / episode / …) and

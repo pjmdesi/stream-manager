@@ -3,6 +3,7 @@ import path from 'path'
 import { imageSize } from 'image-size'
 import { checkLocalFiles } from '../ipc/files'
 import { getValidToken } from './youtubeAuth'
+import * as ytQuotaState from './ytQuotaState'
 
 const BASE = 'https://www.googleapis.com/youtube/v3'
 
@@ -174,6 +175,16 @@ async function ytRequest(
   clientId: string,
   clientSecret: string
 ): Promise<any> {
+  // Centralized quota gate. If a previous call already observed a
+  // `quotaExceeded` 403, every subsequent call would just burn an
+  // error round-trip until midnight PT — short-circuit here instead
+  // and let the renderer's banner explain why. `getQuotaState()`
+  // lazily auto-clears once the cached `resetsAt` has passed, so
+  // calls after midnight PT pass straight through.
+  const quota = ytQuotaState.getQuotaState()
+  if (quota.exceeded) {
+    throw new Error('YouTube API quota exceeded. Quota refreshes at midnight Pacific Time.')
+  }
   const token = await getValidToken(clientId, clientSecret)
   const url = `${BASE}${path}`
   console.log('[YT api]', options.method, url)
@@ -190,6 +201,13 @@ async function ytRequest(
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as any
     console.error('[YT api] error body:', JSON.stringify(err))
+    // Detect quota-exceeded via the documented `errors[].reason`
+    // value. 403 status alone isn't sufficient — perms-related 403s
+    // shouldn't trip the quota banner / refresh suppression.
+    const isQuotaExceeded = res.status === 403
+      && Array.isArray(err?.error?.errors)
+      && err.error.errors.some((e: any) => e?.reason === 'quotaExceeded')
+    if (isQuotaExceeded) ytQuotaState.markQuotaExceeded()
     throw new Error(err?.error?.message || `YouTube API error ${res.status}`)
   }
   // 204 No Content
@@ -251,11 +269,13 @@ export async function getLiveBroadcasts(
     throw new Error(errors[0])
   }
 
-  // Hydrate tags from the videos resource (liveBroadcasts snippet doesn't carry them)
-  const tagsMap = await fetchTagsForVideos(broadcasts.map(b => b.id), clientId, clientSecret)
+  // Hydrate tags + categoryId from the videos resource (the
+  // liveBroadcasts snippet doesn't carry either).
+  const extrasMap = await fetchVideoExtras(broadcasts.map(b => b.id), clientId, clientSecret)
   for (const b of broadcasts) {
-    const tags = tagsMap.get(b.id)
-    if (tags) b.snippet.tags = tags
+    const extras = extrasMap.get(b.id)
+    if (extras?.tags) b.snippet.tags = extras.tags
+    if (extras?.categoryId) b.snippet.categoryId = extras.categoryId
   }
 
   return broadcasts
@@ -279,9 +299,10 @@ export async function getBroadcastById(
   )
   const item = data?.items?.[0]
   if (!item) return null
-  const tagsMap = await fetchTagsForVideos([broadcastId], clientId, clientSecret)
-  const tags = tagsMap.get(broadcastId)
-  if (tags) item.snippet.tags = tags
+  const extrasMap = await fetchVideoExtras([broadcastId], clientId, clientSecret)
+  const extras = extrasMap.get(broadcastId)
+  if (extras?.tags) item.snippet.tags = extras.tags
+  if (extras?.categoryId) item.snippet.categoryId = extras.categoryId
   return item as LiveBroadcast
 }
 
@@ -305,6 +326,14 @@ export async function getVideoById(
       description: item.snippet.description ?? '',
       actualStartTime: item.snippet.publishedAt,
       tags: item.snippet.tags ?? [],
+      // Forward `categoryId` so single-video lookups (used for the
+      // VOD path that backs most "old stream items" — see callers in
+      // StreamsPage's fallback lookup + the post-push refresh) carry
+      // the same field that the bulk-list paths now populate. Without
+      // this the in-memory broadcast for an old VOD has categoryId
+      // undefined, so the symmetric mismatch check sees `'' === ''`
+      // and the Pull button never appears.
+      categoryId: item.snippet.categoryId ?? undefined,
     },
     status: {
       lifeCycleStatus: 'complete',
@@ -315,13 +344,19 @@ export async function getVideoById(
 
 /** Fetch tags for a list of video IDs from the videos resource and return a map of id → tags.
  *  Chunks requests to stay within the API's 50-ID-per-request limit. */
-async function fetchTagsForVideos(
+/** Returns per-id `{ tags, categoryId }` for fields the
+ *  `/liveBroadcasts` resource doesn't carry — both live on the
+ *  `/videos` snippet. Either field may be absent on a given video
+ *  (tags is an array we omit when empty; categoryId can be missing
+ *  on very old uploads). Callers iterate the returned map and assign
+ *  whichever fields are present. */
+async function fetchVideoExtras(
   ids: string[],
   clientId: string,
   clientSecret: string
-): Promise<Map<string, string[]>> {
+): Promise<Map<string, { tags?: string[]; categoryId?: string }>> {
   if (ids.length === 0) return new Map()
-  const map = new Map<string, string[]>()
+  const map = new Map<string, { tags?: string[]; categoryId?: string }>()
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50)
     const data = await ytRequest(
@@ -330,7 +365,10 @@ async function fetchTagsForVideos(
       clientId, clientSecret
     )
     for (const item of (data?.items ?? [])) {
-      if (item.snippet?.tags?.length) map.set(item.id, item.snippet.tags)
+      const extras: { tags?: string[]; categoryId?: string } = {}
+      if (item.snippet?.tags?.length) extras.tags = item.snippet.tags
+      if (item.snippet?.categoryId) extras.categoryId = String(item.snippet.categoryId)
+      if (extras.tags || extras.categoryId) map.set(item.id, extras)
     }
   }
   return map
@@ -357,11 +395,13 @@ export async function getCompletedBroadcasts(
     pageToken = data?.nextPageToken
   } while (pageToken)
 
-  // Hydrate tags from the videos resource (liveBroadcasts snippet doesn't carry them)
-  const tagsMap = await fetchTagsForVideos(broadcasts.map(b => b.id), clientId, clientSecret)
+  // Hydrate tags + categoryId from the videos resource (the
+  // liveBroadcasts snippet doesn't carry either).
+  const extrasMap = await fetchVideoExtras(broadcasts.map(b => b.id), clientId, clientSecret)
   for (const b of broadcasts) {
-    const tags = tagsMap.get(b.id)
-    if (tags) b.snippet.tags = tags
+    const extras = extrasMap.get(b.id)
+    if (extras?.tags) b.snippet.tags = extras.tags
+    if (extras?.categoryId) b.snippet.categoryId = extras.categoryId
   }
 
   return broadcasts
@@ -721,6 +761,7 @@ export async function updateVideoTags(
   clientSecret: string,
   updatedTitle?: string,
   updatedDescription?: string,
+  updatedCategoryId?: string,
 ): Promise<void> {
   const current = await ytRequest(
     `/videos?${new URLSearchParams({ part: 'snippet', id: videoId })}`,
@@ -731,7 +772,11 @@ export async function updateVideoTags(
 
   // Only send writable snippet fields to avoid 400s from read-only properties.
   // Use the caller-supplied title/description if provided — the video resource
-  // may not have synced the broadcast snippet update yet.
+  // may not have synced the broadcast snippet update yet. `updatedCategoryId`
+  // overrides the existing categoryId when supplied — the regular YT push
+  // flow uses this to push the user's chosen category alongside title/tags
+  // in one round-trip; omitting it preserves whatever's currently on the
+  // video (back-compat for any caller that doesn't know about category).
   await ytRequest(
     `/videos?part=snippet`,
     {
@@ -741,7 +786,7 @@ export async function updateVideoTags(
         snippet: {
           title: updatedTitle ?? currentSnippet.title,
           description: updatedDescription ?? currentSnippet.description,
-          categoryId: currentSnippet.categoryId,
+          categoryId: updatedCategoryId ?? currentSnippet.categoryId,
           defaultLanguage: currentSnippet.defaultLanguage,
           tags,
         },
@@ -749,4 +794,38 @@ export async function updateVideoTags(
     },
     clientId, clientSecret
   )
+}
+
+/** A single entry from the `videoCategories.list` response. `assignable`
+ *  is false for some categories (e.g. legacy ones YouTube no longer lets
+ *  users pick) — the caller should filter those out before presenting a
+ *  dropdown. */
+export interface YouTubeVideoCategory {
+  id: string
+  title: string
+  assignable: boolean
+}
+
+/** Fetches the assignable video categories for a region. YouTube's
+ *  category list is region-specific (e.g. some regions don't have
+ *  "Nonprofits & Activism"), so the caller passes the regionCode — 'US'
+ *  is a safe default that covers the common ones (Gaming, Entertainment,
+ *  Music, etc.). The list changes rarely, so the renderer caches it for
+ *  the session rather than re-fetching per sidebar mount. */
+export async function getVideoCategories(
+  regionCode: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<YouTubeVideoCategory[]> {
+  const res = await ytRequest(
+    `/videoCategories?${new URLSearchParams({ part: 'snippet', regionCode })}`,
+    { method: 'GET' },
+    clientId, clientSecret
+  )
+  const items: any[] = res?.items ?? []
+  return items.map(i => ({
+    id: String(i.id),
+    title: String(i.snippet?.title ?? ''),
+    assignable: !!i.snippet?.assignable,
+  }))
 }

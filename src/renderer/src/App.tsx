@@ -518,9 +518,15 @@ function AppInner() {
 
   return (
     <div className="flex flex-col h-screen bg-navy-900 text-gray-200 overflow-hidden">
-      {/* Custom title bar */}
+      {/* Custom title bar. Asymmetric horizontal padding so the right
+          edge of the close button sits ~6px from the window's right
+          edge, matching the ~5–7px the buttons sit from the window's
+          top edge (top gap is set by `items-center` against `h-10`
+          minus the button's own height — `p-1.5` padding + 14–18px
+          icon ≈ 26–30px, centered in 40px). Left side keeps `pl-4`
+          so the logo + app name have room to breathe. */}
       <div
-        className="flex items-center justify-between h-10 bg-navy-800 border-b border-white/5 px-4 shrink-0"
+        className="flex items-center justify-between h-10 bg-navy-800 border-b border-white/5 pl-4 pr-1.5 shrink-0"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <div className="flex items-center gap-2">

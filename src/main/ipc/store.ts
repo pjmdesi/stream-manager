@@ -101,6 +101,11 @@ export interface AppConfig {
    *  user-typed "Black Flag" can come back as "Assassin's Creed IV
    *  Black Flag"). Surfaced + toggleable from Settings → Streams. */
   twitchSkipCategoryRenamePrompt: boolean
+  /** YouTube video category id (numeric string, e.g. '20' = Gaming)
+   *  to pre-fill `meta.ytCategoryId` for newly-created streams. Empty
+   *  string = no default (user must pick per-stream). Surfaced as a
+   *  dropdown under Settings → Integrations / YouTube. */
+  defaultYouTubeCategoryId: string
 }
 
 function getDefaultConfig(): AppConfig {
@@ -153,6 +158,7 @@ function getDefaultConfig(): AppConfig {
     calendarShowWeekNumbers: false,
     calendarShowAdjacentMonthDays: true,
     twitchSkipCategoryRenamePrompt: false,
+    defaultYouTubeCategoryId: '',
   }
 }
 

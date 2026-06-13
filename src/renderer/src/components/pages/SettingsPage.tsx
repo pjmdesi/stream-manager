@@ -133,11 +133,20 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
       if (!s.connected) { setYtStatus({ connected: false, valid: false }); return }
       const v = await window.api.youtubeValidateToken().catch(() => ({ valid: false }))
       setYtStatus({ connected: true, valid: v.valid })
+      // Categories list — only fetchable when YT is connected. Used to
+      // populate the "Default YouTube category" dropdown in the
+      // Streams section. Failure is non-fatal — dropdown just stays
+      // empty + disabled with a hint.
+      window.api.youtubeGetCategories()
+        .then(setYtCategories)
+        .catch(() => {})
     }).catch(() => {})
     window.api.twitchGetStatus?.().then((s: { connected: boolean }) => {
       setTwStatus({ connected: s.connected })
     }).catch(() => {})
   }, [])
+
+  const [ytCategories, setYtCategories] = useState<{ id: string; title: string; assignable: boolean }[]>([])
 
   const clearCache = async () => {
     setClearingCache(true)
@@ -423,6 +432,25 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
               className="w-32 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
             />
             <p className="text-xs text-gray-400">Pre-fills the start time when scheduling a YouTube broadcast — both when creating one from a stream item and when rescheduling. You can still change it per-broadcast.</p>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Default YouTube category</label>
+            <div className="relative">
+              <select
+                value={local.defaultYouTubeCategoryId ?? ''}
+                onChange={e => set('defaultYouTubeCategoryId', e.target.value)}
+                disabled={!ytStatus?.connected || ytCategories.length === 0}
+                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 [color-scheme:dark] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <option value="">— None —</option>
+                {ytCategories.filter(c => c.assignable).map(c => (
+                  <option key={c.id} value={c.id}>{c.title}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+            <p className="text-xs text-gray-400">Pre-fills the YouTube category field on newly-created streams (both "New stream" and "New episode"). YouTube requires a category on every video — picking a default here means the Push to YouTube button won't soft-block on new streams. Existing streams need to have a category picked manually before they can push to YouTube. {!ytStatus?.connected && <span className="text-amber-400">Connect YouTube to populate this list.</span>}</p>
           </div>
 
           <Checkbox

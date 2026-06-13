@@ -362,6 +362,17 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetStatus: () =>
     ipcRenderer.invoke('youtube:getStatus'),
 
+  youtubeGetQuotaState: () =>
+    ipcRenderer.invoke('youtube:getQuotaState'),
+
+  // Pushed by the main process when quota state changes (mark or
+  // auto-clear). Callback receives the same shape as `getQuotaState`.
+  onYouTubeQuotaChanged: (cb: (state: { exceeded: boolean; resetsAt: string | null }) => void) => {
+    const listener = (_e: unknown, state: { exceeded: boolean; resetsAt: string | null }) => cb(state)
+    ipcRenderer.on('youtube:quota-changed', listener)
+    return () => { ipcRenderer.removeListener('youtube:quota-changed', listener) }
+  },
+
   youtubeGetChannelId: (): Promise<string> =>
     ipcRenderer.invoke('youtube:getChannelId'),
 
@@ -395,8 +406,16 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetBroadcastById: (broadcastId: string) =>
     ipcRenderer.invoke('youtube:getBroadcastById', broadcastId),
 
-  youtubeUpdateVideo: (videoId: string, title: string, description: string, tags: string[]) =>
-    ipcRenderer.invoke('youtube:updateVideo', videoId, title, description, tags),
+  youtubeGetCategories: (regionCode?: string) =>
+    ipcRenderer.invoke('youtube:getCategories', regionCode),
+
+  youtubeUpdateVideo: (
+    videoId: string,
+    title: string,
+    description: string,
+    tags: string[],
+    categoryId?: string,
+  ) => ipcRenderer.invoke('youtube:updateVideo', videoId, title, description, tags, categoryId),
 
   youtubeValidateToken: () =>
     ipcRenderer.invoke('youtube:validateToken'),
@@ -410,8 +429,9 @@ contextBridge.exposeInMainWorld('api', {
   youtubeUpdateBroadcast: (
     broadcastId: string,
     snippet: { title: string; description: string; scheduledStartTime?: string },
-    tags: string[]
-  ) => ipcRenderer.invoke('youtube:updateBroadcast', broadcastId, snippet, tags),
+    tags: string[],
+    categoryId?: string,
+  ) => ipcRenderer.invoke('youtube:updateBroadcast', broadcastId, snippet, tags, categoryId),
 
   youtubeUpdateBroadcastStatus: (
     broadcastId: string,

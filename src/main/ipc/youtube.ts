@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories } from '../services/youtubeApi'
+import * as ytQuotaState from '../services/ytQuotaState'
 import { getStore } from './store'
 
 function getCreds() {
@@ -17,6 +18,11 @@ export function registerYouTubeIPC(): void {
     console.log('[YT main] getStatus — connected:', connected)
     return { connected, redirectUri: REDIRECT_URI }
   })
+
+  // Renderer reads this on mount + listens for `youtube:quota-changed`
+  // pushes to react to mid-session changes. The state auto-clears after
+  // midnight PT — the renderer doesn't have to poll or schedule a clear.
+  ipcMain.handle('youtube:getQuotaState', () => ytQuotaState.getQuotaState())
 
   ipcMain.handle('youtube:connect', async () => {
     const { clientId, clientSecret } = getCreds()
@@ -126,15 +132,21 @@ export function registerYouTubeIPC(): void {
     return getBroadcastById(broadcastId, clientId, clientSecret)
   })
 
+  ipcMain.handle('youtube:getCategories', async (_event, regionCode?: string) => {
+    const { clientId, clientSecret } = getCreds()
+    return getVideoCategories(regionCode || 'US', clientId, clientSecret)
+  })
+
   ipcMain.handle('youtube:updateVideo', async (
     _event,
     videoId: string,
     title: string,
     description: string,
-    tags: string[]
+    tags: string[],
+    categoryId?: string,
   ) => {
     const { clientId, clientSecret } = getCreds()
-    await updateVideoTags(videoId, tags, clientId, clientSecret, title, description)
+    await updateVideoTags(videoId, tags, clientId, clientSecret, title, description, categoryId)
   })
 
   ipcMain.handle('youtube:getQualifyingThumbnails', (_event, paths: string[]) => {
@@ -150,12 +162,18 @@ export function registerYouTubeIPC(): void {
     _event,
     broadcastId: string,
     snippet: { title: string; description: string; scheduledStartTime?: string },
-    tags: string[]
+    tags: string[],
+    categoryId?: string,
   ) => {
     const { clientId, clientSecret } = getCreds()
     await updateBroadcastSnippet(broadcastId, snippet, clientId, clientSecret)
-    if (tags.length > 0) {
-      await updateVideoTags(broadcastId, tags, clientId, clientSecret, snippet.title, snippet.description)
+    // categoryId lives on the underlying video resource (not the
+    // broadcast snippet), so even when there are no tags to push we
+    // still need to round-trip through updateVideoTags whenever a
+    // category override is supplied. Without the categoryId param we
+    // only round-trip when tags are non-empty (existing behavior).
+    if (tags.length > 0 || categoryId !== undefined) {
+      await updateVideoTags(broadcastId, tags, clientId, clientSecret, snippet.title, snippet.description, categoryId)
     }
   })
 

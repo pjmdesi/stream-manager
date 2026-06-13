@@ -50,6 +50,7 @@ const defaultConfig: AppConfig = {
   calendarShowWeekNumbers: false,
   calendarShowAdjacentMonthDays: true,
   twitchSkipCategoryRenamePrompt: false,
+  defaultYouTubeCategoryId: '',
 }
 
 interface StoreContextValue {

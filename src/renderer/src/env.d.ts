@@ -185,6 +185,8 @@ declare global {
 
       // ── YouTube ──────────────────────────────────────────────────────────────
       youtubeGetStatus(): Promise<{ connected: boolean; channelName?: string }>
+      youtubeGetQuotaState(): Promise<{ exceeded: boolean; resetsAt: string | null }>
+      onYouTubeQuotaChanged(cb: (state: { exceeded: boolean; resetsAt: string | null }) => void): () => void
       youtubeGetChannelId(): Promise<string>
       youtubeConnect(): Promise<void>
       youtubeDisconnect(): Promise<void>
@@ -196,11 +198,12 @@ declare global {
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
       youtubeGetBroadcastById(broadcastId: string): Promise<LiveBroadcast | null>
-      youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[]): Promise<void>
+      youtubeGetCategories(regionCode?: string): Promise<{ id: string; title: string; assignable: boolean }[]>
+      youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[], categoryId?: string): Promise<void>
       youtubeValidateToken(): Promise<{ valid: boolean; error?: string }>
       youtubeGetQualifyingThumbnails(paths: string[]): Promise<{ bestFit: string[]; rest: string[] }>
       youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>
-      youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string; scheduledStartTime?: string }, tags: string[]): Promise<void>
+      youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string; scheduledStartTime?: string }, tags: string[], categoryId?: string): Promise<void>
       youtubeUpdateBroadcastStatus(broadcastId: string, privacyStatus: 'public' | 'unlisted' | 'private'): Promise<void>
       youtubeDeleteVideo(videoId: string): Promise<void>
       getYTTitleTemplates(): Promise<YTTitleTemplate[]>
