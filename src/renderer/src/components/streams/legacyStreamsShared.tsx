@@ -3561,10 +3561,21 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
 }
 
 /** Inline "Save as template" text-link that expands into a name input with save/cancel. */
-export function SaveAsTemplateButton({ onSave, suggestedName }: { onSave: (name: string) => Promise<void> | void; suggestedName?: string }) {
+export function SaveAsTemplateButton({
+  onSave, suggestedName, existingNames,
+}: {
+  onSave: (name: string) => Promise<void> | void
+  suggestedName?: string
+  /** Existing template names. When the typed name (case-insensitive)
+   *  matches one, the save action switches to an inline overwrite
+   *  confirm — first click arms, second confirms. Omit to skip the
+   *  duplicate check entirely (e.g. for fields without name collisions). */
+  existingNames?: string[]
+}) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -3576,16 +3587,28 @@ export function SaveAsTemplateButton({ onSave, suggestedName }: { onSave: (name:
     if (suggestedName) inputRef.current?.select()
   }, [editing, suggestedName])
 
+  // Editing the name unconditionally dismisses an armed overwrite confirm
+  // so the user can't end up confirming the wrong name.
+  useEffect(() => { setConfirmOverwrite(false) }, [name])
+
+  const trimmed = name.trim()
+  const lowerExisting = useMemo(
+    () => new Set((existingNames ?? []).map(n => n.toLowerCase())),
+    [existingNames]
+  )
+  const isDuplicate = trimmed.length > 0 && lowerExisting.has(trimmed.toLowerCase())
+
   const startEditing = () => {
     setName(suggestedName ?? '')
     setEditing(true)
+    setConfirmOverwrite(false)
   }
-  const cancel = () => { setEditing(false); setName('') }
+  const cancel = () => { setEditing(false); setName(''); setConfirmOverwrite(false) }
   const save = async () => {
-    const trimmed = name.trim()
     if (!trimmed || saving) return
+    if (isDuplicate && !confirmOverwrite) { setConfirmOverwrite(true); return }
     setSaving(true)
-    try { await onSave(trimmed); setEditing(false); setName('') }
+    try { await onSave(trimmed); setEditing(false); setName(''); setConfirmOverwrite(false) }
     finally { setSaving(false) }
   }
 
@@ -3603,6 +3626,11 @@ export function SaveAsTemplateButton({ onSave, suggestedName }: { onSave: (name:
 
   return (
     <div className="flex items-center gap-1">
+      {isDuplicate && (
+        <span className="text-[10px] text-amber-400 mr-1 whitespace-nowrap">
+          {confirmOverwrite ? 'Click ✓ again to overwrite' : 'Will overwrite'}
+        </span>
+      )}
       <input
         ref={inputRef}
         value={name}
@@ -3612,14 +3640,22 @@ export function SaveAsTemplateButton({ onSave, suggestedName }: { onSave: (name:
           else if (e.key === 'Escape') { e.preventDefault(); cancel() }
         }}
         placeholder="Template name…"
-        className="text-xs bg-navy-900 border border-white/10 text-gray-200 rounded-lg px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500/40 w-32"
+        // `size` is in avg-char widths — grows with content so long
+        // names aren't truncated, with a floor that matches the
+        // placeholder width.
+        size={Math.max(14, name.length + 1)}
+        className={`text-xs bg-navy-900 border ${isDuplicate ? 'border-amber-500/40' : 'border-white/10'} text-gray-200 rounded-lg px-1.5 py-0.5 focus:outline-none focus:ring-1 ${isDuplicate ? 'focus:ring-amber-500/40' : 'focus:ring-purple-500/40'}`}
       />
       <button
         type="button"
         onClick={save}
-        disabled={!name.trim() || saving}
-        className="p-0.5 text-green-400 hover:text-green-300 disabled:text-gray-600 disabled:cursor-default transition-colors"
-        title="Save"
+        disabled={!trimmed || saving}
+        className={`p-0.5 transition-colors disabled:text-gray-600 disabled:cursor-default ${
+          isDuplicate
+            ? (confirmOverwrite ? 'text-amber-300 hover:text-amber-200' : 'text-amber-400 hover:text-amber-300')
+            : 'text-green-400 hover:text-green-300'
+        }`}
+        title={isDuplicate ? (confirmOverwrite ? 'Click to confirm overwrite' : 'A template with this name exists — click to overwrite') : 'Save'}
       >
         <Check size={12} />
       </button>

@@ -128,6 +128,35 @@ input.volume-slider-mt::-webkit-slider-runnable-track {
   animation: outline-pulse 1.8s linear infinite;
 }
 
+/* Smaller-ring variant tuned for the 6px direction-aware mismatch dots.
+   Same outline-not-box-shadow choice as the keyframes above so the ring
+   never clips against overflow:hidden sidebar containers. Color is set
+   per-dot via the --pulse-color CSS variable. */
+@keyframes outline-pulse-sm {
+  0%, 100% {
+    outline: 1px solid transparent;
+    outline-offset: 1.5px;
+  }
+  50% {
+    outline: 1px solid var(--pulse-color);
+    outline-offset: 1.5px;
+  }
+}
+.mismatch-dot-pulse {
+  animation: outline-pulse-sm 1.8s ease-in-out infinite;
+}
+
+/* TemplateBodyEditor placeholder. Native <input placeholder> doesn't
+   apply to contenteditable, so we forge it via ::before on the empty
+   state. `:empty` only matches when the element has no children at
+   all, which is exactly the "fresh field with no text or chips" case
+   we want to show the placeholder for. */
+.template-body-editor:empty::before {
+  content: attr(data-placeholder);
+  color: rgb(107 114 128); /* gray-500 */
+  pointer-events: none;
+}
+
 /* Fade-in utility for elements whose CSS opacity transition should fire
    on the very first paint after mount. CSS transitions only animate
    property CHANGES, so without a "from" value the element pops in at

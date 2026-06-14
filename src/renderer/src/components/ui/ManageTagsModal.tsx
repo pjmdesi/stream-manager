@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { SwatchBook, Trash2, Star, X, GitMerge, Check, Plus, Layers, PencilLine } from 'lucide-react'
+import { SwatchBook, Trash2, Star, X, GitMerge, Check, Plus, Layers, PencilLine, Link2, Link2Off } from 'lucide-react'
 import { Modal } from './Modal'
 import { Button } from './Button'
 import { Tooltip } from './Tooltip'
@@ -129,6 +129,104 @@ function TexturePicker({
   )
 }
 
+// ─── Tag template link picker portal ──────────────────────────────────────────
+
+function TagTemplateLinkPicker({
+  anchorRef,
+  gameName,
+  templates,
+  currentId,
+  onPick,
+  onClose,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>
+  gameName: string
+  templates: Array<{ id: string; name: string }>
+  currentId: string
+  onPick: (id: string) => void
+  onClose: () => void
+}) {
+  const rect = anchorRef.current?.getBoundingClientRect()
+  const pickerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        pickerRef.current && !pickerRef.current.contains(e.target as Node) &&
+        anchorRef.current && !anchorRef.current.contains(e.target as Node)
+      ) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose, anchorRef])
+
+  if (!rect) return null
+
+  const suggestedId = (() => {
+    if (currentId) return null
+    const lower = gameName.trim().toLowerCase()
+    return templates.find(t => t.name.trim().toLowerCase() === lower)?.id ?? null
+  })()
+
+  // Anchor right-edge under the button (the row's action cluster sits at
+  // the row's right side, so a right-aligned dropdown stays on-screen).
+  const width = 260
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width))
+
+  return ReactDOM.createPortal(
+    <div
+      ref={pickerRef}
+      style={{ position: 'fixed', top: rect.bottom + 6, left, width, zIndex: 10000 }}
+      className="bg-navy-700 border border-white/10 rounded-xl shadow-2xl p-2 max-h-72 overflow-y-auto"
+    >
+      <p className="text-[11px] text-gray-400 px-2 py-1">Link YT tags template</p>
+      {templates.length === 0 ? (
+        <p className="text-xs text-gray-400 italic px-2 py-2">No templates yet. Create one in Templates first.</p>
+      ) : (
+        <div className="flex flex-col">
+          {currentId && (
+            <button
+              type="button"
+              onClick={() => { onPick(''); onClose() }}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors text-left"
+            >
+              <Link2Off size={12} />
+              Clear link
+            </button>
+          )}
+          {templates.map(t => {
+            const isCurrent = t.id === currentId
+            const isSuggested = t.id === suggestedId
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => { onPick(t.id); onClose() }}
+                className={`
+                  flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-xs transition-colors text-left
+                  ${isCurrent
+                    ? 'bg-blue-500/15 text-blue-200'
+                    : 'text-gray-300 hover:bg-white/5 hover:text-gray-100'
+                  }
+                `}
+              >
+                <span className="truncate flex items-center gap-1.5">
+                  {isCurrent && <Check size={11} className="text-blue-300 shrink-0" />}
+                  {t.name}
+                </span>
+                {isSuggested && (
+                  <span className="text-[10px] text-blue-300 shrink-0">suggested</span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>,
+    document.body
+  )
+}
+
 // ─── Shared tag list panel ────────────────────────────────────────────────────
 
 interface TagListPanelProps {
@@ -165,6 +263,14 @@ interface TagListPanelProps {
    *  re-keys the color/texture maps for stream-type tags). Omit on
    *  panels where rename isn't supported. */
   onRenameItem?: (oldName: string, newName: string) => void
+  /** Per-item link to a YT tag template id. Only meaningful for the
+   *  Topics/Games panel. When `onSetLink` is set, each row shows a
+   *  link button that opens a template picker; the linked template is
+   *  auto-applied when a stream's only game tag becomes this item and
+   *  its YT tags are still empty. */
+  itemLinks?: Record<string, string>
+  tagTemplates?: Array<{ id: string; name: string }>
+  onSetLink?: (item: string, templateId: string) => void
 }
 
 function TagListPanel({
@@ -191,11 +297,16 @@ function TagListPanel({
   getDefaultColor,
   getDefaultTexture,
   onRenameItem,
+  itemLinks,
+  tagTemplates,
+  onSetLink,
 }: TagListPanelProps) {
   const [openColorPicker, setOpenColorPicker] = useState<string | null>(null)
   const [openTexturePicker, setOpenTexturePicker] = useState<string | null>(null)
+  const [openLinkPicker, setOpenLinkPicker] = useState<string | null>(null)
   const swatchBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const textureBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const linkBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   // Rename mode: one row at a time. `renameDraft` holds the in-progress
   // new name; `renameError` surfaces validation problems (empty / duplicate).
   // Cleared together on cancel + commit.
@@ -448,6 +559,29 @@ function TagListPanel({
                       </button>
                     </Tooltip>
                   )}
+                  {onSetLink && (() => {
+                    const linkedId = itemLinks?.[item] ?? ''
+                    const linkedTpl = linkedId ? tagTemplates?.find(t => t.id === linkedId) : null
+                    const tip = linkedTpl
+                      ? `Linked to "${linkedTpl.name}" — applied automatically when this is the only game and YT tags are empty`
+                      : 'Link a YT tags template'
+                    return (
+                      <Tooltip content={tip}>
+                        <button
+                          ref={el => { linkBtnRefs.current[item] = el }}
+                          type="button"
+                          onClick={() => { setOpenLinkPicker(prev => prev === item ? null : item); setOpenColorPicker(null); setOpenTexturePicker(null) }}
+                          className={`p-1.5 rounded transition-colors ${
+                            linkedTpl
+                              ? 'text-blue-400 hover:text-blue-300 hover:bg-blue-500/10'
+                              : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'
+                          }`}
+                        >
+                          <Link2 size={14} />
+                        </button>
+                      </Tooltip>
+                    )
+                  })()}
                   <Tooltip content="Delete">
                     <button
                       type="button"
@@ -523,6 +657,17 @@ function TagListPanel({
                   currentKey={tagTextures[item] ?? DEFAULT_TAG_TEXTURE}
                   onPick={textureKey => { onTextureChange(item, textureKey); setOpenTexturePicker(null) }}
                   onClose={() => setOpenTexturePicker(null)}
+                />
+              )}
+              {/* Tag template link picker */}
+              {openLinkPicker === item && onSetLink && (
+                <TagTemplateLinkPicker
+                  anchorRef={{ current: linkBtnRefs.current[item] }}
+                  gameName={item}
+                  templates={tagTemplates ?? []}
+                  currentId={itemLinks?.[item] ?? ''}
+                  onPick={id => onSetLink(item, id)}
+                  onClose={() => setOpenLinkPicker(null)}
                 />
               )}
             </div>
@@ -702,6 +847,11 @@ interface Props {
    *  color + texture maps). Mirrors the delete/combine pattern. */
   onRenameTag: (oldName: string, newName: string) => void
   onRenameGame: (oldName: string, newName: string) => void
+  /** Game-tag → YT tag template id map. Surfaced as a link icon per
+   *  game; consumed by SidebarDetail's auto-apply effect. */
+  gameTagsLinks?: Record<string, string>
+  tagTemplates?: Array<{ id: string; name: string }>
+  onSetGameTagLink?: (game: string, templateId: string) => void
   onClose: () => void
 }
 
@@ -712,6 +862,7 @@ export function ManageTagsModal({
   onColorChange, onTextureChange, onAddTag, onDeleteTag, onCombineTags,
   onDeleteGame, onCombineGames,
   onRenameTag, onRenameGame,
+  gameTagsLinks, tagTemplates, onSetGameTagLink,
   onClose,
 }: Props) {
   const [activeTab, setActiveTab] = useState<'types' | 'topics'>('types')
@@ -903,6 +1054,9 @@ export function ManageTagsModal({
           onConfirmCombine={handleConfirmCombine}
           chipClass={TOPIC_CHIP}
           onRenameItem={onRenameGame}
+          itemLinks={gameTagsLinks}
+          tagTemplates={tagTemplates}
+          onSetLink={onSetGameTagLink}
         />
       )}
     </Modal>

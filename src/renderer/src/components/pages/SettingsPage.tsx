@@ -54,6 +54,28 @@ function DirInput({
   )
 }
 
+/**
+ * ForceQuotaToggle — dev-only checkbox surfaced inside the Settings
+ * form. Stages into `local` like every other setting; the parent's
+ * save handler persists the field AND fires the IPC so the main-side
+ * `ytQuotaState.forcedExceeded` matches the just-saved config. On app
+ * startup the same flag is re-applied from the persisted config.
+ */
+function ForceQuotaToggle({
+  checked, onChange,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <Checkbox
+      checked={checked}
+      onChange={onChange}
+      label={<div><div className="text-sm font-medium text-gray-200">Force YouTube quota-exceeded</div><div className="text-xs text-gray-400">Pretends the YouTube Data API returned a quota 403 for every call. All push/pull, auto-refresh, and relay broadcast lifecycle operations will fail with the same banner + gating as a real outage — useful for exercising the offline-cache fallbacks. Applied on Save; persists across restarts until you toggle it back off.</div></div>}
+    />
+  )
+}
+
 // TODO (cloud sync): if users report perf issues with the parallel
 // dehydrate/hydrate workers, expose two settings here:
 //   1. Max concurrent files (currently hardcoded at DEHYDRATE_CONCURRENCY /
@@ -175,6 +197,10 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
     const newStreamsDir = local.streamsDir
     await updateConfig(local)
     await window.api.setStartupSettings(!!local.startWithWindows, !!local.startMinimized)
+    // Dev-only: apply the just-persisted force-quota flag to the live
+    // runtime in ytQuotaState. No-op in production builds since the
+    // toggle isn't visible there; safe to call unconditionally.
+    await window.api.youtubeSetForcedQuotaExceeded(!!local.devForceYouTubeQuotaExceeded).catch(() => {})
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
 
@@ -639,14 +665,15 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
               </Button>
               <p className="text-xs text-gray-400">Clears streamsDir and streamerName, then reloads the app to trigger the onboarding flow. Not visible in production builds.</p>
             </div>
-            <div className="flex flex-col gap-1">
-              <Checkbox
-                label="Slow down animations (5×)"
-                checked={!!local.slowAnimations}
-                onChange={v => setLocal(prev => ({ ...prev, slowAnimations: v }))}
-              />
-              <p className="text-xs text-gray-400">Multiplies all motion animation durations by 10 to make transitions easier to inspect.</p>
-            </div>
+            <Checkbox
+              checked={!!local.slowAnimations}
+              onChange={v => setLocal(prev => ({ ...prev, slowAnimations: v }))}
+              label={<div><div className="text-sm font-medium text-gray-200">Slow down animations (5×)</div><div className="text-xs text-gray-400">Multiplies all motion animation durations by 10 to make transitions easier to inspect.</div></div>}
+            />
+            <ForceQuotaToggle
+              checked={!!local.devForceYouTubeQuotaExceeded}
+              onChange={v => set('devForceYouTubeQuotaExceeded', v)}
+            />
           </section>
         )}
       </div>

@@ -231,6 +231,16 @@ export interface AppConfig {
    *  to pre-fill `meta.ytCategoryId` on newly-created streams. Empty
    *  = no default. Surfaced under Settings → Streams. */
   defaultYouTubeCategoryId: string
+  /** Tag-template ids to auto-seed onto newly-created streams. Empty
+   *  = no default. Surfaced as star toggles in the Templates modal
+   *  (one per platform). */
+  defaultYouTubeTagsTemplateId: string
+  defaultTwitchTagsTemplateId: string
+  /** Dev-only: when true, the main process pretends YouTube returned a
+   *  quota-exceeded 403 for every API call. UI visibility guarded by
+   *  import.meta.env.DEV in the renderer; field is harmless in
+   *  packaged builds because nothing surfaces it. */
+  devForceYouTubeQuotaExceeded: boolean
 }
 
 export type VideoCategory = 'full' | 'short' | 'clip'
@@ -376,6 +386,21 @@ export interface StreamMeta {
    *  the templated value. Persists across stream switches and app
    *  restarts; ephemeral selection-state lives in the renderer only. */
   ytTitleTemplateId?: string
+  /** Id of the YouTube-tags template currently bound to this stream.
+   *  Unlike the title template, tags aren't merge-field substituted —
+   *  applying a tags template just writes its values into `ytTags` and
+   *  the binding persists as a "this came from template X" marker.
+   *  Cleared when the user edits the chips OR picks "Clear" in the
+   *  dropdown. */
+  ytTagsTemplateId?: string
+  /** Staged privacy for the linked YouTube broadcast/video. Edited
+   *  locally via the sidebar's Privacy dropdown; pushed alongside the
+   *  other fields by the Push to YouTube button. Falls back to the
+   *  broadcast's current status when undefined so existing streams
+   *  display YouTube's value as a starting point. Snapshot below mirrors
+   *  the title/description/tags pattern for direction-aware mismatch. */
+  ytPrivacyStatus?: 'public' | 'unlisted' | 'private'
+  ytLastPushedPrivacy?: 'public' | 'unlisted' | 'private'
   // Twitch
   twitchTitle?: string
   twitchGameName?: string
@@ -384,6 +409,9 @@ export interface StreamMeta {
    *  format constraints diverge enough from YouTube's that sharing a list
    *  produces mostly-incompatible noise. */
   twitchTags?: string[]
+  /** Id of the Twitch-tags template currently bound to this stream.
+   *  Same semantics as `ytTagsTemplateId` but for the Twitch tag list. */
+  twitchTagsTemplateId?: string
   /** Sync flags — when true, the corresponding Twitch field mirrors the
    *  YouTube field at push time. Default to true (match existing UX where
    *  most users want the same info on both platforms). Tags have no sync

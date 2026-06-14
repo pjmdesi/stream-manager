@@ -6,16 +6,37 @@ const MODEL = 'claude-haiku-4-5-20251001'
 
 // When the user's cursor is mid-field, generate text to insert at that position.
 // When the field is empty (no prefix or suffix), generate the full content.
-function buildInstruction(field: string, prefix: string, suffix: string): string {
+//
+// For tag fields, `prefix` is just whatever the user has typed into the
+// add-tag input — NOT the existing chips. The existing chip list comes
+// in via context (`currentYtTags` / `currentTwitchTags`) and is the
+// source of truth for "what tags already exist." We thread it into the
+// prompt explicitly so Claude can avoid duplicating chips.
+function buildInstruction(
+  field: string,
+  prefix: string,
+  suffix: string,
+  ctx: { currentYtTags?: string[]; currentTwitchTags?: string[]; previousTaglines?: string[] },
+): string {
   const hasCursor = prefix !== '' || suffix !== ''
+  const ytExisting = ctx.currentYtTags?.length
+    ? `Existing YouTube tags (do NOT suggest any of these): ${ctx.currentYtTags.join(', ')}.`
+    : ''
+  const twExisting = ctx.currentTwitchTags?.length
+    ? `Existing Twitch tags (do NOT suggest any of these): ${ctx.currentTwitchTags.join(', ')}.`
+    : ''
+  const prevTaglinesText = ctx.previousTaglines?.length
+    ? `Previous taglines in this series (do NOT repeat or closely paraphrase any of these): ${ctx.previousTaglines.map(t => `"${t}"`).join(', ')}.`
+    : ''
 
   if (!hasCursor) {
     // Empty field — generate from scratch
     const full: Record<string, string> = {
       title: 'Generate a YouTube video title for this stream. Keep it under 70 characters, make it engaging and specific to the content. Return ONLY the title text — no quotes, no explanation.',
       description: 'Write a YouTube video description for this stream. 2–4 sentences, informative and engaging. Return ONLY the description text.',
-      tags: 'Generate YouTube tags for this stream as a comma-separated list. Include 8–12 relevant tags covering the game, genre, and stream type. Return ONLY the comma-separated tags.',
-      'twitch-tags': 'Generate Twitch channel tags for this stream as a comma-separated list. Twitch rules: alphanumeric only (no spaces, no punctuation), up to 25 characters per tag, maximum 10 tags total. Pick the most relevant tags covering the game, genre, and stream type. Return ONLY the comma-separated tags.',
+      tagline: `Generate a short catchy tagline for this stream — 3 to 8 words that capture what happens or the vibe of the session. The tagline substitutes into a title template's {tagline} slot, so it should sit naturally inside a longer title. Ground the suggestion in the topic/game, description, and existing tags when those are present. ${prevTaglinesText} Return ONLY the tagline text — no quotes, no explanation, no trailing punctuation.`.trim(),
+      tags: `Generate YouTube tags for this stream as a comma-separated list. Include 8–12 relevant tags covering the game, genre, and stream type. ${ytExisting} Return ONLY the comma-separated tags.`.trim(),
+      'twitch-tags': `Generate Twitch channel tags for this stream as a comma-separated list. Twitch rules: alphanumeric only (no spaces, no punctuation), up to 25 characters per tag, maximum 10 tags total. Pick the most relevant tags covering the game, genre, and stream type. ${twExisting} Return ONLY the comma-separated tags.`.trim(),
     }
     return full[field] ?? `Generate the ${field} for this stream. Return ONLY the value.`
   }
@@ -24,8 +45,9 @@ function buildInstruction(field: string, prefix: string, suffix: string): string
   const inline: Record<string, string> = {
     title: `Continue or complete this stream title. Text before cursor: "${prefix}". Text after cursor: "${suffix}". Return ONLY the text to insert at the cursor — no surrounding context, no quotes.`,
     description: `Insert text at the cursor position in this stream description.\nText before cursor:\n${prefix}\nText after cursor:\n${suffix}\nReturn ONLY the text to insert. Do not repeat the prefix or suffix.`,
-    tags: `Add more YouTube tags to this list. Tags so far: "${prefix}". Return ONLY additional comma-separated tags to append (no duplicates, no leading comma).`,
-    'twitch-tags': `Add more Twitch channel tags to this list. Tags so far: "${prefix}". Twitch rules: alphanumeric only (no spaces, no punctuation), up to 25 characters per tag, maximum 10 tags total — stay within the remaining budget. Return ONLY additional comma-separated tags to append (no duplicates, no leading comma).`,
+    tagline: `Complete this tagline. Text before cursor: "${prefix}". Text after cursor: "${suffix}". A tagline is a short catchy phrase (3–8 words total when combined) that substitutes into a title template's {tagline} slot. ${prevTaglinesText} Return ONLY the text to insert at the cursor — no quotes, no surrounding context.`.trim(),
+    tags: `Suggest 1–4 additional YouTube tags. The user is currently typing: "${prefix}". ${ytExisting} Return ONLY a comma-separated list of new tags — no duplicates of existing tags, no leading comma.`.trim(),
+    'twitch-tags': `Suggest 1–4 additional Twitch channel tags. The user is currently typing: "${prefix}". ${twExisting} Twitch rules: alphanumeric only (no spaces, no punctuation), up to 25 characters per tag, maximum 10 tags total — stay within the remaining budget. Return ONLY a comma-separated list of new tags — no duplicates of existing tags, no leading comma.`.trim(),
   }
   return inline[field] ?? `Insert text at the cursor in the ${field} field. Text before: "${prefix}". Text after: "${suffix}". Return ONLY the inserted text.`
 }
@@ -55,7 +77,10 @@ export function registerClaudeIPC() {
 
     const prefix = String(context.prefix ?? '')
     const suffix = String(context.suffix ?? '')
-    const instruction = buildInstruction(field, prefix, suffix)
+    const currentYtTags = Array.isArray(context.currentYtTags) ? context.currentYtTags as string[] : undefined
+    const currentTwitchTags = Array.isArray(context.currentTwitchTags) ? context.currentTwitchTags as string[] : undefined
+    const previousTaglines = Array.isArray(context.previousTaglines) ? context.previousTaglines as string[] : undefined
+    const instruction = buildInstruction(field, prefix, suffix, { currentYtTags, currentTwitchTags, previousTaglines })
 
     const system = [
       'You are a streaming metadata assistant. Help create YouTube metadata for stream recordings.',

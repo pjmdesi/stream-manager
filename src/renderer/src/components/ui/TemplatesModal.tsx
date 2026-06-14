@@ -1,12 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Plus, Trash2, Star } from 'lucide-react'
 import { v4 as uuid } from 'uuid'
 import { Modal } from './Modal'
 import { Button } from './Button'
-import { useAutoGrowTextarea } from './Input'
+import { Tooltip } from './Tooltip'
+import { TagChipEditor } from './TagChipEditor'
+import { TemplateBodyEditor, MergeFieldPicker } from './TemplateBodyEditor'
+import { useStore } from '../../hooks/useStore'
 import type { YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate } from '../../types'
 import { ytTagCharCount, YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
+
+// Merge-field key sets — same as the sidebar's title field, plus
+// `season_links` (description-only, resolved async at apply time).
+const TITLE_MERGE_KEYS = ['game', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
+const DESCRIPTION_MERGE_KEYS = [...TITLE_MERGE_KEYS, 'season_links'] as const
 
 // ─── Inline edit forms ────────────────────────────────────────────────────────
 
@@ -18,6 +26,8 @@ function TitleForm({ initial, onSave, onCancel }: {
   const [name, setName] = useState(initial.name ?? '')
   const [template, setTemplate] = useState(initial.template ?? '')
   const [error, setError] = useState('')
+  const keySet = useMemo(() => new Set<string>(TITLE_MERGE_KEYS as readonly string[]), [])
+  const insertRef = useRef<((text: string) => void) | null>(null)
   const handleSave = () => {
     if (!name.trim()) { setError('Name is required.'); return }
     if (!template.trim()) { setError('Template is required.'); return }
@@ -32,11 +42,14 @@ function TitleForm({ initial, onSave, onCancel }: {
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Title template</label>
-        <p className="text-xs text-gray-400">
-          Merge fields: <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{tagline}'}</span>
-        </p>
-        <input value={template} onChange={e => setTemplate(e.target.value)} placeholder="{game} S{season} — Part {episode} of {total_episodes} | {tagline}"
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+        <TemplateBodyEditor
+          value={template}
+          onSave={setTemplate}
+          knownKeys={keySet}
+          insertRef={insertRef}
+          placeholder="{game} S{season} — Part {episode} of {total_episodes} | {tagline}"
+        />
+        <MergeFieldPicker keys={TITLE_MERGE_KEYS} onInsert={k => insertRef.current?.(`{${k}}`)} />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
@@ -55,6 +68,8 @@ function DescriptionForm({ initial, onSave, onCancel }: {
   const [name, setName] = useState(initial.name ?? '')
   const [description, setDescription] = useState(initial.description ?? '')
   const [error, setError] = useState('')
+  const keySet = useMemo(() => new Set<string>(DESCRIPTION_MERGE_KEYS as readonly string[]), [])
+  const insertRef = useRef<((text: string) => void) | null>(null)
   const handleSave = () => {
     if (!name.trim()) { setError('Name is required.'); return }
     onSave({ id: initial.id ?? uuid(), name: name.trim(), description })
@@ -69,17 +84,19 @@ function DescriptionForm({ initial, onSave, onCancel }: {
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Description</label>
         <p className="text-xs text-gray-400 leading-relaxed">
-          Merge fields:
-          {' '}<span className="font-mono text-purple-400">{'{game}'}</span>,
-          {' '}<span className="font-mono text-purple-400">{'{season}'}</span>,
-          {' '}<span className="font-mono text-purple-400">{'{episode}'}</span>,
-          {' '}<span className="font-mono text-purple-400">{'{total_episodes}'}</span>,
-          {' '}<span className="font-mono text-purple-400">{'{tagline}'}</span>,
-          {' '}<span className="font-mono text-purple-400">{'{season_links}'}</span>
-          {' '}(list of previous-episode links, applied once when the template is selected).
+          <span className="font-mono text-purple-300">{'{season_links}'}</span> resolves
+          to a list of previous-episode links, applied once when the template is selected.
         </p>
-        <textarea ref={useAutoGrowTextarea(description)} value={description} onChange={e => setDescription(e.target.value)} rows={6} placeholder="Stream description…"
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none" />
+        <TemplateBodyEditor
+          value={description}
+          onSave={setDescription}
+          knownKeys={keySet}
+          insertRef={insertRef}
+          placeholder="Stream description…"
+          multiline
+          minHeight={144}
+        />
+        <MergeFieldPicker keys={DESCRIPTION_MERGE_KEYS} onInsert={k => insertRef.current?.(`{${k}}`)} />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
@@ -96,16 +113,15 @@ function TagForm({ initial, onSave, onCancel }: {
   onCancel: () => void
 }) {
   const [name, setName] = useState(initial.name ?? '')
-  const [tagsText, setTagsText] = useState(initial.tags?.join(', ') ?? '')
+  const [tags, setTags] = useState<string[]>(initial.tags ?? [])
   const [error, setError] = useState('')
-  const tagCount = tagsText.split(',').map(t => t.trim()).filter(Boolean).length
-  const charCount = ytTagCharCount(tagsText)
+  const charCount = ytTagCharCount(tags.join(', '))
   const overLimit = charCount > YT_TAG_CHAR_LIMIT
   const nearLimit = !overLimit && charCount >= YT_TAG_CHAR_LIMIT * 0.85
   const countColorCls = overLimit ? 'text-red-400' : nearLimit ? 'text-amber-400' : 'text-gray-400'
   const handleSave = () => {
     if (!name.trim()) { setError('Name is required.'); return }
-    onSave({ id: initial.id ?? uuid(), name: name.trim(), tags: tagsText.split(',').map(t => t.trim()).filter(Boolean) })
+    onSave({ id: initial.id ?? uuid(), name: name.trim(), tags })
   }
   return (
     <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-purple-500/20">
@@ -116,12 +132,16 @@ function TagForm({ initial, onSave, onCancel }: {
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Tags</label>
-        <p className="text-xs text-gray-400">Comma-separated.</p>
-        <textarea ref={useAutoGrowTextarea(tagsText)} value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="gaming, lets play, elden ring, …"
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none" />
-        <p className={`text-xs tabular-nums text-right ${countColorCls}`}>
-          {tagCount} tags · {charCount} / {YT_TAG_CHAR_LIMIT} chars
-        </p>
+        <TagChipEditor
+          value={tags}
+          onChange={setTags}
+          placeholder="add tag…"
+          footerRight={
+            <span className={`text-xs tabular-nums ${countColorCls}`}>
+              {tags.length} tags · {charCount} / {YT_TAG_CHAR_LIMIT} chars
+            </span>
+          }
+        />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
@@ -138,10 +158,9 @@ function TwitchTagForm({ initial, onSave, onCancel }: {
   onCancel: () => void
 }) {
   const [name, setName] = useState(initial.name ?? '')
-  const [tagsText, setTagsText] = useState(initial.tags?.join(', ') ?? '')
+  const [tags, setTags] = useState<string[]>(initial.tags ?? [])
   const [error, setError] = useState('')
-  const entered = tagsText.split(',').map(t => t.trim()).filter(Boolean)
-  const { compat, skipped } = toTwitchCompatibleTags(entered)
+  const { compat, skipped } = toTwitchCompatibleTags(tags)
   const handleSave = () => {
     if (!name.trim()) { setError('Name is required.'); return }
     // Persist only the Twitch-compatible subset — saving incompatible tags
@@ -157,13 +176,18 @@ function TwitchTagForm({ initial, onSave, onCancel }: {
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Tags</label>
-        <p className="text-xs text-gray-400">Comma-separated. Twitch rules: alphanumeric only (no spaces or punctuation), max {TWITCH_TAG_MAX_COUNT} tags, max 25 chars each.</p>
-        <textarea ref={useAutoGrowTextarea(tagsText)} value={tagsText} onChange={e => setTagsText(e.target.value)} rows={4} placeholder="EldenRing, soulslike, opengame, …"
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm font-mono rounded-lg px-3 py-1.5 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none" />
-        <p className="text-xs tabular-nums text-right text-gray-400">
-          {compat.length} / {TWITCH_TAG_MAX_COUNT} valid
-          {skipped.length > 0 && <span className="text-amber-400 ml-1">· {skipped.length} invalid (will be dropped)</span>}
-        </p>
+        <p className="text-xs text-gray-400">Twitch rules: alphanumeric only (no spaces or punctuation), max {TWITCH_TAG_MAX_COUNT} tags, max 25 chars each.</p>
+        <TagChipEditor
+          value={tags}
+          onChange={setTags}
+          placeholder="add tag…"
+          footerRight={
+            <span className="text-xs tabular-nums text-gray-400">
+              {compat.length} / {TWITCH_TAG_MAX_COUNT} valid
+              {skipped.length > 0 && <span className="text-amber-400 ml-1">· {skipped.length} invalid (will be dropped)</span>}
+            </span>
+          }
+        />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
@@ -177,7 +201,7 @@ function TwitchTagForm({ initial, onSave, onCancel }: {
 // ─── Template list with inline editing ───────────────────────────────────────
 
 function TemplateList<T extends { id: string; name: string }>({
-  items, subtitle, onSave, onDelete, newLabel, renderForm,
+  items, subtitle, onSave, onDelete, newLabel, renderForm, defaultId, onSetDefault,
 }: {
   items: T[]
   subtitle: (t: T) => React.ReactNode
@@ -185,6 +209,13 @@ function TemplateList<T extends { id: string; name: string }>({
   onDelete: (id: string) => void
   newLabel: string
   renderForm: (initial: Partial<T>, onSave: (t: T) => void, onCancel: () => void) => React.ReactNode
+  /** Optional — when supplied, renders a star toggle next to each item.
+   *  Clicking sets that template as the default for newly-created
+   *  streams; clicking the already-default star clears the default
+   *  (toggle semantics). When omitted, no star column shows — used by
+   *  the Titles + Descriptions tabs which don't support defaults yet. */
+  defaultId?: string
+  onSetDefault?: (id: string) => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -205,9 +236,26 @@ function TemplateList<T extends { id: string; name: string }>({
           </div>
         ) : (
           <div key={t.id} className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-white/[0.03] border border-white/5">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-gray-200">{t.name}</p>
-              <div className="mt-0.5">{subtitle(t)}</div>
+            <div className="min-w-0 flex-1 flex items-start gap-2">
+              {onSetDefault && (
+                <Tooltip content={defaultId === t.id ? 'Default for new streams (click to clear)' : 'Set as default for new streams'} side="top">
+                  <button
+                    type="button"
+                    onClick={() => onSetDefault(defaultId === t.id ? '' : t.id)}
+                    className={`p-1 rounded transition-colors mt-0.5 ${
+                      defaultId === t.id
+                        ? 'text-amber-400 hover:text-amber-300'
+                        : 'text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    <Star size={13} fill={defaultId === t.id ? 'currentColor' : 'none'} />
+                  </button>
+                </Tooltip>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-200">{t.name}</p>
+                <div className="mt-0.5">{subtitle(t)}</div>
+              </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <Button variant="ghost" size="sm" onClick={() => setEditingId(t.id)}>Edit</Button>
@@ -234,6 +282,92 @@ function TemplateList<T extends { id: string; name: string }>({
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
+/**
+ * BulkBindRow — surfaces above the YT tag template list. Walks every
+ * folder, finds streams whose tags are non-empty + unbound + exactly
+ * match a single template (case-insensitive set equality, no
+ * ambiguity), and offers to bind them all in one click.
+ *
+ * Ambiguous matches (multiple templates with identical tags) are
+ * deliberately dropped — auto-binding then would be a coin flip; the
+ * user can resolve those per-stream via the inline "Bind to X" link.
+ */
+function BulkBindRow({
+  folders, tagTemplates, onApply,
+}: {
+  folders: NonNullable<TemplatesModalProps['folders']>
+  tagTemplates: YTTagTemplate[]
+  onApply: NonNullable<TemplatesModalProps['onBulkBindYtTags']>
+}) {
+  const [armed, setArmed] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  // Bucket templates by their normalized tag-set key so the match
+  // check is O(1) per folder rather than O(templates * folder). We
+  // only keep buckets with exactly one template — multi-template
+  // buckets are ambiguous and skipped.
+  const candidates = useMemo(() => {
+    const buckets = new Map<string, YTTagTemplate[]>()
+    for (const t of tagTemplates) {
+      if (t.tags.length === 0) continue
+      const k = t.tags.map(x => x.toLowerCase()).sort().join('|')
+      const list = buckets.get(k) ?? []
+      list.push(t)
+      buckets.set(k, list)
+    }
+    const unambiguous = new Map<string, YTTagTemplate>()
+    for (const [k, list] of buckets) if (list.length === 1) unambiguous.set(k, list[0])
+    const binds: Array<{ folderPath: string; templateId: string; templateName: string }> = []
+    for (const f of folders) {
+      const m = f.meta
+      if (!m?.ytTags?.length || m.ytTagsTemplateId) continue
+      const k = m.ytTags.map(x => x.toLowerCase()).sort().join('|')
+      const tpl = unambiguous.get(k)
+      if (tpl) binds.push({ folderPath: f.folderPath, templateId: tpl.id, templateName: tpl.name })
+    }
+    return binds
+  }, [folders, tagTemplates])
+
+  useEffect(() => { setArmed(false) }, [candidates.length])
+
+  if (candidates.length === 0) return null
+
+  const handleClick = async () => {
+    if (!armed) { setArmed(true); return }
+    setBusy(true)
+    try { await onApply(candidates.map(({ folderPath, templateId }) => ({ folderPath, templateId }))) }
+    finally { setBusy(false); setArmed(false) }
+  }
+
+  // Distinct template names in the candidate set — drives the "matched
+  // N streams across M templates" subtitle. Set keeps ordering stable
+  // enough for a short preview list.
+  const templateNames = Array.from(new Set(candidates.map(c => c.templateName)))
+
+  return (
+    <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-amber-500/[0.06] border border-amber-500/20">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm text-gray-200">
+          <span className="font-medium">{candidates.length}</span> unbound stream{candidates.length === 1 ? '' : 's'} match{candidates.length === 1 ? 'es' : ''} a template exactly.
+        </p>
+        <p className="mt-0.5 text-xs text-gray-400">
+          Binding leaves tags as-is; future edits to {templateNames.length === 1 ? `the "${templateNames[0]}"` : 'these'} template{templateNames.length === 1 ? '' : 's'} will sync into the bound stream{candidates.length === 1 ? '' : 's'}.
+          {templateNames.length > 1 && <> Matched: <span className="text-gray-300">{templateNames.slice(0, 4).join(', ')}{templateNames.length > 4 ? `, +${templateNames.length - 4} more` : ''}</span>.</>}
+        </p>
+      </div>
+      <Button
+        variant={armed ? 'primary' : 'ghost'}
+        size="sm"
+        onClick={handleClick}
+        loading={busy}
+        disabled={busy}
+      >
+        {armed ? `Confirm bind ${candidates.length}` : `Auto-bind ${candidates.length}`}
+      </Button>
+    </div>
+  )
+}
+
 type Tab = 'titles' | 'descriptions' | 'tags' | 'twitch-tags'
 
 const TABS: { id: Tab; label: string }[] = [
@@ -249,10 +383,20 @@ export interface TemplatesModalProps {
   isOpen: boolean
   onClose: () => void
   onSaved?: () => void
+  /** Folder list — used by the "auto-bind" affordance on the YT tags
+   *  tab to count + bind streams whose existing tags exactly match a
+   *  template. Optional so the modal still renders if the host page
+   *  doesn't surface bindings. */
+  folders?: Array<{ folderPath: string; relativePath?: string; meta?: { ytTags?: string[]; ytTagsTemplateId?: string } | null }>
+  /** Callback for the bulk auto-bind action. Receives the resolved
+   *  (folderPath → templateId) list and persists each binding. The
+   *  host writes meta + refreshes its folder list. */
+  onBulkBindYtTags?: (binds: Array<{ folderPath: string; templateId: string }>) => Promise<void> | void
 }
 
-export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps) {
+export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYtTags }: TemplatesModalProps) {
   const [tab, setTab] = useState<Tab>('titles')
+  const { config, updateConfig } = useStore()
 
   const [titleTemplates, setTitleTemplates] = useState<YTTitleTemplate[]>([])
   const [descTemplates, setDescTemplates] = useState<YTDescriptionTemplate[]>([])
@@ -383,6 +527,13 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
       {tab === 'tags' && (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-gray-400">Curated YouTube tag lists you can mix and match per stream.</p>
+          {folders && onBulkBindYtTags && (
+            <BulkBindRow
+              folders={folders}
+              tagTemplates={tagTemplates}
+              onApply={onBulkBindYtTags}
+            />
+          )}
           <TemplateList
             items={tagTemplates}
             subtitle={t => <p className="text-xs text-gray-400">{t.tags.length} tags — <span className="text-gray-400 font-mono">{t.tags.slice(0, 5).join(', ')}{t.tags.length > 5 ? '…' : ''}</span></p>}
@@ -392,6 +543,8 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
             renderForm={(initial, onSave, onCancel) => (
               <TagForm initial={initial} onSave={onSave} onCancel={onCancel} />
             )}
+            defaultId={config.defaultYouTubeTagsTemplateId}
+            onSetDefault={id => updateConfig({ defaultYouTubeTagsTemplateId: id })}
           />
         </div>
       )}
@@ -412,6 +565,8 @@ export function TemplatesModal({ isOpen, onClose, onSaved }: TemplatesModalProps
             renderForm={(initial, onSave, onCancel) => (
               <TwitchTagForm initial={initial} onSave={onSave} onCancel={onCancel} />
             )}
+            defaultId={config.defaultTwitchTagsTemplateId}
+            onSetDefault={id => updateConfig({ defaultTwitchTagsTemplateId: id })}
           />
         </div>
       )}

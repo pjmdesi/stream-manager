@@ -27,6 +27,11 @@ export interface QuotaState {
 
 let exceededAt: Date | null = null
 let resetsAtCached: Date | null = null
+// Dev-only: when true, getQuotaState() reports exceeded regardless of
+// the real flag. Lets us exercise quota-outage UI paths without
+// burning real API quota. Toggled via IPC from the Dev Tools section
+// of Settings (guarded to dev builds in the renderer).
+let forcedExceeded = false
 
 /** Returns the next instant that is 00:00:00 in America/Los_Angeles
  *  as a Date in UTC. Handles PDT/PST automatically — picks whichever
@@ -64,8 +69,18 @@ export function markQuotaExceeded(): void {
 }
 
 /** Returns the current quota state. Lazy auto-clears if we've passed
- *  the cached `resetsAt` — callers don't need to poll a clear-loop. */
+ *  the cached `resetsAt` — callers don't need to poll a clear-loop.
+ *  Honours the dev-only `forcedExceeded` flag so we can exercise
+ *  outage paths without hitting a real 403; the synthetic resetsAt
+ *  rolls forward if the day flips while the toggle is on so the
+ *  banner's countdown stays accurate. */
 export function getQuotaState(): QuotaState {
+  if (forcedExceeded) {
+    if (!resetsAtCached || Date.now() >= resetsAtCached.getTime()) {
+      resetsAtCached = nextMidnightPT()
+    }
+    return { exceeded: true, resetsAt: resetsAtCached.toISOString() }
+  }
   if (!exceededAt || !resetsAtCached) return { exceeded: false, resetsAt: null }
   if (Date.now() >= resetsAtCached.getTime()) {
     exceededAt = null
@@ -75,6 +90,25 @@ export function getQuotaState(): QuotaState {
   }
   return { exceeded: true, resetsAt: resetsAtCached.toISOString() }
 }
+
+/** Dev-only: force the quota gate to report exceeded. Idempotent.
+ *  Synthesizes a resetsAt when no real outage is in flight so the
+ *  emitted state shape matches a real 403 exactly (renderer banner,
+ *  countdown, gated effects all behave the same). */
+export function setForcedExceeded(forced: boolean): void {
+  if (forcedExceeded === forced) return
+  forcedExceeded = forced
+  if (forced) {
+    if (!resetsAtCached) resetsAtCached = nextMidnightPT()
+  } else if (!exceededAt) {
+    // No real outage running — clear our synthetic reset so a future
+    // real outage starts fresh from its own moment.
+    resetsAtCached = null
+  }
+  emitChange()
+}
+
+export function isForcedExceeded(): boolean { return forcedExceeded }
 
 /** Forces a manual clear — used by the IPC reset path if we ever want
  *  to expose "try anyway" to the user. Not wired yet but cheap to
@@ -87,9 +121,10 @@ export function clearQuotaExceeded(): void {
 }
 
 function emitChange(): void {
-  const state = exceededAt && resetsAtCached
-    ? { exceeded: true, resetsAt: resetsAtCached.toISOString() }
-    : { exceeded: false, resetsAt: null }
+  // Funnels through getQuotaState so the synthetic-resetsAt path stays
+  // in one place — guarantees the pushed shape always matches what a
+  // fresh read would return.
+  const state = getQuotaState()
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('youtube:quota-changed', state)
   }

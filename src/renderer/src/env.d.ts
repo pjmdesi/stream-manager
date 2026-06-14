@@ -149,6 +149,8 @@ declare global {
       setStreamTypeTags(v: Record<string, string>): Promise<void>
       getStreamTypeTextures(): Promise<Record<string, string>>
       setStreamTypeTextures(v: Record<string, string>): Promise<void>
+      getGameTagsLinks(): Promise<Record<string, string>>
+      setGameTagsLinks(v: Record<string, string>): Promise<void>
 
       // ── Streams ──────────────────────────────────────────────────────────────
       listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
@@ -187,6 +189,8 @@ declare global {
       youtubeGetStatus(): Promise<{ connected: boolean; channelName?: string }>
       youtubeGetQuotaState(): Promise<{ exceeded: boolean; resetsAt: string | null }>
       onYouTubeQuotaChanged(cb: (state: { exceeded: boolean; resetsAt: string | null }) => void): () => void
+      youtubeSetForcedQuotaExceeded(forced: boolean): Promise<{ exceeded: boolean; resetsAt: string | null }>
+      youtubeGetForcedQuotaExceeded(): Promise<boolean>
       youtubeGetChannelId(): Promise<string>
       youtubeConnect(): Promise<void>
       youtubeDisconnect(): Promise<void>

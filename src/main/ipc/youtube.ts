@@ -13,6 +13,15 @@ function getCreds() {
 }
 
 export function registerYouTubeIPC(): void {
+  // Dev-only: re-apply the persisted force-quota flag on every launch
+  // so the toggle in Settings → Dev Tools survives restarts. Read once
+  // at register time; subsequent toggles flow through the IPC handler
+  // below + Settings save handler.
+  try {
+    const persisted = !!(getStore().get('config') as any).devForceYouTubeQuotaExceeded
+    if (persisted) ytQuotaState.setForcedExceeded(true)
+  } catch { /* startup safety — never block IPC reg on this */ }
+
   ipcMain.handle('youtube:getStatus', () => {
     const connected = isConnected()
     console.log('[YT main] getStatus — connected:', connected)
@@ -23,6 +32,16 @@ export function registerYouTubeIPC(): void {
   // pushes to react to mid-session changes. The state auto-clears after
   // midnight PT — the renderer doesn't have to poll or schedule a clear.
   ipcMain.handle('youtube:getQuotaState', () => ytQuotaState.getQuotaState())
+  // Dev-only knob exposed to the Settings page so QA flows can poke
+  // the quota gate without burning real API units. The handler itself
+  // doesn't check app.isPackaged — the renderer guards visibility.
+  // Returns the resulting state so the caller can update local UI
+  // without an extra round-trip.
+  ipcMain.handle('youtube:setForcedQuotaExceeded', (_e, forced: boolean) => {
+    ytQuotaState.setForcedExceeded(!!forced)
+    return ytQuotaState.getQuotaState()
+  })
+  ipcMain.handle('youtube:getForcedQuotaExceeded', () => ytQuotaState.isForcedExceeded())
 
   ipcMain.handle('youtube:connect', async () => {
     const { clientId, clientSecret } = getCreds()

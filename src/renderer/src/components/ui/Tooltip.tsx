@@ -13,12 +13,28 @@ interface TooltipProps {
   maxWidth?: string
   /** Extra classes applied to the trigger wrapper div (e.g. 'w-full block' for full-width triggers) */
   triggerClassName?: string
+  /** Inline style for the trigger wrapper. Used together with
+   *  `triggerClassName="fixed pointer-events-none"` + an externally
+   *  controlled `open` flag to position the wrapper precisely over a
+   *  non-React-rendered visual element — the Tooltip then anchors off
+   *  that fixed-position wrapper instead of wherever it'd otherwise
+   *  flow in the DOM. */
+  triggerStyle?: React.CSSProperties
   /** When true, the tooltip body becomes pointer-event-active and stays
    *  open while the cursor is over it (with a brief grace period to
    *  traverse the gap from trigger to tooltip). A click anywhere inside
    *  the tooltip auto-dismisses it, so consumers can wire selection
    *  handlers on inner buttons without managing tooltip visibility. */
   interactive?: boolean
+  /** Externally-controlled visibility. When set, the internal hover
+   *  triggers are bypassed and the tooltip mirrors the prop. Used by
+   *  consumers that can't make the actual visual element a React
+   *  child (e.g. tokens inside a contenteditable). The caller is
+   *  responsible for positioning the trigger wrapper over the real
+   *  visual element so getBoundingClientRect() anchors the tooltip
+   *  at the right spot. Leave undefined for the standard
+   *  hover-driven behavior. */
+  open?: boolean
   children: React.ReactNode
 }
 
@@ -60,13 +76,16 @@ function fits(rect: DOMRect, vw: number, vh: number): boolean {
          rect.top  >= GAP && rect.bottom <= vh - GAP
 }
 
-export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'max-w-xs', triggerClassName, interactive, children }: TooltipProps) {
+export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'max-w-xs', triggerClassName, triggerStyle, interactive, open, children }: TooltipProps) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos]         = useState({ top: 0, left: 0 })
   const triggerRef            = useRef<HTMLDivElement>(null)
   const tooltipRef            = useRef<HTMLDivElement>(null)
   const arrowRef              = useRef<HTMLDivElement>(null)
   const closeTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // When `open` is supplied, externally-controlled visibility wins —
+  // internal hover state is ignored. Default to the hover-driven flag.
+  const effectiveVisible = open ?? visible
 
   const cancelClose = useCallback(() => {
     if (closeTimerRef.current) {
@@ -98,10 +117,23 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
 
   useEffect(() => () => cancelClose(), [cancelClose])
 
+  // When externally opened, re-anchor pos from the trigger ref before
+  // the side-priority layout effect runs (no-op when hover-driven —
+  // `show()` already did this). Runs in layout phase so position is
+  // committed before paint.
+  useLayoutEffect(() => {
+    if (open !== true) return
+    const trig = triggerRef.current
+    if (!trig) return
+    const r = trig.getBoundingClientRect()
+    const { top, left } = computeAnchor(r, side)
+    setPos(prev => prev.top === top && prev.left === left ? prev : { top, left })
+  })
+
   // After the tooltip portal renders, try each fallback side in priority order
   // until one fits inside the viewport. Runs before paint — no visible flash.
   useLayoutEffect(() => {
-    if (!visible || !tooltipRef.current || !triggerRef.current) return
+    if (!effectiveVisible || !tooltipRef.current || !triggerRef.current) return
     const el      = tooltipRef.current
     const arrowEl = arrowRef.current
     const r       = triggerRef.current.getBoundingClientRect()
@@ -116,14 +148,26 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
       if (arrowEl) arrowEl.className = ARROW[trySide]
       if (fits(el.getBoundingClientRect(), vw, vh)) return
     }
-  }, [visible, pos, side])
+  }, [effectiveVisible, pos, side])
+
+  // Internal hover handlers are wired only when `open` isn't controlled
+  // — callers using external control don't want surprise visibility
+  // changes from a stray mouse event on the (typically invisible)
+  // trigger wrapper.
+  const wantsInternalHover = open === undefined
 
   return (
     <>
-      <div ref={triggerRef} className={triggerClassName ?? 'inline-flex'} onMouseEnter={show} onMouseLeave={close}>
+      <div
+        ref={triggerRef}
+        className={triggerClassName ?? 'inline-flex'}
+        style={triggerStyle}
+        onMouseEnter={wantsInternalHover ? show : undefined}
+        onMouseLeave={wantsInternalHover ? close : undefined}
+      >
         {children}
       </div>
-      {visible && createPortal(
+      {effectiveVisible && createPortal(
         <div
           ref={tooltipRef}
           className={`fixed ${interactive ? 'pointer-events-auto' : 'pointer-events-none'} z-[10001] ${width} ${maxWidth} rounded-lg bg-navy-800 border border-white/10 px-3 py-2.5 text-xs text-gray-300 leading-relaxed shadow-xl`}

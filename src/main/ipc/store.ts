@@ -106,6 +106,22 @@ export interface AppConfig {
    *  string = no default (user must pick per-stream). Surfaced as a
    *  dropdown under Settings → Integrations / YouTube. */
   defaultYouTubeCategoryId: string
+  /** Tag-template ids to auto-seed onto newly-created streams. Empty
+   *  string = no default. Surfaced as a star toggle next to each
+   *  template in the Templates modal. Game-tag links (separate
+   *  `gameTagsLinks` store key) take precedence per-game when the
+   *  stream's existing YT tags are empty at game-add time; the
+   *  default seeds at creation regardless. */
+  defaultYouTubeTagsTemplateId: string
+  defaultTwitchTagsTemplateId: string
+  /** Dev-only: when true, the main process pretends YouTube returned
+   *  a quota-exceeded 403 for every API call. Mirrors the runtime
+   *  forced flag in ytQuotaState so the toggle in Settings persists
+   *  across restarts (same dirty/save flow as every other setting).
+   *  Renderer guards visibility to dev builds via import.meta.env.DEV;
+   *  the field is harmless in packaged builds because nothing surfaces
+   *  it. */
+  devForceYouTubeQuotaExceeded: boolean
 }
 
 function getDefaultConfig(): AppConfig {
@@ -159,6 +175,9 @@ function getDefaultConfig(): AppConfig {
     calendarShowAdjacentMonthDays: true,
     twitchSkipCategoryRenamePrompt: false,
     defaultYouTubeCategoryId: '',
+    defaultYouTubeTagsTemplateId: '',
+    defaultTwitchTagsTemplateId: '',
+    devForceYouTubeQuotaExceeded: false,
   }
 }
 
@@ -176,6 +195,10 @@ type StoreShape = {
   thumbnailRecents: any[]
   thumbnailLastFont: string
   pendingJobs: any[]
+  /** Per-game-tag link to a YT tag template id. When a stream gains its
+   *  first game tag and `meta.ytTags` is empty, the linked template's
+   *  tags are auto-applied. Linking is per-game (key = game tag name). */
+  gameTagsLinks: Record<string, string>
 }
 
 let store: Store<StoreShape> | null = null
@@ -198,6 +221,7 @@ export function getStore(): Store<StoreShape> {
         thumbnailRecents: [],
         thumbnailLastFont: '',
         pendingJobs: [],
+        gameTagsLinks: {},
       }
     })
   }
@@ -246,6 +270,9 @@ export function registerStoreIPC(): void {
 
   ipcMain.handle('store:getTwitchTagTemplates', async () => getStore().get('twitchTagTemplates', []))
   ipcMain.handle('store:setTwitchTagTemplates', async (_e, v: TwitchTagTemplate[]) => getStore().set('twitchTagTemplates', v))
+
+  ipcMain.handle('store:getGameTagsLinks', async () => getStore().get('gameTagsLinks', {}))
+  ipcMain.handle('store:setGameTagsLinks', async (_e, v: Record<string, string>) => getStore().set('gameTagsLinks', v))
 
   ipcMain.handle('store:getStreamTypeTags', async () => getStore().get('streamTypeTags', {}))
   ipcMain.handle('store:setStreamTypeTags', async (_e, v: Record<string, string>) => getStore().set('streamTypeTags', v))

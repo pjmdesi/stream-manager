@@ -22,6 +22,8 @@ import { PresetPickerModal, ThumbnailCarousel, VideoCountTooltip, BulkTagModal, 
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
+import { TagChipEditor } from '../ui/TagChipEditor'
+import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { TwitchCategoryRenamePrompt } from '../ui/TwitchCategoryRenamePrompt'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
@@ -97,6 +99,60 @@ function todayStr(): string {
 function applyMergeFields(template: string, fields: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
 }
+
+/** Known YouTube-title merge fields. The set of keys the title template
+ *  engine resolves at render time — also drives the preview detector
+ *  in the sidebar (the preview only surfaces when one of these tokens
+ *  appears verbatim in the title field). */
+const YT_TITLE_MERGE_KEYS = ['game', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
+
+/** Build the merge-field map for a single stream — same shape the
+ *  sidebar's mergeFields useMemo produces, but available outside the
+ *  React tree so push handlers can resolve title bodies before
+ *  sending to YouTube / Twitch. */
+function buildYtTitleMergeFields(
+  meta: StreamMeta | null | undefined,
+  folder: StreamFolder,
+  folders: StreamFolder[],
+): Record<string, string> {
+  const m = meta
+  // `{game}` resolves directly from the Topics / Games tag selection —
+  // primary tag first, then falls back to games[0] or folder-detected
+  // games. The standalone ytGameTitle input was retired; legacy meta
+  // values stay on disk but no longer feed merge resolution so the
+  // Topic/Game tag is the single source of truth.
+  const primaryGame = resolvePrimaryGame(m) || m?.games?.[0] || folder.detectedGames?.[0] || ''
+  // Series-specific keys collapse to '' on standalone streams so
+  // templates that reference them render cleanly.
+  const standalone = isStandalone(m)
+  return {
+    game: primaryGame,
+    season: standalone ? '' : (m?.ytSeason ?? '1'),
+    episode: standalone ? '' : (m?.ytEpisode ?? ''),
+    tagline: m?.ytCatchyTitle ?? '',
+    title: m?.ytCatchyTitle ?? '',
+    total_episodes: standalone ? '' : String(detectTotalEpisodes(folders, primaryGame, m?.ytSeason || '1')),
+  }
+}
+
+/** Resolve `meta.ytTitle` (a raw template body) against the stream's
+ *  current merge fields. Returns the final string that should be
+ *  pushed to YouTube + displayed in the broadcast picker etc. */
+function resolveYtTitle(
+  meta: StreamMeta | null | undefined,
+  folder: StreamFolder,
+  folders: StreamFolder[],
+): string {
+  return applyMergeFields(meta?.ytTitle ?? '', buildYtTitleMergeFields(meta, folder, folders))
+}
+
+/** True when the given text contains at least one known YT title merge
+ *  field token. Used by the sidebar to decide whether to show the
+ *  rendered preview underneath the title field. */
+function hasYtTitleMergeFields(text: string): boolean {
+  return YT_TITLE_MERGE_KEYS.some(k => text.includes(`{${k}}`))
+}
+
 
 /** Next-available episode number for (game, season) — counts streams strictly
  *  before `beforeDate` and returns count+1. Treats ytSeason `''` / undefined
@@ -265,6 +321,10 @@ export function StreamsPage({
   // suggesting in the combobox.
   const [tagColors, setTagColors] = useState<Record<string, string>>({})
   const [tagTextures, setTagTextures] = useState<Record<string, string>>({})
+  // Game tag → YT tag template id. Managed in ManageTagsModal's Topics
+  // tab; consumed by SidebarDetail's auto-apply effect to seed ytTags
+  // when a stream gains its first game and YT tags are still empty.
+  const [gameTagsLinks, setGameTagsLinks] = useState<Record<string, string>>({})
   // Template lists for title/description/tag merge-field substitution. Used
   // by the InlineTemplateSelect dropdowns above each editable field in the
   // sidebar. When the user picks a template, its body is run through
@@ -520,6 +580,7 @@ export function StreamsPage({
   useEffect(() => {
     window.api.getStreamTypeTags().then(setTagColors)
     window.api.getStreamTypeTextures().then(setTagTextures)
+    window.api.getGameTagsLinks().then(setGameTagsLinks)
     window.api.youtubeGetStatus().then(s => {
       setYtConnected(s.connected)
       // Eager-load upcoming/scheduled broadcasts so the sidebar's
@@ -680,7 +741,11 @@ export function StreamsPage({
       const m = next.meta
       const syncTitle = m.syncTitle ?? true
       const syncGame = m.syncGame ?? true
-      const title = (syncTitle ? m.ytTitle : m.twitchTitle) ?? m.ytTitle ?? m.twitchTitle ?? ''
+      // YT title field stores a raw template body; resolve through merge
+      // fields before treating it as a Twitch-pushable string. twitchTitle
+      // (non-sync path) is plain text and passes through.
+      const ytResolved = resolveYtTitle(m, next, foldersRef.current)
+      const title = (syncTitle ? ytResolved : m.twitchTitle) ?? ytResolved ?? m.twitchTitle ?? ''
       const game = (syncGame ? m.ytGameTitle : m.twitchGameName) ?? m.ytGameTitle ?? m.twitchGameName ?? ''
       // Twitch's PATCH /channels rejects an empty title — skip silently.
       if (!title.trim()) return
@@ -1045,7 +1110,10 @@ export function StreamsPage({
       showBanner({ folderPath: folder.folderPath, type: 'error', message: 'No linked YouTube broadcast or video. Link one before pushing.' })
       return
     }
-    const title = meta.ytTitle?.trim() ?? ''
+    // meta.ytTitle is the raw template BODY ("{game} [PART {episode}]")
+    // — resolve to the final string before pushing so YouTube receives
+    // the rendered title instead of the placeholder tokens.
+    const title = resolveYtTitle(meta, folder, folders).trim()
     const description = meta.ytDescription ?? ''
     const tags = meta.ytTags ?? []
     // Effective category: user-set value takes priority; otherwise
@@ -1053,6 +1121,7 @@ export function StreamsPage({
     // empty string) is the "don't touch" signal the IPC interprets to
     // preserve the existing value — we never want to clear a category.
     const categoryId = meta.ytCategoryId || undefined
+    const privacy = meta.ytPrivacyStatus
     // Thumbnail to upload: caller's explicit pick (from the picker
     // section in the sidebar) overrides the implicit "use the stream
     // item's preferred thumbnail" fallback. `null` from the caller
@@ -1072,6 +1141,16 @@ export function StreamsPage({
         // intended. The videos.update endpoint is the right one for
         // past streams.
         await window.api.youtubeUpdateVideo(meta.ytVideoId, title, description, tags, categoryId)
+      }
+      // Privacy is a separate Status endpoint, not part of the snippet
+      // update. Fire it after the snippet push so a snippet error
+      // doesn't strand a privacy change without the rest of the fields
+      // (and vice versa — if privacy fails the snippet has already
+      // landed). Only call when the user has staged a value; falling
+      // through avoids overwriting YouTube's default privacy on every
+      // push.
+      if (privacy) {
+        await window.api.youtubeUpdateBroadcastStatus(meta.ytVideoId, privacy)
       }
       if (thumbToUpload) {
         try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload) }
@@ -1121,6 +1200,7 @@ export function StreamsPage({
           refreshed.snippet.description = description
           refreshed.snippet.tags = tags
           if (categoryId) refreshed.snippet.categoryId = categoryId
+          if (privacy) refreshed.status.privacyStatus = privacy
           setYtBroadcasts(prev => prev.some(b => b.id === refreshed.id)
             ? prev.map(b => b.id === refreshed.id ? refreshed : b)
             : prev
@@ -1149,6 +1229,7 @@ export function StreamsPage({
             ytLastPushedDate: folder.date,
           }
           if (categoryId) snapshot.ytLastPushedCategoryId = categoryId
+          if (privacy) snapshot.ytLastPushedPrivacy = privacy
           // Time snapshot: when newScheduledStartTime was actually
           // computed (meaning either date or time was sent), capture
           // the time portion we sent. Falls back to undefined when we
@@ -1196,7 +1277,7 @@ export function StreamsPage({
     } catch (err: any) {
       showBanner({ folderPath: folder.folderPath, type: 'error', message: `YouTube push failed: ${err?.message ?? String(err)}` })
     }
-  }, [showBanner, setYtBroadcasts, setYtVods, updateMeta])
+  }, [showBanner, setYtBroadcasts, setYtVods, updateMeta, folders])
 
   // Push to Twitch. Honours syncTitle/syncGame: when sync is on (or
   // undefined), the YouTube title/game stand in for the Twitch fields. Tags
@@ -1211,7 +1292,11 @@ export function StreamsPage({
     }
     const syncTitle = meta.syncTitle !== false
     const syncGame = meta.syncGame !== false
-    const effectiveTitle = syncTitle ? (meta.ytTitle ?? '') : (meta.twitchTitle ?? '')
+    // When syncing from YT, meta.ytTitle is the raw template body — resolve
+    // through merge fields so Twitch receives the rendered string just
+    // like YouTube would. twitchTitle (when sync is off) is plain text;
+    // pass through verbatim.
+    const effectiveTitle = syncTitle ? resolveYtTitle(meta, folder, folders) : (meta.twitchTitle ?? '')
     // Twitch category now reads directly from the selected Topic/Game
     // tag rather than routing through `ytGameTitle`. Removes the hidden
     // YouTube-coupling that made the dependency invisible in the UI;
@@ -1231,7 +1316,7 @@ export function StreamsPage({
       // already on screen — callers don't need to surface it again.
       throw err
     }
-  }, [showBanner])
+  }, [showBanner, folders])
 
   const loadFolders = useCallback(async () => {
     if (!streamsDir) return
@@ -1527,9 +1612,18 @@ export function StreamsPage({
     await window.api.setYTDescriptionTemplates(next)
     return tpl.id
   }, [ytDescTemplates])
+  // Upsert by name (case-insensitive). When a template with the same
+  // name already exists, its tags are replaced and the existing id is
+  // kept so any meta still bound to it picks up the new value.
   const saveYtTagsTemplate = useCallback(async (name: string, tags: string[]): Promise<string> => {
-    const tpl = { id: crypto.randomUUID(), name, tags }
-    const next = [...ytTagTemplates, tpl]
+    const lower = name.toLowerCase()
+    const existing = ytTagTemplates.find(t => t.name.toLowerCase() === lower)
+    const tpl = existing
+      ? { ...existing, name, tags }
+      : { id: crypto.randomUUID(), name, tags }
+    const next = existing
+      ? ytTagTemplates.map(t => t.id === existing.id ? tpl : t)
+      : [...ytTagTemplates, tpl]
     setYtTagTemplates(next)
     await window.api.setYTTagTemplates(next)
     return tpl.id
@@ -1539,8 +1633,14 @@ export function StreamsPage({
   // alphanumeric ≤25-char rule).
   const saveTwitchTagsTemplate = useCallback(async (name: string, tags: string[]): Promise<string> => {
     const { compat } = toTwitchCompatibleTags(tags)
-    const tpl = { id: crypto.randomUUID(), name, tags: compat }
-    const next = [...twitchTagTemplates, tpl]
+    const lower = name.toLowerCase()
+    const existing = twitchTagTemplates.find(t => t.name.toLowerCase() === lower)
+    const tpl = existing
+      ? { ...existing, name, tags: compat }
+      : { id: crypto.randomUUID(), name, tags: compat }
+    const next = existing
+      ? twitchTagTemplates.map(t => t.id === existing.id ? tpl : t)
+      : [...twitchTagTemplates, tpl]
     setTwitchTagTemplates(next)
     await window.api.setTwitchTagTemplates(next)
     return tpl.id
@@ -1867,7 +1967,6 @@ export function StreamsPage({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-lg font-semibold flex items-center gap-2">
-                <Radio size={18} className="text-purple-400" />
                 Streams
                 <Tooltip content={ytConnected
                   ? (ytQuota.exceeded
@@ -2431,6 +2530,7 @@ export function StreamsPage({
               onSaveYtDescTemplate={saveYtDescTemplate}
               onSaveYtTagsTemplate={saveYtTagsTemplate}
               onSaveTwitchTagsTemplate={saveTwitchTagsTemplate}
+              gameTagsLinks={gameTagsLinks}
             />
           </div>
         )}
@@ -2645,7 +2745,15 @@ export function StreamsPage({
                   games: (f.meta?.games ?? []).filter(g => g !== game),
                 }, f.relativePath)
               )
-            ).then(() => loadFolders())
+            ).then(() => {
+              if (game in gameTagsLinks) {
+                const next = { ...gameTagsLinks }
+                delete next[game]
+                setGameTagsLinks(next)
+                window.api.setGameTagsLinks(next)
+              }
+              void loadFolders()
+            })
           }}
           onCombineGames={(dying, survivor) => {
             const allDying = new Set(dying)
@@ -2663,7 +2771,22 @@ export function StreamsPage({
                   games: merged,
                 }, f.relativePath)
               })
-            ).then(() => loadFolders())
+            ).then(() => {
+              // If any dying game had a link, hand it to the survivor
+              // (unless the survivor already has one). Then drop the
+              // dying entries.
+              const dyingWithLinks = dying.filter(d => gameTagsLinks[d])
+              if (dyingWithLinks.length) {
+                const next = { ...gameTagsLinks }
+                if (!next[survivor] && dyingWithLinks[0]) {
+                  next[survivor] = gameTagsLinks[dyingWithLinks[0]]
+                }
+                for (const d of dying) delete next[d]
+                setGameTagsLinks(next)
+                window.api.setGameTagsLinks(next)
+              }
+              void loadFolders()
+            })
           }}
           // Global rename of a stream type. Rewrites every folder whose
           // streamType array contains the old name, replacing it
@@ -2728,7 +2851,24 @@ export function StreamsPage({
                 if (m.primaryGame === oldName) next.primaryGame = newName
                 return window.api.writeStreamMeta(f.folderPath, next, f.relativePath)
               })
-            ).then(() => loadFolders())
+            ).then(() => {
+              if (oldName in gameTagsLinks) {
+                const next = { ...gameTagsLinks, [newName]: gameTagsLinks[oldName] }
+                delete next[oldName]
+                setGameTagsLinks(next)
+                window.api.setGameTagsLinks(next)
+              }
+              void loadFolders()
+            })
+          }}
+          gameTagsLinks={gameTagsLinks}
+          tagTemplates={ytTagTemplates.map(t => ({ id: t.id, name: t.name }))}
+          onSetGameTagLink={(game, templateId) => {
+            const next = { ...gameTagsLinks }
+            if (templateId) next[game] = templateId
+            else delete next[game]
+            setGameTagsLinks(next)
+            window.api.setGameTagsLinks(next)
           }}
           onClose={() => setShowManageTags(false)}
         />
@@ -2825,6 +2965,20 @@ export function StreamsPage({
           window.api.getYTTagTemplates().then(setYtTagTemplates).catch(() => {})
           window.api.getTwitchTagTemplates?.().then(setTwitchTagTemplates).catch(() => {})
         }}
+        folders={folders}
+        onBulkBindYtTags={async (binds) => {
+          // Walk each affected folder, writing only the new ytTagsTemplateId
+          // (tags are unchanged by definition — they already match the
+          // template). Refresh the folder list when done so the sidebar
+          // reflects the new bindings if the user has a stream open.
+          await Promise.all(binds.map(({ folderPath, templateId }) => {
+            const f = folders.find(x => x.folderPath === folderPath)
+            const m = f?.meta
+            if (!f || !m) return Promise.resolve()
+            return window.api.writeStreamMeta(folderPath, { ...m, ytTagsTemplateId: templateId }, f.relativePath)
+          }))
+          await loadFolders()
+        }}
       />
 
       {pendingArchiveDecision && (
@@ -2884,6 +3038,8 @@ export function StreamsPage({
             streamMode={streamMode}
             source={source}
             folders={folders}
+            ytTagTemplates={ytTagTemplates}
+            twitchTagTemplates={twitchTagTemplates}
           />
         )
       })()}
@@ -3865,6 +4021,7 @@ function SidebarDetail({
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
   onSaveYtTitleTemplate, onSaveYtDescTemplate, onSaveYtTagsTemplate, onSaveTwitchTagsTemplate,
+  gameTagsLinks,
 }: {
   folder: StreamFolder
   folders: StreamFolder[]
@@ -3985,6 +4142,11 @@ function SidebarDetail({
   onSaveYtDescTemplate: (name: string, value: string) => Promise<string>
   onSaveYtTagsTemplate: (name: string, tags: string[]) => Promise<string>
   onSaveTwitchTagsTemplate: (name: string, tags: string[]) => Promise<string>
+  /** Game-tag → YT tag template id map. When the stream gains a primary
+   *  game and YT tags are still empty, the linked template's tags are
+   *  auto-seeded. Skip-silently semantics: never overwrites non-empty
+   *  ytTags. */
+  gameTagsLinks: Record<string, string>
 }) {
   const meta = folder.meta
   const title = meta?.ytTitle?.trim() || meta?.games?.join(', ') || folder.folderName
@@ -4013,9 +4175,9 @@ function SidebarDetail({
   // selections stay ephemeral for now (the user only asked for title to
   // persist; can lift those later if it turns out to be useful).
   const titleTplId = meta?.ytTitleTemplateId ?? ''
+  const tagsTplId = meta?.ytTagsTemplateId ?? ''
+  const twitchTagsTplId = meta?.twitchTagsTemplateId ?? ''
   const [descTplId, setDescTplId] = useState('')
-  const [tagsTplId, setTagsTplId] = useState('')
-  const [twitchTagsTplId, setTwitchTagsTplId] = useState('')
 
   // Auto-fill the {game} field (ytGameTitle) from the *selected* Topic/
   // Game tag (the one with the ring indicator in the chip row). Source
@@ -4038,53 +4200,41 @@ function SidebarDetail({
   // `{season_links}` is NOT in this map — it's resolved separately inside
   // applyDescTemplate at template-pick time since it's async (walks all
   // folders and can hit the YouTube API for missing titles).
-  const mergeFields = useMemo<Record<string, string>>(() => {
-    const primaryGame = meta?.ytGameTitle?.trim() || meta?.games?.[0] || folder.detectedGames?.[0] || ''
-    // Series-specific merge fields collapse to '' on standalone streams
-    // so user templates that reference {season}/{episode}/{total_episodes}
-    // render cleanly (no "Season 1 Episode " stub text). Game / tagline /
-    // title aren't series-specific and stay populated.
-    const standalone = isStandalone(meta)
-    return {
-      game: meta?.ytGameTitle ?? meta?.games?.[0] ?? '',
-      season: standalone ? '' : (meta?.ytSeason ?? '1'),
-      episode: standalone ? '' : (meta?.ytEpisode ?? ''),
-      tagline: meta?.ytCatchyTitle ?? '',
-      title: meta?.ytCatchyTitle ?? '',
-      total_episodes: standalone ? '' : String(detectTotalEpisodes(folders, primaryGame, meta?.ytSeason || '1')),
-    }
-  }, [folder.detectedGames, meta?.ytGameTitle, meta?.games, meta?.ytSeason, meta?.ytEpisode, meta?.ytCatchyTitle, meta?.isSeries, folders])
+  const mergeFields = useMemo<Record<string, string>>(
+    () => buildYtTitleMergeFields(meta, folder, folders),
+    [folder, meta, folders],
+  )
+  // Stable set + imperative-insert handle for the chip editor + picker
+  // below. Set is stable per component instance (the key list is a
+  // module-level constant), so a useMemo with empty deps is fine.
+  const titleMergeKeySet = useMemo(
+    () => new Set<string>(YT_TITLE_MERGE_KEYS as readonly string[]),
+    [],
+  )
+  // Series-specific keys collapse to '' on standalone streams (see
+  // buildYtTitleMergeFields), so chips/picker entries for those keys
+  // are flagged or hidden when the stream is standalone. `standalone`
+  // is a plain boolean → stable dep across renders.
+  const standalone = isStandalone(meta)
+  const titleInapplicableKeySet = useMemo(
+    () => standalone
+      ? new Set<string>(['season', 'episode', 'total_episodes'])
+      : new Set<string>(),
+    [standalone],
+  )
+  const titlePickerKeys = useMemo(
+    () => standalone
+      ? YT_TITLE_MERGE_KEYS.filter(k => k !== 'season' && k !== 'episode' && k !== 'total_episodes')
+      : YT_TITLE_MERGE_KEYS,
+    [standalone],
+  )
+  const titleInsertRef = useRef<((text: string) => void) | null>(null)
 
-  // Tracks the title string we most recently produced from a template. When
-  // the user blurs the title field with a value that DOESN'T match this, we
-  // know they hand-edited it and clear the template so further merge-field
-  // edits don't clobber their custom title.
-  //
-  // A ref (not state) because reading it inside the title's onSave handler
-  // should reflect the latest write — not whatever was captured when the
-  // EditableTextField rendered.
-  const lastAppliedTitleRef = useRef<string | null>(null)
-
-  // Hoist onUpdateMeta into a ref so the re-apply effect below can call it
-  // without re-running every time the parent re-renders (the parent passes
-  // an inline arrow each time, so it isn't reference-stable).
+  // Hoist onUpdateMeta into a ref so other effects below can call it
+  // without re-running every time the parent re-renders (the parent
+  // passes an inline arrow each time, so it isn't reference-stable).
   const onUpdateMetaRef = useRef(onUpdateMeta)
   useEffect(() => { onUpdateMetaRef.current = onUpdateMeta })
-
-  // When a title template is selected and the merge-field inputs change,
-  // re-render the template with the new values and push the result into the
-  // title field. The check `next === current` is the loop-breaker — once
-  // we've written the new title, mergeFields stays the same (no further
-  // merge field edits), and meta.ytTitle now matches `next`, so the effect
-  // is a no-op on the follow-up render.
-  useEffect(() => {
-    if (!titleTplId) { lastAppliedTitleRef.current = null; return }
-    const tpl = ytTitleTemplates.find(t => t.id === titleTplId)
-    if (!tpl) return
-    const next = applyMergeFields(tpl.template, mergeFields)
-    lastAppliedTitleRef.current = next
-    if (next !== meta?.ytTitle) onUpdateMetaRef.current({ ytTitle: next })
-  }, [titleTplId, mergeFields, ytTitleTemplates, meta?.ytTitle])
 
   // One-shot series auto-detect on first game-add. Only fires for streams
   // explicitly marked `seriesAutoDetectPending: true` at creation (the
@@ -4114,31 +4264,75 @@ function SidebarDetail({
     })
   }, [meta?.seriesAutoDetectPending, meta?.games, folder.folderPath, folders])
 
+  // Auto-apply a linked YT tags template when a stream gains its first
+  // game tag. Fires when the *primary game* transitions from absent to
+  // present and only when `meta.ytTags` is currently empty (skip-silently
+  // semantics — manual edits never get clobbered). Tracked per-folder
+  // via a ref so switching between streams doesn't re-fire it for
+  // a stream that already had its primary at mount.
+  const prevPrimaryGameRef = useRef<{ folderPath: string; primary: string } | null>(null)
+  useEffect(() => {
+    const primary = meta?.games?.[0] ?? ''
+    const prev = prevPrimaryGameRef.current
+    const prevPrimary = prev?.folderPath === folder.folderPath ? prev.primary : ''
+    prevPrimaryGameRef.current = { folderPath: folder.folderPath, primary }
+    if (!primary || prevPrimary) return
+    if (meta?.ytTags?.length) return
+    const linkedId = gameTagsLinks[primary]
+    if (!linkedId) return
+    const tpl = ytTagTemplates.find(t => t.id === linkedId)
+    if (!tpl || !tpl.tags.length) return
+    onUpdateMetaRef.current({ ytTags: [...tpl.tags], ytTagsTemplateId: linkedId })
+  }, [folder.folderPath, meta?.games, meta?.ytTags, gameTagsLinks, ytTagTemplates])
+
+  // Lazy refresh of bound tag templates. If the bound YT/Twitch tag
+  // template has been edited since the last time this stream was
+  // touched, sync the local tags to the template's current value. If
+  // the template was deleted, clear the orphaned binding. User-edited
+  // streams already cleared their binding on chip mutation, so this
+  // effect only runs when meta still claims to be template-bound.
+  useEffect(() => {
+    const id = meta?.ytTagsTemplateId
+    if (!id) return
+    const tpl = ytTagTemplates.find(t => t.id === id)
+    if (!tpl) { onUpdateMetaRef.current({ ytTagsTemplateId: '' }); return }
+    const current = meta?.ytTags ?? []
+    const same = current.length === tpl.tags.length && current.every((t, i) => t === tpl.tags[i])
+    if (!same) onUpdateMetaRef.current({ ytTags: [...tpl.tags] })
+  }, [folder.folderPath, meta?.ytTagsTemplateId, meta?.ytTags, ytTagTemplates])
+
+  useEffect(() => {
+    const id = meta?.twitchTagsTemplateId
+    if (!id) return
+    const tpl = twitchTagTemplates.find(t => t.id === id)
+    if (!tpl) { onUpdateMetaRef.current({ twitchTagsTemplateId: '' }); return }
+    const current = meta?.twitchTags ?? []
+    const same = current.length === tpl.tags.length && current.every((t, i) => t === tpl.tags[i])
+    if (!same) onUpdateMetaRef.current({ twitchTags: [...tpl.tags] })
+  }, [folder.folderPath, meta?.twitchTagsTemplateId, meta?.twitchTags, twitchTagTemplates])
+
   // Reset the ephemeral (non-persisted) template selections when the
-  // user switches streams. Title's selection isn't reset here — it lives
-  // in meta and naturally tracks the new folder via the meta?.ytTitleTemplateId
-  // read above. lastAppliedTitleRef is still cleared because it caches
-  // the previous folder's templated output, which is meaningless for the
-  // new one (the re-apply effect repopulates it on the next render).
+  // user switches streams. Title / tags / twitch-tags selections aren't
+  // reset here — they live in meta and naturally track the new folder
+  // via the meta?.ytTitleTemplateId / ytTagsTemplateId / twitchTagsTemplateId
+  // reads above.
   useEffect(() => {
     setDescTplId('')
-    setTagsTplId('')
-    setTwitchTagsTplId('')
-    lastAppliedTitleRef.current = null
   }, [folder.folderPath])
 
-  // Keys ({game}, {season}, …) the currently-selected title template
-  // consumes. The merge-field rows (Game Title / Tagline / Season /
-  // Episode) check this set to subtly highlight when they affect the
-  // title output.
+  // Keys ({game}, {season}, …) the title field's current body uses.
+  // Driven directly by `meta.ytTitle` (the raw template body) rather
+  // than the bound template, so hand-editing a token in or out of the
+  // title immediately flips the corresponding row's highlight —
+  // matching what's actually rendered, regardless of whether a
+  // template is assigned.
   const activeTitleMergeKeys = useMemo<Set<string>>(() => {
-    if (!titleTplId) return new Set()
-    const tpl = ytTitleTemplates.find(t => t.id === titleTplId)
-    if (!tpl) return new Set()
+    const body = meta?.ytTitle ?? ''
+    if (!body) return new Set()
     const keys = new Set<string>()
-    for (const m of tpl.template.matchAll(/\{(\w+)\}/g)) keys.add(m[1])
+    for (const m of body.matchAll(/\{(\w+)\}/g)) keys.add(m[1])
     return keys
-  }, [titleTplId, ytTitleTemplates])
+  }, [meta?.ytTitle])
   // 'tagline' and 'title' both alias to ytCatchyTitle, so either token in
   // the template should highlight the Tagline row.
   const taglineActive = activeTitleMergeKeys.has('tagline') || activeTitleMergeKeys.has('title')
@@ -4170,22 +4364,67 @@ function SidebarDetail({
     const currentKey = [...compat].sort().join('|').toLowerCase()
     return !twitchTagTemplates.some(t => [...t.tags].sort().join('|').toLowerCase() === currentKey)
   }, [meta?.twitchTags, twitchTagTemplates])
-  // Suggested template name for tag editors — defaults to the first
-  // game so "Hollow Knight" with `[tag1, tag2]` defaults to a template
-  // named "Hollow Knight". Only suggests when that name isn't already
-  // taken (otherwise users would type over it anyway).
+  // Suggested template name for tag editors — defaults to the primary
+  // game (so series like "Hollow Knight" with `[tag1, tag2]` default to
+  // a template named "Hollow Knight"). When a template with that name
+  // already exists, the SaveAsTemplateButton's overwrite-confirm step
+  // catches it — the suggestion itself is no longer suppressed.
   const suggestedTagTemplateName = useMemo(() => {
-    const game = (meta?.games ?? folder.detectedGames)[0]?.trim()
-    if (!game) return undefined
-    const exists = ytTagTemplates.some(t => t.name.toLowerCase() === game.toLowerCase())
-    return exists ? undefined : game
-  }, [meta?.games, folder.detectedGames, ytTagTemplates])
-  const suggestedTwitchTagTemplateName = useMemo(() => {
-    const game = (meta?.games ?? folder.detectedGames)[0]?.trim()
-    if (!game) return undefined
-    const exists = twitchTagTemplates.some(t => t.name.toLowerCase() === game.toLowerCase())
-    return exists ? undefined : game
-  }, [meta?.games, folder.detectedGames, twitchTagTemplates])
+    const primary = resolvePrimaryGame(meta) || (meta?.games ?? folder.detectedGames)[0]
+    return primary?.trim() || undefined
+  }, [meta, folder.detectedGames])
+  const suggestedTwitchTagTemplateName = suggestedTagTemplateName
+  // Suggest applying a YT tag template whose name matches the primary
+  // game tag, when there's no better signal already driving the tags:
+  //  - skip when the primary game has an explicit gameTagsLinks entry
+  //    (the empty→present effect handles that case)
+  //  - skip when the stream is already bound to *any* template (user
+  //    has made an explicit choice)
+  //  - skip when current ytTags already equal the matched template's
+  //    tags (nothing to suggest)
+  // Twitch deliberately omitted — channel tags are streamer-wide, not
+  // per-game, so basing them on the primary game isn't useful.
+  const suggestedYtTagsTemplate = useMemo(() => {
+    if (meta?.ytTagsTemplateId) return null
+    const primary = (resolvePrimaryGame(meta) || (meta?.games ?? folder.detectedGames)[0])?.trim()
+    if (!primary) return null
+    if (gameTagsLinks[primary]) return null
+    const lower = primary.toLowerCase()
+    const match = ytTagTemplates.find(t => t.name.toLowerCase() === lower)
+    if (!match) return null
+    const current = meta?.ytTags ?? []
+    if (current.length === match.tags.length && current.every((t, i) => t === match.tags[i])) return null
+    return match
+  }, [meta, folder.detectedGames, gameTagsLinks, ytTagTemplates])
+  // Detect when this stream's current ytTags exactly match an existing
+  // template's tags (case-insensitive set equality) — surfaces a "Bind
+  // to 'X' template" link so legacy streams whose tags were typed in
+  // before templates existed can opt into the binding without losing
+  // any data. Only when:
+  //  - not already bound to anything
+  //  - has at least one tag
+  //  - at least one template's tags exactly match
+  // Prefers the template whose name matches the primary game when
+  // multiple templates match (deterministic + matches user intent in
+  // the common case). Twitch deliberately omitted to match the
+  // suggested-template scope.
+  const matchingTagTemplate = useMemo(() => {
+    if (meta?.ytTagsTemplateId) return null
+    const current = meta?.ytTags ?? []
+    if (current.length === 0) return null
+    const currentKey = current.map(t => t.toLowerCase()).sort().join('|')
+    const matches = ytTagTemplates.filter(t => {
+      if (t.tags.length !== current.length) return false
+      return t.tags.map(x => x.toLowerCase()).sort().join('|') === currentKey
+    })
+    if (matches.length === 0) return null
+    const primary = (resolvePrimaryGame(meta) || (meta?.games ?? folder.detectedGames)[0])?.trim().toLowerCase()
+    if (primary) {
+      const named = matches.find(t => t.name.toLowerCase() === primary)
+      if (named) return named
+    }
+    return matches[0]
+  }, [meta, folder.detectedGames, ytTagTemplates])
   // Wrappers that capture the current field value, persist, and select
   // the newly-saved template. For title, "select" means writing
   // ytTitleTemplateId to meta (persists across sessions). For the
@@ -4200,17 +4439,24 @@ function SidebarDetail({
   }, [onSaveYtDescTemplate, meta?.ytDescription])
   const handleSaveTagsTemplate = useCallback(async (name: string) => {
     const id = await onSaveYtTagsTemplate(name, meta?.ytTags ?? [])
-    setTagsTplId(id)
+    onUpdateMetaRef.current({ ytTagsTemplateId: id })
   }, [onSaveYtTagsTemplate, meta?.ytTags])
   const handleSaveTwitchTagsTemplate = useCallback(async (name: string) => {
     const id = await onSaveTwitchTagsTemplate(name, meta?.twitchTags ?? [])
-    setTwitchTagsTplId(id)
+    onUpdateMetaRef.current({ twitchTagsTemplateId: id })
   }, [onSaveTwitchTagsTemplate, meta?.twitchTags])
 
-  // Pick → write to meta. The re-apply effect (which depends on
-  // meta.ytTitleTemplateId via the `titleTplId` derivation) then renders
-  // the template against the live merge fields on the next pass.
-  const applyTitleTemplate = (id: string) => { onUpdateMeta({ ytTitleTemplateId: id }) }
+  // Pick → write the raw template body into ytTitle verbatim and
+  // record the binding. The title field IS the template now; the
+  // preview below the field renders mergeFields against this body on
+  // every keystroke. Clearing (id === '') leaves the body intact so
+  // the user can keep editing what's there as plain text.
+  const applyTitleTemplate = (id: string) => {
+    if (!id) { onUpdateMeta({ ytTitleTemplateId: '' }); return }
+    const tpl = ytTitleTemplates.find(t => t.id === id)
+    if (tpl) onUpdateMeta({ ytTitle: tpl.template, ytTitleTemplateId: id })
+    else onUpdateMeta({ ytTitleTemplateId: id })
+  }
   const applyDescTemplate = async (id: string) => {
     setDescTplId(id)
     if (!id) return
@@ -4239,24 +4485,29 @@ function SidebarDetail({
     onUpdateMeta({ ytDescription: applyMergeFields(body, mergeFields) })
   }
   const applyTagsTemplate = (id: string) => {
-    setTagsTplId(id)
-    if (!id) return
+    if (!id) { onUpdateMeta({ ytTagsTemplateId: '' }); return }
     const tpl = ytTagTemplates.find(t => t.id === id)
-    if (tpl) onUpdateMeta({ ytTags: tpl.tags })
+    if (tpl) onUpdateMeta({ ytTags: tpl.tags, ytTagsTemplateId: id })
+    else onUpdateMeta({ ytTagsTemplateId: id })
   }
   const applyTwitchTagsTemplate = (id: string) => {
-    setTwitchTagsTplId(id)
-    if (!id) return
+    if (!id) { onUpdateMeta({ twitchTagsTemplateId: '' }); return }
     const tpl = twitchTagTemplates.find(t => t.id === id)
-    if (tpl) onUpdateMeta({ twitchTags: tpl.tags })
+    if (tpl) onUpdateMeta({ twitchTags: tpl.tags, twitchTagsTemplateId: id })
+    else onUpdateMeta({ twitchTagsTemplateId: id })
   }
   const handleTitleSave = (v: string) => {
-    // Diverging from the last-templated value means the user hand-edited
-    // the title; drop the template binding too so future merge-field
-    // edits don't overwrite their custom string. Both writes go through
-    // the same updateMeta partial so the disk write is atomic.
+    // The title field stores the raw template body. Diverging from the
+    // bound template's body means the user hand-edited the template
+    // for this stream — clear the binding so future template edits
+    // don't surprise them with a remote overwrite via lazy-refresh.
+    // Both writes go through one updateMeta call so the disk write is
+    // atomic.
     const partial: Partial<StreamMeta> = { ytTitle: v }
-    if (titleTplId && v !== lastAppliedTitleRef.current) partial.ytTitleTemplateId = ''
+    if (titleTplId) {
+      const tpl = ytTitleTemplates.find(t => t.id === titleTplId)
+      if (tpl && tpl.template !== v) partial.ytTitleTemplateId = ''
+    }
     onUpdateMeta(partial)
   }
 
@@ -4285,18 +4536,57 @@ function SidebarDetail({
   // Ctrl+Space requests use up-to-date context. Returns `undefined` (not
   // a noop) when Claude is disabled so EditableTextField knows to skip
   // the whole AI plumbing rather than wire a never-firing fetcher.
+  // Previous taglines in the same (game, season) — sent to the
+  // tagline Claude prompt so suggestions don't repeat or closely
+  // paraphrase taglines the user has already shipped in the series.
+  // Standalone streams (no series concept) skip the season match and
+  // just key off the primary game. Capped at 20 to keep the prompt
+  // bounded for long-running series.
+  const previousTaglines = useMemo<string[]>(() => {
+    const primary = (resolvePrimaryGame(meta) || meta?.games?.[0] || folder.detectedGames?.[0] || '').trim().toLowerCase()
+    if (!primary) return []
+    const season = meta?.ytSeason || '1'
+    const standalone = isStandalone(meta)
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const f of folders) {
+      if (f.folderPath === folder.folderPath) continue
+      const fm = f.meta
+      const tagline = fm?.ytCatchyTitle?.trim()
+      if (!tagline) continue
+      const fPrimary = (resolvePrimaryGame(fm) || fm?.games?.[0] || '').trim().toLowerCase()
+      if (fPrimary !== primary) continue
+      if (!standalone && (fm?.ytSeason || '1') !== season) continue
+      const key = tagline.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(tagline)
+      if (out.length >= 20) break
+    }
+    return out
+  }, [folders, folder.folderPath, folder.detectedGames, meta])
   const buildAiContext = useCallback(() => ({
     date: folder.date,
     streamTypes: normalizeStreamTypes(meta?.streamType),
     games: meta?.games?.length ? meta.games : folder.detectedGames,
     currentTitle: meta?.ytTitle || undefined,
     currentDescription: meta?.ytDescription || undefined,
-  }), [folder.date, folder.detectedGames, meta?.streamType, meta?.games, meta?.ytTitle, meta?.ytDescription])
+    currentYtTags: meta?.ytTags?.length ? meta.ytTags : undefined,
+    currentTwitchTags: meta?.twitchTags?.length ? meta.twitchTags : undefined,
+    previousTaglines: previousTaglines.length ? previousTaglines : undefined,
+  }), [folder.date, folder.detectedGames, meta?.streamType, meta?.games, meta?.ytTitle, meta?.ytDescription, meta?.ytTags, meta?.twitchTags, previousTaglines])
   const aiFetchTitle = useMemo(() => claudeEnabled
     ? (prefix: string, suffix: string) => window.api.claudeGenerate('title', { ...buildAiContext(), prefix, suffix })
     : undefined, [claudeEnabled, buildAiContext])
   const aiFetchDescription = useMemo(() => claudeEnabled
     ? (prefix: string, suffix: string) => window.api.claudeGenerate('description', { ...buildAiContext(), prefix, suffix })
+    : undefined, [claudeEnabled, buildAiContext])
+  // Tagline fetcher — Ctrl+Space inside the Tagline EditableTextField
+  // asks Claude for a catchy 3–8 word phrase grounded in the topic,
+  // description, and tags, and explicitly avoiding `previousTaglines`
+  // already used in this (game, season) bucket.
+  const aiFetchTagline = useMemo(() => claudeEnabled
+    ? (prefix: string, suffix: string) => window.api.claudeGenerate('tagline', { ...buildAiContext(), prefix, suffix })
     : undefined, [claudeEnabled, buildAiContext])
   // Tag fetchers — `prefix`/`suffix` here come from the chip editor's
   // add-tag input, not the chip list. Claude returns either a single tag
@@ -4395,20 +4685,14 @@ function SidebarDetail({
     [otherFolderLinks, linkedId],
   )
 
-  // Privacy state — optimistic; reverts on failure. The override lets us
-  // show the user's just-clicked value immediately even before the API
-  // round-trips. Reset whenever a different broadcast is selected.
-  const [privacyOverride, setPrivacyOverride] = useState<'public' | 'unlisted' | 'private' | null>(null)
-  const [savingPrivacy, setSavingPrivacy] = useState(false)
-  const [privacyError, setPrivacyError] = useState<string | null>(null)
   // Transient "Copied!" state for the copy-broadcast-URL button.
   // Resets via timeout — see copyBroadcastUrl below.
   const [copiedUrl, setCopiedUrl] = useState(false)
-  useEffect(() => {
-    setPrivacyOverride(null)
-    setPrivacyError(null)
-  }, [selectedBroadcast?.id])
-  const currentPrivacy = (privacyOverride ?? selectedBroadcast?.status.privacyStatus) as
+  // Displayed privacy: staged local value first, falls back to YouTube's
+  // current status (so existing streams without an explicit override
+  // show the remote value as their starting point). Mirrors the same
+  // staged-edit pattern as `displayedScheduledTime`.
+  const displayedPrivacy = (meta?.ytPrivacyStatus ?? selectedBroadcast?.status?.privacyStatus) as
     | 'public' | 'unlisted' | 'private' | undefined
   // Upcoming-broadcast time picker. Only show the picker when we have a
   // future-dated broadcast (`scheduledStartTime` set + `actualStartTime`
@@ -4429,21 +4713,6 @@ function SidebarDetail({
     !selectedBroadcast.snippet.actualStartTime
   )
   const displayedScheduledTime = meta?.scheduledTime ?? broadcastScheduledTimeHHMM
-  const changePrivacy = useCallback(async (next: 'public' | 'unlisted' | 'private') => {
-    if (!selectedBroadcast || currentPrivacy === next || savingPrivacy) return
-    const prev = currentPrivacy
-    setPrivacyOverride(next)
-    setSavingPrivacy(true)
-    setPrivacyError(null)
-    try {
-      await window.api.youtubeUpdateBroadcastStatus(selectedBroadcast.id, next)
-    } catch (err: any) {
-      setPrivacyOverride(prev ?? null)
-      setPrivacyError(err?.message ?? String(err))
-    } finally {
-      setSavingPrivacy(false)
-    }
-  }, [selectedBroadcast, currentPrivacy, savingPrivacy])
 
   // ── Paste-URL fallback ──────────────────────────────────────────────
   // For VODs that don't appear in the picker (unlisted, from a sub-channel,
@@ -4694,7 +4963,11 @@ function SidebarDetail({
       return 'remote'
     }
 
-    const localTitle = (meta?.ytTitle ?? '').trim()
+    // meta.ytTitle is the raw template body — resolve through merge
+    // fields before comparing against YouTube's already-rendered value
+    // and the snapshot (which was captured at push/pull time as the
+    // rendered string).
+    const localTitle = applyMergeFields(meta?.ytTitle ?? '', mergeFields).trim()
     const remoteTitle = (selectedBroadcast.snippet.title ?? '').trim()
     if (remoteTitle !== localTitle) {
       const snapshot = meta?.ytLastPushedTitle
@@ -4724,7 +4997,10 @@ function SidebarDetail({
     // direction is always "remote" when there's a divergence, since
     // local can't have been changed *toward* Studio without us pushing.
     // 'unknown' would be misleading; remote-ahead is the truth.
-    if (selectedBroadcast.snippet.gameTitle && selectedBroadcast.snippet.gameTitle !== (meta?.ytGameTitle ?? '')) {
+    // Local source is the primary Topics/Games tag (Topics row carries
+    // the {game} merge hint + this mismatch dot).
+    const localGame = resolvePrimaryGame(meta) || meta?.games?.[0] || ''
+    if (selectedBroadcast.snippet.gameTitle && selectedBroadcast.snippet.gameTitle !== localGame) {
       map.set('gameTitle', 'remote')
     }
 
@@ -4794,8 +5070,24 @@ function SidebarDetail({
         }
       }
     }
+
+    // Privacy mismatch — same skip-when-unset semantics as scheduledTime.
+    // Local only counts when meta.ytPrivacyStatus is explicitly set;
+    // otherwise the displayed dropdown value falls back to the
+    // broadcast's current status and there's nothing to flag.
+    const localPrivacy = meta?.ytPrivacyStatus
+    const remotePrivacy = selectedBroadcast.status?.privacyStatus
+    if (localPrivacy !== undefined && remotePrivacy && localPrivacy !== remotePrivacy) {
+      const snapshot = meta?.ytLastPushedPrivacy
+      const has = snapshot !== undefined
+      map.set('privacy', directionFor(
+        has && snapshot !== localPrivacy,
+        has && snapshot !== remotePrivacy,
+        has,
+      ))
+    }
     return map
-  }, [selectedBroadcast, meta?.ytTitle, meta?.ytDescription, meta?.ytGameTitle, meta?.ytTags, meta?.ytCategoryId, meta?.scheduledTime, meta?.ytLastPushedTitle, meta?.ytLastPushedDescription, meta?.ytLastPushedTags, meta?.ytLastPushedCategoryId, meta?.ytLastPushedDate, meta?.ytLastPushedScheduledTime, folder.date, localDateFromIso])
+  }, [selectedBroadcast, meta?.ytTitle, meta?.ytDescription, meta?.games, meta?.primaryGame, meta?.ytTags, meta?.ytCategoryId, meta?.scheduledTime, meta?.ytPrivacyStatus, meta?.ytLastPushedTitle, meta?.ytLastPushedDescription, meta?.ytLastPushedTags, meta?.ytLastPushedCategoryId, meta?.ytLastPushedDate, meta?.ytLastPushedScheduledTime, meta?.ytLastPushedPrivacy, folder.date, localDateFromIso, mergeFields])
   const broadcastMismatch = broadcastMismatches.size > 0
 
   return (
@@ -4826,7 +5118,16 @@ function SidebarDetail({
                   : dir === 'remote' ? 'bg-orange-400'
                   : dir === 'both' ? 'bg-gradient-to-br from-blue-400 to-orange-400'
                   : 'bg-gray-400'
-                return <span className={`inline-block w-1.5 h-1.5 rounded-full ${cls} ml-0.5`} />
+                const pulseColor = dir === 'local' ? 'rgba(96, 165, 250, 0.7)'
+                  : dir === 'remote' ? 'rgba(251, 146, 60, 0.7)'
+                  : dir === 'both' ? 'rgba(168, 85, 247, 0.7)'
+                  : 'rgba(156, 163, 175, 0.7)'
+                return (
+                  <span
+                    className={`inline-block w-1.5 h-1.5 rounded-full mismatch-dot-pulse ${cls} ml-0.5`}
+                    style={{ ['--pulse-color' as any]: pulseColor }}
+                  />
+                )
               })()}
             </button>
           </Tooltip>
@@ -5022,100 +5323,96 @@ function SidebarDetail({
             {/* — Tags (SM-level: stream type + topics/games) — Order
                 matches the streams list columns (Type, then Games) so
                 the eye lands in the same place in both views. */}
-            <div className="flex flex-col gap-3">
-              <div className="grid grid-cols-2 gap-2">
-                <MetaRow label="Stream type">
-                  <TagComboBox
-                    values={normalizeStreamTypes(meta?.streamType)}
-                    onChange={next => onUpdateMeta({ streamType: next })}
-                    allOptions={allStreamTypes}
-                    placeholder="e.g. games, other…"
-                    emptyLabel="No types"
-                    tagColors={tagColors}
-                    tagTextures={tagTextures}
-                    onNewTag={onNewStreamType}
-                    compact
+            {/* Single SM-metadata row — five fields on one horizontal
+                line above ~800px container width, wrapping the whole
+                Series group (checkbox + Season + Episode) to a second
+                line below that threshold. Container query (not media
+                query) so the breakpoint tracks the sidebar's actual
+                width, not the viewport's. `@container` here scopes
+                child `@[800px]:` rules to this element.
+                Stream Type + Topics/Games stay flex-grow with a 10rem
+                basis so the two tag combos share remaining space; the
+                Series group's `basis-full` forces a wrap below the
+                breakpoint while `@[800px]:basis-auto` lets it inline
+                above it. */}
+            <div className="@container">
+              <div className="flex gap-3 flex-wrap">
+                <div className="flex-1 min-w-0 basis-40">
+                  <MetaRow label="Stream type">
+                    <TagComboBox
+                      values={normalizeStreamTypes(meta?.streamType)}
+                      onChange={next => onUpdateMeta({ streamType: next })}
+                      allOptions={allStreamTypes}
+                      placeholder="e.g. games, other…"
+                      emptyLabel="No types"
+                      tagColors={tagColors}
+                      tagTextures={tagTextures}
+                      onNewTag={onNewStreamType}
+                      compact
+                    />
+                  </MetaRow>
+                </div>
+                <div className="flex-1 min-w-0 basis-40">
+                  <MetaRow
+                    label="Topics / Games"
+                    mergeHint="{game}"
+                    highlighted={activeTitleMergeKeys.has('game')}
+                    mismatched={broadcastMismatches.get('gameTitle')}
+                  >
+                    <TagComboBox
+                      values={meta?.games ?? []}
+                      onChange={next => onUpdateMeta({ games: next })}
+                      allOptions={allGames}
+                      placeholder="Add topic or game…"
+                      emptyLabel="No topics added"
+                      compact
+                      // Selection drives `meta.primaryGame` — the value
+                      // used by both the YT title's {game} merge field and
+                      // the Twitch category push. `resolvePrimaryGame`
+                      // falls back to games[0] when no explicit primary
+                      // exists, so the ring is always on *some* chip when
+                      // the list is non-empty.
+                      selectedValue={resolvePrimaryGame(meta)}
+                      onSelectValue={v => onUpdateMeta({ primaryGame: v })}
+                      reorderable
+                    />
+                  </MetaRow>
+                </div>
+                <div className="flex flex-col basis-full @[800px]:basis-auto">
+                  <Checkbox
+                    checked={meta?.isSeries !== false}
+                    // Also clear the auto-detect pending flag — a manual
+                    // toggle means the user owns the value going forward.
+                    // Without this, clearing then re-adding games[] later
+                    // could silently flip the user's choice.
+                    onChange={v => onUpdateMeta({ isSeries: v, seriesAutoDetectPending: undefined })}
+                    label={<span className="text-[11px] text-gray-400">Series</span>}
                   />
-                </MetaRow>
-                <MetaRow label="Topics / Games">
-                  <TagComboBox
-                    values={meta?.games ?? []}
-                    onChange={next => onUpdateMeta({ games: next })}
-                    allOptions={allGames}
-                    placeholder="Add topic or game…"
-                    emptyLabel="No topics added"
-                    compact
-                    // Selection drives `meta.primaryGame` — the value
-                    // used by both the YT title's {game} merge field and
-                    // the Twitch category push. `resolvePrimaryGame`
-                    // falls back to games[0] when no explicit primary
-                    // exists, so the ring is always on *some* chip when
-                    // the list is non-empty.
-                    selectedValue={resolvePrimaryGame(meta)}
-                    onSelectValue={v => onUpdateMeta({ primaryGame: v })}
-                    reorderable
-                  />
-                </MetaRow>
+                  {!isStandalone(meta) && (
+                    <div className="flex items-center gap-3">
+                      <MetaRow mergeHint="{season}" highlighted={activeTitleMergeKeys.has('season')}>
+                        <NumberStepperField
+                          value={meta?.ytSeason ?? ''}
+                          placeholder="1"
+                          onSave={handleSeasonSave}
+                          className="w-16"
+                        />
+                      </MetaRow>
+                      <MetaRow mergeHint="{episode}" highlighted={activeTitleMergeKeys.has('episode')}>
+                        <NumberStepperField
+                          value={meta?.ytEpisode ?? ''}
+                          placeholder="—"
+                          onSave={v => onUpdateMeta({ ytEpisode: v })}
+                          className="w-16"
+                        />
+                      </MetaRow>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             {/* — YouTube — */}
             <div className="flex flex-col gap-3">
-            {/* Merge-field params on one row (matches the old metamodal):
-                Game Title · Tagline · Season · Episode. Together these feed
-                the YouTube title / description / tag templates below, so they
-                sit above the title field rather than scattered through the
-                metadata. Grid uses two flexible columns for Game + Tagline and
-                two auto columns for the small Season + Episode steppers.
-                The Series checkbox above gates whether the season + episode
-                columns render at all — standalone streams collapse the grid
-                to 2 columns to keep the row visually tidy. */}
-            <div className="flex items-center justify-end -mb-1">
-              <Checkbox
-                checked={meta?.isSeries !== false}
-                // Also clear the auto-detect pending flag — a manual
-                // toggle means the user owns the value going forward.
-                // Without this, clearing then re-adding games[] later
-                // could silently flip the user's choice.
-                onChange={v => onUpdateMeta({ isSeries: v, seriesAutoDetectPending: undefined })}
-                label={<span className="text-[11px] text-gray-400">Series</span>}
-              />
-            </div>
-            <div className={`grid gap-2 items-start ${isStandalone(meta) ? 'grid-cols-[1fr_1fr]' : 'grid-cols-[1fr_1fr_auto_auto]'}`}>
-              <MetaRow mergeHint="{game}" highlighted={activeTitleMergeKeys.has('game')} mismatched={broadcastMismatches.get('gameTitle')}>
-                <EditableTextField
-                  value={meta?.ytGameTitle ?? ''}
-                  placeholder="e.g. Hollow Knight"
-                  onSave={v => onUpdateMeta({ ytGameTitle: v })}
-                />
-              </MetaRow>
-              <MetaRow mergeHint="{tagline}" highlighted={taglineActive}>
-                <EditableTextField
-                  value={meta?.ytCatchyTitle ?? ''}
-                  placeholder="catchy tagline…"
-                  onSave={v => onUpdateMeta({ ytCatchyTitle: v })}
-                />
-              </MetaRow>
-              {!isStandalone(meta) && (
-                <>
-                  <MetaRow mergeHint="{season}" highlighted={activeTitleMergeKeys.has('season')}>
-                    <NumberStepperField
-                      value={meta?.ytSeason ?? ''}
-                      placeholder="1"
-                      onSave={handleSeasonSave}
-                      className="w-16"
-                    />
-                  </MetaRow>
-                  <MetaRow mergeHint="{episode}" highlighted={activeTitleMergeKeys.has('episode')}>
-                    <NumberStepperField
-                      value={meta?.ytEpisode ?? ''}
-                      placeholder="—"
-                      onSave={v => onUpdateMeta({ ytEpisode: v })}
-                      className="w-16"
-                    />
-                  </MetaRow>
-                </>
-              )}
-            </div>
             {/* YouTube title — pushed below the merge-field params since the
                 title is normally derived from them via a template. The
                 template selector reads "Assign template" (vs "Apply template"
@@ -5140,13 +5437,50 @@ function SidebarDetail({
                 </div>
               }
             >
-              <EditableTextField
+              <TemplateBodyEditor
                 value={meta?.ytTitle ?? ''}
                 placeholder="Title for YouTube upload…"
                 onSave={handleTitleSave}
                 tabAttached
                 tabActive={!!titleTplId}
-                aiFetcher={aiFetchTitle}
+                knownKeys={titleMergeKeySet}
+                inapplicableKeys={titleInapplicableKeySet}
+                insertRef={titleInsertRef}
+              />
+              <MergeFieldPicker
+                keys={titlePickerKeys}
+                onInsert={k => titleInsertRef.current?.(`{${k}}`)}
+              />
+              {/* Preview — only shows when the title body actually
+                  contains a recognised merge-field token. For static
+                  titles the preview would just echo the field and add
+                  visual noise. */}
+              {hasYtTitleMergeFields(meta?.ytTitle ?? '') && (() => {
+                const rendered = applyMergeFields(meta?.ytTitle ?? '', mergeFields)
+                return (
+                  <p className="mt-1 text-xs text-gray-200 leading-snug flex items-baseline gap-1.5">
+                    <span className="text-[10px] text-gray-500 uppercase tracking-wide shrink-0">Preview</span>
+                    <span>{rendered || <span className="italic text-gray-500">(empty)</span>}</span>
+                  </p>
+                )
+              })()}
+            </MetaRow>
+            {/* Tagline — purely a title-driver, so it lives directly
+                below the title field. Label + merge-hint badge format
+                mirrors Topics / Games so the merge-fed fields read
+                consistently. Highlighted when the bound template's
+                body references {tagline} or {title} (both alias to
+                ytCatchyTitle). */}
+            <MetaRow
+              label="Tagline"
+              mergeHint="{tagline}"
+              highlighted={taglineActive}
+            >
+              <EditableTextField
+                value={meta?.ytCatchyTitle ?? ''}
+                placeholder="catchy tagline…"
+                onSave={v => onUpdateMeta({ ytCatchyTitle: v })}
+                aiFetcher={aiFetchTagline}
               />
             </MetaRow>
             {/* YouTube thumbnail picker — sits between title and
@@ -5276,13 +5610,38 @@ function SidebarDetail({
               mismatched={broadcastMismatches.get('tags')}
               right={
                 <div className="flex items-center gap-2">
-                  {canSaveTagsTemplate && <SaveAsTemplateButton onSave={handleSaveTagsTemplate} suggestedName={suggestedTagTemplateName} />}
+                  {suggestedYtTagsTemplate && (
+                    <UseSuggestedTagsButton
+                      template={suggestedYtTagsTemplate}
+                      existingCount={meta?.ytTags?.length ?? 0}
+                      onApply={() => applyTagsTemplate(suggestedYtTagsTemplate.id)}
+                    />
+                  )}
+                  {matchingTagTemplate && (
+                    <Tooltip content={`Mark these tags as coming from the "${matchingTagTemplate.name}" template. Tags stay as-is; future edits to the template will sync into this stream.`} side="top">
+                      <button
+                        type="button"
+                        onClick={() => onUpdateMeta({ ytTagsTemplateId: matchingTagTemplate.id })}
+                        className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                      >
+                        Bind to &ldquo;{matchingTagTemplate.name}&rdquo;
+                      </button>
+                    </Tooltip>
+                  )}
+                  {canSaveTagsTemplate && (
+                    <SaveAsTemplateButton
+                      onSave={handleSaveTagsTemplate}
+                      suggestedName={suggestedTagTemplateName}
+                      existingNames={ytTagTemplates.map(t => t.name)}
+                    />
+                  )}
                   <InlineTemplateSelect
                     items={ytTagTemplates}
                     value={tagsTplId}
                     onChange={applyTagsTemplate}
-                    placeholder="Apply template"
+                    placeholder="Assign template"
                     tabbed
+                    tabActive={!!tagsTplId}
                   />
                 </div>
               }
@@ -5291,8 +5650,9 @@ function SidebarDetail({
                 <TagChipEditor
                   value={meta?.ytTags ?? []}
                   placeholder="Add tag…"
-                  onChange={next => onUpdateMeta({ ytTags: next })}
+                  onChange={next => onUpdateMeta(tagsTplId ? { ytTags: next, ytTagsTemplateId: '' } : { ytTags: next })}
                   tabAttached
+                  tabActive={!!tagsTplId}
                   aiFetcher={aiFetchTags}
                   footerRight={(() => {
                     const tags = meta?.ytTags ?? []
@@ -5384,13 +5744,20 @@ function SidebarDetail({
               attachRight
               right={
                 <div className="flex items-center gap-2">
-                  {canSaveTwitchTagsTemplate && <SaveAsTemplateButton onSave={handleSaveTwitchTagsTemplate} suggestedName={suggestedTwitchTagTemplateName} />}
+                  {canSaveTwitchTagsTemplate && (
+                    <SaveAsTemplateButton
+                      onSave={handleSaveTwitchTagsTemplate}
+                      suggestedName={suggestedTwitchTagTemplateName}
+                      existingNames={twitchTagTemplates.map(t => t.name)}
+                    />
+                  )}
                   <InlineTemplateSelect
                     items={twitchTagTemplates}
                     value={twitchTagsTplId}
                     onChange={applyTwitchTagsTemplate}
-                    placeholder="Apply template"
+                    placeholder="Assign template"
                     tabbed
+                    tabActive={!!twitchTagsTplId}
                   />
                 </div>
               }
@@ -5399,8 +5766,9 @@ function SidebarDetail({
                 <TagChipEditor
                   value={meta?.twitchTags ?? []}
                   placeholder="Add tag…"
-                  onChange={next => onUpdateMeta({ twitchTags: next })}
+                  onChange={next => onUpdateMeta(twitchTagsTplId ? { twitchTags: next, twitchTagsTemplateId: '' } : { twitchTags: next })}
                   tabAttached
+                  tabActive={!!twitchTagsTplId}
                   aiFetcher={aiFetchTwitchTags}
                   footerRight={(() => {
                     const tags = meta?.twitchTags ?? []
@@ -5489,23 +5857,34 @@ function SidebarDetail({
                           active.blur()
                         }
                         const update: Partial<StreamMeta> = {
+                          // Pulled title is YouTube's rendered string,
+                          // which becomes the new title-body verbatim
+                          // (no merge fields). Clear the binding too
+                          // so the dropdown doesn't keep claiming the
+                          // body came from a template.
                           ytTitle: selectedBroadcast.snippet.title,
                           ytDescription: selectedBroadcast.snippet.description,
-                          // Clear the title-template binding. The YT
-                          // title is now the authoritative value;
-                          // without this, the auto-re-apply effect
-                          // (search for `lastAppliedTitleRef`) would
-                          // immediately re-render the bound template
-                          // against the current merge fields and
-                          // overwrite the pulled title. That effect
-                          // sees an empty `ytTitleTemplateId` and
-                          // early-returns, leaving the pulled title
-                          // in place.
                           ytTitleTemplateId: '',
                         }
                         if (selectedBroadcast.snippet.gameTitle) update.ytGameTitle = selectedBroadcast.snippet.gameTitle
-                        if (selectedBroadcast.snippet.tags?.length) update.ytTags = selectedBroadcast.snippet.tags
+                        if (selectedBroadcast.snippet.tags?.length) {
+                          update.ytTags = selectedBroadcast.snippet.tags
+                          // Pulled tags are authoritative — clear any
+                          // stale template binding so the dropdown
+                          // doesn't keep claiming the values came from
+                          // a template.
+                          update.ytTagsTemplateId = ''
+                        }
                         if (selectedBroadcast.snippet.categoryId) update.ytCategoryId = selectedBroadcast.snippet.categoryId
+                        // Privacy mirrors title/tags semantics — pull
+                        // writes the YT value into the staged local
+                        // field AND snapshots it so the direction-aware
+                        // mismatch dot doesn't immediately re-flag.
+                        const remotePrivacy = selectedBroadcast.status?.privacyStatus
+                        if (remotePrivacy === 'public' || remotePrivacy === 'unlisted' || remotePrivacy === 'private') {
+                          update.ytPrivacyStatus = remotePrivacy
+                          update.ytLastPushedPrivacy = remotePrivacy
+                        }
                         // Sync snapshot — Pull represents "local and
                         // remote agree at this moment" just like Push
                         // does. Without this the direction-aware
@@ -5569,6 +5948,28 @@ function SidebarDetail({
               showDateOnly={isPastStream}
               onOpen={isPastStream ? onLoadAllVods : undefined}
               dropUp
+              // When linked but the broadcast pool can't see the id
+              // (e.g. quota outage blocked the fetch on stream open),
+              // render the trigger from local meta so the user sees
+              // their cached title + time instead of "not linked".
+              // selectedBroadcast — used elsewhere for mismatch dots —
+              // stays null so we don't pretend everything is in sync.
+              triggerFallback={!selectedBroadcast && linkedId ? {
+                // Resolve the template body so the cached title shows
+                // the rendered string (e.g. "Elden Ring [PART 5]") not
+                // raw placeholders. Falls back to the snapshot (which
+                // is already rendered) or the bare video id.
+                title: applyMergeFields(meta?.ytTitle ?? '', mergeFields).trim()
+                  || meta?.ytLastPushedTitle?.trim()
+                  || `Video ${linkedId}`,
+                scheduledIso: !isPastStream && meta?.scheduledTime
+                  ? `${folder.date}T${meta.scheduledTime}:00`
+                  : undefined,
+              } : undefined}
+              disableOpen={quotaExceeded}
+              triggerHint={quotaExceeded
+                ? 'Cached — refresh blocked while YouTube quota is exhausted'
+                : undefined}
             />
 
             {/* Date mismatch warning — only for upcoming broadcasts.
@@ -5626,38 +6027,23 @@ function SidebarDetail({
 
                 {streamDateInFuture && (
                   <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] text-gray-400 uppercase tracking-wider">Or create a new scheduled broadcast</span>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="flex items-center gap-1">
-                        <label className="text-[10px] text-gray-400 shrink-0">Time</label>
-                        <input
-                          type="time"
-                          value={newBroadcastTime}
-                          onChange={e => setNewBroadcastTime(e.target.value)}
-                          disabled={creatingBroadcast}
-                          // Asymmetric padding compensates for the native
-                          // time-input chrome — pt-[5px] pb-1 lines up
-                          // with neighboring controls.
-                          className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]"
-                        />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <label className="text-[10px] text-gray-400 shrink-0">Privacy</label>
-                        <PrivacyDropdown
-                          value={newBroadcastPrivacy}
-                          onChange={setNewBroadcastPrivacy}
-                          disabled={creatingBroadcast}
-                        />
-                      </div>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        loading={creatingBroadcast}
-                        onClick={handleCreateBroadcast}
-                      >
-                        Create broadcast
-                      </Button>
-                    </div>
+                    <BroadcastTimePrivacyRow
+                      time={newBroadcastTime}
+                      onTimeChange={setNewBroadcastTime}
+                      privacy={newBroadcastPrivacy}
+                      onPrivacyChange={setNewBroadcastPrivacy}
+                      disabled={creatingBroadcast}
+                      trailing={
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          loading={creatingBroadcast}
+                          onClick={handleCreateBroadcast}
+                        >
+                          Create broadcast
+                        </Button>
+                      }
+                    />
                     {createError && (
                       <p className="text-[10px] text-red-400 flex items-center gap-1">
                         <AlertTriangle size={10} className="shrink-0" />
@@ -5669,106 +6055,42 @@ function SidebarDetail({
               </>
             )}
 
-            {/* Privacy controls — only when a broadcast is linked and
-                we have its status loaded. Optimistic UI; revert + error
-                surfaced below if the API call fails.
-                Segmented-control layout matches the calendar settings
-                popover above (one outer border + rounded clip, three
-                flex-1 buttons inside with no individual borders) so
-                they read as one connected control. */}
-            {selectedBroadcast && currentPrivacy && (
-              <div className="flex items-center gap-1.5">
-                {/* Time picker — only meaningful for upcoming broadcasts
-                    (YouTube rejects schedule edits on live / completed
-                    streams; the API itself accepts but the change has
-                    no effect). Bound to `meta.scheduledTime` when the
-                    user has overridden it, otherwise reflects the
-                    broadcast's current scheduledStartTime. The push
-                    handler combines folder.date + this time into a
-                    fresh scheduledStartTime ISO when either differs
-                    from the broadcast's current value. */}
-                {isUpcomingBroadcast && (() => {
-                  const dir = broadcastMismatches.get('scheduledTime')
-                  const dotCls = dir === 'local' ? 'bg-blue-400'
-                    : dir === 'remote' ? 'bg-orange-400'
-                    : dir === 'both' ? 'bg-gradient-to-br from-blue-400 to-orange-400'
-                    : dir ? 'bg-gray-400' : ''
-                  return (
-                    <Tooltip content="Scheduled broadcast time" side="bottom">
-                      <div className="flex items-center gap-1 shrink-0">
-                        {dir && <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotCls}`} />}
-                        <input
-                          type="time"
-                          value={displayedScheduledTime}
-                          onChange={e => onUpdateMeta({ scheduledTime: e.target.value || undefined })}
-                          className="bg-white/5 border border-white/10 text-gray-200 text-[10px] rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
-                        />
-                      </div>
-                    </Tooltip>
-                  )
-                })()}
-                <div className="inline-flex bg-white/5 border border-white/10 rounded overflow-hidden">
-                  {([
-                    { value: 'public' as const,   label: 'Public',   Icon: Globe,    hint: 'Anyone can find and watch' },
-                    { value: 'unlisted' as const, label: 'Unlisted', Icon: LinkIcon, hint: 'Anyone with the link can watch' },
-                    { value: 'private' as const,  label: 'Private',  Icon: Lock,     hint: 'Anyone invited can watch' },
-                  ]).map(({ value, label, Icon, hint }) => {
-                    const active = currentPrivacy === value
-                    return (
-                      // `triggerClassName="w-[100px]"` so the Tooltip's
-                      // wrapping div participates in the segmented
-                      // control's equal-width layout — the inner button
-                      // then takes `w-full` to fill its 100px cell.
-                      // Without this, the default `inline-flex` wrapper
-                      // would let each button collapse to its content
-                      // width and break the joined-pill alignment.
-                      <Tooltip key={value} content={hint} side="bottom" triggerClassName="w-[100px]">
-                        <button
-                          type="button"
-                          onClick={() => changePrivacy(value)}
-                          disabled={savingPrivacy && !active}
-                          className={`w-full flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                            active
-                              ? 'bg-purple-600/25 text-purple-200'
-                              : 'text-gray-400 hover:bg-white/10 hover:text-gray-200 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400'
-                          }`}
-                        >
-                          <Icon size={10} />
-                          {label}
-                        </button>
-                      </Tooltip>
-                    )
-                  })}
-                </div>
-                {/* Copy public-share URL for the linked broadcast.
-                    Uses youtu.be (short form) for cleaner pastes; works
-                    for both upcoming + live + completed broadcasts since
-                    the broadcast id IS the video id. Brief Check-icon
-                    flash on success via the copiedUrl state. */}
-                <Tooltip content={copiedUrl ? 'Copied!' : 'Copy broadcast URL'} side="bottom">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!selectedBroadcast) return
-                      try {
-                        await navigator.clipboard.writeText(`https://youtu.be/${selectedBroadcast.id}`)
-                        setCopiedUrl(true)
-                        setTimeout(() => setCopiedUrl(false), 1500)
-                      } catch { /* clipboard refused — ignore */ }
-                    }}
-                    className="p-1 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors shrink-0"
-                  >
-                    {copiedUrl ? <Check size={12} className="text-green-400" /> : <Link2 size={12} />}
-                  </button>
-                </Tooltip>
-                {savingPrivacy && <Loader2 size={11} className="animate-spin text-gray-400 shrink-0" />}
-              </div>
-            )}
-            {privacyError && (
-              <p className="text-[10px] text-red-400 flex items-center gap-1">
-                <AlertTriangle size={10} className="shrink-0" />
-                {privacyError}
-              </p>
+            {/* Time + Privacy row for the linked state. Mirrors the
+                unlinked Create-broadcast row so the only difference
+                between the two states' editable controls is the
+                trailing button (Copy URL here vs Create broadcast over
+                there). Time is suppressed for past / live broadcasts —
+                YouTube rejects schedule edits once a broadcast has
+                started or finished. Edits stage in meta; the Push to
+                YouTube button picks them up. */}
+            {selectedBroadcast && displayedPrivacy && (
+              <BroadcastTimePrivacyRow
+                showTime={isUpcomingBroadcast}
+                time={displayedScheduledTime}
+                onTimeChange={v => onUpdateMeta({ scheduledTime: v || undefined })}
+                timeMismatch={broadcastMismatches.get('scheduledTime')}
+                privacy={displayedPrivacy}
+                onPrivacyChange={v => onUpdateMeta({ ytPrivacyStatus: v })}
+                privacyMismatch={broadcastMismatches.get('privacy')}
+                trailing={
+                  <Tooltip content={copiedUrl ? 'Copied!' : 'Copy broadcast URL'} side="bottom">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!selectedBroadcast) return
+                        try {
+                          await navigator.clipboard.writeText(`https://youtu.be/${selectedBroadcast.id}`)
+                          setCopiedUrl(true)
+                          setTimeout(() => setCopiedUrl(false), 1500)
+                        } catch { /* clipboard refused — ignore */ }
+                      }}
+                      className="p-1.5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors shrink-0"
+                    >
+                      {copiedUrl ? <Check size={14} className="text-green-400" /> : <Link2 size={14} />}
+                    </button>
+                  </Tooltip>
+                }
+              />
             )}
 
             {/* Shared-link warning — other stream items also pointing
@@ -5840,7 +6162,10 @@ function SidebarDetail({
           // older streams) so the YT title/game stand in for Twitch.
           const twSyncTitle = meta?.syncTitle !== false
           const twSyncGame = meta?.syncGame !== false
-          const twEffectiveTitle = twSyncTitle ? (meta?.ytTitle ?? '') : (meta?.twitchTitle ?? '')
+          // meta.ytTitle is the raw template body now — resolve through
+          // merge fields so the comparison matches what handlePushToTwitch
+          // actually sends (and what Twitch then stores).
+          const twEffectiveTitle = twSyncTitle ? resolveYtTitle(meta, folder, folders) : (meta?.twitchTitle ?? '')
           // Source-of-truth alignment with handlePushToTwitch above: when
           // syncGame is on, the comparison reads from the selected Topic/
           // Game tag (resolvePrimaryGame) — same value the push handler
@@ -6339,15 +6664,18 @@ function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched
   // dots are diagnostic, not actionable per-field) — but the colors
   // surface direction without forcing the user to remember whether
   // they touched that field.
-  const dotConfig: Record<NonNullable<typeof mismatched>, { cls: string; tip: string }> = {
-    local:   { cls: 'bg-blue-400',     tip: 'You changed this in SM since last sync — push to update YouTube.' },
-    remote:  { cls: 'bg-orange-400',   tip: 'YouTube has a newer value than what SM last sync’d — pull to update SM, or push to overwrite YouTube with your local value.' },
-    both:    { cls: 'bg-gradient-to-br from-blue-400 to-orange-400', tip: 'Both SM and YouTube have changed since the last sync — pulling will overwrite your local edits; pushing will overwrite YouTube’s.' },
-    unknown: { cls: 'bg-gray-400',     tip: 'Doesn’t match YouTube. Direction unknown — this stream hasn’t been sync’d since the per-field tracker was added.' },
+  const dotConfig: Record<NonNullable<typeof mismatched>, { cls: string; pulseColor: string; tip: string }> = {
+    local:   { cls: 'bg-blue-400',     pulseColor: 'rgba(96, 165, 250, 0.7)',  tip: 'You changed this in SM since last sync — push to update YouTube.' },
+    remote:  { cls: 'bg-orange-400',   pulseColor: 'rgba(251, 146, 60, 0.7)',  tip: 'YouTube has a newer value than what SM last sync’d — pull to update SM, or push to overwrite YouTube with your local value.' },
+    both:    { cls: 'bg-gradient-to-br from-blue-400 to-orange-400', pulseColor: 'rgba(168, 85, 247, 0.7)', tip: 'Both SM and YouTube have changed since the last sync — pulling will overwrite your local edits; pushing will overwrite YouTube’s.' },
+    unknown: { cls: 'bg-gray-400',     pulseColor: 'rgba(156, 163, 175, 0.7)', tip: 'Doesn’t match YouTube. Direction unknown — this stream hasn’t been sync’d since the per-field tracker was added.' },
   }
   const mismatchDot = mismatched ? (
     <Tooltip content={dotConfig[mismatched].tip} side="top">
-      <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotConfig[mismatched].cls}`} />
+      <span
+        className={`inline-block w-1.5 h-1.5 rounded-full mismatch-dot-pulse ${dotConfig[mismatched].cls}`}
+        style={{ ['--pulse-color' as any]: dotConfig[mismatched].pulseColor }}
+      />
     </Tooltip>
   ) : null
 
@@ -6373,9 +6701,12 @@ function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched
     )
   }
 
+  // Same shape as the attachRight branch — label sits at the bottom of
+  // its 16px row via items-end, with zero gap to the input below so
+  // every MetaRow matches the YouTube Title field's spacing exactly.
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between gap-2 min-h-[16px]">
+    <div className="flex flex-col">
+      <div className="flex items-end justify-between gap-2 min-h-[16px]">
         <span className={labelCls}>
           {label}
           {mergeHint && <span className={hintCls}>{mergeHint}</span>}
@@ -6624,189 +6955,48 @@ function EditableTextField({
 }
 
 /**
- * EditorTagChip — single chip with truncation-aware Tooltip. Detects
- * overflow via scrollWidth > clientWidth on the inner text span. Tooltip
- * only renders when the chip is actually clipped, so short tags don't
- * carry a redundant hover tip with the same text. Pulled out of
- * TagChipEditor's .map because hooks can't be called inside a loop.
+ * UseSuggestedTagsButton — inline "Use 'X' tags" link surfaced next to
+ * the YT tags field when a tag template's name matches the stream's
+ * primary game. Clicking applies the template; when the field already
+ * has chips the first click arms an overwrite confirm and the second
+ * confirms (mirrors SaveAsTemplateButton's overwrite UX).
  */
-function EditorTagChip({
-  tag, chipCls, onRemove,
+function UseSuggestedTagsButton({
+  template, existingCount, onApply,
 }: {
-  tag: string
-  chipCls: string
-  onRemove: () => void
+  template: { id: string; name: string }
+  existingCount: number
+  onApply: () => void
 }) {
-  const [truncated, setTruncated] = useState(false)
-  // Callback ref so the observer follows whichever inner span is
-  // currently mounted — see DisplayTagChip in legacyStreamsShared for
-  // the long version.
-  const obsCleanupRef = useRef<(() => void) | null>(null)
-  const setTextRef = useCallback((el: HTMLSpanElement | null) => {
-    obsCleanupRef.current?.()
-    obsCleanupRef.current = null
-    if (!el) return
-    const check = () => setTruncated(el.scrollWidth > el.clientWidth)
-    check()
-    let raf = 0
-    const obs = new ResizeObserver(() => {
-      cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(check)
-    })
-    obs.observe(el)
-    obsCleanupRef.current = () => {
-      cancelAnimationFrame(raf)
-      obs.disconnect()
-    }
-  }, [])
-  useEffect(() => () => { obsCleanupRef.current?.() }, [])
+  const [armed, setArmed] = useState(false)
+  // Disarm when the template suggestion changes (stream switch, primary
+  // game change, etc.) so a half-armed state doesn't carry over.
+  useEffect(() => { setArmed(false) }, [template.id])
 
-  const chip = (
-    <span className={chipCls}>
-      <span ref={setTextRef} className="truncate min-w-0">{tag}</span>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="text-gray-500 hover:text-red-400 transition-colors leading-none shrink-0"
-        aria-label={`Remove ${tag}`}
-      >
-        <X size={9} />
-      </button>
-    </span>
-  )
-  // inline-block + max-w-full + min-w-0 on the Tooltip wrapper — see
-  // DisplayTagChip in legacyStreamsShared for the long version.
-  // Default inline-flex wrapper would collapse to chip natural width
-  // and break truncation; min-w-0 overrides the flex-item min-content
-  // default so max-w-full actually cascades.
-  return truncated ? (
-    <Tooltip content={tag} side="top" triggerClassName="inline-block max-w-full min-w-0">{chip}</Tooltip>
-  ) : chip
-}
-
-/**
- * TagChipEditor — visible removable chips + a trailing input. Enter or comma
- * commits, Backspace on an empty input pops the last chip. Persists on every
- * mutation (no working-copy or blur-debounce); chip operations are discrete
- * enough that batching them just hides latency. Commits any pending input
- * text on blur so users can't lose a half-typed tag by clicking out.
- *
- * variant only swaps the chip color palette. Validation/limit hints are
- * rendered by the caller below the editor (kept out of this component since
- * YouTube and Twitch surface different numbers).
- */
-function TagChipEditor({
-  value,
-  onChange,
-  placeholder,
-  tabAttached,
-  aiFetcher,
-  footerRight,
-}: {
-  value: string[]
-  onChange: (next: string[]) => Promise<void> | void
-  placeholder?: string
-  /** Drops the top-right corner rounding so an InlineTemplateSelect tab
-   *  can sit flush against it. Border color stays put — tag editors
-   *  don't have an "active" template binding to highlight. */
-  tabAttached?: boolean
-  /** When set, Ctrl+Space inside the add-tag input asks Claude for a
-   *  suggestion. The text is inserted + selected; Tab accepts it into the
-   *  input, then Enter / comma commits it as one or more chips (the
-   *  commit logic splits on commas so a multi-tag suggestion becomes
-   *  multiple chips in a single round-trip). */
-  aiFetcher?: (prefix: string, suffix: string) => Promise<string | null>
-  /** Rendered flush-right on the same row as the AI hint (or alone in
-   *  that row when no AI fetcher is wired). Caller supplies the char-
-   *  count / valid-tag-count summary for the field. */
-  footerRight?: React.ReactNode
-}) {
-  const [input, setInput] = useState('')
-
-  // AI suggestion plumbing. Always called (hooks rule); the noop fetcher
-  // makes Ctrl+Space a no-op when AI isn't configured.
-  const noopFetcher = useCallback((_p: string, _s: string) => Promise.resolve(null), [])
-  const sg = useFieldSuggestion(input, setInput, aiFetcher ?? noopFetcher)
-  const aiEnabled = !!aiFetcher
-
-  const commit = (raw: string) => {
-    const fresh = raw.split(',').map(t => t.trim()).filter(Boolean)
-    if (fresh.length === 0) { setInput(''); return }
-    const seen = new Set(value.map(t => t.toLowerCase()))
-    const additions = fresh.filter(t => {
-      const k = t.toLowerCase()
-      if (seen.has(k)) return false
-      seen.add(k)
-      return true
-    })
-    if (additions.length > 0) onChange([...value, ...additions])
-    setInput('')
+  const needsConfirm = existingCount > 0
+  const handleClick = () => {
+    if (needsConfirm && !armed) { setArmed(true); return }
+    onApply()
+    setArmed(false)
   }
-
-  const removeAt = (i: number) => {
-    onChange(value.filter((_, idx) => idx !== i))
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Let useFieldSuggestion handle Ctrl+Space, Tab (accept), Esc
-    // (dismiss) first. If it consumed the key it called preventDefault,
-    // so the chip commit logic below won't fire on that Tab.
-    sg.props.onKeyDown(e)
-    if (e.defaultPrevented) return
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault()
-      commit(input)
-    } else if (e.key === 'Backspace' && input === '' && value.length > 0) {
-      e.preventDefault()
-      onChange(value.slice(0, -1))
-    }
-  }
-
-  const handleBlur = () => {
-    sg.props.onBlur()
-    if (input.trim()) commit(input)
-  }
-
-  // Both YouTube + Twitch tag editors share the brighter purple chip
-  // styling. The earlier gray-on-white/5 treatment for YouTube tags read
-  // as disabled, so it's been unified.
-  const chipCls = 'inline-flex items-center gap-1 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/25 rounded px-1.5 py-0.5 max-w-full'
 
   return (
-    <div className="flex flex-col">
-      <div className={`flex flex-wrap gap-1 items-center min-h-[1.75rem] bg-navy-900/70 border border-white/10 px-1.5 py-1 focus-within:border-purple-500/50 focus-within:bg-navy-900 transition-colors ${tabAttached ? 'rounded-lg rounded-tr-none' : 'rounded-lg'}`}>
-        {value.map((tag, i) => (
-          <EditorTagChip
-            key={`${tag}-${i}`}
-            tag={tag}
-            chipCls={chipCls}
-            onRemove={() => removeAt(i)}
-          />
-        ))}
-        <input
-          ref={sg.ref as React.RefObject<HTMLInputElement>}
-          type="text"
-          value={input}
-          onChange={sg.props.onChange}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          placeholder={value.length === 0 ? placeholder : ''}
-          className="flex-1 min-w-[80px] bg-transparent text-[11px] text-gray-200 placeholder-gray-500 outline-none border-none p-0.5"
-        />
-      </div>
-      {(aiEnabled || footerRight) && (
-        <div className="flex items-center justify-between gap-2 mt-0.5 min-h-[14px]">
-          {aiEnabled ? (
-            <p className="flex items-center gap-1 text-[10px] text-gray-400">
-              {sg.hint === 'loading' && <><Loader2 size={9} className="animate-spin" />Generating…</>}
-              {sg.hint === 'accept' && <>Tab to accept · Esc to dismiss · then Enter to commit</>}
-              {!sg.hint && <span>Ctrl+Space for AI suggestion</span>}
-            </p>
-          ) : <span />}
-          {footerRight}
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={handleClick}
+      className={`text-xs transition-colors ${
+        armed ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-gray-200'
+      }`}
+      title={
+        armed
+          ? `Click again to overwrite ${existingCount} tag${existingCount === 1 ? '' : 's'}`
+          : `Apply the "${template.name}" tag template to this stream`
+      }
+    >
+      {armed
+        ? `Overwrite ${existingCount} tag${existingCount === 1 ? '' : 's'}?`
+        : `Use "${template.name}" tags`}
+    </button>
   )
 }
 
@@ -6877,7 +7067,7 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
       {open && rect && ReactDOM.createPortal(
         <div
           ref={dropdownRef}
-          style={{ position: 'fixed', top: rect.bottom + 4, right: window.innerWidth - rect.right, zIndex: 9999, minWidth: 160 }}
+          style={{ position: 'fixed', top: rect.bottom + 4, right: window.innerWidth - rect.right, zIndex: 9999, minWidth: 160, width: 'max-content', maxWidth: 320 }}
           className="bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden max-h-72 overflow-y-auto"
           onMouseDown={e => e.preventDefault()}
         >
@@ -7043,6 +7233,88 @@ const PRIVACY_OPTIONS: Array<{ value: PrivacyValue; label: string; Icon: typeof 
   { value: 'unlisted', label: 'Unlisted', Icon: LinkIcon },
   { value: 'private',  label: 'Private',  Icon: Lock },
 ]
+/**
+ * BroadcastTimePrivacyRow — shared row layout for the inline broadcast
+ * picker section. Used in both the unlinked state (alongside a Create
+ * broadcast button) and the linked state (alongside a Copy URL button).
+ * Each field gets a stacked label-above-input shape that mirrors
+ * MetaRow's chrome (uppercase tracking + direction-aware dot inline
+ * with the label), keeping this row visually consistent with the rest
+ * of the sidebar.
+ *
+ * `showTime` is false for past / live broadcasts where YouTube doesn't
+ * accept schedule edits — only the privacy column renders in that case.
+ */
+function BroadcastTimePrivacyRow({
+  time, onTimeChange, timeMismatch, showTime = true,
+  privacy, onPrivacyChange, privacyMismatch,
+  disabled,
+  trailing,
+}: {
+  time: string
+  onTimeChange: (v: string) => void
+  timeMismatch?: 'local' | 'remote' | 'both' | 'unknown'
+  showTime?: boolean
+  privacy: PrivacyValue
+  onPrivacyChange: (v: PrivacyValue) => void
+  privacyMismatch?: 'local' | 'remote' | 'both' | 'unknown'
+  disabled?: boolean
+  trailing?: React.ReactNode
+}) {
+  // Same dot palette + tooltip copy as MetaRow. Kept inline here rather
+  // than imported from MetaRow because MetaRow's render shape (label +
+  // single child below) doesn't fit two side-by-side fields.
+  const dotConfig: Record<'local' | 'remote' | 'both' | 'unknown', { cls: string; pulseColor: string; tip: string }> = {
+    local:   { cls: 'bg-blue-400',     pulseColor: 'rgba(96, 165, 250, 0.7)',  tip: 'You changed this in SM since last sync — push to update YouTube.' },
+    remote:  { cls: 'bg-orange-400',   pulseColor: 'rgba(251, 146, 60, 0.7)',  tip: 'YouTube has a newer value than what SM last sync’d — pull to update SM, or push to overwrite YouTube with your local value.' },
+    both:    { cls: 'bg-gradient-to-br from-blue-400 to-orange-400', pulseColor: 'rgba(168, 85, 247, 0.7)', tip: 'Both SM and YouTube have changed since the last sync — pulling will overwrite your local edits; pushing will overwrite YouTube’s.' },
+    unknown: { cls: 'bg-gray-400',     pulseColor: 'rgba(156, 163, 175, 0.7)', tip: 'Doesn’t match YouTube. Direction unknown — this stream hasn’t been sync’d since the per-field tracker was added.' },
+  }
+  const renderDot = (dir?: 'local' | 'remote' | 'both' | 'unknown') => dir
+    ? (
+      <Tooltip content={dotConfig[dir].tip} side="top">
+        <span
+          className={`inline-block w-1.5 h-1.5 rounded-full mismatch-dot-pulse ${dotConfig[dir].cls}`}
+          style={{ ['--pulse-color' as any]: dotConfig[dir].pulseColor }}
+        />
+      </Tooltip>
+    )
+    : null
+  const labelCls = 'text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5'
+  return (
+    <div className="flex items-end gap-2 flex-wrap">
+      {/* Each field stacks label-then-input with no gap and uses
+          items-end on the label row so the label baseline sits exactly
+          at the input's top edge — matches MetaRow's tight spacing
+          (the YouTube Title pattern) every other field uses. */}
+      {showTime && (
+        <div className="flex flex-col">
+          <span className={`${labelCls} min-h-[16px] items-end`}>Broadcast time {renderDot(timeMismatch)}</span>
+          <input
+            type="time"
+            value={time}
+            onChange={e => onTimeChange(e.target.value)}
+            disabled={disabled}
+            // Asymmetric padding compensates for native time-input chrome
+            // so the input height lines up with the PrivacyDropdown next to
+            // it (pt-[5px] pb-1 → both rest on the same baseline).
+            className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]"
+          />
+        </div>
+      )}
+      <div className="flex flex-col">
+        <span className={`${labelCls} min-h-[16px] items-end`}>Privacy {renderDot(privacyMismatch)}</span>
+        <PrivacyDropdown
+          value={privacy}
+          onChange={onPrivacyChange}
+          disabled={disabled}
+        />
+      </div>
+      {trailing}
+    </div>
+  )
+}
+
 function PrivacyDropdown({
   value, onChange, disabled,
 }: {
@@ -7756,6 +8028,8 @@ function NewStreamModal({
   streamMode,
   source,
   folders,
+  ytTagTemplates,
+  twitchTagTemplates,
 }: {
   existingDates: string[]
   onClose: () => void
@@ -7771,6 +8045,8 @@ function NewStreamModal({
   source?: StreamFolder
   /** Used only in New Episode mode to compute the next episode number. */
   folders?: StreamFolder[]
+  ytTagTemplates: Array<{ id: string; name: string; tags: string[] }>
+  twitchTagTemplates: Array<{ id: string; name: string; tags: string[] }>
 }) {
   const isNewEpisode = !!source
   const { config } = useStore()
@@ -7782,6 +8058,19 @@ function NewStreamModal({
   // empty when the user hasn't set a default — picks happen in the
   // sidebar instead.
   const defaultYtCategoryId = config.defaultYouTubeCategoryId || ''
+  // Resolve default tag templates (per platform) once per render.
+  // Only applied when the new stream doesn't already inherit tags from
+  // a source episode — never overwrites existing values.
+  const defaultYtTags = (() => {
+    const id = config.defaultYouTubeTagsTemplateId
+    if (!id) return null
+    return ytTagTemplates.find(t => t.id === id)?.tags ?? null
+  })()
+  const defaultTwitchTags = (() => {
+    const id = config.defaultTwitchTagsTemplateId
+    if (!id) return null
+    return twitchTagTemplates.find(t => t.id === id)?.tags ?? null
+  })()
   const todayStr = (() => {
     const d = new Date()
     const yyyy = d.getFullYear()
@@ -7811,6 +8100,14 @@ function NewStreamModal({
       seriesAutoDetectPending: true,
     }
     if (defaultYtCategoryId) base.ytCategoryId = defaultYtCategoryId
+    if (defaultYtTags && defaultYtTags.length) {
+      base.ytTags = [...defaultYtTags]
+      base.ytTagsTemplateId = config.defaultYouTubeTagsTemplateId
+    }
+    if (defaultTwitchTags && defaultTwitchTags.length) {
+      base.twitchTags = [...defaultTwitchTags]
+      base.twitchTagsTemplateId = config.defaultTwitchTagsTemplateId
+    }
     if (!source) return base
 
     const m = source.meta ?? ({} as StreamMeta)
@@ -7841,9 +8138,21 @@ function NewStreamModal({
     // Only attach optional fields when the source actually has them, so
     // we don't write a bunch of '' / undefined keys for nothing.
     if (m.ytGameTitle) meta.ytGameTitle = m.ytGameTitle
-    if (m.ytTags?.length) meta.ytTags = m.ytTags
+    if (m.ytTags?.length) {
+      meta.ytTags = m.ytTags
+      if (m.ytTagsTemplateId) meta.ytTagsTemplateId = m.ytTagsTemplateId
+    } else if (defaultYtTags && defaultYtTags.length) {
+      meta.ytTags = [...defaultYtTags]
+      meta.ytTagsTemplateId = config.defaultYouTubeTagsTemplateId
+    }
     if (m.ytTitleTemplateId) meta.ytTitleTemplateId = m.ytTitleTemplateId
-    if (m.twitchTags?.length) meta.twitchTags = m.twitchTags
+    if (m.twitchTags?.length) {
+      meta.twitchTags = m.twitchTags
+      if (m.twitchTagsTemplateId) meta.twitchTagsTemplateId = m.twitchTagsTemplateId
+    } else if (defaultTwitchTags && defaultTwitchTags.length) {
+      meta.twitchTags = [...defaultTwitchTags]
+      meta.twitchTagsTemplateId = config.defaultTwitchTagsTemplateId
+    }
     if (m.syncTitle !== undefined) meta.syncTitle = m.syncTitle
     if (m.syncGame !== undefined) meta.syncGame = m.syncGame
     if (m.smThumbnail !== undefined) meta.smThumbnail = m.smThumbnail

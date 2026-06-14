@@ -38,6 +38,21 @@ interface BroadcastPickerProps {
    *  streams page's sidebar where the picker sits low in the viewport
    *  and the downward dropdown would clip against the window edge. */
   dropUp?: boolean
+  /** Fallback metadata for the trigger label when the broadcast id in
+   *  `value` isn't present in `broadcasts` (e.g. a quota outage blocked
+   *  the pool fetch). Renders as the trigger label only — NOT added to
+   *  the dropdown options and NOT plumbed into any mismatch logic.
+   *  Caller passes locally-cached fields from meta so the link doesn't
+   *  appear disconnected during an outage. */
+  triggerFallback?: { title: string; scheduledIso?: string }
+  /** Click-to-open is blocked when true. The trigger still renders
+   *  (showing `selected` or `triggerFallback`) but the dropdown can't
+   *  open — used while quota is exceeded since picking a different
+   *  broadcast needs a fresh pool fetch. */
+  disableOpen?: boolean
+  /** Small hint string shown under the trigger when the fallback is in
+   *  use — e.g. "Cached — refresh blocked by quota". */
+  triggerHint?: string
 }
 
 export function BroadcastPicker({
@@ -51,6 +66,9 @@ export function BroadcastPicker({
   showDateOnly = false,
   onOpen,
   dropUp = false,
+  triggerFallback,
+  disableOpen = false,
+  triggerHint,
 }: BroadcastPickerProps) {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
@@ -72,7 +90,7 @@ export function BroadcastPicker({
   )
 
   const handleOpen = () => {
-    if (loading) return
+    if (loading || disableOpen) return
     if (open) { setOpen(false); return }
     onOpen?.()
     setOpen(true)
@@ -82,6 +100,18 @@ export function BroadcastPicker({
     setOpen(false)
   }
 
+  // Show the cached fallback only when the pool genuinely missed AND
+  // the caller passed a fallback. `value` is the bound broadcast id —
+  // having one but no `selected` is the "linked but pool-blind" case
+  // we want to cover. Falsy `value` means truly unlinked → fall through
+  // to the placeholder.
+  const fallbackInUse = !selected && !!value && !!triggerFallback
+  const cursorCls = disableOpen
+    ? 'cursor-not-allowed'
+    : loading
+      ? 'cursor-wait'
+      : 'cursor-pointer'
+
   return (
     <>
       <button
@@ -89,12 +119,27 @@ export function BroadcastPicker({
         type="button"
         onClick={handleOpen}
         disabled={loading}
-        className={`w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 disabled:cursor-wait text-left relative ${
+        title={disableOpen ? 'Picker disabled while YouTube quota is exhausted.' : undefined}
+        className={`w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 ${cursorCls} text-left relative ${
           open ? 'ring-2 ring-purple-500/50' : ''
-        }`}
+        } ${disableOpen ? 'opacity-70' : ''}`}
       >
         {selected ? (
           <RowContent broadcast={selected} showDateOnly={showDateOnly} compact />
+        ) : fallbackInUse ? (
+          <RowContent
+            broadcast={{
+              id: value,
+              snippet: {
+                title: triggerFallback!.title || 'Untitled broadcast',
+                description: '',
+                scheduledStartTime: triggerFallback!.scheduledIso,
+              },
+              status: { lifeCycleStatus: '', privacyStatus: '' },
+            }}
+            showDateOnly={showDateOnly}
+            compact
+          />
         ) : (
           <span className="text-gray-400">
             {broadcasts.length === 0 ? (emptyLabel ?? placeholder) : placeholder}
@@ -102,9 +147,12 @@ export function BroadcastPicker({
         )}
         {loading
           ? <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />
-          : <ChevronDown size={12} className={`absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+          : <ChevronDown size={12} className={`absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-transform ${open ? 'rotate-180' : ''} ${disableOpen ? 'opacity-40' : ''}`} />
         }
       </button>
+      {triggerHint && fallbackInUse && (
+        <p className="mt-1 text-[10px] text-gray-400 italic">{triggerHint}</p>
+      )}
 
       {open && anchorRef.current && ReactDOM.createPortal(
         (() => {

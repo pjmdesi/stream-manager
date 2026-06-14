@@ -365,6 +365,14 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetQuotaState: () =>
     ipcRenderer.invoke('youtube:getQuotaState'),
 
+  // Dev-only: forcibly mark quota as exceeded so the renderer's outage
+  // banner + all gated calls behave as if YouTube returned a quota
+  // 403. Returns the resulting state after applying the change.
+  youtubeSetForcedQuotaExceeded: (forced: boolean) =>
+    ipcRenderer.invoke('youtube:setForcedQuotaExceeded', forced),
+  youtubeGetForcedQuotaExceeded: (): Promise<boolean> =>
+    ipcRenderer.invoke('youtube:getForcedQuotaExceeded'),
+
   // Pushed by the main process when quota state changes (mark or
   // auto-clear). Callback receives the same shape as `getQuotaState`.
   onYouTubeQuotaChanged: (cb: (state: { exceeded: boolean; resetsAt: string | null }) => void) => {
@@ -455,6 +463,8 @@ contextBridge.exposeInMainWorld('api', {
   setStreamTypeTags: (v: Record<string, string>) => ipcRenderer.invoke('store:setStreamTypeTags', v),
   getStreamTypeTextures: (): Promise<Record<string, string>> => ipcRenderer.invoke('store:getStreamTypeTextures'),
   setStreamTypeTextures: (v: Record<string, string>) => ipcRenderer.invoke('store:setStreamTypeTextures', v),
+  getGameTagsLinks: (): Promise<Record<string, string>> => ipcRenderer.invoke('store:getGameTagsLinks'),
+  setGameTagsLinks: (v: Record<string, string>) => ipcRenderer.invoke('store:setGameTagsLinks', v),
 
   // ── Twitch ────────────────────────────────────────────────────────────────
   twitchGetStatus: () =>
