@@ -4,7 +4,7 @@ import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
   Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ChevronsDown, ChevronsUp, X,
   Film, Zap, Combine, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
-  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon,
+  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon,
 } from 'lucide-react'
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { Tooltip } from '../ui/Tooltip'
@@ -23,6 +23,7 @@ import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
 import { TagChipEditor } from '../ui/TagChipEditor'
+import { DatePicker, type DateMark } from '../ui/DatePicker'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { TwitchCategoryRenamePrompt } from '../ui/TwitchCategoryRenamePrompt'
 import { v4 as uuidv4 } from 'uuid'
@@ -34,6 +35,9 @@ import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
+import { renderStreamTitle } from '../../lib/streamTitle'
+import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
+import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import type { StreamFolder, StreamMeta } from '../../types'
 
 /** Canonical _meta.json key for a stream. Mirrors the helper in
@@ -46,6 +50,19 @@ function streamMetaKey(folderPath: string, date: string, streamsDir: string | un
   if (root && fp === root) return date
   if (root && fp.startsWith(root + '/')) return fp.slice(root.length + 1)
   return fp.split('/').pop() ?? fp
+}
+
+/** The stream item's "main" thumbnail (what a YT push uploads): preferred
+ *  thumbnail basename → matching path → first thumbnail. Mirrors the sidebar's
+ *  resolvedStreamItemThumb. */
+function resolveStreamThumb(folder: StreamFolder): string | null {
+  if (folder.thumbnails.length === 0) return null
+  const preferredName = folder.meta?.preferredThumbnail
+  if (preferredName) {
+    const match = folder.thumbnails.find(p => (p.split(/[\\/]/).pop() ?? '') === preferredName)
+    if (match) return match
+  }
+  return folder.thumbnails[0]
 }
 
 /** Tolerates the legacy single-string streamType from old meta files —
@@ -106,6 +123,13 @@ function applyMergeFields(template: string, fields: Record<string, string>): str
  *  appears verbatim in the title field). */
 const YT_TITLE_MERGE_KEYS = ['game', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
 
+/** Platform title length limits, counted against the *resolved* title
+ *  (merge fields substituted). YouTube truncates video titles past 100
+ *  chars; Twitch caps stream titles at 140. Drives the character
+ *  counter under each title field. */
+const YT_TITLE_CHAR_LIMIT = 100
+const TWITCH_TITLE_CHAR_LIMIT = 140
+
 /** Build the merge-field map for a single stream — same shape the
  *  sidebar's mergeFields useMemo produces, but available outside the
  *  React tree so push handlers can resolve title bodies before
@@ -144,6 +168,18 @@ function resolveYtTitle(
   folders: StreamFolder[],
 ): string {
   return applyMergeFields(meta?.ytTitle ?? '', buildYtTitleMergeFields(meta, folder, folders))
+}
+
+/** Resolve `meta.twitchTitle` (a raw template body) against the same
+ *  merge fields the YT title uses. Only meaningful when the user has
+ *  unchecked "Same as YouTube title"; otherwise the YT-resolved title
+ *  is used for Twitch too. */
+function resolveTwitchTitle(
+  meta: StreamMeta | null | undefined,
+  folder: StreamFolder,
+  folders: StreamFolder[],
+): string {
+  return applyMergeFields(meta?.twitchTitle ?? '', buildYtTitleMergeFields(meta, folder, folders))
 }
 
 /** True when the given text contains at least one known YT title merge
@@ -258,6 +294,20 @@ function isPendingStream(folder: StreamFolder, today: string): boolean {
   })
 }
 
+/** Group folders by date into the marker map the DatePicker popup uses
+ *  for its stream dots (one dot per stream, archived ones ringed). */
+function buildDateMarks(folders: StreamFolder[] | undefined): Map<string, DateMark[]> {
+  const map = new Map<string, DateMark[]>()
+  if (!folders) return map
+  for (const f of folders) {
+    if (!f.date || f.isMissing) continue
+    const arr = map.get(f.date) ?? []
+    arr.push({ archived: !!f.meta?.archived })
+    map.set(f.date, arr)
+  }
+  return map
+}
+
 // Action-button styling pulled from the existing ExpandedStreamPanel so the
 // new sidebar matches the row's hover-revealed action panel design verbatim.
 // Keeping these as local constants avoids cross-file coupling while we
@@ -362,6 +412,12 @@ export function StreamsPage({
   const [ytVods, setYtVods] = useState<LiveBroadcast[]>([])
   const [ytVodsLoaded, setYtVodsLoaded] = useState(false)
   const [ytBroadcastsLoading, setYtBroadcastsLoading] = useState(false)
+  // Out-of-sync panel: remote snapshot per linked video id + check state +
+  // current thumbnail hash per folder (for the thumbnail-needs-push field).
+  const [outOfSyncRemote, setOutOfSyncRemote] = useState<Record<string, LiveBroadcast>>({})
+  const [thumbHashById, setThumbHashById] = useState<Record<string, string | null>>({})
+  const [outOfSyncLoading, setOutOfSyncLoading] = useState(false)
+  const [outOfSyncCheckedAt, setOutOfSyncCheckedAt] = useState<number | null>(null)
   const [twConnected, setTwConnected] = useState(false)
   // Cached Twitch channel snapshot — the title / category / tags
   // currently set on the channel. Compared against local stream meta
@@ -741,12 +797,16 @@ export function StreamsPage({
       const m = next.meta
       const syncTitle = m.syncTitle ?? true
       const syncGame = m.syncGame ?? true
-      // YT title field stores a raw template body; resolve through merge
-      // fields before treating it as a Twitch-pushable string. twitchTitle
-      // (non-sync path) is plain text and passes through.
+      // Both title fields store raw template bodies now — resolve each
+      // through merge fields before treating it as a Twitch-pushable
+      // string. When sync is on, the YT-resolved title stands in.
       const ytResolved = resolveYtTitle(m, next, foldersRef.current)
-      const title = (syncTitle ? ytResolved : m.twitchTitle) ?? ytResolved ?? m.twitchTitle ?? ''
-      const game = (syncGame ? m.ytGameTitle : m.twitchGameName) ?? m.ytGameTitle ?? m.twitchGameName ?? ''
+      const twResolved = resolveTwitchTitle(m, next, foldersRef.current)
+      const title = syncTitle ? ytResolved : twResolved
+      // Game comes from the primary Topic/Game tag when synced (the
+      // retired ytGameTitle input is no longer the source); the Twitch
+      // override applies only when the user unchecks the sync.
+      const game = (syncGame ? resolvePrimaryGame(m) : m.twitchGameName) ?? m.twitchGameName ?? ''
       // Twitch's PATCH /channels rejects an empty title — skip silently.
       if (!title.trim()) return
       const { compat: tags } = toTwitchCompatibleTags(m.twitchTags ?? [])
@@ -814,7 +874,7 @@ export function StreamsPage({
     for (const f of folders) {
       const id = f.meta?.ytVideoId
       if (!id) continue
-      const title = f.meta?.ytTitle?.trim() || f.meta?.twitchTitle?.trim()
+      const title = renderStreamTitle(f, folders)
       refs.push({ broadcastId: id, folderDate: f.date, folderTitle: title || undefined })
     }
     return refs
@@ -1075,7 +1135,7 @@ export function StreamsPage({
     openThumbnailEditor({
       folderPath: folder.folderPath,
       date: folder.date,
-      title: folder.meta?.ytTitle ?? folder.meta?.games?.join(', '),
+      title: renderStreamTitle(folder, folders),
       meta: folder.meta ?? undefined,
       totalEpisodes: (() => {
         if (isStandalone(folder.meta)) return 0
@@ -1279,6 +1339,137 @@ export function StreamsPage({
     }
   }, [showBanner, setYtBroadcasts, setYtVods, updateMeta, folders])
 
+  // ── Out-of-sync panel (sidebar empty state) ───────────────────────────────
+  // Compares every linked stream's local meta against YouTube and surfaces the
+  // drift. Reads are cheap (batched videos.list, 1 unit / 50 ids + the already-
+  // loaded broadcasts pool), so we re-check whenever the empty state is shown.
+  const refreshOutOfSync = useCallback(async () => {
+    if (!ytConnected) { setOutOfSyncRemote({}); return }
+    const linkedIds = Array.from(new Set(
+      folders.map(f => f.meta?.ytVideoId).filter((id): id is string => !!id)
+    ))
+    if (linkedIds.length === 0) { setOutOfSyncRemote({}); setOutOfSyncCheckedAt(Date.now()); return }
+    setOutOfSyncLoading(true)
+    try {
+      // Prefer the already-loaded pools (broadcasts carry scheduledStartTime);
+      // batch-fetch the rest (past videos / regular uploads) by id.
+      const poolById = new Map<string, LiveBroadcast>()
+      for (const b of ytBroadcasts) poolById.set(b.id, b)
+      for (const v of ytVods) poolById.set(v.id, v)
+      const missing = linkedIds.filter(id => !poolById.has(id))
+      const fetched = missing.length > 0 ? await window.api.youtubeGetVideosByIds(missing) : []
+      const fetchedById = new Map(fetched.map(b => [b.id, b]))
+      const map: Record<string, LiveBroadcast> = {}
+      for (const id of linkedIds) {
+        const b = poolById.get(id) ?? fetchedById.get(id)
+        if (b) map[id] = b
+      }
+      // Hash each linked stream's thumbnail (batched) so the panel can flag
+      // "thumbnail changed since last push" — local-only, always a push.
+      const linkedFolders = folders.filter(f => f.meta?.ytVideoId && map[f.meta.ytVideoId])
+      const thumbPaths = Array.from(new Set(
+        linkedFolders.map(resolveStreamThumb).filter((p): p is string => !!p)
+      ))
+      const hashByPath = thumbPaths.length > 0 ? await window.api.thumbnailHashFiles(thumbPaths) : {}
+      const byFolder: Record<string, string | null> = {}
+      for (const f of linkedFolders) {
+        const p = resolveStreamThumb(f)
+        byFolder[f.folderPath] = p ? (hashByPath[p] ?? null) : null
+      }
+      setOutOfSyncRemote(map)
+      setThumbHashById(byFolder)
+      setOutOfSyncCheckedAt(Date.now())
+    } catch (e) {
+      console.warn('Out-of-sync check failed', e)
+    } finally {
+      setOutOfSyncLoading(false)
+    }
+  }, [ytConnected, folders, ytBroadcasts, ytVods])
+  // Ref to the latest checker so the auto-trigger doesn't depend on `folders`
+  // (which would re-fetch on every optimistic meta write during a bulk resolve).
+  const refreshOutOfSyncRef = useRef(refreshOutOfSync)
+  useEffect(() => { refreshOutOfSyncRef.current = refreshOutOfSync })
+
+  // Auto-check when the empty state is shown (page visible, no selection) and
+  // YT is connected; also re-runs once when the broadcasts/VOD pools finish
+  // loading (length transitions), so upcoming-broadcast schedule mismatches
+  // are picked up. NOT keyed on `folders` to avoid churn during resolves.
+  useEffect(() => {
+    if (!isVisible || selectedFolderPath || !ytConnected) return
+    // Wait for the folder list to finish loading — running while `folders` is
+    // still empty would hit the no-linked-ids path and prematurely mark the
+    // panel "checked" (showing the green in-sync state) before the real check.
+    if (loading) return
+    refreshOutOfSyncRef.current()
+  }, [isVisible, selectedFolderPath, ytConnected, loading, folders.length, ytBroadcasts.length, ytVods.length])
+
+  const outOfSyncItems = useMemo<OutOfSyncItem[]>(() => {
+    const out: OutOfSyncItem[] = []
+    for (const f of folders) {
+      const id = f.meta?.ytVideoId
+      if (!id) continue
+      const remote = outOfSyncRemote[id]
+      if (!remote) continue
+      const mismatch = computeBroadcastMismatch(f, folders, remote)
+      // Thumbnail-needs-push (local-only): current thumbnail bytes differ from
+      // what was last pushed (ytThumbnailPushedHash). Surfaces even when no
+      // metadata differs.
+      const curThumbHash = thumbHashById[f.folderPath]
+      const thumbNeedsPush = !!resolveStreamThumb(f) && curThumbHash != null && curThumbHash !== f.meta?.ytThumbnailPushedHash
+      if (thumbNeedsPush) mismatch.set('thumbnail', 'local')
+      if (mismatch.size === 0) continue
+      const kind = classifyMismatch(mismatch)
+      if (kind === 'none') continue
+      const signature = outOfSyncSignature(f, folders, remote, { current: curThumbHash ?? null, pushed: f.meta?.ytThumbnailPushedHash })
+      const ignored = !!f.meta?.ignoreOutOfSyncSig && f.meta.ignoreOutOfSyncSig === signature
+      out.push({ folder: f, mismatch, kind, signature, ignored })
+    }
+    return out
+  }, [folders, outOfSyncRemote, thumbHashById])
+
+  const outOfSyncItemsRef = useRef(outOfSyncItems)
+  useEffect(() => { outOfSyncItemsRef.current = outOfSyncItems })
+
+  const handleBulkResolve = useCallback(async (kind: 'push' | 'pull', targets: StreamFolder[]) => {
+    for (const f of targets) {
+      try {
+        if (kind === 'push') {
+          // Upload the thumbnail only when it's part of this stream's
+          // divergence (pass the resolved path); otherwise skip it (null) so we
+          // don't burn 50 units re-uploading an unchanged thumbnail.
+          const item = outOfSyncItemsRef.current.find(i => i.folder.folderPath === f.folderPath)
+          const thumbPath = item?.mismatch.has('thumbnail') ? resolveStreamThumb(f) : null
+          await handlePushToYoutube(f, thumbPath)
+        } else {
+          const id = f.meta?.ytVideoId
+          const remote = id ? outOfSyncRemote[id] : undefined
+          if (remote) await updateMeta(f.folderPath, buildPullUpdate(remote))
+        }
+      } catch (e) {
+        console.warn('Bulk resolve failed for', f.folderPath, e)
+      }
+    }
+    await refreshOutOfSyncRef.current()
+  }, [handlePushToYoutube, updateMeta, outOfSyncRemote])
+
+  // Ignore = snapshot the current divergence fingerprint into meta; the item
+  // stays hidden only while that signature still matches (any local/remote
+  // change re-surfaces it). Un-ignore clears it.
+  const handleIgnoreOutOfSync = useCallback(async (targets: StreamFolder[]) => {
+    for (const f of targets) {
+      const item = outOfSyncItemsRef.current.find(i => i.folder.folderPath === f.folderPath)
+      if (!item) continue
+      await updateMeta(f.folderPath, { ignoreOutOfSyncSig: item.signature, ignoreOutOfSyncAt: Date.now() })
+    }
+    await refreshOutOfSyncRef.current()
+  }, [updateMeta])
+  const handleUnignoreOutOfSync = useCallback(async (targets: StreamFolder[]) => {
+    for (const f of targets) {
+      await updateMeta(f.folderPath, { ignoreOutOfSyncSig: undefined, ignoreOutOfSyncAt: undefined })
+    }
+    await refreshOutOfSyncRef.current()
+  }, [updateMeta])
+
   // Push to Twitch. Honours syncTitle/syncGame: when sync is on (or
   // undefined), the YouTube title/game stand in for the Twitch fields. Tags
   // get sanitised through toTwitchCompatibleTags so anything that violates
@@ -1292,11 +1483,11 @@ export function StreamsPage({
     }
     const syncTitle = meta.syncTitle !== false
     const syncGame = meta.syncGame !== false
-    // When syncing from YT, meta.ytTitle is the raw template body — resolve
-    // through merge fields so Twitch receives the rendered string just
-    // like YouTube would. twitchTitle (when sync is off) is plain text;
-    // pass through verbatim.
-    const effectiveTitle = syncTitle ? resolveYtTitle(meta, folder, folders) : (meta.twitchTitle ?? '')
+    // Both title fields store raw template bodies — resolve through
+    // merge fields so Twitch receives the rendered string. When sync
+    // is on the YT-resolved title stands in; when off the dedicated
+    // Twitch body is resolved instead.
+    const effectiveTitle = syncTitle ? resolveYtTitle(meta, folder, folders) : resolveTwitchTitle(meta, folder, folders)
     // Twitch category now reads directly from the selected Topic/Game
     // tag rather than routing through `ytGameTitle`. Removes the hidden
     // YouTube-coupling that made the dependency invisible in the UI;
@@ -1401,11 +1592,16 @@ export function StreamsPage({
   // shown so the user can see broken state).
   const visibleFolders = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
+    // Resolved display title per folder — used for both search and the
+    // title sort so users match/order by what they see, not the raw
+    // `{game} … {tagline}` template body stored in meta.
+    const titleByPath = new Map(folders.map(f => [f.folderPath, renderStreamTitle(f, folders)]))
     const matches = (f: StreamFolder) => {
       if (!q) return true
       const fields = [
         f.date,
         f.folderName,
+        titleByPath.get(f.folderPath) ?? '',
         f.meta?.ytTitle ?? '',
         f.meta?.twitchTitle ?? '',
         f.meta?.comments ?? '',
@@ -1427,8 +1623,8 @@ export function StreamsPage({
     })
     list.sort((a, b) => {
       if (sortMode === 'title-asc') {
-        const at = (a.meta?.ytTitle?.trim() || a.meta?.games?.join(', ') || a.folderName).toLowerCase()
-        const bt = (b.meta?.ytTitle?.trim() || b.meta?.games?.join(', ') || b.folderName).toLowerCase()
+        const at = (titleByPath.get(a.folderPath) || a.folderName).toLowerCase()
+        const bt = (titleByPath.get(b.folderPath) || b.folderName).toLowerCase()
         return at.localeCompare(bt)
       }
       const cmp = a.date.localeCompare(b.date)
@@ -2122,7 +2318,7 @@ export function StreamsPage({
                   </Button>
                 </Tooltip>
                 <Tooltip content="Select multiple streams for bulk actions" side="bottom">
-                  <Button variant="ghost" size="sm" icon={<CheckCheck size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                  <Button variant="ghost" size="sm" icon={<ListChecks size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
                     labelCollapsed={selectedFolderPath ? true : undefined}>
                     Select
                   </Button>
@@ -2332,6 +2528,7 @@ export function StreamsPage({
                       <StreamListItem
                         key={f.folderPath}
                         folder={f}
+                        folders={folders}
                         selected={f.folderPath === selectedFolderPath}
                         animDurationMs={animDurationMs}
                         compact={false}
@@ -2343,6 +2540,7 @@ export function StreamsPage({
                         dragMovedRef={dragMoved}
                         cloudSyncActive={cloudSyncActive}
                         isPending={isPendingStream(f, today)}
+                        isToday={f.date === today}
                         isNextUpcoming={f.folderPath === nextUpcomingFolderPath}
                         isLive={!!(ytId && ytLiveMap[ytId])}
                         privacyStatus={status?.privacyStatus ?? null}
@@ -2431,10 +2629,33 @@ export function StreamsPage({
               <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] font-semibold uppercase tracking-wider text-gray-500 mt-2">Calendar</span>
             </button>
           ) : (
-            <SidebarMonthCalendar
-              folders={folders}
-              onSelectStream={(f) => setSelectedFolderPath(f.folderPath)}
-            />
+            <div className="h-full flex flex-col">
+              {/* Fixed-height calendar widget pinned to the top; the out-of-sync
+                  panel below fills the remaining height and scrolls. */}
+              <div className="h-[345px] shrink-0">
+                <SidebarMonthCalendar
+                  folders={folders}
+                  onSelectStream={(f) => setSelectedFolderPath(f.folderPath)}
+                />
+              </div>
+              {ytConnected && folders.some(f => f.meta?.ytVideoId) && (
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  <OutOfSyncPanel
+                    items={outOfSyncItems}
+                    folders={folders}
+                    thumbsKey={thumbsKey}
+                    loading={outOfSyncLoading}
+                    checkedAt={outOfSyncCheckedAt}
+                    quotaExceeded={ytQuota.exceeded}
+                    onRefresh={refreshOutOfSync}
+                    onOpenStream={(f) => setSelectedFolderPath(f.folderPath)}
+                    onResolve={handleBulkResolve}
+                    onIgnore={handleIgnoreOutOfSync}
+                    onUnignore={handleUnignoreOutOfSync}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -3066,14 +3287,17 @@ export function StreamsPage({
  * present, and an unlinked icon when it isn't.
  */
 function StreamListItem({
-  folder, selected, compact, selectMode, multiSelected, onToggleMultiSelect,
+  folder, folders, selected, compact, selectMode, multiSelected, onToggleMultiSelect,
   onDragStart, onDragEnter, dragMovedRef,
-  isPending, isNextUpcoming, isLive, privacyStatus, isLivestream,
+  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
   animDurationMs,
 }: {
   folder: StreamFolder
+  /** Full folder list — needed to render the title template ({total_episodes}
+   *  counts siblings in the same game + season). */
+  folders: StreamFolder[]
   selected: boolean
   /** Page-level sidebar transition duration. Drives the delay before
    *  the selected-row indicator appears on open (so it lands after the
@@ -3096,6 +3320,11 @@ function StreamListItem({
    *  ref so it doesn't toggle the start row off. */
   dragMovedRef: React.MutableRefObject<boolean>
   isPending: boolean
+  /** True when this pending stream's date is the current day. Today's
+   *  upcoming streams render with a blue accent instead of the teal
+   *  used for future-dated upcoming streams, so "happening today"
+   *  stands out at a glance. */
+  isToday: boolean
   /** True when this row is the soonest-upcoming pending stream — just
    *  swaps the unlinked-pending badge tooltip text. */
   isNextUpcoming: boolean
@@ -3166,7 +3395,7 @@ function StreamListItem({
   const firstThumbLocal = thumbnailLocalFlags?.[0] ?? true
   const extraCount = thumbnails.length - 1
   const hasSMThumbnail = thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
-  const title = meta?.ytTitle?.trim() || meta?.twitchTitle?.trim() || meta?.games?.join(', ') || folder.folderName
+  const title = renderStreamTitle(folder, folders)
 
   // Title clamp — lines that fit within the thumbnail's height once you
   // subtract the date row above it. Mirrors the old page formula.
@@ -3195,13 +3424,19 @@ function StreamListItem({
       style={selectMode ? { userSelect: 'none' } : undefined}
       className={`group transition-colors cursor-pointer ${
         isPending
-          ? 'border-b border-teal-900/30 bg-teal-900/15 hover:bg-teal-900/30'
+          ? (isToday
+              ? 'border-b border-blue-900/30 bg-blue-900/15 hover:bg-blue-900/30'
+              : 'border-b border-teal-900/30 bg-teal-900/15 hover:bg-teal-900/30')
           : 'border-b border-white/10 hover:bg-white/[0.03]'
       } ${selected ? (
         // Right-edge indicator lives on the date cell below (search for
         // `selected-row-indicator`) so it stays visible when the sidebar
         // overlay covers the row's actual right edge.
-        `${isPending ? 'border-b border-teal-700/40 !bg-teal-700/30 hover:!bg-teal-700/40' : '!bg-purple-900/20'}`
+        `${isPending
+          ? (isToday
+              ? 'border-b border-blue-700/40 !bg-blue-700/30 hover:!bg-blue-700/40'
+              : 'border-b border-teal-700/40 !bg-teal-700/30 hover:!bg-teal-700/40')
+          : '!bg-purple-900/20'}`
       ) : ''} ${selectMode && multiSelected ? '!bg-purple-900/15' : ''}`}
     >
       {/* Checkbox column — only renders in select mode. The pl-3 keeps
@@ -3777,20 +4012,12 @@ function SidebarMonthCalendar({
 
       {/* Day grid — same column shape as the header, rendered week-by-
           week (7 cells per row) so each row can prefix a wk-number cell
-          when enabled.
-          `containerType: inline-size` makes the grid itself the
-          reference for its descendants' `cqi` calculations. The day
-          cells (below) then get an explicit fixed height computed
-          from the grid's width — what a 7-column (no-week-numbers)
-          cell would be — so the cells stay the same height whether
-          the wk# column is showing or not. Without this, `gridAutoRows`
-          alone gets overridden by the grid's default
-          `align-content: stretch` because the calendar widget's
-          flex-col parent hands the grid more vertical space than the
-          rows naturally need. */}
+          when enabled. `flex-1 min-h-0 auto-rows-fr` fills the calendar's
+          fixed height with six equal rows; the cells fill their rows
+          (h-full), so the calendar height is constant regardless of the
+          wk# column. */}
       <div
-        className={`grid ${showWeekNumbers ? 'grid-cols-[auto_repeat(7,minmax(0,1fr))]' : 'grid-cols-7'} gap-0.5 content-start`}
-        style={{ containerType: 'inline-size' }}
+        className={`grid ${showWeekNumbers ? 'grid-cols-[auto_repeat(7,minmax(0,1fr))]' : 'grid-cols-7'} gap-0.5 flex-1 min-h-0 auto-rows-fr`}
       >
         {Array.from({ length: 6 }, (_, weekIdx) => {
           const weekStart = weekIdx * 7
@@ -3827,10 +4054,10 @@ function SidebarMonthCalendar({
           // turned that off — keep the grid slot so columns stay
           // aligned with the day-of-week header.
           if (!c.inMonth && !showAdjacent) {
-            // Empty spacer takes the same fixed height as a real
-            // day cell so the row's vertical footprint is identical
-            // whether the row is populated or blank.
-            return <div key={c.iso} style={{ height: 'calc((100cqi - 12px) / 7)' }} />
+            // Empty spacer occupies the grid slot; the row's height comes
+            // from the grid's `auto-rows-fr`, so blank and populated rows
+            // share the same footprint.
+            return <div key={c.iso} />
           }
           const has = c.streams.length > 0
           const isFuture = c.iso > today
@@ -3851,15 +4078,13 @@ function SidebarMonthCalendar({
               type="button"
               disabled={!has}
               onClick={() => has && onSelectStream(c.streams[0])}
-              // Explicit pixel height computed from the grid's own
-              // width (via container queries): the height a cell
-              // would have if there were 7 equal-width columns and
-              // no wk# column. Toggling the wk# column only changes
-              // the cell's width — height stays put, calendar height
-              // stays put, popover anchor stays put.
-              style={{ height: 'calc((100cqi - 12px) / 7)' }}
+              // Fill the grid row. The grid is `flex-1 auto-rows-fr` inside the
+              // fixed-height calendar, so the six rows divide the available
+              // height evenly — no container query needed (it was a source of a
+              // Chromium paint glitch when the sibling out-of-sync panel
+              // reflowed). Height stays constant since the calendar box is fixed.
               className={[
-                'relative w-full flex items-center justify-center rounded transition-colors',
+                'relative w-full h-full flex items-center justify-center rounded transition-colors',
                 has ? 'cursor-pointer hover:bg-white/10' : 'cursor-default',
                 c.isToday ? 'ring-1 ring-purple-500/50' : '',
               ].join(' ')}
@@ -3903,8 +4128,7 @@ function SidebarMonthCalendar({
           const tooltipContent = multi ? (
             <div className="flex flex-col gap-0.5 -mx-2 -my-1.5 py-1">
               {c.streams.map((f) => {
-                const title =
-                  f.meta?.ytTitle?.trim() || f.meta?.games?.join(', ') || f.folderName
+                const title = renderStreamTitle(f, folders)
                 return (
                   <button
                     key={f.folderPath}
@@ -3919,9 +4143,7 @@ function SidebarMonthCalendar({
             </div>
           ) : (
             <div className="text-xs text-gray-100 truncate max-w-[240px]">
-              {c.streams[0].meta?.ytTitle?.trim()
-                || c.streams[0].meta?.games?.join(', ')
-                || c.streams[0].folderName}
+              {renderStreamTitle(c.streams[0], folders)}
             </div>
           )
 
@@ -4008,11 +4230,26 @@ function SidebarMonthCalendar({
 
 // ── Sidebar detail ──────────────────────────────────────────────────────────
 
+/** Meta fields excluded from the detail-sidebar undo/redo history. These are
+ *  system snapshots / non-input actions rather than user field edits: push
+ *  state, broadcast link, thumbnail selection, and the retired ytGameTitle
+ *  auto-sync. A partial touching ANY of these is treated as a system/bulk
+ *  write and isn't recorded — which also drops mixed writes like
+ *  Pull-from-YouTube (it carries ytLastPushed* keys) out of the user's undo
+ *  timeline, where reverting it would be surprising. */
+const META_HISTORY_SKIP = new Set<string>([
+  'ytVideoId', 'ytGameTitle', 'ytThumbnailPushedHash',
+  'ytLastPushedTitle', 'ytLastPushedDescription', 'ytLastPushedTags',
+  'ytLastPushedCategoryId', 'ytLastPushedDate', 'ytLastPushedScheduledTime',
+  'ytLastPushedPrivacy', 'preferredThumbnail', 'smThumbnail', 'smThumbnailTemplate',
+  'videoMap',
+])
+
 /** All sidebar content when an item is selected. Extracted so the empty
  *  state stays cleanly separated and the metadata + action layout can
  *  evolve independently. */
 function SidebarDetail({
-  folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, onClose, onUpdateMeta, cloudSyncActive,
+  folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, onClose, onUpdateMeta: onUpdateMetaRaw, cloudSyncActive,
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
@@ -4149,7 +4386,86 @@ function SidebarDetail({
   gameTagsLinks: Record<string, string>
 }) {
   const meta = folder.meta
-  const title = meta?.ytTitle?.trim() || meta?.games?.join(', ') || folder.folderName
+
+  // ── Undo/redo for the sidebar's editable fields ───────────────────────────
+  // One linear history shared across every input in the detail sidebar (tags,
+  // title, tagline, description, season/episode, category, sync toggles, …).
+  // `recordedUpdateMeta` shadows the raw onUpdateMeta prop so every user edit
+  // flows through here and snapshots the prior value; system/bulk writes are
+  // skipped via META_HISTORY_SKIP, and the template auto-apply effects bypass
+  // recording entirely by going through `onUpdateMetaRef` (wired to the raw
+  // prop below). Keyboard-only: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo.
+  const sidebarRootRef = useRef<HTMLDivElement>(null)
+  const metaRef = useRef(meta)
+  useEffect(() => { metaRef.current = meta })
+  // The parent passes a fresh inline onUpdateMeta arrow each render; route
+  // through a ref so the wrappers below stay reference-stable (which also
+  // keeps every downstream callback that depends on `onUpdateMeta` stable).
+  const onUpdateMetaRawRef = useRef(onUpdateMetaRaw)
+  useEffect(() => { onUpdateMetaRawRef.current = onUpdateMetaRaw })
+  const metaUndoRef = useRef<{ before: Partial<StreamMeta>; after: Partial<StreamMeta> }[]>([])
+  const metaRedoRef = useRef<{ before: Partial<StreamMeta>; after: Partial<StreamMeta> }[]>([])
+  // Fresh history per stream — undoing into another stream's edits would be
+  // meaningless and the before-snapshots wouldn't match.
+  useEffect(() => { metaUndoRef.current = []; metaRedoRef.current = [] }, [folder.folderPath])
+
+  const recordedUpdateMeta = useCallback((partial: Partial<StreamMeta>) => {
+    const keys = Object.keys(partial)
+    if (keys.length > 0 && !keys.some(k => META_HISTORY_SKIP.has(k))) {
+      const m = metaRef.current as unknown as Record<string, unknown> | undefined
+      const before: Record<string, unknown> = {}
+      for (const k of keys) before[k] = m?.[k]
+      metaUndoRef.current.push({ before: before as Partial<StreamMeta>, after: { ...partial } })
+      metaRedoRef.current = []
+    }
+    return onUpdateMetaRawRef.current(partial)
+  }, [])
+  const onUpdateMeta = recordedUpdateMeta
+
+  const undoMeta = useCallback(() => {
+    const entry = metaUndoRef.current.pop()
+    if (!entry) return
+    metaRedoRef.current.push(entry)
+    onUpdateMetaRawRef.current(entry.before)
+  }, [])
+  const redoMeta = useCallback(() => {
+    const entry = metaRedoRef.current.pop()
+    if (!entry) return
+    metaUndoRef.current.push(entry)
+    onUpdateMetaRawRef.current(entry.after)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const k = e.key.toLowerCase()
+      const isUndo = k === 'z' && !e.shiftKey
+      const isRedo = k === 'y' || (k === 'z' && e.shiftKey)
+      if (!isUndo && !isRedo) return
+      // Scope to the sidebar — only act when focus is inside it. This also
+      // covers the streams page being hidden behind another page: hiding it
+      // (display:none) blurs the focused field, so focus leaves the sidebar
+      // and we don't hijack Ctrl+Z on the player/thumbnail pages.
+      const root = sidebarRootRef.current
+      if (!root || !root.contains(document.activeElement)) return
+      // Defer to native text undo/redo while actively editing: a text input
+      // with content, or any contenteditable (the title / description chip
+      // editors). An *empty* tag input still routes here, so Ctrl+Z right
+      // after committing a tag undoes that tag.
+      const ae = document.activeElement as HTMLElement | null
+      if (ae) {
+        if (ae.isContentEditable) return
+        if ((ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && (ae as HTMLInputElement).value !== '') return
+      }
+      e.preventDefault()
+      if (isUndo) undoMeta()
+      else redoMeta()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [undoMeta, redoMeta])
+
+  const title = renderStreamTitle(folder, folders)
   const hasSMThumbnail = folder.thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
   const videoCount = folder.videoCount
   // Ref to the YT Category <select> so the soft-block on push (when
@@ -4175,6 +4491,7 @@ function SidebarDetail({
   // selections stay ephemeral for now (the user only asked for title to
   // persist; can lift those later if it turns out to be useful).
   const titleTplId = meta?.ytTitleTemplateId ?? ''
+  const twitchTitleTplId = meta?.twitchTitleTemplateId ?? ''
   const tagsTplId = meta?.ytTagsTemplateId ?? ''
   const twitchTagsTplId = meta?.twitchTagsTemplateId ?? ''
   const [descTplId, setDescTplId] = useState('')
@@ -4229,12 +4546,18 @@ function SidebarDetail({
     [standalone],
   )
   const titleInsertRef = useRef<((text: string) => void) | null>(null)
+  // Separate insert handle for the Twitch title's chip editor (shown
+  // only when the user unchecks "Same as YouTube title"). Shares the
+  // same merge-key + inapplicable sets as the YT title.
+  const twitchTitleInsertRef = useRef<((text: string) => void) | null>(null)
 
   // Hoist onUpdateMeta into a ref so other effects below can call it
   // without re-running every time the parent re-renders (the parent
   // passes an inline arrow each time, so it isn't reference-stable).
-  const onUpdateMetaRef = useRef(onUpdateMeta)
-  useEffect(() => { onUpdateMetaRef.current = onUpdateMeta })
+  // Wired to the RAW prop, not the recording wrapper: the template
+  // auto-apply effects that use this ref shouldn't create undo entries.
+  const onUpdateMetaRef = useRef(onUpdateMetaRaw)
+  useEffect(() => { onUpdateMetaRef.current = onUpdateMetaRaw })
 
   // One-shot series auto-detect on first game-add. Only fires for streams
   // explicitly marked `seriesAutoDetectPending: true` at creation (the
@@ -4348,6 +4671,10 @@ function SidebarDetail({
     const v = (meta?.ytTitle ?? '').trim()
     return v.length > 0 && !ytTitleTemplates.some(t => t.template === meta?.ytTitle)
   }, [meta?.ytTitle, ytTitleTemplates])
+  const canSaveTwitchTitleTemplate = useMemo(() => {
+    const v = (meta?.twitchTitle ?? '').trim()
+    return v.length > 0 && !ytTitleTemplates.some(t => t.template === meta?.twitchTitle)
+  }, [meta?.twitchTitle, ytTitleTemplates])
   const canSaveDescTemplate = useMemo(() => {
     const v = (meta?.ytDescription ?? '').trim()
     return v.length > 0 && !ytDescTemplates.some(t => t.description === meta?.ytDescription)
@@ -4433,6 +4760,13 @@ function SidebarDetail({
     const id = await onSaveYtTitleTemplate(name, meta?.ytTitle ?? '')
     onUpdateMeta({ ytTitleTemplateId: id })
   }, [onSaveYtTitleTemplate, meta?.ytTitle, onUpdateMeta])
+  // Twitch title saves into the SAME Titles template store as the YT
+  // title — the group is shared. Binds the new template to the Twitch
+  // title only.
+  const handleSaveTwitchTitleTemplate = useCallback(async (name: string) => {
+    const id = await onSaveYtTitleTemplate(name, meta?.twitchTitle ?? '')
+    onUpdateMeta({ twitchTitleTemplateId: id })
+  }, [onSaveYtTitleTemplate, meta?.twitchTitle, onUpdateMeta])
   const handleSaveDescTemplate = useCallback(async (name: string) => {
     const id = await onSaveYtDescTemplate(name, meta?.ytDescription ?? '')
     setDescTplId(id)
@@ -4456,6 +4790,12 @@ function SidebarDetail({
     const tpl = ytTitleTemplates.find(t => t.id === id)
     if (tpl) onUpdateMeta({ ytTitle: tpl.template, ytTitleTemplateId: id })
     else onUpdateMeta({ ytTitleTemplateId: id })
+  }
+  const applyTwitchTitleTemplate = (id: string) => {
+    if (!id) { onUpdateMeta({ twitchTitleTemplateId: '' }); return }
+    const tpl = ytTitleTemplates.find(t => t.id === id)
+    if (tpl) onUpdateMeta({ twitchTitle: tpl.template, twitchTitleTemplateId: id })
+    else onUpdateMeta({ twitchTitleTemplateId: id })
   }
   const applyDescTemplate = async (id: string) => {
     setDescTplId(id)
@@ -4495,6 +4835,16 @@ function SidebarDetail({
     const tpl = twitchTagTemplates.find(t => t.id === id)
     if (tpl) onUpdateMeta({ twitchTags: tpl.tags, twitchTagsTemplateId: id })
     else onUpdateMeta({ twitchTagsTemplateId: id })
+  }
+  const handleTwitchTitleSave = (v: string) => {
+    // Mirror handleTitleSave: hand-editing away from the bound
+    // template's body clears the binding.
+    const partial: Partial<StreamMeta> = { twitchTitle: v }
+    if (twitchTitleTplId) {
+      const tpl = ytTitleTemplates.find(t => t.id === twitchTitleTplId)
+      if (tpl && tpl.template !== v) partial.twitchTitleTemplateId = ''
+    }
+    onUpdateMeta(partial)
   }
   const handleTitleSave = (v: string) => {
     // The title field stores the raw template body. Diverging from the
@@ -4863,7 +5213,7 @@ function SidebarDetail({
       const target = new Date(y, mo - 1, d, hh, mm, 0, 0).getTime()
       const future = Date.now() + 5 * 60 * 1000
       const scheduledStartTime = new Date(Math.max(target, future)).toISOString()
-      const title = meta?.ytTitle || 'Untitled stream'
+      const title = renderStreamTitle(folder, folders) || 'Untitled stream'
       const description = meta?.ytDescription || ''
       const tags = meta?.ytTags ?? []
       const created = await window.api.youtubeCreateBroadcast({
@@ -4949,149 +5299,18 @@ function SidebarDetail({
   // Drives the inline dot indicator on each MetaRow. The
   // `broadcastMismatch` boolean below derives from `.size > 0` and is
   // what the Push/Pull buttons gate on.
-  type Direction = 'local' | 'remote' | 'both' | 'unknown'
-  const broadcastMismatches = useMemo(() => {
-    const map = new Map<string, Direction>()
-    if (!selectedBroadcast) return map
-    // Direction helper. `localChanged` / `remoteChanged` track whether
-    // the respective side diverged from the snapshot. When the snapshot
-    // is undefined we can't say — return 'unknown'.
-    const directionFor = (localChanged: boolean, remoteChanged: boolean, hasSnapshot: boolean): Direction => {
-      if (!hasSnapshot) return 'unknown'
-      if (localChanged && remoteChanged) return 'both'
-      if (localChanged) return 'local'
-      return 'remote'
-    }
-
-    // meta.ytTitle is the raw template body — resolve through merge
-    // fields before comparing against YouTube's already-rendered value
-    // and the snapshot (which was captured at push/pull time as the
-    // rendered string).
-    const localTitle = applyMergeFields(meta?.ytTitle ?? '', mergeFields).trim()
-    const remoteTitle = (selectedBroadcast.snippet.title ?? '').trim()
-    if (remoteTitle !== localTitle) {
-      const snapshot = meta?.ytLastPushedTitle
-      const has = snapshot !== undefined
-      map.set('title', directionFor(
-        has && (snapshot ?? '').trim() !== localTitle,
-        has && (snapshot ?? '').trim() !== remoteTitle,
-        has,
-      ))
-    }
-
-    const normDesc = (s: string | undefined) => (s ?? '').replace(/\r\n/g, '\n').trim()
-    const localDesc = normDesc(meta?.ytDescription)
-    const remoteDesc = normDesc(selectedBroadcast.snippet.description)
-    if (remoteDesc !== localDesc) {
-      const snapshot = meta?.ytLastPushedDescription
-      const has = snapshot !== undefined
-      map.set('description', directionFor(
-        has && normDesc(snapshot) !== localDesc,
-        has && normDesc(snapshot) !== remoteDesc,
-        has,
-      ))
-    }
-
-    // gameTitle has no symmetric snapshot field (the YT API doesn't let
-    // us write it, so we never "pushed" it — we only ever read it). The
-    // direction is always "remote" when there's a divergence, since
-    // local can't have been changed *toward* Studio without us pushing.
-    // 'unknown' would be misleading; remote-ahead is the truth.
-    // Local source is the primary Topics/Games tag (Topics row carries
-    // the {game} merge hint + this mismatch dot).
-    const localGame = resolvePrimaryGame(meta) || meta?.games?.[0] || ''
-    if (selectedBroadcast.snippet.gameTitle && selectedBroadcast.snippet.gameTitle !== localGame) {
-      map.set('gameTitle', 'remote')
-    }
-
-    const localCat = meta?.ytCategoryId ?? ''
-    const remoteCat = selectedBroadcast.snippet.categoryId ?? ''
-    if (localCat !== remoteCat) {
-      const snapshot = meta?.ytLastPushedCategoryId
-      const has = snapshot !== undefined
-      map.set('categoryId', directionFor(
-        has && (snapshot ?? '') !== localCat,
-        has && (snapshot ?? '') !== remoteCat,
-        has,
-      ))
-    }
-
-    const normTagSet = (tags: string[] | undefined) =>
-      [...(tags ?? [])].map(t => t.trim().toLowerCase()).filter(Boolean).sort().join('|')
-    const localTagSet = normTagSet(meta?.ytTags)
-    const remoteTagSet = normTagSet(selectedBroadcast.snippet.tags)
-    const tagsDiffer = (remoteTagSet && remoteTagSet !== localTagSet) || (!remoteTagSet && localTagSet)
-    if (tagsDiffer) {
-      const snapshot = meta?.ytLastPushedTags
-      const has = snapshot !== undefined
-      const snapshotSet = normTagSet(snapshot)
-      map.set('tags', directionFor(
-        has && snapshotSet !== localTagSet,
-        has && snapshotSet !== remoteTagSet,
-        has,
-      ))
-    }
-
-    // Date + time mismatches are only meaningful when the broadcast
-    // can still be rescheduled (upcoming — YT API rejects schedule
-    // edits on live/completed). Both get direction-aware dots backed
-    // by `ytLastPushedDate` + `ytLastPushedScheduledTime`.
-    if (
-      !selectedBroadcast.snippet.actualStartTime &&
-      selectedBroadcast.snippet.scheduledStartTime
-    ) {
-      const remoteDate = localDateFromIso(selectedBroadcast.snippet.scheduledStartTime)
-      if (remoteDate && remoteDate !== folder.date) {
-        const snapshot = meta?.ytLastPushedDate
-        const has = snapshot !== undefined
-        map.set('date', directionFor(
-          has && snapshot !== folder.date,
-          has && snapshot !== remoteDate,
-          has,
-        ))
-      }
-
-      const remoteIso = new Date(selectedBroadcast.snippet.scheduledStartTime)
-      if (!isNaN(remoteIso.getTime())) {
-        const remoteTime = `${String(remoteIso.getHours()).padStart(2, '0')}:${String(remoteIso.getMinutes()).padStart(2, '0')}`
-        // Local time only counts as "user-expressed intent" when
-        // `meta.scheduledTime` is explicitly set — otherwise the
-        // displayed value falls back to the broadcast's own time and
-        // there's nothing to be out-of-sync about.
-        const localTime = meta?.scheduledTime
-        if (localTime !== undefined && localTime !== remoteTime) {
-          const snapshot = meta?.ytLastPushedScheduledTime
-          const has = snapshot !== undefined
-          map.set('scheduledTime', directionFor(
-            has && snapshot !== localTime,
-            has && snapshot !== remoteTime,
-            has,
-          ))
-        }
-      }
-    }
-
-    // Privacy mismatch — same skip-when-unset semantics as scheduledTime.
-    // Local only counts when meta.ytPrivacyStatus is explicitly set;
-    // otherwise the displayed dropdown value falls back to the
-    // broadcast's current status and there's nothing to flag.
-    const localPrivacy = meta?.ytPrivacyStatus
-    const remotePrivacy = selectedBroadcast.status?.privacyStatus
-    if (localPrivacy !== undefined && remotePrivacy && localPrivacy !== remotePrivacy) {
-      const snapshot = meta?.ytLastPushedPrivacy
-      const has = snapshot !== undefined
-      map.set('privacy', directionFor(
-        has && snapshot !== localPrivacy,
-        has && snapshot !== remotePrivacy,
-        has,
-      ))
-    }
-    return map
-  }, [selectedBroadcast, meta?.ytTitle, meta?.ytDescription, meta?.games, meta?.primaryGame, meta?.ytTags, meta?.ytCategoryId, meta?.scheduledTime, meta?.ytPrivacyStatus, meta?.ytLastPushedTitle, meta?.ytLastPushedDescription, meta?.ytLastPushedTags, meta?.ytLastPushedCategoryId, meta?.ytLastPushedDate, meta?.ytLastPushedScheduledTime, meta?.ytLastPushedPrivacy, folder.date, localDateFromIso, mergeFields])
+  // Per-field local↔YouTube divergence map (see lib/broadcastMismatch). Drives
+  // the inline dot on each MetaRow; `broadcastMismatch` below derives from
+  // `.size > 0` and gates the Push/Pull buttons. The same fn powers the
+  // empty-state Out-of-sync panel so both agree on what "out of sync" means.
+  const broadcastMismatches = useMemo(
+    () => computeBroadcastMismatch(folder, folders, selectedBroadcast),
+    [folder, folders, selectedBroadcast],
+  )
   const broadcastMismatch = broadcastMismatches.size > 0
 
   return (
-    <div className="@container flex flex-col h-full overflow-hidden">
+    <div ref={sidebarRootRef} className="@container flex flex-col h-full overflow-hidden">
       {/* Header — top row: date (left) · episode nav (center) · close X
           (right). Bottom row: full title. The series label "S1 · E3" is
           surfaced as a metadata row below rather than here, since it's
@@ -5221,9 +5440,7 @@ function SidebarDetail({
                     {seriesEpisodes.slice().reverse().map(ep => {
                       const isCurrent = ep.folderPath === folder.folderPath
                       const epNum = ep.meta?.ytEpisode || '?'
-                      const epTitle = ep.meta?.ytTitle?.trim()
-                        || (ep.meta?.games && ep.meta.games.length > 0 ? ep.meta.games.join(' · ') : '')
-                        || ep.folderName
+                      const epTitle = renderStreamTitle(ep, folders)
                       return (
                         <button
                           key={ep.folderPath}
@@ -5255,14 +5472,13 @@ function SidebarDetail({
             document.body,
           )}
           <Tooltip content="Close" side="bottom" triggerClassName="ml-auto">
-            <button
-              type="button"
+            <Button
+              variant="danger"
+              size="sm"
+              icon={<X size={14} />}
               onClick={onClose}
-              className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
               aria-label="Close"
-            >
-              <X size={14} />
-            </button>
+            />
           </Tooltip>
         </div>
         <div className="text-base font-semibold text-gray-100 break-words leading-snug" title={title}>
@@ -5451,17 +5667,23 @@ function SidebarDetail({
                 keys={titlePickerKeys}
                 onInsert={k => titleInsertRef.current?.(`{${k}}`)}
               />
-              {/* Preview — only shows when the title body actually
-                  contains a recognised merge-field token. For static
-                  titles the preview would just echo the field and add
-                  visual noise. */}
-              {hasYtTitleMergeFields(meta?.ytTitle ?? '') && (() => {
+              {/* Preview + char counter. Preview only shows when the
+                  body contains a merge-field token (a static title would
+                  just echo itself). The counter always shows and counts
+                  the *resolved* title — that's the string that publishes
+                  + is what the limit applies to. */}
+              {(() => {
                 const rendered = applyMergeFields(meta?.ytTitle ?? '', mergeFields)
                 return (
-                  <p className="mt-1 text-xs text-gray-200 leading-snug flex items-baseline gap-1.5">
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wide shrink-0">Preview</span>
-                    <span>{rendered || <span className="italic text-gray-500">(empty)</span>}</span>
-                  </p>
+                  <>
+                    {hasYtTitleMergeFields(meta?.ytTitle ?? '') && (
+                      <p className="mt-2 text-xs text-gray-200 leading-snug flex items-baseline gap-1.5">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wide shrink-0">Preview</span>
+                        <span>{rendered || <span className="italic text-gray-500">(empty)</span>}</span>
+                      </p>
+                    )}
+                    <TitleCharCounter count={rendered.length} limit={YT_TITLE_CHAR_LIMIT} />
+                  </>
                 )
               })()}
             </MetaRow>
@@ -5704,23 +5926,69 @@ function SidebarDetail({
                 since the effective value is whatever was set on the YouTube
                 side above. */}
             <div className="grid grid-cols-2 gap-2 items-start">
-              <MetaRow label="Twitch title">
-                <div className="flex flex-col gap-1.5">
-                  <Checkbox
-                    size="sm"
-                    checked={meta?.syncTitle !== false}
-                    onChange={v => onUpdateMeta({ syncTitle: v })}
-                    label={<span className="text-[11px] text-gray-400">Same as YouTube title</span>}
-                  />
-                  {meta?.syncTitle === false && (
-                    <EditableTextField
-                      value={meta?.twitchTitle ?? ''}
-                      placeholder="Title for Twitch broadcast…"
-                      onSave={v => onUpdateMeta({ twitchTitle: v })}
+              {/* When the title override is shown, the field spans both
+                  columns so the chip editor + merge-field picker have
+                  room (matching the YouTube title's full-width layout);
+                  the category then wraps to the next grid row. */}
+              <div className={meta?.syncTitle === false ? 'col-span-2' : ''}>
+                <MetaRow label="Twitch title">
+                  <div className="flex flex-col gap-1.5">
+                    <Checkbox
+                      size="sm"
+                      checked={meta?.syncTitle !== false}
+                      onChange={v => onUpdateMeta({ syncTitle: v })}
+                      label={<span className="text-[11px] text-gray-400">Same as YouTube title</span>}
                     />
-                  )}
-                </div>
-              </MetaRow>
+                    {meta?.syncTitle === false && (
+                      // No-gap column so the template tab sits flush on
+                      // the editor's top-right corner (mirrors the YT
+                      // title's MetaRow attachRight layout). Picker +
+                      // preview space themselves via their own margins.
+                      <div className="flex flex-col">
+                        <div className="flex items-end justify-end gap-2 min-h-[16px]">
+                          {canSaveTwitchTitleTemplate && <SaveAsTemplateButton onSave={handleSaveTwitchTitleTemplate} />}
+                          <InlineTemplateSelect
+                            items={ytTitleTemplates}
+                            value={twitchTitleTplId}
+                            onChange={applyTwitchTitleTemplate}
+                            placeholder="Assign template"
+                            tabbed
+                            tabActive={!!twitchTitleTplId}
+                          />
+                        </div>
+                        <TemplateBodyEditor
+                          value={meta?.twitchTitle ?? ''}
+                          placeholder="Title for Twitch broadcast…"
+                          onSave={handleTwitchTitleSave}
+                          tabAttached
+                          tabActive={!!twitchTitleTplId}
+                          knownKeys={titleMergeKeySet}
+                          inapplicableKeys={titleInapplicableKeySet}
+                          insertRef={twitchTitleInsertRef}
+                        />
+                        <MergeFieldPicker
+                          keys={titlePickerKeys}
+                          onInsert={k => twitchTitleInsertRef.current?.(`{${k}}`)}
+                        />
+                        {(() => {
+                          const rendered = applyMergeFields(meta?.twitchTitle ?? '', mergeFields)
+                          return (
+                            <>
+                              {hasYtTitleMergeFields(meta?.twitchTitle ?? '') && (
+                                <p className="mt-2 text-xs text-gray-200 leading-snug flex items-baseline gap-1.5">
+                                  <span className="text-[10px] text-gray-500 uppercase tracking-wide shrink-0">Preview</span>
+                                  <span>{rendered || <span className="italic text-gray-500">(empty)</span>}</span>
+                                </p>
+                              )}
+                              <TitleCharCounter count={rendered.length} limit={TWITCH_TITLE_CHAR_LIMIT} />
+                            </>
+                          )
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </MetaRow>
+              </div>
               <MetaRow label="Twitch category">
                 <div className="flex flex-col gap-1.5">
                   <Checkbox
@@ -5856,68 +6124,13 @@ function SidebarDetail({
                         if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
                           active.blur()
                         }
-                        const update: Partial<StreamMeta> = {
-                          // Pulled title is YouTube's rendered string,
-                          // which becomes the new title-body verbatim
-                          // (no merge fields). Clear the binding too
-                          // so the dropdown doesn't keep claiming the
-                          // body came from a template.
-                          ytTitle: selectedBroadcast.snippet.title,
-                          ytDescription: selectedBroadcast.snippet.description,
-                          ytTitleTemplateId: '',
-                        }
-                        if (selectedBroadcast.snippet.gameTitle) update.ytGameTitle = selectedBroadcast.snippet.gameTitle
-                        if (selectedBroadcast.snippet.tags?.length) {
-                          update.ytTags = selectedBroadcast.snippet.tags
-                          // Pulled tags are authoritative — clear any
-                          // stale template binding so the dropdown
-                          // doesn't keep claiming the values came from
-                          // a template.
-                          update.ytTagsTemplateId = ''
-                        }
-                        if (selectedBroadcast.snippet.categoryId) update.ytCategoryId = selectedBroadcast.snippet.categoryId
-                        // Privacy mirrors title/tags semantics — pull
-                        // writes the YT value into the staged local
-                        // field AND snapshots it so the direction-aware
-                        // mismatch dot doesn't immediately re-flag.
-                        const remotePrivacy = selectedBroadcast.status?.privacyStatus
-                        if (remotePrivacy === 'public' || remotePrivacy === 'unlisted' || remotePrivacy === 'private') {
-                          update.ytPrivacyStatus = remotePrivacy
-                          update.ytLastPushedPrivacy = remotePrivacy
-                        }
-                        // Sync snapshot — Pull represents "local and
-                        // remote agree at this moment" just like Push
-                        // does. Without this the direction-aware
-                        // mismatch indicator would later mark the
-                        // pulled fields as "remote ahead" (since
-                        // lastPushed is stale from a previous push and
-                        // wouldn't match the freshly-pulled values).
-                        // Snapshot is set to the just-pulled values
-                        // verbatim.
-                        update.ytLastPushedTitle = selectedBroadcast.snippet.title ?? ''
-                        update.ytLastPushedDescription = selectedBroadcast.snippet.description ?? ''
-                        update.ytLastPushedTags = selectedBroadcast.snippet.tags ?? []
-                        if (selectedBroadcast.snippet.categoryId) update.ytLastPushedCategoryId = selectedBroadcast.snippet.categoryId
-                        // Time portion: clear any local override (the
-                        // displayed time falls back to the broadcast's
-                        // current value, which is exactly what Pull
-                        // means here) AND snapshot the broadcast's
-                        // current time so direction-aware mismatch
-                        // doesn't immediately re-flag this field.
-                        // Note: date is intentionally NOT pulled here
-                        // (folder rename is a structural change that
-                        // belongs to the Reschedule modal); we only
-                        // snapshot what's currently on YouTube so a
-                        // subsequent Reschedule pull-mode confirmation
-                        // can finish closing the loop.
-                        if (selectedBroadcast.snippet.scheduledStartTime) {
-                          const remote = new Date(selectedBroadcast.snippet.scheduledStartTime)
-                          if (!isNaN(remote.getTime())) {
-                            update.scheduledTime = undefined
-                            update.ytLastPushedScheduledTime = `${String(remote.getHours()).padStart(2, '0')}:${String(remote.getMinutes()).padStart(2, '0')}`
-                          }
-                        }
-                        onUpdateMeta(update)
+                        // Build the pull patch via the shared helper (same one
+                        // the empty-state bulk pull uses) — overwrites local
+                        // title/description/game/tags/category/privacy with
+                        // YouTube's values and snapshots them as ytLastPushed*
+                        // so the direction dots read in-sync. Date is not pulled
+                        // (folder rename belongs to the reschedule flow).
+                        onUpdateMeta(buildPullUpdate(selectedBroadcast))
                       }}
                       className="text-[10px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1"
                     >
@@ -6162,10 +6375,10 @@ function SidebarDetail({
           // older streams) so the YT title/game stand in for Twitch.
           const twSyncTitle = meta?.syncTitle !== false
           const twSyncGame = meta?.syncGame !== false
-          // meta.ytTitle is the raw template body now — resolve through
-          // merge fields so the comparison matches what handlePushToTwitch
-          // actually sends (and what Twitch then stores).
-          const twEffectiveTitle = twSyncTitle ? resolveYtTitle(meta, folder, folders) : (meta?.twitchTitle ?? '')
+          // Both title fields are raw template bodies now — resolve
+          // through merge fields so the comparison matches what
+          // handlePushToTwitch actually sends (and what Twitch stores).
+          const twEffectiveTitle = twSyncTitle ? resolveYtTitle(meta, folder, folders) : resolveTwitchTitle(meta, folder, folders)
           // Source-of-truth alignment with handlePushToTwitch above: when
           // syncGame is on, the comparison reads from the selected Topic/
           // Game tag (resolvePrimaryGame) — same value the push handler
@@ -6955,6 +7168,23 @@ function EditableTextField({
 }
 
 /**
+ * TitleCharCounter — "N / LIMIT chars" line under a title field. Counts
+ * the *resolved* title (merge fields substituted) since that's what
+ * actually publishes. Color tiers match the tag-field counter: over
+ * the limit is red, exactly at the limit is amber, otherwise gray.
+ */
+function TitleCharCounter({ count, limit }: { count: number; limit: number }) {
+  const over = count > limit
+  const atMax = count === limit
+  const cls = over ? 'text-red-400' : atMax ? 'text-amber-400' : 'text-gray-400'
+  return (
+    <p className={`mt-1 text-[10px] tabular-nums ${cls}`}>
+      {count} / {limit} chars
+    </p>
+  )
+}
+
+/**
  * UseSuggestedTagsButton — inline "Use 'X' tags" link surfaced next to
  * the YT tags field when a tag template's name matches the stream's
  * primary game. Clicking applies the template; when the field already
@@ -7481,6 +7711,8 @@ function RescheduleModal({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Stream dots for the DatePicker popup, grouped by date from folders.
+  const dateMarks = useMemo(() => buildDateMarks(folders), [folders])
   // Saved across the step transition: step 1's IPC returns the new
   // folder path; step 2 hands it off to onSuccess once the user
   // confirms or skips the platform pushes.
@@ -7704,12 +7936,12 @@ function RescheduleModal({
           )}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-gray-400">New date</label>
-            <input
-              type="date"
+            <DatePicker
               value={newDate}
-              onChange={e => setNewDate(e.target.value)}
+              onChange={setNewDate}
               disabled={busy || pullMode}
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark] disabled:opacity-60"
+              markedDates={dateMarks}
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark] disabled:opacity-60"
             />
           </div>
 
@@ -8082,6 +8314,8 @@ function NewStreamModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const dateExists = existingDates.includes(date)
+  // Stream dots for the DatePicker popup, grouped by date from folders.
+  const dateMarks = useMemo(() => buildDateMarks(folders), [folders])
 
   // Build the inherited meta when the source is set. Built fresh per
   // call so the computed ytEpisode reflects the date the user just
@@ -8146,6 +8380,7 @@ function NewStreamModal({
       meta.ytTagsTemplateId = config.defaultYouTubeTagsTemplateId
     }
     if (m.ytTitleTemplateId) meta.ytTitleTemplateId = m.ytTitleTemplateId
+    if (m.twitchTitleTemplateId) meta.twitchTitleTemplateId = m.twitchTitleTemplateId
     if (m.twitchTags?.length) {
       meta.twitchTags = m.twitchTags
       if (m.twitchTagsTemplateId) meta.twitchTagsTemplateId = m.twitchTagsTemplateId
@@ -8214,12 +8449,12 @@ function NewStreamModal({
         )}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-gray-400">Date</label>
-          <input
-            type="date"
+          <DatePicker
             value={date}
-            onChange={e => setDate(e.target.value)}
+            onChange={setDate}
             disabled={busy}
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+            markedDates={dateMarks}
+            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
           />
         </div>
         {dateExists && (

@@ -296,6 +296,9 @@ contextBridge.exposeInMainWorld('api', {
   updateStreamMeta: (folderPath: string, partial: any, metaKey?: string) =>
     ipcRenderer.invoke('streams:updateMeta', folderPath, partial, metaKey),
 
+  backfillThumbnailHashes: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
+    ipcRenderer.invoke('streams:backfillThumbnailHashes', dir, mode),
+
   saveClipDraft: (folderPath: string, draft: any, metaKey?: string) =>
     ipcRenderer.invoke('clipDraft:save', folderPath, draft, metaKey),
 
@@ -410,6 +413,8 @@ contextBridge.exposeInMainWorld('api', {
 
   youtubeGetVideoById: (videoId: string) =>
     ipcRenderer.invoke('youtube:getVideoById', videoId),
+  youtubeGetVideosByIds: (ids: string[]) =>
+    ipcRenderer.invoke('youtube:getVideosByIds', ids),
 
   youtubeGetBroadcastById: (broadcastId: string) =>
     ipcRenderer.invoke('youtube:getBroadcastById', broadcastId),
@@ -512,6 +517,8 @@ contextBridge.exposeInMainWorld('api', {
   windowMaximize: () => ipcRenderer.send('window:maximize'),
   windowClose: () => ipcRenderer.send('window:close'),
   windowMinimizeToTray: () => ipcRenderer.send('window:minimizeToTray'),
+  // Native redo for the focused editable field (Ctrl/Cmd+Shift+Z parity).
+  editRedo: () => ipcRenderer.send('edit:redo'),
   windowIsMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:isMaximized'),
   onMaximizeChange: (cb: (maximized: boolean) => void) => {
     const handler = (_: Electron.IpcRendererEvent, val: boolean) => cb(val)
@@ -580,12 +587,20 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:cacheAsset', streamsDir, srcPath),
   thumbnailHashFile: (filePath: string): Promise<string | null> =>
     ipcRenderer.invoke('thumbnail:hashFile', filePath),
+  thumbnailHashFiles: (filePaths: string[]): Promise<Record<string, string | null>> =>
+    ipcRenderer.invoke('thumbnail:hashFiles', filePaths),
   thumbnailGetRecents: () =>
     ipcRenderer.invoke('thumbnail:getRecents'),
   thumbnailAddRecent: (entry: any) =>
     ipcRenderer.invoke('thumbnail:addRecent', entry),
   thumbnailRemoveRecent: (folderPath: string, date: string) =>
     ipcRenderer.invoke('thumbnail:removeRecent', folderPath, date),
+  playerGetRecents: () =>
+    ipcRenderer.invoke('player:getRecents'),
+  playerAddRecent: (entry: any) =>
+    ipcRenderer.invoke('player:addRecent', entry),
+  playerRemoveRecent: (filePath: string) =>
+    ipcRenderer.invoke('player:removeRecent', filePath),
   thumbnailGetLastFont: () =>
     ipcRenderer.invoke('thumbnail:getLastFont'),
   thumbnailSetLastFont: (font: string) =>

@@ -95,6 +95,77 @@ export function StreamRelayWidget({
     refreshUpcoming().catch(() => {})
   }
 
+  const broadcast = active.broadcast
+  const broadcastTitle = broadcast?.snippet?.title?.trim() || 'Untitled broadcast'
+
+  // Picker dropdown — portalled out so the nav's overflow-hidden doesn't clip
+  // it, anchored to whichever pickerAnchorRef element is mounted (the compact
+  // collapsed trigger or the expanded active-broadcast row). Shared by both
+  // modes so the broadcast can be picked without expanding the sidebar.
+  const renderPickerDropdown = () => {
+    if (!pickerOpen || !pickerAnchorRef.current) return null
+    const rect = pickerAnchorRef.current.getBoundingClientRect()
+    return ReactDOM.createPortal(
+      <>
+        <div className="fixed inset-0 z-[60]" onClick={() => setPickerOpen(false)} />
+        <div
+          style={{
+            position: 'fixed',
+            top: rect.top,
+            left: rect.right + 4,
+            zIndex: 61,
+            maxHeight: Math.max(160, window.innerHeight - rect.top - 12),
+          }}
+          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl w-72 overflow-y-auto"
+        >
+          <div className="sticky top-0 z-10 bg-navy-700 px-3 py-2 border-b border-white/5 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Pick a broadcast</span>
+            <Tooltip content="Refresh from YouTube" side="bottom">
+              <button
+                onClick={refreshUpcoming}
+                className="ml-auto p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+              >
+                <RotateCcw size={11} />
+              </button>
+            </Tooltip>
+          </div>
+          {/* Auto-pick row — clears the manual override */}
+          <button
+            onClick={() => pickBroadcast(null)}
+            className={`flex flex-col items-start w-full px-3 py-2 text-left transition-colors border-b border-white/5 ${
+              !active.isManual ? 'bg-purple-600/20 text-purple-200' : 'text-gray-300 hover:bg-white/5'
+            }`}
+          >
+            <span className="text-[11px] font-medium">Use soonest upcoming (auto)</span>
+            <span className="text-[10px] text-gray-400">SM auto-picks the next-scheduled broadcast</span>
+          </button>
+          {upcoming.length === 0 ? (
+            <p className="px-3 py-3 text-[11px] text-gray-400 italic">No upcoming broadcasts.</p>
+          ) : upcoming.map(b => {
+            const isCurrent = active.isManual && active.broadcast?.id === b.id
+            const title = b.snippet?.title?.trim() || 'Untitled broadcast'
+            const when = b.snippet?.scheduledStartTime
+              ? formatScheduledTime(b.snippet.scheduledStartTime)
+              : ''
+            return (
+              <button
+                key={b.id}
+                onClick={() => pickBroadcast(b.id)}
+                className={`flex flex-col items-start w-full px-3 py-1.5 text-left transition-colors ${
+                  isCurrent ? 'bg-purple-600/20 text-purple-200' : 'text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                <span className="text-[11px] truncate w-full">{title}</span>
+                <span className="text-[10px] text-gray-400 tabular-nums">{when}</span>
+              </button>
+            )
+          })}
+        </div>
+      </>,
+      document.body,
+    )
+  }
+
   // ── Collapsed mode ──────────────────────────────────────────────────────
 
   if (collapsed) {
@@ -113,6 +184,22 @@ export function StreamRelayWidget({
             <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">Stream Relay</span>
           </button>
         </Tooltip>
+        {/* Compact picker trigger — opens the same dropdown as expanded mode
+            so the active broadcast can be picked without expanding the
+            sidebar. Mirrors the Auto-Rules collapsed control (centered icon
+            button below the header). */}
+        <div ref={pickerAnchorRef} className="flex justify-center pb-1">
+          <Tooltip content={broadcast ? broadcastTitle : 'Pick a broadcast'} side="right">
+            <button
+              onClick={togglePicker}
+              disabled={isStreaming}
+              className="p-1.5 rounded text-purple-400 hover:text-purple-300 hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              aria-label="Pick a broadcast"
+            >
+              <Calendar size={14} />
+            </button>
+          </Tooltip>
+        </div>
         {/* Status dot stays centered in the 48px rail — it's a small
             decorative indicator, not a primary icon, so the visual
             convention here is centered rather than left-aligned. */}
@@ -125,14 +212,13 @@ export function StreamRelayWidget({
             'bg-gray-600'
           }`} />
         </div>
+        {renderPickerDropdown()}
       </div>
     )
   }
 
   // ── Expanded mode ──────────────────────────────────────────────────────
 
-  const broadcast = active.broadcast
-  const broadcastTitle = broadcast?.snippet?.title?.trim() || 'Untitled broadcast'
   const broadcastTime = broadcast?.snippet?.scheduledStartTime
     ? formatScheduledTime(broadcast.snippet.scheduledStartTime)
     : ''
@@ -273,73 +359,7 @@ export function StreamRelayWidget({
             (rendered at AppInner level), surfaced over the whole window. */}
       </div>
 
-      {/* Picker dropdown — portalled out of the sidebar so the overflow-hidden
-          on the nav doesn't clip it. Anchored to the right edge of the sidebar
-          so it pops out beside the widget. */}
-      {pickerOpen && pickerAnchorRef.current && ReactDOM.createPortal(
-        (() => {
-          const rect = pickerAnchorRef.current.getBoundingClientRect()
-          return (
-            <>
-              <div className="fixed inset-0 z-[60]" onClick={() => setPickerOpen(false)} />
-              <div
-                style={{
-                  position: 'fixed',
-                  top: rect.top,
-                  left: rect.right + 4,
-                  zIndex: 61,
-                  maxHeight: Math.max(160, window.innerHeight - rect.top - 12),
-                }}
-                className="bg-navy-700 border border-white/10 rounded-lg shadow-xl w-72 overflow-y-auto"
-              >
-                <div className="sticky top-0 z-10 bg-navy-700 px-3 py-2 border-b border-white/5 flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Pick a broadcast</span>
-                  <Tooltip content="Refresh from YouTube" side="bottom">
-                    <button
-                      onClick={refreshUpcoming}
-                      className="ml-auto p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
-                    >
-                      <RotateCcw size={11} />
-                    </button>
-                  </Tooltip>
-                </div>
-                {/* Auto-pick row — clears the manual override */}
-                <button
-                  onClick={() => pickBroadcast(null)}
-                  className={`flex flex-col items-start w-full px-3 py-2 text-left transition-colors border-b border-white/5 ${
-                    !active.isManual ? 'bg-purple-600/20 text-purple-200' : 'text-gray-300 hover:bg-white/5'
-                  }`}
-                >
-                  <span className="text-[11px] font-medium">Use soonest upcoming (auto)</span>
-                  <span className="text-[10px] text-gray-400">SM auto-picks the next-scheduled broadcast</span>
-                </button>
-                {upcoming.length === 0 ? (
-                  <p className="px-3 py-3 text-[11px] text-gray-400 italic">No upcoming broadcasts.</p>
-                ) : upcoming.map(b => {
-                  const isCurrent = active.isManual && active.broadcast?.id === b.id
-                  const title = b.snippet?.title?.trim() || 'Untitled broadcast'
-                  const when = b.snippet?.scheduledStartTime
-                    ? formatScheduledTime(b.snippet.scheduledStartTime)
-                    : ''
-                  return (
-                    <button
-                      key={b.id}
-                      onClick={() => pickBroadcast(b.id)}
-                      className={`flex flex-col items-start w-full px-3 py-1.5 text-left transition-colors ${
-                        isCurrent ? 'bg-purple-600/20 text-purple-200' : 'text-gray-300 hover:bg-white/5'
-                      }`}
-                    >
-                      <span className="text-[11px] truncate w-full">{title}</span>
-                      <span className="text-[10px] text-gray-400 tabular-nums">{when}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </>
-          )
-        })(),
-        document.body,
-      )}
+      {renderPickerDropdown()}
     </div>
   )
 }

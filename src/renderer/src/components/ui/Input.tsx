@@ -3,6 +3,8 @@ import { GripHorizontal, ChevronUp, ChevronDown } from 'lucide-react'
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string
+  /** Rendered inline after the label text (e.g. a dirty-state dot). */
+  labelSuffix?: React.ReactNode
   error?: string
   hint?: string
   suffix?: React.ReactNode
@@ -11,6 +13,7 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 
 export const Input: React.FC<InputProps> = ({
   label,
+  labelSuffix,
   error,
   hint,
   suffix,
@@ -25,7 +28,7 @@ export const Input: React.FC<InputProps> = ({
     <div className="flex flex-col gap-1">
       {label && (
         <label htmlFor={inputId} className="text-sm font-medium text-gray-300">
-          {label}
+          {label}{labelSuffix}
         </label>
       )}
       <div className="relative flex items-center">

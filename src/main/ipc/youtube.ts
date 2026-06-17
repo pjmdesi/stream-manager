@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories } from '../services/youtubeApi'
 import * as ytQuotaState from '../services/ytQuotaState'
 import { getStore } from './store'
 
@@ -144,6 +144,16 @@ export function registerYouTubeIPC(): void {
   ipcMain.handle('youtube:getVideoById', async (_event, videoId: string) => {
     const { clientId, clientSecret } = getCreds()
     return getVideoById(videoId, clientId, clientSecret)
+  })
+
+  ipcMain.handle('youtube:getVideosByIds', async (_event, ids: string[]) => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      return await getVideosByIds(ids, clientId, clientSecret)
+    } catch (e: any) {
+      console.error('[YT main] getVideosByIds — error:', e.message)
+      throw e
+    }
   })
 
   ipcMain.handle('youtube:getBroadcastById', async (_event, broadcastId: string) => {

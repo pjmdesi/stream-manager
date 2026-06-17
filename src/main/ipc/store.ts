@@ -39,7 +39,6 @@ export interface AppConfig {
   disableAnimations: boolean
   slowAnimations: boolean
   autoDeletePartialOnCancel: boolean
-  clipDurationThreshold: number
   claudeApiKey: string
   claudeSystemPrompt: string
   launcherWidgetGroupId: string
@@ -95,6 +94,12 @@ export interface AppConfig {
    *  cells of the 6-row grid. When false, those cells render blank
    *  (the grid stays 6 rows × 7 columns either way). */
   calendarShowAdjacentMonthDays: boolean
+  /** Thumbnail editor asset panel sources. `FromSeason` includes assets
+   *  from every stream in the same season; `FromTopicGame` narrows that
+   *  to only streams sharing the current Topic/Game tag (implies
+   *  `FromSeason`). Both off → only the current stream's own assets. */
+  thumbnailAssetsFromSeason: boolean
+  thumbnailAssetsFromTopicGame: boolean
   /** When true, suppress the post-Twitch-push modal that offers to
    *  rename the local game tag to Twitch's canonical category name
    *  (Twitch fuzzy-matches the game via search → game_id, so a
@@ -150,7 +155,6 @@ function getDefaultConfig(): AppConfig {
     disableAnimations: false,
     slowAnimations: false,
     autoDeletePartialOnCancel: false,
-    clipDurationThreshold: 300,
     claudeApiKey: '',
     claudeSystemPrompt: '',
     launcherWidgetGroupId: '',
@@ -173,6 +177,8 @@ function getDefaultConfig(): AppConfig {
     calendarFirstDayOfWeek: 'sunday',
     calendarShowWeekNumbers: false,
     calendarShowAdjacentMonthDays: true,
+    thumbnailAssetsFromSeason: true,
+    thumbnailAssetsFromTopicGame: false,
     twitchSkipCategoryRenamePrompt: false,
     defaultYouTubeCategoryId: '',
     defaultYouTubeTagsTemplateId: '',
@@ -193,6 +199,7 @@ type StoreShape = {
   streamTypeTags: Record<string, string>
   streamTypeTextures: Record<string, string>
   thumbnailRecents: any[]
+  playerRecents: any[]
   thumbnailLastFont: string
   pendingJobs: any[]
   /** Per-game-tag link to a YT tag template id. When a stream gains its
@@ -219,6 +226,7 @@ export function getStore(): Store<StoreShape> {
         streamTypeTags: {},
         streamTypeTextures: {},
         thumbnailRecents: [],
+        playerRecents: [],
         thumbnailLastFont: '',
         pendingJobs: [],
         gameTagsLinks: {},
@@ -230,7 +238,13 @@ export function getStore(): Store<StoreShape> {
 
 export function registerStoreIPC(): void {
   ipcMain.handle('store:getConfig', async () => {
-    const stored = getStore().get('config', getDefaultConfig())
+    // Merge defaults so the returned config always has every key. Older
+    // persisted configs predating a setting leave that key `undefined`,
+    // which makes the Settings page's dirty-check misfire (toggling a
+    // checkbox to its default value `false` would read as different from
+    // the absent/`undefined` original and keep Save enabled forever).
+    // Spread order: defaults first, stored second → explicit values win.
+    const stored = { ...getDefaultConfig(), ...getStore().get('config', {} as AppConfig) }
     // Migrate the legacy boolean shape of autoUpdateTwitchAfterStream to the
     // new tri-state. Users with `true` previously meant "always"; everyone
     // else (default or `false`) gets the new 'ask' default so they discover

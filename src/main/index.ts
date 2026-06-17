@@ -201,6 +201,13 @@ function createWindow(): BrowserWindow {
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:maximizeChange', false))
   ipcMain.on('window:close', () => mainWindow.close())
 
+  // Native redo for the focused editable field. Chromium maps redo to Ctrl+Y
+  // on Windows but not Ctrl+Shift+Z; the renderer detects the editable +
+  // Ctrl/Cmd+Shift+Z and routes here so text inputs match the app's
+  // Ctrl+Shift+Z redo convention. `sender.redo()` is the same native command
+  // the right-click "Redo" menu item fires.
+  ipcMain.on('edit:redo', (e) => e.sender.redo())
+
   return mainWindow
 }
 

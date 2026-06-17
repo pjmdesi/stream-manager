@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Plus, Bot, FolderTree, CheckCircle } from 'lucide-react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
+import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Plus, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
@@ -25,7 +25,7 @@ function DirInput({
   onChange,
   hint,
 }: {
-  label: string
+  label: React.ReactNode
   value: string
   onChange: (v: string) => void
   hint?: string
@@ -62,16 +62,17 @@ function DirInput({
  * startup the same flag is re-applied from the persisted config.
  */
 function ForceQuotaToggle({
-  checked, onChange,
+  checked, onChange, labelSuffix,
 }: {
   checked: boolean
   onChange: (v: boolean) => void
+  labelSuffix?: React.ReactNode
 }) {
   return (
     <Checkbox
       checked={checked}
       onChange={onChange}
-      label={<div><div className="text-sm font-medium text-gray-200">Force YouTube quota-exceeded</div><div className="text-xs text-gray-400">Pretends the YouTube Data API returned a quota 403 for every call. All push/pull, auto-refresh, and relay broadcast lifecycle operations will fail with the same banner + gating as a real outage — useful for exercising the offline-cache fallbacks. Applied on Save; persists across restarts until you toggle it back off.</div></div>}
+      label={<div><div className="text-sm font-medium text-gray-200">Force YouTube quota-exceeded {labelSuffix}</div><div className="text-xs text-gray-400">Pretends the YouTube Data API returned a quota 403 for every call. All push/pull, auto-refresh, and relay broadcast lifecycle operations will fail with the same banner + gating as a real outage — useful for exercising the offline-cache fallbacks. Applied on Save; persists across restarts until you toggle it back off.</div></div>}
     />
   )
 }
@@ -104,9 +105,64 @@ interface SettingsPageProps {
   /** Called when the user picks Cancel. App should clear pendingNav so the
    *  modal closes and the user stays on Settings. */
   onCancelNav?: () => void
+  /** Navigate to another page (App's guarded setPage). Used by the
+   *  "Manage integrations" link in the Profile section. */
+  onNavigate?: (target: Page) => void
 }
 
-export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onConfirmNav, onCancelNav }: SettingsPageProps = {}) {
+/** Section metadata for the jump-nav. `keys` are the config keys a
+ *  section owns — used to show an "unsaved changes" dot on its nav chip.
+ *  `dev` sections only appear in dev builds. */
+interface SettingsSectionMeta {
+  id: string
+  label: string
+  icon: React.ReactNode
+  keys: (keyof import('../../types').AppConfig)[]
+  dev?: boolean
+}
+
+const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
+  { id: 'profile', label: 'Profile', icon: <User size={14} />, keys: ['streamerName'] },
+  { id: 'directories', label: 'Directories', icon: <FolderTree size={14} />, keys: ['streamsDir', 'defaultWatchDir', 'tempDir'] },
+  { id: 'cache', label: 'Cache', icon: <HardDrive size={14} />, keys: ['audioCacheLimit'] },
+  { id: 'streams', label: 'Streams', icon: <Radio size={14} />, keys: ['useBuiltinThumbnailByDefault', 'defaultBuiltinThumbnailTemplate', 'defaultThumbnailTemplate', 'archivePresetId', 'checkEpisodeIteration', 'defaultBroadcastTime', 'defaultYouTubeCategoryId', 'twitchSkipCategoryRenamePrompt'] },
+  { id: 'player', label: 'Video Player', icon: <Film size={14} />, keys: ['clipPresetId', 'defaultBleepVolume', 'skipClipMergeWarning'] },
+  { id: 'converter', label: 'Converter', icon: <Zap size={14} />, keys: ['autoDeletePartialOnCancel'] },
+  { id: 'appearance', label: 'Appearance', icon: <Palette size={14} />, keys: ['disableAnimations', 'calendarFirstDayOfWeek'] },
+  { id: 'autorules', label: 'Auto-rules', icon: <Shuffle size={14} />, keys: ['autoStartWatcher'] },
+  { id: 'system', label: 'System', icon: <MonitorCog size={14} />, keys: ['checkForUpdates', 'startWithWindows', 'startMinimized'] },
+  { id: 'devtools', label: 'Dev Tools', icon: <FlaskConical size={14} />, keys: ['slowAnimations', 'devForceYouTubeQuotaExceeded'], dev: true },
+]
+
+/** A settings section with an icon'd header. Registers its DOM node by
+ *  id so the jump-nav can scroll to it + track which one is in view. */
+function Section({
+  id, icon, title, headerClass, registerRef, children,
+}: {
+  id: string
+  icon: React.ReactNode
+  title: string
+  /** Override the header text color (Dev Tools uses amber). */
+  headerClass?: string
+  registerRef: (id: string, el: HTMLElement | null) => void
+  children: React.ReactNode
+}) {
+  return (
+    <section
+      id={`settings-${id}`}
+      ref={el => registerRef(id, el)}
+      className="flex flex-col gap-4 scroll-mt-4"
+    >
+      <h2 className={`flex items-center gap-2 text-sm font-semibold uppercase tracking-wider border-b pb-2 ${headerClass ?? 'text-gray-300 border-white/5'}`}>
+        <span className={headerClass ? 'text-yellow-600' : 'text-purple-300'}>{icon}</span>
+        {title}
+      </h2>
+      {children}
+    </section>
+  )
+}
+
+export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pendingNav, onConfirmNav, onCancelNav }: SettingsPageProps = {}) {
   const { config, updateConfig, loading } = useStore()
   const [local, setLocal] = useState(config)
   // Snapshot the streamsDir as it was when the page mounted (or after the
@@ -192,6 +248,77 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
     setSaved(false)
   }
 
+  // One-time thumbnail-hash backfill (Dev Tools).
+  const [backfillState, setBackfillState] = useState<'idle' | 'running' | string>('idle')
+  const runThumbnailBackfill = async () => {
+    if (!local.streamsDir) { setBackfillState('No streams directory configured.'); return }
+    setBackfillState('running')
+    try {
+      const mode = local.streamMode === 'dump-folder' ? 'dump-folder' : 'folder-per-stream'
+      const r = await window.api.backfillThumbnailHashes(local.streamsDir, mode)
+      setBackfillState(`Stamped ${r.updated} stream${r.updated === 1 ? '' : 's'}` +
+        (r.skippedNoThumb > 0 ? ` · ${r.skippedNoThumb} skipped (no thumbnail)` : '') +
+        '. Re-check the out-of-sync panel.')
+    } catch (err: any) {
+      setBackfillState(`Failed: ${err?.message ?? String(err)}`)
+    }
+  }
+
+  // ── Jump-nav ───────────────────────────────────────────────────────────
+  const isDev = import.meta.env.DEV
+  const sections = SETTINGS_SECTIONS.filter(s => !s.dev || isDev)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const sectionEls = useRef<Map<string, HTMLElement>>(new Map())
+  const [activeSection, setActiveSection] = useState<string>(sections[0]?.id ?? '')
+  const registerSection = useCallback((id: string, el: HTMLElement | null) => {
+    if (el) sectionEls.current.set(id, el)
+    else sectionEls.current.delete(id)
+  }, [])
+
+  // Active-section tracking: the section whose top is at/above a trigger
+  // line near the container top is "active". Runs on scroll of the inner
+  // container (not the window). The bottom-of-scroll case forces the last
+  // section so a short final section still highlights.
+  const computeActive = useCallback(() => {
+    const sc = scrollRef.current
+    if (!sc) return
+    if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4) {
+      setActiveSection(sections[sections.length - 1]?.id ?? '')
+      return
+    }
+    const line = sc.getBoundingClientRect().top + 72
+    let current = sections[0]?.id ?? ''
+    for (const s of sections) {
+      const el = sectionEls.current.get(s.id)
+      if (el && el.getBoundingClientRect().top <= line) current = s.id
+    }
+    setActiveSection(current)
+  }, [sections])
+
+  useEffect(() => {
+    const sc = scrollRef.current
+    if (!sc) return
+    computeActive()
+    sc.addEventListener('scroll', computeActive, { passive: true })
+    return () => sc.removeEventListener('scroll', computeActive)
+  }, [computeActive])
+
+  const jumpTo = (id: string) => {
+    sectionEls.current.get(id)?.scrollIntoView({ behavior: local.disableAnimations ? 'auto' : 'smooth', block: 'start' })
+  }
+
+  // Per-key dirty check — a key is dirty when its staged value differs
+  // from what's saved. Drives both the per-field label dots and the
+  // section nav-chip dots. Blue matches the "local edit" mismatch dot
+  // color used in the streams detail sidebar.
+  const keyDirty = (key: keyof typeof config) =>
+    JSON.stringify(local[key]) !== JSON.stringify(config[key])
+  const sectionDirty = (keys: (keyof typeof config)[]) => keys.some(keyDirty)
+  const dirtyDot = (key: keyof typeof config) =>
+    keyDirty(key)
+      ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 ml-1.5 align-middle shrink-0" />
+      : null
+
   const save = async () => {
     const prevStreamsDir = lastSavedStreamsDirRef.current
     const newStreamsDir = local.streamsDir
@@ -240,23 +367,49 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
         </Button>
       </div>
 
-      <div className="flex-1 overflow-hidden pr-2">
-      <div className="h-full overflow-y-auto">
-      <div className="p-6 flex flex-col gap-8 max-w-2xl">
+      {/* Jump-nav — always visible below the header. Clicking a chip
+          scrolls the content to that section; the active chip tracks the
+          section in view; a dot marks sections with unsaved changes. */}
+      <nav className="shrink-0 border-b border-white/5 overflow-x-auto">
+        {/* `w-max mx-auto` centers the chips when they fit and falls back
+            to left-anchored + horizontal scroll when they don't (narrow
+            window), so the first chip is always reachable. */}
+        <div className="flex items-center gap-1 w-max mx-auto px-6 py-2">
+          {sections.map(s => {
+            const active = activeSection === s.id
+            const dirty = sectionDirty(s.keys)
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => jumpTo(s.id)}
+                className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs whitespace-nowrap transition-colors ${
+                  active ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+              >
+                <span className={active ? 'text-purple-300' : (s.dev ? 'text-yellow-600' : 'text-gray-500')}>{s.icon}</span>
+                {s.label}
+                {dirty && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-400" />}
+              </button>
+            )
+          })}
+        </div>
+      </nav>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto pr-2">
+      <div className="p-6 flex flex-col gap-12 max-w-2xl mx-auto">
         {/* Profile */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            Profile
-          </h2>
+        <Section id="profile" icon={<User size={14} />} title="Profile" registerRef={registerSection}>
           <Input
             label="Streamer Name"
+            labelSuffix={dirtyDot('streamerName')}
             value={local.streamerName}
             onChange={e => set('streamerName', e.target.value)}
             placeholder="Your channel name"
             hint="Used to pre-fill your name in stream metadata and integrations"
           />
           {(ytStatus || twStatus || local.claudeApiKey !== undefined) && (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-wrap">
               {ytStatus && (
                 <span className={`flex items-center gap-1.5 text-xs ${
                   ytStatus.connected && ytStatus.valid ? 'text-green-400' :
@@ -282,17 +435,22 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
                 <Bot size={18} />
                 {local.claudeApiKey ? 'Connected' : 'Not connected'}
               </span>
+              <button
+                type="button"
+                onClick={() => onNavigate?.('integrations')}
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-purple-300 transition-colors ml-auto"
+              >
+                Manage integrations
+                <ArrowRight size={12} />
+              </button>
             </div>
           )}
-        </section>
+        </Section>
 
         {/* Directories */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            Directories
-          </h2>
+        <Section id="directories" icon={<FolderTree size={14} />} title="Directories" registerRef={registerSection}>
           <DirInput
-            label="Streams Directory"
+            label={<>Streams Directory {dirtyDot('streamsDir')}</>}
             value={local.streamsDir}
             onChange={v => set('streamsDir', v)}
             hint="Root folder containing your YYYY-MM-DD stream session folders"
@@ -316,26 +474,23 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
             </div>
           )}
           <DirInput
-            label="Default Watch Directory"
+            label={<>Default Watch Directory {dirtyDot('defaultWatchDir')}</>}
             value={local.defaultWatchDir}
             onChange={v => set('defaultWatchDir', v)}
             hint="Where Auto-Rules watch for new files by default"
           />
           <DirInput
-            label="Cache Directory"
+            label={<>Cache Directory {dirtyDot('tempDir')}</>}
             value={local.tempDir}
             onChange={v => set('tempDir', v)}
             hint="Where temporary cached files are stored during processing"
           />
-        </section>
+        </Section>
 
-        {/* Audio Cache */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            Cache Files
-          </h2>
+        {/* Cache */}
+        <Section id="cache" icon={<HardDrive size={14} />} title="Cache Files" registerRef={registerSection}>
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Cache Limit</label>
+            <label className="text-sm font-medium text-gray-300">Cache Limit {dirtyDot('audioCacheLimit')}</label>
             <div className="flex items-center gap-2">
               <input
                 type="number"
@@ -352,7 +507,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-400">Currently using {formatBytes(cacheSize)}</span>
+            <span className="text-xs text-gray-400">Currently using: <span className="font-semibold text-gray-300">{formatBytes(cacheSize)}</span></span>
             <Button
               variant="ghost"
               size="sm"
@@ -363,21 +518,18 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
               {clearingCache ? 'Clearing…' : 'Clear Cache'}
             </Button>
           </div>
-        </section>
+        </Section>
 
         {/* Streams */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            Streams
-          </h2>
+        <Section id="streams" icon={<Radio size={14} />} title="Streams" registerRef={registerSection}>
           <Checkbox
             checked={local.useBuiltinThumbnailByDefault ?? true}
             onChange={v => set('useBuiltinThumbnailByDefault', v)}
-            label="Use built-in thumbnail creator by default for new streams"
+            label={<div><div className="text-sm font-medium text-gray-200">Use the built-in thumbnail creator by default {dirtyDot('useBuiltinThumbnailByDefault')}</div><div className="text-xs text-gray-400">Pre-checks the "use the built-in thumbnail creator" option when creating new streams, so the thumbnail editor opens with your default built-in template instead of copying an external template file.</div></div>}
           />
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default Built-in Thumbnail Template</label>
+            <label className="text-sm font-medium text-gray-300">Default Built-in Thumbnail Template {dirtyDot('defaultBuiltinThumbnailTemplate')}</label>
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <select
@@ -402,7 +554,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default External Thumbnail Template</label>
+            <label className="text-sm font-medium text-gray-300">Default External Thumbnail Template {dirtyDot('defaultThumbnailTemplate')}</label>
             <div className="relative">
               <select
                 value={local.defaultThumbnailTemplate ?? ''}
@@ -420,7 +572,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default Archive Preset</label>
+            <label className="text-sm font-medium text-gray-300">Default Archive Preset {dirtyDot('archivePresetId')}</label>
             <div className="relative">
               <select
                 value={local.archivePresetId ?? ''}
@@ -446,22 +598,22 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
           <Checkbox
             checked={local.checkEpisodeIteration ?? true}
             onChange={v => set('checkEpisodeIteration', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration</div><div className="text-xs text-gray-400">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration {dirtyDot('checkEpisodeIteration')}</div><div className="text-xs text-gray-400">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game.</div></div>}
           />
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default broadcast time</label>
+            <label className="text-sm font-medium text-gray-300">Default broadcast time {dirtyDot('defaultBroadcastTime')}</label>
             <input
               type="time"
               value={local.defaultBroadcastTime || '19:00'}
               onChange={e => set('defaultBroadcastTime', e.target.value || '19:00')}
-              className="w-32 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              className="w-32 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 [color-scheme:dark]"
             />
             <p className="text-xs text-gray-400">Pre-fills the start time when scheduling a YouTube broadcast — both when creating one from a stream item and when rescheduling. You can still change it per-broadcast.</p>
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default YouTube category</label>
+            <label className="text-sm font-medium text-gray-300">Default YouTube category {dirtyDot('defaultYouTubeCategoryId')}</label>
             <div className="relative">
               <select
                 value={local.defaultYouTubeCategoryId ?? ''}
@@ -480,39 +632,16 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
           </div>
 
           <Checkbox
-            checked={local.checkForUpdates ?? true}
-            onChange={v => set('checkForUpdates', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Check for app updates</div><div className="text-xs text-gray-400">On launch, check the GitHub releases page for a newer version of Stream Manager. An indicator appears next to the version label in the sidebar when an update is available. No data is sent — only a public API call.</div></div>}
-          />
-
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">
-              Clip duration threshold — <span className="text-purple-400 tabular-nums">{Math.round((local.clipDurationThreshold ?? 300) / 60)} min</span>
-            </label>
-            <input
-              type="range"
-              min={1} max={30} step={1}
-              value={Math.round((local.clipDurationThreshold ?? 300) / 60)}
-              onChange={e => set('clipDurationThreshold', parseInt(e.target.value) * 60)}
-            />
-            <p className="text-xs text-gray-400">Videos at or under this length are classified as clips in the stream video map. Default is 5 minutes.</p>
-          </div>
-
-          <Checkbox
             checked={local.twitchSkipCategoryRenamePrompt ?? false}
             onChange={v => set('twitchSkipCategoryRenamePrompt', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Skip "rename category" prompt after Twitch pushes</div><div className="text-xs text-gray-400">Twitch fuzzy-matches the pushed game name through its search → game_id round-trip, so a typed "Black Flag" may come back as "Assassin's Creed IV Black Flag." When this is unchecked and the canonical name differs from what you sent, a modal asks whether to rename your local game tag to match. The modal also has its own "Don't ask again" button that sets this option.</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Skip "rename category" prompt after Twitch pushes {dirtyDot('twitchSkipCategoryRenamePrompt')}</div><div className="text-xs text-gray-400">Twitch fuzzy-matches the pushed game name through its search → game_id round-trip, so a typed "Black Flag" may come back as "Assassin's Creed IV Black Flag." When this is unchecked and the canonical name differs from what you sent, a modal asks whether to rename your local game tag to match. The modal also has its own "Don't ask again" button that sets this option.</div></div>}
           />
-        </section>
+        </Section>
 
         {/* Video Player */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            Video Player
-          </h2>
-
+        <Section id="player" icon={<Film size={14} />} title="Video Player" registerRef={registerSection}>
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default Clip Export Preset</label>
+            <label className="text-sm font-medium text-gray-300">Default Clip Export Preset {dirtyDot('clipPresetId')}</label>
             <div className="relative">
               <select
                 value={local.clipPresetId ?? ''}
@@ -543,7 +672,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
 
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">
-              Default Bleep Volume — <span className="text-purple-400 tabular-nums">{Math.round((local.defaultBleepVolume ?? 0.25) * 100)}%</span>
+              Default Bleep Volume — <span className="text-purple-400 tabular-nums">{Math.round((local.defaultBleepVolume ?? 0.25) * 100)}%</span> {dirtyDot('defaultBleepVolume')}
             </label>
             <input
               type="range"
@@ -565,49 +694,67 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
           <Checkbox
             checked={local.skipClipMergeWarning ?? false}
             onChange={v => set('skipClipMergeWarning', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Skip multi-track confirmation on entering clip mode</div><div className="text-xs text-gray-400">Enter clip mode immediately on videos with multiple audio tracks instead of prompting to enable multi-track mode. You can still enable multi-track mode when clip mode is active.</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Skip multi-track confirmation on entering clip mode {dirtyDot('skipClipMergeWarning')}</div><div className="text-xs text-gray-400">Enter clip mode immediately on videos with multiple audio tracks instead of prompting to enable multi-track mode. You can still enable multi-track mode when clip mode is active.</div></div>}
           />
-        </section>
+        </Section>
 
         {/* Converter */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            Converter
-          </h2>
+        <Section id="converter" icon={<Zap size={14} />} title="Converter" registerRef={registerSection}>
           <Checkbox
             checked={!!local.autoDeletePartialOnCancel}
             onChange={v => set('autoDeletePartialOnCancel', v)}
-            label={
-              <div>
-                <div className="text-sm font-medium text-gray-200">Automatically delete partial files on cancel</div>
-                <div className="text-xs text-gray-400">When unchecked, you'll be asked each time a conversion is cancelled</div>
-              </div>
-            }
+            label={<div><div className="text-sm font-medium text-gray-200">Automatically delete partial files on cancel {dirtyDot('autoDeletePartialOnCancel')}</div><div className="text-xs text-gray-400">When unchecked, you'll be asked each time a conversion is cancelled.</div></div>}
           />
-        </section>
+        </Section>
 
         {/* Appearance */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            Appearance
-          </h2>
+        <Section id="appearance" icon={<Palette size={14} />} title="Appearance" registerRef={registerSection}>
           <Checkbox
             checked={!!local.disableAnimations}
             onChange={v => set('disableAnimations', v)}
-            label={
-              <div>
-                <div className="text-sm font-medium text-gray-200">Disable animations</div>
-                <div className="text-xs text-gray-400">Turn off motion animations throughout the app. Also applies automatically if your OS has "Reduce motion" enabled.</div>
-              </div>
-            }
+            label={<div><div className="text-sm font-medium text-gray-200">Disable animations {dirtyDot('disableAnimations')}</div><div className="text-xs text-gray-400">Turn off motion animations throughout the app. Also applies automatically if your OS has "Reduce motion" enabled.</div></div>}
           />
-        </section>
+          <div className="flex flex-col gap-1.5">
+            <div>
+              <div className="text-sm font-medium text-gray-200">First day of the week {dirtyDot('calendarFirstDayOfWeek')}</div>
+              <div className="text-xs text-gray-400">Sets the starting day for every calendar and date picker across the app, including the streams sidebar calendar. The sidebar calendar's own settings stay in sync with this.</div>
+            </div>
+            <div className="flex bg-navy-800 border border-white/10 rounded-lg overflow-hidden w-48">
+              {(['sunday', 'monday'] as const).map(opt => {
+                const selected = (local.calendarFirstDayOfWeek || 'sunday') === opt
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => set('calendarFirstDayOfWeek', opt)}
+                    className={`flex-1 py-1.5 text-sm capitalize transition-colors ${
+                      selected ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </Section>
+
+        {/* Auto-rules */}
+        <Section id="autorules" icon={<Shuffle size={14} />} title="Auto-rules" registerRef={registerSection}>
+          <Checkbox
+            checked={local.autoStartWatcher}
+            onChange={v => set('autoStartWatcher', v)}
+            label={<div><div className="text-sm font-medium text-gray-200">Auto-start file watcher on launch {dirtyDot('autoStartWatcher')}</div><div className="text-xs text-gray-400">Automatically activate all enabled rules when the app opens.</div></div>}
+          />
+        </Section>
 
         {/* System */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            System
-          </h2>
+        <Section id="system" icon={<MonitorCog size={14} />} title="System" registerRef={registerSection}>
+          <Checkbox
+            checked={local.checkForUpdates ?? true}
+            onChange={v => set('checkForUpdates', v)}
+            label={<div><div className="text-sm font-medium text-gray-200">Check for app updates {dirtyDot('checkForUpdates')}</div><div className="text-xs text-gray-400">On launch, check the GitHub releases page for a newer version of Stream Manager. An indicator appears next to the version label in the sidebar when an update is available. No data is sent — only a public API call.</div></div>}
+          />
           <Checkbox
             checked={!!local.startWithWindows}
             onChange={v => set('startWithWindows', v)}
@@ -615,7 +762,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
             label={
               <div>
                 <div className="text-sm font-medium text-gray-200">
-                  Start with Windows
+                  Start with Windows {dirtyDot('startWithWindows')}
                   {import.meta.env.DEV && <span className="ml-2 text-xs text-yellow-600 font-normal">(deployable builds only)</span>}
                 </div>
                 <div className="text-xs text-gray-400">Automatically launch Stream Manager when Windows starts</div>
@@ -626,32 +773,12 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
             checked={!!local.startMinimized}
             onChange={v => set('startMinimized', v)}
             disabled={import.meta.env.DEV || !local.startWithWindows}
-            label={
-              <div>
-                <div className="text-sm font-medium text-gray-200">Start Minimized</div>
-                <div className="text-xs text-gray-400">Hide to tray on launch instead of opening the window</div>
-              </div>
-            }
+            label={<div><div className="text-sm font-medium text-gray-200">Start Minimized {dirtyDot('startMinimized')}</div><div className="text-xs text-gray-400">Hide to tray on launch instead of opening the window.</div></div>}
           />
-        </section>
-
-        {/* Behaviour */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider border-b border-white/5 pb-2">
-            Auto-rules Behaviour
-          </h2>
-          <Checkbox
-            checked={local.autoStartWatcher}
-            onChange={v => set('autoStartWatcher', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Auto-start file watcher on launch</div><div className="text-xs text-gray-400">Automatically activate all enabled rules when the app opens</div></div>}
-          />
-        </section>
+        </Section>
 
         {import.meta.env.DEV && (
-          <section className="flex flex-col gap-4">
-            <h2 className="text-sm font-semibold text-yellow-600 uppercase tracking-wider border-b border-yellow-600/20 pb-2">
-              Dev Tools
-            </h2>
+          <Section id="devtools" icon={<FlaskConical size={14} />} title="Dev Tools" headerClass="text-yellow-600 border-yellow-600/20" registerRef={registerSection}>
             <div className="flex flex-col gap-1">
               <Button
                 variant="ghost"
@@ -668,15 +795,26 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, pendingNav, onCo
             <Checkbox
               checked={!!local.slowAnimations}
               onChange={v => setLocal(prev => ({ ...prev, slowAnimations: v }))}
-              label={<div><div className="text-sm font-medium text-gray-200">Slow down animations (5×)</div><div className="text-xs text-gray-400">Multiplies all motion animation durations by 10 to make transitions easier to inspect.</div></div>}
+              label={<div><div className="text-sm font-medium text-gray-200">Slow down animations (5×) {dirtyDot('slowAnimations')}</div><div className="text-xs text-gray-400">Multiplies all motion animation durations by 10 to make transitions easier to inspect.</div></div>}
             />
             <ForceQuotaToggle
               checked={!!local.devForceYouTubeQuotaExceeded}
               onChange={v => set('devForceYouTubeQuotaExceeded', v)}
+              labelSuffix={dirtyDot('devForceYouTubeQuotaExceeded')}
             />
-          </section>
+            <div className="flex flex-col gap-1">
+              <Button variant="ghost" size="sm" disabled={backfillState === 'running'} onClick={runThumbnailBackfill}>
+                {backfillState === 'running' ? 'Stamping…' : 'Backfill thumbnail sync snapshots'}
+              </Button>
+              <p className="text-xs text-gray-400">
+                One-time: records each <span className="text-gray-300">linked</span> stream's current thumbnail hash as its last-pushed snapshot, so thumbnails that were already up to date on YouTube stop showing as out-of-sync. Only fills in streams that have no snapshot yet — never overwrites a real push. Run this only if you're sure your local thumbnails already match YouTube.
+              </p>
+              {backfillState !== 'idle' && backfillState !== 'running' && (
+                <p className="text-xs text-yellow-600">{backfillState}</p>
+              )}
+            </div>
+          </Section>
         )}
-      </div>
       </div>
       </div>
 

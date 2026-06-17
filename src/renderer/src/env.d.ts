@@ -23,6 +23,7 @@ import type {
   RelayStats,
   ActivePickResult,
   OrchestratorEvent,
+  PlayerRecentEntry,
 } from './types'
 
 declare global {
@@ -157,6 +158,7 @@ declare global {
       detectStreamStructure(dir: string): Promise<DetectedStructure>
       writeStreamMeta(folderPath: string, meta: StreamMeta, metaKey?: string): Promise<void>
       updateStreamMeta(folderPath: string, partial: Partial<StreamMeta>, metaKey?: string): Promise<void>
+      backfillThumbnailHashes(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<{ updated: number; skippedNoThumb: number }>
       saveClipDraft(folderPath: string, draft: ClipDraft, metaKey?: string): Promise<void>
       deleteClipDraft(folderPath: string, draftId: string, metaKey?: string): Promise<void>
       clipTagExport(folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null, metaKey?: string): Promise<void>
@@ -201,6 +203,7 @@ declare global {
       youtubeGetDefaultStreamKey(): Promise<{ streamId: string; streamName: string; ingestionAddress: string } | null>
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
+      youtubeGetVideosByIds(ids: string[]): Promise<LiveBroadcast[]>
       youtubeGetBroadcastById(broadcastId: string): Promise<LiveBroadcast | null>
       youtubeGetCategories(regionCode?: string): Promise<{ id: string; title: string; assignable: boolean }[]>
       youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[], categoryId?: string): Promise<void>
@@ -248,9 +251,13 @@ declare global {
       thumbnailListVariants(folderPath: string, date: string): Promise<number[]>
       thumbnailCacheAsset(streamsDir: string, srcPath: string): Promise<string>
       thumbnailHashFile(filePath: string): Promise<string | null>
+      thumbnailHashFiles(filePaths: string[]): Promise<Record<string, string | null>>
       thumbnailGetRecents(): Promise<ThumbnailRecentEntry[]>
       thumbnailAddRecent(entry: ThumbnailRecentEntry): Promise<ThumbnailRecentEntry[]>
       thumbnailRemoveRecent(folderPath: string, date: string): Promise<ThumbnailRecentEntry[]>
+      playerGetRecents(): Promise<PlayerRecentEntry[]>
+      playerAddRecent(entry: PlayerRecentEntry): Promise<PlayerRecentEntry[]>
+      playerRemoveRecent(filePath: string): Promise<PlayerRecentEntry[]>
       thumbnailGetLastFont(): Promise<string>
       thumbnailSetLastFont(font: string): Promise<void>
 
@@ -279,6 +286,7 @@ declare global {
       windowMaximize(): void
       windowClose(): void
       windowMinimizeToTray(): void
+      editRedo(): void
       windowIsMaximized(): Promise<boolean>
       onMaximizeChange(cb: (maximized: boolean) => void): () => void
       onConfirmQuit(cb: (data: { running: number; queued: number }) => void): () => void

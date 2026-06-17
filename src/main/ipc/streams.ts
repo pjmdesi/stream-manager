@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import crypto from 'crypto'
 import { spawnSync } from 'child_process'
 import chokidar, { FSWatcher } from 'chokidar'
 import { getStore } from './store'
@@ -49,6 +50,11 @@ export interface StreamMeta {
   comments: string
   archived?: boolean
   ytVideoId?: string
+  /** sha1 of the thumbnail bytes last pushed to YouTube — compared against the
+   *  current thumbnail to detect an out-of-sync thumbnail. (The full set of YT
+   *  sync fields lives on the renderer's StreamMeta; the main process only
+   *  needs the ones it reads/writes directly.) */
+  ytThumbnailPushedHash?: string
   preferredThumbnail?: string
   videoMap?: Record<string, VideoEntry>
   clipDrafts?: Record<string, ClipDraft>
@@ -457,18 +463,19 @@ function migrateMeta(streamsDir: string): void {
 const CLOUD_SIZE_THRESHOLD = 2 * 1024 * 1024 * 1024  // 2 GB
 
 function classifyVideo(
-  duration: number | undefined,
   width: number | undefined,
   height: number | undefined,
   size: number,
   isLocal: boolean,
-  clipThresholdSecs: number
 ): VideoCategory {
+  // Local, probeable videos: portrait → short, otherwise full. (Clip
+  // auto-detection by duration was removed — app-produced clips are
+  // force-categorized by the caller via `clipOf`.)
   if (isLocal && width !== undefined && height !== undefined) {
-    if (height > width) return 'short'
-    if (duration !== undefined && duration <= clipThresholdSecs) return 'clip'
-    return 'full'
+    return height > width ? 'short' : 'full'
   }
+  // Cloud placeholders / probe failures can't be measured — fall back to
+  // the size heuristic.
   return size < CLOUD_SIZE_THRESHOLD ? 'clip' : 'full'
 }
 
@@ -479,7 +486,6 @@ function classifyVideo(
 async function refreshVideoMaps(
   entries: Array<{ key: string; folderPath: string; date: string; videos: string[] }>,
   allMeta: Record<string, StreamMeta>,
-  clipThresholdSecs: number
 ): Promise<boolean> {
   const allPaths: string[] = []
   const pathKey: Map<string, string> = new Map()
@@ -528,7 +534,7 @@ async function refreshVideoMaps(
       const entry: VideoEntry = {
         size: stat.size,
         mtime: stat.mtimeMs,
-        category: classifyVideo(undefined, undefined, undefined, stat.size, false, clipThresholdSecs),
+        category: classifyVideo(undefined, undefined, stat.size, false),
       }
       const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
       if (!meta.videoMap) meta.videoMap = {}
@@ -560,7 +566,7 @@ async function refreshVideoMaps(
           const cropAspect = (prev.clipState as { cropAspect?: string } | undefined)?.cropAspect
           category = cropAspect === '9:16' ? 'short' : 'clip'
         } else {
-          category = classifyVideo(info.duration, info.width, info.height, stat.size, true, clipThresholdSecs)
+          category = classifyVideo(info.width, info.height, stat.size, true)
         }
         const entry: VideoEntry = {
           size: stat.size,
@@ -588,7 +594,7 @@ async function refreshVideoMaps(
           const entry: VideoEntry = {
             size: stat.size,
             mtime: stat.mtimeMs,
-            category: classifyVideo(undefined, undefined, undefined, stat.size, true, clipThresholdSecs),
+            category: classifyVideo(undefined, undefined, stat.size, true),
           }
           const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
           if (!meta.videoMap) meta.videoMap = {}
@@ -816,7 +822,6 @@ export function registerStreamsIPC(): void {
     // Only refresh video maps if the set of video files has changed since last cache.
     // Keys are paths relative to each stream folder (forward-slash) — for flat layouts
     // this equals the bare filename, so legacy maps are still valid.
-    const clipThreshold = ((getStore().get('config') as any)?.clipDurationThreshold) ?? 300
     const videoEntries = folders
       .filter(f => f.videos.length > 0 && !f.isMissing)
       .map(f => ({ key: f.relativePath, folderPath: f.folderPath, date: f.date, videos: f.videos }))
@@ -830,7 +835,7 @@ export function registerStreamsIPC(): void {
       return false
     })
     if (videoSetChanged) {
-      refreshVideoMaps(videoEntries, allMeta, clipThreshold)
+      refreshVideoMaps(videoEntries, allMeta)
         .then(changed => {
           if (!changed) return
           try { writeAllMeta(dir, allMeta) }
@@ -886,6 +891,74 @@ export function registerStreamsIPC(): void {
     const existing = allMeta[key] ?? ({} as StreamMeta)
     allMeta[key] = { ...existing, ...partial }
     writeAllMeta(streamsDir, allMeta)
+  })
+
+  // One-time backfill: stamp `ytThumbnailPushedHash` on linked streams that
+  // predate the thumbnail-sync-snapshot feature so their (already up-to-date)
+  // thumbnails stop reading as an out-of-sync push. Resolves the displayed
+  // thumbnail exactly the way streams:list does, then sha1-hashes it (the same
+  // hash the mismatch check compares against). Only touches LINKED entries
+  // (`ytVideoId`) that LACK the hash — never overwrites a real push snapshot.
+  // The caller vouches that local thumbnails already match YouTube.
+  ipcMain.handle('streams:backfillThumbnailHashes', async (
+    _event,
+    dir: string,
+    mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream',
+  ): Promise<{ updated: number; skippedNoThumb: number }> => {
+    const streamsDir = dir || getStreamsDir()
+    if (!streamsDir || !fs.existsSync(streamsDir)) return { updated: 0, skippedNoThumb: 0 }
+    const allMeta = readAllMeta(streamsDir)
+
+    // key → displayed thumbnail path (thumbnails[0] after preferredThumbnail),
+    // mirroring the two scan modes in streams:list.
+    const thumbByKey = new Map<string, string>()
+    const promotePreferred = (sorted: string[], preferred?: string) => {
+      if (!preferred) return
+      const idx = sorted.findIndex(t => path.basename(t) === preferred)
+      if (idx > 0) { const [item] = sorted.splice(idx, 1); sorted.unshift(item) }
+    }
+    if (mode === 'dump-folder') {
+      const groups = new Map<string, string[]>()
+      for (const entry of fs.readdirSync(streamsDir, { withFileTypes: true })) {
+        if (entry.isDirectory()) continue
+        const match = entry.name.match(DATE_IN_FILENAME_RE)
+        if (!match) continue
+        if (!IMAGE_EXTS.has(path.extname(entry.name).toLowerCase())) continue
+        const arr = groups.get(match[1]) ?? []
+        arr.push(path.join(streamsDir, entry.name))
+        groups.set(match[1], arr)
+      }
+      for (const [date, thumbs] of groups) {
+        const sorted = thumbs.sort((a, b) => {
+          const [rA, nA] = thumbnailSortKey(path.basename(a))
+          const [rB, nB] = thumbnailSortKey(path.basename(b))
+          return rA !== rB ? rA - rB : nA.localeCompare(nB)
+        })
+        promotePreferred(sorted, allMeta[date]?.preferredThumbnail)
+        if (sorted[0]) thumbByKey.set(date, sorted[0])
+      }
+    } else {
+      for (const folderPath of findStreamFolders(streamsDir)) {
+        const key = metaKey(streamsDir, folderPath)
+        const thumbs = detectThumbnails(folderPath)
+        promotePreferred(thumbs, allMeta[key]?.preferredThumbnail)
+        if (thumbs[0]) thumbByKey.set(key, thumbs[0])
+      }
+    }
+
+    let updated = 0, skippedNoThumb = 0
+    for (const [key, meta] of Object.entries(allMeta)) {
+      if (!meta?.ytVideoId || meta.ytThumbnailPushedHash) continue
+      const thumbPath = thumbByKey.get(key)
+      if (!thumbPath) { skippedNoThumb++; continue }
+      try {
+        const buf = fs.readFileSync(thumbPath)
+        allMeta[key] = { ...meta, ytThumbnailPushedHash: crypto.createHash('sha1').update(buf).digest('hex') }
+        updated++
+      } catch { skippedNoThumb++ }
+    }
+    if (updated > 0) writeAllMeta(streamsDir, allMeta)
+    return { updated, skippedNoThumb }
   })
 
   // Insert or update a single clip draft in the folder's meta, preserving other drafts.

@@ -119,4 +119,40 @@ export function registerVideoIPC(): void {
     waveformCacheManager.save(filePath, samples)
     return samples
   })
+
+  // ── Recent videos (stored in electron-store) ──────────────────────────────
+  // Mirrors the thumbnail-editor recents: a most-recently-opened list of
+  // video files, deduped by path and capped at 20. Surfaced in the
+  // Player page's empty state.
+  ipcMain.handle('player:getRecents', () => {
+    return (getStore() as any).get('playerRecents', []) as PlayerRecentEntry[]
+  })
+
+  ipcMain.handle('player:addRecent', (_e, entry: PlayerRecentEntry) => {
+    const recents = ((getStore() as any).get('playerRecents', []) as PlayerRecentEntry[])
+      .filter(r => r.filePath !== entry.filePath)
+    const updated = [entry, ...recents].slice(0, 20)
+    ;(getStore() as any).set('playerRecents', updated)
+    return updated
+  })
+
+  ipcMain.handle('player:removeRecent', (_e, filePath: string) => {
+    const updated = ((getStore() as any).get('playerRecents', []) as PlayerRecentEntry[])
+      .filter(r => r.filePath !== filePath)
+    ;(getStore() as any).set('playerRecents', updated)
+    return updated
+  })
+}
+
+export interface PlayerRecentEntry {
+  /** Absolute path to the video file. */
+  filePath: string
+  /** Bare file name for display. */
+  fileName: string
+  /** Resolved stream title (if the file belongs to a stream folder). */
+  streamTitle?: string
+  /** Resolved stream date (YYYY-MM-DD) when derivable. */
+  streamDate?: string
+  /** Last-opened timestamp (ms). */
+  openedAt: number
 }

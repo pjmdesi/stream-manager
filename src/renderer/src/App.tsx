@@ -316,13 +316,13 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
 
   // Main row uses the nav-item pattern — identical flex layout in both
   // modes, icon at x=16 from the left, label always rendered + cropped
-  // by the nav's outer overflow-hidden as the sidebar shrinks. Click
-  // target differs per mode: collapsed = quick-launch the group;
-  // expanded = navigate to the Launcher page (the dedicated launch
-  // button below handles the launch in that mode).
+  // by the nav's outer overflow-hidden as the sidebar shrinks. The header
+  // always navigates to the Launcher page (both modes); the launch action
+  // lives on the dedicated button below in both modes — matching the
+  // Auto-Rules widget's "header navigates, control acts" convention.
   const mainButton = (
     <button
-      onClick={collapsed ? launch : onNavigate}
+      onClick={onNavigate}
       className="flex items-center gap-3 w-full px-4 h-10 text-sm font-medium text-gray-400 hover:text-gray-200 transition-colors"
     >
       <span className="shrink-0 inline-flex"><GroupIcon name={group.icon} size={16} /></span>
@@ -336,25 +336,23 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
   return (
     <div className="bg-navy-900 border-y border-white/5 hover:border-white/10 transition-colors whitespace-nowrap">
       {mainButtonWrapped}
-      {/* Launch button row only in expanded mode — there's no room
-          for it at 48px wide, and the main row's onClick handles
-          launch directly in collapsed mode. */}
-      {!collapsed && (
-        <div className="px-3 pb-2">
-          <Tooltip content={appListContent} side="right" triggerClassName="block w-full">
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<Rocket size={12} />}
-              className="w-full whitespace-nowrap"
-              disabled={launching || appCount === 0}
-              onClick={launch}
-            >
-              {feedback != null ? `Launched ${feedback}` : `Launch ${appCount} app${appCount === 1 ? '' : 's'}`}
-            </Button>
-          </Tooltip>
-        </div>
-      )}
+      {/* Launch button — shown in both modes so collapsing the sidebar
+          doesn't hide quick-launch. Collapsed: icon-only, centered (mirrors
+          the Auto-Rules Start/Stop control); expanded: full-width + label. */}
+      <div className={collapsed ? 'flex justify-center pb-2' : 'px-3 pb-2'}>
+        <Tooltip content={appListContent} side="right" triggerClassName={collapsed ? '' : 'block w-full'}>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Rocket size={12} />}
+            className={collapsed ? 'justify-center' : 'w-full whitespace-nowrap'}
+            disabled={launching || appCount === 0}
+            onClick={launch}
+          >
+            {collapsed ? null : (feedback != null ? `Launched ${feedback}` : `Launch ${appCount} app${appCount === 1 ? '' : 's'}`)}
+          </Button>
+        </Tooltip>
+      </div>
     </div>
   )
 }
@@ -489,6 +487,26 @@ function AppInner() {
   useEffect(() => {
     window.api.windowIsMaximized().then(setIsMaximized)
     return window.api.onMaximizeChange(setIsMaximized)
+  }, [])
+
+  // App-wide Ctrl/Cmd+Shift+Z → redo for native editable fields. Chromium
+  // only binds Ctrl+Y to redo in text inputs on Windows, so we route the
+  // PS/Affinity-style shortcut to the native redo command when an editable
+  // is focused. Gated on editable focus so page-level handlers (e.g. the
+  // thumbnail editor's own undo stack on the canvas) keep their own
+  // Ctrl+Shift+Z; preventDefault avoids a double-redo on platforms that do
+  // bind it natively (e.g. macOS).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.key.toLowerCase() !== 'z') return
+      const el = document.activeElement as HTMLElement | null
+      const editable = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      if (!editable) return
+      e.preventDefault()
+      window.api.editRedo()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
   const [pendingPlayer, setPendingPlayer] = useState<PendingFile | null>(null)
@@ -789,6 +807,7 @@ function AppInner() {
             <SettingsPage
               onOpenOnboarding={() => setOnboardingOpen(true)}
               onDirtyChange={setSettingsDirty}
+              onNavigate={setPage}
               pendingNav={pendingNav}
               onConfirmNav={(target) => { setPageRaw(target); setPendingNav(null); setSettingsDirty(false) }}
               onCancelNav={() => setPendingNav(null)}

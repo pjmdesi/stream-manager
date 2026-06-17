@@ -183,7 +183,6 @@ export interface AppConfig {
   disableAnimations: boolean
   slowAnimations: boolean
   autoDeletePartialOnCancel: boolean
-  clipDurationThreshold: number  // seconds; videos ≤ this length classified as clips
   claudeApiKey: string
   claudeSystemPrompt: string
   launcherWidgetGroupId: string
@@ -222,6 +221,11 @@ export interface AppConfig {
   /** Render days from the prior/next month in the leading + trailing
    *  cells of the grid. When false, those cells render blank. */
   calendarShowAdjacentMonthDays: boolean
+  /** Thumbnail editor asset panel sources. `FromSeason` includes assets
+   *  from same-season streams; `FromTopicGame` narrows that to the
+   *  current Topic/Game tag (implies `FromSeason`). */
+  thumbnailAssetsFromSeason: boolean
+  thumbnailAssetsFromTopicGame: boolean
   /** When true, suppress the after-Twitch-push modal that offers to
    *  rename the local game tag to Twitch's canonical category. Set
    *  via the "Don't ask again" button in that same modal or via the
@@ -403,6 +407,12 @@ export interface StreamMeta {
   ytLastPushedPrivacy?: 'public' | 'unlisted' | 'private'
   // Twitch
   twitchTitle?: string
+  /** Id of the Titles template currently bound to the Twitch title.
+   *  Shares the same template store as `ytTitleTemplateId` (the group
+   *  is just "Titles"); only meaningful when the user unchecks "Same
+   *  as YouTube title". Same semantics as the YT title binding —
+   *  cleared when the user hand-edits the body away from the template. */
+  twitchTitleTemplateId?: string
   twitchGameName?: string
   /** Twitch channel tags — Twitch's rules: ≤10 tags, ≤25 chars each,
    *  alphanumeric only. Stored independently from ytTags because Twitch's
@@ -449,6 +459,13 @@ export interface StreamMeta {
    *  thumbnail has changed since the last push (so the push action can offer
    *  to re-upload it even when no other metadata changed). */
   ytThumbnailPushedHash?: string
+  /** Out-of-sync panel "ignore": the divergence fingerprint at ignore time
+   *  (see lib/broadcastMismatch.outOfSyncSignature). The stream is hidden from
+   *  the out-of-sync list only while the current signature still matches — any
+   *  local or remote change produces a new signature and re-surfaces it.
+   *  `ignoreOutOfSyncAt` is the ignore timestamp (for display). */
+  ignoreOutOfSyncSig?: string
+  ignoreOutOfSyncAt?: number
   // Per-file, per-track audio settings (M/S/volume) for the multi-track
   // playback feature. Outer key = video filename (matching videoMap keys);
   // inner key = track index. Omitted fields use sensible defaults; an
@@ -732,6 +749,14 @@ export interface ThumbnailRecentEntry {
   title?: string
   templateId?: string
   updatedAt: number
+}
+
+export interface PlayerRecentEntry {
+  filePath: string
+  fileName: string
+  streamTitle?: string
+  streamDate?: string
+  openedAt: number
 }
 
 export interface LauncherApp {

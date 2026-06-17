@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid } from 'lucide-react'
-import { Youtube } from './ui/BrandIcons'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, CopyPlus, CloudDownload, SquareDashedText } from 'lucide-react'
+import { Youtube, Twitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { useStore } from '../hooks/useStore'
 
@@ -72,20 +72,20 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <Radio size={16} />,
     body: (
       <>
-        <p>The Streams page is the home view — every stream session you've recorded or upcoming session you've scheduled shows up as a row. Each stream item is made up of the following elements:</p>
+        <p>The Streams page shows a list of stream items stacked as rows sorted by date (descending) by default. Upcoming streams are steams scheduled for a future date and are colored teal. Streams happening on the current day are colored blue. Each stream item row is made up of the following elements:</p>
 
         <ElementSection icon={<ImageIcon size={14} />} title="Thumbnail">
-          <p>Stream Manager automatically detects images related to the stream and picks the best one to represent it (typically the first available). Click the stream item row to see a carousel containing all the images in the folder and manually pick a new thumbnail for the item.</p>
+          <p>Stream Manager picks the best image to represent a stream item (typically the first available that matches certain criteria). Click the stream item row to see a carousel containing all the images in the folder. There, you can manually pick a new thumbnail for the item.</p>
         </ElementSection>
 
         <ElementSection icon={<Film size={14} />} title="Video Counter">
-          <p>Shows how many videos belong to the stream item, split into two counts by category:</p>
+          <p>Shows how many videos belong to the stream item, split into two counts by category based on length and file size:</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
-            <li className="flex items-baseline gap-2"><Film size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">vid</strong> — full recordings (the original stream or full gameplay video).</span></li>
+            <li className="flex items-baseline gap-2"><Film size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">vid</strong> — full recordings (the original stream, full gameplay video, or other long-form videos).</span></li>
             <li className="flex items-baseline gap-2"><Scissors size={11} className="shrink-0 text-blue-400 translate-y-0.5" /><span><strong className="text-gray-300">clip</strong> — short edited segments derived from the full video, plus any related shorter videos.</span></li>
-            <li className="flex items-baseline gap-2"><Scissors size={11} className="shrink-0 text-blue-400 translate-y-0.5" /><span><strong className="text-gray-300">short</strong> — vertical-aspect edited clips intended for social platforms (counted with clips).</span></li>
+            <li className="flex items-baseline gap-2"><Scissors size={11} className="shrink-0 text-blue-400 translate-y-0.5" /><span><strong className="text-gray-300">short</strong> — vertical-aspect edited clips intended for social platforms like YouTube Shorts or reels (counted with clips).</span></li>
           </ul>
-          <p>Hover the counter for a per-file breakdown.</p>
+          <p>Hover over the counter column for a tooltip that shows a per-file breakdown.</p>
         </ElementSection>
 
         <ElementSection icon={<Archive size={14} />} title="Status Badges">
@@ -98,28 +98,71 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<Tag size={14} />} title="Type Tags">
-          <p>Used to categorize the stream however you like (or not at all). Create new tags inline when you create or edit a stream, or via the <strong className="text-gray-300">Manage Tags</strong> button on the Streams page. Tags can be styled with different colors and textures to distinguish them at a glance.</p>
+          <p>Used to categorize the stream however you like (or not at all). Create new tags on the fly when you create or edit a stream item, or via the <strong className="text-gray-300">Manage Tags</strong> button in the Streams page header. Tags can be customized with different colors and textures to.</p>
         </ElementSection>
 
         <ElementSection icon={<Hash size={14} />} title="Topics / Games">
-          <p>Further detail about what the stream covered. Like Type Tags, you can create new ones on the fly while creating or editing a stream, or through the <strong className="text-gray-300">Manage Tags</strong> button.</p>
+          <p>Further detail about what the stream covered. Like Type Tags, you can create new ones on the fly while creating or editing a stream, or through the <strong className="text-gray-300">Manage Tags</strong> button. It's recommended that these tags match topics or games that Twitch uses as categories. When a tag is close to matching one of Twitch's categories, SM will suggest that the tag be updated to match exactly. This tag can be used in the templating system for stream Titles.</p>
         </ElementSection>
 
         <ElementSection icon={<MessageSquare size={14} />} title="Notes">
-          <p>Free-form notes for anything the other fields don't cover. Click a stream item to open the details sidebar — notes (and every other field) are edited inline there.</p>
+          <p>Free-form notes for anything the other fields don't cover. Located at thee bottom of the detail sidebar main content.</p>
         </ElementSection>
 
         <ElementSection icon={<Zap size={14} />} title="Action Buttons">
-          <p>Click a stream item to open the details sidebar — that's where all editing happens. Hover over a stream to reveal its quick actions:</p>
+          <p>Click a stream item to open the details sidebar — that's where all editing happens. Some action buttons are available on the very right of a stream item row when hovering while the sidebar is closed:</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
             <li className="flex items-baseline gap-2"><Film size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Player</strong> — open the stream's video in the Player page for review or clipping.</span></li>
             <li className="flex items-baseline gap-2"><Zap size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Converter</strong> — queue the stream's video for conversion using a chosen preset.</span></li>
             <li className="flex items-baseline gap-2"><Combine size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Combine videos</strong> — merge multi-part recordings into one file (only shown when there are 2+ videos).</span></li>
             <li className="flex items-baseline gap-2"><ImageIcon size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Create / Edit thumbnail</strong> — open the built-in thumbnail editor for this stream.</span></li>
+            <li className="flex items-baseline gap-2"><CopyPlus size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Create New episode</strong> — create a duplicate of the current stream item. Useful for quickly adding new episodes of the current series.</span></li>
+            <li className="flex items-baseline gap-2"><Cloud size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Offload files</strong> — "dehydrate" the stream's files (set the files inside the stream folder to be cloud-only through the Windows cloud service).</span></li>
+            <li className="flex items-baseline gap-2"><CloudDownload size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Pin files local</strong> — "hydrate" the stream's files (set the files inside the stream folder to be available locally through the Windows cloud service).</span></li>
             <li className="flex items-baseline gap-2"><FolderOpen size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Open folder</strong> — reveal the stream's folder in your OS file explorer.</span></li>
-            <li className="flex items-baseline gap-2"><CalendarClock size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Reschedule</strong> — change the date of an upcoming stream (only shown for upcoming items).</span></li>
-            <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — remove the stream item and its files. You'll be asked to confirm.</span></li>
+            <li className="flex items-baseline gap-2"><Archive size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Archive Stream</strong> — runs the archiving process for the stream's files. This converts the stream's recording files using the default archive encoding preset (set on the settings page) and, once finished, tags the stream item as archived. This cannot be undone.</span></li>
+            <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — remove the stream item and all of its files. You'll be asked to confirm.</span></li>
           </ul>
+        </ElementSection>
+
+        <ElementSection icon={<PanelRight size={14} />} title="Details Sidebar">
+          <p>Click any stream item to open the details sidebar — every field is edited inline and autosaves as you go. This sidebar is where you prepare and publish a stream's YouTube &amp; Twitch metadata. A few fields feed the title and description templates as <strong className="text-gray-300">merge fields</strong>:</p>
+          <ul className="list-none pl-0 flex flex-col gap-1">
+            <li className="flex items-baseline gap-2"><Hash size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Topics / Games</strong> — the selected tag is the <em>primary</em> one. It sets the <code>{'{game}'}</code> merge field and the Twitch category by default.</span></li>
+            <li className="flex items-baseline gap-2"><PencilLine size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Tagline</strong> — a short catchy phrase that sets the <code>{'{tagline}'}</code> merge field. Press <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in the field for an AI suggestion using the stream's details, previous taglines in the series, and your preferences prompt configurable on the integrations page.</span></li>
+            <li className="flex items-baseline gap-2"><Layers size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Series / Season / Episode</strong> — for a stream series, these set the <code>{'{season}'}</code>, <code>{'{episode}'}</code>, and <code>{'{total_episodes}'}</code> merge fields. Turn off <em>Series</em> for one-off streams or to otherwise opt-out of the series system.</span></li>
+          </ul>
+        </ElementSection>
+
+        <ElementSection icon={<Type size={14} />} title="Title fields & merge fields">
+          <p>The YouTube Title and the Twitch Title (when you uncheck <em>Same as YouTube title</em>) are mini template editors. Type plain text, or insert a <strong className="text-gray-300">merge-field chip</strong> from the <em>Insert</em> row beneath the field. Chips like <code>{'{game}'}</code> or <code>{'{episode}'}</code> are substituted live from the fields above.</p>
+          <ul className="list-none pl-0 flex flex-col gap-1.5">
+            <li className="flex items-baseline gap-2"><Braces size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Preview</strong> — when a title contains merge fields, a preview line shows the final rendered title (exactly what publishes).</span></li>
+            <li className="flex items-baseline gap-2"><Hash size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Character counter</strong> — counts the rendered title against the platform limit (100 for YouTube, 140 for Twitch) and turns red when you go over.</span></li>
+            <li className="flex items-baseline gap-2"><Braces size={11} className="shrink-0 text-red-400 translate-y-0.5" /><span>A merge field that doesn't apply — e.g. <code>{'{episode}'}</code> on a standalone stream — shows as a red chip. Turn on <em>Series</em> to use it.</span></li>
+          </ul>
+        </ElementSection>
+
+        <ElementSection icon={<SquareDashedText size={14} />} title="Templates">
+          <p>Save reusable Titles, Descriptions, and Tag lists from the <strong className="text-gray-300">Templates</strong> button in the Streams page header. Title &amp; Description templates use the same merge-field chips; tag templates are reusable tag lists.</p>
+          <ul className="list-none pl-0 flex flex-col gap-1.5">
+            <li>Assign a Titles template from the dropdown above the title field — it fills the field with the template's body and stays <strong className="text-gray-300">bound</strong> (the tab lights up). Hand-editing the field detaches it. The same Titles templates work with both YouTube and Twitch Title fields.</li>
+            <li className="flex items-baseline gap-2"><Star size={11} className="shrink-0 text-amber-400 translate-y-0.5" /><span><strong className="text-gray-300">Default tag templates</strong> — star a tag template to auto-fill it onto every new stream (set separately for YouTube and Twitch).</span></li>
+            <li className="flex items-baseline gap-2"><Link2 size={11} className="shrink-0 text-blue-400 translate-y-0.5" /><span><strong className="text-gray-300">Linked tags</strong> — in Manage Tags, link a Topic/Game to a tag template so its tags auto-fill whenever you add that topic or game tag to the stream item. Only the primary tag (either the first or manually selected topic/game tag) will be used to fill the tags fields with its linked list if it has one. The Templates dialog can also bulk-bind existing streams whose tags already match a template.</span></li>
+          </ul>
+        </ElementSection>
+
+        <ElementSection icon={<Youtube size={14} />} title="Publishing to YouTube & Twitch">
+          <p>Link a stream to a YouTube broadcast or video from the sidebar footer, then edit its title, description, tags, category, privacy, and scheduled time locally and <strong className="text-gray-300">Push to YouTube</strong> when ready. <strong className="text-gray-300">Pull from YouTube</strong> copies YouTube's current values back onto the stream.</p>
+          <p>A colored dot next to a field means it differs from YouTube, and which way it's out of sync:</p>
+          <ul className="list-none pl-0 flex flex-col gap-1">
+            <li className="flex items-baseline gap-2"><span className="shrink-0 w-2 h-2 rounded-full bg-blue-400" /><span><strong className="text-gray-300">Blue</strong> — you changed it locally; push to update YouTube.</span></li>
+            <li className="flex items-baseline gap-2"><span className="shrink-0 w-2 h-2 rounded-full bg-orange-400" /><span><strong className="text-gray-300">Orange</strong> — YouTube has a newer value; pull to update the stream (or push to overwrite YouTube with yours).</span></li>
+            <li className="flex items-baseline gap-2"><span className="shrink-0 w-2 h-2 rounded-full bg-gradient-to-br from-blue-400 to-orange-400" /><span><strong className="text-gray-300">Two-tone</strong> — a conflict: both sides changed since the last sync. Pulling overwrites your local edits; pushing overwrites YouTube's.</span></li>
+            <li className="flex items-baseline gap-2"><span className="shrink-0 w-2 h-2 rounded-full bg-gray-400" /><span><strong className="text-gray-300">Gray</strong> — the field differs from YouTube but the direction is unknown, because the stream hasn't been synced since per-field tracking was added. Push or pull once to start tracking direction.</span></li>
+          </ul>
+          <p className="flex items-baseline gap-2"><Twitch size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span>Twitch pushes the title, category, and tags to your channel. <em>Same as YouTube title</em> mirrors the YouTube title; uncheck it to give Twitch its own (also template-aware) title. <em>Same as Topic / Game</em> does the same for the category.</span></p>
+          <p>Twitch fields don't show the per-field dots above — Twitch is a single channel state (one title/category/tags at a time) rather than a per-stream object, so there's no per-field direction to track. Instead the <strong className="text-gray-300">Push to Twitch</strong> button simply lights up when your channel doesn't match this stream's values and disables once they're in sync.</p>
         </ElementSection>
       </>
     ),
@@ -288,8 +331,8 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <Plug size={16} />,
     body: (
       <>
-        <p>Connect YouTube, Twitch, and Claude AI. With YouTube connected, you can pull broadcast and VOD info onto a stream's metadata, and push title/description/tag updates back. Twitch syncs go-live title and category.</p>
-        <p>Claude (optional) helps draft titles, descriptions, and tags from the stream's metadata. All API keys are stored locally.</p>
+        <p>Connect YouTube, Twitch, and Claude AI. With YouTube connected, you can pull broadcast and VOD info onto a stream's metadata, and push title/description/tag updates back — the per-field push/pull workflow lives in the Streams details sidebar (see <em>Streams → Publishing to YouTube &amp; Twitch</em>). Twitch syncs go-live title and category.</p>
+        <p>Claude (optional) helps draft taglines, descriptions, and tags from the stream's metadata via <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in those fields. All API keys are stored locally.</p>
       </>
     ),
   },

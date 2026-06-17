@@ -342,6 +342,47 @@ export async function getVideoById(
   }
 }
 
+/** Batched video lookup → LiveBroadcast-shaped objects (snippet + status) for
+ *  many IDs at once. Chunks at the API's 50-ID-per-request limit; 1 quota unit
+ *  per chunk (so ~4 units for 200 IDs). Used by the Out-of-sync panel to
+ *  compare local meta against YouTube for every linked stream cheaply.
+ *  `scheduledStartTime` / `gameTitle` are liveBroadcast-only and stay absent
+ *  here — past videos don't need them, and `actualStartTime` (= publishedAt)
+ *  marks them as started so the schedule mismatch is correctly skipped. */
+export async function getVideosByIds(
+  ids: string[],
+  clientId: string,
+  clientSecret: string
+): Promise<LiveBroadcast[]> {
+  if (ids.length === 0) return []
+  const out: LiveBroadcast[] = []
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50)
+    const data = await ytRequest(
+      `/videos?${new URLSearchParams({ part: 'snippet,status', id: chunk.join(','), maxResults: '50' })}`,
+      { method: 'GET' },
+      clientId, clientSecret
+    )
+    for (const item of (data?.items ?? [])) {
+      out.push({
+        id: item.id,
+        snippet: {
+          title: item.snippet?.title ?? '',
+          description: item.snippet?.description ?? '',
+          actualStartTime: item.snippet?.publishedAt,
+          tags: item.snippet?.tags ?? [],
+          categoryId: item.snippet?.categoryId ?? undefined,
+        },
+        status: {
+          lifeCycleStatus: 'complete',
+          privacyStatus: item.status?.privacyStatus ?? 'public',
+        },
+      })
+    }
+  }
+  return out
+}
+
 /** Fetch tags for a list of video IDs from the videos resource and return a map of id → tags.
  *  Chunks requests to stay within the API's 50-ID-per-request limit. */
 /** Returns per-id `{ tags, categoryId }` for fields the

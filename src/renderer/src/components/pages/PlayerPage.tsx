@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
-import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, TimelineViewport } from '../../types'
+import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, TimelineViewport, PlayerRecentEntry } from '../../types'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
 import { useWaveform } from '../../hooks/useWaveform'
@@ -17,6 +17,7 @@ import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { Checkbox } from '../ui/Checkbox'
 import { isClipExportCompatible } from '../../lib/clipExport'
+import { renderStreamTitle } from '../../lib/streamTitle'
 
 /** Given an absolute file path and the streams root, find the file's stream
  *  folder and the canonical key used in _meta.json:
@@ -1352,6 +1353,51 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       null
     )
   }, [state.filePath, config.streamsDir, sortedStreamFolders, folderPath])
+
+  // ── Recent videos ──────────────────────────────────────────────────────
+  // Most-recently-opened video files, surfaced in the empty state (mirrors
+  // the thumbnail editor's recents). Loaded once on mount, pruned to only
+  // still-existing files. Added/updated whenever a video opens.
+  const [recents, setRecents] = useState<PlayerRecentEntry[]>([])
+  useEffect(() => {
+    let cancelled = false
+    window.api.playerGetRecents().then(async (list) => {
+      const flags = await Promise.all(list.map(r => window.api.fileExists(r.filePath).catch(() => true)))
+      if (cancelled) return
+      setRecents(list.filter((_, i) => flags[i]))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  useEffect(() => {
+    if (!state.filePath) return
+    const fp = state.filePath
+    const entry: PlayerRecentEntry = {
+      filePath: fp,
+      fileName: fp.split(/[\\/]/).pop() ?? fp,
+      streamTitle: currentStreamFolder
+        ? renderStreamTitle(currentStreamFolder, sortedStreamFolders) || undefined
+        : undefined,
+      streamDate: currentStreamFolder?.date,
+      openedAt: Date.now(),
+    }
+    window.api.playerAddRecent(entry).then(setRecents).catch(() => {})
+  }, [state.filePath, currentStreamFolder, sortedStreamFolders])
+  const removeRecent = useCallback((filePath: string) => {
+    window.api.playerRemoveRecent(filePath).then(setRecents).catch(() => {})
+  }, [])
+  // Resolve each recent's stream title against the live folder list so the
+  // list reflects current metadata and renders {merge fields} — older entries
+  // stored the raw template body. Falls back to the stored snapshot when the
+  // file no longer maps to a known stream folder.
+  const displayRecents = useMemo(() => {
+    return recents.map(r => {
+      const { metaKey } = resolveStreamContext(r.filePath, config.streamsDir)
+      const folder = sortedStreamFolders.find(f => f.relativePath === metaKey)
+      return folder
+        ? { ...r, streamTitle: renderStreamTitle(folder, sortedStreamFolders) || r.streamTitle }
+        : r
+    })
+  }, [recents, sortedStreamFolders, config.streamsDir])
 
   // Prev/next stream items in chronological order. Streams with zero
   // playable video files are skipped over (navigating to an empty
@@ -3234,15 +3280,57 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {!videoUrl ? (
-        /* Empty state */
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8">
-          <FileDropZone
-            onFiles={handleFiles}
-            accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
-            label="Drop a video file here or click to browse"
-            className="w-full max-w-lg"
-          />
-          <p className="text-xs text-gray-400">You can also send a video here from the Streams page using the action buttons on each row.</p>
+        /* Empty state — mirrors the Thumbnails page overview: a primary
+           action area (the dropzone, in the slot the templates grid
+           occupies there) followed by a Recent list. */
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-8 min-h-0">
+          <section>
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">Open a video</h2>
+            <FileDropZone
+              onFiles={handleFiles}
+              accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
+              label="Drop a video file here or click to browse"
+              className="w-full"
+            />
+            <p className="text-xs text-gray-400 mt-2">You can also send a video here from the Streams page using the action buttons on each row.</p>
+          </section>
+
+          {displayRecents.length > 0 && (
+            <section>
+              <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">Recent</h2>
+              <div className="flex flex-col gap-1.5">
+                {displayRecents.map(r => (
+                  <div
+                    key={r.filePath}
+                    className="group flex items-center gap-3 pr-1 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 transition-colors overflow-hidden"
+                  >
+                    <button
+                      onClick={() => loadFile(r.filePath)}
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                    >
+                      <span className="w-16 h-10 flex items-center justify-center bg-navy-900 border-r border-white/5 shrink-0">
+                        <Film size={16} className="text-gray-500" />
+                      </span>
+                      <div className="flex-1 min-w-0 py-2">
+                        <p className="text-xs text-gray-300 truncate">{r.streamTitle ?? r.fileName}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{r.filePath}</p>
+                      </div>
+                    </button>
+                    {r.streamDate && <span className="text-[10px] text-gray-400 shrink-0 py-2">{r.streamDate}</span>}
+                    <Tooltip content="Remove from recents" side="left">
+                      <button
+                        onClick={() => removeRecent(r.filePath)}
+                        className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                        aria-label="Remove from recents"
+                      >
+                        <X size={13} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       ) : (
         <div className="flex flex-1 overflow-hidden">
@@ -4920,9 +5008,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   root). */}
               {currentStreamFolder && (() => {
                 const meta = currentStreamFolder.meta
-                const title = meta?.ytTitle?.trim()
-                  || meta?.twitchTitle?.trim()
-                  || (meta?.games && meta.games.length > 0 ? meta.games.join(' · ') : '')
+                const title = renderStreamTitle(currentStreamFolder, sortedStreamFolders)
                   || currentStreamFolder.folderName
                 // Resolve the thumbnail (preferredThumbnail filename if set,
                 // else first slot). Cloud placeholders render as a Cloud
@@ -4980,10 +5066,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           {sortedStreamFolders.length === 0 ? (
                             <p className="px-3 py-2 text-xs text-gray-400">No streams</p>
                           ) : sortedStreamFolders.slice().reverse().map(folder => {
-                            const fMeta = folder.meta
-                            const fTitle = fMeta?.ytTitle?.trim()
-                              || fMeta?.twitchTitle?.trim()
-                              || (fMeta?.games && fMeta.games.length > 0 ? fMeta.games.join(' · ') : '')
+                            const fTitle = renderStreamTitle(folder, sortedStreamFolders)
                               || folder.folderName
                             const isCurrent = !!currentStreamFolder
                               && folder.folderPath === currentStreamFolder.folderPath

@@ -102,6 +102,24 @@ export function registerThumbnailIPC(): void {
     }
   })
 
+  // Batched content hash — same sha1-of-bytes as hashFile, for many files at
+  // once (the Out-of-sync panel hashes every linked stream's thumbnail to
+  // detect "thumbnail changed since last push"). Hashed in parallel; missing/
+  // unreadable files map to null.
+  ipcMain.handle('thumbnail:hashFiles', async (_e, filePaths: string[]): Promise<Record<string, string | null>> => {
+    const entries = await Promise.all(
+      (filePaths ?? []).map(async (p): Promise<[string, string | null]> => {
+        try {
+          const buf = await fs.promises.readFile(p)
+          return [p, crypto.createHash('sha1').update(buf).digest('hex')]
+        } catch {
+          return [p, null]
+        }
+      })
+    )
+    return Object.fromEntries(entries)
+  })
+
   // ── Templates ────────────────────────────────────────────────────────────
 
   ipcMain.handle('thumbnail:listTemplates', async (_e, streamsDir: string): Promise<ThumbnailTemplate[]> => {

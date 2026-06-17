@@ -6,7 +6,7 @@ import { Stage, Layer, Group as KonvaGroup, Image as KonvaImage, Text as KonvaTe
 import useImage from 'use-image'
 import Konva from 'konva'
 import {
-  ArrowLeft, Plus, Trash2, Eye, EyeOff,
+  Plus, Trash2, Eye, EyeOff,
   Image as ImageIcon, Type, Undo2, Redo2, Download,
   BookMarked, FolderOpen, LayoutTemplate, Sliders, RotateCcw, Copy,
   Magnet, Grid3x3, Check, X, AlertTriangle, Pencil, Link2, Unlink2,
@@ -19,12 +19,14 @@ import {
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
-import { useAutoGrowTextarea, NumberInput } from '../ui/Input'
+import { NumberInput } from '../ui/Input'
+import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import { theme, rgba } from '../../theme'
-import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta } from '../../types'
+import { renderStreamTitle, renderTitleFromMeta } from '../../lib/streamTitle'
+import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta, StreamFolder } from '../../types'
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
 const CANVAS_W = 1280
@@ -247,6 +249,13 @@ export function applyThumbnailMergeFields(text: string, fields: Record<string, s
   if (!fields) return text
   return text.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
 }
+
+/** Merge fields a thumbnail text layer can reference. Mirrors the keys
+ *  `mergeFieldValues` resolves (see the editor body). The series-specific
+ *  trio is flagged inapplicable on standalone streams — same treatment as
+ *  the YouTube-title chip editor on the Streams page. */
+const THUMBNAIL_MERGE_KEYS = ['title', 'game', 'date', 'season', 'episode', 'total_episodes'] as const
+const THUMBNAIL_SERIES_KEYS = ['season', 'episode', 'total_episodes']
 
 function snapGrid(v: number) { return Math.round(v / GRID_SIZE) * GRID_SIZE }
 
@@ -1025,6 +1034,11 @@ interface PropsPanelProps {
   onChange: (updated: ThumbnailLayer) => void
   systemFonts: string[]
   fontVariantMap: Record<string, { name: string; css: string }[]>
+  /** True when the active stream is explicitly standalone (not a series).
+   *  Flags the season/episode/total_episodes merge chips as inapplicable —
+   *  mirrors the YouTube-title chip editor on the Streams page. False in
+   *  template-edit mode (no bound stream → every field is applicable). */
+  standalone: boolean
 }
 
 function FilterSlider({ label, min, max, step, value, onChange }: {
@@ -1066,14 +1080,22 @@ function FilterToggle({ label, checked, onChange }: {
   )
 }
 
-function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: PropsPanelProps) {
-  // Auto-grow ref for the text-layer textarea below. Must be called
-  // unconditionally — the textarea only renders for text layers, but
-  // calling the hook inside that conditional would change the hook count
-  // when the user clicks between layer types.
-  const textAreaRef = useAutoGrowTextarea(
-    layer?.type === 'text' ? layer.text ?? '' : '',
-    layer?.type === 'text',
+function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap, standalone }: PropsPanelProps) {
+  // Chip-editor wiring for the text-layer body. Hooks must run
+  // unconditionally (the editor only renders for text layers), so they
+  // live above the early return. Stable sets keep TemplateBodyEditor from
+  // rebuilding its chips every render.
+  const textInsertRef = useRef<((text: string) => void) | null>(null)
+  const knownKeys = useMemo(() => new Set<string>(THUMBNAIL_MERGE_KEYS), [])
+  const inapplicableKeys = useMemo(
+    () => standalone ? new Set<string>(THUMBNAIL_SERIES_KEYS) : new Set<string>(),
+    [standalone],
+  )
+  const pickerKeys = useMemo(
+    () => standalone
+      ? THUMBNAIL_MERGE_KEYS.filter(k => !THUMBNAIL_SERIES_KEYS.includes(k))
+      : THUMBNAIL_MERGE_KEYS,
+    [standalone],
   )
 
   if (!layer) {
@@ -1286,27 +1308,20 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
         <>
           <section>
             <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Text</p>
-            <textarea
-              ref={textAreaRef}
+            <TemplateBodyEditor
               value={layer.text ?? ''}
-              onChange={e => update({ text: e.target.value })}
-              rows={3}
-              className="w-full bg-navy-900 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-gray-200 resize-none"
+              onSave={v => update({ text: v })}
+              placeholder="Text…"
+              knownKeys={knownKeys}
+              inapplicableKeys={inapplicableKeys}
+              insertRef={textInsertRef}
+              multiline
+              minHeight={54}
             />
-            <p className="text-[10px] text-gray-400 mt-1 leading-snug">
-              Merge fields:
-              {' '}
-              {['title', 'game', 'date', 'season', 'episode', 'total_episodes'].map((f, i, arr) => (
-                <React.Fragment key={f}>
-                  <code
-                    onClick={() => update({ text: (layer.text ?? '') + `{${f}}` })}
-                    className="text-purple-400/80 cursor-pointer hover:text-purple-300"
-                    title={`Insert {${f}}`}
-                  >{`{${f}}`}</code>
-                  {i < arr.length - 1 && ' '}
-                </React.Fragment>
-              ))}
-            </p>
+            <MergeFieldPicker
+              keys={pickerKeys}
+              onInsert={k => textInsertRef.current?.(`{${k}}`)}
+            />
           </section>
           <section>
             <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Font</p>
@@ -1709,8 +1724,19 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap }: Props
 
 export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const { pendingStream, clearPendingStream } = useThumbnailEditor()
-  const { config } = useStore()
+  const { config, updateConfig } = useStore()
   const { setThumbnailHasCanvas } = usePageActivity()
+  // Assets-panel options dropdown (show-from-season / show-from-topic-game).
+  const [assetOptionsOpen, setAssetOptionsOpen] = useState(false)
+  const assetOptionsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!assetOptionsOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (assetOptionsRef.current && !assetOptionsRef.current.contains(e.target as Node)) setAssetOptionsOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [assetOptionsOpen])
 
   // ── Mode ─────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<'overview' | 'editor'>('overview')
@@ -1846,6 +1872,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const singleTriangle = sel.length === 1 && sel[0].type === 'shape' && sel[0].shapeType === 'triangle'
     const rotatedInMulti = sel.length > 1 && sel.some(l => (l.rotation ?? 0) !== 0)
     tr.keepRatio(singleTriangle || rotatedInMulti)
+    // Stop Konva from forcing proportional scaling when Shift is held — our
+    // boundBoxFunc is the sole aspect-ratio authority (Shift inverts the
+    // per-layer lock there), and Konva's default Shift behavior would
+    // pre-constrain the box and corrupt the cursor reconstruction.
+    tr.shiftBehavior('none')
     tr.enabledAnchors(onlyText
       ? ['middle-left', 'middle-right']
       : ['top-left', 'top-right', 'bottom-left', 'bottom-right',
@@ -1919,24 +1950,41 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const pendingTransformsRef = useRef<Map<string, Konva.Node>>(new Map())
   const commitTransformScheduledRef = useRef(false)
 
-  // Shift state observable from inside boundBoxFunc (which doesn't
-  // carry event info). When Shift is held during a resize-handle drag,
-  // we invert the layer's aspectLocked flag for that gesture only —
-  // matches the Photoshop/Affinity convention.
+  // Box at the start of the current resize gesture. boundBoxFunc references
+  // this (not the per-frame oldBox) for ratio / anchor / scale so the whole
+  // transform is recomputed each frame as a pure function of (startBox,
+  // cursor, current modifiers). That's what makes pressing/releasing Shift or
+  // Ctrl mid-drag behave as if the key had been held the whole time — like
+  // Photoshop/Affinity — instead of baking a distorted frame into the
+  // baseline. Captured on the first boundBoxFunc frame (when null) and reset
+  // to null in handleTransformEnd so the next gesture re-captures.
+  const resizeStartBoxRef = useRef<KonvaBox | null>(null)
+
+  // Modifier state observable from inside boundBoxFunc (which doesn't
+  // carry event info). During a resize-handle drag:
+  //   • Shift inverts the layer's aspectLocked flag for that gesture only
+  //     (Photoshop/Affinity convention).
+  //   • Ctrl (or Cmd) does centered/symmetric scaling — origin = layer center.
+  // Alt is intentionally NOT read here: Konva's Transformer bakes in its own
+  // Alt=centered behavior, but we reconstruct the box geometry ourselves so
+  // Alt has no effect on resize (reserved for Alt+drag duplicate later).
   const shiftPressedRef = useRef(false)
+  const ctrlPressedRef = useRef(false)
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftPressedRef.current = true }
-    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftPressedRef.current = false }
+    const sync = (e: KeyboardEvent) => {
+      shiftPressedRef.current = e.shiftKey
+      ctrlPressedRef.current = e.ctrlKey || e.metaKey
+    }
     // Some focus-shift sequences can leave the keyup unfired (e.g. user
-    // alt-tabs while holding Shift). Reset on blur to avoid a stale
-    // "always shifted" state.
-    const onBlur = () => { shiftPressedRef.current = false }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
+    // alt-tabs while holding a modifier). Reset on blur to avoid a stale
+    // "always held" state.
+    const onBlur = () => { shiftPressedRef.current = false; ctrlPressedRef.current = false }
+    window.addEventListener('keydown', sync)
+    window.addEventListener('keyup', sync)
     window.addEventListener('blur', onBlur)
     return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('keydown', sync)
+      window.removeEventListener('keyup', sync)
       window.removeEventListener('blur', onBlur)
     }
   }, [])
@@ -1993,20 +2041,32 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         if (cancelled || myToken !== token) return
         const cur = all.find(s => s.folderPath === currentStream.folderPath)
         if (!cur) { setSeasonAssets(null); return }
-        // "Related episodes" = same game (series) AND same season, mirroring
-        // the streams-page series convention. Matching on season alone is
-        // wrong: it pulls in unrelated games that happen to share a season
-        // number (e.g. Hardspace S2 surfacing Rimworld S2), and excludes
-        // everything when the season is unset. Default season to '1' so
-        // streams without an explicit ytSeason still group together.
+        // Related-episode sources are user-controlled via the Assets
+        // panel options dropdown. Both require the SAME series (same
+        // Topic/Game) — matching on a bare season number would pull in
+        // unrelated games that happen to share it (e.g. Hardspace S2
+        // surfacing Rimworld S2):
+        //   • FromSeason    → same series, same season (this season's episodes).
+        //   • FromTopicGame → same series, ALL seasons (the whole series).
+        //                     Broader, so it supersedes FromSeason.
+        // Both off → no related streams (only the current stream's assets).
+        // Season defaults to '1' so streams without an explicit ytSeason
+        // still group together.
         const curGame = cur.meta?.games?.[0] ?? cur.detectedGames?.[0]
         const curSeason = cur.meta?.ytSeason ?? '1'
-        const related = curGame
+        const fromTopicGame = config.thumbnailAssetsFromTopicGame
+        const fromSeason = config.thumbnailAssetsFromSeason
+        const sameSeason = (s: StreamFolder) => (s.meta?.ytSeason ?? '1') === curSeason
+        const sameGame = (s: StreamFolder) =>
+          !!curGame && !!s.meta?.games?.some(g => g.toLowerCase() === curGame.toLowerCase())
+        const related = (fromTopicGame || fromSeason)
           ? all
               .filter(s =>
                 s.folderPath !== currentStream.folderPath &&
-                s.meta?.games?.some(g => g.toLowerCase() === curGame.toLowerCase()) &&
-                (s.meta?.ytSeason ?? '1') === curSeason
+                sameGame(s) &&
+                // Topic/Game spans every season; Season alone narrows to
+                // the current one.
+                (fromTopicGame || sameSeason(s))
               )
               // Reverse chronological — newest stream items at the top.
               .sort((a, b) => b.date.localeCompare(a.date))
@@ -2024,7 +2084,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           folderPath: s.folderPath,
           date: s.date,
           episode: s.meta?.ytEpisode,
-          title: s.meta?.ytTitle,
+          title: renderStreamTitle(s, all),
           images: (s.thumbnails ?? []).filter(p => !isSmThumb(p)),
         })
         setSeasonAssets({
@@ -2042,7 +2102,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       cancelled = true
       unsubscribe()
     }
-  }, [currentStream, config.streamsDir, config.streamMode, assetRefreshTrigger])
+  }, [currentStream, config.streamsDir, config.streamMode, config.thumbnailAssetsFromSeason, config.thumbnailAssetsFromTopicGame, assetRefreshTrigger])
 
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null)
   // {id → starting Konva-space (x, y)} for every OTHER node in the current
@@ -2200,6 +2260,107 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     return toScreen(result)
   }, [smartSnapEnabled, gridSnapEnabled])
 
+  // Snap variant for ratio-locked resizes. The plain snapper above moves the
+  // vertical and horizontal edges independently, which breaks a locked aspect
+  // ratio the instant one edge lands on a stop (e.g. dragging a side handle
+  // until the derived edge touches the canvas boundary). Here the whole box is
+  // a function of a single scale `s` about a fixed anchor, so it stays exactly
+  // ratio-correct: we find the scale that lands the nearest in-threshold edge
+  // on its stop, otherwise follow the cursor. Because the in-threshold test is
+  // evaluated at the *cursor* scale, the box "freezes" at the snapped size
+  // while the cursor lingers near the stop and jumps free once it drags past —
+  // matching a normal snap's feel without ever distorting the ratio.
+  const handleRatioLockedSnap = useCallback((
+    oldBox: KonvaBox,
+    cursorBox: KonvaBox,
+    hAnchor: 'left' | 'right' | 'center',
+    vAnchor: 'top' | 'bottom' | 'center',
+  ): KonvaBox => {
+    const stage = stageRef.current
+    const guideLayer = guideLayerRef.current
+    if (!stage || !guideLayer || oldBox.width <= 0 || oldBox.height <= 0) return cursorBox
+
+    const zoom = viewZoomRef.current
+    const pan = viewPanRef.current
+    const excluded = selectedIdsRef.current
+
+    // Work in canvas space (stops are canvas coords). Scale is dimensionless,
+    // so it transfers between screen + canvas untouched.
+    const O = {
+      x: (oldBox.x - pan.x) / zoom,
+      y: (oldBox.y - pan.y) / zoom,
+      w: oldBox.width / zoom,
+      h: oldBox.height / zoom,
+    }
+    const sCursor = cursorBox.width / oldBox.width
+
+    // Ratio-locked box at scale s, anchored per hAnchor/vAnchor. Using O.w/O.h
+    // directly preserves the layer's exact current ratio.
+    const boxAt = (s: number) => {
+      const w = O.w * s, h = O.h * s
+      const x = hAnchor === 'left' ? O.x
+        : hAnchor === 'right' ? O.x + O.w - w
+        : O.x + O.w / 2 - w / 2
+      const y = vAnchor === 'top' ? O.y
+        : vAnchor === 'bottom' ? O.y + O.h - h
+        : O.y + O.h / 2 - h / 2
+      return { x, y, w, h }
+    }
+
+    const vStops: number[] = [0, CANVAS_W / 2, CANVAS_W]
+    const hStops: number[] = [0, CANVAS_H / 2, CANVAS_H]
+    stage.find('.snap-target').forEach((other: Konva.Node) => {
+      if (excluded.includes(other.id())) return
+      const b = other.getClientRect({ relativeTo: stage })
+      vStops.push(b.x, b.x + b.width / 2, b.x + b.width)
+      hStops.push(b.y, b.y + b.height / 2, b.y + b.height)
+    })
+
+    // Each moving edge is linear in s: pos(s) = pos(sCursor) + B·(s − sCursor).
+    // Anchored edges have B = 0 and never snap. We collect every in-threshold
+    // (edge, stop) pair and keep the closest — solving for the scale that puts
+    // that edge exactly on its stop.
+    const cur = boxAt(sCursor)
+    const cands: { s: number; dist: number; guide: SnapGuide }[] = []
+    const consider = (posCursor: number, B: number, stops: number[], orientation: 'V' | 'H') => {
+      if (Math.abs(B) < 1e-6) return
+      for (const stop of stops) {
+        const dist = Math.abs(posCursor - stop)
+        if (dist > SNAP_THRESHOLD) continue
+        cands.push({ s: sCursor + (stop - posCursor) / B, dist, guide: { lineGuide: stop, orientation } })
+      }
+    }
+    // Vertical guide lines (left/right edges) per horizontal anchor.
+    if (hAnchor === 'left') consider(cur.x + cur.w, O.w, vStops, 'V')
+    else if (hAnchor === 'right') consider(cur.x, -O.w, vStops, 'V')
+    else { consider(cur.x, -O.w / 2, vStops, 'V'); consider(cur.x + cur.w, O.w / 2, vStops, 'V') }
+    // Horizontal guide lines (top/bottom edges) per vertical anchor.
+    if (vAnchor === 'top') consider(cur.y + cur.h, O.h, hStops, 'H')
+    else if (vAnchor === 'bottom') consider(cur.y, -O.h, hStops, 'H')
+    else { consider(cur.y, -O.h / 2, hStops, 'H'); consider(cur.y + cur.h, O.h / 2, hStops, 'H') }
+
+    let s = sCursor
+    const guides: SnapGuide[] = []
+    if (cands.length > 0) {
+      cands.sort((a, b) => a.dist - b.dist)
+      s = cands[0].s
+      guides.push(cands[0].guide)
+    }
+    // Min size: keep both dimensions ≥ ~10 screen px.
+    const minS = (10 / zoom) / Math.min(O.w, O.h)
+    if (s < minS) s = minS
+
+    const r = boxAt(s)
+    renderSnapGuides(guides, guideLayer, zoom)
+    return {
+      x: r.x * zoom + pan.x,
+      y: r.y * zoom + pan.y,
+      width: r.w * zoom,
+      height: r.h * zoom,
+      rotation: oldBox.rotation,
+    }
+  }, [smartSnapEnabled])
+
   const clearSnapGuides = useCallback(() => {
     if (!guideLayerRef.current) return
     guideLayerRef.current.destroyChildren()
@@ -2250,14 +2411,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     Promise.all([
       window.api.thumbnailListTemplates(config.streamsDir),
       window.api.thumbnailGetRecents(),
-    ]).then(async ([tmpl, rec]) => {
+      window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream'),
+    ]).then(async ([tmpl, rec, allStreams]) => {
       setTemplates(tmpl)
 
       // Filter out recents whose canvas file no longer exists on disk
       const existsFlags = await Promise.all(
         rec.map(r => window.api.fileExists(`${r.folderPath}/${r.date}_sm-thumbnail.json`))
       )
-      const valid = rec.filter((_, i) => existsFlags[i])
       const stale = rec.filter((_, i) => !existsFlags[i])
 
       // Persist removals so they don't reappear next time
@@ -2265,9 +2426,21 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         stale.map(r => window.api.thumbnailRemoveRecent(r.folderPath, r.date))
       )
 
+      // Re-render each recent's title from live stream metadata. The stored
+      // title is just a snapshot (and older entries stored the raw template
+      // body), so resolving against the current folder keeps the list in
+      // sync with renames + renders {merge fields} properly.
+      const byPath = new Map(allStreams.map(s => [s.folderPath, s]))
+      const valid = rec
+        .filter((_, i) => existsFlags[i])
+        .map(r => {
+          const f = byPath.get(r.folderPath)
+          return f ? { ...r, title: renderStreamTitle(f, allStreams) } : r
+        })
+
       setRecents(valid)
     }).catch(() => {}).finally(() => setOverviewLoading(false))
-  }, [isVisible, config.streamsDir])
+  }, [isVisible, config.streamsDir, config.streamMode])
 
   // ── Handle pending stream navigation ─────────────────────────────────────
   useEffect(() => {
@@ -2534,6 +2707,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
    *  entry. After commit, scaleX/scaleY are reset on each node since the
    *  scale factors have already been baked into width/height. */
   const handleTransformEnd = useCallback((e: Konva.KonvaEventObject<Event>) => {
+    // Gesture done — drop the captured start box so the next resize
+    // re-captures its own baseline on its first boundBoxFunc frame.
+    resizeStartBoxRef.current = null
     pendingTransformsRef.current.set(e.target.id(), e.target)
     if (commitTransformScheduledRef.current) return
     commitTransformScheduledRef.current = true
@@ -3197,10 +3373,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   useEffect(() => {
     if (!isVisible || mode !== 'editor') return
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo() }
+      const target = e.target as HTMLElement
+      const tag = target.tagName
+      // Bail when typing in a form field OR a contenteditable (the text-layer
+      // chip editor) — otherwise Backspace/Delete here would nuke the whole
+      // selected layer instead of editing its text.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return
+      // Normalize case: with Shift held the Z key reports as 'Z', so a
+      // literal 'z' compare would make Ctrl+Shift+Z (the PS/Affinity redo)
+      // never match. Redo = Ctrl+Y or Ctrl+Shift+Z; undo = Ctrl+Z.
+      const k = e.key.toLowerCase()
+      if ((e.ctrlKey || e.metaKey) && k === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+      if ((e.ctrlKey || e.metaKey) && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo() }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); manualSave() }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         const copied = layers.filter(l => selectedIds.includes(l.id)).map(cloneLayer)
@@ -3258,6 +3442,22 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
   }, [currentStream])
 
+  // Display title for the toolbar. `meta.ytTitle` is a raw template body, so
+  // resolve it through merge fields (preferred — always current). Streams
+  // opened from recents don't carry meta, so fall back to the pre-rendered
+  // `title` snapshot that was stored when the recent was created.
+  const currentStreamTitle = useMemo(() => {
+    if (!currentStream) return undefined
+    if (currentStream.meta?.ytTitle?.trim()) {
+      const rendered = renderTitleFromMeta(currentStream.meta, {
+        totalEpisodes: currentStream.totalEpisodes,
+        fallback: currentStream.title,
+      })
+      if (rendered) return rendered
+    }
+    return currentStream.title
+  }, [currentStream])
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-navy-900">
@@ -3286,18 +3486,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         <>
           {/* Top bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0 bg-navy-800">
-            <Tooltip content="Back to overview" side="bottom">
-              <button
-                onClick={() => setMode('overview')}
-                className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
-              >
-                <ArrowLeft size={15} />
-              </button>
-            </Tooltip>
             <div className="flex-1 flex items-center gap-2 min-w-0">
               {currentStream ? (
                 <span className="text-xs text-gray-400 truncate">
-                  {currentStream.title ?? currentStream.date}
+                  {currentStreamTitle ?? currentStream.date}
                   <span className="text-gray-400 ml-2">{currentStream.date}</span>
                 </span>
               ) : currentTemplateId ? (
@@ -3544,6 +3736,22 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   the variant switcher — both manage "which / how many
                   thumbnails for this stream", so they belong in the
                   same zone instead of the toolbar's canvas-ops band. */}
+              {/* Close session — right-most control, mirroring the
+                  Player page's red close-session button. Set off from
+                  the canvas-ops band by a divider; collapses to
+                  icon-only below ~1300px viewport (animated). */}
+              <div className="w-px h-4 bg-white/10 mx-1" />
+              <Tooltip content="Close session" side="bottom">
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon={<X size={14} />}
+                  onClick={() => setMode('overview')}
+                  collapsibleLabel="min-[1300px]:grid-cols-[1fr] min-[1300px]:ms-0"
+                >
+                  Close session
+                </Button>
+              </Tooltip>
             </div>
           </div>
 
@@ -3722,80 +3930,114 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     // produces on negative-scaled nodes).
                     flipEnabled={false}
                     boundBoxFunc={(oldBox, newBox) => {
-                      // Universal min size + per-selection text-height lock.
-                      const constrained: KonvaBox = {
-                        ...newBox,
-                        width: Math.max(10, newBox.width),
-                        height: Math.max(10, newBox.height),
+                      // Reconstruct the resize ourselves from the active handle
+                      // + our own modifier policy, so Konva's built-in
+                      // Alt=centered behavior is ignored: Ctrl/Cmd drives
+                      // centered scaling, Alt does nothing (reserved for
+                      // Alt+drag duplicate). The dragged anchor's edge in newBox
+                      // follows the cursor regardless of Konva's centering, so
+                      // we read that and rebuild around our chosen origin.
+                      const anchorName = transformerRef.current?.getActiveAnchor() ?? ''
+                      const centered = ctrlPressedRef.current
+                      const dragsLeft = anchorName.includes('left')
+                      const dragsRight = anchorName.includes('right')
+                      const dragsTop = anchorName.includes('top')
+                      const dragsBottom = anchorName.includes('bottom')
+
+                      // Not a resize (rotation / unknown handle) — pass Konva's
+                      // box straight through the per-edge snapper.
+                      if (!dragsLeft && !dragsRight && !dragsTop && !dragsBottom) {
+                        return handleSnapTransformBoundBox(oldBox, {
+                          ...newBox,
+                          width: Math.max(10, newBox.width),
+                          height: Math.max(10, newBox.height),
+                        })
                       }
+
+                      // Reference everything off the gesture-start box (captured
+                      // on the first frame), not the per-frame oldBox. This is
+                      // what lets a mid-drag Shift/Ctrl change recompute the
+                      // whole transform as if the key had been held from the
+                      // start instead of baking a distorted frame into the base.
+                      // Clone so a reused/mutated oldBox object can't drift our
+                      // captured baseline mid-gesture.
+                      const start = resizeStartBoxRef.current ?? { ...oldBox }
+                      resizeStartBoxRef.current = start
+
+                      const startR = start.x + start.width
+                      const startB = start.y + start.height
+                      const startCx = start.x + start.width / 2
+                      const startCy = start.y + start.height / 2
+
+                      let bx = start.x, by = start.y, bw = start.width, bh = start.height
+                      if (dragsLeft || dragsRight) {
+                        const cursorX = dragsLeft ? newBox.x : newBox.x + newBox.width
+                        if (centered) { bw = Math.max(10, Math.abs(cursorX - startCx) * 2); bx = startCx - bw / 2 }
+                        else if (dragsLeft) { bx = Math.min(cursorX, startR - 10); bw = startR - bx }
+                        else { bw = Math.max(10, cursorX - start.x) }
+                      }
+                      if (dragsTop || dragsBottom) {
+                        const cursorY = dragsTop ? newBox.y : newBox.y + newBox.height
+                        if (centered) { bh = Math.max(10, Math.abs(cursorY - startCy) * 2); by = startCy - bh / 2 }
+                        else if (dragsTop) { by = Math.min(cursorY, startB - 10); bh = startB - by }
+                        else { bh = Math.max(10, cursorY - start.y) }
+                      }
+                      const constrained: KonvaBox = { x: bx, y: by, width: Math.max(10, bw), height: Math.max(10, bh), rotation: newBox.rotation }
+
+                      // Anchor the ratio re-derive + snapper grow the box from.
+                      let ratioAnchors: { h: 'left' | 'right' | 'center'; v: 'top' | 'bottom' | 'center' } | null = null
                       const sel = selectedIdsRef.current
                       if (sel.length === 1) {
-                        const l = layers.find(x => x.id === sel[0])
-                        if (l?.type === 'text') constrained.height = oldBox.height
-                        // Aspect-ratio enforcement (single-layer selection only;
-                        // multi-select treats as freeform because honoring
-                        // multiple individual ratios at once in a single bbox
-                        // is ambiguous). Lock state defaults to true when
-                        // undefined; Shift inverts for this gesture.
+                        const l = layers.find(ll => ll.id === sel[0])
+                        // Text height is font-driven — never resize it vertically.
+                        if (l?.type === 'text') { constrained.height = start.height; constrained.y = start.y }
+                        // Aspect-ratio enforcement (single non-text layer only;
+                        // multi-select is freeform because honoring multiple
+                        // ratios in one bbox is ambiguous). Lock defaults to true;
+                        // Shift inverts for this gesture.
                         if (l && l.type !== 'text') {
                           const layerLocked = l.aspectLocked ?? true
                           const effectiveLock = layerLocked !== shiftPressedRef.current
                           if (effectiveLock) {
-                            const ratio = oldBox.height > 0 ? oldBox.width / oldBox.height : 1
-                            // Compare oldBox vs newBox edges to figure out which
-                            // edges the user is dragging. Side handles change
-                            // exactly one of width/height; corner handles
-                            // change both.
-                            const widthChanged = Math.abs(constrained.width - oldBox.width) > 0.5
-                            const heightChanged = Math.abs(constrained.height - oldBox.height) > 0.5
-                            if (widthChanged && heightChanged) {
-                              // Corner handle: use the projection of the
-                              // user's cursor (encoded in newBox's far corner)
-                              // onto the ratio-locked diagonal from the
-                              // anchor corner. This is continuous — small
-                              // cursor moves produce small box changes
-                              // regardless of which dimension dominates. The
-                              // previous "pick whichever delta is larger"
-                              // approach flipped between width-driven and
-                              // height-driven mid-drag, which made the
-                              // anchor visibly jump around.
-                              //
-                              // Math: closest (w, h) to (cw, ch) on the line
-                              // w = ratio * h is found by minimizing
-                              // (ratio*h − cw)² + (h − ch)², which gives
-                              // h = (ratio·cw + ch) / (ratio² + 1).
+                            const ratio = start.height > 0 ? start.width / start.height : 1
+                            // Origin: centered → both axes from center; else the
+                            // dragged edge's opposite is fixed and any *derived*
+                            // axis grows from center.
+                            const hAnchor: 'left' | 'right' | 'center' = centered ? 'center' : dragsLeft ? 'right' : dragsRight ? 'left' : 'center'
+                            const vAnchor: 'top' | 'bottom' | 'center' = centered ? 'center' : dragsTop ? 'bottom' : dragsBottom ? 'top' : 'center'
+                            const dragsH = dragsLeft || dragsRight
+                            const dragsV = dragsTop || dragsBottom
+                            // Uniform scale: a corner projects the cursor box
+                            // (cw, ch) onto the line w = ratio·h (continuous, no
+                            // mid-drag axis flip); a side handle is driven by its
+                            // single changing dimension.
+                            let s: number
+                            if (dragsH && dragsV) {
                               const cw = constrained.width
                               const ch = constrained.height
-                              const t = (ratio * cw + ch) / (ratio * ratio + 1)
-                              const newH = Math.max(10, Math.round(t))
-                              const newW = Math.max(10, Math.round(ratio * newH))
-                              // Anchor: which corner of oldBox is fixed?
-                              // Whichever didn't move from oldBox in
-                              // `constrained`.
-                              const leftFixed = Math.abs(constrained.x - oldBox.x) < 0.5
-                              const topFixed = Math.abs(constrained.y - oldBox.y) < 0.5
-                              constrained.x = leftFixed ? oldBox.x : (oldBox.x + oldBox.width - newW)
-                              constrained.y = topFixed ? oldBox.y : (oldBox.y + oldBox.height - newH)
-                              constrained.width = newW
-                              constrained.height = newH
-                            } else if (widthChanged) {
-                              // Side handle (left or right): adjust height to
-                              // match ratio, expanding symmetrically from the
-                              // vertical center so the drag feels balanced.
-                              const newH = Math.max(10, Math.round(constrained.width / ratio))
-                              constrained.y = oldBox.y - (newH - oldBox.height) / 2
-                              constrained.height = newH
-                            } else if (heightChanged) {
-                              // Side handle (top or bottom): adjust width
-                              // around the horizontal center.
-                              const newW = Math.max(10, Math.round(constrained.height * ratio))
-                              constrained.x = oldBox.x - (newW - oldBox.width) / 2
-                              constrained.width = newW
+                              s = Math.max(10, (ratio * cw + ch) / (ratio * ratio + 1)) / start.height
+                            } else if (dragsH) {
+                              s = constrained.width / start.width
+                            } else {
+                              s = constrained.height / start.height
                             }
+                            const nw = Math.max(10, start.width * s)
+                            const nh = Math.max(10, start.height * s)
+                            constrained.width = nw
+                            constrained.height = nh
+                            constrained.x = hAnchor === 'left' ? start.x : hAnchor === 'right' ? startR - nw : startCx - nw / 2
+                            constrained.y = vAnchor === 'top' ? start.y : vAnchor === 'bottom' ? startB - nh : startCy - nh / 2
+                            ratioAnchors = { h: hAnchor, v: vAnchor }
                           }
                         }
                       }
-                      return handleSnapTransformBoundBox(oldBox, constrained)
+                      // Ratio-locked + smart snap → single-scale snapper that
+                      // keeps the ratio intact. Everything else (freeform, grid,
+                      // or no snap) uses the per-edge snapper.
+                      if (ratioAnchors && smartSnapEnabled) {
+                        return handleRatioLockedSnap(start, constrained, ratioAnchors.h, ratioAnchors.v)
+                      }
+                      return handleSnapTransformBoundBox(start, constrained)
                     }}
                   />
                 </Layer>
@@ -3846,7 +4088,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             </div>
 
             {/* Right panel: Layers + Assets + Properties */}
-            <div className="w-56 flex flex-col border-l border-white/5 bg-navy-800 shrink-0 overflow-hidden">
+            <div className="w-64 flex flex-col border-l border-white/5 bg-navy-800 shrink-0 overflow-hidden">
               {/* Layers */}
               <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '30%' }}>
                 <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 shrink-0">
@@ -3965,7 +4207,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Sliders size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
                 </div>
-                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} />
+                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} standalone={currentStream?.meta?.isSeries === false} />
               </div>
 
               {/* Divider */}
@@ -3975,9 +4217,57 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   episodes. Drag a thumbnail onto the canvas to add it as an
                   image layer. */}
               <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '35%' }}>
-                <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
+                <div className="relative flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
                   <ImageIcon size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Assets</span>
+                  <div ref={assetOptionsRef} className="ml-auto relative">
+                    <button
+                      type="button"
+                      onClick={() => setAssetOptionsOpen(o => !o)}
+                      title="Asset sources"
+                      className={`p-0.5 rounded transition-colors ${assetOptionsOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                    >
+                      <Sliders size={12} />
+                    </button>
+                    {assetOptionsOpen && (
+                      <div className="absolute top-full right-0 mt-1 z-30 w-56 bg-navy-900 border border-white/10 rounded-lg shadow-xl p-1">
+                        {(() => {
+                          // Topic/Game implies season — when it's on, the
+                          // season row is forced-checked + disabled.
+                          const fromTopicGame = !!config.thumbnailAssetsFromTopicGame
+                          const fromSeason = !!config.thumbnailAssetsFromSeason || fromTopicGame
+                          const Row = ({ checked, disabled, onToggle, label }: { checked: boolean; disabled?: boolean; onToggle: () => void; label: string }) => (
+                            <button
+                              type="button"
+                              disabled={disabled}
+                              onClick={onToggle}
+                              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-[11px] transition-colors ${disabled ? 'cursor-default opacity-60' : 'hover:bg-white/5'}`}
+                            >
+                              <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${checked ? 'bg-purple-600/40 border-purple-500/60 text-purple-100' : 'border-white/20'}`}>
+                                {checked && <Check size={10} strokeWidth={3} />}
+                              </span>
+                              <span className="text-gray-200">{label}</span>
+                            </button>
+                          )
+                          return (
+                            <>
+                              <Row
+                                checked={fromSeason}
+                                disabled={fromTopicGame}
+                                onToggle={() => updateConfig({ thumbnailAssetsFromSeason: !config.thumbnailAssetsFromSeason })}
+                                label="Show assets from season"
+                              />
+                              <Row
+                                checked={fromTopicGame}
+                                onToggle={() => updateConfig({ thumbnailAssetsFromTopicGame: !fromTopicGame })}
+                                label="Show assets from same Topic / Game"
+                              />
+                            </>
+                          )
+                        })()}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="overflow-y-auto flex-1">
                   {(() => {

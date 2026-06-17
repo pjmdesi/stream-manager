@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Loader2, Cloud, AlertTriangle } from 'lucide-react'
 
 export function friendlyDate(iso: string): string {
@@ -90,9 +90,20 @@ export function ThumbImage({
 
   const src = `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
 
+  // A file:// image can already be decoded by the time React attaches `onLoad`
+  // (e.g. rows mounted on scroll with a warm OS cache), so the load event is
+  // missed and status sticks on 'loading'. Catch that case after each commit.
+  const imgRef = useRef<HTMLImageElement>(null)
+  useEffect(() => {
+    if (status !== 'loading') return
+    const el = imgRef.current
+    if (el && el.complete && el.naturalWidth > 0) { setStatus('loaded'); onLoad?.() }
+  })
+
   return (
     <>
       <img
+        ref={imgRef}
         src={src}
         className={className}
         style={style}
