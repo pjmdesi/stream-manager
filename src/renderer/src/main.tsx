@@ -54,6 +54,20 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, { error:
   }
 }
 
+// Swallow the benign "ResizeObserver loop completed with undelivered
+// notifications" warning. Chromium fires it whenever a resize observation is
+// deferred to the next frame — normal behavior, not an app bug — but it spams
+// the console and trips Vite's dev error overlay. The actual loop-prevention
+// lives in the observers themselves (e.g. the auto-grow textarea's width-only
+// guard); this only quiets the noise.
+const RO_NOISE = /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/
+window.addEventListener('error', (e) => {
+  if (RO_NOISE.test(e.message)) {
+    e.stopImmediatePropagation()
+    e.preventDefault()
+  }
+})
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <AppErrorBoundary>

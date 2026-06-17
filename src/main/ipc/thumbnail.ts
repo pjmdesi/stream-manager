@@ -50,11 +50,16 @@ function canvasPngPath(folderPath: string, date: string, ordinal: number = 1) {
 /** Scan a stream folder for all SM-thumbnail variants. Returns the
  *  ordinals in ascending order — `[1]` for a legacy single-thumbnail
  *  stream, `[1, 2, 3]` for one with two alternatives, etc. Holes are
- *  preserved (e.g. `[1, 3]` if the user deleted variant 2). */
+ *  preserved (e.g. `[1, 3]` if the user deleted variant 2).
+ *
+ *  Matches both the rendered `.png` AND the editable `.json` so a variant
+ *  whose PNG was deleted externally (or never finished rendering) is still
+ *  discoverable from its surviving canvas data — the editor can then reopen
+ *  it and regenerate the missing image instead of treating it as gone. */
 function listThumbnailVariants(folderPath: string, date: string): number[] {
   let entries: string[]
   try { entries = fs.readdirSync(folderPath) } catch { return [] }
-  const re = new RegExp(`^${date.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}_sm-thumbnail(?:-(\\d+))?\\.png$`, 'i')
+  const re = new RegExp(`^${date.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}_sm-thumbnail(?:-(\\d+))?\\.(?:png|json)$`, 'i')
   const ordinals = new Set<number>()
   for (const name of entries) {
     const m = name.match(re)

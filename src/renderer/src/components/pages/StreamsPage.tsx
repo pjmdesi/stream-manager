@@ -18,7 +18,7 @@ import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
-import { PresetPickerModal, ThumbnailCarousel, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip } from '../streams/legacyStreamsShared'
+import { PresetPickerModal, ThumbnailCarousel, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal } from '../streams/legacyStreamsShared'
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
@@ -482,6 +482,15 @@ export function StreamsPage({
   // so a suppressed prompt is never even staged here.
   const [categoryRenamePrompt, setCategoryRenamePrompt] = useState<{ sent: string; canonical: string } | null>(null)
   const [newStreamOpen, setNewStreamOpen] = useState(false)
+  // Cloud-download prompt for send-to-player when the chosen video is a cloud
+  // placeholder. `stage` flips confirm → downloading; the file is sent on once
+  // the cloud-download-done event fires for its path (effect below).
+  const [cloudDownload, setCloudDownload] = useState<{
+    filePath: string
+    fileName: string
+    action: 'player' | 'converter' | 'combine'
+    stage: 'confirm' | 'downloading'
+  } | null>(null)
   // When set, the New Stream modal opens in "New episode" mode with this
   // folder as the source. Cleared on close. The path-based key (not the
   // folder object) survives folder-list refreshes without going stale.
@@ -966,18 +975,30 @@ export function StreamsPage({
   // straight to the target page. Adequate for typical folders; a polish phase
   // can layer the cloud/picker affordances in once we know which actually
   // matter for the new sidebar UX.
-  const pickPrimaryVideo = (folder: StreamFolder): string | null => {
-    if (folder.videos.length === 0) return null
+  // Prefer a 'full' recording over exported clips/shorts so sending a stream
+  // lands on the source recording; fall back to the first of the given list.
+  const pickPrimaryFrom = (folder: StreamFolder, videos: string[]): string | null => {
+    if (videos.length === 0) return null
     const map = folder.meta?.videoMap
-    const firstFull = folder.videos.find(v => {
-      const key = v.split(/[\\/]/).pop() ?? v
-      return map?.[key]?.category === 'full'
-    })
-    return firstFull ?? folder.videos[0]
+    const firstFull = videos.find(v => map?.[v.split(/[\\/]/).pop() ?? v]?.category === 'full')
+    return firstFull ?? videos[0]
   }
+  const pickPrimaryVideo = (folder: StreamFolder): string | null =>
+    pickPrimaryFrom(folder, folder.videos)
 
-  const handleSendToPlayer = useCallback((folder: StreamFolder) => {
-    const file = pickPrimaryVideo(folder)
+  const handleSendToPlayer = useCallback(async (folder: StreamFolder) => {
+    if (folder.videos.length === 0) return
+    // Only send a file that's actually present on disk. If the whole folder is
+    // offloaded to the cloud, prompt to download the first video and hand it to
+    // the player once it's local (handled by the cloud-download-done effect).
+    const localFlags = await window.api.checkLocalFiles(folder.videos)
+    const localVideos = folder.videos.filter((_, i) => localFlags[i])
+    if (localVideos.length === 0) {
+      const filePath = folder.videos[0]
+      setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'player', stage: 'confirm' })
+      return
+    }
+    const file = pickPrimaryFrom(folder, localVideos)
     if (file) onSendToPlayer(file)
   }, [onSendToPlayer])
 
@@ -989,6 +1010,26 @@ export function StreamsPage({
   const handleSendToCombine = useCallback((folder: StreamFolder) => {
     if (folder.videos.length > 0) onSendToCombine(folder.videos)
   }, [onSendToCombine])
+
+  // When a prompted cloud download finishes, route the now-local file to its
+  // pending action and dismiss the modal. The pending download is read from a
+  // ref (not the state updater) so the routing call — which navigates via a
+  // parent setState — runs in this event callback rather than inside a render-
+  // phase updater (which would warn "setState while rendering another
+  // component").
+  const cloudDownloadRef = useRef(cloudDownload)
+  useEffect(() => { cloudDownloadRef.current = cloudDownload }, [cloudDownload])
+  useEffect(() => {
+    const unsub = window.api.onCloudDownloadDone((filePath: string) => {
+      const pending = cloudDownloadRef.current
+      if (!pending || pending.filePath !== filePath) return
+      setCloudDownload(null)
+      if (pending.action === 'player') onSendToPlayer(filePath)
+      else if (pending.action === 'converter') onSendToConverter(filePath)
+      else onSendToCombine([filePath])
+    })
+    return unsub
+  }, [onSendToPlayer, onSendToConverter, onSendToCombine])
 
   // Open-in-Explorer is mode-aware: in dump-mode the folder doesn't
   // exclusively belong to one stream, so we reveal the first video file
@@ -1548,10 +1589,32 @@ export function StreamsPage({
   // the preferred thumbnail, also clear meta.preferredThumbnail so the
   // row's primary thumb falls back to whatever's next in the list.
   const handleDeleteThumbnail = useCallback(async (folder: StreamFolder, filePath: string) => {
+    // Optimistically drop the slot from state BEFORE trashing the file, so the
+    // carousel removes it in one clean step. Otherwise the deleted path stays
+    // in the rendered thumbnails for the duration of the async reload and the
+    // <img> flashes as a broken link before disappearing.
+    setFolders(prev => prev.map(f => {
+      if (f.folderPath !== folder.folderPath) return f
+      const idx = f.thumbnails.indexOf(filePath)
+      if (idx === -1) return f
+      return {
+        ...f,
+        thumbnails: f.thumbnails.filter((_, i) => i !== idx),
+        thumbnailLocalFlags: f.thumbnailLocalFlags?.filter((_, i) => i !== idx),
+      }
+    }))
     try {
       await window.api.trashFile(filePath)
+      // SM-generated thumbnails carry a companion `<name>.json` holding the
+      // editable canvas data. Trashing the PNG alone would orphan the JSON
+      // (an editor entry whose image is gone), so remove both together —
+      // mirroring the thumbnail editor's own variant delete.
+      if (/[_-]sm-thumbnail(?:-\d+)?\.png$/i.test(filePath)) {
+        await window.api.trashFile(filePath.replace(/\.png$/i, '.json')).catch(() => {})
+      }
     } catch (err) {
       console.error('Failed to trash thumbnail', err)
+      await loadFolders()  // restore the optimistically-removed slot
       return
     }
     const basename = filePath.split(/[\\/]/).pop() ?? ''
@@ -2612,9 +2675,11 @@ export function StreamsPage({
 
         {/* Layer 1: no-selection content. Anchored left, sized to the
             settled-small width. Stays at opacity 1 always — the detail
-            layer above just covers it during the open animation. */}
+            layer above just covers it during the open animation. `isolate`
+            keeps the out-of-sync panel's sticky `z-10` header contained to
+            this layer so it can't paint above the detail layer (Layer 2). */}
         <div
-          className="absolute top-0 left-0 bottom-0"
+          className="absolute top-0 left-0 bottom-0 isolate"
           style={{ width: normalSidebarWidth }}
         >
           {sidebarCollapsedPref ? (
@@ -3264,6 +3329,24 @@ export function StreamsPage({
           />
         )
       })()}
+
+      {cloudDownload && (
+        <CloudDownloadModal
+          fileName={cloudDownload.fileName}
+          filePath={cloudDownload.filePath}
+          stage={cloudDownload.stage}
+          onConfirm={async () => {
+            setCloudDownload(prev => prev ? { ...prev, stage: 'downloading' } : null)
+            await window.api.startCloudDownload(cloudDownload.filePath)
+          }}
+          onCancel={async () => {
+            if (cloudDownload.stage === 'downloading') {
+              await window.api.cancelCloudDownload(cloudDownload.filePath)
+            }
+            setCloudDownload(null)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -4170,11 +4253,11 @@ function SidebarMonthCalendar({
         >
           Go to today
         </Button>
-        <Tooltip content="Calendar settings" side="top">
+        <Tooltip content="Calendar settings" side="left" triggerClassName="absolute right-0 top-1/2 -translate-y-1/2 inline-flex">
           <button
             type="button"
             onClick={() => setSettingsOpen(v => !v)}
-            className={`absolute right-0 top-1/2 -translate-y-1/2 p-1.5 rounded transition-colors ${
+            className={`p-1.5 rounded transition-colors ${
               settingsOpen
                 ? 'bg-white/10 text-gray-200'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
@@ -4569,23 +4652,46 @@ function SidebarDetail({
   // used as a series). Match → bump this stream to series; no match →
   // leave standalone. Either way, clear the pending flag so the effect
   // never re-fires.
-  useEffect(() => {
-    if (!meta?.seriesAutoDetectPending) return
-    const primary = meta?.games?.[0]
-    if (!primary) return
-    const lower = primary.toLowerCase()
-    const matched = folders.some(f =>
+  // Derive the season + next episode this stream should inherit if it belongs
+  // to an existing series for `primaryGame`. Returns null when no qualifying
+  // sibling exists (same game, and either explicitly a series or a legacy
+  // stream that was used as one — has an episode number). Season comes from
+  // the most-recently-dated sibling (the series being continued); episode is
+  // the next number for that game+season strictly before this stream's date.
+  const computeSeriesNumbers = useCallback((primaryGame: string): { ytSeason: string; ytEpisode: string } | null => {
+    const lower = primaryGame.trim().toLowerCase()
+    if (!lower) return null
+    const siblings = folders.filter(f =>
       f.folderPath !== folder.folderPath &&
       !f.isMissing &&
       ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
        (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
       (f.meta?.isSeries === true || (f.meta?.isSeries === undefined && !!f.meta?.ytEpisode))
     )
-    onUpdateMetaRef.current({
-      isSeries: matched ? true : false,
-      seriesAutoDetectPending: undefined,
-    })
-  }, [meta?.seriesAutoDetectPending, meta?.games, folder.folderPath, folders])
+    if (siblings.length === 0) return null
+    const latest = siblings.reduce((a, b) => (b.date > a.date ? b : a))
+    const season = latest.meta?.ytSeason || '1'
+    const others = folders.filter(f => f.folderPath !== folder.folderPath)
+    const episode = String(detectEpisodeNumber(others, primaryGame, season, folder.date))
+    return { ytSeason: season, ytEpisode: episode }
+  }, [folders, folder.folderPath, folder.date])
+
+  useEffect(() => {
+    if (!meta?.seriesAutoDetectPending) return
+    const primary = resolvePrimaryGame(meta) || meta?.games?.[0]
+    if (!primary) return
+    const nums = computeSeriesNumbers(primary)
+    if (!nums) {
+      onUpdateMetaRef.current({ isSeries: false, seriesAutoDetectPending: undefined })
+      return
+    }
+    // Match → promote to series and fill season/episode (without clobbering
+    // anything the user already typed). Clear the pending flag either way.
+    const update: Partial<StreamMeta> = { isSeries: true, seriesAutoDetectPending: undefined }
+    if (!meta?.ytSeason) update.ytSeason = nums.ytSeason
+    if (!meta?.ytEpisode) update.ytEpisode = nums.ytEpisode
+    onUpdateMetaRef.current(update)
+  }, [meta?.seriesAutoDetectPending, meta?.games, meta?.ytSeason, meta?.ytEpisode, folder.folderPath, folders, computeSeriesNumbers])
 
   // Auto-apply a linked YT tags template when a stream gains its first
   // game tag. Fires when the *primary game* transitions from absent to
@@ -5600,8 +5706,21 @@ function SidebarDetail({
                     // Also clear the auto-detect pending flag — a manual
                     // toggle means the user owns the value going forward.
                     // Without this, clearing then re-adding games[] later
-                    // could silently flip the user's choice.
-                    onChange={v => onUpdateMeta({ isSeries: v, seriesAutoDetectPending: undefined })}
+                    // could silently flip the user's choice. Enabling Series
+                    // also fills season/episode from a matching existing
+                    // series (same logic as the auto-detect), so turning it
+                    // on by hand isn't left with empty placeholder fields.
+                    onChange={v => {
+                      if (!v) { onUpdateMeta({ isSeries: false, seriesAutoDetectPending: undefined }); return }
+                      const primary = resolvePrimaryGame(meta) || meta?.games?.[0] || ''
+                      const nums = primary ? computeSeriesNumbers(primary) : null
+                      const update: Partial<StreamMeta> = { isSeries: true, seriesAutoDetectPending: undefined }
+                      if (nums) {
+                        if (!meta?.ytSeason) update.ytSeason = nums.ytSeason
+                        if (!meta?.ytEpisode) update.ytEpisode = nums.ytEpisode
+                      }
+                      onUpdateMeta(update)
+                    }}
                     label={<span className="text-[11px] text-gray-400">Series</span>}
                   />
                   {!isStandalone(meta) && (

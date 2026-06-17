@@ -3805,7 +3805,7 @@ export function BulkTagModal({
 
 // ─── Cloud download modal ─────────────────────────────────────────────────────
 
-function CloudDownloadModal({
+export function CloudDownloadModal({
   fileName,
   filePath,
   stage,
@@ -3823,7 +3823,7 @@ function CloudDownloadModal({
       isOpen
       onClose={onCancel}
       title="File Not Available Locally"
-      width="sm"
+      width="lg"
       footer={
         stage === 'confirm' ? (
           <div className="flex gap-2 justify-end w-full">
@@ -3847,7 +3847,7 @@ function CloudDownloadModal({
           <p className="text-sm text-gray-400">
             Download it now? The file will be sent to the player automatically once it's ready.
           </p>
-          <p className="text-xs text-gray-400 font-mono truncate" title={filePath}>{filePath}</p>
+          <p className="text-xs text-gray-400 font-mono break-all">{filePath}</p>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -3859,6 +3859,10 @@ function CloudDownloadModal({
           </div>
           <p className="text-xs text-gray-400">
             The file will be sent automatically once the download is complete.
+          </p>
+          <p className="text-xs text-gray-500">
+            SM can't track cloud download progress — check your cloud provider's
+            software or the Windows notification for status.
           </p>
         </div>
       )}

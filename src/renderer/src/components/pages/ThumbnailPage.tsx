@@ -2601,6 +2601,46 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // pointing the ref at the callback is enough.
   useEffect(() => { triggerAutoSaveRef.current = triggerAutoSave }, [triggerAutoSave])
 
+  // Image layers load their bitmaps asynchronously (via `useImage`), so
+  // capturing the stage before they resolve renders the PNG with assets
+  // missing. This is most visible when a render is triggered programmatically
+  // right after the editor opens (the self-heal regenerate path) — the user
+  // never gets a chance to wait. Block any capture until every Konva image
+  // node on the stage actually has its bitmap. Bounded by a timeout so a
+  // permanently-broken/missing asset can't hang the save forever.
+  const waitForStageImages = useCallback(async (timeoutMs = 5000): Promise<void> => {
+    const stage = stageRef.current
+    if (!stage) return
+    const start = Date.now()
+    const pending = () => stage.find('Image').filter(node => {
+      const im = (node as Konva.Image).image()
+      if (!im) return true
+      return im instanceof HTMLImageElement && (!im.complete || im.naturalWidth === 0)
+    })
+    while (pending().length > 0 && Date.now() - start < timeoutMs) {
+      await new Promise<void>(r => requestAnimationFrame(() => r()))
+    }
+  }, [])
+
+  // Decode every image asset a set of layers references, up front. Polling the
+  // konva nodes alone is unreliable right after open — a node may not be
+  // mounted yet (so nothing reads as "pending") or `useImage` may not have
+  // started. Decoding the files directly both warms the browser cache (so the
+  // nodes' own loads resolve fast) and forces a real wait on the bytes.
+  // Resolves on error/missing so a broken asset can't hang the save.
+  const preloadLayerImages = useCallback(async (layersToLoad: ThumbnailLayer[]): Promise<void> => {
+    const srcs = Array.from(new Set(
+      layersToLoad
+        .filter(l => l.type === 'image' && l.src)
+        .map(l => `file://${l.src}`)
+    ))
+    await Promise.all(srcs.map(src => {
+      const img = new Image()
+      img.src = src
+      return img.decode().catch(() => {})
+    }))
+  }, [])
+
   // Export the canvas at full 1:1 resolution regardless of current view
   const getCanvasDataUrl = useCallback((): string => {
     const stage = stageRef.current
@@ -2640,6 +2680,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       updatedAt: Date.now(),
       layers: saveLayers,
     }
+    await preloadLayerImages(saveLayers)
+    await waitForStageImages()
     const pngDataUrl = getCanvasDataUrl()
     try {
       await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl, ordinal)
@@ -2656,7 +2698,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     } catch (err) {
       console.error('Auto-save failed:', err)
     }
-  }, [getCanvasDataUrl, currentStream])
+  }, [getCanvasDataUrl, waitForStageImages, preloadLayerImages, currentStream])
 
   // ── Layer mutations ────────────────────────────────────────────────────────
   const commitLayers = useCallback((next: ThumbnailLayer[]) => {
@@ -3110,6 +3152,22 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       await new Promise<void>(r => requestAnimationFrame(() => r()))
       await doSave(layersToSave, folderPath, date, templateIdToSave, initialVariant)
     }
+    // Self-heal a missing render: the variant's editable JSON exists (that's
+    // how we got here) but its PNG is gone — deleted externally, or a save
+    // that wrote the JSON but never finished the image. Regenerate it from the
+    // just-loaded canvas so the recents/streams thumbnails stop showing the
+    // broken placeholder. Only fires when the PNG is actually absent, so normal
+    // opens don't re-write on every visit.
+    if (canvas) {
+      const layersToSave = canvas.layers
+      const templateIdToSave = canvas.templateId
+      const suffix = initialVariant <= 1 ? '' : `-${initialVariant}`
+      const pngExists = await window.api.fileExists(`${folderPath}/${date}_sm-thumbnail${suffix}.png`)
+      if (!pngExists) {
+        await new Promise<void>(r => requestAnimationFrame(() => r()))
+        await doSave(layersToSave, folderPath, date, templateIdToSave, initialVariant)
+      }
+    }
   }, [resetLayers, config.streamsDir, doSave])
 
   const openFromRecent = useCallback((entry: ThumbnailRecentEntry) => {
@@ -3260,10 +3318,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       id: newId(), name, createdAt: Date.now(), updatedAt: Date.now(), layers: layers.map(cloneLayer),
     }
     await window.api.thumbnailEnsureAssetsDir(config.streamsDir)
+    await waitForStageImages()
     const pngDataUrl = getCanvasDataUrl()
     const saved = await window.api.thumbnailSaveTemplate(config.streamsDir, template, pngDataUrl || undefined)
     setTemplates(prev => [saved, ...prev.filter(t => t.id !== saved.id)])
-  }, [saveTemplateName, layers, config.streamsDir, getCanvasDataUrl])
+  }, [saveTemplateName, layers, config.streamsDir, getCanvasDataUrl, waitForStageImages])
 
   const deleteTemplate = useCallback(async (id: string) => {
     if (!config.streamsDir) return
@@ -3281,11 +3340,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       layers: layers.map(cloneLayer),
       updatedAt: Date.now(),
     }
+    await waitForStageImages()
     const pngDataUrl = getCanvasDataUrl()
     const saved = await window.api.thumbnailSaveTemplate(config.streamsDir, updated, pngDataUrl || undefined)
     setTemplates(prev => prev.map(t => t.id === saved.id ? saved : t))
     setIsDirty(false)
-  }, [currentTemplateId, templates, layers, config.streamsDir, getCanvasDataUrl])
+  }, [currentTemplateId, templates, layers, config.streamsDir, getCanvasDataUrl, waitForStageImages])
 
   // ── Manual save ───────────────────────────────────────────────────────────
   const manualSave = useCallback(async () => {
@@ -3359,15 +3419,59 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setMode('overview')
   }, [currentStream, currentVariant, resetLayers])
 
+  // React to the open variant's files being removed out from under the editor
+  // (e.g. deleted via the streams-page detail carousel). Switch to a surviving
+  // alternate, or fall back to the overview if nothing's left — otherwise a
+  // later edit would silently re-save (resurrect) the just-deleted thumbnail.
+  // Mirrors the tail of confirmDeleteThumbnail minus the delete + meta cleanup
+  // (the file's already gone and the deleter owns the meta/preferred cleanup).
+  const reconcileVariantGone = useCallback(async (folderPath: string, date: string, goneVariant: number) => {
+    const remaining = (await window.api.thumbnailListVariants(folderPath, date).catch(() => [] as number[]))
+      .filter(v => v !== goneVariant)
+    if (remaining.length > 0) {
+      const nextOrdinal = remaining[0]
+      const canvas = await window.api.thumbnailLoadCanvas(folderPath, date, nextOrdinal)
+      setVariants(remaining)
+      setCurrentVariant(nextOrdinal)
+      if (canvas) { resetLayers(canvas.layers); setCurrentTemplateId(canvas.templateId) }
+      else { resetLayers([]); setCurrentTemplateId(undefined) }
+      setIsDirty(false)
+      return
+    }
+    setCurrentStream(null)
+    setVariants([1])
+    setCurrentVariant(1)
+    resetLayers([])
+    setCurrentTemplateId(undefined)
+    setIsDirty(false)
+    setMode('overview')
+  }, [resetLayers])
+
+  useEffect(() => {
+    if (mode !== 'editor' || !currentStream) return
+    const { folderPath, date } = currentStream
+    const variant = currentVariant
+    const unsub = window.api.onStreamsChanged(async () => {
+      const suffix = variant <= 1 ? '' : `-${variant}`
+      // The editor's own saves also fire streams:changed, but the JSON exists
+      // then, so this is a no-op for them. Only act when it's actually gone.
+      const exists = await window.api.fileExists(`${folderPath}/${date}_sm-thumbnail${suffix}.json`)
+      if (exists) return
+      await reconcileVariantGone(folderPath, date, variant)
+    })
+    return unsub
+  }, [mode, currentStream, currentVariant, reconcileVariantGone])
+
   // ── Export PNG ────────────────────────────────────────────────────────────
   const exportPng = useCallback(async () => {
     if (!stageRef.current) return
+    await waitForStageImages()
     const dataUrl = getCanvasDataUrl()
     const defaultName = currentStream ? `${currentStream.date}_thumbnail.png` : 'thumbnail.png'
     const dest = await window.api.saveFileDialog({ defaultPath: defaultName, filters: [{ name: 'PNG', extensions: ['png'] }] })
     if (!dest) return
     await window.api.saveScreenshot(dest, dataUrl.replace(/^data:image\/png;base64,/, ''))
-  }, [currentStream, getCanvasDataUrl])
+  }, [currentStream, getCanvasDataUrl, waitForStageImages])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
