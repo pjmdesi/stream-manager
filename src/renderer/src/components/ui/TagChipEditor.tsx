@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Loader2, Trash2, Copy, Check } from 'lucide-react'
+import { X, Loader2, Trash2, Copy, Check, AlertTriangle } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 
@@ -250,9 +250,14 @@ export function TagChipEditor({
       {(aiEnabled || footerRight) && (
         <div className="flex items-center justify-between gap-2 mt-0.5 min-h-[14px]">
           {aiEnabled ? (
-            <p className="flex items-center gap-1 text-[10px] text-gray-400">
+            <p className="flex items-center gap-1 text-[10px] text-gray-400 min-w-0">
               {sg.hint === 'loading' && <><Loader2 size={9} className="animate-spin" />Generating…</>}
               {sg.hint === 'accept' && <>Tab to accept · Esc to dismiss</>}
+              {sg.hint === 'error' && (
+                <span className="flex items-center gap-1 text-red-400 min-w-0" title={sg.error ?? ''}>
+                  <AlertTriangle size={9} className="shrink-0" /><span className="truncate">{sg.error}</span>
+                </span>
+              )}
               {!sg.hint && <span>Ctrl+Space for AI suggestion</span>}
             </p>
           ) : <span />}

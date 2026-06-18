@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, Radio, Copy, Check } from 'lucide-react'
-import type { RelayStatus } from '../../types'
+import type { RelayStatus, RelayStats, OrchestratorEvent } from '../../types'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
@@ -9,6 +9,18 @@ import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
 
+
+/** HH:MM:SS for the relay duration (drops the hours segment when zero).
+ *  Mirrors the sidebar widget's formatter. */
+function srFormatDuration(s: number): string {
+  if (!Number.isFinite(s) || s < 0) return '0:00'
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = Math.floor(s % 60)
+  const mm = String(m).padStart(2, '0')
+  const ss = String(sec).padStart(2, '0')
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`
+}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -38,6 +50,8 @@ export function IntegrationsPage() {
   const [srFetchError, setSrFetchError] = useState<string | null>(null)
   const [srCopied, setSrCopied] = useState<'server' | 'key' | null>(null)
   const [srStatus, setSrStatus] = useState<RelayStatus>({ state: 'idle' })
+  const [srStats, setSrStats] = useState<RelayStats | null>(null)
+  const [srLifecycle, setSrLifecycle] = useState<OrchestratorEvent | null>(null)
   // "Use custom port" — UI affordance to hide the port field by default.
   // Initialized from current config: if the port differs from the default
   // 1935, the user has clearly customized it and we want the field visible.
@@ -49,12 +63,20 @@ export function IntegrationsPage() {
     setSrOutboundKey(config.streamRelayOutboundKey ?? '')
   }, [config.streamRelayPort, config.streamRelayOutboundKey])
 
-  // Subscribe to live relay status. Cleanup is from the preload subscriber
-  // pattern — each `on*` returns its own unsubscribe fn.
+  // Subscribe to live relay status + stats + lifecycle so the card mirrors the
+  // sidebar widget (kbps/duration/speed while streaming, lifecycle stage +
+  // grace countdown). Cleanup is from the preload subscriber pattern — each
+  // `on*` returns its own unsubscribe fn. Stats reset on stream start/stop.
   useEffect(() => {
     window.api.streamRelayGetStatus().then(setSrStatus).catch(() => {})
-    const off = window.api.onRelayStatus(setSrStatus)
-    return off
+    const offs = [
+      window.api.onRelayStatus(setSrStatus),
+      window.api.onRelayStats(setSrStats),
+      window.api.onRelayStreamStarted(() => setSrStats(null)),
+      window.api.onRelayStreamStopped(() => setSrStats(null)),
+      window.api.onRelayLifecycle(setSrLifecycle),
+    ]
+    return () => { for (const off of offs) off() }
   }, [])
 
   // Key looks like a YouTube stream key: four 4-char dash-separated blocks.
@@ -167,6 +189,21 @@ export function IntegrationsPage() {
   useEffect(() => {
     setClaudePromptLocal(config.claudeSystemPrompt ?? '')
   }, [config.claudeSystemPrompt])
+  // Models the connected account has access to (free vs. paid tiers differ),
+  // fetched from the Anthropic models API so the dropdown only offers valid
+  // choices. Loaded on mount (if a key exists) and after a successful test.
+  const [claudeModels, setClaudeModels] = useState<Array<{ id: string; displayName: string }>>([])
+  const [claudeModelsLoading, setClaudeModelsLoading] = useState(false)
+  const [claudeModelsError, setClaudeModelsError] = useState<string | null>(null)
+  const loadClaudeModels = useCallback(async (key: string) => {
+    const k = key.trim()
+    if (!k) { setClaudeModels([]); setClaudeModelsError(null); return }
+    setClaudeModelsLoading(true); setClaudeModelsError(null)
+    const res = await window.api.claudeListModels(k)
+    if (res.ok) setClaudeModels(res.models)
+    else setClaudeModelsError(res.error)
+    setClaudeModelsLoading(false)
+  }, [])
 
   // ── YouTube instructions toggle ───────────────────────────────────────────
   const [ytInstructionsExpanded, setYtInstructionsExpanded] = useState(false)
@@ -216,6 +253,9 @@ export function IntegrationsPage() {
     window.api.twitchGetStatus().then((s: { connected: boolean }) => {
       setTwConnected(s.connected)
     }).catch(() => {})
+    const key = (config.claudeApiKey ?? '').trim()
+    if (key) loadClaudeModels(key)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── YouTube actions ───────────────────────────────────────────────────────
@@ -239,8 +279,10 @@ export function IntegrationsPage() {
 
   // ── Claude actions ────────────────────────────────────────────────────────
   const disconnectClaude = async () => {
-    await updateConfig({ claudeApiKey: '', claudeSystemPrompt: '' })
+    await updateConfig({ claudeApiKey: '', claudeSystemPrompt: '', claudeModel: '' })
     setClaudeTestResult(null)
+    setClaudeModels([])
+    setClaudeModelsError(null)
   }
   const testClaudeKey = async () => {
     const key = (config.claudeApiKey ?? '').trim()
@@ -249,6 +291,7 @@ export function IntegrationsPage() {
     const result = await window.api.claudeTestKey(key)
     setClaudeTestResult(result)
     setClaudeTesting(false)
+    if (result.valid) loadClaudeModels(key)
   }
 
   // ── Twitch actions ────────────────────────────────────────────────────────
@@ -448,6 +491,45 @@ export function IntegrationsPage() {
                 />
               </div>
             </div>
+            {/* Live activity strip — mirrors the sidebar widget so the user
+                gets the same lifecycle stage + stats while the setup page is
+                open during their first stream. Only renders when enabled and
+                there's something transitional/streaming to show. */}
+            {config.streamRelayEnabled && (() => {
+              const lc = srLifecycle
+              const streaming = srStatus.state === 'streaming'
+              const transitional = lc && (lc.stage === 'binding' || lc.stage === 'waiting-for-ingest' || lc.stage === 'going-live')
+              const lifecycleMsg =
+                lc?.stage === 'binding' ? `Connecting broadcast${lc.broadcastTitle ? `: ${lc.broadcastTitle}` : '…'}` :
+                lc?.stage === 'waiting-for-ingest' ? 'Waiting for YouTube to receive stream…' :
+                lc?.stage === 'going-live' ? `Going live${lc.broadcastTitle ? ` as ${lc.broadcastTitle}` : '…'}` :
+                lc?.stage === 'grace' ? `Finalizing in ${lc.graceRemainingSec ?? 30}s…` :
+                lc?.stage === 'completing' ? 'Finalizing broadcast…' :
+                (lc?.stage === 'no-broadcast' && streaming) ? 'Streaming without a bound broadcast (YouTube will auto-create one).' :
+                null
+              const errorMsg = lc?.stage === 'error' ? lc.error
+                : (srStatus.state === 'error' ? srStatus.error : undefined)
+              const showStats = streaming && srStats && !transitional
+              if (!lifecycleMsg && !showStats && !errorMsg) return null
+              return (
+                <div className="px-4 py-2 border-b border-white/5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {lifecycleMsg && (
+                    <span className={`text-[11px] tabular-nums ${lc?.stage === 'no-broadcast' ? 'text-gray-400' : 'text-amber-400'}`}>
+                      {lifecycleMsg}
+                    </span>
+                  )}
+                  {showStats && (
+                    <span className="flex items-center gap-2 text-[11px] text-gray-400 tabular-nums">
+                      <span>{Math.round(srStats!.kbps)} kbps</span>
+                      <span>·</span>
+                      <span>{srFormatDuration(srStats!.durationSec)}</span>
+                      {srStats!.speed < 0.97 && <span className="text-amber-400">· {srStats!.speed.toFixed(2)}x</span>}
+                    </span>
+                  )}
+                  {errorMsg && <span className="text-[11px] text-red-400 leading-tight">{errorMsg}</span>}
+                </div>
+              )
+            })()}
             <div className="px-4 py-4 flex flex-col gap-4">
               <p className="text-xs text-gray-400 leading-relaxed">
                 Routes your stream to YouTube with the option to automatically connect to the next scheduled
@@ -751,6 +833,37 @@ export function IntegrationsPage() {
                   </button>
                 </div>
               </div>
+              {(config.claudeApiKey ?? '').trim() && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-400">Model</label>
+                  <div className="relative">
+                    <select
+                      value={config.claudeModel ?? ''}
+                      onChange={e => updateConfig({ claudeModel: e.target.value })}
+                      className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    >
+                      <option value="">Default (Claude Sonnet 4.6)</option>
+                      {/* Stored model that isn't in the fetched list (not loaded
+                          yet, or access changed) — keep it selectable so the
+                          dropdown reflects the saved value. */}
+                      {(config.claudeModel ?? '').trim() && !claudeModels.some(m => m.id === config.claudeModel) && (
+                        <option value={config.claudeModel}>{config.claudeModel}</option>
+                      )}
+                      {claudeModels.map(m => (
+                        <option key={m.id} value={m.id}>{m.displayName}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  </div>
+                  <p className="text-xs text-gray-400 flex items-center gap-1.5">
+                    {claudeModelsLoading
+                      ? <><Loader2 size={11} className="animate-spin" /> Loading available models…</>
+                      : claudeModelsError
+                        ? <span className="text-amber-400">Couldn’t load model list ({claudeModelsError}). Showing your saved choice — test the connection to retry.</span>
+                        : <>Only models your account can access are listed. Stronger models (Sonnet 4.6, Opus 4.8) give better suggestions, especially tags.</>}
+                  </p>
+                </div>
+              )}
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-400">
                   Preferences / System Prompt

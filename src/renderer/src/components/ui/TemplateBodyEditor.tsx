@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
-import { GripHorizontal } from 'lucide-react'
+import { GripHorizontal, Loader2, AlertTriangle } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { cleanClaudeError } from '../../lib/claudeError'
 
 // ─── Chip styling (shared between in-editor chips + picker buttons) ─────────
 
@@ -233,6 +234,61 @@ function setCursorOffset(root: HTMLElement, target: number): void {
   }
 }
 
+/** Resolve a source offset to a concrete DOM point. Returns the text node +
+ *  in-node offset when the position lands inside plain text; for a position
+ *  at a chip/`<br>` boundary it returns the element with `after: true` so the
+ *  caller can use setStartAfter/setEndAfter. Used to paint a selection over
+ *  an AI suggestion that was just spliced into the source. */
+function domPointAtOffset(root: HTMLElement, target: number): { node: Node; offset?: number; after?: boolean } | null {
+  let remaining = target
+  let found: { node: Node; offset?: number; after?: boolean } | null = null
+  const walk = (node: Node): boolean => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = node.textContent?.length ?? 0
+      if (remaining <= len) { found = { node, offset: remaining }; return true }
+      remaining -= len
+      return false
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return false
+    const el = node as HTMLElement
+    const tok = el.dataset.token
+    if (tok) {
+      if (remaining < tok.length) { found = { node: el, after: true }; return true }
+      remaining -= tok.length
+      return false
+    }
+    if (el.tagName === 'BR') {
+      if (remaining < 1) { found = { node: el, after: true }; return true }
+      remaining -= 1
+      return false
+    }
+    for (const child of Array.from(node.childNodes)) {
+      if (walk(child)) return true
+    }
+    return false
+  }
+  for (const child of Array.from(root.childNodes)) {
+    if (walk(child)) break
+  }
+  return found
+}
+
+/** Paint a selection across the source range [start, end). Returns false if
+ *  either endpoint couldn't be resolved (caller falls back to a collapsed
+ *  caret). */
+function selectSourceRange(root: HTMLElement, start: number, end: number): boolean {
+  const a = domPointAtOffset(root, start)
+  const b = domPointAtOffset(root, end)
+  const sel = window.getSelection()
+  if (!a || !b || !sel) return false
+  const range = document.createRange()
+  if (a.after) range.setStartAfter(a.node); else range.setStart(a.node, a.offset ?? 0)
+  if (b.after) range.setEndAfter(b.node); else range.setEnd(b.node, b.offset ?? 0)
+  sel.removeAllRanges()
+  sel.addRange(range)
+  return true
+}
+
 // ─── TemplateBodyEditor ─────────────────────────────────────────────────────
 
 /**
@@ -247,7 +303,7 @@ function setCursorOffset(root: HTMLElement, target: number): void {
  * cursor via offset helpers.
  */
 export function TemplateBodyEditor({
-  value, onSave, placeholder, knownKeys, inapplicableKeys, resolvedValues, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus, height, onHeightChange,
+  value, onSave, placeholder, knownKeys, inapplicableKeys, resolvedValues, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus, height, onHeightChange, aiFetcher,
 }: {
   value: string
   onSave: (v: string) => Promise<void> | void
@@ -278,12 +334,35 @@ export function TemplateBodyEditor({
   /** Focus the editor on mount. Useful when the form pops open and
    *  the body field is the primary edit target. */
   autoFocus?: boolean
+  /** When provided, Ctrl+Space requests a Claude suggestion at the caret.
+   *  The returned text is spliced in and selected; Tab accepts, Esc removes
+   *  it, and typing replaces it (same UX as the plain-textarea fields).
+   *  `prefix`/`suffix` are the source text on either side of the caret. */
+  aiFetcher?: (prefix: string, suffix: string) => Promise<string | null>
 }) {
   const [local, setLocal] = useState(value)
   const [saving, setSaving] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
   const lastInapplicableRef = useRef<ReadonlySet<string> | undefined>(undefined)
   const lastResolvedRef = useRef<ReadonlyMap<string, string> | undefined>(undefined)
+
+  // ── AI suggestion state ───────────────────────────────────────────────────
+  // `aiPending` tracks an inserted-but-unaccepted suggestion as a source
+  // [start, start+length) span so Tab (accept) / Esc (remove) / typing
+  // (replace) can act on it. Refs mirror the latest values for the keydown
+  // and async-completion closures.
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiPending, setAiPending] = useState<{ start: number; length: number } | null>(null)
+  // Last generation error, surfaced inline (no toast system) and auto-cleared.
+  const [aiError, setAiError] = useState<string | null>(null)
+  const localRef = useRef(local)
+  localRef.current = local
+  const aiPendingRef = useRef(aiPending)
+  aiPendingRef.current = aiPending
+  const aiLoadingRef = useRef(aiLoading)
+  aiLoadingRef.current = aiLoading
+  const aiFetcherRef = useRef(aiFetcher)
+  aiFetcherRef.current = aiFetcher
 
   // Focus-aware refresh — only sync from props when the user isn't
   // mid-edit. Same pattern as EditableTextField.
@@ -317,7 +396,60 @@ export function TemplateBodyEditor({
     const el = editorRef.current
     if (!el) return
     setLocal(serialize(el))
+    // Any real keystroke replaces/edits the pending suggestion — drop the
+    // tracking so Tab/Esc no longer act on the now-stale span.
+    if (aiPendingRef.current) setAiPending(null)
   }
+
+  // Ctrl+Space → fetch a suggestion at the caret, splice it into the source,
+  // and mark it pending. Best-effort: errors are swallowed (no toast system),
+  // matching the plain-textarea fields.
+  const requestAi = useCallback(async () => {
+    const el = editorRef.current
+    const fetcher = aiFetcherRef.current
+    if (!el || !fetcher || aiPendingRef.current || aiLoadingRef.current) return
+    const offset = getCursorOffset(el)
+    const base = localRef.current
+    const safeOffset = offset < 0 ? base.length : offset
+    const prefix = base.slice(0, safeOffset)
+    const suffix = base.slice(safeOffset)
+    setAiError(null)
+    setAiLoading(true)
+    try {
+      const result = await fetcher(prefix, suffix)
+      // Bail if the field changed underneath us or a suggestion is already
+      // showing — avoids clobbering edits made during the request.
+      if (result && localRef.current === base && !aiPendingRef.current) {
+        setLocal(base.slice(0, safeOffset) + result + base.slice(safeOffset))
+        setAiPending({ start: safeOffset, length: result.length })
+      }
+    } catch (e) {
+      setAiError(cleanClaudeError(e))
+    } finally {
+      setAiLoading(false)
+    }
+  }, [])
+
+  // Auto-dismiss the inline error after a few seconds.
+  useEffect(() => {
+    if (!aiError) return
+    const id = setTimeout(() => setAiError(null), 6000)
+    return () => clearTimeout(id)
+  }, [aiError])
+
+  // After the chip-render layout effect rebuilds the DOM for a freshly
+  // inserted suggestion, paint the selection over its span so the user can
+  // see what will be accepted. Runs after the render effect (declared
+  // earlier) in the same commit.
+  useLayoutEffect(() => {
+    if (!aiPending) return
+    const el = editorRef.current
+    if (!el) return
+    el.focus()
+    if (!selectSourceRange(el, aiPending.start, aiPending.start + aiPending.length)) {
+      setCursorOffset(el, aiPending.start + aiPending.length)
+    }
+  }, [aiPending])
 
   // Expose an insert() handle so the picker below the editor can
   // splice tokens in at the cursor position without juggling refs.
@@ -342,6 +474,8 @@ export function TemplateBodyEditor({
   }, [insertRef, local])
 
   const handleBlur = async () => {
+    // Leaving the field accepts whatever's currently shown (keeps the text).
+    if (aiPendingRef.current) setAiPending(null)
     if (local === value) return
     setSaving(true)
     try { await onSave(local) }
@@ -392,6 +526,38 @@ export function TemplateBodyEditor({
   //                 default <div>/<br>. Our serializer handles all three
   //                 just in case.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // ── AI suggestion controls ──
+    if ((e.ctrlKey || e.metaKey) && e.key === ' ') {
+      e.preventDefault()
+      if (aiFetcherRef.current && !aiPendingRef.current) requestAi()
+      return
+    }
+    if (aiPendingRef.current) {
+      if (e.key === 'Tab') {
+        // Accept — keep the text, collapse the caret to its end.
+        e.preventDefault()
+        const p = aiPendingRef.current
+        setAiPending(null)
+        requestAnimationFrame(() => {
+          const el = editorRef.current
+          if (el) { el.focus(); setCursorOffset(el, p.start + p.length) }
+        })
+        return
+      }
+      if (e.key === 'Escape') {
+        // Dismiss — splice the suggestion back out, caret to where it was.
+        e.preventDefault()
+        const p = aiPendingRef.current
+        const base = localRef.current
+        setLocal(base.slice(0, p.start) + base.slice(p.start + p.length))
+        setAiPending(null)
+        requestAnimationFrame(() => {
+          const el = editorRef.current
+          if (el) { el.focus(); setCursorOffset(el, p.start) }
+        })
+        return
+      }
+    }
     if (e.key === 'Enter') {
       if (!multiline) {
         e.preventDefault()
@@ -478,6 +644,19 @@ export function TemplateBodyEditor({
           </div>
         </div>
       ) : editor}
+      {aiFetcher && (
+        <p className="flex items-center gap-1 text-[10px] text-gray-400 mt-0.5 min-h-[14px] min-w-0">
+          {aiError
+            ? <span className="flex items-center gap-1 text-red-400 min-w-0" title={aiError}>
+                <AlertTriangle size={9} className="shrink-0" /><span className="truncate">{aiError}</span>
+              </span>
+            : aiLoading
+              ? <><Loader2 size={9} className="animate-spin" />Generating…</>
+              : aiPending
+                ? <>Tab to accept · Esc to dismiss</>
+                : <span>Ctrl+Space for AI suggestion</span>}
+        </p>
+      )}
       {hoveredInapplicable && (
         <Tooltip
           open

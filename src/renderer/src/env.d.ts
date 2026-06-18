@@ -240,6 +240,7 @@ declare global {
       // ── Claude AI ────────────────────────────────────────────────────────────
       claudeGenerate(field: string, context: Record<string, unknown>): Promise<string | null>
       claudeTestKey(apiKey: string): Promise<{ valid: boolean; error?: string }>
+      claudeListModels(apiKey: string): Promise<{ ok: true; models: Array<{ id: string; displayName: string }> } | { ok: false; error: string }>
 
       // ── Thumbnail Editor ─────────────────────────────────────────────────────
       thumbnailEnsureAssetsDir(streamsDir: string): Promise<void>

@@ -564,6 +564,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('claude:generate', { field, context }),
   claudeTestKey: (apiKey: string) =>
     ipcRenderer.invoke('claude:testKey', apiKey),
+  claudeListModels: (apiKey: string) =>
+    ipcRenderer.invoke('claude:listModels', apiKey),
 
   // ── Thumbnail Editor ──────────────────────────────────────────────────────
   thumbnailEnsureAssetsDir: (streamsDir: string) =>

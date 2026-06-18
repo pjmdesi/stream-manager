@@ -5113,6 +5113,13 @@ function SidebarDetail({
   const aiFetchTitle = useMemo(() => claudeEnabled
     ? (prefix: string, suffix: string) => window.api.claudeGenerate('title', { ...buildAiContext(), prefix, suffix })
     : undefined, [claudeEnabled, buildAiContext])
+  // Description fetcher — Ctrl+Space inside the TemplateBodyEditor asks Claude
+  // for description text at the caret (full body when the field is empty,
+  // mid-field insertion otherwise). `prefix`/`suffix` are the source text on
+  // either side of the caret, supplied by the editor.
+  const aiFetchDescription = useMemo(() => claudeEnabled
+    ? (prefix: string, suffix: string) => window.api.claudeGenerate('description', { ...buildAiContext(), prefix, suffix })
+    : undefined, [claudeEnabled, buildAiContext])
   // Tagline fetcher — Ctrl+Space inside the Tagline EditableTextField
   // asks Claude for a catchy 3–8 word phrase grounded in the topic,
   // description, and tags, and explicitly avoiding `previousTaglines`
@@ -5858,6 +5865,7 @@ function SidebarDetail({
                 knownKeys={titleMergeKeySet}
                 inapplicableKeys={titleInapplicableKeySet}
                 insertRef={titleInsertRef}
+                aiFetcher={aiFetchTitle}
               />
               <MergeFieldPicker
                 keys={titlePickerKeys}
@@ -6075,6 +6083,7 @@ function SidebarDetail({
                     inapplicableKeys={descInapplicableKeySet}
                     resolvedValues={descResolvedValues}
                     insertRef={descInsertRef}
+                    aiFetcher={aiFetchDescription}
                   />
                   <MergeFieldPicker keys={descPickerKeys} onInsert={k => descInsertRef.current?.(`{${k}}`)} />
                 </>
@@ -7382,9 +7391,14 @@ function EditableTextField({
     await handleBlur()      // then autosave if dirty
   }
   const aiHint = aiEnabled && (sg.hint || true) ? (
-    <p className="flex items-center gap-1 text-[10px] text-gray-400 mt-0.5 min-h-[14px]">
+    <p className="flex items-center gap-1 text-[10px] text-gray-400 mt-0.5 min-h-[14px] min-w-0">
       {sg.hint === 'loading' && <><Loader2 size={9} className="animate-spin" />Generating…</>}
       {sg.hint === 'accept' && <>Tab to accept · Esc to dismiss</>}
+      {sg.hint === 'error' && (
+        <span className="flex items-center gap-1 text-red-400 min-w-0" title={sg.error ?? ''}>
+          <AlertTriangle size={9} className="shrink-0" /><span className="truncate">{sg.error}</span>
+        </span>
+      )}
       {!sg.hint && <span>Ctrl+Space for AI suggestion</span>}
     </p>
   ) : null

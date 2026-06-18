@@ -41,6 +41,7 @@ export interface AppConfig {
   autoDeletePartialOnCancel: boolean
   claudeApiKey: string
   claudeSystemPrompt: string
+  claudeModel: string
   launcherWidgetGroupId: string
   listThumbWidth: number
   defaultBuiltinThumbnailTemplate: string
@@ -100,6 +101,9 @@ export interface AppConfig {
    *  `FromSeason`). Both off → only the current stream's own assets. */
   thumbnailAssetsFromSeason: boolean
   thumbnailAssetsFromTopicGame: boolean
+  /** Set true the first time the user opens the Help modal. Drives a one-time
+   *  attention animation on the sidebar "How to use" link until they do. */
+  hasOpenedHelp: boolean
   /** When true, suppress the post-Twitch-push modal that offers to
    *  rename the local game tag to Twitch's canonical category name
    *  (Twitch fuzzy-matches the game via search → game_id, so a
@@ -157,6 +161,7 @@ function getDefaultConfig(): AppConfig {
     autoDeletePartialOnCancel: false,
     claudeApiKey: '',
     claudeSystemPrompt: '',
+    claudeModel: '',
     launcherWidgetGroupId: '',
     listThumbWidth: 85,
     defaultBuiltinThumbnailTemplate: '',
@@ -179,6 +184,7 @@ function getDefaultConfig(): AppConfig {
     calendarShowAdjacentMonthDays: true,
     thumbnailAssetsFromSeason: true,
     thumbnailAssetsFromTopicGame: false,
+    hasOpenedHelp: false,
     twitchSkipCategoryRenamePrompt: false,
     defaultYouTubeCategoryId: '',
     defaultYouTubeTagsTemplateId: '',

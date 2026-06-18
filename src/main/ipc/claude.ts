@@ -2,7 +2,12 @@ import { ipcMain } from 'electron'
 import { getStore } from './store'
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
-const MODEL = 'claude-haiku-4-5-20251001'
+const ANTHROPIC_MODELS_API = 'https://api.anthropic.com/v1/models'
+// Fallback when the user hasn't picked a model yet. Sonnet 4.6 is a much
+// stronger default than the old Haiku hardcode for metadata/tag generation
+// while staying inexpensive; users can switch to any model their account
+// has access to via the Integrations → Claude AI dropdown.
+const DEFAULT_MODEL = 'claude-sonnet-4-6'
 
 // When the user's cursor is mid-field, generate text to insert at that position.
 // When the field is empty (no prefix or suffix), generate the full content.
@@ -52,7 +57,7 @@ function buildInstruction(
   return inline[field] ?? `Insert text at the cursor in the ${field} field. Text before: "${prefix}". Text after: "${suffix}". Return ONLY the inserted text.`
 }
 
-async function callAnthropic(apiKey: string, system: string, userMessage: string, maxTokens = 512): Promise<Response> {
+async function callAnthropic(apiKey: string, model: string, system: string, userMessage: string, maxTokens = 512): Promise<Response> {
   return fetch(ANTHROPIC_API, {
     method: 'POST',
     headers: {
@@ -61,7 +66,7 @@ async function callAnthropic(apiKey: string, system: string, userMessage: string
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content: userMessage }],
@@ -92,7 +97,8 @@ export function registerClaudeIPC() {
     const { prefix: _p, suffix: _s, ...streamContext } = context
     const userMessage = `Stream context:\n${JSON.stringify(streamContext, null, 2)}\n\nTask: ${instruction}`
 
-    const res = await callAnthropic(apiKey, system, userMessage)
+    const model = config.claudeModel?.trim() || DEFAULT_MODEL
+    const res = await callAnthropic(apiKey, model, system, userMessage)
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as { error?: { message?: string } }
       throw new Error(err.error?.message ?? `Anthropic API error ${res.status}`)
@@ -104,12 +110,42 @@ export function registerClaudeIPC() {
 
   ipcMain.handle('claude:testKey', async (_, apiKey: string) => {
     try {
-      const res = await callAnthropic(apiKey.trim(), 'You are a test.', 'Reply with just "ok".', 5)
+      const config = getStore().get('config')
+      const model = config.claudeModel?.trim() || DEFAULT_MODEL
+      const res = await callAnthropic(apiKey.trim(), model, 'You are a test.', 'Reply with just "ok".', 5)
       if (res.ok) return { valid: true }
       const err = await res.json().catch(() => ({})) as { error?: { message?: string } }
       return { valid: false, error: err.error?.message ?? `Error ${res.status}` }
     } catch (e: unknown) {
       return { valid: false, error: e instanceof Error ? e.message : 'Network error' }
+    }
+  })
+
+  // List the models the connected account actually has access to, so the
+  // settings dropdown only offers valid choices (free vs. paid tiers differ).
+  // Returns newest-first as the API already orders them. The API key is
+  // passed directly (may be unsaved/just-typed in the settings field).
+  ipcMain.handle('claude:listModels', async (_, apiKey: string) => {
+    const key = apiKey?.trim()
+    if (!key) return { ok: false as const, error: 'No API key' }
+    try {
+      const res = await fetch(`${ANTHROPIC_MODELS_API}?limit=1000`, {
+        headers: {
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+        },
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: { message?: string } }
+        return { ok: false as const, error: err.error?.message ?? `Error ${res.status}` }
+      }
+      const data = await res.json() as { data?: Array<{ id?: string; display_name?: string }> }
+      const models = (data.data ?? [])
+        .filter(m => typeof m.id === 'string')
+        .map(m => ({ id: m.id as string, displayName: m.display_name ?? (m.id as string) }))
+      return { ok: true as const, models }
+    } catch (e: unknown) {
+      return { ok: false as const, error: e instanceof Error ? e.message : 'Network error' }
     }
   })
 }

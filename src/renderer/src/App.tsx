@@ -764,8 +764,8 @@ function AppInner() {
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
             <button
-              onClick={() => setHelpOpen(true)}
-              className="text-[10px] text-gray-400 hover:text-gray-300 transition-colors whitespace-nowrap"
+              onClick={() => { setHelpOpen(true); if (!config.hasOpenedHelp) updateConfig({ hasOpenedHelp: true }) }}
+              className={`text-[10px] transition-colors whitespace-nowrap rounded px-1 -mx-1 ${!loading && !config.hasOpenedHelp ? 'help-attention' : 'text-gray-400 hover:text-gray-300'}`}
             >
               {sidebarCollapsed ? 'Help' : 'How to use'}
             </button>

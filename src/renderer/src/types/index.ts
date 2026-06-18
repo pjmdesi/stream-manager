@@ -185,6 +185,7 @@ export interface AppConfig {
   autoDeletePartialOnCancel: boolean
   claudeApiKey: string
   claudeSystemPrompt: string
+  claudeModel: string
   launcherWidgetGroupId: string
   listThumbWidth: number
   checkForUpdates: boolean
@@ -226,6 +227,9 @@ export interface AppConfig {
    *  current Topic/Game tag (implies `FromSeason`). */
   thumbnailAssetsFromSeason: boolean
   thumbnailAssetsFromTopicGame: boolean
+  /** Set true the first time the user opens the Help modal — drives the
+   *  one-time attention animation on the sidebar "How to use" link. */
+  hasOpenedHelp: boolean
   /** When true, suppress the after-Twitch-push modal that offers to
    *  rename the local game tag to Twitch's canonical category. Set
    *  via the "Don't ask again" button in that same modal or via the

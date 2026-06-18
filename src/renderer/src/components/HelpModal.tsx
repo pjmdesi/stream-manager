@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, CopyPlus, CloudDownload, SquareDashedText } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, CopyPlus, CloudDownload, SquareDashedText, Bot } from 'lucide-react'
 import { Youtube, Twitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { useStore } from '../hooks/useStore'
@@ -331,8 +331,31 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <Plug size={16} />,
     body: (
       <>
-        <p>Connect YouTube, Twitch, and Claude AI. With YouTube connected, you can pull broadcast and VOD info onto a stream's metadata, and push title/description/tag updates back — the per-field push/pull workflow lives in the Streams details sidebar (see <em>Streams → Publishing to YouTube &amp; Twitch</em>). Twitch syncs go-live title and category.</p>
-        <p>Claude (optional) helps draft taglines, descriptions, and tags from the stream's metadata via <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in those fields. All API keys are stored locally.</p>
+        <p>Connect your YouTube, Twitch, and Claude AI accounts here. All API keys and tokens are stored locally on your machine.</p>
+
+        <ElementSection icon={<Youtube size={14} />} title="YouTube">
+          <p>With YouTube connected, you can pull broadcast and VOD info onto a stream's metadata and push title, description, tags, category, and privacy updates back. The per-field push/pull workflow lives in the Streams details sidebar (see <em>Streams → Publishing to YouTube &amp; Twitch</em>).</p>
+        </ElementSection>
+
+        <ElementSection icon={<TrendingUpDown size={14} />} title="Stream Relay">
+          <p>The relay routes your streaming app (OBS, Xsplit, etc.) to YouTube through a small local RTMP server that Stream Manager runs in the background. Its job is to <strong className="text-gray-300">automatically connect your stream to the right scheduled broadcast and take it live</strong> — so you don't have to touch YouTube Studio when you start streaming.</p>
+          <p><strong className="text-gray-300">Setup</strong> (requires YouTube connected):</p>
+          <ul className="list-none pl-0 flex flex-col gap-1">
+            <li className="flex items-baseline gap-2"><span className="shrink-0 text-gray-500">1.</span><span>Toggle <strong className="text-gray-300">Enabled</strong>. Stream Manager auto-fills your channel's persistent stream key from YouTube.</span></li>
+            <li className="flex items-baseline gap-2"><span className="shrink-0 text-gray-500">2.</span><span>In your streaming app's stream settings, set a <em>Custom</em> server to the <strong className="text-gray-300">Server URL</strong> and <strong className="text-gray-300">Stream Key</strong> shown in the card (click either to copy). These point at Stream Manager, not YouTube directly.</span></li>
+            <li className="flex items-baseline gap-2"><span className="shrink-0 text-gray-500">3.</span><span>Leave the relay enabled — it starts with the app and listens for your streaming software to connect.</span></li>
+          </ul>
+          <p><strong className="text-gray-300">Active-broadcast workflow.</strong> Stream Manager binds your stream to one upcoming YouTube broadcast. By default it auto-picks the <em>soonest upcoming</em> one; you can override this from the <strong className="text-gray-300">Stream Relay widget</strong> in the navigation sidebar (pick a specific broadcast or switch back to auto). When go live in your streaming app, the relay binds that broadcast, waits for YouTube to start receiving the feed, and transitions it to live — you'll see the stage progress in the widget.</p>
+          <p>When you stop streaming, the broadcast is finalized after a short grace period, so a brief disconnect/reconnect won't end it. If you start streaming without a broadcast picked, bytes still reach YouTube and it creates a broadcast on its own — Stream Manager just won't be managing the details for that stream.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Twitch size={14} />} title="Twitch">
+          <p>With Twitch connected, Stream Manager syncs a stream's title and category to your channel. It can automatically push the next scheduled broadcast's details or allow you to push them manually in the Streams details sidebar.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Bot size={14} />} title="Claude AI">
+          <p>When Claude is connected, it can draft titles, taglines, descriptions, and tag lists. Press <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in those fields for a suggestion grounded in the stream's details and your preferences prompt.</p>
+        </ElementSection>
       </>
     ),
   },
@@ -394,7 +417,7 @@ export function HelpModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
     <Modal isOpen={isOpen} onClose={onClose} title="How to use Stream Manager" width="2xl">
       <div className="flex gap-4 items-stretch h-[65vh]">
         {/* Sidebar nav */}
-        <nav className="w-44 shrink-0 flex flex-col gap-0.5 border-r border-white/5 pr-2 overflow-y-auto">
+        <nav className="w-44 shrink-0 flex flex-col gap-0.5 border-r border-white/5 pr-2 overflow-y-auto -ms-4">
           {items.map(i => {
             const isActive = i.id === active
             return (

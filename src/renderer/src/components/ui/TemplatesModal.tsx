@@ -135,6 +135,7 @@ function TagForm({ initial, onSave, onCancel }: {
         <TagChipEditor
           value={tags}
           onChange={setTags}
+          sortOnBlur
           placeholder="add tag…"
           footerRight={
             <span className={`text-xs tabular-nums ${countColorCls}`}>

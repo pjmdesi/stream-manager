@@ -1,4 +1,5 @@
-import { useRef, useState, useLayoutEffect, useCallback } from 'react'
+import { useRef, useState, useLayoutEffect, useEffect, useCallback } from 'react'
+import { cleanClaudeError } from '../lib/claudeError'
 
 type FieldEl = HTMLInputElement | HTMLTextAreaElement
 
@@ -27,6 +28,9 @@ export function useFieldSuggestion(
   const [suggestion, setSuggestion] = useState('')
   const [insertAt, setInsertAt] = useState(0)
   const [loading, setLoading] = useState(false)
+  // Last generation error, surfaced inline by the field. Auto-clears so a
+  // stale failure (out of credits, model revoked, rate limit) doesn't linger.
+  const [error, setError] = useState<string | null>(null)
   const ref = useRef<FieldEl>(null)
 
   // Stale-closure-safe refs
@@ -60,6 +64,7 @@ export function useFieldSuggestion(
     const cursorPos = el?.selectionStart ?? valueRef.current.length
     const prefix = valueRef.current.slice(0, cursorPos)
     const suffix = valueRef.current.slice(cursorPos)
+    setError(null)
     setLoading(true)
     try {
       const result = await fetchSuggestion(prefix, suffix)
@@ -67,12 +72,21 @@ export function useFieldSuggestion(
         setInsertAt(cursorPos)
         setSuggestion(result)
       }
-    } catch {
-      // Suggestions are best-effort; silently swallow errors
+    } catch (e) {
+      // Surface the cause inline (no toast system) so the user knows why
+      // nothing appeared — e.g. out of credits, model unavailable, rate limit.
+      setError(cleanClaudeError(e))
     } finally {
       setLoading(false)
     }
   }, [fetchSuggestion])
+
+  // Auto-dismiss the inline error after a few seconds.
+  useEffect(() => {
+    if (!error) return
+    const id = setTimeout(() => setError(null), 6000)
+    return () => clearTimeout(id)
+  }, [error])
 
   const handleKeyDown = (e: React.KeyboardEvent<FieldEl>) => {
     // Ctrl+Space — request a suggestion at current cursor position
@@ -110,7 +124,7 @@ export function useFieldSuggestion(
 
   const handleBlur = () => dismiss()
 
-  const hint = loading ? 'loading' : suggestion ? 'accept' : ''
+  const hint = error ? 'error' : loading ? 'loading' : suggestion ? 'accept' : ''
 
   const props = {
     onKeyDown: handleKeyDown,
@@ -118,5 +132,5 @@ export function useFieldSuggestion(
     onBlur: handleBlur,
   }
 
-  return { ref, props, hint, loading, hasSuggestion: !!suggestion, dismiss, requestSuggestion }
+  return { ref, props, hint, loading, error, hasSuggestion: !!suggestion, dismiss, requestSuggestion }
 }
