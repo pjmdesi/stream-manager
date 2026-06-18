@@ -4,7 +4,7 @@ import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
   Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ChevronsDown, ChevronsUp, X,
   Film, Zap, Combine, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
-  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon,
+  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon, ListRestart, Eye,
 } from 'lucide-react'
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { Tooltip } from '../ui/Tooltip'
@@ -128,6 +128,7 @@ const YT_TITLE_MERGE_KEYS = ['game', 'season', 'episode', 'tagline', 'title', 't
  *  chars; Twitch caps stream titles at 140. Drives the character
  *  counter under each title field. */
 const YT_TITLE_CHAR_LIMIT = 100
+const YT_DESCRIPTION_CHAR_LIMIT = 5000
 const TWITCH_TITLE_CHAR_LIMIT = 140
 
 /** Build the merge-field map for a single stream — same shape the
@@ -4634,6 +4635,36 @@ function SidebarDetail({
   // same merge-key + inapplicable sets as the YT title.
   const twitchTitleInsertRef = useRef<((text: string) => void) | null>(null)
 
+  // Description chip editor: same merge keys as the title plus {season_links}
+  // (the multi-line prior-episodes list, series-only).
+  const descMergeKeySet = useMemo(
+    () => new Set<string>([...YT_TITLE_MERGE_KEYS, 'season_links']),
+    [],
+  )
+  const descInapplicableKeySet = useMemo(
+    () => standalone
+      ? new Set<string>(['season', 'episode', 'total_episodes', 'season_links'])
+      : new Set<string>(),
+    [standalone],
+  )
+  const descPickerKeys = useMemo(
+    () => standalone
+      ? YT_TITLE_MERGE_KEYS.filter(k => k !== 'season' && k !== 'episode' && k !== 'total_episodes')
+      : [...YT_TITLE_MERGE_KEYS, 'season_links'],
+    [standalone],
+  )
+  const descInsertRef = useRef<((text: string) => void) | null>(null)
+  // Edit ⇄ preview toggle for the description. Edit shows value-rendering
+  // chips and is editable; preview shows the fully-resolved plain text,
+  // read-only. Default to edit.
+  const [descPreview, setDescPreview] = useState(false)
+  // Manual drag-resize height for the description field, lifted here so it
+  // persists across the edit⇄preview toggle (both elements apply it). `null`
+  // = auto-grow. Reset when switching streams.
+  const [descHeight, setDescHeight] = useState<number | null>(null)
+  useEffect(() => { setDescHeight(null) }, [folder.folderPath])
+  const descPreviewRef = useRef<HTMLDivElement>(null)
+
   // Hoist onUpdateMeta into a ref so other effects below can call it
   // without re-running every time the parent re-renders (the parent
   // passes an inline arrow each time, so it isn't reference-stable).
@@ -4641,6 +4672,63 @@ function SidebarDetail({
   // auto-apply effects that use this ref shouldn't create undo entries.
   const onUpdateMetaRef = useRef(onUpdateMetaRaw)
   useEffect(() => { onUpdateMetaRef.current = onUpdateMetaRaw })
+
+  // {season_links} is the one async merge field — resolve it once here (walks
+  // siblings, can hit the YT API) and reuse it for both the chip display and
+  // the baked output. Re-resolves on stream-open + this stream's series-field
+  // edits; `folders` is read via closure (excluded from deps) so unrelated meta
+  // writes don't trigger constant re-resolves.
+  const [descSeasonLinks, setDescSeasonLinks] = useState('')
+  useEffect(() => {
+    if (isStandalone(meta)) { setDescSeasonLinks(''); return }
+    let cancelled = false
+    computeSeasonLinks(
+      folders,
+      meta?.ytGameTitle?.trim() || meta?.games?.[0] || folder.detectedGames?.[0] || '',
+      meta?.ytSeason || '1',
+      folder.date,
+    ).then(links => { if (!cancelled) setDescSeasonLinks(links) }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta?.isSeries, meta?.ytGameTitle, meta?.games, meta?.ytSeason, folder.folderPath, folder.date])
+
+  // Token → resolved-value map for the description chips: the sync title merge
+  // fields plus the async-resolved {season_links}. Memoized so the chip editor
+  // only rebuilds chips when a value actually changes.
+  const descResolvedValues = useMemo(() => {
+    const map = new Map<string, string>(Object.entries(mergeFields))
+    map.set('season_links', descSeasonLinks)
+    return map
+  }, [mergeFields, descSeasonLinks])
+
+  // Editable raw body + its baked output. Baking is synchronous: substitute the
+  // pre-resolved {season_links}, then the sync merge fields. The baked value is
+  // what's pushed + compared by the out-of-sync check (meta.ytDescription).
+  const descBody = meta?.ytDescriptionTemplate ?? meta?.ytDescription ?? ''
+  const descBaked = useMemo(
+    () => applyMergeFields(descBody.replace(/\{season_links\}/g, descSeasonLinks), mergeFields),
+    [descBody, descSeasonLinks, mergeFields],
+  )
+  // True when the body contains at least one known merge-field token (i.e. a
+  // chip). Without any, the preview would be identical to the editor, so the
+  // edit⇄preview toggle is hidden.
+  const descHasChips = useMemo(() => {
+    const re = /\{(\w+)\}/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(descBody)) !== null) {
+      if (descMergeKeySet.has(m[1])) return true
+    }
+    return false
+  }, [descBody, descMergeKeySet])
+  // Write the baked output to meta.ytDescription whenever it diverges — but only
+  // once the stream has adopted the template model (ytDescriptionTemplate set).
+  // Legacy streams keep their stored resolved text untouched until first edit.
+  // `descBody` reads the template (not ytDescription) when present, so the write
+  // can't feed back into descBaked — no loop.
+  useEffect(() => {
+    if (meta?.ytDescriptionTemplate === undefined) return
+    if (descBaked !== (meta?.ytDescription ?? '')) onUpdateMetaRef.current({ ytDescription: descBaked })
+  }, [descBaked, meta?.ytDescriptionTemplate, meta?.ytDescription])
 
   // One-shot series auto-detect on first game-add. Only fires for streams
   // explicitly marked `seriesAutoDetectPending: true` at creation (the
@@ -4781,10 +4869,13 @@ function SidebarDetail({
     const v = (meta?.twitchTitle ?? '').trim()
     return v.length > 0 && !ytTitleTemplates.some(t => t.template === meta?.twitchTitle)
   }, [meta?.twitchTitle, ytTitleTemplates])
+  // Compare the raw template body (`descBody`, the editable source) against
+  // saved templates so the Save-as-template affordance reflects the tokens the
+  // user sees, not the baked output.
   const canSaveDescTemplate = useMemo(() => {
-    const v = (meta?.ytDescription ?? '').trim()
-    return v.length > 0 && !ytDescTemplates.some(t => t.description === meta?.ytDescription)
-  }, [meta?.ytDescription, ytDescTemplates])
+    const v = descBody.trim()
+    return v.length > 0 && !ytDescTemplates.some(t => t.description === descBody)
+  }, [descBody, ytDescTemplates])
   const canSaveTagsTemplate = useMemo(() => {
     const tags = meta?.ytTags ?? []
     if (tags.length === 0) return false
@@ -4874,9 +4965,11 @@ function SidebarDetail({
     onUpdateMeta({ twitchTitleTemplateId: id })
   }, [onSaveYtTitleTemplate, meta?.twitchTitle, onUpdateMeta])
   const handleSaveDescTemplate = useCallback(async (name: string) => {
-    const id = await onSaveYtDescTemplate(name, meta?.ytDescription ?? '')
+    // Save the raw template body (tokens intact) so the template is reusable,
+    // not the baked output for this one stream.
+    const id = await onSaveYtDescTemplate(name, meta?.ytDescriptionTemplate ?? meta?.ytDescription ?? '')
     setDescTplId(id)
-  }, [onSaveYtDescTemplate, meta?.ytDescription])
+  }, [onSaveYtDescTemplate, meta?.ytDescriptionTemplate, meta?.ytDescription])
   const handleSaveTagsTemplate = useCallback(async (name: string) => {
     const id = await onSaveYtTagsTemplate(name, meta?.ytTags ?? [])
     onUpdateMetaRef.current({ ytTagsTemplateId: id })
@@ -4903,32 +4996,18 @@ function SidebarDetail({
     if (tpl) onUpdateMeta({ twitchTitle: tpl.template, twitchTitleTemplateId: id })
     else onUpdateMeta({ twitchTitleTemplateId: id })
   }
-  const applyDescTemplate = async (id: string) => {
+  const applyDescTemplate = (id: string) => {
     setDescTplId(id)
     if (!id) return
     const tpl = ytDescTemplates.find(t => t.id === id)
     if (!tpl) return
-    // {season_links} is resolved here (not in mergeFields) because it's
-    // async — walks all folders for matching prior episodes and may need
-    // a YT API call to backfill missing titles. Substituted into the
-    // template body BEFORE applyMergeFields runs so the rest of the
-    // tokens ({game}, {season}, etc.) layer in normally afterward.
-    let body = tpl.description
-    if (body.includes('{season_links}')) {
-      // Standalone streams have no series concept — collapse the merge
-      // field to '' so the template body doesn't carry a stub "Prior
-      // episodes:" header pointing at unrelated streams.
-      const links = isStandalone(meta)
-        ? ''
-        : await computeSeasonLinks(
-            folders,
-            meta?.ytGameTitle?.trim() || meta?.games?.[0] || folder.detectedGames?.[0] || '',
-            meta?.ytSeason || '1',
-            folder.date,
-          )
-      body = body.replace(/\{season_links\}/g, links)
-    }
-    onUpdateMeta({ ytDescription: applyMergeFields(body, mergeFields) })
+    // Store the raw template body (with tokens) as the editable source + bake
+    // it into the resolved `ytDescription` using the already-resolved
+    // {season_links}. The bake effect keeps ytDescription in sync on later
+    // edits (and re-bakes once season_links finishes resolving for a fresh
+    // stream).
+    const baked = applyMergeFields(tpl.description.replace(/\{season_links\}/g, descSeasonLinks), mergeFields)
+    onUpdateMeta({ ytDescriptionTemplate: tpl.description, ytDescription: baked })
   }
   const applyTagsTemplate = (id: string) => {
     if (!id) { onUpdateMeta({ ytTagsTemplateId: '' }); return }
@@ -5033,9 +5112,6 @@ function SidebarDetail({
   }), [folder.date, folder.detectedGames, meta?.streamType, meta?.games, meta?.ytTitle, meta?.ytDescription, meta?.ytTags, meta?.twitchTags, previousTaglines])
   const aiFetchTitle = useMemo(() => claudeEnabled
     ? (prefix: string, suffix: string) => window.api.claudeGenerate('title', { ...buildAiContext(), prefix, suffix })
-    : undefined, [claudeEnabled, buildAiContext])
-  const aiFetchDescription = useMemo(() => claudeEnabled
-    ? (prefix: string, suffix: string) => window.api.claudeGenerate('description', { ...buildAiContext(), prefix, suffix })
     : undefined, [claudeEnabled, buildAiContext])
   // Tagline fetcher — Ctrl+Space inside the Tagline EditableTextField
   // asks Claude for a catchy 3–8 word phrase grounded in the topic,
@@ -5766,6 +5842,7 @@ function SidebarDetail({
                     value={titleTplId}
                     onChange={applyTitleTemplate}
                     placeholder="Assign template"
+                    icon={<Link2 size={11} />}
                     tabbed
                     tabActive={!!titleTplId}
                   />
@@ -5917,33 +5994,101 @@ function SidebarDetail({
               mismatched={broadcastMismatches.get('description')}
               right={
                 <div className="flex items-center gap-2">
+                  {descHasChips && (
+                    <Tooltip content={descPreview ? 'Back to editing' : 'Preview rendered text'} side="top">
+                      <button
+                        type="button"
+                        onClick={() => setDescPreview(p => !p)}
+                        className={`p-1 rounded transition-colors ${descPreview ? 'bg-white/10 text-gray-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                        aria-label={descPreview ? 'Back to editing' : 'Preview rendered text'}
+                      >
+                        {descPreview ? <PencilLine size={13} /> : <Eye size={13} />}
+                      </button>
+                    </Tooltip>
+                  )}
                   {canSaveDescTemplate && <SaveAsTemplateButton onSave={handleSaveDescTemplate} />}
                   <InlineTemplateSelect
                     items={ytDescTemplates}
                     value={descTplId}
                     onChange={applyDescTemplate}
-                    placeholder="Apply template"
+                    placeholder="Start with template"
+                    labelOverride={descBody.trim() ? 'Overwrite with template' : 'Start with template'}
+                    icon={<ListRestart size={11} />}
                     tabbed
                   />
                 </div>
               }
             >
-              {/* `key` forces a remount when the user switches streams so the
-                  textarea's auto-grow state (and any manual-resize override)
-                  resets to fit the new stream's content. Without this the
-                  browser's inline `style.height` from a previous manual drag
-                  would carry across stream items. */}
-              <EditableTextField
-                key={folder.folderPath}
-                autoGrow
-                multiline
-                rows={4}
-                value={meta?.ytDescription ?? ''}
-                placeholder="Description for YouTube upload…"
-                onSave={v => onUpdateMeta({ ytDescription: v })}
-                tabAttached
-                aiFetcher={aiFetchDescription}
-              />
+              {/* Edit mode: chip editor showing each merge field's resolved
+                  value inline (so the body reads like the final description),
+                  fully editable. Preview mode: the resolved plain text,
+                  read-only. The editable source is the raw body
+                  (`ytDescriptionTemplate`); a bake effect resolves it into
+                  `meta.ytDescription` (what's pushed + compared). Legacy streams
+                  fall back to the already-resolved `ytDescription`. `key`
+                  remounts on stream switch so editor state resets. */}
+              {descPreview && descHasChips ? (
+                // Mirrors the editor's box exactly (same padding, text size,
+                // line-height, min-height, border) + the same drag-resize strip
+                // and shared `descHeight` so toggling edit⇄preview doesn't shift
+                // the layout. A div (not <pre>) inherits the app sans font.
+                <div className="w-full flex flex-col">
+                  <div
+                    ref={descPreviewRef}
+                    className="relative z-10 w-full bg-navy-900/70 border border-white/10 rounded-lg rounded-tr-none px-2 py-1 text-xs text-gray-200 leading-relaxed whitespace-pre-wrap overflow-y-auto"
+                    style={{ minHeight: 96, height: descHeight ?? undefined }}
+                  >
+                    {(meta?.ytDescription ?? '') || <span className="italic text-gray-500">Description for YouTube upload…</span>}
+                  </div>
+                  <div
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      const el = descPreviewRef.current
+                      if (!el) return
+                      const startY = e.clientY
+                      const startHeight = el.offsetHeight
+                      const onMove = (me: MouseEvent) => setDescHeight(Math.max(40, startHeight + me.clientY - startY))
+                      const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+                      window.addEventListener('mousemove', onMove)
+                      window.addEventListener('mouseup', onUp)
+                    }}
+                    onDoubleClick={() => setDescHeight(null)}
+                    className="group relative z-0 cursor-ns-resize flex items-center justify-center h-4 rounded-b-lg hover:bg-white/5 transition-colors pt-[8px] mt-[-8px]"
+                    title="Drag to resize · double-click to reset"
+                  >
+                    <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <TemplateBodyEditor
+                    key={folder.folderPath}
+                    value={descBody}
+                    placeholder="Description for YouTube upload…"
+                    onSave={v => onUpdateMeta({ ytDescriptionTemplate: v })}
+                    multiline
+                    minHeight={96}
+                    height={descHeight}
+                    onHeightChange={setDescHeight}
+                    tabAttached
+                    knownKeys={descMergeKeySet}
+                    inapplicableKeys={descInapplicableKeySet}
+                    resolvedValues={descResolvedValues}
+                    insertRef={descInsertRef}
+                  />
+                  <MergeFieldPicker keys={descPickerKeys} onInsert={k => descInsertRef.current?.(`{${k}}`)} />
+                </>
+              )}
+              {/* Char counter on the resolved length (what actually publishes). */}
+              {(() => {
+                const rendered = meta?.ytDescription ?? ''
+                const over = rendered.length > YT_DESCRIPTION_CHAR_LIMIT
+                return (
+                  <p className={`mt-1 text-[10px] text-right ${over ? 'text-red-400' : 'text-gray-500'}`}>
+                    {rendered.length} / {YT_DESCRIPTION_CHAR_LIMIT}
+                  </p>
+                )
+              })()}
             </MetaRow>
             <MetaRow
               label="YouTube tags"
@@ -5981,6 +6126,7 @@ function SidebarDetail({
                     value={tagsTplId}
                     onChange={applyTagsTemplate}
                     placeholder="Assign template"
+                    icon={<Link2 size={11} />}
                     tabbed
                     tabActive={!!tagsTplId}
                   />
@@ -5992,6 +6138,7 @@ function SidebarDetail({
                   value={meta?.ytTags ?? []}
                   placeholder="Add tag…"
                   onChange={next => onUpdateMeta(tagsTplId ? { ytTags: next, ytTagsTemplateId: '' } : { ytTags: next })}
+                  sortOnBlur
                   tabAttached
                   tabActive={!!tagsTplId}
                   aiFetcher={aiFetchTags}
@@ -6071,6 +6218,7 @@ function SidebarDetail({
                             value={twitchTitleTplId}
                             onChange={applyTwitchTitleTemplate}
                             placeholder="Assign template"
+                            icon={<Link2 size={11} />}
                             tabbed
                             tabActive={!!twitchTitleTplId}
                           />
@@ -6143,6 +6291,7 @@ function SidebarDetail({
                     value={twitchTagsTplId}
                     onChange={applyTwitchTagsTemplate}
                     placeholder="Assign template"
+                    icon={<Link2 size={11} />}
                     tabbed
                     tabActive={!!twitchTagsTplId}
                   />
@@ -7358,7 +7507,7 @@ function UseSuggestedTagsButton({
  * for the typical placement above each editable field.
  */
 function InlineTemplateSelect<T extends { id: string; name: string }>({
-  items, value, onChange, placeholder = 'Template…', tabbed, tabActive,
+  items, value, onChange, placeholder = 'Template…', tabbed, tabActive, icon, labelOverride,
 }: {
   items: T[]
   value: string
@@ -7372,6 +7521,15 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
    *  expected to lighten the input border to match). Used for the YouTube
    *  title's persistent template binding — visually signals "active". */
   tabActive?: boolean
+  /** Small icon rendered on the left of the trigger to signal the
+   *  dropdown's behavior — a bind icon for "assign" (bound) selectors, a
+   *  restart icon for "apply" (one-time) selectors. */
+  icon?: React.ReactNode
+  /** Forces the trigger label regardless of selection. Used by apply-mode
+   *  selectors (description) which never stay bound, so showing a picked
+   *  template name would be misleading — they show "Start with…" /
+   *  "Overwrite with…" instead. Also hides the Clear row. */
+  labelOverride?: string
 }) {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
@@ -7410,7 +7568,8 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
             : 'flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors focus:outline-none'
         }
       >
-        <span>{selected ? selected.name : placeholder}</span>
+        {icon && <span className="shrink-0 opacity-80">{icon}</span>}
+        <span>{labelOverride ?? (selected ? selected.name : placeholder)}</span>
         <ChevronDown size={9} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && rect && ReactDOM.createPortal(
@@ -7420,7 +7579,7 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
           className="bg-navy-700 border border-white/10 rounded-lg shadow-xl overflow-hidden max-h-72 overflow-y-auto"
           onMouseDown={e => e.preventDefault()}
         >
-          {value && (
+          {value && !labelOverride && (
             <button
               className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-white/5 transition-colors border-b border-white/5"
               onClick={() => { onChange(''); close() }}

@@ -142,6 +142,11 @@ export function registerVideoIPC(): void {
     ;(getStore() as any).set('playerRecents', updated)
     return updated
   })
+
+  ipcMain.handle('player:clearRecents', () => {
+    ;(getStore() as any).set('playerRecents', [])
+    return []
+  })
 }
 
 export interface PlayerRecentEntry {

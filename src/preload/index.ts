@@ -595,12 +595,16 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:addRecent', entry),
   thumbnailRemoveRecent: (folderPath: string, date: string) =>
     ipcRenderer.invoke('thumbnail:removeRecent', folderPath, date),
+  thumbnailClearRecents: () =>
+    ipcRenderer.invoke('thumbnail:clearRecents'),
   playerGetRecents: () =>
     ipcRenderer.invoke('player:getRecents'),
   playerAddRecent: (entry: any) =>
     ipcRenderer.invoke('player:addRecent', entry),
   playerRemoveRecent: (filePath: string) =>
     ipcRenderer.invoke('player:removeRecent', filePath),
+  playerClearRecents: () =>
+    ipcRenderer.invoke('player:clearRecents'),
   thumbnailGetLastFont: () =>
     ipcRenderer.invoke('thumbnail:getLastFont'),
   thumbnailSetLastFont: (font: string) =>

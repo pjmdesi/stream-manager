@@ -240,6 +240,11 @@ export function registerThumbnailIPC(): void {
     return updated
   })
 
+  ipcMain.handle('thumbnail:clearRecents', () => {
+    setRecents([])
+    return []
+  })
+
   // ── Last used font ────────────────────────────────────────────────────────
 
   ipcMain.handle('thumbnail:getLastFont', () => getLastFont())

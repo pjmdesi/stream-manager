@@ -62,10 +62,15 @@ export function TagChipEditor({
   tabActive,
   aiFetcher,
   footerRight,
+  sortOnBlur,
 }: {
   value: string[]
   onChange: (next: string[]) => Promise<void> | void
   placeholder?: string
+  /** Alphabetically sort the chips (case-insensitive) when the field loses
+   *  focus. Used for YouTube tags so SM's order matches YouTube, which
+   *  re-sorts tags alphabetically on its end. Off by default. */
+  sortOnBlur?: boolean
   /** Drops the top-right corner rounding so an InlineTemplateSelect tab
    *  can sit flush against it. */
   tabAttached?: boolean
@@ -99,9 +104,12 @@ export function TagChipEditor({
   const sg = useFieldSuggestion(input, setInput, aiFetcher ?? noopFetcher)
   const aiEnabled = !!aiFetcher
 
-  const commit = (raw: string) => {
+  // Merge comma/typed input into the current chip list, deduped
+  // case-insensitively. Returns the same `value` reference when nothing new
+  // was added so callers can skip a no-op onChange.
+  const mergeInput = (raw: string): string[] => {
     const fresh = raw.split(',').map(t => t.trim()).filter(Boolean)
-    if (fresh.length === 0) { setInput(''); return }
+    if (fresh.length === 0) return value
     const seen = new Set(value.map(t => t.toLowerCase()))
     const additions = fresh.filter(t => {
       const k = t.toLowerCase()
@@ -109,7 +117,12 @@ export function TagChipEditor({
       seen.add(k)
       return true
     })
-    if (additions.length > 0) onChange([...value, ...additions])
+    return additions.length > 0 ? [...value, ...additions] : value
+  }
+
+  const commit = (raw: string) => {
+    const next = mergeInput(raw)
+    if (next !== value) onChange(next)
     setInput('')
   }
 
@@ -146,7 +159,13 @@ export function TagChipEditor({
 
   const handleBlur = () => {
     sg.props.onBlur()
-    if (input.trim()) commit(input)
+    let next = mergeInput(input)
+    if (input) setInput('')
+    if (sortOnBlur) {
+      const sorted = [...next].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+      if (sorted.some((t, i) => t !== next[i])) next = sorted
+    }
+    if (next !== value) onChange(next)
   }
 
   const chipCls = 'inline-flex items-center gap-1 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/25 rounded px-1.5 py-0.5 max-w-full'

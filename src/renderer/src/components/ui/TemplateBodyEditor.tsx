@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
+import { GripHorizontal } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
 // ─── Chip styling (shared between in-editor chips + picker buttons) ─────────
@@ -17,6 +18,12 @@ export const MERGE_FIELD_CHIP_CLASS = 'inline-flex items-center box-border leadi
  *  back as its original `{key}` so flipping the set returns it to the
  *  normal style without losing the token. */
 export const MERGE_FIELD_CHIP_CLASS_INAPPLICABLE = 'inline-flex items-center box-border leading-none text-[10px] text-red-300 bg-red-950 border border-red-800 rounded px-1.5 py-0.5'
+/** Value-rendering chip — stacks a tiny merge-field name label over the
+ *  field's resolved value (which may span multiple lines). Used when the
+ *  editor is given a `resolvedValues` map so the user sees what each token
+ *  actually renders to, inline. `align-bottom` keeps it sitting on the text
+ *  baseline; the column grows to whatever the value needs. */
+export const MERGE_FIELD_VALUE_CHIP_CLASS = 'inline-flex flex-col align-bottom box-border mx-px my-0.5 rounded border border-purple-800 bg-purple-950/60 px-1.5 py-0.5 select-none'
 
 // ─── Source <-> DOM helpers ─────────────────────────────────────────────────
 
@@ -63,6 +70,7 @@ function render(
   text: string,
   knownKeys: ReadonlySet<string>,
   inapplicableKeys?: ReadonlySet<string>,
+  resolvedValues?: ReadonlyMap<string, string>,
 ): void {
   while (el.firstChild) el.removeChild(el.firstChild)
   const re = /\{(\w+)\}/g
@@ -79,10 +87,32 @@ function render(
       chip.contentEditable = 'false'
       chip.dataset.token = tok
       const inapplicable = inapplicableKeys?.has(key) ?? false
-      const baseCls = inapplicable ? MERGE_FIELD_CHIP_CLASS_INAPPLICABLE : MERGE_FIELD_CHIP_CLASS
-      chip.className = baseCls + ' mx-px align-baseline select-none'
       if (inapplicable) chip.dataset.inapplicable = key
-      chip.textContent = key
+      // When a resolved-values map is supplied and the (applicable) token has
+      // an entry, render the live value inside the chip (name label on top,
+      // value — possibly multi-line — below). Otherwise fall back to the
+      // compact name-only chip.
+      if (!inapplicable && resolvedValues?.has(key)) {
+        chip.className = MERGE_FIELD_VALUE_CHIP_CLASS
+        const nameEl = document.createElement('span')
+        nameEl.className = 'block text-[8px] uppercase tracking-wider text-purple-400 leading-none mb-0.5'
+        nameEl.textContent = key
+        const valEl = document.createElement('span')
+        const value = resolvedValues.get(key) ?? ''
+        if (value) {
+          valEl.className = 'block text-xs text-purple-100 leading-snug whitespace-pre-wrap'
+          valEl.textContent = value
+        } else {
+          valEl.className = 'block text-xs italic text-purple-300/60 leading-snug'
+          valEl.textContent = '(empty)'
+        }
+        chip.appendChild(nameEl)
+        chip.appendChild(valEl)
+      } else {
+        const baseCls = inapplicable ? MERGE_FIELD_CHIP_CLASS_INAPPLICABLE : MERGE_FIELD_CHIP_CLASS
+        chip.className = baseCls + ' mx-px align-baseline select-none'
+        chip.textContent = key
+      }
       el.appendChild(chip)
     } else {
       el.appendChild(document.createTextNode(tok))
@@ -217,13 +247,23 @@ function setCursorOffset(root: HTMLElement, target: number): void {
  * cursor via offset helpers.
  */
 export function TemplateBodyEditor({
-  value, onSave, placeholder, knownKeys, inapplicableKeys, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus,
+  value, onSave, placeholder, knownKeys, inapplicableKeys, resolvedValues, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus, height, onHeightChange,
 }: {
   value: string
   onSave: (v: string) => Promise<void> | void
   placeholder?: string
   knownKeys: ReadonlySet<string>
   inapplicableKeys?: ReadonlySet<string>
+  /** When provided, known tokens render as chips showing their resolved value
+   *  (name label + value) instead of just the token name. Pass a stable
+   *  (memoized) map so the editor only rebuilds chips when values change. */
+  resolvedValues?: ReadonlyMap<string, string>
+  /** Controlled manual-resize height (px) for the multiline drag handle.
+   *  `null`/undefined = auto-grow to content. Pair with `onHeightChange` to
+   *  persist the dragged height (e.g. to keep it across an edit⇄preview
+   *  toggle). */
+  height?: number | null
+  onHeightChange?: (h: number | null) => void
   tabAttached?: boolean
   tabActive?: boolean
   /** When true, the editor accepts newlines (Enter inserts '\n', paste
@@ -243,6 +283,7 @@ export function TemplateBodyEditor({
   const [saving, setSaving] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
   const lastInapplicableRef = useRef<ReadonlySet<string> | undefined>(undefined)
+  const lastResolvedRef = useRef<ReadonlyMap<string, string> | undefined>(undefined)
 
   // Focus-aware refresh — only sync from props when the user isn't
   // mid-edit. Same pattern as EditableTextField.
@@ -257,13 +298,15 @@ export function TemplateBodyEditor({
     const el = editorRef.current
     if (!el) return
     const inapplicableChanged = lastInapplicableRef.current !== inapplicableKeys
-    if (!inapplicableChanged && serialize(el) === local) return
+    const resolvedChanged = lastResolvedRef.current !== resolvedValues
+    if (!inapplicableChanged && !resolvedChanged && serialize(el) === local) return
     const owns = document.activeElement === el
     const offset = owns ? getCursorOffset(el) : -1
-    render(el, local, knownKeys, inapplicableKeys)
+    render(el, local, knownKeys, inapplicableKeys, resolvedValues)
     lastInapplicableRef.current = inapplicableKeys
+    lastResolvedRef.current = resolvedValues
     if (offset >= 0) setCursorOffset(el, offset)
-  }, [local, knownKeys, inapplicableKeys])
+  }, [local, knownKeys, inapplicableKeys, resolvedValues])
 
   useEffect(() => {
     if (!autoFocus) return
@@ -308,6 +351,38 @@ export function TemplateBodyEditor({
     }
     finally { setSaving(false) }
   }
+
+  // Drag-to-resize via the handle strip below the editor (multiline only).
+  // Sets an explicit height on the editor (which switches off auto-grow until
+  // double-clicked), and reports it up via onHeightChange so callers can keep
+  // the height across remounts / a sibling preview. Mirrors EditableTextField.
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    if (!multiline) return
+    e.preventDefault()
+    const el = editorRef.current
+    if (!el) return
+    const startY = e.clientY
+    const startHeight = el.offsetHeight
+    const onMove = (me: MouseEvent) => {
+      const next = Math.max(40, startHeight + me.clientY - startY)
+      el.style.height = `${next}px`
+      onHeightChange?.(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [multiline, onHeightChange])
+
+  // Double-click the handle → back to content-fitting auto-grow.
+  const handleResizeReset = useCallback(() => {
+    if (!multiline) return
+    const el = editorRef.current
+    if (el) el.style.height = ''
+    onHeightChange?.(null)
+  }, [multiline, onHeightChange])
 
   // Enter:
   //   single-line → preventDefault + blur (commits the save flow);
@@ -361,26 +436,48 @@ export function TemplateBodyEditor({
 
   const borderCls = tabActive ? 'border-white/[0.18]' : 'border-white/10'
   const cornerCls = tabAttached ? 'rounded-lg rounded-tr-none' : 'rounded-lg'
-  const wrapCls = multiline ? 'whitespace-pre-wrap leading-relaxed' : 'whitespace-nowrap overflow-x-auto leading-snug'
+  // overflow-y-auto lets content scroll once the user drags a height shorter
+  // than the content; with no explicit height it just grows. The drag handle
+  // below provides the resize (custom strip, larger hit target than the native
+  // corner) — same pattern as the sidebar's EditableTextField.
+  const wrapCls = multiline ? 'whitespace-pre-wrap leading-relaxed overflow-y-auto resize-none' : 'whitespace-nowrap overflow-x-auto leading-snug'
   const cls = `template-body-editor w-full bg-navy-900/70 border ${borderCls} ${cornerCls} px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''} ${wrapCls}`
+
+  const editor = (
+    <div
+      ref={editorRef}
+      role="textbox"
+      contentEditable={!saving}
+      suppressContentEditableWarning
+      onInput={handleInput}
+      onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
+      onBlur={handleBlur}
+      onMouseOver={handleEditorMouseOver}
+      onMouseOut={handleEditorMouseOut}
+      data-placeholder={placeholder}
+      className={`${cls}${multiline ? ' relative z-10' : ''}`}
+      style={multiline ? { minHeight: minHeight ?? 96, height: height ?? undefined } : undefined}
+    />
+  )
 
   return (
     <>
-      <div
-        ref={editorRef}
-        role="textbox"
-        contentEditable={!saving}
-        suppressContentEditableWarning
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        onBlur={handleBlur}
-        onMouseOver={handleEditorMouseOver}
-        onMouseOut={handleEditorMouseOut}
-        data-placeholder={placeholder}
-        className={cls}
-        style={multiline ? { minHeight: minHeight ?? 96 } : undefined}
-      />
+      {multiline ? (
+        // Wrap with the custom drag-to-resize strip below (full-width hit
+        // target tucked behind the editor's rounded bottom corners).
+        <div className="w-full flex flex-col">
+          {editor}
+          <div
+            onMouseDown={handleResizeStart}
+            onDoubleClick={handleResizeReset}
+            className="group relative z-0 cursor-ns-resize flex items-center justify-center h-4 rounded-b-lg hover:bg-white/5 transition-colors pt-[8px] mt-[-8px]"
+            title="Drag to resize · double-click to reset"
+          >
+            <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+          </div>
+        </div>
+      ) : editor}
       {hoveredInapplicable && (
         <Tooltip
           open

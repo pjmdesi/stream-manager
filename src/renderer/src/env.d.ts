@@ -255,9 +255,11 @@ declare global {
       thumbnailGetRecents(): Promise<ThumbnailRecentEntry[]>
       thumbnailAddRecent(entry: ThumbnailRecentEntry): Promise<ThumbnailRecentEntry[]>
       thumbnailRemoveRecent(folderPath: string, date: string): Promise<ThumbnailRecentEntry[]>
+      thumbnailClearRecents(): Promise<ThumbnailRecentEntry[]>
       playerGetRecents(): Promise<PlayerRecentEntry[]>
       playerAddRecent(entry: PlayerRecentEntry): Promise<PlayerRecentEntry[]>
       playerRemoveRecent(filePath: string): Promise<PlayerRecentEntry[]>
+      playerClearRecents(): Promise<PlayerRecentEntry[]>
       thumbnailGetLastFont(): Promise<string>
       thumbnailSetLastFont(font: string): Promise<void>
 

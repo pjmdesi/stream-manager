@@ -6,7 +6,8 @@ import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
-import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, TimelineViewport, PlayerRecentEntry } from '../../types'
+import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry } from '../../types'
+import { ThumbImage } from '../streams/ThumbImage'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
 import { useWaveform } from '../../hooks/useWaveform'
@@ -68,6 +69,19 @@ function resolveStreamContext(filePath: string, streamsRoot: string | undefined)
     isDump: true,
     date: m ? m[1] : null,
   }
+}
+
+/** The stream folder's displayed thumbnail (preferred, else first) plus its
+ *  local/cloud flag — mirrors the streams page's resolveStreamThumb. */
+function resolveFolderThumb(folder: StreamFolder): { path: string; isLocal: boolean } | null {
+  if (!folder.thumbnails.length) return null
+  let idx = 0
+  const pref = folder.meta?.preferredThumbnail
+  if (pref) {
+    const i = folder.thumbnails.findIndex(p => (p.split(/[\\/]/).pop() ?? '') === pref)
+    if (i >= 0) idx = i
+  }
+  return { path: folder.thumbnails[idx], isLocal: folder.thumbnailLocalFlags?.[idx] ?? true }
 }
 
 function formatTime(seconds: number, fps?: number): string {
@@ -1385,17 +1399,26 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const removeRecent = useCallback((filePath: string) => {
     window.api.playerRemoveRecent(filePath).then(setRecents).catch(() => {})
   }, [])
-  // Resolve each recent's stream title against the live folder list so the
-  // list reflects current metadata and renders {merge fields} — older entries
-  // stored the raw template body. Falls back to the stored snapshot when the
-  // file no longer maps to a known stream folder.
+  const clearRecents = useCallback(() => {
+    window.api.playerClearRecents().then(setRecents).catch(() => setRecents([]))
+  }, [])
+  // Cache-buster for recent thumbnails — bumps whenever the folder list
+  // reloads so an edited thumbnail re-fetches.
+  const recentsThumbsKey = useMemo(() => Date.now(), [sortedStreamFolders])
+  // Resolve each recent against the live folder list so the list reflects
+  // current metadata (title re-rendered with {merge fields}, thumbnail, and
+  // video count). Entries that no longer map to a known stream folder (e.g. a
+  // single video opened from outside the streams root) keep their stored
+  // snapshot and fall back to the file name + path.
   const displayRecents = useMemo(() => {
     return recents.map(r => {
       const { metaKey } = resolveStreamContext(r.filePath, config.streamsDir)
       const folder = sortedStreamFolders.find(f => f.relativePath === metaKey)
-      return folder
-        ? { ...r, streamTitle: renderStreamTitle(folder, sortedStreamFolders) || r.streamTitle }
-        : r
+      return {
+        ...r,
+        streamTitle: folder ? (renderStreamTitle(folder, sortedStreamFolders) || r.streamTitle) : r.streamTitle,
+        folder,
+      }
     })
   }, [recents, sortedStreamFolders, config.streamsDir])
 
@@ -3280,10 +3303,14 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {!videoUrl ? (
-        /* Empty state — mirrors the Thumbnails page overview: a primary
-           action area (the dropzone, in the slot the templates grid
-           occupies there) followed by a Recent list. */
-        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-8 min-h-0">
+        /* Empty state — mirrors the Thumbnails page overview: a page-title
+           header, then a primary action area (the dropzone, in the slot the
+           templates grid occupies there) followed by a Recent list. */
+        <>
+          <div className="px-6 py-4 border-b border-white/5 shrink-0">
+            <h1 className="text-lg font-semibold">Player</h1>
+          </div>
+          <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-8 min-h-0">
           <section>
             <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">Open a video</h2>
             <FileDropZone
@@ -3297,9 +3324,19 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
           {displayRecents.length > 0 && (
             <section>
-              <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">Recent</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent</h2>
+                <button
+                  onClick={clearRecents}
+                  className="text-[10px] text-gray-400 hover:text-gray-200 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors"
+                >
+                  Clear all
+                </button>
+              </div>
               <div className="flex flex-col gap-1.5">
-                {displayRecents.map(r => (
+                {displayRecents.map(r => {
+                  const thumb = r.folder ? resolveFolderThumb(r.folder) : null
+                  return (
                   <div
                     key={r.filePath}
                     className="group flex items-center gap-3 pr-1 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 transition-colors overflow-hidden"
@@ -3308,12 +3345,21 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       onClick={() => loadFile(r.filePath)}
                       className="flex items-center gap-3 flex-1 min-w-0 text-left"
                     >
-                      <span className="w-16 h-10 flex items-center justify-center bg-navy-900 border-r border-white/5 shrink-0">
-                        <Film size={16} className="text-gray-500" />
+                      <span className="relative w-16 h-10 flex items-center justify-center bg-navy-900 border-r border-white/5 shrink-0 overflow-hidden">
+                        {thumb
+                          ? <ThumbImage path={thumb.path} thumbsKey={recentsThumbsKey} isLocal={thumb.isLocal} className="w-full h-full object-cover" iconSize={14} />
+                          : <Film size={16} className="text-gray-500" />}
                       </span>
                       <div className="flex-1 min-w-0 py-2">
                         <p className="text-xs text-gray-300 truncate">{r.streamTitle ?? r.fileName}</p>
-                        <p className="text-[10px] text-gray-400 truncate">{r.filePath}</p>
+                        {/* Session items show a video count; a single video
+                            opened from outside the streams root shows its path
+                            so it's distinguishable from the stream sessions. */}
+                        <p className="text-[10px] text-gray-400 truncate">
+                          {r.folder
+                            ? `${r.folder.videoCount} video${r.folder.videoCount === 1 ? '' : 's'}`
+                            : r.filePath}
+                        </p>
                       </div>
                     </button>
                     {r.streamDate && <span className="text-[10px] text-gray-400 shrink-0 py-2">{r.streamDate}</span>}
@@ -3327,11 +3373,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       </button>
                     </Tooltip>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </section>
           )}
-        </div>
+          </div>
+        </>
       ) : (
         <div className="flex flex-1 overflow-hidden">
           {/* Video + controls column */}

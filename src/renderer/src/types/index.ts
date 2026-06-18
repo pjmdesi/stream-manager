@@ -308,7 +308,14 @@ export interface StreamMeta {
   // YouTube
   ytVideoId?: string
   ytTitle?: string
+  /** The baked/resolved description — what's pushed to YouTube and what the
+   *  out-of-sync check compares. Kept in sync from `ytDescriptionTemplate`. */
   ytDescription?: string
+  /** Raw description body with merge-field tokens ({game}, {season_links}, …),
+   *  edited via the sidebar's chip/plain-text editor. Resolved into
+   *  `ytDescription` whenever it (or a merge input) changes. Absent on legacy
+   *  streams, where `ytDescription` already holds plain resolved text. */
+  ytDescriptionTemplate?: string
   ytGameTitle?: string
   ytCatchyTitle?: string
   ytSeason?: string

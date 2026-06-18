@@ -948,11 +948,13 @@ interface OverviewProps {
   onNewBlank: () => void
   onOpenTemplate: (t: ThumbnailTemplate) => void
   onOpenRecent: (entry: ThumbnailRecentEntry) => void
+  onRemoveRecent: (entry: ThumbnailRecentEntry) => void
+  onClearRecents: () => void
   onDeleteTemplate: (id: string) => void
   loading: boolean
 }
 
-function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, onOpenRecent, onDeleteTemplate, loading }: OverviewProps) {
+function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, onOpenRecent, onRemoveRecent, onClearRecents, onDeleteTemplate, loading }: OverviewProps) {
   return (
     <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-8 min-h-0">
       {/* Templates */}
@@ -1004,21 +1006,41 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
       {/* Recents */}
       {recents.length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">Recent</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent</h2>
+            <button
+              onClick={onClearRecents}
+              className="text-[10px] text-gray-400 hover:text-gray-200 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
           <div className="flex flex-col gap-1.5">
             {recents.map((entry, i) => (
-              <button
+              <div
                 key={i}
-                onClick={() => onOpenRecent(entry)}
-                className="flex items-center gap-3 pr-3 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 text-left transition-colors overflow-hidden"
+                className="group flex items-center gap-3 pr-1 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 transition-colors overflow-hidden"
               >
-                <RecentThumb folderPath={entry.folderPath} date={entry.date} updatedAt={entry.updatedAt} />
-                <div className="flex-1 min-w-0 py-2">
-                  <p className="text-xs text-gray-300 truncate">{entry.title ?? entry.date}</p>
-                  <p className="text-[10px] text-gray-400 truncate">{entry.folderPath}</p>
-                </div>
+                <button
+                  onClick={() => onOpenRecent(entry)}
+                  className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                >
+                  <RecentThumb folderPath={entry.folderPath} date={entry.date} updatedAt={entry.updatedAt} />
+                  <div className="flex-1 min-w-0 py-2">
+                    <p className="text-xs text-gray-300 truncate">{entry.title ?? entry.date}</p>
+                    <p className="text-[10px] text-gray-400 truncate">{entry.folderPath}</p>
+                  </div>
+                </button>
                 <span className="text-[10px] text-gray-400 shrink-0 py-2">{entry.date}</span>
-              </button>
+                <button
+                  onClick={() => onRemoveRecent(entry)}
+                  className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                  aria-label="Remove from recents"
+                  title="Remove from recents"
+                >
+                  <X size={13} />
+                </button>
+              </div>
             ))}
           </div>
         </section>
@@ -3174,6 +3196,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     openStreamEditor(entry.folderPath, entry.date, entry.title)
   }, [openStreamEditor])
 
+  const removeRecent = useCallback((entry: ThumbnailRecentEntry) => {
+    window.api.thumbnailRemoveRecent(entry.folderPath, entry.date).then(setRecents).catch(() => {
+      setRecents(prev => prev.filter(r => !(r.folderPath === entry.folderPath && r.date === entry.date)))
+    })
+  }, [])
+  const clearRecents = useCallback(() => {
+    window.api.thumbnailClearRecents().then(setRecents).catch(() => setRecents([]))
+  }, [])
+
   // ── Confirm template picker choice ────────────────────────────────────────
   const confirmPickTemplate = useCallback(async (t: ThumbnailTemplate | null) => {
     if (!templatePickerStream) return
@@ -3577,6 +3608,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             onNewBlank={openNewBlank}
             onOpenTemplate={openFromTemplate}
             onOpenRecent={openFromRecent}
+            onRemoveRecent={removeRecent}
+            onClearRecents={clearRecents}
             onDeleteTemplate={deleteTemplate}
             loading={overviewLoading}
           />
