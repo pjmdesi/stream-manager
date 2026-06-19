@@ -903,6 +903,26 @@ function useUndoRedo(initial: ThumbnailLayer[], onApply?: (next: ThumbnailLayer[
   return { layers: present, commit, set, undo, redo, reset, canUndo: past.length > 0, canRedo: future.length > 0 }
 }
 
+/** Collapses a continuous edit (color-picker drag, held arrow-key nudge, a
+ *  burst of typing) into a single undo entry. Returns `beginsGesture(key)`:
+ *  the first change for a given `key` returns `true` (caller commits to
+ *  history); subsequent changes for the same key return `false` (caller
+ *  applies a no-history live update). A gesture ends when the key changes or
+ *  after `idleMs` of inactivity, so distinct edits stay separate undo entries
+ *  while a single drag/scrub/type does not flood the history. */
+function useCommitOnRelease(idleMs = 400) {
+  const keyRef = useRef<string | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+  return useCallback((key: string) => {
+    const begins = keyRef.current !== key
+    keyRef.current = key
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => { keyRef.current = null }, idleMs)
+    return begins
+  }, [idleMs])
+}
+
 // ── Overview ──────────────────────────────────────────────────────────────────
 
 function RecentThumb({ folderPath, date, updatedAt }: { folderPath: string; date: string; updatedAt: number }) {
@@ -1053,7 +1073,12 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
 
 interface PropsPanelProps {
   layer: ThumbnailLayer | null
+  /** Commits the change to undo history (one entry). */
   onChange: (updated: ThumbnailLayer) => void
+  /** Applies the change live WITHOUT pushing an undo entry — used for the
+   *  continuation of a gesture so a color drag / scrub / typing burst lands
+   *  as a single undo entry (see `useCommitOnRelease`). */
+  onLiveChange: (updated: ThumbnailLayer) => void
   systemFonts: string[]
   fontVariantMap: Record<string, { name: string; css: string }[]>
   /** True when the active stream is explicitly standalone (not a series).
@@ -1102,7 +1127,7 @@ function FilterToggle({ label, checked, onChange }: {
   )
 }
 
-function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap, standalone }: PropsPanelProps) {
+function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, standalone }: PropsPanelProps) {
   // Chip-editor wiring for the text-layer body. Hooks must run
   // unconditionally (the editor only renders for text layers), so they
   // live above the early return. Stable sets keep TemplateBodyEditor from
@@ -1120,6 +1145,10 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap, standal
     [standalone],
   )
 
+  // Gesture tracker so a continuous edit (color-picker drag, held nudge,
+  // typing burst) on one property collapses to a single undo entry.
+  const beginsGesture = useCommitOnRelease()
+
   if (!layer) {
     return (
       <div className="p-4 text-xs text-gray-400 text-center">
@@ -1128,7 +1157,16 @@ function PropertiesPanel({ layer, onChange, systemFonts, fontVariantMap, standal
     )
   }
 
-  const update = (patch: Partial<ThumbnailLayer>) => onChange({ ...layer, ...patch })
+  // Every property edit funnels through here. The first change of a gesture
+  // commits to undo history; continuations of the same gesture apply live
+  // (no history). Keyed by layer + which property changed so switching
+  // field/layer starts a fresh undo entry.
+  const update = (patch: Partial<ThumbnailLayer>) => {
+    const next = { ...layer, ...patch }
+    const key = `${layer.id}:${Object.keys(patch).sort().join(',')}`
+    if (beginsGesture(key)) onChange(next)
+    else onLiveChange(next)
+  }
 
   // Aspect-ratio lock is per-layer + persisted on the layer itself.
   // Undefined defaults to `true` — newly added images/shapes start
@@ -2732,6 +2770,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const next = layers.map(l => l.id === updated.id ? updated : l)
     commitLayers(next)
   }, [layers, commitLayers])
+
+  // Live (no-history) sibling of updateLayer — applies the change + autosaves
+  // but does NOT push an undo entry. Used for gesture continuations (a
+  // color-picker drag after the first committed change) so one gesture = one
+  // undo entry. See useCommitOnRelease / PropertiesPanel.update.
+  const liveUpdateLayer = useCallback((updated: ThumbnailLayer) => {
+    const next = layers.map(l => l.id === updated.id ? updated : l)
+    setLayersDirect(next)
+    triggerAutoSave(next)
+  }, [layers, setLayersDirect, triggerAutoSave])
 
   /** Commits the drag's final position(s). One commit = one undo entry,
    *  whether single-drag or multi-drag. Layer-type-specific conversion
@@ -4344,7 +4392,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Sliders size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
                 </div>
-                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} standalone={currentStream?.meta?.isSeries === false} />
+                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} standalone={currentStream?.meta?.isSeries === false} />
               </div>
 
               {/* Divider */}
