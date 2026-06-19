@@ -70,10 +70,11 @@ interface PendingFiles {
 }
 
 interface PendingConverterFile {
-  path: string
+  paths: string[]
   token: number
-  /** Set when the file was sent from a stream — drives the "from stream" link
-   *  in the converter and the click-to-open-its-sidebar navigation back. */
+  /** Set when the files were sent from a stream — drives the "from stream" link
+   *  in the converter and the click-to-open-its-sidebar navigation back. All
+   *  paths in one send share the same origin (they come from one folder). */
   stream?: { folderPath: string; label: string }
 }
 
@@ -523,8 +524,8 @@ function AppInner() {
     setPendingPlayer(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1 }))
     setPage('player')
   }
-  const sendToConverter = (filePath: string, stream?: { folderPath: string; label: string }) => {
-    setPendingConverter(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1, stream }))
+  const sendToConverter = (filePaths: string[], stream?: { folderPath: string; label: string }) => {
+    setPendingConverter(prev => ({ paths: filePaths, token: (prev?.token ?? 0) + 1, stream }))
     setPage('converter')
   }
   const navigateToStream = (folderPath: string) => {
@@ -800,7 +801,7 @@ function AppInner() {
             <PlayerPage initialFile={pendingPlayer} onNavigateToConverter={() => setPage('converter')} />
           </div>
           <div className={`h-full ${page === 'converter' ? '' : 'hidden'}`}>
-            <ConverterPage initialFile={pendingConverter} onNavigateToStream={navigateToStream} />
+            <ConverterPage pending={pendingConverter} onNavigateToStream={navigateToStream} />
           </div>
           <div className={`h-full ${page === 'thumbnails' ? '' : 'hidden'}`}>
             <ThumbnailPage isVisible={page === 'thumbnails'} />

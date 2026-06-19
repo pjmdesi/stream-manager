@@ -198,9 +198,9 @@ function getOutputPath(inputFile: string, preset: ConversionPreset, outputDir: s
   return `${dir}/${base}_${suffix}.${preset.outputExtension}`
 }
 
-interface PendingFile { path: string; token: number; stream?: { folderPath: string; label: string } }
+interface PendingConverter { paths: string[]; token: number; stream?: { folderPath: string; label: string } }
 
-export function ConverterPage({ initialFile, onNavigateToStream }: { initialFile?: PendingFile | null; onNavigateToStream?: (folderPath: string) => void }) {
+export function ConverterPage({ pending, onNavigateToStream }: { pending?: PendingConverter | null; onNavigateToStream?: (folderPath: string) => void }) {
   const { config, updateConfig } = useStore()
   const [builtinPresets, setBuiltinPresets] = useState<ConversionPreset[]>([])
   const [importedPresets, setImportedPresets] = useState<ConversionPreset[]>([])
@@ -232,11 +232,21 @@ export function ConverterPage({ initialFile, onNavigateToStream }: { initialFile
   const presetForId = (id: string) => allPresets.find(p => p.id === id) ?? defaultPreset
 
   useEffect(() => {
-    if (initialFile) {
-      if (initialFile.stream) setStreamOrigins(prev => ({ ...prev, [initialFile.path]: initialFile.stream! }))
-      setQueuedFiles(prev => prev.some(f => f.path === initialFile.path) ? prev : [...prev, { path: initialFile.path, presetId: defaultPreset?.id ?? '', outputDir: '', pickedDir: '', stream: initialFile.stream }])
-    }
-  }, [initialFile?.token]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!pending) return
+    const { paths, stream } = pending
+    if (stream) setStreamOrigins(prev => {
+      const next = { ...prev }
+      for (const p of paths) next[p] = stream
+      return next
+    })
+    setQueuedFiles(prev => {
+      const existing = new Set(prev.map(f => f.path))
+      const additions = paths
+        .filter(p => !existing.has(p))
+        .map(path => ({ path, presetId: defaultPreset?.id ?? '', outputDir: '', pickedDir: '', stream }))
+      return additions.length ? [...prev, ...additions] : prev
+    })
+  }, [pending?.token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     Promise.all([
@@ -607,7 +617,7 @@ export function ConverterPage({ initialFile, onNavigateToStream }: { initialFile
       </div>
 
         <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto p-4 flex flex-col gap-4">
-          <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
+          <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden shrink-0">
               <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 gap-2">
                 <span className="text-xs font-medium text-gray-400">{queuedFiles.length} file(s) ready</span>
                 <Button
@@ -736,7 +746,7 @@ export function ConverterPage({ initialFile, onNavigateToStream }: { initialFile
           </div>
 
           {jobs.length > 0 && (
-            <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
+            <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden shrink-0">
               <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/5">
                 <span className="text-xs font-medium text-gray-400">Converting ({jobs.length})</span>
                 <div className="flex items-center gap-1">
@@ -837,7 +847,7 @@ export function ConverterPage({ initialFile, onNavigateToStream }: { initialFile
                 onFiles={addFiles}
                 accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
                 label="Drop video files here to convert"
-                className="min-h-[100px]"
+                className="min-h-[100px] shrink-0"
               />
               <p className="text-xs text-gray-400 px-1">You can also send videos here from the Streams page using the action buttons on each row.</p>
             </>

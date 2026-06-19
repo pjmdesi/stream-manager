@@ -33,6 +33,7 @@ import { Globe, Lock, Link as LinkIcon, Link2 } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
+import { SendToConverterModal } from '../streams/SendToConverterModal'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { renderStreamTitle } from '../../lib/streamTitle'
@@ -354,7 +355,7 @@ export function StreamsPage({
 }: {
   isVisible: boolean
   onSendToPlayer: (file: string) => void
-  onSendToConverter: (file: string, stream?: { folderPath: string; label: string }) => void
+  onSendToConverter: (files: string[], stream?: { folderPath: string; label: string }) => void
   onSendToCombine: (files: string[]) => void
   /** When the token bumps, select/open this folder's detail sidebar — used to
    *  navigate back from the converter's "from stream" link. */
@@ -369,6 +370,9 @@ export function StreamsPage({
   // underlying array reshuffles. folderPath is unique per folder in both
   // folder-per-stream and dump-folder modes.
   const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null)
+  // When set, the "pick which videos to send to the converter" modal is open
+  // for this folder (shown only for folders with more than one video).
+  const [sendConverterFolder, setSendConverterFolder] = useState<StreamFolder | null>(null)
   // External navigation: when App bumps pendingSelect's token (e.g. the
   // converter's "from stream" link), open that folder's detail sidebar.
   const lastSelectTokenRef = useRef(0)
@@ -1016,8 +1020,11 @@ export function StreamsPage({
   }, [onSendToPlayer])
 
   const handleSendToConverter = useCallback((folder: StreamFolder) => {
+    // More than one video → let the user pick which file(s) to send. A single
+    // video goes straight to the converter as before.
+    if (folder.videos.length > 1) { setSendConverterFolder(folder); return }
     const file = pickPrimaryVideo(folder)
-    if (file) onSendToConverter(file, { folderPath: folder.folderPath, label: renderStreamTitle(folder, folders) || folder.folderName })
+    if (file) onSendToConverter([file], { folderPath: folder.folderPath, label: renderStreamTitle(folder, folders) || folder.folderName })
   }, [onSendToConverter, folders])
 
   const handleSendToCombine = useCallback((folder: StreamFolder) => {
@@ -1038,7 +1045,7 @@ export function StreamsPage({
       if (!pending || pending.filePath !== filePath) return
       setCloudDownload(null)
       if (pending.action === 'player') onSendToPlayer(filePath)
-      else if (pending.action === 'converter') onSendToConverter(filePath)
+      else if (pending.action === 'converter') onSendToConverter([filePath])
       else onSendToCombine([filePath])
     })
     return unsub
@@ -2928,6 +2935,21 @@ export function StreamsPage({
           />
         )
       })()}
+
+      {sendConverterFolder && (
+        <SendToConverterModal
+          isOpen={!!sendConverterFolder}
+          folder={sendConverterFolder}
+          onClose={() => setSendConverterFolder(null)}
+          onSend={paths => {
+            onSendToConverter(paths, {
+              folderPath: sendConverterFolder.folderPath,
+              label: renderStreamTitle(sendConverterFolder, folders) || sendConverterFolder.folderName,
+            })
+            setSendConverterFolder(null)
+          }}
+        />
+      )}
 
       {archiveTargetPaths.length > 0 && (
         <PresetPickerModal
@@ -5518,7 +5540,7 @@ function SidebarDetail({
           part of the metadata content and the header is for identity +
           navigation chrome. */}
       <div className="ps-4 pe-2 pt-3 pb-4 border-b border-white/5 shrink-0 flex flex-col gap-2">
-        <div className="flex items-center gap-2">
+        <div className="relative flex items-center gap-2">
           <Tooltip content="Reschedule stream" side="bottom">
             <button
               type="button"
@@ -5672,6 +5694,17 @@ function SidebarDetail({
             })(),
             document.body,
           )}
+          {/* Archived flag — marks the stream archived (excludes it from the
+              "pending" set). Absolutely centered in the header row, clear of the
+              date/nav on the left and the close button on the right. */}
+          <Checkbox
+            checked={meta?.archived ?? false}
+            onChange={(v) => onUpdateMeta({ archived: v })}
+            label="Archived"
+            color="green"
+            size="sm"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+          />
           <Tooltip content="Close" side="bottom" triggerClassName="ml-auto">
             <Button
               variant="danger"
