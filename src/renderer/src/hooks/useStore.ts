@@ -20,6 +20,7 @@ const defaultConfig: AppConfig = {
   defaultBroadcastTime: '19:00',
   checkEpisodeIteration: true,
   audioCacheLimit: 1_073_741_824,
+  maxConcurrentConversions: 2,
   youtubeClientId: '',
   youtubeClientSecret: '',
   twitchClientId: '',

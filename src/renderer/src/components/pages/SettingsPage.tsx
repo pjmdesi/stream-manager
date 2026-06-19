@@ -127,7 +127,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: 'cache', label: 'Cache', icon: <HardDrive size={14} />, keys: ['audioCacheLimit'] },
   { id: 'streams', label: 'Streams', icon: <Radio size={14} />, keys: ['useBuiltinThumbnailByDefault', 'defaultBuiltinThumbnailTemplate', 'defaultThumbnailTemplate', 'archivePresetId', 'checkEpisodeIteration', 'defaultBroadcastTime', 'defaultYouTubeCategoryId', 'twitchSkipCategoryRenamePrompt'] },
   { id: 'player', label: 'Video Player', icon: <Film size={14} />, keys: ['clipPresetId', 'defaultBleepVolume', 'skipClipMergeWarning'] },
-  { id: 'converter', label: 'Converter', icon: <Zap size={14} />, keys: ['autoDeletePartialOnCancel'] },
+  { id: 'converter', label: 'Converter', icon: <Zap size={14} />, keys: ['maxConcurrentConversions', 'autoDeletePartialOnCancel'] },
   { id: 'appearance', label: 'Appearance', icon: <Palette size={14} />, keys: ['disableAnimations', 'calendarFirstDayOfWeek'] },
   { id: 'autorules', label: 'Auto-rules', icon: <Shuffle size={14} />, keys: ['autoStartWatcher'] },
   { id: 'system', label: 'System', icon: <MonitorCog size={14} />, keys: ['checkForUpdates', 'startWithWindows', 'startMinimized'] },
@@ -700,6 +700,19 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
 
         {/* Converter */}
         <Section id="converter" icon={<Zap size={14} />} title="Converter" registerRef={registerSection}>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Max simultaneous conversions {dirtyDot('maxConcurrentConversions')}</label>
+            <input
+              type="number"
+              min={1}
+              max={4}
+              step={1}
+              value={local.maxConcurrentConversions ?? 2}
+              onChange={e => set('maxConcurrentConversions', Math.min(4, Math.max(1, parseInt(e.target.value) || 1)))}
+              className="w-28 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            />
+            <p className="text-xs text-gray-400">How many conversions auto-start at once when archiving in bulk. 2 is usually fastest on a GPU — one encode often leaves the encoder half-idle and a second fills it; higher can hit GPU encoder-session limits, and CPU-only presets don't benefit from running in parallel. Manually starting a queued job always runs it immediately, regardless of this limit.</p>
+          </div>
           <Checkbox
             checked={!!local.autoDeletePartialOnCancel}
             onChange={v => set('autoDeletePartialOnCancel', v)}

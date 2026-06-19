@@ -173,6 +173,9 @@ export interface AppConfig {
   defaultBroadcastTime: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number
+  /** Max conversions the auto-scheduler runs at once (archive batches).
+   *  Manual "Start" on a queued job always bypasses this. Min 1, default 2. */
+  maxConcurrentConversions: number
   defaultBleepVolume: number
   youtubeClientId: string
   youtubeClientSecret: string

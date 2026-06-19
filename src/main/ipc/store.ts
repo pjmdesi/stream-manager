@@ -29,6 +29,9 @@ export interface AppConfig {
   defaultThumbnailTemplate: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number
+  /** Max conversions the auto-scheduler runs at once (archive batches).
+   *  Manual "Start" on a queued job always bypasses this. Min 1, default 2. */
+  maxConcurrentConversions: number
   defaultBleepVolume: number
   youtubeClientId: string
   youtubeClientSecret: string
@@ -149,6 +152,7 @@ function getDefaultConfig(): AppConfig {
     defaultThumbnailTemplate: '',
     checkEpisodeIteration: true,
     audioCacheLimit: 1_073_741_824,  // 1 GB
+    maxConcurrentConversions: 2,
     defaultBleepVolume: 0.25,
     youtubeClientId: '',
     youtubeClientSecret: '',

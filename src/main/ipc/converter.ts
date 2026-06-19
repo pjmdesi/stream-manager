@@ -171,6 +171,27 @@ const downloadCancelFlags = new Map<string, { cancelled: boolean }>()
 // background later gets picked up by startConversionJob's inline hydrate.
 const hydrateInFlight = new Set<string>()
 
+// Cap how many cloud-hydrate probes run at once. Without this, bulk-archiving
+// many cloud-synced folders fires an ensureHydrated() for every file at the
+// same instant — a storm of PowerShell checkLocalFiles calls + file touches
+// that contributes to the start-up freeze.
+const HYDRATE_CONCURRENCY = 4
+const hydrateQueue: string[] = []
+let hydrateActive = 0
+function pumpHydrate(): void {
+  while (hydrateActive < HYDRATE_CONCURRENCY && hydrateQueue.length > 0) {
+    const jobId = hydrateQueue.shift() as string
+    hydrateActive++
+    ensureHydrated(jobId)
+      .catch(() => { /* per-task errors handled inside ensureHydrated */ })
+      .finally(() => { hydrateActive--; pumpHydrate() })
+  }
+}
+function enqueueHydrate(jobId: string): void {
+  hydrateQueue.push(jobId)
+  pumpHydrate()
+}
+
 /** Broadcast an IPC event to every renderer window. Module-scoped so
  *  helpers outside startConversionJob can notify status changes too. */
 function notifyAll(channel: string, data: unknown): void {
@@ -191,8 +212,10 @@ function setJobStatus(jobId: string, status: ConversionJob['status']): void {
 /**
  * Pre-encode hydrate task. Runs in parallel for every job in a group so the
  * second/third/etc. files don't sit idle as 'queued' while the first one
- * downloads — they all start hydrating at the same time. The encode phase
- * still serializes (one ffmpeg at a time per group) via startNextInGroup.
+ * downloads — they all start hydrating at the same time (capped via the
+ * hydrate queue). The encode phase is governed by the global scheduleNext()
+ * scheduler: at most one encode per group, and at most the configured cap
+ * across all groups.
  *
  * Lifecycle:
  *   queued → 'downloading' → (poll) → 'queued' (hydrated, ready to encode)
@@ -249,15 +272,14 @@ async function ensureHydrated(jobId: string): Promise<void> {
         notifyAll('converter:jobStatus', { jobId, status: 'cancelled' })
         notifyAll('converter:jobError', { jobId, error: 'Cancelled' })
       }
-      if (job.groupId) startNextInGroup(job.groupId)
+      scheduleNext()
       return
     }
 
-    // Hydrate finished — drop back to 'queued' so startNextInGroup can pick
-    // it up when the encoder slot frees. If it's already free (no other
-    // group sibling is encoding), this kicks the encode immediately.
+    // Hydrate finished — drop back to 'queued' so the scheduler can pick it
+    // up when an encode slot is free (kicks immediately if one is).
     setJobStatus(jobId, 'queued')
-    if (job.groupId) startNextInGroup(job.groupId)
+    scheduleNext()
   } finally {
     hydrateInFlight.delete(jobId)
   }
@@ -461,26 +483,52 @@ export function addPendingJob(job: ConversionJob): string {
   return id
 }
 
-/** Start the first queued job in a group. Used to serialize execution within
- *  a group (archive batches) — kicked off when a group is submitted, then
- *  re-fired on each job-end so the next one begins.
+/** Configured cap on how many conversions the auto-scheduler runs at once.
+ *  Clamped to a minimum of 1. */
+function getMaxConcurrentConversions(): number {
+  const raw = (getStore().get('config') as { maxConcurrentConversions?: number } | undefined)?.maxConcurrentConversions
+  const n = typeof raw === 'number' && Number.isFinite(raw) ? Math.floor(raw) : 2
+  return Math.max(1, n)
+}
+
+/** Global encode scheduler. Auto-starts queued GROUP jobs (archive batches)
+ *  up to the configured concurrency cap, across all groups, while keeping at
+ *  most one active encode per group (so a multi-file folder still serializes
+ *  internally).
  *
- *  Note: 'downloading' is NOT considered in-flight here because hydrate runs
- *  in parallel for the whole group via ensureHydrated(). Only encoding-phase
- *  states (running / replacing / paused) block the next encode slot. */
-function startNextInGroup(groupId: string): void {
-  const groupJobs = [...jobs.values()].filter(j => j.groupId === groupId)
-  const encoding = groupJobs.some(j =>
+ *  - The cap governs AUTOMATIC scheduling only. Manual starts
+ *    (converter:startQueued / converter:addToQueue) call startConversionJob
+ *    directly and bypass this, so a user override can exceed the cap; the
+ *    scheduler then won't auto-start anything new until the active count drops
+ *    back under it.
+ *  - Standalone queued jobs (no groupId — e.g. auto-rules with "start
+ *    immediately" off) are intentionally NOT auto-started; they wait for the
+ *    user's manual Start. Only archive-style group jobs auto-schedule.
+ *  - All active encodes count toward the cap (grouped or not) so a manual job
+ *    correctly reserves a slot.
+ *
+ *  'downloading' is NOT counted as active — hydrate runs in parallel and
+ *  shouldn't tie up an encode slot. Re-invoked on job end, group submission,
+ *  hydrate completion, and cancellation. */
+function scheduleNext(): void {
+  const all = [...jobs.values()]
+  const isActive = (j: ConversionJob) =>
     j.status === 'running' || j.status === 'replacing' || j.status === 'paused'
-  )
-  if (encoding) return
-  // Pick the first 'queued' job (preserves submission order). Note this
-  // catches both already-hydrated jobs and any that haven't been touched
-  // yet — startConversionJob's inline hydrate handles the latter as a
-  // fallback if a job somehow slips through ensureHydrated.
-  const next = groupJobs.find(j => j.status === 'queued')
-  if (!next) return
-  startConversionJob(next).catch(() => { /* error broadcast separately */ })
+  let free = getMaxConcurrentConversions() - all.filter(isActive).length
+  if (free <= 0) return
+  // Groups that already have an in-flight encode — never start a second from
+  // the same group automatically (per-group serialization).
+  const activeGroups = new Set(all.filter(j => isActive(j) && j.groupId).map(j => j.groupId as string))
+  const claimedGroups = new Set<string>()
+  // Map iteration preserves submission order, so first-queued-first-started.
+  for (const j of all) {
+    if (free <= 0) break
+    if (j.status !== 'queued' || !j.groupId) continue
+    if (activeGroups.has(j.groupId) || claimedGroups.has(j.groupId)) continue
+    claimedGroups.add(j.groupId)
+    startConversionJob(j).catch(() => { /* error broadcast separately */ })
+    free--
+  }
 }
 
 /** Best-effort delete of a file that may be temporarily locked. Aimed at temp
@@ -599,7 +647,7 @@ export async function startConversionJob(
       // job in the group (and no group siblings have failed/cancelled).
       maybeFireGroupHook(id)
       // Advance the group: start the next queued job in the same group.
-      if (job.groupId) startNextInGroup(job.groupId)
+      scheduleNext()
       resolve()
     }
     const handleError = (err: Error) => {
@@ -618,7 +666,7 @@ export async function startConversionJob(
       maybeFireGroupHook(id)
       // Group continues despite errors (preserves the prior archive behaviour
       // of trying every file in the folder even if some fail).
-      if (job.groupId) startNextInGroup(job.groupId)
+      scheduleNext()
       reject(err)
     }
     ;(async () => {
@@ -894,25 +942,21 @@ export function registerConverterIPC(): void {
     return id
   })
 
-  // Add a batch of jobs (all sharing a groupId) and start the first one. The
-  // rest enter 'queued' state and start one-by-one as each preceding one
-  // finishes (handleComplete/handleError → startNextInGroup). Used by the
-  // archive flow so multiple files in a folder don't fight for ffmpeg / GPU
-  // resources.
+  // Add a batch of jobs (all sharing a groupId) and let the global scheduler
+  // start them up to the concurrency cap. The rest enter 'queued' state and
+  // start as slots free (handleComplete/handleError → scheduleNext). Used by
+  // the archive flow so many files/folders don't all fight for ffmpeg / GPU
+  // at once.
   ipcMain.handle('converter:addQueuedGroup', async (_event, jobsList: ConversionJob[]): Promise<string[]> => {
     const ids: string[] = []
     for (const j of jobsList) ids.push(addPendingJob(j))
-    // Kick off hydrate for every job in parallel — files needing cloud
-    // download all start hydrating immediately rather than waiting their
-    // turn behind the previous file's encode. Each ensureHydrated task
-    // fires startNextInGroup when it completes, so encoding starts as
-    // soon as the first hydrated job finishes (or immediately if a file
-    // was already local).
-    for (const id of ids) {
-      ensureHydrated(id).catch(() => { /* hydrate errors handled per-task */ })
-    }
-    const groupIds = new Set(jobsList.map(j => j.groupId).filter(Boolean) as string[])
-    for (const gid of groupIds) startNextInGroup(gid)
+    // Queue hydrate for every job (capped, so a big batch doesn't storm the
+    // cloud-sync probe). Files needing download start hydrating ahead of the
+    // encoder; each ensureHydrated fires scheduleNext() on completion. The
+    // scheduleNext() below kicks encoding for any already-local files now,
+    // up to the concurrency cap (the rest stay queued).
+    for (const id of ids) enqueueHydrate(id)
+    scheduleNext()
     return ids
   })
 
@@ -1257,8 +1301,8 @@ export function registerConverterIPC(): void {
         deleteWithRetry(j.outputFile, 'cancelled output')
       }
       maybeFireGroupHook(jobId)
-      // Cancellation of one job in a group shouldn't stop the others; advance.
-      if (j.groupId) startNextInGroup(j.groupId)
+      // Cancellation frees a slot — let the scheduler fill it from any group.
+      scheduleNext()
     }
   })
 
@@ -1287,6 +1331,8 @@ export function registerConverterIPC(): void {
       }
       notifyAll('converter:jobStatus', { jobId: j.id, status: 'cancelled' })
     }
+    // Cancelling a whole group frees slots — backfill from any other group.
+    scheduleNext()
   })
 
   ipcMain.handle('converter:pauseJob', async (_event, jobId: string) => {
