@@ -1348,4 +1348,20 @@ export function registerConverterIPC(): void {
   })
 
   ipcMain.handle('converter:getJobs', async () => Array.from(jobs.values()))
+
+  // Forget a job entirely — drops it from the in-memory map (which survives
+  // renderer reloads) and the persisted pending queue, so a removed job doesn't
+  // reappear after a Ctrl+R / restart. Refuses to remove a job that's still in
+  // flight; the caller should cancel it first.
+  ipcMain.handle('converter:removeJob', async (_event, jobId: string) => {
+    const j = jobs.get(jobId)
+    if (!j) return
+    if (j.status === 'running' || j.status === 'downloading' || j.status === 'replacing' || j.status === 'paused') return
+    jobs.delete(jobId)
+    cancellers.delete(jobId)
+    pausers.delete(jobId)
+    resumers.delete(jobId)
+    downloadCancelFlags.delete(jobId)
+    if (j.status === 'queued') persistPendingJobs()
+  })
 }

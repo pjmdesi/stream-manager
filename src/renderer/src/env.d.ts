@@ -135,6 +135,7 @@ declare global {
       resumeJob(jobId: string): Promise<void>
       startQueuedJob(jobId: string): Promise<void>
       getJobs(): Promise<ConversionJob[]>
+      removeJob(jobId: string): Promise<void>
       onJobProgress(cb: (data: { jobId: string; percent: number; status?: string }) => void): () => void
       onJobComplete(cb: (data: { jobId: string; outputPath: string }) => void): () => void
       onJobError(cb: (data: { jobId: string; error: string }) => void): () => void

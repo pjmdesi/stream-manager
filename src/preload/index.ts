@@ -240,6 +240,9 @@ contextBridge.exposeInMainWorld('api', {
   getJobs: () =>
     ipcRenderer.invoke('converter:getJobs'),
 
+  removeJob: (jobId: string) =>
+    ipcRenderer.invoke('converter:removeJob', jobId),
+
   onJobProgress: (callback: (data: { jobId: string; percent: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('converter:jobProgress', handler)

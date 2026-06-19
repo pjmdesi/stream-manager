@@ -13,6 +13,7 @@ const defaultConfig: AppConfig = {
   streamMode: '' as import('../types').StreamMode,
   archivePresetId: '',
   clipPresetId: '',
+  defaultConversionPresetId: '',
   defaultBleepVolume: 0.25,
   defaultThumbnailTemplate: '',
   defaultBuiltinThumbnailTemplate: '',

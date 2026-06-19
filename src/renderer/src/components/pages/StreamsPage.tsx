@@ -350,11 +350,15 @@ export function StreamsPage({
   onSendToPlayer,
   onSendToConverter,
   onSendToCombine,
+  pendingSelect,
 }: {
   isVisible: boolean
   onSendToPlayer: (file: string) => void
-  onSendToConverter: (file: string) => void
+  onSendToConverter: (file: string, stream?: { folderPath: string; label: string }) => void
   onSendToCombine: (files: string[]) => void
+  /** When the token bumps, select/open this folder's detail sidebar — used to
+   *  navigate back from the converter's "from stream" link. */
+  pendingSelect?: { folderPath: string; token: number } | null
 }) {
   const { config, updateConfig } = useStore()
   const { openEditor: openThumbnailEditor } = useThumbnailEditor()
@@ -365,6 +369,14 @@ export function StreamsPage({
   // underlying array reshuffles. folderPath is unique per folder in both
   // folder-per-stream and dump-folder modes.
   const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null)
+  // External navigation: when App bumps pendingSelect's token (e.g. the
+  // converter's "from stream" link), open that folder's detail sidebar.
+  const lastSelectTokenRef = useRef(0)
+  useEffect(() => {
+    if (!pendingSelect || pendingSelect.token === lastSelectTokenRef.current) return
+    lastSelectTokenRef.current = pendingSelect.token
+    setSelectedFolderPath(pendingSelect.folderPath)
+  }, [pendingSelect])
   // Stream-type color/texture assignments live in electron-store; we load
   // them once on mount. Currently read-only here — the swatch picker UX
   // for editing them stays on the old page until phase 4. The keys are
@@ -1005,8 +1017,8 @@ export function StreamsPage({
 
   const handleSendToConverter = useCallback((folder: StreamFolder) => {
     const file = pickPrimaryVideo(folder)
-    if (file) onSendToConverter(file)
-  }, [onSendToConverter])
+    if (file) onSendToConverter(file, { folderPath: folder.folderPath, label: renderStreamTitle(folder, folders) || folder.folderName })
+  }, [onSendToConverter, folders])
 
   const handleSendToCombine = useCallback((folder: StreamFolder) => {
     if (folder.videos.length > 0) onSendToCombine(folder.videos)

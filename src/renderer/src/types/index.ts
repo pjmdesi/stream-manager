@@ -167,6 +167,8 @@ export interface AppConfig {
   streamMode: StreamMode
   archivePresetId: string
   clipPresetId: string
+  /** Preset assigned to new files added to the Converter page. */
+  defaultConversionPresetId: string
   defaultThumbnailTemplate: string
   defaultBuiltinThumbnailTemplate: string
   useBuiltinThumbnailByDefault: boolean

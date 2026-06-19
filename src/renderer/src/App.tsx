@@ -72,6 +72,9 @@ interface PendingFiles {
 interface PendingConverterFile {
   path: string
   token: number
+  /** Set when the file was sent from a stream — drives the "from stream" link
+   *  in the converter and the click-to-open-its-sidebar navigation back. */
+  stream?: { folderPath: string; label: string }
 }
 
 /** ETA formatter for the conversion widget. Uses `h m` for ≥ 1 minute and
@@ -512,14 +515,21 @@ function AppInner() {
   const [pendingPlayer, setPendingPlayer] = useState<PendingFile | null>(null)
   const [pendingConverter, setPendingConverter] = useState<PendingConverterFile | null>(null)
   const [pendingCombine, setPendingCombine] = useState<PendingFiles | null>(null)
+  // Bumped (token++) when something wants the streams page to select/open a
+  // specific folder's detail sidebar — e.g. the converter's "from stream" link.
+  const [pendingStreamSelect, setPendingStreamSelect] = useState<{ folderPath: string; token: number } | null>(null)
 
   const sendToPlayer = (filePath: string) => {
     setPendingPlayer(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1 }))
     setPage('player')
   }
-  const sendToConverter = (filePath: string) => {
-    setPendingConverter(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1 }))
+  const sendToConverter = (filePath: string, stream?: { folderPath: string; label: string }) => {
+    setPendingConverter(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1, stream }))
     setPage('converter')
+  }
+  const navigateToStream = (folderPath: string) => {
+    setPendingStreamSelect(prev => ({ folderPath, token: (prev?.token ?? 0) + 1 }))
+    setPage('streams')
   }
 
   const sendToCombine = (filePaths: string[]) => {
@@ -790,13 +800,13 @@ function AppInner() {
             <PlayerPage initialFile={pendingPlayer} onNavigateToConverter={() => setPage('converter')} />
           </div>
           <div className={`h-full ${page === 'converter' ? '' : 'hidden'}`}>
-            <ConverterPage initialFile={pendingConverter} />
+            <ConverterPage initialFile={pendingConverter} onNavigateToStream={navigateToStream} />
           </div>
           <div className={`h-full ${page === 'thumbnails' ? '' : 'hidden'}`}>
             <ThumbnailPage isVisible={page === 'thumbnails'} />
           </div>
           <div className={`h-full ${page === 'streams' ? '' : 'hidden'}`}>
-            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} />
+            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} />
           </div>
           {page === 'templates' && <TemplatesPage />}
           {page === 'rules'     && <RulesPage />}

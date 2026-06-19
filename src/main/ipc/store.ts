@@ -26,6 +26,8 @@ export interface AppConfig {
   streamMode: StreamMode
   archivePresetId: string
   clipPresetId: string
+  /** Preset assigned to new files added to the Converter page. */
+  defaultConversionPresetId: string
   defaultThumbnailTemplate: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number
@@ -149,6 +151,7 @@ function getDefaultConfig(): AppConfig {
     streamMode: '' as StreamMode,
     archivePresetId: '',
     clipPresetId: '',
+    defaultConversionPresetId: '',
     defaultThumbnailTemplate: '',
     checkEpisodeIteration: true,
     audioCacheLimit: 1_073_741_824,  // 1 GB

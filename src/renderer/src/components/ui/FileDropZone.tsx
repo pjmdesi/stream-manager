@@ -7,6 +7,9 @@ interface FileDropZoneProps {
   className?: string
   children?: React.ReactNode
   label?: string
+  /** Slim single-row variant (icon + short label, no supported-types line) for
+   *  embedding inside a list as an inline "add more" affordance. */
+  compact?: boolean
 }
 
 export const FileDropZone: React.FC<FileDropZoneProps> = ({
@@ -14,7 +17,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   accept,
   className = '',
   children,
-  label = 'Drop files here or click to browse'
+  label = 'Drop files here or click to browse',
+  compact = false
 }) => {
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -71,6 +75,31 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
           </div>
         )}
         {children}
+      </div>
+    )
+  }
+
+  if (compact) {
+    return (
+      <div
+        className={`
+          relative flex items-center justify-center gap-2 px-4 py-3
+          border-2 border-dashed rounded-lg cursor-pointer transition-all duration-200
+          ${isDragging
+            ? 'border-purple-500 bg-purple-600/10'
+            : 'border-white/10 hover:border-purple-500/50 hover:bg-purple-600/5'
+          }
+          ${className}
+        `}
+        onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={handleDrop}
+        onClick={handleBrowse}
+      >
+        {isDragging
+          ? <Upload size={16} className="text-purple-400" />
+          : <Film size={16} className="text-gray-400" />}
+        <p className="text-xs text-gray-400">{label}</p>
       </div>
     )
   }

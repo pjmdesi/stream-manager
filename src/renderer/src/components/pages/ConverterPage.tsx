@@ -1,13 +1,24 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
-import { X, XCircle, FolderOpen, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Upload, Trash2, Pencil, Archive, Ban, Pause, Play, Star, Cloud, Plus } from 'lucide-react'
-import { PresetEditorModal } from '../preset-editor/PresetEditorModal'
+import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, Film, RotateCcw } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob } from '../../types'
 import { Button } from '../ui/Button'
 import { FileDropZone } from '../ui/FileDropZone'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
+import { useStore } from '../../hooks/useStore'
+import { PresetsModal } from '../preset-editor/PresetsModal'
+import { CollapsibleLabel } from '../ui/CollapsibleLabel'
+
+// Row action buttons — neutral at rest, colored only on hover, with a label
+// that collapses to icon-only as the row narrows. Mirrors the stream detail
+// sidebar's footer buttons (PANEL_ACTION_BUTTON_*).
+const ROW_ACTION_BASE = 'inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'
+const ROW_ACTION_GREEN = `${ROW_ACTION_BASE} hover:text-green-400 hover:bg-green-500/10`
+const ROW_ACTION_RED = `${ROW_ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
+const ROW_ACTION_YELLOW = `${ROW_ACTION_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
+const ROW_ACTION_BLUE = `${ROW_ACTION_BASE} hover:text-blue-400 hover:bg-blue-500/10`
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
@@ -23,6 +34,121 @@ function formatDuration(ms: number): string {
   const sec = s % 60
   if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
   return `${m}:${String(sec).padStart(2,'0')}`
+}
+
+/** Shorten an output directory for the per-file dropdown so the drive letter
+ *  and the final directory stay visible (native selects clip the END, hiding
+ *  exactly what matters), e.g. `D:\…older\subfolder`. */
+function shortenDir(dir: string): string {
+  const norm = dir.replace(/[\\/]+$/, '')
+  const m = norm.match(/^([a-zA-Z]:)[\\/]?(.*)$/)
+  if (!m) return norm
+  const [, drive, rest] = m
+  const MAX = 20
+  if (rest.length <= MAX) return norm
+  return `${drive}\\…${rest.slice(rest.length - MAX)}`
+}
+
+/** A single-line text span that shows a Tooltip (above) with the full text
+ *  only when the text is actually truncated. Re-measures on resize. */
+function TruncText({ text, className = '' }: { text: string; className?: string }) {
+  const [truncated, setTruncated] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const check = () => setTruncated(el.scrollWidth > el.clientWidth + 1)
+    check()
+    const obs = new ResizeObserver(check)
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [text])
+  // Always render the same structure — the Tooltip wrapper stays mounted and we
+  // just arm/disarm it via `open`. Wrapping/unwrapping on the truncation toggle
+  // would remount the measured span and make detection order-dependent.
+  return (
+    <Tooltip content={text} side="top" open={truncated ? undefined : false} triggerClassName="block min-w-0 truncate">
+      <span ref={ref} className={`block truncate min-w-0 ${className}`}>{text}</span>
+    </Tooltip>
+  )
+}
+
+// Cache generated frames by file path so a thumbnail isn't re-decoded when the
+// same file remounts in another panel (ready → converting, requeue, etc.).
+const thumbCache = new Map<string, { url: string; aspect: number }>()
+
+/** Thumbnail for a video file — grabs a frame at the midpoint via an offscreen
+ *  <video> + canvas (same approach as the player's session-video items). Only
+ *  runs for confirmed-local files so cloud placeholders aren't hydrated.
+ *  Cached by path so moving between panels reuses the already-decoded frame. */
+function VideoThumb({ path }: { path: string }) {
+  const cached = thumbCache.get(path)
+  const [thumbnail, setThumbnail] = useState<string | null>(cached?.url ?? null)
+  const [aspect, setAspect] = useState(cached?.aspect ?? 16 / 9)
+  const [local, setLocal] = useState<boolean | null>(cached ? true : null)
+
+  useEffect(() => {
+    if (thumbCache.has(path)) return
+    let cancelled = false
+    window.api.checkLocalFiles([path])
+      .then(([l]) => { if (!cancelled) setLocal(!!l) })
+      .catch(() => { if (!cancelled) setLocal(false) })
+    return () => { cancelled = true }
+  }, [path])
+
+  useEffect(() => {
+    if (thumbCache.has(path) || !local) return
+    const vid = document.createElement('video')
+    vid.src = `file://${path.replace(/\\/g, '/')}`
+    vid.muted = true
+    vid.preload = 'metadata'
+    let sought = false
+    const cleanup = () => {
+      vid.removeEventListener('loadedmetadata', onMeta)
+      vid.removeEventListener('seeked', onSeeked)
+      vid.removeEventListener('error', onErr)
+      vid.src = ''
+    }
+    const onMeta = () => {
+      const dur = vid.duration
+      if (isFinite(dur) && dur > 0) {
+        if (vid.videoWidth > 0 && vid.videoHeight > 0) setAspect(vid.videoWidth / vid.videoHeight)
+        if (!sought) { sought = true; vid.currentTime = dur * 0.5 }
+      } else cleanup()
+    }
+    const onSeeked = () => {
+      const vw = vid.videoWidth || 80
+      const vh = vid.videoHeight || 45
+      const canvas = document.createElement('canvas')
+      canvas.height = 64
+      canvas.width = Math.round(64 * (vw / vh))
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        try {
+          ctx.drawImage(vid, 0, 0, canvas.width, canvas.height)
+          const url = canvas.toDataURL('image/jpeg', 0.7)
+          thumbCache.set(path, { url, aspect: vw / vh })
+          setThumbnail(url)
+        } catch { /* decode error */ }
+      }
+      cleanup()
+    }
+    const onErr = () => cleanup()
+    vid.addEventListener('loadedmetadata', onMeta)
+    vid.addEventListener('seeked', onSeeked)
+    vid.addEventListener('error', onErr)
+    return cleanup
+  }, [path, local])
+
+  const H = 56
+  const W = Math.round(H * aspect)
+  return (
+    <div className="relative shrink-0 rounded-md overflow-hidden bg-white/5 flex items-center justify-center" style={{ width: W, height: H }}>
+      {thumbnail
+        ? <img src={thumbnail} alt="" className="w-full h-full object-cover" />
+        : <Film size={13} className="text-gray-500" />}
+    </div>
+  )
 }
 
 function StatusIcon({ status }: { status: ConversionJob['status'] }) {
@@ -72,49 +198,59 @@ function getOutputPath(inputFile: string, preset: ConversionPreset, outputDir: s
   return `${dir}/${base}_${suffix}.${preset.outputExtension}`
 }
 
-interface PendingFile { path: string; token: number }
+interface PendingFile { path: string; token: number; stream?: { folderPath: string; label: string } }
 
-export function ConverterPage({ initialFile }: { initialFile?: PendingFile | null }) {
+export function ConverterPage({ initialFile, onNavigateToStream }: { initialFile?: PendingFile | null; onNavigateToStream?: (folderPath: string) => void }) {
+  const { config, updateConfig } = useStore()
   const [builtinPresets, setBuiltinPresets] = useState<ConversionPreset[]>([])
   const [importedPresets, setImportedPresets] = useState<ConversionPreset[]>([])
-  const [selectedPreset, setSelectedPreset] = useState<ConversionPreset | null>(null)
-  const [archivePresetId, setArchivePresetId] = useState<string>('')
   const [recommendedArchiveId, setRecommendedArchiveId] = useState<string | null>(null)
-  const [outputDir, setOutputDir] = useState('')
   const { jobs, setJobs, jobEtas, jobElapsed, jobFinalElapsed } = useConversionJobs()
-  const [queuedFiles, setQueuedFiles] = useState<string[]>([])
+  // outputDir: '' = next to the original; otherwise an explicit directory.
+  // pickedDir: the last directory the user chose via the picker — kept so the
+  // option stays in the dropdown even after switching back to "Next to original".
+  const [queuedFiles, setQueuedFiles] = useState<Array<{ path: string; presetId: string; outputDir: string; pickedDir: string; stream?: { folderPath: string; label: string } }>>([])
+  // Source-stream origin keyed by file path, kept separately from queuedFiles
+  // so the "from stream" link survives the file moving into an active job.
+  const [streamOrigins, setStreamOrigins] = useState<Record<string, { folderPath: string; label: string }>>({})
   const [importing, setImporting] = useState(false)
-  // Custom preset editor (form-based; raw-args via the Advanced section).
-  const [presetEditorOpen, setPresetEditorOpen] = useState(false)
-  const [editingPreset, setEditingPreset] = useState<ConversionPreset | null>(null)
   const [importError, setImportError] = useState('')
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [autoDeletePartial, setAutoDeletePartial] = useState(false)
+  const [presetsModalOpen, setPresetsModalOpen] = useState(false)
   const [deleteDialog, setDeleteDialog] = useState<{ jobId: string; outputFile: string } | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-  const renameInputRef = useRef<HTMLInputElement>(null)
+
+  const autoDeletePartial = !!config.autoDeletePartialOnCancel
+
+  // The default preset (★ in the Presets modal; falls back to the first
+  // built-in) is assigned to each file as it's added — so changing the default
+  // later only affects newly-added files. Each row can override it via its
+  // dropdown.
+  const allPresets = [...builtinPresets, ...importedPresets]
+  const defaultPreset =
+    allPresets.find(p => p.id === config.defaultConversionPresetId) ?? builtinPresets[0] ?? null
+  // Resolve a queued file's chosen preset, falling back to the current default
+  // if its id is missing (assigned before presets loaded, or preset deleted).
+  const presetForId = (id: string) => allPresets.find(p => p.id === id) ?? defaultPreset
 
   useEffect(() => {
-    if (initialFile) setQueuedFiles(prev => prev.includes(initialFile.path) ? prev : [...prev, initialFile.path])
+    if (initialFile) {
+      if (initialFile.stream) setStreamOrigins(prev => ({ ...prev, [initialFile.path]: initialFile.stream! }))
+      setQueuedFiles(prev => prev.some(f => f.path === initialFile.path) ? prev : [...prev, { path: initialFile.path, presetId: defaultPreset?.id ?? '', outputDir: '', pickedDir: '', stream: initialFile.stream }])
+    }
   }, [initialFile?.token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     Promise.all([
       window.api.getBuiltinPresets(),
       window.api.getImportedPresets(),
-      window.api.getConfig(),
       Promise.all([
         window.api.checkEncoderAvailable('libsvtav1'),
         window.api.checkEncoderAvailable('av1_nvenc'),
         window.api.checkEncoderAvailable('av1_amf'),
         window.api.checkEncoderAvailable('av1_qsv'),
       ]),
-    ]).then(([builtin, imported, config, [hasSvt, hasNvenc, hasAmf, hasQsv]]) => {
+    ]).then(([builtin, imported, [hasSvt, hasNvenc, hasAmf, hasQsv]]) => {
       setBuiltinPresets(builtin)
       setImportedPresets(imported)
-      setArchivePresetId(config.archivePresetId ?? '')
-      setAutoDeletePartial(!!config.autoDeletePartialOnCancel)
-      setSelectedPreset(prev => prev ?? builtin[0] ?? null)
       const hasAnyAv1 = hasSvt || hasNvenc || hasAmf || hasQsv
       setRecommendedArchiveId(hasAnyAv1 ? 'archive-av1' : 'archive-h265')
     })
@@ -132,64 +268,87 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     try {
       const preset = await window.api.importPreset(paths[0])
       setImportedPresets(prev => [...prev, preset])
-      setSelectedPreset(preset)
     } catch (err: any) {
       setImportError(err.message ?? 'Failed to import preset')
     }
     setImporting(false)
   }
 
+  const savePreset = async (preset: ConversionPreset) => {
+    await window.api.saveCustomPreset(preset)
+    setImportedPresets(prev => {
+      const idx = prev.findIndex(p => p.id === preset.id)
+      return idx >= 0 ? prev.map((p, i) => i === idx ? preset : p) : [...prev, preset]
+    })
+  }
+
   const deleteImported = async (id: string) => {
     await window.api.deleteImportedPreset(id)
     setImportedPresets(prev => prev.filter(p => p.id !== id))
-    if (selectedPreset?.id === id) setSelectedPreset(builtinPresets[0] ?? null)
+    // Clear the default / archive-default pointers if they referenced it so
+    // they fall back gracefully instead of dangling.
+    if (config.defaultConversionPresetId === id) updateConfig({ defaultConversionPresetId: '' })
+    if (config.archivePresetId === id) updateConfig({ archivePresetId: '' })
   }
 
-  const startRename = (p: ConversionPreset) => {
-    setRenamingId(p.id)
-    setRenameValue(p.name)
-    // Focus the input on the next render
-    setTimeout(() => renameInputRef.current?.select(), 0)
-  }
+  const removeFile = (p: string) => setQueuedFiles(prev => prev.filter(f => f.path !== p))
+  const addFiles = (paths: string[]) => setQueuedFiles(prev => {
+    const existing = new Set(prev.map(f => f.path))
+    const assignId = defaultPreset?.id ?? ''
+    const additions = paths.filter(p => !existing.has(p)).map(path => ({ path, presetId: assignId, outputDir: '', pickedDir: '' }))
+    return additions.length ? [...prev, ...additions] : prev
+  })
+  const setFilePreset = (p: string, presetId: string) =>
+    setQueuedFiles(prev => prev.map(f => f.path === p ? { ...f, presetId } : f))
+  const setFileOutputDir = (p: string, outputDir: string) =>
+    setQueuedFiles(prev => prev.map(f => f.path === p ? { ...f, outputDir } : f))
 
-  const commitRename = async () => {
-    if (!renamingId) return
-    const trimmed = renameValue.trim()
-    if (trimmed) {
-      await window.api.renameImportedPreset(renamingId, trimmed)
-      setImportedPresets(prev => prev.map(p => p.id === renamingId ? { ...p, name: trimmed } : p))
-      if (selectedPreset?.id === renamingId) setSelectedPreset(prev => prev ? { ...prev, name: trimmed } : prev)
+  /** Queue one ready file as a conversion job, then drop it from the ready list. */
+  const startOne = async (file: { path: string; presetId: string; outputDir: string }) => {
+    const preset = presetForId(file.presetId)
+    if (!preset) return
+    const job: ConversionJob = {
+      id: uuidv4(),
+      inputFile: file.path,
+      outputFile: getOutputPath(file.path, preset, file.outputDir),
+      preset,
+      status: 'queued',
+      progress: 0,
     }
-    setRenamingId(null)
+    // Update the UI synchronously — add to Converting and drop from the ready
+    // list in the same tick — before awaiting the IPC, so the row never shows
+    // in both panels during the round-trip.
+    setJobs(prev => [...prev, job])
+    removeFile(file.path)
+    await window.api.addToQueue(job)
   }
-
-  const cancelRename = () => setRenamingId(null)
-
-  const pickOutputDir = async () => {
-    const dir = await window.api.openDirectoryDialog()
-    if (dir) setOutputDir(dir)
-  }
-
-  const removeFile = (p: string) => setQueuedFiles(prev => prev.filter(f => f !== p))
-  const addFiles = (paths: string[]) => setQueuedFiles(prev => [...new Set([...prev, ...paths])])
 
   const startAll = async () => {
-    if (!selectedPreset || queuedFiles.length === 0) return
+    if (queuedFiles.length === 0) return
 
-    for (const inputFile of queuedFiles) {
-      const outputFile = getOutputPath(inputFile, selectedPreset, outputDir)
-      const job: ConversionJob = {
+    // Build every job up front so the UI can update in one tick — add them all
+    // to Converting and clear the started files from the ready list — before
+    // firing the IPC calls, so nothing lingers in both panels during the loop.
+    const jobs: ConversionJob[] = []
+    const startedPaths = new Set<string>()
+    for (const file of queuedFiles) {
+      const preset = presetForId(file.presetId)
+      if (!preset) continue
+      jobs.push({
         id: uuidv4(),
-        inputFile,
-        outputFile,
-        preset: selectedPreset,
+        inputFile: file.path,
+        outputFile: getOutputPath(file.path, preset, file.outputDir),
+        preset,
         status: 'queued',
-        progress: 0
-      }
-      setJobs(prev => [...prev, job])
-      await window.api.addToQueue(job)
+        progress: 0,
+      })
+      startedPaths.add(file.path)
     }
-    setQueuedFiles([])
+    if (jobs.length === 0) return
+
+    setJobs(prev => [...prev, ...jobs])
+    setQueuedFiles(prev => prev.filter(f => !startedPaths.has(f.path)))
+    for (const job of jobs) await window.api.addToQueue(job)
   }
 
   const removeJob = (id: string) => {
@@ -197,6 +356,24 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     jobEtas.delete(id)
     jobElapsed.delete(id)
     jobFinalElapsed.delete(id)
+    // Also drop it from the main process's job map / persisted queue, or it
+    // reappears on the next renderer reload (getJobs re-hydrates from there).
+    window.api.removeJob(id).catch(() => {})
+  }
+
+  /** Move a cancelled job back to the ready list so its preset / output can be
+   *  tweaked and the conversion run again. Reconstructs the output choice from
+   *  the job's paths ('' when it was next-to-original) and keeps the stream
+   *  origin so the "from stream" link survives. */
+  const requeueJob = (job: ConversionJob) => {
+    const inputDir = job.inputFile.replace(/[\\/][^\\/]+$/, '')
+    const outDir = job.outputFile.replace(/[\\/][^\\/]+$/, '')
+    const outputDir = outDir === inputDir ? '' : outDir
+    const presetId = allPresets.some(p => p.id === job.preset.id) ? job.preset.id : (defaultPreset?.id ?? '')
+    setQueuedFiles(prev => prev.some(f => f.path === job.inputFile)
+      ? prev
+      : [...prev, { path: job.inputFile, presetId, outputDir, pickedDir: outputDir, stream: streamOrigins[job.inputFile] }])
+    removeJob(job.id)
   }
 
   const cancelJob = async (id: string) => {
@@ -230,9 +407,18 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     // wrongly included transient states like 'downloading' (cloud hydrate
     // wait) and 'replacing' (atomic swap), causing in-flight cloud archives
     // to disappear from the queue mid-wait.
+    const cleared = jobs.filter(j =>
+      j.status === 'done' || j.status === 'error' || j.status === 'cancelled')
     setJobs(prev => prev.filter(j =>
       j.status !== 'done' && j.status !== 'error' && j.status !== 'cancelled'
     ))
+    // Evict from the main process too, or getJobs re-hydrates them on reload.
+    cleared.forEach(j => {
+      jobEtas.delete(j.id)
+      jobElapsed.delete(j.id)
+      jobFinalElapsed.delete(j.id)
+      window.api.removeJob(j.id).catch(() => {})
+    })
   }
 
   /** Render a single job row — extracted so both the ungrouped queue and
@@ -251,24 +437,30 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
     const eta = jobEtas.get(job.id) ?? null
     const outputDir = job.outputFile.replace(/[\\/][^\\/]+$/, '')
     const outputName = job.outputFile.split(/[\\/]/).pop()
+    const streamOrigin = streamOrigins[job.inputFile]
 
     return (
-      <div key={job.id} className={`px-4 py-3 border-b border-white/5 last:border-0 flex items-stretch gap-3 ${indented ? 'pl-7' : ''}`}>
+      <div key={job.id} className={`@container px-4 py-3 border-b border-white/5 last:border-0 flex items-stretch gap-3 ${indented ? 'pl-7' : ''}`}>
+        {/* Thumbnail — pulled toward the left/top/bottom edges, keeps the
+            gap to the right content. */}
+        <div className="self-center shrink-0 -my-1 -ms-2">
+          <VideoThumb path={job.inputFile} />
+        </div>
         {/* Left: all content */}
         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
           {/* Filenames row */}
           <div className="flex items-center gap-2">
             <StatusIcon status={job.status} />
-            <span className="text-xs text-gray-400 truncate shrink-0 max-w-[30%]" title={job.inputFile}>
-              {job.inputFile.split(/[\\/]/).pop()}
-            </span>
+            <div className="shrink-0 max-w-[30%] min-w-0">
+              <TruncText text={job.inputFile.split(/[\\/]/).pop() ?? job.inputFile} className="text-xs text-gray-400" />
+            </div>
             <span className="text-xs text-gray-400 shrink-0">→</span>
-            <span className="flex-1 text-xs text-gray-200 truncate" title={job.outputFile}>
-              {/* Hide the temp-file name for replaceInput jobs — they're
-                  invisible to the user; show the input file's name instead so
-                  the row reads as "input → input (replaced in place)". */}
-              {job.replaceInput ? job.inputFile.split(/[\\/]/).pop() : outputName}
-            </span>
+            {/* Hide the temp-file name for replaceInput jobs — they're invisible
+                to the user; show the input file's name instead so the row reads
+                as "input → input (replaced in place)". */}
+            <div className="flex-1 min-w-0">
+              <TruncText text={(job.replaceInput ? job.inputFile.split(/[\\/]/).pop() : outputName) ?? ''} className="text-xs text-gray-200" />
+            </div>
             <span className="text-xs text-gray-400 shrink-0">
               {job.preset.name}
               {typeof job.inputSize === 'number' && (
@@ -276,6 +468,19 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
               )}
             </span>
           </div>
+
+          {/* Link back to the source stream (only for files sent from one). */}
+          {streamOrigin && (
+            <Tooltip content={`Open “${streamOrigin.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
+              <button
+                type="button"
+                onClick={() => onNavigateToStream?.(streamOrigin.folderPath)}
+                className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+              >
+                {streamOrigin.label}
+              </button>
+            </Tooltip>
+          )}
 
           <ProgressBar percent={job.progress} status={job.status} />
 
@@ -347,252 +552,193 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
           )}
         </div>
 
-        {/* Right: action buttons column */}
-        <div className="flex flex-row items-center justify-center gap-1 shrink-0">
+        {/* Separator */}
+        <div className="w-px self-stretch bg-white/10 shrink-0" />
+        {/* Right: action buttons — same scheme as the ready-files rows (neutral
+            at rest, color on hover, label collapses to icon-only as it narrows). */}
+        <div className="self-center flex flex-row items-center justify-center gap-1 shrink-0">
           {job.status === 'queued' && (
-            <Tooltip content="Start conversion">
-              <button
-                onClick={() => window.api.startQueuedJob(job.id)}
-                className="p-1.5 text-gray-400 hover:text-green-400 transition-colors"
-              >
-                <Play size={14} />
-              </button>
-            </Tooltip>
+            <button onClick={() => window.api.startQueuedJob(job.id)} className={ROW_ACTION_GREEN}>
+              <Play size={13} />
+              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
+            </button>
           )}
           {isActive && (
-            <Tooltip content={job.status === 'paused' ? 'Resume' : 'Pause'}>
-              <button
-                onClick={() => job.status === 'paused' ? resumeJob(job.id) : pauseJob(job.id)}
-                className={`p-1.5 text-gray-400 transition-colors ${job.status === 'paused' ? 'hover:text-blue-400' : 'hover:text-yellow-400'}`}
-              >
-                {job.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
-              </button>
-            </Tooltip>
+            <button
+              onClick={() => job.status === 'paused' ? resumeJob(job.id) : pauseJob(job.id)}
+              className={job.status === 'paused' ? ROW_ACTION_BLUE : ROW_ACTION_YELLOW}
+            >
+              {job.status === 'paused' ? <Play size={13} /> : <Pause size={13} />}
+              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">{job.status === 'paused' ? 'Resume' : 'Pause'}</CollapsibleLabel>
+            </button>
           )}
           {isWorking && (
-            <Tooltip content="Cancel">
-              <button
-                onClick={() => cancelJob(job.id)}
-                className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
-              >
-                <Ban size={14} />
-              </button>
-            </Tooltip>
+            <button onClick={() => cancelJob(job.id)} className={ROW_ACTION_RED}>
+              <Ban size={13} />
+              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Cancel</CollapsibleLabel>
+            </button>
+          )}
+          {isCancelled && (
+            <button onClick={() => requeueJob(job)} className={ROW_ACTION_BLUE}>
+              <RotateCcw size={13} />
+              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Requeue</CollapsibleLabel>
+            </button>
           )}
           {(isDone || isCancelled || isError || job.status === 'queued') && (
-            <Tooltip content="Remove">
-              <button
-                onClick={() => removeJob(job.id)}
-                className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
-              >
-                <Trash2 size={14} />
-              </button>
-            </Tooltip>
+            <button onClick={() => removeJob(job.id)} className={ROW_ACTION_RED}>
+              <Trash2 size={13} />
+              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
+            </button>
           )}
         </div>
-      </div>
-    )
-  }
-
-  // Render function (NOT a sub-component) so React reconciles its output
-  // as ordinary inline JSX. Defining this as `<PresetItem />` would create a
-  // new component-type identity on every parent re-render — and the parent
-  // re-renders every second from the ETA tick — causing every preset row's
-  // subtree to unmount/remount mid-hover, which manifests as flashing
-  // hover styles and tooltip flicker.
-  const renderPresetItem = (p: ConversionPreset, deletable?: boolean) => {
-    const isRenaming = renamingId === p.id
-    const isArchiveDefault = archivePresetId === p.id
-    const isRecommended = recommendedArchiveId === p.id
-    return (
-      <div
-        key={p.id}
-        className={`group flex items-start border-b border-white/5 transition-colors ${
-          selectedPreset?.id === p.id
-            ? 'bg-purple-600/20 border-l-2 border-l-purple-500'
-            : 'hover:bg-white/5'
-        } ${!isRenaming ? 'cursor-pointer' : ''}`}
-        onClick={!isRenaming ? () => setSelectedPreset(p) : undefined}
-      >
-        <div className="flex-1 min-w-0 px-4 py-3">
-          {isRenaming ? (
-            <input
-              ref={renameInputRef}
-              value={renameValue}
-              onChange={e => setRenameValue(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') commitRename()
-                if (e.key === 'Escape') cancelRename()
-              }}
-              onBlur={commitRename}
-              onClick={e => e.stopPropagation()}
-              className="w-full bg-navy-900 border border-purple-500/50 text-gray-200 text-sm rounded-lg px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
-              autoFocus
-            />
-          ) : (
-            <div className="flex items-center gap-1.5">
-              <div className="text-sm font-medium text-gray-200 truncate">{p.name}</div>
-              {isArchiveDefault && (
-                <Tooltip content="Default archive preset">
-                  <span><Archive size={11} className="text-purple-400 shrink-0" /></span>
-                </Tooltip>
-              )}
-              {isRecommended && (
-                <Tooltip content="Recommended for your system">
-                  <span><Star size={11} className="text-amber-400 shrink-0 fill-amber-400" /></span>
-                </Tooltip>
-              )}
-            </div>
-          )}
-          {!isRenaming && p.description && (
-            <Tooltip content={p.description} side="right" width="w-64" triggerClassName="block w-full">
-              <div className="text-xs text-gray-400 mt-0.5 truncate">{p.description}</div>
-            </Tooltip>
-          )}
-        </div>
-        {deletable && !isRenaming && (
-          <div className="flex opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-2 mr-1">
-            <Tooltip content="Rename preset">
-              <button
-                onClick={e => { e.stopPropagation(); startRename(p) }}
-                className="p-1.5 text-gray-400 hover:text-blue-400 transition-colors"
-              >
-                <Pencil size={11} />
-              </button>
-            </Tooltip>
-            <Tooltip content="Remove preset">
-              <button
-                onClick={e => { e.stopPropagation(); deleteImported(p.id) }}
-                className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
-              >
-                <Trash2 size={11} />
-              </button>
-            </Tooltip>
-          </div>
-        )}
       </div>
     )
   }
 
   return (
     <>
-    <div className="flex h-full overflow-hidden">
-      {/* Left: presets sidebar */}
-      <div className="w-64 bg-navy-800 border-r border-white/5 flex flex-col shrink-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/5">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Presets</h3>
-        </div>
-
-        <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto">
-          {builtinPresets.map(p => renderPresetItem(p))}
-
-          {importedPresets.length > 0 && (
-            <>
-              <div className="px-4 pt-3 pb-1">
-                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Imported</span>
-              </div>
-              {importedPresets.map(p => renderPresetItem(p, true))}
-            </>
-          )}
-        </div>
-
-        </div>
-        {/* Create + Import buttons */}
-        <div className="p-3 border-t border-white/5 flex flex-col gap-2">
-          {importError && (
-            <p className="text-xs text-red-400 leading-tight">{importError}</p>
-          )}
-          <Button
-            variant="primary"
-            size="sm"
-            className="w-full"
-            icon={<Plus size={12} />}
-            onClick={() => { setEditingPreset(null); setPresetEditorOpen(true) }}
-          >
-            New Custom Preset
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="w-full"
-            icon={importing ? <RefreshCw size={12} className="animate-spin" /> : <Upload size={12} />}
-            onClick={importPreset}
-            disabled={importing}
-          >
-            Import HandBrake JSON
-          </Button>
-        </div>
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-white/5 flex items-center gap-3 shrink-0">
+        <h1 className="text-lg font-semibold flex-1">Converter</h1>
+        <Button variant="secondary" size="sm" icon={<SlidersHorizontal size={14} />} onClick={() => setPresetsModalOpen(true)}>
+          Manage presets
+        </Button>
       </div>
 
-      {/* Right: file drop + queue */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-6 py-4 border-b border-white/5 flex items-center gap-3 shrink-0">
-          <h1 className="text-lg font-semibold flex-1">Converter</h1>
-        </div>
-
         <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto p-4 flex flex-col gap-4">
-          {queuedFiles.length > 0 && (
-            <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 flex-wrap gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs font-medium text-gray-400 shrink-0">{queuedFiles.length} file(s) ready</span>
-                  {selectedPreset && (
-                    <Tooltip content="Preset that will apply to these files when started">
-                      <span className="text-xs px-2 py-0.5 rounded-full border text-purple-300 bg-purple-900/30 border-purple-300/40 truncate">
-                        {selectedPreset.name}
-                      </span>
-                    </Tooltip>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-400">
-                      Output: {outputDir ? outputDir : 'Next to original'}
-                    </span>
-                    {outputDir && (
-                      <button
-                        onClick={() => setOutputDir('')}
-                        className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
-                      >
-                        Clear
-                      </button>
-                    )}
-                    <Button variant="ghost" size="sm" icon={<FolderOpen size={12} />} onClick={pickOutputDir}>
-                      Change
-                    </Button>
-                  </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={<Zap size={12} />}
-                    onClick={startAll}
-                    disabled={!selectedPreset}
-                  >
-                    Start
-                  </Button>
-                </div>
-              </div>
-              {queuedFiles.map(f => (
-                <div key={f} className="flex items-center gap-2 px-4 py-2 border-b border-white/5 last:border-0">
-                  <span className="flex-1 text-xs text-gray-400 truncate" title={f}>
-                    {f.split(/[\\/]/).pop()}
-                  </span>
-                  {selectedPreset && (
-                    <span className="text-xs text-gray-400 shrink-0">
-                      → {getOutputPath(f, selectedPreset, outputDir).split(/[\\/]/).pop()}
-                    </span>
-                  )}
-                  <button onClick={() => removeFile(f)} className="p-1 text-gray-400 hover:text-red-400 transition-colors shrink-0">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
           <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 gap-2">
+                <span className="text-xs font-medium text-gray-400">{queuedFiles.length} file(s) ready</span>
+                <Button
+                  variant="success"
+                  size="sm"
+                  icon={<Zap size={12} />}
+                  onClick={startAll}
+                  disabled={!defaultPreset || queuedFiles.length === 0}
+                >
+                  Start all
+                </Button>
+              </div>
+              {queuedFiles.length === 0 && jobs.length === 0 && (
+                <div className="px-4 py-6 text-center text-xs text-gray-400">No files queued</div>
+              )}
+              {queuedFiles.map(file => {
+                const { path, outputDir, pickedDir, stream } = file
+                const preset = presetForId(file.presetId)
+                const sourceName = path.split(/[\\/]/).pop() ?? path
+                const destName = preset ? getOutputPath(path, preset, outputDir).split(/[\\/]/).pop() ?? '' : ''
+                return (
+                  <div key={path} className="@container flex items-stretch gap-3 px-4 py-2.5 border-b border-white/5 last:border-0">
+                    {/* Thumbnail — pulled toward the left/top/bottom edges
+                        (negative margins), but keeps the gap-3 to the right. */}
+                    <div className="self-center shrink-0 -my-1 -ms-2">
+                      <VideoThumb path={path} />
+                    </div>
+                    {/* Info column: filenames on top, controls below */}
+                    <div className="flex-1 min-w-0 flex flex-col justify-center gap-1.5">
+                      <div className="flex items-center gap-1.5 text-xs min-w-0">
+                        <TruncText text={sourceName} className="text-gray-400" />
+                        {preset && (
+                          <>
+                            <span className="shrink-0 text-gray-400">→</span>
+                            <TruncText text={destName} className="text-gray-300" />
+                          </>
+                        )}
+                      </div>
+                      {/* Link back to the source stream (only for files sent
+                          from a stream). Opens its detail sidebar on the
+                          streams page. */}
+                      {stream && (
+                        <Tooltip content={`Open “${stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToStream?.(stream.folderPath)}
+                            className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                          >
+                            {stream.label}
+                          </button>
+                        </Tooltip>
+                      )}
+                      <div className="flex items-center gap-2 min-w-0">
+                        {/* Encode preset */}
+                        <div className="relative shrink-0">
+                          <select
+                            value={preset?.id ?? ''}
+                            onChange={e => setFilePreset(path, e.target.value)}
+                            className="appearance-none max-w-[180px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                          >
+                            <optgroup label="Built-in">
+                              {builtinPresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </optgroup>
+                            {importedPresets.length > 0 && (
+                              <optgroup label="Custom &amp; imported">
+                                {importedPresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                              </optgroup>
+                            )}
+                          </select>
+                          <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                        {/* Output directory — keeps the last picked path as an
+                            option even after switching back to "Next to original". */}
+                        <div className="relative shrink-0">
+                          <select
+                            value={outputDir || ''}
+                            onChange={async e => {
+                              const v = e.target.value
+                              if (v === '__choose__') {
+                                const dir = await window.api.openDirectoryDialog()
+                                if (dir) setQueuedFiles(prev => prev.map(f => f.path === path ? { ...f, outputDir: dir, pickedDir: dir } : f))
+                                else setFileOutputDir(path, outputDir) // cancel → reset the controlled value
+                              } else {
+                                setFileOutputDir(path, v)
+                              }
+                            }}
+                            className="appearance-none max-w-[220px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                          >
+                            <option value="">Next to original</option>
+                            {pickedDir && <option value={pickedDir}>{shortenDir(pickedDir)}</option>}
+                            <option value="__choose__">Choose location…</option>
+                          </select>
+                          <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    </div>
+                    {/* Separator */}
+                    <div className="w-px self-stretch bg-white/10 shrink-0" />
+                    {/* Buttons column — match the sidebar-footer buttons: ghost
+                        Button with a label that smoothly collapses to icon-only
+                        as the row narrows. */}
+                    <div className="shrink-0 self-center flex items-center gap-1">
+                      <button onClick={() => startOne(file)} disabled={!preset} className={ROW_ACTION_GREEN}>
+                        <Zap size={13} />
+                        <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
+                      </button>
+                      <button onClick={() => removeFile(path)} className={ROW_ACTION_RED}>
+                        <Trash2 size={13} />
+                        <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+              {/* When something's converting, hide the big drop zone below and
+                  offer a slim "add more" zone as the last queue item instead. */}
+              {jobs.length > 0 && (
+                <FileDropZone
+                  compact
+                  onFiles={addFiles}
+                  accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
+                  label="Drop or click to add files"
+                  className="m-2"
+                />
+              )}
+          </div>
+
+          {jobs.length > 0 && (
+            <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
               <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/5">
-                <span className="text-xs font-medium text-gray-400">Queue {jobs.length > 0 ? `(${jobs.length})` : ''}</span>
+                <span className="text-xs font-medium text-gray-400">Converting ({jobs.length})</span>
                 <div className="flex items-center gap-1">
                   {(() => {
                     const anyRunning = jobs.some(j => j.status === 'running' || j.status === 'downloading')
@@ -625,9 +771,6 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                   <Button variant="ghost" size="sm" onClick={clearDone} disabled={!jobs.some(j => j.status === 'done' || j.status === 'cancelled' || j.status === 'error')}>Clear done</Button>
                 </div>
               </div>
-              {jobs.length === 0 && (
-                <div className="px-4 py-6 text-center text-xs text-gray-400">Nothing in the queue</div>
-              )}
               {/* Build a render list: group rows are emitted at the position of
                   their first member; subsequent members are skipped (the group
                   block renders all members itself). Ungrouped jobs render as
@@ -686,16 +829,20 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
                 return items
               })()}
             </div>
+          )}
 
-          <FileDropZone
-            onFiles={addFiles}
-            accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
-            label="Drop video files here to convert"
-            className="min-h-[100px]"
-          />
-          <p className="text-xs text-gray-400 px-1">You can also send videos here from the Streams page using the action buttons on each row.</p>
+          {jobs.length === 0 && (
+            <>
+              <FileDropZone
+                onFiles={addFiles}
+                accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
+                label="Drop video files here to convert"
+                className="min-h-[100px]"
+              />
+              <p className="text-xs text-gray-400 px-1">You can also send videos here from the Streams page using the action buttons on each row.</p>
+            </>
+          )}
         </div></div>
-      </div>
     </div>
 
     <Modal
@@ -732,23 +879,20 @@ export function ConverterPage({ initialFile }: { initialFile?: PendingFile | nul
       </div>
     </Modal>
 
-    {/* Custom preset editor — opened via the "New Custom Preset" button (creation)
-        or via the imported-preset list (edit). On save, the IPC persists the preset
-        and we update the local list. */}
-    <PresetEditorModal
-      isOpen={presetEditorOpen}
-      onClose={() => { setPresetEditorOpen(false); setEditingPreset(null) }}
-      editing={editingPreset}
-      onSave={async (preset) => {
-        await window.api.saveCustomPreset(preset)
-        setImportedPresets(prev => {
-          const idx = prev.findIndex(p => p.id === preset.id)
-          return idx >= 0 ? prev.map((p, i) => i === idx ? preset : p) : [...prev, preset]
-        })
-        setSelectedPreset(preset)
-        setPresetEditorOpen(false)
-        setEditingPreset(null)
-      }}
+    {/* Presets management — list + inline create/edit form + import + the
+        default / archive-default / recommended markers. Replaces the old
+        left sidebar. */}
+    <PresetsModal
+      isOpen={presetsModalOpen}
+      onClose={() => setPresetsModalOpen(false)}
+      builtinPresets={builtinPresets}
+      importedPresets={importedPresets}
+      recommendedId={recommendedArchiveId}
+      onSavePreset={savePreset}
+      onDeletePreset={deleteImported}
+      onImport={importPreset}
+      importing={importing}
+      importError={importError}
     />
     </>
   )
