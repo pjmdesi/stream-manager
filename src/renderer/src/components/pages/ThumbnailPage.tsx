@@ -15,7 +15,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   FlipHorizontal2, FlipVertical2,
-  ChevronDown,
+  ChevronDown, Loader2,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -985,10 +985,15 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
             New blank
           </Button>
         </div>
-        {loading ? (
-          <p className="text-xs text-gray-400">Loading…</p>
+        {/* Reserve ~one card row so the Recents section below doesn't jump
+            when templates finish loading (loading/empty states are short). */}
+        <div className="min-h-[170px]">
+          {loading ? (
+          <div className="flex items-center justify-center gap-2 h-[170px] text-xs text-gray-400">
+            <Loader2 size={14} className="animate-spin" /> Loading templates…
+          </div>
         ) : templates.length === 0 ? (
-          <p className="text-xs text-gray-400">No templates yet. Create one from the editor.</p>
+          <div className="flex items-center justify-center h-[170px] text-xs text-gray-400">No templates yet. Create one from the editor.</div>
         ) : (
           <div className="grid grid-cols-3 gap-3">
             {templates.map(t => (
@@ -1021,6 +1026,7 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
             ))}
           </div>
         )}
+        </div>
       </section>
 
       {/* Recents */}
@@ -2464,9 +2470,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }).catch(() => {})
   }, [])
 
-  // ── Load overview data when visible ───────────────────────────────────────
+  // ── Load overview data once per config ────────────────────────────────────
+  // ThumbnailPage stays mounted across navigation (App renders it always,
+  // toggling `isVisible`), so its templates/recents state persists. Loading on
+  // every visibility flip re-fetched and flashed the loading state each visit.
+  // Templates/recents are kept current in-memory by the save/delete handlers,
+  // so we load once per (streamsDir, streamMode) and skip on subsequent visits;
+  // a config change resets the key and triggers a fresh load.
+  const overviewLoadedKeyRef = useRef<string | null>(null)
   useEffect(() => {
     if (!isVisible || !config.streamsDir) return
+    const key = `${config.streamsDir} ${config.streamMode || 'folder-per-stream'}`
+    if (overviewLoadedKeyRef.current === key) return
+    overviewLoadedKeyRef.current = key
     setOverviewLoading(true)
     Promise.all([
       window.api.thumbnailListTemplates(config.streamsDir),
@@ -3665,8 +3681,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     <div className="flex flex-col h-full bg-navy-900">
       {mode === 'overview' ? (
         <div className="flex flex-col flex-1 min-h-0 relative">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-white/5 shrink-0">
-            <h1 className="text-sm font-semibold text-gray-200">Thumbnail Editor</h1>
+          <div className="px-6 py-4 border-b border-white/5 shrink-0">
+            <h1 className="text-lg font-semibold">Thumbnail Editor</h1>
           </div>
           <Overview
             streamsDir={config.streamsDir}
