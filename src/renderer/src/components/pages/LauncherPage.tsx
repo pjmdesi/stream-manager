@@ -9,6 +9,14 @@ import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { IconPickerModal } from '../ui/IconPickerModal'
 import { useStore } from '../../hooks/useStore'
+import { useAnimationConfig } from '../../hooks/useAnimationConfig'
+
+// Visible width of a group row's left zone (icon + name). The detail sidebar
+// slides over everything to the right of this, leaving the icon + name of each
+// row showing — mirrors how the Streams detail sidebar obscures all but the
+// thumbnail/counter/title. Shared by the rows and the sidebar's width so the
+// boundary lines up exactly.
+const GROUP_ROW_WIDTH = 280
 
 function toPascal(name: string) {
   return name.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
@@ -495,6 +503,87 @@ function AppRow({
   )
 }
 
+// ── Group row (main list) ──────────────────────────────────────────────────────
+
+function GroupRow({
+  group, selected, isWidget, launching, feedback, onSelect, onLaunchGroup, onLaunchApp, onToggleWidget,
+}: {
+  group: LauncherGroup
+  selected: boolean
+  isWidget: boolean
+  launching: boolean
+  feedback?: number
+  onSelect: () => void
+  onLaunchGroup: () => void
+  onLaunchApp: (app: LauncherApp) => void
+  onToggleWidget: () => void
+}) {
+  const launchable = group.apps.length > 0 && group.apps.some(a => a.path)
+  return (
+    <div
+      onClick={onSelect}
+      className={`group/row flex items-stretch border-b border-white/5 cursor-pointer transition-colors ${
+        selected ? 'bg-purple-600/15' : 'hover:bg-white/5'
+      }`}
+    >
+      {/* Left zone (icon + name) — stays visible under the open sidebar. */}
+      <div className="shrink-0 flex items-center gap-3 pl-6 pr-3 py-3" style={{ width: GROUP_ROW_WIDTH }}>
+        <div className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-lg ${
+          selected ? 'bg-purple-500/20 text-purple-200' : 'bg-white/5 text-gray-300'
+        }`}>
+          <GroupIcon name={group.icon} size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className={`text-sm font-medium truncate ${selected ? 'text-purple-200' : 'text-gray-200'}`}>{group.name}</span>
+          </div>
+          <span className="text-[11px] text-gray-400">{group.apps.length} {group.apps.length === 1 ? 'app' : 'apps'}</span>
+        </div>
+      </div>
+
+      {/* Right zone (app icons wrap; covered by the detail sidebar when open). */}
+      <div className="flex-1 min-w-0 flex items-center gap-3 pr-4 py-3">
+        <div className="flex-1 min-w-0 flex flex-wrap items-center gap-1.5">
+          {group.apps.length === 0 ? (
+            <span className="text-xs text-gray-400 italic">No apps yet</span>
+          ) : group.apps.map(app => (
+            <Tooltip key={app.id} content={app.path ? `Launch ${app.name}` : `${app.name} — no path set`} side="top">
+              <button
+                onClick={e => { e.stopPropagation(); if (app.path) onLaunchApp(app) }}
+                disabled={!app.path}
+                className="shrink-0 p-1 rounded hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <AppIcon path={app.path} size={22} />
+              </button>
+            </Tooltip>
+          ))}
+        </div>
+        <div className="shrink-0 flex items-center gap-1">
+          <Tooltip content={isWidget ? 'Remove from sidebar widget' : 'Pin to sidebar widget'} side="top">
+            <button
+              onClick={e => { e.stopPropagation(); onToggleWidget() }}
+              className={`p-1.5 rounded transition-colors ${
+                isWidget ? 'text-yellow-400' : 'text-gray-400 opacity-0 group-hover/row:opacity-100 hover:text-gray-200'
+              }`}
+            >
+              <Star size={13} className={isWidget ? 'fill-yellow-400' : ''} />
+            </button>
+          </Tooltip>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Rocket size={13} />}
+            disabled={launching || !launchable}
+            onClick={e => { e.stopPropagation(); onLaunchGroup() }}
+          >
+            {feedback != null ? `Launched ${feedback}` : 'Launch all'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function LauncherPage() {
@@ -552,7 +641,8 @@ export function LauncherPage() {
   useEffect(() => {
     window.api.getLauncherGroups().then(g => {
       setGroups(g)
-      if (g.length > 0 && !selectedId) setSelectedId(g[0].id)
+      // Don't auto-select a group — the page opens to the full list with no
+      // sidebar; the detail sidebar appears only when a row is clicked.
     })
     window.api.getStartMenuPath().then(setStartMenuPath).catch(() => {})
   }, [])
@@ -619,6 +709,21 @@ export function LauncherPage() {
 
   const selected = groups.find(g => g.id === selectedId) ?? null
 
+  // Detail sidebar slide timing (respects the user's animation prefs) + the
+  // last-opened group held through the close slide-out so its content doesn't
+  // vanish before the sidebar finishes animating away.
+  const anim = useAnimationConfig()
+  const animMs = anim.duration(200)
+  const [renderedGroupId, setRenderedGroupId] = useState<string | null>(null)
+  useEffect(() => {
+    if (selectedId) { setRenderedGroupId(selectedId); return }
+    if (renderedGroupId === null) return
+    const t = window.setTimeout(() => setRenderedGroupId(null), animMs)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, animMs])
+  const sidebarGroup = groups.find(g => g.id === (selectedId ?? renderedGroupId)) ?? null
+
   const getItemStyle = (groupId: string, idx: number): React.CSSProperties => {
     if (!dragState || dragState.groupId !== groupId) return {}
     const { dragIdx, startY, currentY, rowHeight } = dragState
@@ -641,88 +746,105 @@ export function LauncherPage() {
 
   return (
     <>
-    <div className="flex h-full overflow-hidden">
-      {/* Left: group list */}
-      <div className="w-56 bg-navy-800 border-r border-white/5 flex flex-col shrink-0">
-        <div className="px-4 py-3 border-b border-white/5 shrink-0">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Launch Groups</h3>
-        </div>
-        <div className="flex-1 overflow-y-auto py-1">
-          {groups.map(group => {
-            const isPinned = widgetGroupId === group.id
-            const isSelected = selectedId === group.id
-            return (
-              <div
-                key={group.id}
-                className={`group/row flex items-center transition-colors ${
-                  isSelected ? 'bg-purple-600/20' : 'hover:bg-white/5'
-                }`}
-              >
-                <button
-                  onClick={() => setSelectedId(group.id)}
-                  className={`flex-1 flex items-center gap-2 pl-3 pr-1 py-2 text-sm text-left transition-colors min-w-0 ${
-                    isSelected ? 'text-purple-300' : 'text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  <GroupIcon name={group.icon} size={14} />
-                  <span className="flex-1 truncate">{group.name}</span>
-                  <span className="text-[10px] text-gray-400 shrink-0">{group.apps.length}</span>
-                </button>
-                <Tooltip content={isPinned ? 'Remove from sidebar widget' : 'Pin to sidebar widget'} side="right">
-                  <button
-                    onClick={() => setWidgetGroupId(isPinned ? '' : group.id)}
-                    className={`shrink-0 px-2 py-2 transition-colors ${
-                      isPinned
-                        ? 'text-yellow-400'
-                        : 'text-gray-400 opacity-0 group-hover/row:opacity-100 hover:text-gray-400'
-                    }`}
-                  >
-                    <Star size={12} className={isPinned ? 'fill-yellow-400' : ''} />
-                  </button>
-                </Tooltip>
-              </div>
-            )
-          })}
-        </div>
-        <div className="p-2 border-t border-white/5 shrink-0">
-          <Button variant="ghost" size="sm" icon={<Plus size={13} />} className="w-full justify-center" onClick={addGroup}>
+    <div className="relative h-full overflow-hidden bg-navy-900">
+      {/* List column (header + rows) sits full-width UNDER the sidebar overlay,
+          so the sidebar covers the header's right portion too — only the left
+          strip (the page title, and each row's icon + name) stays visible. */}
+      <div className="absolute inset-0 flex flex-col">
+        {/* Header — shrinks to the row strip when a group is open, in lockstep
+            with the sidebar sliding over the rest. Its New Group button slides
+            left with it and animates to icon-only, staying visible in the strip
+            (mirrors the Streams header's collapsing buttons). */}
+        <div
+          className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0 transition-[width] ease-linear"
+          style={{ width: selectedId ? `${GROUP_ROW_WIDTH}px` : '100%', transitionDuration: `${animMs}ms` }}
+        >
+          <h1 className="text-lg font-semibold shrink-0">Launcher</h1>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Plus size={13} />}
+            collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+            labelCollapsed={!!selectedId}
+            onClick={addGroup}
+          >
             New Group
           </Button>
         </div>
+
+        {/* Group list — full width so rows never reflow. */}
+        <div className="flex-1 overflow-y-auto">
+          {groups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
+              <Rocket size={32} className="text-gray-400" />
+              <p className="text-sm text-gray-400">Create a launch group to get started.</p>
+              <Button variant="secondary" size="sm" icon={<Plus size={13} />} onClick={addGroup}>New Group</Button>
+            </div>
+          ) : (
+            groups.map(group => (
+              <GroupRow
+                key={group.id}
+                group={group}
+                selected={selectedId === group.id}
+                isWidget={widgetGroupId === group.id}
+                launching={launching === group.id}
+                feedback={launchFeedback[group.id]}
+                onSelect={() => setSelectedId(selectedId === group.id ? null : group.id)}
+                onLaunchGroup={() => launchGroup(group.id)}
+                onLaunchApp={app => { if (app.path) window.api.launchApp(app.path) }}
+                onToggleWidget={() => setWidgetGroupId(widgetGroupId === group.id ? '' : group.id)}
+              />
+            ))
+          )}
+        </div>
       </div>
 
-      {/* Right: selected group detail */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {selected ? (
-          <>
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
+      {/* Detail sidebar — fixed width, slides in from the right over BOTH the
+          list rows and the header. Constant width so its content doesn't reflow
+          mid-slide; only the left GROUP_ROW_WIDTH strip is left uncovered. */}
+      <aside
+        className="absolute top-0 right-0 bottom-0 bg-navy-800 border-l border-white/10 overflow-hidden shadow-2xl shadow-black/30"
+        style={{
+          width: `calc(100% - ${GROUP_ROW_WIDTH}px)`,
+          transform: selectedId ? 'translateX(0)' : 'translateX(100%)',
+          transition: `transform ${animMs}ms linear`,
+          pointerEvents: selectedId ? 'auto' : 'none',
+        }}
+      >
+        {sidebarGroup && (
+          <div className="h-full flex flex-col">
+            {/* Detail header — aligns with the page header band it overlays. */}
+            <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-white/5 shrink-0">
               <div className="flex items-center gap-3 min-w-0">
                 <Tooltip content="Change icon" side="bottom">
                   <button
                     onClick={() => setIconPickerOpen(true)}
-                    className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
+                    className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-gray-100 transition-colors"
                   >
-                    <GroupIcon name={selected.icon} size={18} />
+                    <GroupIcon name={sidebarGroup.icon} size={18} />
                   </button>
                 </Tooltip>
                 <EditableLabel
-                  value={selected.name}
-                  onSave={name => updateGroup(selected.id, { name })}
+                  value={sidebarGroup.name}
+                  onSave={name => updateGroup(sidebarGroup.id, { name })}
                   placeholder="Group name"
                   className="text-lg font-semibold text-gray-200"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                {widgetGroupId === selected.id && (
-                  <span className="flex items-center gap-1 text-[10px] text-yellow-400/80 bg-yellow-400/10 border border-yellow-400/20 rounded px-1.5 py-0.5">
-                    <Star size={9} className="fill-yellow-400/80" />
-                    Sidebar widget
-                  </span>
-                )}
-                <Tooltip content="Remove this group" side="left">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Tooltip content={widgetGroupId === sidebarGroup.id ? 'Remove from sidebar widget' : 'Pin to sidebar widget'} side="bottom">
                   <button
-                    onClick={() => removeGroup(selected.id)}
+                    onClick={() => setWidgetGroupId(widgetGroupId === sidebarGroup.id ? '' : sidebarGroup.id)}
+                    className={`p-1.5 rounded transition-colors ${
+                      widgetGroupId === sidebarGroup.id ? 'text-yellow-400' : 'text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <Star size={15} className={widgetGroupId === sidebarGroup.id ? 'fill-yellow-400' : ''} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Remove this group" side="bottom">
+                  <button
+                    onClick={() => removeGroup(sidebarGroup.id)}
                     className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
                   >
                     <Trash2 size={15} />
@@ -732,20 +854,28 @@ export function LauncherPage() {
                   variant="primary"
                   size="sm"
                   icon={<Rocket size={13} />}
-                  disabled={launching === selected.id || selected.apps.length === 0 || selected.apps.every(a => !a.path)}
-                  onClick={() => launchGroup(selected.id)}
+                  disabled={launching === sidebarGroup.id || sidebarGroup.apps.length === 0 || sidebarGroup.apps.every(a => !a.path)}
+                  onClick={() => launchGroup(sidebarGroup.id)}
                 >
-                  {launchFeedback[selected.id] != null
-                    ? `Launched ${launchFeedback[selected.id]}`
+                  {launchFeedback[sidebarGroup.id] != null
+                    ? `Launched ${launchFeedback[sidebarGroup.id]}`
                     : 'Launch All'
                   }
                 </Button>
+                <Tooltip content="Close" side="left">
+                  <button
+                    onClick={() => setSelectedId(null)}
+                    className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                </Tooltip>
               </div>
             </div>
 
             {/* App list */}
             <div className="flex-1 overflow-y-auto">
-              {selected.apps.length === 0 ? (
+              {sidebarGroup.apps.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full px-12">
                   <AppDropZone onClick={() => openAddApp()} onFileDrop={openAddApp} />
                 </div>
@@ -754,20 +884,20 @@ export function LauncherPage() {
                   className="p-4 flex flex-col gap-1"
                   style={dragState ? { userSelect: 'none', cursor: 'grabbing' } : undefined}
                 >
-                  {selected.apps.map((app, i) => (
+                  {sidebarGroup.apps.map((app, i) => (
                     <AppRow
                       key={app.id}
                       app={app}
-                      onUpdate={updated => updateApp(selected.id, app.id, updated)}
-                      onRemove={() => removeApp(selected.id, app.id)}
+                      onUpdate={updated => updateApp(sidebarGroup.id, app.id, updated)}
+                      onRemove={() => removeApp(sidebarGroup.id, app.id)}
                       defaultPath={startMenuPath}
-                      isDragging={dragState?.groupId === selected.id && dragState.dragIdx === i}
-                      style={getItemStyle(selected.id, i)}
+                      isDragging={dragState?.groupId === sidebarGroup.id && dragState.dragIdx === i}
+                      style={getItemStyle(sidebarGroup.id, i)}
                       onGripMouseDown={e => {
                         e.preventDefault()
                         const rowEl = (e.currentTarget as HTMLElement).closest('.group') as HTMLElement
                         const rowHeight = rowEl?.getBoundingClientRect().height ?? 48
-                        setDragState({ groupId: selected.id, dragIdx: i, startY: e.clientY, currentY: e.clientY, rowHeight })
+                        setDragState({ groupId: sidebarGroup.id, dragIdx: i, startY: e.clientY, currentY: e.clientY, rowHeight })
                       }}
                     />
                   ))}
@@ -777,17 +907,9 @@ export function LauncherPage() {
                 </div>
               )}
             </div>
-          </>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
-            <Rocket size={32} className="text-gray-400" />
-            <p className="text-sm text-gray-400">Create a launch group to get started.</p>
-            <Button variant="secondary" size="sm" icon={<Plus size={13} />} onClick={addGroup}>
-              New Group
-            </Button>
           </div>
         )}
-      </div>
+      </aside>
     </div>
 
     {selected && (() => {
