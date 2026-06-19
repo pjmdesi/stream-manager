@@ -115,6 +115,15 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
     }, 140)
   }, [interactive, cancelClose])
 
+  // Dismiss immediately when the trigger is clicked. Without this a
+  // non-interactive tooltip can stick open after a click that re-renders or
+  // disables the trigger (the browser may never fire mouseleave), leaving the
+  // portaled bubble floating at z-[10001] over the rest of the UI.
+  const hideNow = useCallback(() => {
+    cancelClose()
+    setVisible(false)
+  }, [cancelClose])
+
   useEffect(() => () => cancelClose(), [cancelClose])
 
   // When externally opened, re-anchor pos from the trigger ref before
@@ -164,6 +173,7 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
         style={triggerStyle}
         onMouseEnter={wantsInternalHover ? show : undefined}
         onMouseLeave={wantsInternalHover ? close : undefined}
+        onClick={wantsInternalHover && !interactive ? hideNow : undefined}
       >
         {children}
       </div>
