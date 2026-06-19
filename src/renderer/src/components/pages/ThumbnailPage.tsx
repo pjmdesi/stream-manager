@@ -3047,6 +3047,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     await addImageLayerFromPath(paths[0])
   }, [currentStream, config.streamsDir, addImageLayerFromPath])
 
+  // Set by the keydown Ctrl+V handler when it pastes an internally-copied
+  // layer, so the native 'paste' event fired by the SAME keystroke doesn't
+  // also paste a leftover OS-clipboard image as a second layer.
+  const justPastedLayerRef = useRef(false)
+
   // Paste-from-clipboard: write the image to the stream folder as a PNG,
   // refresh the asset panel, and add it to the canvas as a new image layer.
   // Skipped when focus is in a text input so paste-in-textbox still works.
@@ -3058,6 +3063,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const onPaste = async (e: ClipboardEvent) => {
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      // The keydown handler already pasted a copied layer for this Ctrl+V —
+      // swallow the native paste so a stale OS-clipboard image isn't added
+      // as a second layer (the reported duplication bug).
+      if (justPastedLayerRef.current) {
+        justPastedLayerRef.current = false
+        e.preventDefault()
+        return
+      }
       const items = e.clipboardData?.items
       if (!items) return
       let imgItem: DataTransferItem | null = null
@@ -3575,6 +3588,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         if (clipboardLayers.length > 0) {
+          // Mark this Ctrl+V as handled so the native 'paste' event for the
+          // same keystroke doesn't also paste an OS-clipboard image. The
+          // paste event fires synchronously before this timeout, so the
+          // guard sees `true`; the timeout just clears it if no paste follows.
+          justPastedLayerRef.current = true
+          setTimeout(() => { justPastedLayerRef.current = false }, 0)
           const pasted = clipboardLayers.map(l => ({ ...cloneLayer(l), id: newId() }))
           commitLayers([...layers, ...pasted])
           setSelectedIds(pasted.map(l => l.id))
