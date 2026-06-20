@@ -71,6 +71,20 @@ export function ThumbImage({
     }
   }, [status, path])
 
+  // A file:// image can already be decoded by the time React attaches `onLoad`
+  // (e.g. rows mounted on scroll with a warm OS cache), so the load event is
+  // missed and status sticks on 'loading'. Catch that case after each commit.
+  // MUST be declared before the early return below — otherwise the hook count
+  // drops when `status` flips to a placeholder state (cloud/syncing/error),
+  // which throws "rendered fewer hooks than expected" (e.g. a reschedule
+  // renames the folder and the old thumbnail path 404s → status='syncing').
+  const imgRef = useRef<HTMLImageElement>(null)
+  useEffect(() => {
+    if (status !== 'loading') return
+    const el = imgRef.current
+    if (el && el.complete && el.naturalWidth > 0) { setStatus('loaded'); onLoad?.({ width: el.naturalWidth, height: el.naturalHeight }) }
+  })
+
   if (status === 'cloud' || status === 'syncing' || status === 'error') {
     const baseCls = 'flex flex-col items-center justify-center gap-1 bg-navy-800/40'
     const cls = `${baseCls} ${placeholderClassName ?? className ?? ''}`
@@ -89,16 +103,6 @@ export function ThumbImage({
   }
 
   const src = `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
-
-  // A file:// image can already be decoded by the time React attaches `onLoad`
-  // (e.g. rows mounted on scroll with a warm OS cache), so the load event is
-  // missed and status sticks on 'loading'. Catch that case after each commit.
-  const imgRef = useRef<HTMLImageElement>(null)
-  useEffect(() => {
-    if (status !== 'loading') return
-    const el = imgRef.current
-    if (el && el.complete && el.naturalWidth > 0) { setStatus('loaded'); onLoad?.({ width: el.naturalWidth, height: el.naturalHeight }) }
-  })
 
   return (
     <>
