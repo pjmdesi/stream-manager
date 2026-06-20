@@ -2889,21 +2889,28 @@ export function StreamsPage({
             dateDirection={rescheduleDateDirection}
             onUpdateMeta={(folderPath, partial) => updateMeta(folderPath, partial)}
             onClose={() => { setRescheduleTargetPath(null); setRescheduleDateDirection(undefined) }}
-            onSuccess={(newFolderPath) => {
+            onSuccess={async (newFolderPath) => {
               setRescheduleTargetPath(null)
               setRescheduleDateDirection(undefined)
-              setSelectedFolderPath(newFolderPath)
-              // Bump thumbsKey so every <ThumbImage> URL invalidates
-              // alongside the folder refresh. Without this, the
-              // chokidar-driven streams:changed listener is the only
-              // thing that bumps it, and its awaitWriteFinish +
-              // debounce window (~1.8s) is long enough for the user
-              // to see stale thumbnail URLs after a rename — especially
-              // bad in back-to-back reschedules that swap dates between
-              // streams, where the renderer can briefly serve cached
+              // Refresh the folder list BEFORE re-selecting the renamed folder.
+              // The renderedFolder fade timer keys on the *resolved* folder, so
+              // selecting the new path first (while folders still holds the old
+              // one) leaves selectedFolder undefined for the whole rescan. If
+              // that outran the fade-hold timer (a full rescan easily does),
+              // renderedFolder cleared and the empty-state calendar flashed
+              // through before the new details mounted. Reloading first keeps
+              // the old folder resolved until the new one exists.
+              await loadFolders()
+              // Bump thumbsKey so every <ThumbImage> URL invalidates alongside
+              // the folder refresh. Without this, the chokidar-driven
+              // streams:changed listener is the only thing that bumps it, and
+              // its awaitWriteFinish + debounce window (~1.8s) is long enough
+              // for the user to see stale thumbnail URLs after a rename —
+              // especially bad in back-to-back reschedules that swap dates
+              // between streams, where the renderer can briefly serve cached
               // bytes for paths that no longer exist.
               setThumbsKey(Date.now())
-              void loadFolders()
+              setSelectedFolderPath(newFolderPath)
             }}
             onPushYoutube={async (newScheduledStartTime, privacy) => {
               // Find the linked broadcast (might have already shifted
