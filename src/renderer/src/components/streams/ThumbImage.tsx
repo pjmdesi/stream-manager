@@ -36,7 +36,7 @@ export function ThumbImage({
   placeholderStyle?: React.CSSProperties
   draggable?: boolean
   iconSize?: number
-  onLoad?: () => void
+  onLoad?: (dims?: { width: number; height: number }) => void
 }) {
   const [status, setStatus] = useState<'loading' | 'loaded' | 'syncing' | 'cloud' | 'error'>(
     isLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud')
@@ -97,7 +97,7 @@ export function ThumbImage({
   useEffect(() => {
     if (status !== 'loading') return
     const el = imgRef.current
-    if (el && el.complete && el.naturalWidth > 0) { setStatus('loaded'); onLoad?.() }
+    if (el && el.complete && el.naturalWidth > 0) { setStatus('loaded'); onLoad?.({ width: el.naturalWidth, height: el.naturalHeight }) }
   })
 
   return (
@@ -108,7 +108,11 @@ export function ThumbImage({
         className={className}
         style={style}
         draggable={draggable}
-        onLoad={() => { setStatus('loaded'); onLoad?.() }}
+        onLoad={e => {
+          setStatus('loaded')
+          const im = e.currentTarget
+          onLoad?.(im.naturalWidth > 0 ? { width: im.naturalWidth, height: im.naturalHeight } : undefined)
+        }}
         onError={() => setStatus('syncing')}
       />
       {status !== 'loaded' && (

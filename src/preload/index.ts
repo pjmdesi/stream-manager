@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld('api', {
   finalizeThumbnailCache: (filePath: string, timecodes: number[]) =>
     ipcRenderer.invoke('video:finalizeThumbnailCache', filePath, timecodes),
 
+  getKeystoneThumbnail: (filePath: string) =>
+    ipcRenderer.invoke('video:getKeystoneThumbnail', filePath),
+
+  saveKeystoneThumbnail: (filePath: string, dataUrl: string) =>
+    ipcRenderer.invoke('video:saveKeystoneThumbnail', filePath, dataUrl),
+
   onExtractProgress: (
     callback: (data: { trackIndex: number; percent: number }) => void
   ) => {

@@ -109,6 +109,16 @@ export function registerVideoIPC(): void {
     thumbnailCacheManager.finalizeMeta(filePath, timecodes)
   })
 
+  // Keystone thumbnail (single representative frame) — prefer the cached one,
+  // else mint it from the player's strip; null means the caller should generate.
+  ipcMain.handle('video:getKeystoneThumbnail', async (_event, filePath: string) => {
+    return thumbnailCacheManager.getKeystone(filePath) ?? thumbnailCacheManager.deriveKeystoneFromStrip(filePath)
+  })
+
+  ipcMain.handle('video:saveKeystoneThumbnail', async (_event, filePath: string, dataUrl: string) => {
+    thumbnailCacheManager.saveKeystone(filePath, dataUrl)
+  })
+
   ipcMain.handle('video:getWaveform', async (_event, filePath: string) => {
     if (waveformCache.has(filePath)) return waveformCache.get(filePath)
     const disk = waveformCacheManager.getCached(filePath)

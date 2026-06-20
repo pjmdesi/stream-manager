@@ -18,7 +18,7 @@ import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
-import { PresetPickerModal, ThumbnailCarousel, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal } from '../streams/legacyStreamsShared'
+import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal } from '../streams/legacyStreamsShared'
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
@@ -34,6 +34,7 @@ import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { SendToConverterModal } from '../streams/SendToConverterModal'
+import { StreamFilesGrid } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { renderStreamTitle } from '../../lib/streamTitle'
@@ -1491,6 +1492,29 @@ export function StreamsPage({
   const outOfSyncItemsRef = useRef(outOfSyncItems)
   useEffect(() => { outOfSyncItemsRef.current = outOfSyncItems })
 
+  // Keep the selected folder's thumbnail hash live in the out-of-sync map as its
+  // thumbnail changes (set-as-thumbnail from the media grid, editor save,
+  // delete), so the empty-state panel / row dot reflect it immediately rather
+  // than waiting for the next full re-check.
+  const selectedResolvedThumb = useMemo(() => {
+    if (!selectedFolderPath) return null
+    const f = folders.find(ff => ff.folderPath === selectedFolderPath)
+    return f ? resolveStreamThumb(f) : null
+  }, [selectedFolderPath, folders])
+  useEffect(() => {
+    if (!selectedFolderPath) return
+    const key = selectedFolderPath
+    if (!selectedResolvedThumb) {
+      setThumbHashById(prev => (prev[key] == null ? prev : { ...prev, [key]: null }))
+      return
+    }
+    let cancelled = false
+    window.api.thumbnailHashFile(selectedResolvedThumb)
+      .then(h => { if (!cancelled) setThumbHashById(prev => (prev[key] === h ? prev : { ...prev, [key]: h })) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [selectedFolderPath, selectedResolvedThumb, thumbsKey])
+
   const handleBulkResolve = useCallback(async (kind: 'push' | 'pull', targets: StreamFolder[]) => {
     for (const f of targets) {
       try {
@@ -2802,6 +2826,12 @@ export function StreamsPage({
               onSendToPlayer={() => handleSendToPlayer(renderedFolder)}
               onSendToConverter={() => handleSendToConverter(renderedFolder)}
               onSendToCombine={() => handleSendToCombine(renderedFolder)}
+              onSendFileToPlayer={(path) => onSendToPlayer(path)}
+              onSendFileToConverter={(path) => onSendToConverter([path], {
+                folderPath: renderedFolder.folderPath,
+                label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
+              })}
+              onReloadFolders={() => void loadFolders()}
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
               onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
@@ -3509,8 +3539,18 @@ function StreamListItem({
 
   const { meta, hasMeta, detectedGames, date, thumbnails, thumbnailLocalFlags, videoCount } = folder
   const displayGames = meta?.games?.length ? meta.games : detectedGames
-  const firstThumb = thumbnails[0]
-  const firstThumbLocal = thumbnailLocalFlags?.[0] ?? true
+  // Show the stream's "main" (preferred) thumbnail — the one a YT push uploads —
+  // not just the first on disk, so setting a different default updates the row.
+  const preferredIdx = (() => {
+    const pref = meta?.preferredThumbnail
+    if (pref) {
+      const i = thumbnails.findIndex(p => (p.split(/[\\/]/).pop() ?? '') === pref)
+      if (i >= 0) return i
+    }
+    return 0
+  })()
+  const firstThumb = thumbnails[preferredIdx]
+  const firstThumbLocal = thumbnailLocalFlags?.[preferredIdx] ?? true
   const extraCount = thumbnails.length - 1
   const hasSMThumbnail = thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
   const title = renderStreamTitle(folder, folders)
@@ -4371,7 +4411,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onOpenFolder, onOpenThumbnails, onDelete,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onReloadFolders, onOpenFolder, onOpenThumbnails, onDelete,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -4437,6 +4477,11 @@ function SidebarDetail({
   onSendToPlayer: () => void
   onSendToConverter: () => void
   onSendToCombine: () => void
+  /** Open / send one specific file — used by the files grid's per-file actions. */
+  onSendFileToPlayer: (path: string) => void
+  onSendFileToConverter: (path: string) => void
+  /** Re-scan folders after a file changes (e.g. trashed from the grid). */
+  onReloadFolders: () => void
   onOpenFolder: () => void
   /** Open the thumbnail editor for the current stream. The optional
    *  variantOrdinal lets the carousel's per-image edit buttons open
@@ -5744,28 +5789,24 @@ function SidebarDetail({
           extra vertical space alone signals the boundary. */}
       <div className="flex-1 overflow-y-auto px-5 flex text-xs [scrollbar-gutter:stable]">
         <div className="flex flex-col gap-8 w-full max-w-[80rem] mx-auto pt-4">
-            {/* — Thumbnails — */}
-            {folder.thumbnails.length > 0 && (
+            {/* — Media — every file in the folder (videos + thumbnail images).
+                Leads the sidebar so past streams open straight onto their
+                recordings; absent only for an empty folder. */}
+            {(folder.videos.length > 0 || folder.thumbnails.length > 0) && (
               <div className="flex flex-col gap-3">
-                <MetaRow label="Thumbnails">
-                  <ThumbnailCarousel
-                    // Force a remount on stream switch so the
-                    // carousel's internal `index` resets to 0 — without
-                    // the key, React reuses the same instance and the
-                    // user sees position N from the previous stream's
-                    // thumbnails list.
-                    key={folder.folderPath}
-                    thumbnails={folder.thumbnails}
+                <MetaRow label="Media">
+                  <StreamFilesGrid
+                    folder={folder}
                     thumbsKey={thumbsKey}
                     preferredThumbnail={meta?.preferredThumbnail}
-                    localFlags={folder.thumbnailLocalFlags}
-                    onSetAsThumbnail={(filePath) => {
-                      const basename = filePath.split(/[\\/]/).pop() ?? ''
-                      onUpdateMeta({ preferredThumbnail: basename })
-                    }}
-                    onDeleteImage={onDeleteThumbnail}
+                    cloudSyncActive={cloudSyncActive}
+                    onSendToPlayer={onSendFileToPlayer}
+                    onSendToConverter={onSendFileToConverter}
+                    onSetThumbnail={(filePath) => onUpdateMeta({ preferredThumbnail: filePath.split(/[\\/]/).pop() ?? '' })}
+                    onDeleteThumbnail={onDeleteThumbnail}
                     onEditThumbnail={onOpenThumbnails}
                     onOpenLightbox={i => setLightboxIndex(i)}
+                    onReload={onReloadFolders}
                   />
                 </MetaRow>
               </div>

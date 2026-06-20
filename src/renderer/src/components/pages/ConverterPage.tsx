@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
-import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, Film, RotateCcw } from 'lucide-react'
+import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob } from '../../types'
 import { Button } from '../ui/Button'
@@ -10,6 +10,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
 import { PresetsModal } from '../preset-editor/PresetsModal'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
+import { VideoThumb } from '../ui/VideoThumb'
 
 // Row action buttons — neutral at rest, colored only on hover, with a label
 // that collapses to icon-only as the row narrows. Mirrors the stream detail
@@ -70,84 +71,6 @@ function TruncText({ text, className = '' }: { text: string; className?: string 
     <Tooltip content={text} side="top" open={truncated ? undefined : false} triggerClassName="block min-w-0 truncate">
       <span ref={ref} className={`block truncate min-w-0 ${className}`}>{text}</span>
     </Tooltip>
-  )
-}
-
-// Cache generated frames by file path so a thumbnail isn't re-decoded when the
-// same file remounts in another panel (ready → converting, requeue, etc.).
-const thumbCache = new Map<string, { url: string; aspect: number }>()
-
-/** Thumbnail for a video file — grabs a frame at the midpoint via an offscreen
- *  <video> + canvas (same approach as the player's session-video items). Only
- *  runs for confirmed-local files so cloud placeholders aren't hydrated.
- *  Cached by path so moving between panels reuses the already-decoded frame. */
-function VideoThumb({ path }: { path: string }) {
-  const cached = thumbCache.get(path)
-  const [thumbnail, setThumbnail] = useState<string | null>(cached?.url ?? null)
-  const [aspect, setAspect] = useState(cached?.aspect ?? 16 / 9)
-  const [local, setLocal] = useState<boolean | null>(cached ? true : null)
-
-  useEffect(() => {
-    if (thumbCache.has(path)) return
-    let cancelled = false
-    window.api.checkLocalFiles([path])
-      .then(([l]) => { if (!cancelled) setLocal(!!l) })
-      .catch(() => { if (!cancelled) setLocal(false) })
-    return () => { cancelled = true }
-  }, [path])
-
-  useEffect(() => {
-    if (thumbCache.has(path) || !local) return
-    const vid = document.createElement('video')
-    vid.src = `file://${path.replace(/\\/g, '/')}`
-    vid.muted = true
-    vid.preload = 'metadata'
-    let sought = false
-    const cleanup = () => {
-      vid.removeEventListener('loadedmetadata', onMeta)
-      vid.removeEventListener('seeked', onSeeked)
-      vid.removeEventListener('error', onErr)
-      vid.src = ''
-    }
-    const onMeta = () => {
-      const dur = vid.duration
-      if (isFinite(dur) && dur > 0) {
-        if (vid.videoWidth > 0 && vid.videoHeight > 0) setAspect(vid.videoWidth / vid.videoHeight)
-        if (!sought) { sought = true; vid.currentTime = dur * 0.5 }
-      } else cleanup()
-    }
-    const onSeeked = () => {
-      const vw = vid.videoWidth || 80
-      const vh = vid.videoHeight || 45
-      const canvas = document.createElement('canvas')
-      canvas.height = 64
-      canvas.width = Math.round(64 * (vw / vh))
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        try {
-          ctx.drawImage(vid, 0, 0, canvas.width, canvas.height)
-          const url = canvas.toDataURL('image/jpeg', 0.7)
-          thumbCache.set(path, { url, aspect: vw / vh })
-          setThumbnail(url)
-        } catch { /* decode error */ }
-      }
-      cleanup()
-    }
-    const onErr = () => cleanup()
-    vid.addEventListener('loadedmetadata', onMeta)
-    vid.addEventListener('seeked', onSeeked)
-    vid.addEventListener('error', onErr)
-    return cleanup
-  }, [path, local])
-
-  const H = 56
-  const W = Math.round(H * aspect)
-  return (
-    <div className="relative shrink-0 rounded-md overflow-hidden bg-white/5 flex items-center justify-center" style={{ width: W, height: H }}>
-      {thumbnail
-        ? <img src={thumbnail} alt="" className="w-full h-full object-cover" />
-        : <Film size={13} className="text-gray-500" />}
-    </div>
   )
 }
 

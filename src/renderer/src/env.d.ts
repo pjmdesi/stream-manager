@@ -41,6 +41,8 @@ declare global {
       getThumbnailCache(filePath: string): Promise<{ timecodes: number[]; frameUrls: string[] } | null>
       saveThumbnailFrame(filePath: string, index: number, dataUrl: string): Promise<void>
       finalizeThumbnailCache(filePath: string, timecodes: number[]): Promise<void>
+      getKeystoneThumbnail(filePath: string): Promise<string | null>
+      saveKeystoneThumbnail(filePath: string, dataUrl: string): Promise<void>
       onExtractProgress(cb: (data: { trackIndex: number; percent: number }) => void): () => void
 
       // ── Files ────────────────────────────────────────────────────────────────

@@ -33,8 +33,10 @@ interface CloudOpsContextValue {
    *  showing in the modal. The widget uses `*Active` to gate visibility. */
   hasActivity: boolean
   modalOpen: boolean
-  enqueueOffload: (files: { path: string; size: number }[]) => void
-  enqueueHydrate: (files: { path: string; size: number }[]) => void
+  /** openModal defaults to true — pass false for per-item actions that should
+   *  surface via the widget/icons without popping the full modal. */
+  enqueueOffload: (files: { path: string; size: number }[], openModal?: boolean) => void
+  enqueueHydrate: (files: { path: string; size: number }[], openModal?: boolean) => void
   cancelOffload: () => void
   cancelHydrate: () => void
   openModal: () => void
@@ -139,7 +141,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 
-  const enqueueOffload = useCallback((files: { path: string; size: number }[]) => {
+  const enqueueOffload = useCallback((files: { path: string; size: number }[], openModal = true) => {
     if (files.length === 0) return
     const batchId = makeBatchId('offload')
     const newRows: CloudOpItem[] = files.map(f => ({
@@ -157,11 +159,11 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
       const stillActive = prev.filter(it => !isTerminal(it.status))
       return [...stillActive, ...newRows]
     })
-    setModalOpen(true)
+    if (openModal) setModalOpen(true)
     window.api.cloudSyncOffload(files.map(f => f.path), batchId).catch(() => {})
   }, [])
 
-  const enqueueHydrate = useCallback((files: { path: string; size: number }[]) => {
+  const enqueueHydrate = useCallback((files: { path: string; size: number }[], openModal = true) => {
     if (files.length === 0) return
     const batchId = makeBatchId('hydrate')
     const newRows: CloudOpItem[] = files.map(f => ({
@@ -176,7 +178,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
       const stillActive = prev.filter(it => !isTerminal(it.status))
       return [...stillActive, ...newRows]
     })
-    setModalOpen(true)
+    if (openModal) setModalOpen(true)
     window.api.cloudSyncPin(files.map(f => f.path), batchId).catch(() => {})
   }, [])
 
