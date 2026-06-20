@@ -1905,6 +1905,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
+  // Live layers for the keyboard handler's relative edits (arrow-key nudge),
+  // which can fire on auto-repeat faster than React re-renders the closure.
+  const layersRef = useRef(layers)
+  useEffect(() => { layersRef.current = layers }, [layers])
   // Inline rename state for the layer panel. Only one layer renames at a time.
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null)
   // Drag-and-drop reordering state. `dropTargetDisplayIdx` is the gap index
@@ -2829,6 +2833,23 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     multiDragStartRef.current.clear()
   }, [layers, commitLayers])
 
+  // Arrow-key nudge of the selection — 1px per press, 10px with Shift. A burst
+  // of presses collapses into a single undo entry via useCommitOnRelease; the
+  // first press commits to history, continuations apply live. layersRef gives a
+  // fresh base so rapid auto-repeat accumulates instead of fighting a stale
+  // closure.
+  const beginsNudge = useCommitOnRelease()
+  const nudgeSelected = useCallback((dx: number, dy: number) => {
+    const sel = selectedIdsRef.current
+    if (sel.length === 0) return
+    const next = layersRef.current.map(l =>
+      sel.includes(l.id) ? { ...l, x: l.x + dx, y: l.y + dy } : l
+    )
+    layersRef.current = next
+    if (beginsNudge('nudge')) commitLayers(next)
+    else { setLayersDirect(next); triggerAutoSave(next) }
+  }, [beginsNudge, commitLayers, setLayersDirect, triggerAutoSave])
+
   /** Commits the transform's final state for every node the shared
    *  Transformer touched. Konva fires `transformend` per node; we accumulate
    *  in a Map and flush once via microtask so a group transform = one undo
@@ -3617,6 +3638,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       }
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
       if (e.key === 'g' || e.key === 'G') setGridSnapEnabled(v => !v)
+      // Arrow-key nudge: move the selection 1px (10px with Shift). e.code keeps
+      // this layout-independent and lets it co-exist with the bracket z-order
+      // keys below. preventDefault stops the arrows from scrolling the panels.
+      if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+        if (selectedIdsRef.current.length > 0) {
+          e.preventDefault()
+          const step = e.shiftKey ? 10 : 1
+          const dx = e.code === 'ArrowLeft' ? -step : e.code === 'ArrowRight' ? step : 0
+          const dy = e.code === 'ArrowUp' ? -step : e.code === 'ArrowDown' ? step : 0
+          nudgeSelected(dx, dy)
+        }
+      }
       // Layer z-order (Photoshop-style). e.code is layout-independent — with
       // Shift held, e.key becomes '}'/'{', so matching on code avoids that.
       // ] = forward/up, [ = backward/down; Shift = all the way to front/back.
@@ -3630,7 +3663,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer])
+  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer, nudgeSelected])
 
   // ── Selected layer ────────────────────────────────────────────────────────
   const selectedLayer = useMemo(() => {
