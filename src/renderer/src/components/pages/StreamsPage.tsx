@@ -6885,15 +6885,23 @@ function SidebarDetail({
               // the refetch and the last-pushed snapshot so we don't
               // record values that never actually made it to Twitch.
               await onPushToTwitch()
-              // Refetch Twitch's canonical state instead of
-              // optimistically caching what we sent. Twitch
-              // canonicalizes a few fields (most notably game name,
-              // since it's resolved through a search → game_id
-              // round-trip), and storing what we SENT here would
-              // make this cache disagree with what a fresh page load
-              // would fetch.
+              // Refetch Twitch's canonical state — but don't blindly trust it.
+              // Twitch's read side lags the PATCH we just made (read-after-
+              // write), so an immediate GET often still reports the PRE-push
+              // title (or returns null), which fails the in-sync guard
+              // (snapshotStillReflectsTwitch) below and leaves the Push button
+              // enabled even though the push succeeded. The PATCH resolved and
+              // Twitch preserves the title verbatim, so seed the cache from what
+              // we authoritatively sent, and only adopt the refetch's canonical
+              // game/tags once it has caught up (its title matches what we
+              // pushed — the fuzzy game-name canonicalization case).
               const refreshed = await window.api.twitchGetChannel?.()
-              if (refreshed) setTwitchChannel(refreshed)
+              const refetchCaughtUp = !!refreshed && refreshed.title.trim() === twEffectiveTitle.trim()
+              setTwitchChannel({
+                title: twEffectiveTitle,
+                gameName: refetchCaughtUp ? refreshed!.gameName : twEffectiveGame,
+                tags: refetchCaughtUp ? refreshed!.tags : twEffectiveTags,
+              })
               // Persist what we just pushed into meta so the in-sync
               // check stays valid across page reloads even when
               // Twitch's canonical state byte-differs from local
@@ -6917,9 +6925,12 @@ function SidebarDetail({
               // non-empty, offer the user the chance to rename their
               // local tag globally to match. The page-level handler
               // gates this against the don't-ask-again preference.
+              // Only when the refetch reflects THIS push — a stale read would
+              // compare the new local game against Twitch's previous game and
+              // could suggest a bogus rename back to the old name.
               const sent = twEffectiveGame.trim()
               const canonical = (refreshed?.gameName ?? '').trim()
-              if (sent && canonical && twNormalize(sent) !== twNormalize(canonical)) {
+              if (refetchCaughtUp && sent && canonical && twNormalize(sent) !== twNormalize(canonical)) {
                 onSuggestCategoryRename(sent, canonical)
               }
             }

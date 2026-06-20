@@ -45,8 +45,6 @@
 
 ## Bugs
 
-1. The mismatch check for Twitch doesn't seem to be working again. The button is not disabling after I push a stream item details to Twitch.
-
 ## Consistency Issues
 
 1. 
