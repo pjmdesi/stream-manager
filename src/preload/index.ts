@@ -560,6 +560,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('launcher:launchApp', filePath),
   getFileIcon: (filePath: string) =>
     ipcRenderer.invoke('launcher:getFileIcon', filePath),
+  getFavicon: (pageUrl: string) =>
+    ipcRenderer.invoke('launcher:getFavicon', pageUrl),
   resolveShortcut: (filePath: string) =>
     ipcRenderer.invoke('launcher:resolveShortcut', filePath),
   getStartMenuPath: () =>

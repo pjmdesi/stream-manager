@@ -78,7 +78,7 @@ function EditableLabel({
   return (
     <button onClick={start} className={`group flex items-center gap-1.5 min-w-0 text-left ${className}`}>
       <span className="truncate">{value || <span className="text-gray-400 italic">{placeholder}</span>}</span>
-      <Pencil size={11} className="shrink-0 opacity-0 group-hover:opacity-40 transition-opacity" />
+      <Pencil size={11} className="shrink-0 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
     </button>
   )
 }
@@ -91,16 +91,29 @@ export const isUrlPath = (p: string): boolean => /^[a-z][a-z\d+.-]*:\/\//i.test(
 // ── App icon (fetched from OS) ─────────────────────────────────────────────────
 
 function AppIcon({ path, size = 20 }: { path: string; size?: number }) {
-  const [iconUrl, setIconUrl] = useState<string | null>(null)
+  const [iconUrl, setIconUrl] = useState<string | null>(null)  // OS file icon (apps)
+  const [favicon, setFavicon] = useState<string | null>(null)  // website favicon (data URL)
   const isUrl = isUrlPath(path)
 
   useEffect(() => {
-    // URLs have no OS file icon — skip the probe and show a globe glyph instead.
-    if (!path || isUrlPath(path)) { setIconUrl(null); return }
+    setIconUrl(null)
+    setFavicon(null)
+    if (!path) return
+    if (isUrlPath(path)) {
+      // Resolved in main from the site's own /favicon.ico (no third party);
+      // null while loading or if none is found → show the globe glyph.
+      let cancelled = false
+      window.api.getFavicon(path).then(d => { if (!cancelled) setFavicon(d) }).catch(() => {})
+      return () => { cancelled = true }
+    }
     window.api.getFileIcon(path).then(setIconUrl).catch(() => setIconUrl(null))
+    return
   }, [path])
 
   if (isUrl) {
+    if (favicon) {
+      return <img src={favicon} alt="" style={{ width: size, height: size }} className="rounded-sm shrink-0 object-contain" />
+    }
     return <Globe size={size * 0.8} style={{ width: size, height: size }} className="shrink-0 text-gray-400 p-px" />
   }
   if (!iconUrl) {
@@ -327,7 +340,7 @@ function AddAppModal({
                   </span>
                 </>
               ) : (
-                <span className="flex-1 text-gray-400">Select a previously linked app</span>
+                <span className="flex-1 text-gray-400">Select a previously added item</span>
               )}
               <ChevronDown size={13} className={`shrink-0 text-gray-400 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
             </button>

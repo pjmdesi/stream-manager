@@ -1,4 +1,4 @@
-import { ipcMain, app, shell } from 'electron'
+import { ipcMain, app, shell, net } from 'electron'
 import path from 'path'
 import { getStore } from './store'
 
@@ -12,6 +12,55 @@ interface LauncherGroup { id: string; name: string; apps: LauncherApp[] }
 const isUrl = (p: string): boolean => /^[a-z][a-z\d+.-]*:\/\//i.test(p)
 const openTarget = (target: string): Promise<unknown> =>
   isUrl(target) ? shell.openExternal(target) : shell.openPath(target)
+
+// Favicon resolution for website launch items. Cached per origin (favicons
+// rarely change within a session) and fetched only from the site itself — no
+// third-party favicon service.
+const faviconCache = new Map<string, string | null>()
+const FAVICON_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) StreamManager'
+
+// Detect an image by its leading bytes (browsers sniff too). Content-type is
+// unreliable here — favicons are routinely served as application/octet-stream
+// or other non-image types. Returns the proper MIME for the data URL, or null
+// when the bytes aren't a recognizable image.
+function sniffImageMime(buf: Buffer): string | null {
+  if (buf.length < 4) return null
+  if (buf[0] === 0x00 && buf[1] === 0x00 && (buf[2] === 0x01 || buf[2] === 0x02) && buf[3] === 0x00) return 'image/x-icon' // ICO / CUR
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif'
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return 'image/bmp'
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
+  // SVG is text — sniff the head (skip BOM + leading whitespace).
+  const head = buf.toString('utf8', 0, Math.min(buf.length, 256)).replace(/^﻿/, '').trimStart().toLowerCase()
+  if (head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'))) return 'image/svg+xml'
+  return null
+}
+
+async function fetchFaviconDataUrl(url: string, timeoutMs = 8000): Promise<string | null> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    // net.fetch uses Chromium's network stack (browser-equivalent TLS + proxy),
+    // so bot-protected hosts that block Node's undici fetch still resolve.
+    const res = await net.fetch(url, { signal: ctrl.signal, redirect: 'follow', headers: { 'User-Agent': FAVICON_UA } })
+    const ct = (res.headers.get('content-type') ?? '').toLowerCase()
+    // Cheap up-front reject for SPA catch-alls that serve their app HTML for
+    // /favicon.ico (200 text/html) — avoids downloading a large page body.
+    if (!res.ok || ct.includes('html')) { try { ctrl.abort() } catch { /* ignore */ } return null }
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length === 0 || buf.length > 512 * 1024) return null
+    // Validate by magic bytes, not content-type — many sites serve favicons as
+    // application/octet-stream. Use the sniffed MIME for the data URL.
+    const mime = sniffImageMime(buf)
+    if (!mime) return null
+    return `data:${mime};base64,${buf.toString('base64')}`
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 export function registerLauncherIPC(): void {
   ipcMain.handle('launcher:getGroups', () => {
@@ -71,5 +120,30 @@ export function registerLauncherIPC(): void {
     } catch (_) {
       return null
     }
+  })
+
+  ipcMain.handle('launcher:getFavicon', async (_event, pageUrl: string): Promise<string | null> => {
+    let origin: string, hostname: string, protocol: string
+    try {
+      const u = new URL(pageUrl)
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+      origin = u.origin; hostname = u.hostname; protocol = u.protocol
+    } catch {
+      return null
+    }
+    if (faviconCache.has(origin)) return faviconCache.get(origin) ?? null
+
+    // 1. The site's own /favicon.ico (content-type validated).
+    let icon = await fetchFaviconDataUrl(`${origin}/favicon.ico`)
+    // 2. SPA subdomains (e.g. studio.youtube.com) 404 /favicon.ico and set their
+    //    icon via JS — fall back to the parent domain's favicon.
+    if (!icon) {
+      const labels = hostname.split('.')
+      if (labels.length > 2) {
+        icon = await fetchFaviconDataUrl(`${protocol}//${labels.slice(1).join('.')}/favicon.ico`)
+      }
+    }
+    faviconCache.set(origin, icon)
+    return icon
   })
 }

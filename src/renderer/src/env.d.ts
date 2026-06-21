@@ -307,6 +307,7 @@ declare global {
       launchGroup(groupId: string): Promise<{ launched: number }>
       launchApp(filePath: string): Promise<{ launched: boolean }>
       getFileIcon(filePath: string): Promise<string | null>
+      getFavicon(pageUrl: string): Promise<string | null>
       resolveShortcut(filePath: string): Promise<string>
       getStartMenuPath(): Promise<string>
     }
