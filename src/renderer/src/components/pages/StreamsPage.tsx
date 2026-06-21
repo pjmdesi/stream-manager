@@ -1839,6 +1839,15 @@ export function StreamsPage({
     if (allFiles.length > 0) enqueueHydrate(allFiles)
     setSelectedPaths(new Set())
   }, [cloudSyncActive, selectedFolderList, collectFolderFiles, enqueueHydrate])
+  // Bulk send-to-converter — queue every video from each selected stream. No
+  // file picker (unlike the single-stream flow): it's a bulk tool, so assume all
+  // videos and let the user drop any unwanted ones from the converter queue.
+  const clickBulkSendToConverter = useCallback(() => {
+    const allVideos = selectedFolderList.flatMap(f => f.videos)
+    if (allVideos.length === 0) return
+    onSendToConverter(allVideos)
+    setSelectedPaths(new Set())
+  }, [selectedFolderList, onSendToConverter])
   // Disable bulk archive when the selection contains any folder that's
   // already archiving (would race with the in-flight job) or any folder
   // that's already been archived (nothing to do).
@@ -2310,36 +2319,11 @@ export function StreamsPage({
               </p>
             </div>
             {selectMode ? (
-              // Bulk-action toolbar — replaces the New Stream button while
-              // in select mode. Mirrors the StreamsPage toolbar order:
-              // Select All / Edit Tags / Offload / Pin Local / Archive / Stop.
-              <div className="flex items-center gap-1 flex-wrap">
-                <Tooltip content="Select all visible streams" side="bottom">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<CheckCheck size={14} />}
-                    onClick={selectAllVisible}
-                    disabled={selectedPaths.size === visibleFolders.length}
-                    collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}
-                  >
-                    Select All
-                  </Button>
-                </Tooltip>
-                <Tooltip content="Clear current selection" side="bottom">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Square size={14} />}
-                    onClick={clearSelection}
-                    disabled={selectedPaths.size === 0}
-                    collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}
-                  >
-                    Clear
-                  </Button>
-                </Tooltip>
+              // Bulk-action toolbar — replaces the New Stream button while in
+              // select mode. Bulk actions first, then a divider-grouped
+              // selection-management pair, then exit:
+              // Edit Tags / Convert / Offload / Pin Local / Archive | Select All / Clear | Stop.
+              <div className="flex items-center justify-end gap-1 flex-wrap">
                 <Tooltip content="Add or remove stream-type / topic tags across the selection" side="bottom">
                   <Button
                     variant="ghost"
@@ -2351,6 +2335,19 @@ export function StreamsPage({
                     labelCollapsed={selectedFolderPath ? true : undefined}
                   >
                     Edit Tags
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Send every video from the selected streams to the converter" side="bottom">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Zap size={14} />}
+                    onClick={clickBulkSendToConverter}
+                    disabled={selectedPaths.size === 0}
+                    collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                    labelCollapsed={selectedFolderPath ? true : undefined}
+                  >
+                    Convert
                   </Button>
                 </Tooltip>
                 {cloudSyncActive && (
@@ -2403,12 +2400,46 @@ export function StreamsPage({
                     Archive
                   </Button>
                 </Tooltip>
-                <Tooltip content="Exit selection mode" side="bottom">
-                  <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}>
-                    Stop
-                  </Button>
-                </Tooltip>
+                {/* Selection-management + exit, grouped in a non-wrapping
+                    container so all three wrap to a second row together (still
+                    divider-delimited) once the toolbar runs out of width — the
+                    bulk actions stay on the first row until labels collapse. */}
+                <div className="flex items-center gap-1">
+                  <div className="w-px h-5 bg-white/10 mx-1 self-center" />
+                  <Tooltip content="Select all visible streams" side="bottom">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<CheckCheck size={14} />}
+                      onClick={selectAllVisible}
+                      disabled={selectedPaths.size === visibleFolders.length}
+                      collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                      labelCollapsed={selectedFolderPath ? true : undefined}
+                    >
+                      Select All
+                    </Button>
+                  </Tooltip>
+                  <Tooltip content="Clear current selection" side="bottom">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Square size={14} />}
+                      onClick={clearSelection}
+                      disabled={selectedPaths.size === 0}
+                      collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                      labelCollapsed={selectedFolderPath ? true : undefined}
+                    >
+                      Clear
+                    </Button>
+                  </Tooltip>
+                  <div className="w-px h-5 bg-white/10 mx-1 self-center" />
+                  <Tooltip content="Exit selection mode" side="bottom">
+                    <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                      labelCollapsed={selectedFolderPath ? true : undefined}>
+                      Stop
+                    </Button>
+                  </Tooltip>
+                </div>
               </div>
             ) : (
               <div className="flex items-center gap-1">
