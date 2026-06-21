@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, CopyPlus, CloudDownload, SquareDashedText, Bot } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, CopyPlus, CloudDownload, SquareDashedText, Bot, Bookmark, Maximize2 } from 'lucide-react'
 import { Youtube, Twitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { useStore } from '../hooks/useStore'
@@ -75,7 +75,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         <p>The Streams page shows a list of stream items stacked as rows sorted by date (descending) by default. Upcoming streams are steams scheduled for a future date and are colored teal. Streams happening on the current day are colored blue. Each stream item row is made up of the following elements:</p>
 
         <ElementSection icon={<ImageIcon size={14} />} title="Thumbnail">
-          <p>Stream Manager picks the best image to represent a stream item (typically the first available that matches certain criteria). Click the stream item row to see a carousel containing all the images in the folder. There, you can manually pick a new thumbnail for the item.</p>
+          <p>Stream Manager picks the best image to represent a stream item (typically the first available that matches certain criteria). To choose a different one, open the details sidebar and use the <strong className="text-gray-300">Media files</strong> section — set any image as the thumbnail there, or click it to browse every image full screen.</p>
         </ElementSection>
 
         <ElementSection icon={<Film size={14} />} title="Video Counter">
@@ -123,6 +123,21 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             <li className="flex items-baseline gap-2"><Archive size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Archive Stream</strong> — runs the archiving process for the stream's files. This converts the stream's recording files using the default archive encoding preset (set on the settings page) and, once finished, tags the stream item as archived. This cannot be undone.</span></li>
             <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — remove the stream item and all of its files. You'll be asked to confirm.</span></li>
           </ul>
+        </ElementSection>
+
+        <ElementSection icon={<LayoutGrid size={14} />} title="Media files">
+          <p>The <strong className="text-gray-300">Media</strong> section near the top of the details sidebar lays out media files in the stream's folder: recordings, clips, and images. Use the <em>Video</em> and <em>Images</em> toggles above the grid to show or hide each type.</p>
+          <p>Hover a card to reveal its actions:</p>
+          <ul className="list-none pl-0 flex flex-col gap-1">
+            <li className="flex items-baseline gap-2"><Play size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to player</strong> <em>(videos)</em> — open that specific video in the Player page.</span></li>
+            <li className="flex items-baseline gap-2"><Zap size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to converter</strong> <em>(videos)</em> — queue that one video for conversion.</span></li>
+            <li className="flex items-baseline gap-2"><Bookmark size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Set as item thumbnail</strong> <em>(images)</em> — make that image the stream's thumbnail. The current one wears a filled bookmark tag.</span></li>
+            <li className="flex items-baseline gap-2"><PencilLine size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Edit</strong> <em>(thumbnails made with SM)</em> — open the image in the thumbnail editor.</span></li>
+            <li className="flex items-baseline gap-2"><Maximize2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Open full screen</strong> <em>(images)</em> — click an image to browse all of them in the full-screen carousel.</span></li>
+            <li className="flex items-baseline gap-2"><Cloud size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Offload / Pin local</strong> — toggle that single file between cloud-only and on-disk (only while cloud sync is active).</span></li>
+            <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — send the file to the recycle bin.</span></li>
+          </ul>
+          <p>Cards are tagged to show a file's role at a glance: a <strong className="text-gray-300">Clip</strong> / <strong className="text-gray-300">Short</strong> tray on edited videos, a bookmark tray on the chosen thumbnail image, and an <Archive size={11} className="inline align-baseline -translate-y-px text-emerald-400" /> <strong className="text-gray-300">Archived</strong> marker on compressed recordings. While cloud sync is active, a cloud icon on each card shows whether the file is on this device or offloaded (a spinner shows until that's confirmed).</p>
         </ElementSection>
 
         <ElementSection icon={<PanelRight size={14} />} title="Details Sidebar">
