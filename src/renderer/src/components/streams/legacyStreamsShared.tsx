@@ -19,7 +19,7 @@ import {
   Square, CheckCheck, Loader2, CheckCircle2, XCircle, Check,
   Film, Scissors, Zap, Combine, ListFilter, Trash2, Tags, CalendarClock, Info, Sparkles, SquareDashedText,
   Globe, EyeOff, Lock, Image as ImageIcon, CloudOff, Cloud, CloudCheck, CloudDownload, LayoutList, LayoutGrid, List,
-  RadioTower, Clapperboard, Unlink2
+  RadioTower, Clapperboard, Unlink2, Bookmark
 } from 'lucide-react'
 
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
@@ -854,7 +854,7 @@ export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onS
                 onClick={() => onSetAsThumbnail(currentPath)}
                 className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-purple-600/40 border border-white/20 hover:border-purple-500/50 text-gray-300 hover:text-purple-200 text-xs font-medium transition-colors"
               >
-                <ImageIcon size={12} /> Set as item thumbnail
+                <Bookmark size={12} /> Set as item thumbnail
               </button>
             )
           )}

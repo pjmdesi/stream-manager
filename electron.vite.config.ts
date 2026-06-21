@@ -7,7 +7,10 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        external: ['electron-store', 'chokidar', 'fluent-ffmpeg', 'ffmpeg-static', 'ffprobe-static', 'glob', 'micromatch', 'uuid']
+        // electron-devtools-installer is a dev-only dynamic import (gated by
+        // is.dev). Externalize so it's never bundled; it's a devDependency so
+        // electron-builder also excludes it from packaged builds.
+        external: ['electron-store', 'chokidar', 'fluent-ffmpeg', 'ffmpeg-static', 'ffprobe-static', 'glob', 'micromatch', 'uuid', 'electron-devtools-installer']
       }
     }
   },

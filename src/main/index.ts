@@ -292,6 +292,28 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
 }
 
 app.whenReady().then(() => {
+  // Dev-only: load the React DevTools browser extension so the Components +
+  // Profiler tabs appear in the detached DevTools. The dynamic import + is.dev
+  // guard keep this devDependency out of packaged builds (it's never required
+  // in prod). First launch downloads + caches the extension; later launches
+  // load it from cache. A DevTools reload (Ctrl+R) may be needed the first time.
+  if (is.dev) {
+    void import('electron-devtools-installer')
+      .then((mod) => {
+        // CJS interop varies by how electron-vite emits the externalized import
+        // (require → module.exports; dynamic import → namespace), so resolve the
+        // installer fn + React id defensively from both the module.exports
+        // object and any lexer-detected named export.
+        const m = mod as any
+        const exp = m.default ?? m
+        const installExtension = typeof exp === 'function' ? exp : (exp.default ?? exp)
+        const reactTools = exp.REACT_DEVELOPER_TOOLS ?? m.REACT_DEVELOPER_TOOLS
+        return installExtension(reactTools, { loadExtensionOptions: { allowFileAccess: true } })
+      })
+      .then((name: unknown) => console.log(`[devtools] React DevTools loaded: ${(name as any)?.name ?? name}`))
+      .catch((err: unknown) => console.warn('[devtools] React DevTools failed to load:', err))
+  }
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
