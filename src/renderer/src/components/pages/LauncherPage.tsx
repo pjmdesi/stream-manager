@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import * as LucideIcons from 'lucide-react'
 import { Plus, Trash2, FolderOpen, Rocket, Pencil, Check, X, GripVertical, ChevronDown, Upload, Star, Play, Globe } from 'lucide-react'
@@ -596,10 +596,13 @@ function AppRow({
 // ── Group row (main list) ──────────────────────────────────────────────────────
 
 function GroupRow({
-  group, selected, isWidget, launching, feedback, onSelect, onLaunchGroup, onLaunchApp, onToggleWidget,
+  group, selected, isWidget, launching, feedback, animMs, onSelect, onLaunchGroup, onLaunchApp, onToggleWidget,
 }: {
   group: LauncherGroup
   selected: boolean
+  /** Detail-sidebar slide duration — delays the selected-row indicator so it
+   *  lands once the sidebar settles rather than racing the slide. */
+  animMs: number
   isWidget: boolean
   launching: boolean
   feedback?: number
@@ -609,6 +612,15 @@ function GroupRow({
   onToggleWidget: () => void
 }) {
   const launchable = group.apps.length > 0 && group.apps.some(a => a.path)
+  // Selected-row indicator timing — the purple right-edge bar lands once the
+  // detail sidebar finishes sliding in (mirrors the Streams list). Lags on
+  // open; instant on close (useLayoutEffect updates the class before paint).
+  const [indicatorVisible, setIndicatorVisible] = useState(false)
+  useLayoutEffect(() => {
+    if (!selected) { setIndicatorVisible(false); return }
+    const t = window.setTimeout(() => setIndicatorVisible(true), animMs)
+    return () => clearTimeout(t)
+  }, [selected, animMs])
   return (
     <div
       onClick={onSelect}
@@ -616,8 +628,14 @@ function GroupRow({
         selected ? 'bg-purple-600/15' : 'hover:bg-white/5'
       }`}
     >
-      {/* Left zone (icon + name) — stays visible under the open sidebar. */}
-      <div className="shrink-0 flex items-center gap-3 pl-6 pr-3 py-3" style={{ width: GROUP_ROW_WIDTH }}>
+      {/* Left zone (icon + name) — stays visible under the open sidebar. The
+          selected-row indicator is an ::after bar pinned to this zone's right
+          edge (= the sidebar's left edge at GROUP_ROW_WIDTH) so it sits flush
+          against the sidebar, mirroring the Streams list. */}
+      <div
+        className={`shrink-0 flex items-center gap-3 pl-6 pr-3 py-3 ${indicatorVisible ? 'relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-purple-600' : ''}`}
+        style={{ width: GROUP_ROW_WIDTH }}
+      >
         <div className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-lg ${
           selected ? 'bg-purple-500/20 text-purple-200' : 'bg-white/5 text-gray-300'
         }`}>
@@ -879,6 +897,7 @@ export function LauncherPage() {
                 isWidget={widgetGroupId === group.id}
                 launching={launching === group.id}
                 feedback={launchFeedback[group.id]}
+                animMs={animMs}
                 onSelect={() => setSelectedId(selectedId === group.id ? null : group.id)}
                 onLaunchGroup={() => launchGroup(group.id)}
                 onLaunchApp={app => { if (app.path) window.api.launchApp(app.path) }}
