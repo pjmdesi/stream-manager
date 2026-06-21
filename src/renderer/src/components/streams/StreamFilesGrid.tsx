@@ -49,7 +49,7 @@ const ACTION_CYAN = `${ACTION_BASE} hover:text-cyan-400 hover:bg-cyan-500/10`
 const ACTION_RED = `${ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
 
 const CARD = 'group/file flex gap-3 p-2 rounded-lg bg-white/[0.03] border border-white/5 hover:bg-white/5 transition-colors'
-const ACTION_ROW = 'mt-auto pt-1.5 flex items-center justify-end gap-0.5 opacity-0 group-hover/file:opacity-100 transition-opacity'
+const ACTION_ROW = 'mt-auto flex items-center justify-end gap-0.5 opacity-0 group-hover/file:opacity-100 transition-opacity'
 const TYPE_ICON = 'shrink-0 relative -top-0.5'
 const META_LINE = 'text-[11px] text-gray-400 mt-0.5 flex items-center gap-1 min-w-0'
 const META_SECONDARY = 'text-[11px] text-gray-500 truncate'
