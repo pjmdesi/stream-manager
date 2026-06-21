@@ -65,9 +65,10 @@
 18. Add the ability for the launcher to track which of the apps in each launch group are still open and allow the user to quit them from the launcher. Need to discuss design. We could also add more options to the launcher group items after this such as 2 boolean options: Close with group (checked by default, unchecked means it won't quit when the user clicks the "Quit Group", for example, an app that the user would like to keep open after streaming), and Allow multiple instances (unchecked by default, checked means the app could be attempted to be launched multiple times when the group or individual launch buttons are clicked. Might need to check if it's possible to know if an app can have multiple instances so there's a smaller chance of conflict. If we can, the checkbox would not appear for those apps).
 19. Create a Stream Dashboard pop-out window. This would essentially be a trimmed-down controller for SM which would show info essential for the active stream. This would be one way to show the chat messages in the item above. Additionally it could show the relay status and stats. Also the user would be able to use this to change the stream details live for all platforms at the same time (for instance if they switch games mid-stream, or come up with a better title while streaming). Not sure if this should be a separate exe that the user ca launch separately from SM if they want (it would read the same _meta.json for the info it needs) or if SM should have to be open to have it work. Would need to think through that. Would need a minimal, but effective layout & design.
 20. Build a chat viewer that can connect to the YouTube and Twitch APIs to show the live chat for the active broadcast. This would be a new page in the app that shows the chat messages in real time, along with some basic info about the chat such as the number of viewers for each platform, and maybe some basic moderation tools like the ability to delete messages or ban users.
-23. Add multiselect functionality to the stream item details sidebar files section.
-24. Add ability to double click slider controls like the ones used for the filters in the thumbnail editor properties panel. Double clicking on the knob of the slider will reset the value to the default for that filter.
-25. 
+21. Add multiselect functionality to the stream item details sidebar files section.
+22. Add ability to double click slider controls like the ones used for the filters in the thumbnail editor properties panel. Double clicking on the knob of the slider will reset the value to the default for that filter.
+23. Need to go through the onboarding process to make sure it's smooth and makes sense for all the new features we've added since th last time it was updated.
+24. The layout for the auto-rules page needs to be updated. The sidebar layout does not match the rest of the app, it should be to the right of the sidebar, not below it.
 
 ## Bugs
 
@@ -90,7 +91,7 @@
 7. Relay feature ideas:
    * Add the ability to allow to the stream relay to add a "technical difficulties" fallback image so if the stream app (like OBS) crashes or the signal fails, it will instead push that image to YouTube as a backup until the stream app reconnects.
    * If it's possible to integrate Twitch's enhanced broadcast mode, allow the relay to send to multiple platforms (just Twitch and YouTube for now) at the same time
-   * Allow the user to manage the editable details for each platform straight from SM. Maybe they change up what game they're playing or topic they're doing or otherwise what to flexibly update the details while streaming or right before. 
+   * Allow the user to manage the editable details for each platform straight from SM. Maybe they change up what game they're playing or topic they're doing or otherwise what to flexibly update the details while streaming or right before.
 
 ## Other ideas (big)
 
