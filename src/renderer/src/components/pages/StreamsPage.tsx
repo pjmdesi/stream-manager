@@ -3912,8 +3912,13 @@ function StreamListItem({
                   No meta
                 </span>
               )}
+              {/* Force the Send-to-Player tooltip closed (and its hover handlers
+                  off) while the check runs: the button going disabled fires a
+                  spurious mouseenter on the wrapper, and the send navigates away
+                  with the streams page left mounted — an open tooltip would get
+                  stuck with no mouseleave to close it. */}
               {videoCount > 0 && (
-                <Tooltip content={isSendingToPlayer ? 'Checking which files are available…' : 'Send to Player'}>
+                <Tooltip content="Send to Player" open={isSendingToPlayer ? false : undefined}>
                   <Button
                     variant="ghost"
                     size="icon-sm"
