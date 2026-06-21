@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
+import { VideoRow } from '../ui/VideoRow'
 import { v4 as uuidv4 } from 'uuid'
 import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
@@ -376,8 +377,10 @@ function isPendingStream(folder: import('../../types').StreamFolder, todayStr: s
 export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; folderPath: string; cloudSyncActive: boolean; children: React.ReactNode }) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number }>({ top: 0, left: 0 })
-  const [durations, setDurations] = useState<Record<string, number | null>>({})
-  const [offlineFiles, setOfflineFiles] = useState<Set<string>>(new Set())
+  // Per-file hydration, re-checked on every hover (a cached duration says
+  // nothing about a file's *current* local/offloaded state). VideoRow handles
+  // its own duration/encoding probing from here.
+  const [localStatus, setLocalStatus] = useState<Record<string, boolean>>({})
   const anchorRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
 
@@ -388,40 +391,15 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
     setPos({ top: rect.bottom + 6, left: rect.left })
     setVisible(true)
 
-    // Re-check hydration on every hover for ALL files. A cached duration
-    // says nothing about the file's *current* hydration status — duration
-    // was stored from the last probe, possibly before the file got
-    // offloaded again. Skipping the hydration check for files with a
-    // known duration meant the cloud icon could lie indefinitely.
-    // Duration probes, on the other hand, are expensive and idempotent
-    // for unchanged files — those we still skip when we have a value.
+    // Re-check hydration on every hover for ALL files: a cached duration says
+    // nothing about a file's *current* state (it may have been offloaded since).
     if (videos.length === 0) return
     const localFlags = await window.api.checkLocalFiles(videos)
-    for (let i = 0; i < videos.length; i++) {
-      const v = videos[i]
-      const isLocal = localFlags[i]
-      if (!isLocal) {
-        // Offline — flag for the cloud icon, skip the probe.
-        setOfflineFiles(prev => prev.has(v) ? prev : new Set([...prev, v]))
-        continue
-      }
-      // Local — clear any stale offline mark from a previous hover.
-      setOfflineFiles(prev => {
-        if (!prev.has(v)) return prev
-        const next = new Set(prev)
-        next.delete(v)
-        return next
-      })
-      // Probe only when we don't already have a usable duration.
-      const entry = videoMap?.[videoMapKey(folderPath, v)]
-      if (typeof entry?.duration === 'number' && entry.duration > 0) continue
-      const localDur = durations[v]
-      if (typeof localDur === 'number' && localDur > 0) continue
-      // Errors fall through to the `--:--:--` placeholder.
-      window.api.probeFile(v)
-        .then(info => setDurations(prev => ({ ...prev, [v]: info.duration })))
-        .catch(() => setDurations(prev => ({ ...prev, [v]: null })))
-    }
+    setLocalStatus(prev => {
+      const next = { ...prev }
+      videos.forEach((v, i) => { next[v] = !!localFlags[i] })
+      return next
+    })
   }
 
   // After the tooltip renders, fit it inside the viewport. Vertically: flip
@@ -482,7 +460,7 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
       next.maxHeight !== pos.maxHeight ||
       next.maxWidth !== pos.maxWidth
     ) setPos(next)
-  }, [visible, videos.length, durations, offlineFiles, pos.top, pos.left, pos.maxHeight, pos.maxWidth])
+  }, [visible, videos.length, localStatus, pos.top, pos.left, pos.maxHeight, pos.maxWidth])
 
   if (videos.length === 0) return <>{children}</>
 
@@ -503,68 +481,29 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
             maxWidth: pos.maxWidth,
             overflowY: pos.maxHeight ? 'auto' : undefined,
           }}
-          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1.5 px-3 min-w-[260px] grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-2"
+          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl p-1.5 min-w-[320px] max-w-[460px] flex flex-col gap-0.5"
           onMouseEnter={() => setVisible(true)}
           onMouseLeave={() => setVisible(false)}
         >
-          {/* Single grid spanning every video row so columns (filename · type
-              badge · size · duration · cloud) line up across rows. Each row's
-              cells are emitted directly via Fragment; there's no per-row
-              wrapper element. */}
+          {/* Each video is a shared VideoRow (thumbnail + filename + encoding /
+              timecode / size + hydration). Clicking a row reveals the file in
+              the OS file explorer. */}
           {videos.map(v => {
             const name = v.split(/[\\/]/).pop() ?? v
             const relKey = videoMapKey(folderPath, v)
-            const entry = videoMap?.[relKey]
-            const dur = entry?.duration ?? durations[v]
-            const isOffline = offlineFiles.has(v)
-            const category = entry?.category
-            // For nested files (clips/, recordings/, etc.), show the sub-folder
+            // For nested files (clips/, recordings/, …), show the sub-folder
             // path so the user can tell which file is which.
             const display = relKey.includes('/') ? relKey : name
             return (
-              <React.Fragment key={v}>
-                <span className="text-xs text-gray-300 truncate min-w-0 py-1.5" title={display}>{display}</span>
-                <span className="shrink-0 py-1.5">
-                  {category
-                    ? <span className={`inline-block -translate-y-0.5 text-[10px] font-mono border rounded px-1 ${CATEGORY_STYLES[category] ?? ''}`}>{CATEGORY_LABEL[category] ?? category}</span>
-                    : null}
-                </span>
-                <span className="text-xs text-gray-400 shrink-0 tabular-nums py-1.5">
-                  {entry?.size !== undefined ? formatBytes(entry.size) : ''}
-                </span>
-                <span className="text-xs font-mono shrink-0 py-1.5 justify-self-end">
-                  {/* Duration column. Prefers the cached duration even for
-                      offloaded files (stored in _meta.json from the last
-                      probe). Falls back to a timecode-shaped placeholder
-                      `--:--:--` when probe finished without a result so the
-                      column still aligns with neighboring real timecodes. */}
-                  {dur !== undefined && dur !== null ? (
-                    <span className="text-gray-400">{formatDuration(dur)}</span>
-                  ) : dur === null || v in durations ? (
-                    <span className="text-gray-400">--:--:--</span>
-                  ) : isOffline ? (
-                    // Offline + duration not yet probed (and probably never
-                    // will, since we skip probing cloud placeholders).
-                    <span className="text-gray-400">--:--:--</span>
-                  ) : (
-                    <Loader2 size={10} className="animate-spin text-gray-400" />
-                  )}
-                </span>
-                {/* Cloud-status column — empty when cloud sync isn't active
-                    for this folder. When it is, every file gets an icon:
-                    Cloud for offloaded placeholders, CloudCheck for files
-                    present locally. Kept in its own grid track so the
-                    duration text always ends at the same x-position. */}
-                <span className="shrink-0 py-1.5">
-                  {cloudSyncActive ? (
-                    isOffline ? (
-                      <Cloud size={12} className="text-gray-400" />
-                    ) : (
-                      <CloudCheck size={12} className="text-gray-400" />
-                    )
-                  ) : null}
-                </span>
-              </React.Fragment>
+              <VideoRow
+                key={v}
+                path={v}
+                displayName={display}
+                entry={videoMap?.[relKey]}
+                isLocal={localStatus[v]}
+                cloudSyncActive={cloudSyncActive}
+                onClick={() => window.api.openInExplorer(v)}
+              />
             )
           })}
         </div>,

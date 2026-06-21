@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
-import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry } from '../../types'
+import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry } from '../../types'
 import { ThumbImage } from '../streams/ThumbImage'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
@@ -17,6 +17,7 @@ import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { Checkbox } from '../ui/Checkbox'
+import { VideoRow } from '../ui/VideoRow'
 import { isClipExportCompatible } from '../../lib/clipExport'
 import { renderStreamTitle } from '../../lib/streamTitle'
 
@@ -731,155 +732,42 @@ interface SiblingFile {
   fps?: number              // frames per second (from videoMap) — used for timecode display
   clipOf?: string           // source filename if this was produced by the clip exporter
   clipState?: ClipState     // saved clip state for reopening in the editor
+  entry?: Partial<VideoEntry>  // full videoMap entry (size/duration/codec/dims) for VideoRow
 }
 
 function SiblingVideoItem({
   item,
   isActive,
   onClick,
+  cloudSyncActive,
   indented = false,
   compact = false,
 }: {
   item: SiblingFile
   isActive: boolean
   onClick: () => void
+  cloudSyncActive: boolean
   /** When true, render as an icon-strip-friendly tiny row (used by the
    *  collapsed sidebar). Smaller thumbnail, no inline metadata, full
    *  info shown in a hover tooltip instead. */
   compact?: boolean
   indented?: boolean
 }) {
-  const [thumbnail, setThumbnail] = useState<string | null>(null)
-  const [duration, setDuration] = useState<number | null>(null)
-  const [aspectRatio, setAspectRatio] = useState<number>(16 / 9)
-
-  useEffect(() => {
-    if (!item.isLocal) return
-    const videoUrl = `file://${item.path.replace(/\\/g, '/')}`
-    const vid = document.createElement('video')
-    vid.src = videoUrl
-    vid.muted = true
-    vid.preload = 'metadata'
-    let sought = false
-
-    const cleanup = () => {
-      vid.removeEventListener('loadedmetadata', onMeta)
-      vid.removeEventListener('seeked', onSeeked)
-      vid.removeEventListener('error', onErr)
-      vid.src = ''
-    }
-
-    const onMeta = () => {
-      const dur = vid.duration
-      if (isFinite(dur) && dur > 0) {
-        setDuration(dur)
-        if (vid.videoWidth > 0 && vid.videoHeight > 0) {
-          setAspectRatio(vid.videoWidth / vid.videoHeight)
-        }
-        if (!sought) { sought = true; vid.currentTime = dur * 0.5 }
-      } else { cleanup() }
-    }
-
-    const onSeeked = () => {
-      const vw = vid.videoWidth || 80
-      const vh = vid.videoHeight || 45
-      const canvas = document.createElement('canvas')
-      canvas.height = 45
-      canvas.width = Math.round(45 * (vw / vh))
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        try {
-          ctx.drawImage(vid, 0, 0, canvas.width, canvas.height)
-          setThumbnail(canvas.toDataURL('image/jpeg', 0.7))
-        } catch { /* decode error */ }
-      }
-      cleanup()
-    }
-
-    const onErr = () => cleanup()
-
-    vid.addEventListener('loadedmetadata', onMeta)
-    vid.addEventListener('seeked', onSeeked)
-    vid.addEventListener('error', onErr)
-
-    return cleanup
-  }, [item.path, item.isLocal])
-
-  // Compact rendering uses a fixed 20px thumbnail height to fit the
-  // collapsed sidebar's narrow content area; expanded keeps the previous
-  // 32px height. Width is derived from the captured aspect ratio so
-  // unusual ratios stay correctly shaped.
-  const thumbHeight = compact ? 20 : 32
-  const thumbWidth = Math.round(thumbHeight * aspectRatio)
-
-  // Combined info string surfaced via tooltip in compact mode so the user
-  // can still see name + duration + category without the inline metadata.
-  const durationStr = duration !== null ? formatTime(duration) : item.isLocal ? '…' : 'Cloud sync'
-  const categoryStr = item.category ? ` · ${SESSION_CATEGORY_LABEL[item.category] ?? item.category}` : ''
-  const tooltipContent = `${item.name} · ${durationStr}${categoryStr}`
-
-  const body = (
-    <div
-      onClick={onClick}
-      className={`group/item w-full text-left flex items-center gap-2 ${indented ? (compact ? 'pl-3 pr-1' : 'pl-6 pr-2') : (compact ? 'px-1' : 'px-2')} py-1.5 rounded-lg transition-colors cursor-pointer ${
-        isActive
-          ? 'bg-purple-600/20'
-          : 'hover:bg-white/5'
-      }`}
-    >
-      {/* Thumbnail */}
-      <div
-        className="relative shrink-0 rounded overflow-hidden bg-white/5"
-        style={{ width: thumbWidth, height: thumbHeight }}
-      >
-        {thumbnail ? (
-          <img
-            src={thumbnail}
-            className="w-full h-full object-cover transition-transform duration-200 group-hover/item:scale-110"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-400">
-            {item.isLocal
-              ? <Film size={compact ? 9 : 11} />
-              : <span className={`leading-tight text-center px-1 text-gray-400 ${compact ? 'text-[7px]' : 'text-[9px]'}`}>Cloud</span>
-            }
-          </div>
-        )}
-      </div>
-
-      {/* Inline info — hidden in compact mode (surfaced via tooltip). */}
-      {!compact && (
-        <div className="min-w-0 flex-1">
-          <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
-            {item.name}
-          </div>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-[10px] text-gray-400 tabular-nums">{durationStr}</span>
-            {item.category && (
-              <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${SESSION_CATEGORY_STYLES[item.category] ?? ''}`}>
-                {SESSION_CATEGORY_LABEL[item.category] ?? item.category}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-
-  // Both compact and expanded modes wrap in a Tooltip so the user can
-  // read the full filename when the inline label is truncated. Compact
-  // sits in the popup-out (left of the sidebar) so the tooltip flows
-  // right; expanded sits inside the right-edge sidebar so it flows
-  // left. side= is the *preferred* side — Tooltip falls back if it
-  // doesn't fit.
+  // Shared with the streams video-counter tooltip — VideoRow owns the
+  // thumbnail (cached keystone), the encoding/timecode/size line, and the
+  // hydration indicator. category/fps still live on `item` for the draft
+  // rows; `item.entry` carries the rest of the videoMap metadata.
   return (
-    <Tooltip
-      content={tooltipContent}
-      side={compact ? 'right' : 'left'}
-      triggerClassName="block"
-    >
-      {body}
-    </Tooltip>
+    <VideoRow
+      path={item.path}
+      entry={item.entry ?? { category: item.category, fps: item.fps }}
+      isLocal={item.isLocal}
+      cloudSyncActive={cloudSyncActive}
+      active={isActive}
+      indented={indented}
+      compact={compact}
+      onClick={onClick}
+    />
   )
 }
 
@@ -1230,6 +1118,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   // Session Videos: sibling video files + clip drafts in the same folder
   const [siblingFiles, setSiblingFiles] = useState<SiblingFile[]>([])
+  // Whether the OS cloud-sync provider is active — gates the hydration icon in
+  // the session-video rows (VideoRow). Fetched once.
+  const [cloudSyncActive, setCloudSyncActive] = useState(false)
+  useEffect(() => {
+    window.api.cloudSyncIsActive().then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
+  }, [])
   const [folderDrafts, setFolderDrafts] = useState<import('../../types').ClipDraft[]>([])
   const [folderPath, setFolderPath] = useState<string | null>(null)
   // Full list of stream folders in the streams root, sorted by date.
@@ -1267,7 +1161,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         window.api.readFile(`${streamsDir}/_meta.json`).then(raw => JSON.parse(raw)).catch(() => null),
       ])
       const folderMeta = meta?.[metaKey] ?? {}
-      const videoMap: Record<string, { category?: string; fps?: number; clipOf?: string; clipState?: ClipState }> = folderMeta.videoMap ?? {}
+      const videoMap: Record<string, Partial<VideoEntry>> = folderMeta.videoMap ?? {}
       const drafts: Record<string, import('../../types').ClipDraft> = folderMeta.clipDrafts ?? {}
       setFolderDrafts(Object.values(drafts))
       const videoFiles = files
@@ -1304,6 +1198,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
           fps: entry?.fps,
           clipOf: entry?.clipOf,
           clipState: entry?.clipState,
+          entry,
         }
       }))
 
@@ -5337,6 +5232,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                     <SiblingVideoItem
                                       item={item}
                                       isActive={item.path === state.filePath}
+                                      cloudSyncActive={cloudSyncActive}
                                       onClick={() => loadFile(item.path)}
                                     />
                                     {(draftsBySource[item.name] ?? []).map(draft => (
@@ -5357,6 +5253,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                         key={child.path}
                                         item={child}
                                         isActive={child.path === state.filePath}
+                                        cloudSyncActive={cloudSyncActive}
                                         indented
                                         onClick={() => loadFile(child.path)}
                                       />
