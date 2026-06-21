@@ -5,6 +5,14 @@ import { getStore } from './store'
 interface LauncherApp   { id: string; name: string; path: string }
 interface LauncherGroup { id: string; name: string; apps: LauncherApp[] }
 
+// A launch target is a URL (open in the default browser / protocol handler via
+// shell.openExternal) when it has a `scheme://` prefix; otherwise it's a file
+// path opened with shell.openPath. A Windows drive path ("C:\…") has no `//`
+// after the colon, so it never matches.
+const isUrl = (p: string): boolean => /^[a-z][a-z\d+.-]*:\/\//i.test(p)
+const openTarget = (target: string): Promise<unknown> =>
+  isUrl(target) ? shell.openExternal(target) : shell.openPath(target)
+
 export function registerLauncherIPC(): void {
   ipcMain.handle('launcher:getGroups', () => {
     return (getStore() as any).get('launcherGroups', []) as LauncherGroup[]
@@ -23,7 +31,7 @@ export function registerLauncherIPC(): void {
     for (const entry of group.apps) {
       if (!entry.path) continue
       try {
-        await shell.openPath(entry.path)
+        await openTarget(entry.path)
         launched++
       } catch (_) {
         // continue launching remaining apps even if one fails
@@ -35,7 +43,7 @@ export function registerLauncherIPC(): void {
   ipcMain.handle('launcher:launchApp', async (_event, filePath: string) => {
     if (!filePath) return { launched: false }
     try {
-      await shell.openPath(filePath)
+      await openTarget(filePath)
       return { launched: true }
     } catch (_) {
       return { launched: false }

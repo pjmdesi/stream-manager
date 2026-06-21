@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import * as LucideIcons from 'lucide-react'
-import { Plus, Trash2, FolderOpen, Rocket, Pencil, Check, X, GripVertical, ChevronDown, Upload, Star, Play } from 'lucide-react'
+import { Plus, Trash2, FolderOpen, Rocket, Pencil, Check, X, GripVertical, ChevronDown, Upload, Star, Play, Globe } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { LauncherGroup, LauncherApp } from '../../types'
 import { Button } from '../ui/Button'
@@ -83,16 +83,26 @@ function EditableLabel({
   )
 }
 
+// A launch target is a website/protocol URL (vs a file path) when it has a
+// `scheme://` prefix. Mirrors the main-process check in launcher.ts; a Windows
+// drive path ("C:\…") has no `//` after the colon so it never matches.
+export const isUrlPath = (p: string): boolean => /^[a-z][a-z\d+.-]*:\/\//i.test(p)
+
 // ── App icon (fetched from OS) ─────────────────────────────────────────────────
 
 function AppIcon({ path, size = 20 }: { path: string; size?: number }) {
   const [iconUrl, setIconUrl] = useState<string | null>(null)
+  const isUrl = isUrlPath(path)
 
   useEffect(() => {
-    if (!path) { setIconUrl(null); return }
+    // URLs have no OS file icon — skip the probe and show a globe glyph instead.
+    if (!path || isUrlPath(path)) { setIconUrl(null); return }
     window.api.getFileIcon(path).then(setIconUrl).catch(() => setIconUrl(null))
   }, [path])
 
+  if (isUrl) {
+    return <Globe size={size * 0.8} style={{ width: size, height: size }} className="shrink-0 text-gray-400 p-px" />
+  }
   if (!iconUrl) {
     return <div style={{ width: size, height: size }} className="rounded-sm bg-white/5 shrink-0" />
   }
@@ -159,7 +169,7 @@ function AppDropZone({ onClick, onFileDrop, compact = false }: {
           {isDragging ? <Upload size={14} /> : <Plus size={14} />}
         </div>
         <div className="pointer-events-none">
-          <p className="text-gray-300 font-medium text-sm">Drop an app here or click to browse</p>
+          <p className="text-gray-300 font-medium text-sm">Drop an app here, or click to add an app or website</p>
           <p className="text-gray-400 text-xs mt-0.5">Supports: .exe, .lnk</p>
         </div>
       </div>
@@ -183,14 +193,14 @@ function AppDropZone({ onClick, onFileDrop, compact = false }: {
         }
       </div>
       <div className="text-center pointer-events-none">
-        <p className="text-gray-300 font-medium">Drop an app here or click to browse</p>
+        <p className="text-gray-300 font-medium">Drop an app here, or click to add an app or website</p>
         <p className="text-gray-400 text-sm mt-1">Supports: .exe, .lnk</p>
       </div>
     </div>
   )
 }
 
-// ── Add App modal ─────────────────────────────────────────────────────────────
+// ── Add-to-group modal (app or website) ────────────────────────────────────────
 
 function AddAppModal({
   isOpen,
@@ -212,6 +222,7 @@ function AddAppModal({
   const [path, setPath] = useState('')
   const [name, setName] = useState('')
   const [iconUrl, setIconUrl] = useState<string | null>(null)
+  const [itemType, setItemType] = useState<'app' | 'url'>('app')
   const anchorRef = useRef<HTMLButtonElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -223,11 +234,18 @@ function AddAppModal({
     if (prefill?.path) {
       setPath(prefill.path)
       setName(prefill.name)
-      window.api.getFileIcon(prefill.path).then(setIconUrl).catch(() => setIconUrl(null))
+      if (isUrlPath(prefill.path)) {
+        setItemType('url')
+        setIconUrl(null)
+      } else {
+        setItemType('app')
+        window.api.getFileIcon(prefill.path).then(setIconUrl).catch(() => setIconUrl(null))
+      }
     } else {
       setPath('')
       setName('')
       setIconUrl(null)
+      setItemType('app')
     }
   }, [isOpen])
 
@@ -268,17 +286,27 @@ function AddAppModal({
     if (selectedExisting) {
       onAdd({ ...selectedExisting, id: uuidv4() })
       onClose()
-    } else {
-      if (!path) return
-      onAdd({ id: uuidv4(), name: name.trim() || path.replace(/.*[\\/]/, '').replace(/\.[^.]+$/, ''), path })
-      onClose()
+      return
     }
+    if (itemType === 'url') {
+      let url = path.trim()
+      if (!url) return
+      if (!isUrlPath(url)) url = `https://${url}`  // assume https when no scheme was typed
+      let host = url
+      try { host = new URL(url).hostname.replace(/^www\./, '') } catch { /* keep the raw url as the name */ }
+      onAdd({ id: uuidv4(), name: name.trim() || host, path: url })
+      onClose()
+      return
+    }
+    if (!path) return
+    onAdd({ id: uuidv4(), name: name.trim() || path.replace(/.*[\\/]/, '').replace(/\.[^.]+$/, ''), path })
+    onClose()
   }
 
   const newAppMode = !selectedExisting
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add App" width="sm">
+    <Modal isOpen={isOpen} onClose={onClose} title="Add to Group" width="sm">
       <div className="flex flex-col gap-4">
 
         {/* Previously added apps dropdown */}
@@ -348,7 +376,26 @@ function AddAppModal({
           </div>
         )}
 
-        {/* Path picker — hidden when an existing app is selected */}
+        {/* App vs. Website toggle — only when adding a new item */}
+        {newAppMode && (
+          <div className="flex gap-1 p-0.5 bg-navy-900 border border-white/10 rounded-lg w-fit">
+            {([['app', 'App'], ['url', 'Website']] as const).map(([t, lbl]) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setItemType(t)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  itemType === t ? 'bg-purple-600/30 text-purple-200' : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Path picker (App) — hidden when an existing app is selected */}
+        {itemType === 'app' && (
         <div className={`flex flex-col gap-1.5 ${!newAppMode ? 'opacity-40 pointer-events-none select-none' : ''}`}>
           <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Application</label>
           <div className="flex gap-2">
@@ -376,19 +423,38 @@ function AddAppModal({
             <p className="text-[11px] text-gray-400 font-mono truncate px-1">{path}</p>
           )}
         </div>
+        )}
+
+        {/* URL input (Website) */}
+        {itemType === 'url' && (
+        <div className={`flex flex-col gap-1.5 ${!newAppMode ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+          <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Website URL</label>
+          <input
+            value={path}
+            onChange={e => setPath(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') confirm() }}
+            placeholder="https://example.com"
+            autoFocus
+            className="bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+          />
+          <p className="text-[11px] text-gray-400 px-1">Opens in your default browser when the group launches.</p>
+        </div>
+        )}
 
         {/* Icon + name — hidden when an existing app is selected */}
         <div className={`flex flex-col gap-1.5 ${!newAppMode ? 'opacity-40 pointer-events-none select-none' : ''}`}>
           <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Name</label>
           <div className="flex items-center gap-2">
-            {iconUrl && (
+            {itemType === 'url' ? (
+              <Globe size={20} className="w-8 h-8 shrink-0 text-gray-400 p-1.5" />
+            ) : iconUrl ? (
               <img src={iconUrl} alt="" className="w-8 h-8 shrink-0 object-contain rounded" />
-            )}
+            ) : null}
             <input
               value={name}
               onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') confirm() }}
-              placeholder="App name"
+              placeholder={itemType === 'url' ? 'Website name (optional)' : 'App name'}
               disabled={!newAppMode}
               className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:cursor-not-allowed"
             />
@@ -397,7 +463,7 @@ function AddAppModal({
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" size="sm" disabled={!selectedExisting && !path} onClick={confirm}>Add App</Button>
+          <Button variant="primary" size="sm" disabled={!selectedExisting && !path} onClick={confirm}>Add</Button>
         </div>
       </div>
     </Modal>
@@ -467,17 +533,28 @@ function AppRow({
           className="text-sm font-medium text-gray-200"
         />
         <div className="flex items-center gap-1 min-w-0">
-          <span className="text-xs text-gray-400 truncate font-mono">
-            {app.path || <span className="text-gray-400 not-italic">No path set</span>}
-          </span>
-          <Tooltip content="Change executable" side="top">
-            <button
-              onClick={browsePath}
-              className="shrink-0 p-0.5 text-gray-400 hover:text-gray-300 transition-colors opacity-0 group-hover:opacity-100"
-            >
-              <FolderOpen size={12} />
-            </button>
-          </Tooltip>
+          {isUrlPath(app.path) ? (
+            <EditableLabel
+              value={app.path}
+              onSave={p => onUpdate({ ...app, path: p })}
+              placeholder="https://…"
+              className="text-xs text-gray-400 truncate font-mono"
+            />
+          ) : (
+            <>
+              <span className="text-xs text-gray-400 truncate font-mono">
+                {app.path || <span className="text-gray-400 not-italic">No path set</span>}
+              </span>
+              <Tooltip content="Change executable" side="top">
+                <button
+                  onClick={browsePath}
+                  className="shrink-0 p-0.5 text-gray-400 hover:text-gray-300 transition-colors opacity-0 group-hover:opacity-100"
+                >
+                  <FolderOpen size={12} />
+                </button>
+              </Tooltip>
+            </>
+          )}
         </div>
       </div>
       <Tooltip content={launched ? 'Launched!' : 'Launch'} side="left">
