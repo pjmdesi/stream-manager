@@ -1004,20 +1004,30 @@ export function StreamsPage({
   const pickPrimaryVideo = (folder: StreamFolder): string | null =>
     pickPrimaryFrom(folder, folder.videos)
 
+  // Folder whose hydration check is in flight, so its Send-to-Player button can
+  // show a spinner. The checkLocalFiles call below can take a moment for a
+  // folder with many offloaded files, and there'd otherwise be no feedback.
+  const [sendingPlayerPath, setSendingPlayerPath] = useState<string | null>(null)
   const handleSendToPlayer = useCallback(async (folder: StreamFolder) => {
     if (folder.videos.length === 0) return
     // Only send a file that's actually present on disk. If the whole folder is
     // offloaded to the cloud, prompt to download the first video and hand it to
     // the player once it's local (handled by the cloud-download-done effect).
-    const localFlags = await window.api.checkLocalFiles(folder.videos)
-    const localVideos = folder.videos.filter((_, i) => localFlags[i])
-    if (localVideos.length === 0) {
-      const filePath = folder.videos[0]
-      setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'player', stage: 'confirm' })
-      return
+    setSendingPlayerPath(folder.folderPath)
+    try {
+      const localFlags = await window.api.checkLocalFiles(folder.videos)
+      const localVideos = folder.videos.filter((_, i) => localFlags[i])
+      if (localVideos.length === 0) {
+        const filePath = folder.videos[0]
+        setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'player', stage: 'confirm' })
+        return
+      }
+      const file = pickPrimaryFrom(folder, localVideos)
+      if (file) onSendToPlayer(file)
+    } finally {
+      // Only clear if another send hasn't taken over in the meantime.
+      setSendingPlayerPath(prev => (prev === folder.folderPath ? null : prev))
     }
-    const file = pickPrimaryFrom(folder, localVideos)
-    if (file) onSendToPlayer(file)
   }, [onSendToPlayer])
 
   const handleSendToConverter = useCallback((folder: StreamFolder) => {
@@ -2688,6 +2698,7 @@ export function StreamsPage({
                         thumbWidth={thumbWidth}
                         tagColors={tagColors}
                         tagTextures={tagTextures}
+                        isSendingToPlayer={sendingPlayerPath === f.folderPath}
                         onClick={() => onRowClick(f.folderPath)}
                         onSendToPlayer={() => handleSendToPlayer(f)}
                         onSendToConverter={() => handleSendToConverter(f)}
@@ -3477,7 +3488,7 @@ function StreamListItem({
   onDragStart, onDragEnter, dragMovedRef,
   isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
-  onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
+  isSendingToPlayer, onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
   animDurationMs,
 }: {
   folder: StreamFolder
@@ -3533,6 +3544,9 @@ function StreamListItem({
   /** Drives the cloud-status column in the rich count tooltip — when
    *  false the tooltip skips the Cloud/CloudCheck icon entirely. */
   cloudSyncActive: boolean
+  /** True while this row's Send-to-Player hydration check is in flight —
+   *  spins the button icon and pins the action row open. */
+  isSendingToPlayer: boolean
   onClick: () => void
   onSendToPlayer: () => void
   onSendToConverter: () => void
@@ -3891,7 +3905,7 @@ function StreamListItem({
           </td>
 
           <td className="px-2 py-2 align-middle">
-            <div className={`flex items-center justify-end transition-opacity ${selectMode ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
+            <div className={`flex items-center justify-end transition-opacity ${selectMode ? 'opacity-0 pointer-events-none' : isSendingToPlayer ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
               {!hasMeta && (
                 <span className="flex items-center gap-1 text-xs text-yellow-600 mr-1 shrink-0">
                   <AlertTriangle size={11} />
@@ -3899,8 +3913,14 @@ function StreamListItem({
                 </span>
               )}
               {videoCount > 0 && (
-                <Tooltip content="Send to Player">
-                  <Button variant="ghost" size="icon-sm" icon={<Film size={12} />} onClick={onSendToPlayer} />
+                <Tooltip content={isSendingToPlayer ? 'Checking which files are available…' : 'Send to Player'}>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    icon={isSendingToPlayer ? <Loader2 size={12} className="animate-spin" /> : <Film size={12} />}
+                    onClick={onSendToPlayer}
+                    disabled={isSendingToPlayer}
+                  />
                 </Tooltip>
               )}
               {videoCount > 0 && (
