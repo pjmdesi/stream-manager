@@ -41,6 +41,9 @@ export interface VideoInfo {
   fps?: number
   /** Video stream bitrate in bits/sec from ffprobe (may be absent for some containers) */
   videoBitrate?: number
+  /** Format-level `comment` container tag, if present. Carries the SM clip
+   *  provenance marker on app-exported clips (see clipProvenanceComment). */
+  comment?: string
 }
 
 export async function probeFile(filePath: string): Promise<VideoInfo> {
@@ -74,6 +77,8 @@ export async function probeFile(filePath: string): Promise<VideoInfo> {
       const rawBitrate = videoStream?.bit_rate ?? metadata.format.bit_rate
       const videoBitrate = rawBitrate ? Number(rawBitrate) : undefined
 
+      const fmtTags = (metadata.format as { tags?: Record<string, string> }).tags
+
       resolve({
         path: filePath,
         duration: metadata.format.duration || 0,
@@ -84,6 +89,7 @@ export async function probeFile(filePath: string): Promise<VideoInfo> {
         videoCodec: videoStream?.codec_name,
         fps,
         videoBitrate,
+        comment: fmtTags?.comment ?? fmtTags?.COMMENT,
       })
     })
   })
@@ -102,6 +108,34 @@ export async function probeArchiveTag(filePath: string): Promise<string | undefi
       resolve(tags?.encoded_by ?? tags?.ENCODED_BY)
     })
   })
+}
+
+// ── Clip provenance marker ──────────────────────────────────────────────────
+// App-exported clips get a marker written into the file's `comment` container
+// tag so a clip's identity survives a move out of its stream folder or loss of
+// _meta.json — the same idea as the archive process's `encoded_by` tag, but on
+// `comment` so it never collides with the archived marker. The category is
+// encoded so 'short' vs 'clip' stays exact (a 16:9 clip and a 9:16 short are
+// otherwise only distinguishable by aspect, which the size/aspect classifier
+// can get wrong).
+const CLIP_PROVENANCE: Record<'clip' | 'short', string> = {
+  clip: 'Stream Manager Clip',
+  short: 'Stream Manager Short',
+}
+
+/** Build the `-metadata comment=` value stamped on an exported clip/short. */
+export function clipProvenanceComment(category: 'clip' | 'short', version: string): string {
+  return `${CLIP_PROVENANCE[category]} — v${version}`
+}
+
+/** Read the clip category back from a file's `comment` tag, or null if the file
+ *  carries no SM clip marker. Checks 'short' first since its marker is distinct
+ *  from 'clip'. */
+export function parseClipProvenance(comment: string | undefined | null): 'clip' | 'short' | null {
+  if (!comment) return null
+  if (comment.includes(CLIP_PROVENANCE.short)) return 'short'
+  if (comment.includes(CLIP_PROVENANCE.clip)) return 'clip'
+  return null
 }
 
 // Set of per-call cancel handles. Each in-flight extractAudioTracks adds

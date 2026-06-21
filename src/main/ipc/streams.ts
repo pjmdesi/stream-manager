@@ -7,7 +7,7 @@ import chokidar, { FSWatcher } from 'chokidar'
 import { getStore } from './store'
 import type { ConversionPreset } from './converter'
 import { checkLocalFiles, isFileConfirmedLocal } from './files'
-import { probeFile } from '../services/ffmpegService'
+import { probeFile, parseClipProvenance } from '../services/ffmpegService'
 
 export type VideoCategory = 'full' | 'short' | 'clip'
 
@@ -566,7 +566,10 @@ async function refreshVideoMaps(
           const cropAspect = (prev.clipState as { cropAspect?: string } | undefined)?.cropAspect
           category = cropAspect === '9:16' ? 'short' : 'clip'
         } else {
-          category = classifyVideo(info.width, info.height, stat.size, true)
+          // Fallback: a clip that lost its _meta.json clipOf entry (moved out of
+          // its folder, meta deleted) still carries an SM clip marker in its
+          // container metadata — trust that over the size/aspect heuristic.
+          category = parseClipProvenance(info.comment) ?? classifyVideo(info.width, info.height, stat.size, true)
         }
         const entry: VideoEntry = {
           size: stat.size,

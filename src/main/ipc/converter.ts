@@ -997,7 +997,7 @@ export function registerConverterIPC(): void {
     const hasBleep = bleepRegions.length > 0
     const n = clipRegions.length
 
-    const { extractSegmentToFile, runClipConversion, probeFile, applyGpuAcceleration } = await import('../services/ffmpegService')
+    const { extractSegmentToFile, runClipConversion, probeFile, applyGpuAcceleration, clipProvenanceComment } = await import('../services/ffmpegService')
     const fileInfo = await probeFile(job.inputFile).catch(() => null)
     const audioTrackCount = fileInfo?.audioTracks?.length ?? 1
 
@@ -1082,6 +1082,13 @@ export function registerConverterIPC(): void {
     const rawCodecArgs = `${baseCodecArgs} ${CONCAT_SAFETY_ARGS}`
     const gpuCodecArgs = await applyGpuAcceleration(rawCodecArgs)
     const outputArgs = ['-map', '[vout]', '-map', '[aout]', ...gpuCodecArgs.split(/\s+/).filter(Boolean)]
+    // Stamp a clip-provenance marker into the output's `comment` container tag
+    // so the file is still recognizable as an app-exported clip/short after a
+    // move out of its folder or loss of _meta.json — the fallback identifier the
+    // size/aspect classifier reads when there's no clipOf entry. Category mirrors
+    // clip:tagExport (9:16 crop → short, otherwise clip).
+    const clipCategory: 'clip' | 'short' = cropAspect === '9:16' ? 'short' : 'clip'
+    outputArgs.push('-metadata', `comment=${clipProvenanceComment(clipCategory, app.getVersion())}`)
 
     // Register the job immediately so it appears in the UI
     const newJob: ConversionJob = { ...job, id, status: 'running', progress: 0 }
