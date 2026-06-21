@@ -4240,49 +4240,58 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       // Anchor the ratio re-derive + snapper grow the box from.
                       let ratioAnchors: { h: 'left' | 'right' | 'center'; v: 'top' | 'bottom' | 'center' } | null = null
                       const sel = selectedIdsRef.current
+                      // Aspect-ratio lock decision:
+                      //   • Single non-text layer → its own aspectLocked (default
+                      //     true); Shift inverts for this gesture.
+                      //   • Multi-select → scale the whole group uniformly so
+                      //     every layer keeps its aspect + relative position.
+                      //     Locked by default; Shift inverts. Rotated members are
+                      //     excluded here — the Transformer's keepRatio already
+                      //     forces them uniform (a non-uniform group scale would
+                      //     skew a rotated child), and an all-text group only
+                      //     resizes horizontally so there's no ratio to hold.
+                      let effectiveLock = false
                       if (sel.length === 1) {
                         const l = layers.find(ll => ll.id === sel[0])
                         // Text height is font-driven — never resize it vertically.
                         if (l?.type === 'text') { constrained.height = start.height; constrained.y = start.y }
-                        // Aspect-ratio enforcement (single non-text layer only;
-                        // multi-select is freeform because honoring multiple
-                        // ratios in one bbox is ambiguous). Lock defaults to true;
-                        // Shift inverts for this gesture.
-                        if (l && l.type !== 'text') {
-                          const layerLocked = l.aspectLocked ?? true
-                          const effectiveLock = layerLocked !== shiftPressedRef.current
-                          if (effectiveLock) {
-                            const ratio = start.height > 0 ? start.width / start.height : 1
-                            // Origin: centered → both axes from center; else the
-                            // dragged edge's opposite is fixed and any *derived*
-                            // axis grows from center.
-                            const hAnchor: 'left' | 'right' | 'center' = centered ? 'center' : dragsLeft ? 'right' : dragsRight ? 'left' : 'center'
-                            const vAnchor: 'top' | 'bottom' | 'center' = centered ? 'center' : dragsTop ? 'bottom' : dragsBottom ? 'top' : 'center'
-                            const dragsH = dragsLeft || dragsRight
-                            const dragsV = dragsTop || dragsBottom
-                            // Uniform scale: a corner projects the cursor box
-                            // (cw, ch) onto the line w = ratio·h (continuous, no
-                            // mid-drag axis flip); a side handle is driven by its
-                            // single changing dimension.
-                            let s: number
-                            if (dragsH && dragsV) {
-                              const cw = constrained.width
-                              const ch = constrained.height
-                              s = Math.max(10, (ratio * cw + ch) / (ratio * ratio + 1)) / start.height
-                            } else if (dragsH) {
-                              s = constrained.width / start.width
-                            } else {
-                              s = constrained.height / start.height
-                            }
-                            const nw = Math.max(10, start.width * s)
-                            const nh = Math.max(10, start.height * s)
-                            constrained.width = nw
-                            constrained.height = nh
-                            constrained.x = hAnchor === 'left' ? start.x : hAnchor === 'right' ? startR - nw : startCx - nw / 2
-                            constrained.y = vAnchor === 'top' ? start.y : vAnchor === 'bottom' ? startB - nh : startCy - nh / 2
-                            ratioAnchors = { h: hAnchor, v: vAnchor }
-                          }
+                        else if (l) effectiveLock = (l.aspectLocked ?? true) !== shiftPressedRef.current
+                      } else if (sel.length > 1) {
+                        const selLayers = layers.filter(ll => sel.includes(ll.id))
+                        const allText = selLayers.length > 0 && selLayers.every(ll => ll.type === 'text')
+                        const anyRotated = selLayers.some(ll => (ll.rotation ?? 0) !== 0)
+                        if (!allText && !anyRotated) effectiveLock = !shiftPressedRef.current
+                      }
+                      if (effectiveLock) {
+                        const ratio = start.height > 0 ? start.width / start.height : 1
+                        // Origin: centered → both axes from center; else the
+                        // dragged edge's opposite is fixed and any *derived*
+                        // axis grows from center.
+                        const hAnchor: 'left' | 'right' | 'center' = centered ? 'center' : dragsLeft ? 'right' : dragsRight ? 'left' : 'center'
+                        const vAnchor: 'top' | 'bottom' | 'center' = centered ? 'center' : dragsTop ? 'bottom' : dragsBottom ? 'top' : 'center'
+                        const dragsH = dragsLeft || dragsRight
+                        const dragsV = dragsTop || dragsBottom
+                        // Uniform scale: a corner projects the cursor box
+                        // (cw, ch) onto the line w = ratio·h (continuous, no
+                        // mid-drag axis flip); a side handle is driven by its
+                        // single changing dimension.
+                        let s: number
+                        if (dragsH && dragsV) {
+                          const cw = constrained.width
+                          const ch = constrained.height
+                          s = Math.max(10, (ratio * cw + ch) / (ratio * ratio + 1)) / start.height
+                        } else if (dragsH) {
+                          s = constrained.width / start.width
+                        } else {
+                          s = constrained.height / start.height
                         }
+                        const nw = Math.max(10, start.width * s)
+                        const nh = Math.max(10, start.height * s)
+                        constrained.width = nw
+                        constrained.height = nh
+                        constrained.x = hAnchor === 'left' ? start.x : hAnchor === 'right' ? startR - nw : startCx - nw / 2
+                        constrained.y = vAnchor === 'top' ? start.y : vAnchor === 'bottom' ? startB - nh : startCy - nh / 2
+                        ratioAnchors = { h: hAnchor, v: vAnchor }
                       }
                       // Ratio-locked + smart snap → single-scale snapper that
                       // keeps the ratio intact. Everything else (freeform, grid,
