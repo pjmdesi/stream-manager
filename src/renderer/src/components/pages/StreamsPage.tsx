@@ -2984,6 +2984,10 @@ export function StreamsPage({
                 folderPath: renderedFolder.folderPath,
                 label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
               })}
+              onSendFilesToConverter={(paths) => onSendToConverter(paths, {
+                folderPath: renderedFolder.folderPath,
+                label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
+              })}
               onReloadFolders={() => void loadFolders()}
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
@@ -4585,7 +4589,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onReloadFolders, onOpenFolder, onOpenThumbnails, onDelete,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onReloadFolders, onOpenFolder, onOpenThumbnails, onDelete,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -4654,6 +4658,7 @@ function SidebarDetail({
   /** Open / send one specific file — used by the files grid's per-file actions. */
   onSendFileToPlayer: (path: string) => void
   onSendFileToConverter: (path: string) => void
+  onSendFilesToConverter: (paths: string[]) => void
   /** Re-scan folders after a file changes (e.g. trashed from the grid). */
   onReloadFolders: () => void
   onOpenFolder: () => void
@@ -5976,6 +5981,7 @@ function SidebarDetail({
                     cloudSyncActive={cloudSyncActive}
                     onSendToPlayer={onSendFileToPlayer}
                     onSendToConverter={onSendFileToConverter}
+                    onSendFilesToConverter={onSendFilesToConverter}
                     onSetThumbnail={(filePath) => onUpdateMeta({ preferredThumbnail: filePath.split(/[\\/]/).pop() ?? '' })}
                     onDeleteThumbnail={onDeleteThumbnail}
                     onEditThumbnail={onOpenThumbnails}

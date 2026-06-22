@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive } from 'lucide-react'
+import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, ListChecks, X } from 'lucide-react'
 import { VideoThumb, CHECKER } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
@@ -48,7 +48,7 @@ const ACTION_PINK = `${ACTION_BASE} hover:text-pink-400 hover:bg-pink-500/10`
 const ACTION_CYAN = `${ACTION_BASE} hover:text-cyan-400 hover:bg-cyan-500/10`
 const ACTION_RED = `${ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
 
-const CARD = 'group/file flex gap-3 p-2 rounded-lg bg-white/[0.03] border border-white/5 hover:bg-white/5 transition-colors'
+const CARD = 'group/file relative flex gap-3 p-2 rounded-lg bg-white/[0.03] border border-white/5 hover:bg-white/5 transition-colors'
 const ACTION_ROW = 'mt-auto flex items-center justify-end gap-0.5 opacity-0 group-hover/file:opacity-100 transition-opacity'
 const TYPE_ICON = 'shrink-0 relative -top-0.5'
 const META_LINE = 'text-[11px] text-gray-400 mt-0.5 flex items-center gap-1 min-w-0'
@@ -159,7 +159,33 @@ function TaggedThumb({ thumb, tag }: { thumb: React.ReactNode; tag: TagSpec | nu
   )
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, onSendToPlayer, onSendToConverter, onOffload, onPin, onReload }: {
+/** Selection checkbox overlay — top-left of a card. Only rendered while select
+ *  mode is on; shows the file's selected state. Shift-click extends a range. */
+function SelectBox({ checked, onToggle }: { checked: boolean; onToggle: (shiftKey: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={e => { e.stopPropagation(); onToggle(e.shiftKey) }}
+      title="Select (Shift-click for a range)"
+      className={`absolute top-1 left-1 z-10 w-4 h-4 rounded flex items-center justify-center border transition-colors ${
+        checked
+          ? 'bg-purple-500 border-purple-500 text-white'
+          : 'bg-navy-900/80 border-white/50 text-transparent hover:border-white/80'
+      }`}
+    >
+      <Check size={11} />
+    </button>
+  )
+}
+
+/** Full-card click target that toggles selection in select mode — sits above
+ *  the card's own interactions (lightbox / action buttons) so the whole card
+ *  acts as a select target, like the stream rows. */
+function SelectOverlay({ onToggle }: { onToggle: (shiftKey: boolean) => void }) {
+  return <div className="absolute inset-0 z-[5] cursor-pointer" onClick={e => onToggle(e.shiftKey)} />
+}
+
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, onSelectToggle, onSendToPlayer, onSendToConverter, onOffload, onPin, onReload }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -170,6 +196,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   busy: boolean
   /** SM stamped the archived (encoded_by) tag on the file. */
   archived: boolean
+  selectMode: boolean
+  selected: boolean
+  onSelectToggle: (shiftKey: boolean) => void
   onSendToPlayer: (path: string) => void
   onSendToConverter: (path: string) => void
   onOffload: (path: string) => void
@@ -193,7 +222,8 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   const secondary = [entry?.size != null ? formatBytes(entry.size) : null, encoding || null, extOf(name) || null].filter(Boolean).join('  ·  ')
 
   return (
-    <div className={CARD}>
+    <div className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''}`}>
+      {selectMode && (<><SelectOverlay onToggle={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
           thumb={<VideoThumb path={path} width={104} height={58} checker rounded={isShort || isClip ? 'rounded-t-md' : 'rounded-md'} />}
@@ -215,7 +245,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
           <CloudStatus isLocal={isLocal} active={cloudSyncActive} busy={busy} />
         </div>
         {secondary && <p className={META_SECONDARY}>{secondary}</p>}
-        <div className={ACTION_ROW}>
+        <div className={`${ACTION_ROW}${selectMode ? ' invisible' : ''}`}>
           <Tooltip content="Send to player" side="top">
             <button onClick={() => onSendToPlayer(path)} className={ACTION_PURPLE}><Play size={12} /> Player</button>
           </Tooltip>
@@ -232,7 +262,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   )
 }
 
-function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin }: {
+function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin }: {
   path: string
   thumbIndex: number
   /** Scan-flag-based local hint for rendering the image (immediate). */
@@ -244,6 +274,9 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
   thumbsKey: number
   isPreferred: boolean
   size?: number
+  selectMode: boolean
+  selected: boolean
+  onSelectToggle: (shiftKey: boolean) => void
   onSetThumbnail: (path: string) => void
   onDeleteThumbnail: (path: string) => void
   onEditThumbnail: (variantOrdinal?: number) => void
@@ -258,7 +291,8 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
   const secondary = [size != null ? formatBytes(size) : null, extOf(name) || null].filter(Boolean).join('  ·  ')
 
   return (
-    <div className={CARD}>
+    <div className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''}`}>
+      {selectMode && (<><SelectOverlay onToggle={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
           thumb={
@@ -297,7 +331,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
           <CloudStatus isLocal={cloudIsLocal} active={cloudSyncActive} busy={busy} />
         </div>
         {secondary && <p className={META_SECONDARY}>{secondary}</p>}
-        <div className={ACTION_ROW}>
+        <div className={`${ACTION_ROW}${selectMode ? ' invisible' : ''}`}>
           {isSm && (
             <Tooltip content="Open in thumbnail editor" side="top" shortcut="Ctrl+Shift+T">
               <button onClick={() => onEditThumbnail(ordinal!)} className={ACTION_GRAY}><FileImage size={12} /> Edit</button>
@@ -320,6 +354,8 @@ interface Props {
   cloudSyncActive: boolean
   onSendToPlayer: (path: string) => void
   onSendToConverter: (path: string) => void
+  /** Bulk send the selected videos to the converter (one batch). */
+  onSendFilesToConverter: (paths: string[]) => void
   onSetThumbnail: (path: string) => void
   onDeleteThumbnail: (path: string) => void
   onEditThumbnail: (variantOrdinal?: number) => void
@@ -337,7 +373,7 @@ interface Props {
  */
 export function StreamFilesGrid({
   folder, thumbsKey, preferredThumbnail, cloudSyncActive,
-  onSendToPlayer, onSendToConverter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onReload,
+  onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onReload,
 }: Props) {
   const videoMap = folder.meta?.videoMap ?? {}
   const hasVideos = folder.videos.length > 0
@@ -453,16 +489,91 @@ export function StreamFilesGrid({
   const offloadFile = (path: string) => enqueueOffload([{ path, size: sizeOf(path) }], false)
   const pinFile = (path: string) => enqueueHydrate([{ path, size: sizeOf(path) }], false)
 
+  // ── Multi-select ──────────────────────────────────────────────────────────
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const lastClickedRef = useRef<string | null>(null)
+  // Visible files in display order (videos then images, honoring the filters) —
+  // the order a shift-click range walks.
+  const visiblePaths = useMemo(
+    () => [...(showVideo ? folder.videos : []), ...(showImage ? folder.thumbnails : [])],
+    [showVideo, showImage, folder.videos, folder.thumbnails],
+  )
+  useEffect(() => { setSelectMode(false); setSelected(new Set()); lastClickedRef.current = null }, [folder.folderPath])
+  const toggleSelect = (path: string, shiftKey: boolean) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      const anchor = lastClickedRef.current
+      if (shiftKey && anchor && anchor !== path) {
+        const a = visiblePaths.indexOf(anchor)
+        const b = visiblePaths.indexOf(path)
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a < b ? [a, b] : [b, a]
+          for (let i = lo; i <= hi; i++) next.add(visiblePaths[i])
+        } else if (next.has(path)) { next.delete(path) } else { next.add(path) }
+      } else if (next.has(path)) { next.delete(path) } else { next.add(path) }
+      return next
+    })
+    lastClickedRef.current = path
+  }
+  const clearSelection = () => { setSelected(new Set()); lastClickedRef.current = null }
+  const exitSelectMode = () => { setSelectMode(false); clearSelection() }
+  const selectedPaths = useMemo(() => visiblePaths.filter(p => selected.has(p)), [visiblePaths, selected])
+  const selectedVideos = useMemo(() => selectedPaths.filter(p => folder.videos.includes(p)), [selectedPaths, folder.videos])
+  const bulkConvert = () => { if (selectedVideos.length) { onSendFilesToConverter(selectedVideos); clearSelection() } }
+  const bulkOffload = () => { enqueueOffload(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
+  const bulkPin = () => { enqueueHydrate(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
+  const bulkTrash = async () => {
+    for (const p of selectedPaths) await window.api.trashFile(p).catch(() => {})
+    clearSelection()
+    onReload()
+  }
+
   if (!hasVideos && !hasImages) return null
 
   return (
     <div className="flex flex-col gap-2">
-      {hasVideos && hasImages && (
-        <div className="flex items-center gap-1.5">
-          <FilterToggle active={showVideo} onClick={() => setShowVideo(v => !v)} icon={<Film size={12} />} label={`Video ${folder.videos.length}`} />
-          <FilterToggle active={showImage} onClick={() => setShowImage(v => !v)} icon={<ImageIcon size={12} />} label={`Images ${folder.thumbnails.length}`} />
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {hasVideos && hasImages && (
+          <>
+            <FilterToggle active={showVideo} onClick={() => setShowVideo(v => !v)} icon={<Film size={12} />} label={`Video ${folder.videos.length}`} />
+            <FilterToggle active={showImage} onClick={() => setShowImage(v => !v)} icon={<ImageIcon size={12} />} label={`Images ${folder.thumbnails.length}`} />
+          </>
+        )}
+        <div className="ml-auto flex items-center gap-0.5 flex-wrap">
+          {!selectMode ? (
+            <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /> Select</button>
+          ) : (
+            <>
+              <span className="text-[11px] text-gray-400 mr-1">{selectedPaths.length} selected</span>
+              {selectedPaths.length < visiblePaths.length && (
+                <button onClick={() => setSelected(new Set(visiblePaths))} className={ACTION_GRAY}>Select all</button>
+              )}
+              {selectedVideos.length > 0 && (
+                <Tooltip content="Send selected to converter" side="top">
+                  <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /> Convert</button>
+                </Tooltip>
+              )}
+              {cloudSyncActive && selectedPaths.length > 0 && (
+                <>
+                  <Tooltip content="Offload selected to cloud" side="top">
+                    <button onClick={bulkOffload} className={ACTION_PINK}><Cloud size={12} /></button>
+                  </Tooltip>
+                  <Tooltip content="Pin selected on this device" side="top">
+                    <button onClick={bulkPin} className={ACTION_CYAN}><CloudDownload size={12} /></button>
+                  </Tooltip>
+                </>
+              )}
+              {selectedPaths.length > 0 && (
+                <Tooltip content="Move selected to recycle bin" side="top">
+                  <button onClick={bulkTrash} className={ACTION_RED}><Trash2 size={12} /></button>
+                </Tooltip>
+              )}
+              <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /> Stop</button>
+            </>
+          )}
         </div>
-      )}
+      </div>
       <div className="grid gap-3 max-h-[318px] overflow-y-auto pr-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
         {showVideo && folder.videos.map(path => {
           const entry = videoMap[path.split(/[\\/]/).pop() ?? '']
@@ -476,6 +587,9 @@ export function StreamFilesGrid({
               cloudSyncActive={cloudSyncActive}
               busy={busyPaths.has(path)}
               archived={archivedSet.has(path)}
+              selectMode={selectMode}
+              selected={selected.has(path)}
+              onSelectToggle={(shiftKey) => toggleSelect(path, shiftKey)}
               onSendToPlayer={onSendToPlayer}
               onSendToConverter={onSendToConverter}
               onOffload={offloadFile}
@@ -499,6 +613,9 @@ export function StreamFilesGrid({
               thumbsKey={thumbsKey}
               isPreferred={isPreferred}
               size={imageSizes[path]}
+              selectMode={selectMode}
+              selected={selected.has(path)}
+              onSelectToggle={(shiftKey) => toggleSelect(path, shiftKey)}
               onSetThumbnail={onSetThumbnail}
               onDeleteThumbnail={onDeleteThumbnail}
               onEditThumbnail={onEditThumbnail}
