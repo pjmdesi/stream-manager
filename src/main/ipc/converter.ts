@@ -88,6 +88,10 @@ export interface ConversionJob {
   /** Fired in the main process once every job sharing this groupId has reached
    *  status 'done'. Skipped if any job in the group failed or was cancelled. */
   groupCompletionHook?: GroupCompletionHook
+  /** For audio-extraction presets: the 0-based audio-stream index to extract
+   *  (prepends `-map 0:a:<index>` to the args). Undefined keeps ffmpeg's
+   *  default selection. */
+  audioTrackIndex?: number
 }
 
 // All video presets begin with `-map 0:v? -map 0:a?` so EVERY audio track
@@ -117,8 +121,8 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
   },
   {
     id: 'extract-audio',
-    name: 'Extract Audio (First Track)',
-    description: 'Extract the first audio track to stereo MP3. MP3 is single-track so additional tracks are dropped — use a video preset to keep them all.',
+    name: 'Extract Audio',
+    description: 'Extract one audio track to stereo MP3 (pick which track per file in the queue when there are several). MP3 is single-track so only the selected track is kept — use a video preset to keep them all.',
     ffmpegArgs: '-vn -c:a libmp3lame -b:a 320k -ac 2',
     outputExtension: 'mp3',
     isBuiltin: true
@@ -701,6 +705,11 @@ export async function startConversionJob(
 
         const { runConversion, applyGpuAcceleration, probeFile } = await import('../services/ffmpegService')
         let gpuArgs = await applyGpuAcceleration(job.preset.ffmpegArgs)
+        // Audio-extraction track selection: prepend an explicit stream map so
+        // ffmpeg extracts the chosen audio track rather than its default pick.
+        if (job.audioTrackIndex != null) {
+          gpuArgs = `-map 0:a:${job.audioTrackIndex} ${gpuArgs}`
+        }
         // Stamp archive outputs with a provenance tag in the file's container
         // metadata so the file itself remembers it's been archived (survives
         // moves/renames/_meta.json loss). Detection looks for "Archived

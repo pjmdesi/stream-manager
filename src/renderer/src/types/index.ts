@@ -151,6 +151,10 @@ export interface ConversionJob {
   /** Fired in the main process once every job sharing this groupId has reached
    *  status 'done'. Skipped if any job in the group failed or was cancelled. */
   groupCompletionHook?: GroupCompletionHook
+  /** For audio-extraction presets: the 0-based audio-stream index to extract
+   *  (maps to `-map 0:a:<index>`). Undefined keeps ffmpeg's default selection
+   *  (first/default track). Only set for audio-output presets. */
+  audioTrackIndex?: number
 }
 
 export type StreamMode = 'folder-per-stream' | 'dump-folder' | ''

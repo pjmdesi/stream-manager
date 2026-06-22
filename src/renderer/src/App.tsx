@@ -711,7 +711,7 @@ function AppInner() {
                     // alert at the right get clipped by the nav's
                     // outer `overflow-hidden` as the width shrinks.
                     className={`
-                      relative w-full flex items-center gap-3 px-4 h-10 text-sm font-medium transition-all duration-150 border
+                      relative w-full flex items-center gap-3 px-3.5 h-10 text-sm font-medium transition-all duration-150 border
                       ${isSelected
                         ? 'bg-purple-600/20 text-purple-300 border-purple-600/30'
                         : hasActivity

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
-import type { ConversionPreset, ConversionJob } from '../../types'
+import type { ConversionPreset, ConversionJob, AudioTrackInfo } from '../../types'
 import { Button } from '../ui/Button'
 import { FileDropZone } from '../ui/FileDropZone'
 import { Modal } from '../ui/Modal'
@@ -74,6 +74,19 @@ function TruncText({ text, className = '' }: { text: string; className?: string 
   )
 }
 
+/** Output extensions that mean "audio-only" — the presets that get a per-file
+ *  audio-track picker in the queue. */
+const AUDIO_OUTPUT_EXTS = new Set(['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus', 'wma'])
+function isAudioPreset(preset: ConversionPreset | null | undefined): boolean {
+  return !!preset && AUDIO_OUTPUT_EXTS.has(preset.outputExtension.toLowerCase())
+}
+/** Compact label for an audio track in the picker, e.g. "Track 1 — English · aac · 2ch". */
+function audioTrackLabel(t: AudioTrackInfo): string {
+  const desc = t.title || t.language
+  const meta = [t.codec, t.channels ? `${t.channels}ch` : ''].filter(Boolean).join(' · ')
+  return `Track ${t.index + 1}${desc ? ` — ${desc}` : ''}${meta ? ` · ${meta}` : ''}`
+}
+
 function StatusIcon({ status }: { status: ConversionJob['status'] }) {
   if (status === 'done')        return <CheckCircle size={14} className="text-green-400 shrink-0" />
   if (status === 'error')       return <AlertCircle size={14} className="text-red-400 shrink-0" />
@@ -110,7 +123,7 @@ function ProgressBar({ percent, status }: { percent: number; status: ConversionJ
   )
 }
 
-function getOutputPath(inputFile: string, preset: ConversionPreset, outputDir: string): string {
+function getOutputPath(inputFile: string, preset: ConversionPreset, outputDir: string, trackSuffix = ''): string {
   const inputDir = inputFile.replace(/[\\/][^\\/]+$/, '')
   const base = inputFile.replace(/[\\/]/g, '/').split('/').pop()!.replace(/\.[^.]+$/, '')
   const dir = outputDir || inputDir
@@ -118,7 +131,23 @@ function getOutputPath(inputFile: string, preset: ConversionPreset, outputDir: s
   const suffix = preset.isBuiltin
     ? preset.id
     : preset.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-  return `${dir}/${base}_${suffix}.${preset.outputExtension}`
+  return `${dir}/${base}_${suffix}${trackSuffix}.${preset.outputExtension}`
+}
+
+/** " - Track N - Name" output-filename suffix for an audio-extraction job —
+ *  empty unless it's an audio preset on a multi-track file. Mirrors exactly when
+ *  ConversionJob.audioTrackIndex gets set, so the filename matches the extracted
+ *  track (and distinct tracks from one source don't collide). */
+function audioTrackOutputSuffix(
+  preset: ConversionPreset | null | undefined,
+  tracks: AudioTrackInfo[] | undefined,
+  audioTrackIndex: number | undefined,
+): string {
+  if (!isAudioPreset(preset) || (tracks?.length ?? 0) <= 1) return ''
+  const idx = audioTrackIndex ?? 0
+  const t = tracks!.find(x => x.index === idx) ?? tracks![0]
+  const name = (t.title || t.language || '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
+  return name ? ` - Track ${t.index + 1} - ${name}` : ` - Track ${t.index + 1}`
 }
 
 interface PendingConverter { paths: string[]; token: number; stream?: { folderPath: string; label: string } }
@@ -132,7 +161,10 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   // outputDir: '' = next to the original; otherwise an explicit directory.
   // pickedDir: the last directory the user chose via the picker — kept so the
   // option stays in the dropdown even after switching back to "Next to original".
-  const [queuedFiles, setQueuedFiles] = useState<Array<{ path: string; presetId: string; outputDir: string; pickedDir: string; stream?: { folderPath: string; label: string } }>>([])
+  const [queuedFiles, setQueuedFiles] = useState<Array<{ path: string; presetId: string; outputDir: string; pickedDir: string; audioTrackIndex?: number; stream?: { folderPath: string; label: string } }>>([])
+  // Probed audio-track lists keyed by file path — drives the per-file audio-track
+  // picker for audio-extraction presets. Probed lazily as files are queued.
+  const [audioTracksByPath, setAudioTracksByPath] = useState<Record<string, AudioTrackInfo[]>>({})
   // Source-stream origin keyed by file path, kept separately from queuedFiles
   // so the "from stream" link survives the file moving into an active job.
   const [streamOrigins, setStreamOrigins] = useState<Record<string, { folderPath: string; label: string }>>({})
@@ -189,6 +221,28 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     })
   }, [])
 
+  // Probe newly-queued files for their audio tracks so audio-extraction presets
+  // can offer a per-file track picker. Reuses the same probe the player uses;
+  // failures fall back to an empty list (no picker, default first-track behavior).
+  useEffect(() => {
+    const missing = queuedFiles.map(f => f.path).filter(p => !(p in audioTracksByPath))
+    if (missing.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      const probed = await Promise.all(missing.map(async p => {
+        try { const info = await window.api.probeFile(p); return [p, info.audioTracks ?? []] as const }
+        catch { return [p, [] as AudioTrackInfo[]] as const }
+      }))
+      if (cancelled) return
+      setAudioTracksByPath(prev => {
+        const next = { ...prev }
+        for (const [p, tracks] of probed) next[p] = tracks
+        return next
+      })
+    })()
+    return () => { cancelled = true }
+  }, [queuedFiles, audioTracksByPath])
+
   // Note: IPC job listeners and the 1Hz ETA tick now live in
   // ConversionContext so the sidebar widget keeps getting fresh data
   // regardless of which page is mounted.
@@ -235,18 +289,25 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     setQueuedFiles(prev => prev.map(f => f.path === p ? { ...f, presetId } : f))
   const setFileOutputDir = (p: string, outputDir: string) =>
     setQueuedFiles(prev => prev.map(f => f.path === p ? { ...f, outputDir } : f))
+  const setFileAudioTrack = (p: string, audioTrackIndex: number) =>
+    setQueuedFiles(prev => prev.map(f => f.path === p ? { ...f, audioTrackIndex } : f))
 
   /** Queue one ready file as a conversion job, then drop it from the ready list. */
-  const startOne = async (file: { path: string; presetId: string; outputDir: string }) => {
+  const startOne = async (file: { path: string; presetId: string; outputDir: string; audioTrackIndex?: number }) => {
     const preset = presetForId(file.presetId)
     if (!preset) return
     const job: ConversionJob = {
       id: uuidv4(),
       inputFile: file.path,
-      outputFile: getOutputPath(file.path, preset, file.outputDir),
+      outputFile: getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex)),
       preset,
       status: 'queued',
       progress: 0,
+      // Explicit track only when the picker is shown (audio preset + >1 track),
+      // so the chosen track is mapped exactly; single-track keeps the default.
+      audioTrackIndex: isAudioPreset(preset) && (audioTracksByPath[file.path]?.length ?? 0) > 1
+        ? (file.audioTrackIndex ?? 0)
+        : undefined,
     }
     // Update the UI synchronously — add to Converting and drop from the ready
     // list in the same tick — before awaiting the IPC, so the row never shows
@@ -270,10 +331,13 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
       jobs.push({
         id: uuidv4(),
         inputFile: file.path,
-        outputFile: getOutputPath(file.path, preset, file.outputDir),
+        outputFile: getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex)),
         preset,
         status: 'queued',
         progress: 0,
+        audioTrackIndex: isAudioPreset(preset) && (audioTracksByPath[file.path]?.length ?? 0) > 1
+          ? (file.audioTrackIndex ?? 0)
+          : undefined,
       })
       startedPaths.add(file.path)
     }
@@ -305,7 +369,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     const presetId = allPresets.some(p => p.id === job.preset.id) ? job.preset.id : (defaultPreset?.id ?? '')
     setQueuedFiles(prev => prev.some(f => f.path === job.inputFile)
       ? prev
-      : [...prev, { path: job.inputFile, presetId, outputDir, pickedDir: outputDir, stream: streamOrigins[job.inputFile] }])
+      : [...prev, { path: job.inputFile, presetId, outputDir, pickedDir: outputDir, audioTrackIndex: job.audioTrackIndex, stream: streamOrigins[job.inputFile] }])
     removeJob(job.id)
   }
 
@@ -560,7 +624,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                 const { path, outputDir, pickedDir, stream } = file
                 const preset = presetForId(file.presetId)
                 const sourceName = path.split(/[\\/]/).pop() ?? path
-                const destName = preset ? getOutputPath(path, preset, outputDir).split(/[\\/]/).pop() ?? '' : ''
+                const destName = preset ? getOutputPath(path, preset, outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[path], file.audioTrackIndex)).split(/[\\/]/).pop() ?? '' : ''
                 return (
                   <div key={path} className="@container flex items-stretch gap-3 px-4 py-2.5 border-b border-white/5 last:border-0">
                     {/* Thumbnail — pulled toward the left/top/bottom edges
@@ -635,6 +699,22 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                           </select>
                           <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                         </div>
+                        {/* Audio-track picker — only for audio-extraction presets
+                            on files with more than one audio track. */}
+                        {isAudioPreset(preset) && (audioTracksByPath[path]?.length ?? 0) > 1 && (
+                          <div className="relative shrink-0">
+                            <select
+                              value={String(file.audioTrackIndex ?? 0)}
+                              onChange={e => setFileAudioTrack(path, Number(e.target.value))}
+                              className="appearance-none max-w-[200px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                            >
+                              {audioTracksByPath[path].map(t => (
+                                <option key={t.index} value={String(t.index)}>{audioTrackLabel(t)}</option>
+                              ))}
+                            </select>
+                            <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                          </div>
+                        )}
                       </div>
                     </div>
                     {/* Separator */}

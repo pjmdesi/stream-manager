@@ -9011,7 +9011,7 @@ function NewStreamModal({
         {isNewEpisode && source ? (
           <p className="text-xs text-gray-400">
             Creating a new episode based on <span className="font-mono text-gray-300">{source.date}</span>
-            {source.meta?.ytTitle?.trim() && <> — <span className="text-gray-300">{source.meta.ytTitle}</span></>}.
+            {source.meta?.ytTitle?.trim() && <> — <span className="text-gray-300">{renderStreamTitle(source, folders ?? [source])}</span></>}.
             Games, season, tags, and thumbnail files will be carried over.
           </p>
         ) : (
