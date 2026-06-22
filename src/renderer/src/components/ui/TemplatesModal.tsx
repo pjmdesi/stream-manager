@@ -47,7 +47,7 @@ function TitleForm({ initial, onSave, onCancel }: {
           onSave={setTemplate}
           knownKeys={keySet}
           insertRef={insertRef}
-          placeholder="{game} S{season} — Part {episode} of {total_episodes} | {tagline}"
+          placeholder="{topic} S{season} — Part {episode} of {total_episodes} | {tagline}"
         />
         <MergeFieldPicker keys={TITLE_MERGE_KEYS} onInsert={k => insertRef.current?.(`{${k}}`)} />
       </div>
@@ -482,7 +482,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
       {tab === 'titles' && (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-gray-400 leading-relaxed">
-            Use <span className="font-mono text-purple-400">{'{game}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{tagline}'}</span> as merge fields.
+            Use <span className="font-mono text-purple-400">{'{topic}'}</span>, <span className="font-mono text-purple-400">{'{topics}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{tagline}'}</span> as merge fields.
             Title templates are shared between YouTube and Twitch.
           </p>
           <TemplateList
@@ -503,7 +503,8 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
           <p className="text-xs text-gray-400 leading-relaxed">
             Pre-filled into the description field; can be edited before publishing.
             Supports the same merge fields as titles (
-            <span className="font-mono text-purple-400">{'{game}'}</span>,
+            <span className="font-mono text-purple-400">{'{topic}'}</span>,
+            {' '}<span className="font-mono text-purple-400">{'{topics}'}</span>,
             {' '}<span className="font-mono text-purple-400">{'{season}'}</span>,
             {' '}<span className="font-mono text-purple-400">{'{episode}'}</span>,
             {' '}<span className="font-mono text-purple-400">{'{total_episodes}'}</span>,

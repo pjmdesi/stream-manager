@@ -12,6 +12,7 @@ import { Button } from '../ui/Button'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { Checkbox } from '../ui/Checkbox'
 import { TagComboBox } from '../ui/TagComboBox'
+import { TopicSelect } from '../ui/TopicSelect'
 import { Modal } from '../ui/Modal'
 import { useStore } from '../../hooks/useStore'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
@@ -105,6 +106,20 @@ function resolvePrimaryGame(meta: StreamMeta | null | undefined): string {
   return games[0] ?? ''
 }
 
+/** Twitch category for a stream. In "Pick Topic / Game tag" mode it's the
+ *  chosen tag (`twitchGameName` when it's still one of the stream's topic
+ *  tags) else the primary topic; in override mode (`syncGame === false`)
+ *  it's the free-text `twitchGameName`. The pick is independent of the
+ *  title's `{topic}`, so switching the live Twitch category never moves the
+ *  YouTube/Twitch title. A stale free-text `twitchGameName` left on a stream
+ *  in pick mode is ignored (not a current tag) so the push matches the
+ *  dropdown, which shows the primary in that case. */
+function resolveTwitchGame(meta: StreamMeta | null | undefined): string {
+  const tag = meta?.twitchGameName?.trim() ?? ''
+  if (meta?.syncGame === false) return tag
+  return tag && (meta?.games ?? []).includes(tag) ? tag : resolvePrimaryGame(meta)
+}
+
 /** Today's date in local YYYY-MM-DD form. */
 function todayStr(): string {
   const d = new Date()
@@ -124,7 +139,14 @@ function applyMergeFields(template: string, fields: Record<string, string>): str
  *  engine resolves at render time — also drives the preview detector
  *  in the sidebar (the preview only surfaces when one of these tokens
  *  appears verbatim in the title field). */
-const YT_TITLE_MERGE_KEYS = ['game', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
+const YT_TITLE_MERGE_KEYS = ['topic', 'topics', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
+/** Legacy aliases still resolved + rendered as chips (so templates authored
+ *  before the topic/game rename keep working) but no longer offered in the
+ *  merge-field picker. `{topic}`/`{topics}` are the canonical replacements. */
+const YT_TITLE_LEGACY_KEYS = ['game', 'games'] as const
+/** Every key the title engine recognizes — canonical picker keys plus legacy
+ *  aliases. Drives chip rendering + the preview detector, NOT the picker. */
+const YT_TITLE_KNOWN_KEYS = [...YT_TITLE_MERGE_KEYS, ...YT_TITLE_LEGACY_KEYS] as const
 
 /** Platform title length limits, counted against the *resolved* title
  *  (merge fields substituted). YouTube truncates video titles past 100
@@ -153,8 +175,14 @@ function buildYtTitleMergeFields(
   // Series-specific keys collapse to '' on standalone streams so
   // templates that reference them render cleanly.
   const standalone = isStandalone(m)
+  const allTopics = (m?.games ?? []).join(' ')
   return {
+    // `topic`/`topics` are canonical; `game`/`games` stay as aliases so
+    // templates authored before the rename keep resolving.
+    topic: primaryGame,
+    topics: allTopics,
     game: primaryGame,
+    games: allTopics,
     season: standalone ? '' : (m?.ytSeason ?? '1'),
     episode: standalone ? '' : (m?.ytEpisode ?? ''),
     tagline: m?.ytCatchyTitle ?? '',
@@ -190,7 +218,7 @@ function resolveTwitchTitle(
  *  field token. Used by the sidebar to decide whether to show the
  *  rendered preview underneath the title field. */
 function hasYtTitleMergeFields(text: string): boolean {
-  return YT_TITLE_MERGE_KEYS.some(k => text.includes(`{${k}}`))
+  return YT_TITLE_KNOWN_KEYS.some(k => text.includes(`{${k}}`))
 }
 
 
@@ -825,17 +853,13 @@ export function StreamsPage({
       if (!next?.meta) return
       const m = next.meta
       const syncTitle = m.syncTitle ?? true
-      const syncGame = m.syncGame ?? true
       // Both title fields store raw template bodies now — resolve each
       // through merge fields before treating it as a Twitch-pushable
       // string. When sync is on, the YT-resolved title stands in.
       const ytResolved = resolveYtTitle(m, next, foldersRef.current)
       const twResolved = resolveTwitchTitle(m, next, foldersRef.current)
       const title = syncTitle ? ytResolved : twResolved
-      // Game comes from the primary Topic/Game tag when synced (the
-      // retired ytGameTitle input is no longer the source); the Twitch
-      // override applies only when the user unchecks the sync.
-      const game = (syncGame ? resolvePrimaryGame(m) : m.twitchGameName) ?? m.twitchGameName ?? ''
+      const game = resolveTwitchGame(m)
       // Twitch's PATCH /channels rejects an empty title — skip silently.
       if (!title.trim()) return
       const { compat: tags } = toTwitchCompatibleTags(m.twitchTags ?? [])
@@ -1579,18 +1603,12 @@ export function StreamsPage({
       throw new Error('No metadata to push.')
     }
     const syncTitle = meta.syncTitle !== false
-    const syncGame = meta.syncGame !== false
     // Both title fields store raw template bodies — resolve through
     // merge fields so Twitch receives the rendered string. When sync
     // is on the YT-resolved title stands in; when off the dedicated
     // Twitch body is resolved instead.
     const effectiveTitle = syncTitle ? resolveYtTitle(meta, folder, folders) : resolveTwitchTitle(meta, folder, folders)
-    // Twitch category now reads directly from the selected Topic/Game
-    // tag rather than routing through `ytGameTitle`. Removes the hidden
-    // YouTube-coupling that made the dependency invisible in the UI;
-    // the syncGame checkbox is correspondingly relabelled "Same as
-    // Topic / Game" in the sidebar.
-    const effectiveGame = syncGame ? resolvePrimaryGame(meta) : (meta.twitchGameName ?? '')
+    const effectiveGame = resolveTwitchGame(meta)
     const { compat: twitchSendTags } = toTwitchCompatibleTags(meta.twitchTags ?? [])
     try {
       await window.api.twitchUpdateChannel(effectiveTitle, effectiveGame || undefined, twitchSendTags)
@@ -4844,7 +4862,7 @@ function SidebarDetail({
   // below. Set is stable per component instance (the key list is a
   // module-level constant), so a useMemo with empty deps is fine.
   const titleMergeKeySet = useMemo(
-    () => new Set<string>(YT_TITLE_MERGE_KEYS as readonly string[]),
+    () => new Set<string>(YT_TITLE_KNOWN_KEYS as readonly string[]),
     [],
   )
   // Series-specific keys collapse to '' on standalone streams (see
@@ -4873,7 +4891,7 @@ function SidebarDetail({
   // Description chip editor: same merge keys as the title plus {season_links}
   // (the multi-line prior-episodes list, series-only).
   const descMergeKeySet = useMemo(
-    () => new Set<string>([...YT_TITLE_MERGE_KEYS, 'season_links']),
+    () => new Set<string>([...YT_TITLE_KNOWN_KEYS, 'season_links']),
     [],
   )
   const descInapplicableKeySet = useMemo(
@@ -6002,8 +6020,8 @@ function SidebarDetail({
                 <div className="flex-1 min-w-0 basis-40">
                   <MetaRow
                     label="Topics / Games"
-                    mergeHint="{game}"
-                    highlighted={activeTitleMergeKeys.has('game')}
+                    mergeHint="{topic}"
+                    highlighted={activeTitleMergeKeys.has('topic') || activeTitleMergeKeys.has('topics') || activeTitleMergeKeys.has('game') || activeTitleMergeKeys.has('games')}
                     mismatched={broadcastMismatches.get('gameTitle')}
                   >
                     <TagComboBox
@@ -6509,12 +6527,25 @@ function SidebarDetail({
               </div>
               <MetaRow label="Twitch category">
                 <div className="flex flex-col gap-1.5">
-                  <Checkbox
-                    size="sm"
-                    checked={meta?.syncGame !== false}
-                    onChange={v => onUpdateMeta({ syncGame: v })}
-                    label={<span className="text-[11px] text-gray-400">Same as Topic / Game</span>}
-                  />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Checkbox
+                      size="sm"
+                      checked={meta?.syncGame !== false}
+                      onChange={v => onUpdateMeta({ syncGame: v })}
+                      label={<span className="text-[11px] text-gray-400">Pick Topic / Game tag</span>}
+                    />
+                    {/* When picking from tags and there's more than one, a dropdown
+                        chooses which tag Twitch uses — pinned, independent of the
+                        title's {topic}. One topic needs no picker (it's the default). */}
+                    {meta?.syncGame !== false && (meta?.games?.length ?? 0) > 1 && (
+                      <TopicSelect
+                        topics={meta!.games}
+                        value={resolveTwitchGame(meta)}
+                        onChange={v => onUpdateMeta({ twitchGameName: v })}
+                        aria-label="Twitch category topic"
+                      />
+                    )}
+                  </div>
                   {meta?.syncGame === false && (
                     <EditableTextField
                       value={meta?.twitchGameName ?? ''}
@@ -6893,16 +6924,12 @@ function SidebarDetail({
           // syncTitle/syncGame default ON when undefined (meta from
           // older streams) so the YT title/game stand in for Twitch.
           const twSyncTitle = meta?.syncTitle !== false
-          const twSyncGame = meta?.syncGame !== false
           // Both title fields are raw template bodies now — resolve
           // through merge fields so the comparison matches what
           // handlePushToTwitch actually sends (and what Twitch stores).
           const twEffectiveTitle = twSyncTitle ? resolveYtTitle(meta, folder, folders) : resolveTwitchTitle(meta, folder, folders)
-          // Source-of-truth alignment with handlePushToTwitch above: when
-          // syncGame is on, the comparison reads from the selected Topic/
-          // Game tag (resolvePrimaryGame) — same value the push handler
-          // would actually send.
-          const twEffectiveGame = twSyncGame ? resolvePrimaryGame(meta) : (meta?.twitchGameName ?? '')
+          // Source-of-truth alignment with handlePushToTwitch above.
+          const twEffectiveGame = resolveTwitchGame(meta)
           const { compat: twEffectiveTags } = toTwitchCompatibleTags(meta?.twitchTags ?? [])
           // Comparison normalizers. Twitch canonicalizes a few fields:
           //   • Game name — user supplies a search term, the push

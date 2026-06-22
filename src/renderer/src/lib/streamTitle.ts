@@ -59,8 +59,14 @@ function assembleFields(
   totalEpisodes: number | undefined,
 ): Record<string, string> {
   const standalone = isStandalone(meta)
+  const allTopics = (meta?.games ?? []).join(' ')
   return {
+    // `topic`/`topics` are the canonical keys; `game`/`games` stay as aliases
+    // so templates authored before the topic/game rename still resolve.
+    topic: primaryGame,
+    topics: allTopics,
     game: primaryGame,
+    games: allTopics,
     season: standalone ? '' : (meta?.ytSeason ?? '1'),
     episode: standalone ? '' : (meta?.ytEpisode ?? ''),
     tagline: meta?.ytCatchyTitle ?? '',
