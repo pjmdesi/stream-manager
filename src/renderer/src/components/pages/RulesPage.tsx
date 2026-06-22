@@ -252,7 +252,10 @@ export function RulesPage() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden">
+      {/* Left column: header + rules list. The right sidebar spans full height
+          (matching the rest of the app); the header sits over the content only. */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Auto-Rules</h1>
@@ -269,7 +272,6 @@ export function RulesPage() {
         </Button>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
         {/* Rules list */}
         <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto p-4 flex flex-col gap-2">
           {rules.length === 0 && (
@@ -318,8 +320,9 @@ export function RulesPage() {
             </div>
           ))}
         </div></div>
+      </div>
 
-        {/* Event log */}
+        {/* Event log — full-height sidebar on the right */}
         <div className="w-72 bg-navy-800 border-l border-white/5 flex flex-col shrink-0">
           <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Activity</h3>
@@ -365,7 +368,6 @@ export function RulesPage() {
             ))}
           </div></div>
         </div>
-      </div>
 
       {showEdit && (
         <RuleModal
