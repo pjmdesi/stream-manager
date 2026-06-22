@@ -1094,8 +1094,11 @@ interface PropsPanelProps {
   standalone: boolean
 }
 
-function FilterSlider({ label, min, max, step, value, onChange }: {
+function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0 }: {
   label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void
+  /** Value the slider resets to on a double-click of the knob. Filters are all
+   *  neutral at 0, so that's the default. */
+  defaultValue?: number
 }) {
   return (
     <label className="flex flex-col gap-0.5">
@@ -1107,6 +1110,8 @@ function FilterSlider({ label, min, max, step, value, onChange }: {
         <input
           type="range" min={min} max={max} step={step} value={value}
           onChange={e => onChange(Number(e.target.value))}
+          onDoubleClick={() => onChange(defaultValue)}
+          title="Double-click to reset"
           className="flex-1 accent-purple-600"
         />
         <input
