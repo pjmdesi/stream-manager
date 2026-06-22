@@ -54,7 +54,7 @@ function ShortcutGroup({ title, rows }: { title: string; rows: { keys: React.Rea
 }
 
 type HelpKey =
-  | 'streams' | 'player' | 'converter' | 'combine'
+  | 'streams' | 'shortcuts' | 'player' | 'converter' | 'combine'
   | 'thumbnails' | 'launcher' | 'integrations' | 'rules' | 'widgets'
 
 interface HelpItem {
@@ -183,6 +183,106 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     ),
   },
   {
+    id: 'shortcuts',
+    label: 'Shortcuts',
+    icon: <Keyboard size={16} />,
+    body: (
+      <>
+        <p>Keyboard shortcuts across Stream Manager. None of these fire while a modal dialog is open, and the text-editing ones stand down while you're typing in a field.</p>
+
+        <ElementSection icon={<Keyboard size={14} />} title="Global — any page">
+          <ShortcutGroup title="Navigation" rows={[
+            { keys: ['Ctrl', '1…6'], label: 'Jump to a page (Streams · Player · Converter · Combine · Thumbnails · Launcher)' },
+            { keys: ['Ctrl', 'PageUp / PageDown'], label: 'Cycle to the previous / next page' },
+            { keys: ['Ctrl', ','], label: 'Open Settings' },
+            { keys: ['?'], label: 'Open this Help' },
+          ]} />
+          <ShortcutGroup title="Actions" rows={[
+            { keys: ['Ctrl', 'L'], label: "Launch the sidebar widget's default launch group" },
+          ]} />
+        </ElementSection>
+
+        <ElementSection icon={<Radio size={14} />} title="Streams page">
+          <ShortcutGroup title="General" rows={[
+            { keys: ['Ctrl', 'N'], label: 'New stream' },
+            { keys: ['/'], label: 'Focus the search box' },
+            { keys: ['Esc'], label: 'Clear search → exit select mode → close the detail sidebar' },
+          ]} />
+          <ShortcutGroup title="Multi-select" rows={[
+            { keys: ['Ctrl', 'Shift', 'A'], label: 'Toggle multi-select mode' },
+            { keys: ['Ctrl', 'A'], label: 'Select all visible (press again to clear)' },
+          ]} />
+          <ShortcutGroup title="With the detail sidebar open" rows={[
+            { keys: ['Ctrl', '↑ / ↓'], label: 'Previous / next stream item' },
+            { keys: ['Ctrl', 'Shift', '↑ / ↓'], label: 'Previous / next episode in the series' },
+            { keys: ['Ctrl', 'Shift', 'N'], label: 'New episode of this stream' },
+            { keys: ['Ctrl', 'Shift', 'T'], label: 'Open the thumbnail editor' },
+          ]} />
+        </ElementSection>
+
+        <ElementSection icon={<Film size={14} />} title="Player">
+          <p className="text-[11px] text-gray-400">Active anywhere on the Player page (except while typing in a text field).</p>
+          <ShortcutGroup title="Playback" rows={[
+            { keys: ['Space'], label: 'Play / pause' },
+            { keys: ['K'], label: 'Play / pause (alt)' },
+            { keys: ['J'], label: 'Skip back 10s' },
+            { keys: ['L'], label: 'Skip forward 10s' },
+            { keys: ['←'], label: 'Previous frame' },
+            { keys: ['→'], label: 'Next frame' },
+            { keys: ['Shift', '←/→'], label: 'Skip ±1s' },
+            { keys: ['Ctrl', '←/→'], label: 'Skip ±5s' },
+            { keys: ['Ctrl', 'Shift', '←/→'], label: 'Skip ±10s' },
+            { keys: ['Home'], label: 'Seek to start' },
+            { keys: ['End'], label: 'Seek to end' },
+          ]} />
+          <ShortcutGroup title="Timeline & view" rows={[
+            { keys: ['T'], label: 'Edit playhead timecode' },
+            { keys: ['0'], label: 'Reset zoom' },
+            { keys: ['Numpad +'], label: 'Zoom in (anchored on playhead)' },
+            { keys: ['Numpad -'], label: 'Zoom out (anchored on playhead)' },
+            { keys: ['Middle-click drag'], label: 'Pan timeline' },
+            { keys: ['Double middle-click'], label: 'Reset pan' },
+            { keys: ['F'], label: 'Toggle clip-region focus' },
+            { keys: ['P'], label: 'Toggle pop-out video' },
+            { keys: ['C'], label: 'Toggle clip mode' },
+            { keys: ['Esc'], label: 'Close current session' },
+          ]} />
+          <ShortcutGroup title="File & capture" rows={[
+            { keys: ['Ctrl', 'O'], label: 'Open video file' },
+            { keys: ['Ctrl', 'Shift', 'S'], label: 'Capture screenshot' },
+            { keys: ['Ctrl', 'Alt', '↑/↓'], label: 'Previous / next session item' },
+          ]} />
+          <ShortcutGroup title="Clip mode" rows={[
+            { keys: ['A'], label: 'Add segment at playhead' },
+            { keys: ['S'], label: 'Split segment at playhead' },
+            { keys: ['B'], label: 'Add bleep at playhead' },
+            { keys: ['['], label: 'Jump to previous in/out marker' },
+            { keys: [']'], label: 'Jump to next in/out marker' },
+            { keys: ['Delete'], label: 'Delete selected segment or bleep' },
+            { keys: ['Ctrl', 'E'], label: 'Open Export Clip dialog' },
+          ]} />
+        </ElementSection>
+
+        <ElementSection icon={<ImageIcon size={14} />} title="Thumbnail editor">
+          <ShortcutGroup title="Edit" rows={[
+            { keys: ['Ctrl', 'Z'], label: 'Undo' },
+            { keys: ['Ctrl', 'Shift', 'Z'], label: 'Redo' },
+            { keys: ['Ctrl', 'C'], label: 'Copy selected layers' },
+            { keys: ['Ctrl', 'V'], label: 'Paste' },
+            { keys: ['Ctrl', 'S'], label: 'Save thumbnail' },
+            { keys: ['Delete'], label: 'Delete selected layers' },
+          ]} />
+          <ShortcutGroup title="Layout" rows={[
+            { keys: ['↑ ↓ ← →'], label: 'Nudge selection 1px (Shift = 10px)' },
+            { keys: ['G'], label: 'Toggle grid snap' },
+            { keys: ['Ctrl', ']'], label: 'Bring layer forward (Shift = to front)' },
+            { keys: ['Ctrl', '['], label: 'Send layer backward (Shift = to back)' },
+          ]} />
+        </ElementSection>
+      </>
+    ),
+  },
+  {
     id: 'player',
     label: 'Player',
     icon: <Film size={16} />,
@@ -225,52 +325,6 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           </ul>
         </ElementSection>
 
-        <ElementSection icon={<Keyboard size={14} />} title="Keyboard shortcuts">
-          <p className="text-[11px] text-gray-400">Active anywhere on the Player page (except while typing in a text field).</p>
-
-          <ShortcutGroup title="Playback" rows={[
-            { keys: ['Space'], label: 'Play / pause' },
-            { keys: ['K'], label: 'Play / pause (alt)' },
-            { keys: ['J'], label: 'Skip back 10s' },
-            { keys: ['L'], label: 'Skip forward 10s' },
-            { keys: ['←'], label: 'Previous frame' },
-            { keys: ['→'], label: 'Next frame' },
-            { keys: ['Shift', '←/→'], label: 'Skip ±1s' },
-            { keys: ['Ctrl', '←/→'], label: 'Skip ±5s' },
-            { keys: ['Ctrl', 'Shift', '←/→'], label: 'Skip ±10s' },
-            { keys: ['Home'], label: 'Seek to start' },
-            { keys: ['End'], label: 'Seek to end' },
-          ]} />
-
-          <ShortcutGroup title="Timeline & view" rows={[
-            { keys: ['T'], label: 'Edit playhead timecode' },
-            { keys: ['0'], label: 'Reset zoom' },
-            { keys: ['Numpad +'], label: 'Zoom in (anchored on playhead)' },
-            { keys: ['Numpad -'], label: 'Zoom out (anchored on playhead)' },
-            { keys: ['Middle-click drag'], label: 'Pan timeline' },
-            { keys: ['Double middle-click'], label: 'Reset pan' },
-            { keys: ['F'], label: 'Toggle clip-region focus' },
-            { keys: ['P'], label: 'Toggle pop-out video' },
-            { keys: ['C'], label: 'Toggle clip mode' },
-            { keys: ['Esc'], label: 'Close current session' },
-          ]} />
-
-          <ShortcutGroup title="File & capture" rows={[
-            { keys: ['Ctrl', 'O'], label: 'Open video file' },
-            { keys: ['Ctrl', 'Shift', 'S'], label: 'Capture screenshot' },
-            { keys: ['Ctrl', 'Alt', '↑/↓'], label: 'Previous / next session item' },
-          ]} />
-
-          <ShortcutGroup title="Clip mode" rows={[
-            { keys: ['A'], label: 'Add segment at playhead' },
-            { keys: ['S'], label: 'Split segment at playhead' },
-            { keys: ['B'], label: 'Add bleep at playhead' },
-            { keys: ['['], label: 'Jump to previous in/out marker' },
-            { keys: [']'], label: 'Jump to next in/out marker' },
-            { keys: ['Delete'], label: 'Delete selected segment or bleep' },
-            { keys: ['Ctrl', 'E'], label: 'Open Export Clip dialog' },
-          ]} />
-        </ElementSection>
       </>
     ),
   },

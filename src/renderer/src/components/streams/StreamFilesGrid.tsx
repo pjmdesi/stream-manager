@@ -299,7 +299,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
         {secondary && <p className={META_SECONDARY}>{secondary}</p>}
         <div className={ACTION_ROW}>
           {isSm && (
-            <Tooltip content="Open in thumbnail editor" side="top">
+            <Tooltip content="Open in thumbnail editor" side="top" shortcut="Ctrl+Shift+T">
               <button onClick={() => onEditThumbnail(ordinal!)} className={ACTION_GRAY}><FileImage size={12} /> Edit</button>
             </Tooltip>
           )}

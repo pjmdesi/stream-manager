@@ -28,6 +28,7 @@ import { useStore } from './hooks/useStore'
 import { useAnimationConfig } from './hooks/useAnimationConfig'
 import { OnboardingModal } from './components/OnboardingModal'
 import { HelpModal } from './components/HelpModal'
+import { isAnyModalOpen, isTypingTarget } from './lib/shortcuts'
 import { PostStreamTwitchModal } from './components/PostStreamTwitchModal'
 import { ThumbnailEditorProvider, useThumbnailEditor } from './context/ThumbnailEditorContext'
 import { PageActivityProvider, usePageActivity } from './context/PageActivityContext'
@@ -344,7 +345,7 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
           doesn't hide quick-launch. Collapsed: icon-only, centered (mirrors
           the Auto-Rules Start/Stop control); expanded: full-width + label. */}
       <div className={collapsed ? 'flex justify-center pb-2' : 'px-3 pb-2'}>
-        <Tooltip content={appListContent} side="right" triggerClassName={collapsed ? '' : 'block w-full'}>
+        <Tooltip content={appListContent} side="right" triggerClassName={collapsed ? '' : 'block w-full'} shortcut="Ctrl+L">
           <Button
             variant="primary"
             size="sm"
@@ -371,6 +372,13 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'integrations', label: 'Integrations', icon: <Plug size={18} /> },
   { id: 'settings',     label: 'Settings',     icon: <Settings size={18} /> },
 ]
+
+// Page-jump shortcut labels for the collapsed-nav tooltips (mirror the global
+// handler's Ctrl+1…6 / Ctrl+,).
+const NAV_SHORTCUTS: Partial<Record<Page, string>> = {
+  streams: 'Ctrl+1', player: 'Ctrl+2', converter: 'Ctrl+3',
+  combine: 'Ctrl+4', thumbnails: 'Ctrl+5', launcher: 'Ctrl+6', settings: 'Ctrl+,',
+}
 
 function AppInner() {
   const [page, setPageRaw] = useState<Page>('streams')
@@ -512,6 +520,50 @@ function AppInner() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  // ── Global keyboard shortcuts ──────────────────────────────────────────────
+  // Work from any page. Suppressed while a modal is open. Modifier-based
+  // shortcuts fire even with a field focused (they don't type a character and
+  // edits autosave); `?` (help) stands down while the user is typing.
+  useEffect(() => {
+    const PAGE_NAV: Page[] = ['streams', 'player', 'converter', 'combine', 'thumbnails', 'launcher']
+    const onKey = (e: KeyboardEvent) => {
+      if (isAnyModalOpen()) return
+      const mod = e.ctrlKey || e.metaKey
+      // ? → open Help (a typed character, so only when not editing)
+      if (!mod && e.key === '?' && !isTypingTarget(e.target)) {
+        e.preventDefault()
+        setHelpOpen(true)
+        if (!config.hasOpenedHelp) updateConfig({ hasOpenedHelp: true })
+        return
+      }
+      if (!mod) return
+      // Ctrl+, → Settings
+      if (e.key === ',') { e.preventDefault(); setPage('settings'); return }
+      // Ctrl+L → launch the widget's default launch group
+      if (!e.shiftKey && e.key.toLowerCase() === 'l') {
+        if (config.launcherWidgetGroupId) { e.preventDefault(); window.api.launchGroup(config.launcherWidgetGroupId).catch(() => {}) }
+        return
+      }
+      // Ctrl+1…6 → jump directly to a page
+      if (!e.shiftKey && e.key >= '1' && e.key <= '6') {
+        e.preventDefault()
+        setPage(PAGE_NAV[Number(e.key) - 1])
+        return
+      }
+      // Ctrl+PageUp / PageDown → cycle through the pages
+      if (e.key === 'PageUp' || e.key === 'PageDown') {
+        e.preventDefault()
+        const delta = e.key === 'PageDown' ? 1 : -1
+        const idx = PAGE_NAV.indexOf(page)
+        const base = idx === -1 ? (delta === 1 ? -1 : 0) : idx
+        setPage(PAGE_NAV[(base + delta + PAGE_NAV.length) % PAGE_NAV.length])
+        return
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [page, config.hasOpenedHelp, config.launcherWidgetGroupId, setPage, updateConfig])
 
   const [pendingPlayer, setPendingPlayer] = useState<PendingFile | null>(null)
   const [pendingConverter, setPendingConverter] = useState<PendingConverterFile | null>(null)
@@ -756,7 +808,7 @@ function AppInner() {
                     <div className="my-1 mx-3 border-t border-white/10" />
                   )}
                   {sidebarCollapsed ? (
-                    <Tooltip content={item.label} side="right" triggerClassName="block w-full">
+                    <Tooltip content={item.label} side="right" triggerClassName="block w-full" shortcut={NAV_SHORTCUTS[item.id]}>
                       {row}
                     </Tooltip>
                   ) : (
@@ -774,12 +826,14 @@ function AppInner() {
           <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} />
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
-            <button
-              onClick={() => { setHelpOpen(true); if (!config.hasOpenedHelp) updateConfig({ hasOpenedHelp: true }) }}
-              className={`text-[10px] transition-colors whitespace-nowrap rounded px-1 -mx-1 ${!loading && !config.hasOpenedHelp ? 'help-attention' : 'text-gray-400 hover:text-gray-300'}`}
-            >
-              {sidebarCollapsed ? 'Help' : 'How to use'}
-            </button>
+            <Tooltip content="Open help" side="top" shortcut="?">
+              <button
+                onClick={() => { setHelpOpen(true); if (!config.hasOpenedHelp) updateConfig({ hasOpenedHelp: true }) }}
+                className={`text-[10px] transition-colors whitespace-nowrap rounded px-1 -mx-1 ${!loading && !config.hasOpenedHelp ? 'help-attention' : 'text-gray-400 hover:text-gray-300'}`}
+              >
+                {sidebarCollapsed ? 'Help' : 'How to use'}
+              </button>
+            </Tooltip>
             {!sidebarCollapsed && <span className="text-[10px] text-gray-400">·</span>}
             <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}`} side="top">
               <button

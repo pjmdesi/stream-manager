@@ -26,6 +26,9 @@ interface TooltipProps {
    *  the tooltip auto-dismisses it, so consumers can wire selection
    *  handlers on inner buttons without managing tooltip visibility. */
   interactive?: boolean
+  /** Optional shortcut hint rendered as a smaller, dimmer last line in the
+   *  tooltip (e.g. "Ctrl+N") — surfaces a button's keyboard shortcut. */
+  shortcut?: React.ReactNode
   /** Externally-controlled visibility. When set, the internal hover
    *  triggers are bypassed and the tooltip mirrors the prop. Used by
    *  consumers that can't make the actual visual element a React
@@ -76,7 +79,7 @@ function fits(rect: DOMRect, vw: number, vh: number): boolean {
          rect.top  >= GAP && rect.bottom <= vh - GAP
 }
 
-export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'max-w-xs', triggerClassName, triggerStyle, interactive, open, children }: TooltipProps) {
+export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'max-w-xs', triggerClassName, triggerStyle, interactive, open, shortcut, children }: TooltipProps) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos]         = useState({ top: 0, left: 0 })
   const triggerRef            = useRef<HTMLDivElement>(null)
@@ -187,6 +190,7 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
           onClick={interactive ? () => setVisible(false) : undefined}
         >
           {content}
+          {shortcut != null && <div className="mt-1 text-[10px] text-center text-gray-400">{shortcut}</div>}
           <div ref={arrowRef} className={ARROW[side]} />
         </div>,
         document.body

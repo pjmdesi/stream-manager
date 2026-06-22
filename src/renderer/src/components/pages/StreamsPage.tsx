@@ -34,6 +34,7 @@ import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { SendToConverterModal } from '../streams/SendToConverterModal'
+import { isAnyModalOpen, isTypingTarget } from '../../lib/shortcuts'
 import { StreamFilesGrid } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
@@ -529,6 +530,7 @@ export function StreamsPage({
   // first since that's the most common workflow (today's stream at the top
   // for quick post-stream tasks).
   const [searchQuery, setSearchQuery] = useState('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [sortMode, setSortMode] = useState<'date-desc' | 'date-asc' | 'title-asc'>('date-desc')
   // Cache-busting key for thumbnail file:// URLs. Bumped when streams:changed
   // fires so renamed/swapped thumbnail files refetch instead of serving the
@@ -2068,6 +2070,94 @@ export function StreamsPage({
     }
   }, [folders, selectedFolder])
 
+  // ── Streams-page keyboard shortcuts ────────────────────────────────────────
+  // Active only while the streams page is visible and no modal is open. Esc is
+  // special-cased so it still clears the focused search box; everything else
+  // stands down while the user is typing in a field.
+  useEffect(() => {
+    if (!isVisible) return
+    const onKey = (e: KeyboardEvent) => {
+      if (isAnyModalOpen()) return
+      const mod = e.ctrlKey || e.metaKey
+
+      // Esc — works even with the search box focused (to clear it).
+      if (e.key === 'Escape' && !mod) {
+        if (document.activeElement === searchInputRef.current) {
+          if (searchQuery) setSearchQuery('')
+          searchInputRef.current?.blur()
+          return
+        }
+        if (isTypingTarget(e.target)) return
+        if (selectMode) { toggleSelectMode(); return }
+        if (selectedFolderPath) { setSelectedFolderPath(null); return }
+        return
+      }
+
+      // Everything below stands down while typing in a field.
+      if (isTypingTarget(e.target)) return
+
+      // / → focus the search box
+      if (!mod && e.key === '/') { e.preventDefault(); searchInputRef.current?.focus(); searchInputRef.current?.select(); return }
+
+      if (!mod) return
+      const k = e.key.toLowerCase()
+
+      // Ctrl+Shift+A → toggle multi-select mode
+      if (e.shiftKey && k === 'a') { e.preventDefault(); toggleSelectMode(); return }
+      // Ctrl+A (select mode only) → select all visible, or clear if all selected
+      if (!e.shiftKey && k === 'a') {
+        if (!selectMode) return
+        e.preventDefault()
+        if (visibleFolders.length > 0 && selectedPaths.size === visibleFolders.length) clearSelection()
+        else selectAllVisible()
+        return
+      }
+      // Ctrl+N → new stream
+      if (!e.shiftKey && k === 'n') { e.preventDefault(); setNewStreamOpen(true); return }
+      // Ctrl+Shift+N → new episode for the open stream
+      if (e.shiftKey && k === 'n') {
+        if (selectedFolderPath) { e.preventDefault(); setNewEpisodeSourcePath(selectedFolderPath) }
+        return
+      }
+      // Ctrl+Shift+T → open the thumbnail editor for the open stream
+      if (e.shiftKey && k === 't') {
+        const f = folders.find(ff => ff.folderPath === selectedFolderPath)
+        if (f) { e.preventDefault(); handleOpenThumbnails(f) }
+        return
+      }
+      // Ctrl+↑/↓ → navigate stream items. With nothing selected (or the
+      // selection filtered out of view), both arrows select the first item and
+      // open the detail sidebar.
+      if (!e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        if (visibleFolders.length === 0) return
+        e.preventDefault()
+        const idx = selectedFolderPath ? visibleFolders.findIndex(f => f.folderPath === selectedFolderPath) : -1
+        if (idx === -1) { setSelectedFolderPath(visibleFolders[0].folderPath); return }
+        const next = e.key === 'ArrowDown' ? Math.min(visibleFolders.length - 1, idx + 1) : Math.max(0, idx - 1)
+        if (next !== idx) setSelectedFolderPath(visibleFolders[next].folderPath)
+        return
+      }
+      // Ctrl+Shift+↑/↓ → navigate episodes within the series, in the list's
+      // visual (sort-order) direction so up/down matches what's on screen
+      // rather than episode-number order. Hops over non-sibling rows.
+      if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        if (!selectedFolderPath) return
+        const sibPaths = new Set(seriesNav.siblings.map(s => s.folderPath))
+        const visibleSiblings = visibleFolders.filter(f => sibPaths.has(f.folderPath))
+        const idx = visibleSiblings.findIndex(f => f.folderPath === selectedFolderPath)
+        if (idx === -1) return
+        const nextIdx = e.key === 'ArrowDown' ? idx + 1 : idx - 1
+        if (nextIdx < 0 || nextIdx >= visibleSiblings.length) return
+        e.preventDefault()
+        setSelectedFolderPath(visibleSiblings[nextIdx].folderPath)
+        return
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisible, searchQuery, selectMode, selectedPaths, visibleFolders, selectedFolderPath, folders, seriesNav, toggleSelectMode, selectAllVisible, clearSelection, handleOpenThumbnails])
+
   // Width of the visible-when-selected portion of the list (the area
   // NOT covered by the sidebar overlay). Equals the sum of the always-
   // visible columns: thumbnail (user-resizable) + video count (44px) +
@@ -2416,7 +2506,7 @@ export function StreamsPage({
                     bulk actions stay on the first row until labels collapse. */}
                 <div className="flex items-center gap-1">
                   <div className="w-px h-5 bg-white/10 mx-1 self-center" />
-                  <Tooltip content="Select all visible streams" side="bottom">
+                  <Tooltip content="Select all visible streams" side="bottom" shortcut="Ctrl+A">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -2465,26 +2555,29 @@ export function StreamsPage({
                     Manage Tags
                   </Button>
                 </Tooltip>
-                <Tooltip content="Select multiple streams for bulk actions" side="bottom">
+                <Tooltip content="Select multiple streams for bulk actions" side="bottom" shortcut="Ctrl+Shift+A">
                   <Button variant="ghost" size="sm" icon={<ListChecks size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
                     labelCollapsed={selectedFolderPath ? true : undefined}>
                     Select
                   </Button>
                 </Tooltip>
-                <Button variant="primary" size="sm" icon={<Plus size={14} />} onClick={() => setNewStreamOpen(true)} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}>
-                  New stream
-                </Button>
+                <Tooltip content="Create a new stream" side="bottom" shortcut="Ctrl+N">
+                  <Button variant="primary" size="sm" icon={<Plus size={14} />} onClick={() => setNewStreamOpen(true)} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
+                      labelCollapsed={selectedFolderPath ? true : undefined}>
+                    New stream
+                  </Button>
+                </Tooltip>
               </div>
             )}
           </div>
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <input
+                ref={searchInputRef}
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search title, games, notes, date…"
+                placeholder="Search title, games, notes, date…   ( / )"
                 className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
               />
               {searchQuery && (
@@ -3933,7 +4026,7 @@ function StreamListItem({
                   <Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} />
                 </Tooltip>
               )}
-              <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
+              <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'} shortcut="Ctrl+Shift+T">
                 <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
               </Tooltip>
             </div>
@@ -5708,7 +5801,7 @@ function SidebarDetail({
                   </button>
                 </Tooltip>
               )}
-              <Tooltip content={prevEpisode ? `Previous episode (E${prevEpisode.meta?.ytEpisode || '?'})` : 'No previous episode'} side="bottom">
+              <Tooltip content={prevEpisode ? `Previous episode (E${prevEpisode.meta?.ytEpisode || '?'})` : 'No previous episode'} side="bottom" shortcut={prevEpisode ? 'Ctrl+Shift+↓' : undefined}>
                 <button
                   type="button"
                   onClick={() => prevEpisode && onPickEpisode(prevEpisode)}
@@ -5718,7 +5811,7 @@ function SidebarDetail({
                   <ChevronsDown size={13} />
                 </button>
               </Tooltip>
-              <Tooltip content={nextEpisode ? `Next episode (E${nextEpisode.meta?.ytEpisode || '?'})` : 'No next episode'} side="bottom">
+              <Tooltip content={nextEpisode ? `Next episode (E${nextEpisode.meta?.ytEpisode || '?'})` : 'No next episode'} side="bottom" shortcut={nextEpisode ? 'Ctrl+Shift+↑' : undefined}>
                 <button
                   type="button"
                   onClick={() => nextEpisode && onPickEpisode(nextEpisode)}
@@ -7191,7 +7284,7 @@ function SidebarDetail({
                 </button>
               </Tooltip>
             )}
-            <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'}>
+            <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'} shortcut="Ctrl+Shift+T">
               <button onClick={() => onOpenThumbnails()} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
                 <ImageIcon size={13} />
                 <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Thumbnails</CollapsibleLabel>
@@ -7199,7 +7292,7 @@ function SidebarDetail({
             </Tooltip>
           </div>
           <div className="flex-1 flex items-center justify-center gap-1 px-3">
-            <Tooltip content={isStandalone(meta) ? 'Standalone streams don’t have episodes — enable Series above to use this' : 'New episode based on this stream'}>
+            <Tooltip content={isStandalone(meta) ? 'Standalone streams don’t have episodes — enable Series above to use this' : 'New episode based on this stream'} shortcut={isStandalone(meta) ? undefined : 'Ctrl+Shift+N'}>
               <button
                 onClick={onNewEpisode}
                 disabled={isStandalone(meta)}

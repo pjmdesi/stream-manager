@@ -1,6 +1,11 @@
 import React, { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 
+// Global open-modal tracker so app/page keyboard shortcuts can suppress
+// themselves while any Modal is open. Incremented while a Modal is open.
+let openModalCount = 0
+export function isAnyModalOpen(): boolean { return openModalCount > 0 }
+
 interface ModalProps {
   isOpen: boolean
   onClose: () => void
@@ -56,6 +61,13 @@ export const Modal: React.FC<ModalProps> = ({
       if (!noOverlay) document.body.style.overflow = ''
     }
   }, [isOpen, onClose, noOverlay])
+
+  // Count this modal as open for isAnyModalOpen() while it's mounted + open.
+  useEffect(() => {
+    if (!isOpen) return
+    openModalCount++
+    return () => { openModalCount-- }
+  }, [isOpen])
 
   // Auto-focus is controlled by the `autoFocus` prop (see ModalProps docs).
   //
