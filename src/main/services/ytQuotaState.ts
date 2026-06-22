@@ -17,12 +17,59 @@
  */
 
 import { BrowserWindow } from 'electron'
+import { getStore } from '../ipc/store'
+
+/** YouTube Data API default daily quota (units). */
+export const YT_QUOTA_LIMIT = 10000
 
 export interface QuotaState {
   exceeded: boolean
   /** ISO timestamp of the next midnight Pacific Time after the flag
    *  was set. Null when not exceeded. */
   resetsAt: string | null
+  /** Estimated quota units used so far today (resets at PT midnight). */
+  used: number
+  /** Daily quota allowance (units). */
+  limit: number
+}
+
+interface DailyUsage { date: string; used: number }
+
+/** Current calendar date in Pacific Time (YYYY-MM-DD) — the quota day key. */
+function currentPTDate(at: Date = new Date()): string {
+  return at.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+}
+
+/** Today's usage, auto-reset to 0 once the PT day has rolled over. */
+function readUsage(): DailyUsage {
+  const today = currentPTDate()
+  const stored = (getStore() as any).get('ytQuotaUsage') as DailyUsage | undefined
+  return stored && stored.date === today ? stored : { date: today, used: 0 }
+}
+
+// A bulk refresh fires many API calls in quick succession; coalesce the
+// resulting change events so the renderer re-renders once per burst rather
+// than per call. The persisted total is always current (set synchronously) —
+// only the push is debounced, so a fresh getQuotaState() read stays accurate.
+let usageEmitTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleUsageEmit(): void {
+  if (usageEmitTimer) return
+  usageEmitTimer = setTimeout(() => { usageEmitTimer = null; emitChange() }, 400)
+}
+
+/** Add the estimated quota cost of a just-completed API call (reads ≈ 1,
+ *  writes ≈ 50). Persisted so the running total survives an app restart
+ *  within the same PT day; pushes a (debounced) change event so the UI
+ *  updates live. */
+export function addQuotaUsage(cost: number): void {
+  if (!cost || cost <= 0) return
+  const u = readUsage()
+  ;(getStore() as any).set('ytQuotaUsage', { date: u.date, used: u.used + cost })
+  scheduleUsageEmit()
+}
+
+export function getQuotaUsage(): { used: number; limit: number } {
+  return { used: readUsage().used, limit: YT_QUOTA_LIMIT }
 }
 
 let exceededAt: Date | null = null
@@ -79,16 +126,16 @@ export function getQuotaState(): QuotaState {
     if (!resetsAtCached || Date.now() >= resetsAtCached.getTime()) {
       resetsAtCached = nextMidnightPT()
     }
-    return { exceeded: true, resetsAt: resetsAtCached.toISOString() }
+    return { exceeded: true, resetsAt: resetsAtCached.toISOString(), ...getQuotaUsage() }
   }
-  if (!exceededAt || !resetsAtCached) return { exceeded: false, resetsAt: null }
+  if (!exceededAt || !resetsAtCached) return { exceeded: false, resetsAt: null, ...getQuotaUsage() }
   if (Date.now() >= resetsAtCached.getTime()) {
     exceededAt = null
     resetsAtCached = null
     emitChange()
-    return { exceeded: false, resetsAt: null }
+    return { exceeded: false, resetsAt: null, ...getQuotaUsage() }
   }
-  return { exceeded: true, resetsAt: resetsAtCached.toISOString() }
+  return { exceeded: true, resetsAt: resetsAtCached.toISOString(), ...getQuotaUsage() }
 }
 
 /** Dev-only: force the quota gate to report exceeded. Idempotent.

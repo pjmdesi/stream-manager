@@ -8,6 +8,7 @@ import { Textarea } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
+import { quotaColor } from '../../lib/quotaColor'
 
 
 /** HH:MM:SS for the relay duration (drops the hours segment when zero).
@@ -35,6 +36,7 @@ export function IntegrationsPage() {
   const [ytTokenError, setYtTokenError] = useState<string | null>(null)
   const [ytConnecting, setYtConnecting] = useState(false)
   const [ytError, setYtError] = useState<string | null>(null)
+  const [ytQuota, setYtQuota] = useState<{ exceeded: boolean; resetsAt: string | null; used: number; limit: number } | null>(null)
 
   // ── Stream Relay ──────────────────────────────────────────────────────────
   // Localhost RTMP server that forwards OBS/Aitum to YouTube. Enable flag,
@@ -258,6 +260,13 @@ export function IntegrationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Live YouTube quota usage — fetch once, then update on every API call
+  // (main pushes 'youtube:quota-changed' as usage accrues / resets at PT midnight).
+  useEffect(() => {
+    window.api.youtubeGetQuotaState().then(setYtQuota).catch(() => {})
+    return window.api.onYouTubeQuotaChanged(setYtQuota)
+  }, [])
+
   // ── YouTube actions ───────────────────────────────────────────────────────
   const connectYt = async () => {
     setYtConnecting(true); setYtError(null)
@@ -354,6 +363,37 @@ export function IntegrationsPage() {
                 icon={ytConnecting ? <Loader2 size={13} className="animate-spin" /> : <Youtube size={13} />}>
                 {ytConnecting ? 'Connecting…' : 'Reconnect'}
               </Button>
+            </div>
+          )}
+
+          {/* API quota usage (estimated) */}
+          {ytConnected && ytQuota && (
+            <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-white/5 flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-400">API quota used today</span>
+                <span
+                  className="ml-auto text-xs font-mono font-medium tabular-nums"
+                  style={{ color: quotaColor(ytQuota.used / ytQuota.limit) }}
+                >
+                  {ytQuota.used.toLocaleString()} / {ytQuota.limit.toLocaleString()}
+                </span>
+              </div>
+              <div className="px-4 py-3 flex flex-col gap-2">
+                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(100, (ytQuota.used / ytQuota.limit) * 100)}%`,
+                      backgroundColor: quotaColor(ytQuota.used / ytQuota.limit),
+                    }}
+                  />
+                </div>
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                  Estimated YouTube Data API units used today against the default 10,000-unit daily
+                  limit. Reads cost ~1 unit, writes ~50. This is an estimate and resets at midnight
+                  Pacific Time.
+                </p>
+              </div>
             </div>
           )}
 

@@ -192,9 +192,9 @@ declare global {
 
       // ── YouTube ──────────────────────────────────────────────────────────────
       youtubeGetStatus(): Promise<{ connected: boolean; channelName?: string }>
-      youtubeGetQuotaState(): Promise<{ exceeded: boolean; resetsAt: string | null }>
-      onYouTubeQuotaChanged(cb: (state: { exceeded: boolean; resetsAt: string | null }) => void): () => void
-      youtubeSetForcedQuotaExceeded(forced: boolean): Promise<{ exceeded: boolean; resetsAt: string | null }>
+      youtubeGetQuotaState(): Promise<{ exceeded: boolean; resetsAt: string | null; used: number; limit: number }>
+      onYouTubeQuotaChanged(cb: (state: { exceeded: boolean; resetsAt: string | null; used: number; limit: number }) => void): () => void
+      youtubeSetForcedQuotaExceeded(forced: boolean): Promise<{ exceeded: boolean; resetsAt: string | null; used: number; limit: number }>
       youtubeGetForcedQuotaExceeded(): Promise<boolean>
       youtubeGetChannelId(): Promise<string>
       youtubeConnect(): Promise<void>

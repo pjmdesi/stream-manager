@@ -387,8 +387,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // Pushed by the main process when quota state changes (mark or
   // auto-clear). Callback receives the same shape as `getQuotaState`.
-  onYouTubeQuotaChanged: (cb: (state: { exceeded: boolean; resetsAt: string | null }) => void) => {
-    const listener = (_e: unknown, state: { exceeded: boolean; resetsAt: string | null }) => cb(state)
+  onYouTubeQuotaChanged: (cb: (state: { exceeded: boolean; resetsAt: string | null; used: number; limit: number }) => void) => {
+    const listener = (_e: unknown, state: { exceeded: boolean; resetsAt: string | null; used: number; limit: number }) => cb(state)
     ipcRenderer.on('youtube:quota-changed', listener)
     return () => { ipcRenderer.removeListener('youtube:quota-changed', listener) }
   },

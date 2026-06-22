@@ -150,6 +150,8 @@ export async function uploadThumbnail(
     }
     throw new Error(apiMsg)
   }
+  // thumbnails.set costs 50 quota units (this call bypasses ytRequest).
+  ytQuotaState.addQuotaUsage(50)
 }
 
 export interface LiveBroadcast {
@@ -210,6 +212,9 @@ async function ytRequest(
     if (isQuotaExceeded) ytQuotaState.markQuotaExceeded()
     throw new Error(err?.error?.message || `YouTube API error ${res.status}`)
   }
+  // Estimate quota usage for the successful call: reads (GET) cost 1 unit,
+  // writes (insert/update/delete/bind/transition) cost 50.
+  ytQuotaState.addQuotaUsage((options.method ?? 'GET').toUpperCase() === 'GET' ? 1 : 50)
   // 204 No Content
   if (res.status === 204) return null
   return res.json()
