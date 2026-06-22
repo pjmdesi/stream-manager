@@ -508,7 +508,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                 <Tooltip content="Open output folder" side="top">
                   <button
                     onClick={() => window.api.openInExplorer(outputDir)}
-                    className="ml-auto text-gray-400 hover:text-gray-300 transition-colors truncate max-w-[200px]"
+                    className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
                   >
                     {outputDir}
                   </button>
@@ -525,7 +525,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                 <Tooltip content="Open output folder" side="top">
                   <button
                     onClick={() => window.api.openInExplorer(outputDir)}
-                    className="ml-auto text-gray-400 hover:text-gray-300 transition-colors truncate max-w-[200px]"
+                    className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
                   >
                     {outputDir}
                   </button>
