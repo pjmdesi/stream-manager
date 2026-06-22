@@ -36,7 +36,7 @@ import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { SendToConverterModal } from '../streams/SendToConverterModal'
 import { isAnyModalOpen, isTypingTarget } from '../../lib/shortcuts'
-import { StreamFilesGrid } from '../streams/StreamFilesGrid'
+import { StreamFilesGrid, type FilesGridHandle } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { renderStreamTitle } from '../../lib/streamTitle'
@@ -559,6 +559,10 @@ export function StreamsPage({
   // for quick post-stream tasks).
   const [searchQuery, setSearchQuery] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
+  // Imperative handle to the open stream's files grid, so the keyboard handler
+  // can drive its select mode (Ctrl+Shift+A) / select-all (Ctrl+A) when the
+  // detail sidebar is open. Null when no sidebar / the stream has no files.
+  const filesGridRef = useRef<FilesGridHandle | null>(null)
   const [sortMode, setSortMode] = useState<'date-desc' | 'date-asc' | 'title-asc'>('date-desc')
   // Cache-busting key for thumbnail file:// URLs. Bumped when streams:changed
   // fires so renamed/swapped thumbnail files refetch instead of serving the
@@ -2120,10 +2124,19 @@ export function StreamsPage({
       if (!mod) return
       const k = e.key.toLowerCase()
 
-      // Ctrl+Shift+A → toggle multi-select mode
-      if (e.shiftKey && k === 'a') { e.preventDefault(); toggleSelectMode(); return }
-      // Ctrl+A (select mode only) → select all visible, or clear if all selected
+      // Ctrl+Shift+A → toggle multi-select. When the detail sidebar's files grid
+      // is mounted it drives that grid's select mode instead of the stream rows.
+      if (e.shiftKey && k === 'a') {
+        e.preventDefault()
+        if (filesGridRef.current) filesGridRef.current.toggleSelectMode()
+        else toggleSelectMode()
+        return
+      }
+      // Ctrl+A → select all / clear. The files grid takes priority when it's in
+      // select mode; otherwise the stream rows (when in row select mode).
       if (!e.shiftKey && k === 'a') {
+        const grid = filesGridRef.current
+        if (grid && grid.isSelectMode()) { e.preventDefault(); grid.selectAllOrClear(); return }
         if (!selectMode) return
         e.preventDefault()
         if (visibleFolders.length > 0 && selectedPaths.size === visibleFolders.length) clearSelection()
@@ -2988,6 +3001,7 @@ export function StreamsPage({
                 folderPath: renderedFolder.folderPath,
                 label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
               })}
+              filesGridRef={filesGridRef}
               onReloadFolders={() => void loadFolders()}
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
@@ -4589,7 +4603,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onReloadFolders, onOpenFolder, onOpenThumbnails, onDelete,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onReloadFolders, onOpenFolder, onOpenThumbnails, onDelete,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -4659,6 +4673,7 @@ function SidebarDetail({
   onSendFileToPlayer: (path: string) => void
   onSendFileToConverter: (path: string) => void
   onSendFilesToConverter: (paths: string[]) => void
+  filesGridRef: React.Ref<FilesGridHandle>
   /** Re-scan folders after a file changes (e.g. trashed from the grid). */
   onReloadFolders: () => void
   onOpenFolder: () => void
@@ -5982,6 +5997,7 @@ function SidebarDetail({
                     onSendToPlayer={onSendFileToPlayer}
                     onSendToConverter={onSendFileToConverter}
                     onSendFilesToConverter={onSendFilesToConverter}
+                    ref={filesGridRef}
                     onSetThumbnail={(filePath) => onUpdateMeta({ preferredThumbnail: filePath.split(/[\\/]/).pop() ?? '' })}
                     onDeleteThumbnail={onDeleteThumbnail}
                     onEditThumbnail={onOpenThumbnails}

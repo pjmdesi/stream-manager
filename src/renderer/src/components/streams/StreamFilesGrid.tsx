@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, ListChecks, X } from 'lucide-react'
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X } from 'lucide-react'
 import { VideoThumb, CHECKER } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
@@ -139,10 +139,16 @@ interface TagSpec {
  *  below it, grouping the two. `tag === null` renders the thumbnail bare. The
  *  thumbnail itself must be square along its bottom edge where the tray joins
  *  (the caller passes the appropriate rounding). */
-function TaggedThumb({ thumb, tag }: { thumb: React.ReactNode; tag: TagSpec | null }) {
+function TaggedThumb({ thumb, tag, suppressHover }: { thumb: React.ReactNode; tag: TagSpec | null; suppressHover?: boolean }) {
   if (!tag) return <>{thumb}</>
-  const bc = tag.hoverOnly ? TAG_BORDER_HOVER[tag.color] : TAG_BORDER_STATIC[tag.color]
-  const vis = tag.hoverOnly ? 'opacity-0 group-hover/file:opacity-100 transition-opacity' : ''
+  // A hover-only tag always reserves its border + tray in layout and reveals
+  // them on hover. `suppressHover` (select mode) keeps that reserved layout but
+  // never reveals them, so cards don't resize when toggling select mode.
+  const reveal = tag.hoverOnly && !suppressHover
+  const bc = !tag.hoverOnly
+    ? TAG_BORDER_STATIC[tag.color]
+    : reveal ? TAG_BORDER_HOVER[tag.color] : 'border-transparent'
+  const vis = tag.hoverOnly ? (reveal ? 'opacity-0 group-hover/file:opacity-100 transition-opacity' : 'opacity-0') : ''
   const inner = <>{tag.icon}{tag.label}</>
   const trayCls = `${TRAY_CLS} ${bc} ${TAG_TRAY_BG[tag.color]} ${vis}`
   const trayEl = tag.onClick
@@ -165,27 +171,38 @@ function SelectBox({ checked, onToggle }: { checked: boolean; onToggle: (shiftKe
   return (
     <button
       type="button"
+      onMouseDown={e => e.stopPropagation()}
       onClick={e => { e.stopPropagation(); onToggle(e.shiftKey) }}
       title="Select (Shift-click for a range)"
-      className={`absolute top-1 left-1 z-10 w-4 h-4 rounded flex items-center justify-center border transition-colors ${
-        checked
-          ? 'bg-purple-500 border-purple-500 text-white'
-          : 'bg-navy-900/80 border-white/50 text-transparent hover:border-white/80'
+      className={`absolute bottom-1 right-1 z-10 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+        checked ? 'bg-purple-700 border-purple-700' : 'bg-navy-900/70 border-gray-500 hover:border-gray-300'
       }`}
     >
-      <Check size={11} />
+      {checked && <Check size={10} className="text-white" strokeWidth={3} />}
     </button>
   )
 }
 
-/** Full-card click target that toggles selection in select mode — sits above
- *  the card's own interactions (lightbox / action buttons) so the whole card
- *  acts as a select target, like the stream rows. */
-function SelectOverlay({ onToggle }: { onToggle: (shiftKey: boolean) => void }) {
-  return <div className="absolute inset-0 z-[5] cursor-pointer" onClick={e => onToggle(e.shiftKey)} />
+/** Full-card target for select mode — sits above the card's own interactions
+ *  (lightbox / action buttons) so the whole card acts as a select target, like
+ *  the stream rows: mousedown starts a drag-select, mouseenter extends it, a
+ *  plain click toggles (range with Shift). */
+function SelectOverlay({ onDragStart, onDragEnter, onClick }: {
+  onDragStart: () => void
+  onDragEnter: () => void
+  onClick: (shiftKey: boolean) => void
+}) {
+  return (
+    <div
+      className="absolute inset-0 z-[5] cursor-pointer select-none"
+      onMouseDown={e => { e.preventDefault(); onDragStart() }}
+      onMouseEnter={onDragEnter}
+      onClick={e => onClick(e.shiftKey)}
+    />
+  )
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, onSelectToggle, onSendToPlayer, onSendToConverter, onOffload, onPin, onReload }: {
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onReload }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -199,6 +216,8 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   selectMode: boolean
   selected: boolean
   onSelectToggle: (shiftKey: boolean) => void
+  onDragStart: () => void
+  onDragEnter: () => void
   onSendToPlayer: (path: string) => void
   onSendToConverter: (path: string) => void
   onOffload: (path: string) => void
@@ -223,7 +242,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
 
   return (
     <div className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''}`}>
-      {selectMode && (<><SelectOverlay onToggle={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
+      {selectMode && (<><SelectOverlay onDragStart={onDragStart} onDragEnter={onDragEnter} onClick={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
           thumb={<VideoThumb path={path} width={104} height={58} checker rounded={isShort || isClip ? 'rounded-t-md' : 'rounded-md'} />}
@@ -262,7 +281,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   )
 }
 
-function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin }: {
+function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin }: {
   path: string
   thumbIndex: number
   /** Scan-flag-based local hint for rendering the image (immediate). */
@@ -277,6 +296,8 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
   selectMode: boolean
   selected: boolean
   onSelectToggle: (shiftKey: boolean) => void
+  onDragStart: () => void
+  onDragEnter: () => void
   onSetThumbnail: (path: string) => void
   onDeleteThumbnail: (path: string) => void
   onEditThumbnail: (variantOrdinal?: number) => void
@@ -292,7 +313,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
 
   return (
     <div className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''}`}>
-      {selectMode && (<><SelectOverlay onToggle={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
+      {selectMode && (<><SelectOverlay onDragStart={onDragStart} onDragEnter={onDragEnter} onClick={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
           thumb={
@@ -321,6 +342,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
             ? { color: 'blue', label: 'Thumbnail', icon: <Bookmark size={9} className="text-amber-300" fill="currentColor" />, tooltip: 'Stream item thumbnail' }
             : { color: 'neutral', label: 'Thumbnail', icon: <Bookmark size={9} />, hoverOnly: true, tooltip: 'Set as stream item thumbnail', onClick: () => onSetThumbnail(path) }
           }
+          suppressHover={selectMode}
         />
       </div>
       <div className="flex-1 min-w-0 flex flex-col">
@@ -371,10 +393,18 @@ interface Props {
  * toggles show/hide each kind. Wraps to 3 columns at the sidebar's max content
  * width (1280px), fewer as it narrows; capped to ~3 rows then scrolls.
  */
-export function StreamFilesGrid({
+export interface FilesGridHandle {
+  /** Toggle select mode (exits + clears the selection when turning off). */
+  toggleSelectMode: () => void
+  /** Ctrl+A: select all visible files, or clear if all are already selected. */
+  selectAllOrClear: () => void
+  isSelectMode: () => boolean
+}
+
+export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function StreamFilesGrid({
   folder, thumbsKey, preferredThumbnail, cloudSyncActive,
   onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onReload,
-}: Props) {
+}, ref) {
   const videoMap = folder.meta?.videoMap ?? {}
   const hasVideos = folder.videos.length > 0
   const hasImages = folder.thumbnails.length > 0
@@ -518,6 +548,63 @@ export function StreamFilesGrid({
   }
   const clearSelection = () => { setSelected(new Set()); lastClickedRef.current = null }
   const exitSelectMode = () => { setSelectMode(false); clearSelection() }
+
+  // Drag-select (mirrors the stream rows): mousedown seeds the anchor + a
+  // snapshot of the selection and whether we're adding or removing; mouseenter
+  // on other cards extends the range; a global mouseup ends it. dragMoved makes
+  // the click handler ignore the synthetic click fired at the end of a drag.
+  const isDragging = useRef(false)
+  const dragStartIndex = useRef<number | null>(null)
+  const dragAction = useRef<'add' | 'remove'>('add')
+  const preDragRef = useRef<Set<string>>(new Set())
+  const dragMoved = useRef(false)
+  const startDrag = (path: string) => {
+    const index = visiblePaths.indexOf(path)
+    if (index === -1) return
+    isDragging.current = true
+    dragStartIndex.current = index
+    dragAction.current = selected.has(path) ? 'remove' : 'add'
+    preDragRef.current = new Set(selected)
+    dragMoved.current = false
+    lastClickedRef.current = path
+  }
+  const updateDrag = (path: string) => {
+    if (!isDragging.current || dragStartIndex.current === null) return
+    const index = visiblePaths.indexOf(path)
+    if (index === -1) return
+    dragMoved.current = true
+    const lo = Math.min(dragStartIndex.current, index)
+    const hi = Math.max(dragStartIndex.current, index)
+    setSelected(() => {
+      const next = new Set(preDragRef.current)
+      for (let i = lo; i <= hi; i++) {
+        if (dragAction.current === 'add') next.add(visiblePaths[i]); else next.delete(visiblePaths[i])
+      }
+      return next
+    })
+  }
+  const handleCardClick = (path: string, shiftKey: boolean) => {
+    if (dragMoved.current) { dragMoved.current = false; return }
+    toggleSelect(path, shiftKey)
+  }
+  useEffect(() => {
+    const onUp = () => { isDragging.current = false }
+    document.addEventListener('mouseup', onUp)
+    return () => document.removeEventListener('mouseup', onUp)
+  }, [])
+
+  // Imperative handle so the streams-page keyboard shortcuts can drive the
+  // files-grid selection when the detail sidebar is open: Ctrl+Shift+A toggles
+  // mode, Ctrl+A selects-all / clears.
+  useImperativeHandle(ref, () => ({
+    toggleSelectMode: () => { if (selectMode) exitSelectMode(); else setSelectMode(true) },
+    selectAllOrClear: () => setSelected(prev => {
+      const allSelected = visiblePaths.length > 0 && visiblePaths.every(p => prev.has(p))
+      return allSelected ? new Set() : new Set(visiblePaths)
+    }),
+    isSelectMode: () => selectMode,
+  }), [selectMode, visiblePaths]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectedPaths = useMemo(() => visiblePaths.filter(p => selected.has(p)), [visiblePaths, selected])
   const selectedVideos = useMemo(() => selectedPaths.filter(p => folder.videos.includes(p)), [selectedPaths, folder.videos])
   const bulkConvert = () => { if (selectedVideos.length) { onSendFilesToConverter(selectedVideos); clearSelection() } }
@@ -546,9 +633,6 @@ export function StreamFilesGrid({
           ) : (
             <>
               <span className="text-[11px] text-gray-400 mr-1">{selectedPaths.length} selected</span>
-              {selectedPaths.length < visiblePaths.length && (
-                <button onClick={() => setSelected(new Set(visiblePaths))} className={ACTION_GRAY}>Select all</button>
-              )}
               {selectedVideos.length > 0 && (
                 <Tooltip content="Send selected to converter" side="top">
                   <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /> Convert</button>
@@ -569,12 +653,32 @@ export function StreamFilesGrid({
                   <button onClick={bulkTrash} className={ACTION_RED}><Trash2 size={12} /></button>
                 </Tooltip>
               )}
-              <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /> Stop</button>
+              {/* Selection management + exit — grouped with dividers so they
+                  wrap together, mirroring the stream-row toolbar. */}
+              <div className="flex items-center gap-0.5">
+                <div className="w-px h-5 bg-white/10 mx-1 self-center" />
+                <button
+                  onClick={() => setSelected(new Set(visiblePaths))}
+                  disabled={selectedPaths.length === visiblePaths.length}
+                  className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                >
+                  <CheckCheck size={12} /> Select all
+                </button>
+                <button
+                  onClick={clearSelection}
+                  disabled={selectedPaths.length === 0}
+                  className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                >
+                  <Square size={12} /> Clear
+                </button>
+                <div className="w-px h-5 bg-white/10 mx-1 self-center" />
+                <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /> Stop</button>
+              </div>
             </>
           )}
         </div>
       </div>
-      <div className="grid gap-3 max-h-[318px] overflow-y-auto pr-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
+      <div className="grid gap-3 max-h-[318px] overflow-y-auto p-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
         {showVideo && folder.videos.map(path => {
           const entry = videoMap[path.split(/[\\/]/).pop() ?? '']
           return (
@@ -589,7 +693,9 @@ export function StreamFilesGrid({
               archived={archivedSet.has(path)}
               selectMode={selectMode}
               selected={selected.has(path)}
-              onSelectToggle={(shiftKey) => toggleSelect(path, shiftKey)}
+              onSelectToggle={(shiftKey) => handleCardClick(path, shiftKey)}
+              onDragStart={() => startDrag(path)}
+              onDragEnter={() => updateDrag(path)}
               onSendToPlayer={onSendToPlayer}
               onSendToConverter={onSendToConverter}
               onOffload={offloadFile}
@@ -615,7 +721,9 @@ export function StreamFilesGrid({
               size={imageSizes[path]}
               selectMode={selectMode}
               selected={selected.has(path)}
-              onSelectToggle={(shiftKey) => toggleSelect(path, shiftKey)}
+              onSelectToggle={(shiftKey) => handleCardClick(path, shiftKey)}
+              onDragStart={() => startDrag(path)}
+              onDragEnter={() => updateDrag(path)}
               onSetThumbnail={onSetThumbnail}
               onDeleteThumbnail={onDeleteThumbnail}
               onEditThumbnail={onEditThumbnail}
@@ -628,7 +736,7 @@ export function StreamFilesGrid({
       </div>
     </div>
   )
-}
+})
 
 function FilterToggle({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
   return (
