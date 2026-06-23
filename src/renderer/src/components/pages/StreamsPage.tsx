@@ -863,15 +863,27 @@ export function StreamsPage({
   const foldersRef = useRef(folders)
   const twConnectedRef = useRef(twConnected)
   const autoUpdateTwitchRef = useRef<'always' | 'ask' | 'never'>(config.autoUpdateTwitchAfterStream ?? 'ask')
+  // Pending auto Twitch-update timer (see the delay in the lifecycle effect
+  // below). Held in a ref so a new session starting within the window can
+  // cancel a now-stale push to the previous "next" broadcast.
+  const twitchUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => { foldersRef.current = folders }, [folders])
   useEffect(() => { twConnectedRef.current = twConnected }, [twConnected])
   useEffect(() => { autoUpdateTwitchRef.current = config.autoUpdateTwitchAfterStream ?? 'ask' }, [config.autoUpdateTwitchAfterStream])
   useEffect(() => {
+    // Delay before the auto ('always' mode) post-stream Twitch update fires.
+    // Gives Twitch time to officially close the just-ended session before we
+    // set the next broadcast's title/category — otherwise 3rd-party services
+    // attribute the new info to the previous broadcast. Tunable.
+    const TWITCH_AUTO_UPDATE_DELAY_MS = 60_000
     const off = window.api.onRelayLifecycle(async ev => {
       // Stale prompt cleanup — once the next session starts (or errors)
       // the previous "next upcoming" suggestion is no longer relevant.
       if (ev.stage === 'binding' || ev.stage === 'going-live' || ev.stage === 'live' || ev.stage === 'no-broadcast' || ev.stage === 'error') {
         setPostStreamTwitchSuggestion(null)
+        // A new session supersedes any pending delayed auto-update aimed at
+        // the previous "next" broadcast — cancel it.
+        if (twitchUpdateTimerRef.current) { clearTimeout(twitchUpdateTimerRef.current); twitchUpdateTimerRef.current = null }
         return
       }
       if (ev.stage !== 'completed') return
@@ -899,11 +911,19 @@ export function StreamsPage({
       const payload = { title, game: game || undefined, tags }
       const mode = autoUpdateTwitchRef.current
       if (mode === 'always') {
-        try {
-          await window.api.twitchUpdateChannel(payload.title, payload.game, payload.tags)
-        } catch (e) {
-          console.warn('[auto-update Twitch] push failed:', e)
-        }
+        // Delay the push (see TWITCH_AUTO_UPDATE_DELAY_MS) so Twitch finishes
+        // closing the just-ended session first. Replace any still-pending
+        // timer so the latest completion wins. ('ask' mode is naturally
+        // user-paced, so it fires the prompt immediately.)
+        if (twitchUpdateTimerRef.current) clearTimeout(twitchUpdateTimerRef.current)
+        twitchUpdateTimerRef.current = setTimeout(async () => {
+          twitchUpdateTimerRef.current = null
+          try {
+            await window.api.twitchUpdateChannel(payload.title, payload.game, payload.tags)
+          } catch (e) {
+            console.warn('[auto-update Twitch] push failed:', e)
+          }
+        }, TWITCH_AUTO_UPDATE_DELAY_MS)
       } else if (mode === 'ask') {
         setPostStreamTwitchSuggestion({
           folderPath: next.folderPath,
@@ -913,7 +933,10 @@ export function StreamsPage({
       }
       // mode === 'never' — skip silently.
     })
-    return off
+    return () => {
+      off()
+      if (twitchUpdateTimerRef.current) { clearTimeout(twitchUpdateTimerRef.current); twitchUpdateTimerRef.current = null }
+    }
   }, [setPostStreamTwitchSuggestion])
 
   // Same-day disambiguation index ("#2", "#3" badge when multiple
