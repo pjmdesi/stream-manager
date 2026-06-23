@@ -861,6 +861,17 @@ export function registerStreamsIPC(): void {
   // every stream shares the same folderPath (= the dump dir) and key derivation
   // can't tell them apart. Falls back to deriving from folderPath when omitted.
 
+  // Set of YouTube video ids already linked to a local stream — lets the
+  // "Import from YouTube" picker flag / skip already-imported videos.
+  ipcMain.handle('streams:getLinkedYouTubeIds', async (): Promise<string[]> => {
+    const streamsDir = getStreamsDir()
+    if (!streamsDir) return []
+    const allMeta = readAllMeta(streamsDir)
+    const ids = new Set<string>()
+    for (const m of Object.values(allMeta)) { if (m?.ytVideoId) ids.add(m.ytVideoId) }
+    return [...ids]
+  })
+
   ipcMain.handle('streams:writeMeta', async (_event, folderPath: string, meta: StreamMeta, metaKeyOverride?: string) => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
     const key = metaKeyOverride || metaKey(streamsDir, folderPath)

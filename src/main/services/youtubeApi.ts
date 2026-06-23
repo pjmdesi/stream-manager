@@ -388,6 +388,141 @@ export async function getVideosByIds(
   return out
 }
 
+/** A channel video as needed to import it into a stream item: metadata +
+ *  thumbnail URL + a normalized local date. Shared shape between main and the
+ *  renderer's import picker (mirror in renderer types). */
+export interface YouTubeImportVideo {
+  videoId: string
+  title: string
+  description: string
+  tags: string[]
+  categoryId?: string
+  /** 'public' | 'unlisted' | 'private' */
+  privacyStatus: string
+  /** Local YYYY-MM-DD: actual stream start for livestreams, else publish date. */
+  date: string
+  /** Raw ISO publish timestamp. */
+  publishedAt: string
+  isLivestream: boolean
+  /** status.uploadStatus — 'processed' for a normal published video; drafts and
+   *  failed/rejected uploads report something else. */
+  uploadStatus: string
+  durationSeconds?: number
+  thumbnailUrl?: string
+}
+
+/** Largest available thumbnail URL from a snippet.thumbnails object. */
+function pickThumbUrl(thumbs: any): string | undefined {
+  if (!thumbs) return undefined
+  return (thumbs.maxres ?? thumbs.standard ?? thumbs.high ?? thumbs.medium ?? thumbs.default)?.url
+}
+
+/** ISO-8601 duration (PT#H#M#S) → seconds. */
+function parseIsoDuration(iso: string | undefined): number | undefined {
+  if (!iso) return undefined
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
+  if (!m) return undefined
+  return (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0))
+}
+
+/** ISO timestamp → local YYYY-MM-DD, so imported folders match how SM names
+ *  streams by the user's local date. */
+function isoToLocalDate(iso: string | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** A non-livestream upload at or under this length is treated as a Short — the
+ *  Data API exposes no Short flag, and YouTube caps Shorts at 1m1s. Shorts
+ *  belong to a larger stream item, so the importer skips them. */
+const SHORT_MAX_SECONDS = 61
+
+/** List every video on the connected channel (uploads playlist), newest first,
+ *  with the metadata + thumbnail needed to import each as a stream item. Walks
+ *  channels.list → uploads playlist → playlistItems (paged) → videos.list
+ *  (batched 50). Quota: 1 (channel) + 1 per 50 (playlistItems) + 1 per 50
+ *  (videos) — a few units even for large channels. */
+export async function getChannelVideos(
+  clientId: string,
+  clientSecret: string,
+): Promise<YouTubeImportVideo[]> {
+  // Uploads playlist id for the connected account.
+  const ch = await ytRequest(
+    `/channels?${new URLSearchParams({ part: 'contentDetails', mine: 'true' })}`,
+    { method: 'GET' }, clientId, clientSecret,
+  )
+  const uploads = ch?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads as string | undefined
+  if (!uploads) return []
+
+  // Collect all upload video ids (playlistItems returns newest-first). Dedupe —
+  // pagination can repeat an id when the channel uploads mid-walk.
+  const ids: string[] = []
+  const seenIds = new Set<string>()
+  let pageToken: string | undefined
+  do {
+    const params = new URLSearchParams({ part: 'contentDetails', playlistId: uploads, maxResults: '50' })
+    if (pageToken) params.set('pageToken', pageToken)
+    const page = await ytRequest(`/playlistItems?${params}`, { method: 'GET' }, clientId, clientSecret)
+    for (const it of (page?.items ?? [])) {
+      const vid = it?.contentDetails?.videoId
+      if (vid && !seenIds.has(vid)) { seenIds.add(vid); ids.push(vid) }
+    }
+    pageToken = page?.nextPageToken
+  } while (pageToken)
+
+  // Hide the persistent "default" broadcast (no scheduled time) — same detection
+  // as the broadcast picker (isLikelyDefaultBroadcast). It shouldn't back an
+  // imported stream item. Non-fatal: if broadcasts can't be fetched, don't hide.
+  const defaultIds = new Set<string>()
+  try {
+    for (const b of await getLiveBroadcasts(clientId, clientSecret)) {
+      if (!b.snippet?.scheduledStartTime) defaultIds.add(b.id)
+    }
+  } catch { /* leave defaultIds empty */ }
+
+  // Hydrate details in 50-id batches (videos.list preserves the id order).
+  const out: YouTubeImportVideo[] = []
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50)
+    const data = await ytRequest(
+      `/videos?${new URLSearchParams({ part: 'snippet,status,contentDetails,liveStreamingDetails,fileDetails', id: chunk.join(','), maxResults: '50' })}`,
+      { method: 'GET' }, clientId, clientSecret,
+    )
+    for (const item of (data?.items ?? [])) {
+      if (defaultIds.has(item.id)) continue // hide the persistent default broadcast
+      const sn = item.snippet ?? {}
+      const live = item.liveStreamingDetails
+      const durationSeconds = parseIsoDuration(item.contentDetails?.duration)
+      // Skip Shorts — they belong to a larger stream item, not their own. Detect
+      // via aspect ratio (Shorts are portrait) + the 1m1s cap. When fileDetails
+      // has no stream dimensions, fall back to the duration cap alone.
+      const vs = item.fileDetails?.videoStreams?.[0]
+      const portrait = vs?.aspectRatio != null
+        ? Number(vs.aspectRatio) < 1
+        : (vs?.widthPixels && vs?.heightPixels) ? vs.heightPixels > vs.widthPixels : undefined
+      if (!live && durationSeconds != null && durationSeconds <= SHORT_MAX_SECONDS && portrait !== false) continue
+      const dateIso = (live?.actualStartTime as string | undefined) || sn.publishedAt
+      out.push({
+        videoId: item.id,
+        title: sn.title ?? '',
+        description: sn.description ?? '',
+        tags: sn.tags ?? [],
+        categoryId: sn.categoryId ?? undefined,
+        privacyStatus: item.status?.privacyStatus ?? 'public',
+        date: isoToLocalDate(dateIso),
+        publishedAt: sn.publishedAt ?? '',
+        isLivestream: !!live,
+        uploadStatus: item.status?.uploadStatus ?? 'processed',
+        durationSeconds,
+        thumbnailUrl: pickThumbUrl(sn.thumbnails),
+      })
+    }
+  }
+  return out
+}
+
 /** Fetch tags for a list of video IDs from the videos resource and return a map of id → tags.
  *  Chunks requests to stay within the API's 50-ID-per-request limit. */
 /** Returns per-id `{ tags, categoryId }` for fields the

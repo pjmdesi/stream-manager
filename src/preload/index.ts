@@ -296,6 +296,9 @@ contextBridge.exposeInMainWorld('api', {
   listStreams: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
     ipcRenderer.invoke('streams:list', dir, mode),
 
+  streamsGetLinkedYouTubeIds: (): Promise<string[]> =>
+    ipcRenderer.invoke('streams:getLinkedYouTubeIds'),
+
   detectStreamStructure: (dir: string) =>
     ipcRenderer.invoke('streams:detectStructure', dir),
 
@@ -395,6 +398,10 @@ contextBridge.exposeInMainWorld('api', {
 
   youtubeGetChannelId: (): Promise<string> =>
     ipcRenderer.invoke('youtube:getChannelId'),
+  youtubeListChannelVideos: () =>
+    ipcRenderer.invoke('youtube:listChannelVideos'),
+  youtubeDownloadThumbnail: (targetDir: string, url: string): Promise<{ filename: string; hash: string } | null> =>
+    ipcRenderer.invoke('youtube:downloadThumbnail', targetDir, url),
 
   youtubeConnect: () =>
     ipcRenderer.invoke('youtube:connect'),

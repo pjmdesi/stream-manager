@@ -11,6 +11,7 @@ import type {
   FileInfo,
   StreamMeta,
   StreamFolder,
+  YouTubeImportVideo,
   DetectedStructure,
   ClipDraft,
   YTTitleTemplate,
@@ -197,6 +198,9 @@ declare global {
       youtubeSetForcedQuotaExceeded(forced: boolean): Promise<{ exceeded: boolean; resetsAt: string | null; used: number; limit: number }>
       youtubeGetForcedQuotaExceeded(): Promise<boolean>
       youtubeGetChannelId(): Promise<string>
+      youtubeListChannelVideos(): Promise<YouTubeImportVideo[]>
+      youtubeDownloadThumbnail(targetDir: string, url: string): Promise<{ filename: string; hash: string } | null>
+      streamsGetLinkedYouTubeIds(): Promise<string[]>
       youtubeConnect(): Promise<void>
       youtubeDisconnect(): Promise<void>
       youtubeGetVideoStatuses(videoIds: string[]): Promise<Record<string, { privacyStatus: string; isLivestream: boolean }>>

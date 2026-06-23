@@ -9,6 +9,8 @@ import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
 import { quotaColor } from '../../lib/quotaColor'
+import { YouTubeImportModal } from '../streams/YouTubeImportModal'
+import { YouTubeLinkModal } from '../streams/YouTubeLinkModal'
 
 
 /** HH:MM:SS for the relay duration (drops the hours segment when zero).
@@ -37,6 +39,8 @@ export function IntegrationsPage() {
   const [ytConnecting, setYtConnecting] = useState(false)
   const [ytError, setYtError] = useState<string | null>(null)
   const [ytQuota, setYtQuota] = useState<{ exceeded: boolean; resetsAt: string | null; used: number; limit: number } | null>(null)
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [linkModalOpen, setLinkModalOpen] = useState(false)
 
   // ── Stream Relay ──────────────────────────────────────────────────────────
   // Localhost RTMP server that forwards OBS/Aitum to YouTube. Enable flag,
@@ -396,6 +400,25 @@ export function IntegrationsPage() {
               </div>
             </div>
           )}
+
+          {/* Import from YouTube — requires folder-per-stream mode (dump mode has
+              no per-stream folders to organize recordings into). */}
+          {ytConnected && ytTokenValid && (
+            <div className="bg-navy-800 border border-white/5 rounded-lg px-4 py-3 flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-gray-300">Import from YouTube</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  {config.streamMode === 'dump-folder'
+                    ? 'Unavailable in dump-folder mode — switch to folder-per-stream so each import gets its own folder for recordings.'
+                    : 'Create new stream items from your videos, or link videos to existing streams. Details + thumbnail only, not the video files.'}
+                </p>
+              </div>
+              <Button size="sm" variant="ghost" disabled={config.streamMode === 'dump-folder'} onClick={() => setLinkModalOpen(true)}>Link existing…</Button>
+              <Button size="sm" variant="ghost" disabled={config.streamMode === 'dump-folder'} onClick={() => setImportModalOpen(true)}>Import new…</Button>
+            </div>
+          )}
+          <YouTubeImportModal isOpen={importModalOpen} onClose={() => setImportModalOpen(false)} />
+          <YouTubeLinkModal isOpen={linkModalOpen} onClose={() => setLinkModalOpen(false)} />
 
           {/* YT Credentials */}
           <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">

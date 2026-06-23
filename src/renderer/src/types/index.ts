@@ -320,6 +320,10 @@ export interface StreamMeta {
   clipDrafts?: Record<string, ClipDraft> // key = draft id
   // YouTube
   ytVideoId?: string
+  /** True when this stream was created by importing an existing YouTube video
+   *  (vs. created locally and pushed). Drives an "Imported" indicator and keeps
+   *  the import idempotent. */
+  ytImported?: boolean
   ytTitle?: string
   /** The baked/resolved description — what's pushed to YouTube and what the
    *  out-of-sync check compares. Kept in sync from `ytDescriptionTemplate`. */
@@ -582,6 +586,25 @@ export interface LiveBroadcast {
     lifeCycleStatus: string
     privacyStatus: string
   }
+}
+
+/** A channel video as needed to import it into a stream item — mirrors the
+ *  main-side YouTubeImportVideo (youtubeApi.ts). Drives the import picker. */
+export interface YouTubeImportVideo {
+  videoId: string
+  title: string
+  description: string
+  tags: string[]
+  categoryId?: string
+  privacyStatus: string
+  /** Local YYYY-MM-DD: actual stream start for livestreams, else publish date. */
+  date: string
+  publishedAt: string
+  isLivestream: boolean
+  /** status.uploadStatus — non-'processed' marks drafts / failed uploads. */
+  uploadStatus: string
+  durationSeconds?: number
+  thumbnailUrl?: string
 }
 
 export type Page = 'streams' | 'player' | 'templates' | 'rules' | 'converter' | 'combine' | 'integrations' | 'settings' | 'launcher' | 'thumbnails'

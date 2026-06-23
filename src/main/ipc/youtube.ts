@@ -1,6 +1,9 @@
 import { ipcMain } from 'electron'
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos } from '../services/youtubeApi'
 import * as ytQuotaState from '../services/ytQuotaState'
 import { getStore } from './store'
 
@@ -59,6 +62,36 @@ export function registerYouTubeIPC(): void {
     const { clientId, clientSecret } = getCreds()
     if (!clientId || !clientSecret) throw new Error('YouTube credentials not configured.')
     return await getMyChannelId(clientId, clientSecret)
+  })
+
+  // Lists every video on the connected channel for the "Import from YouTube"
+  // picker. Read-only; a few quota units even for large channels.
+  ipcMain.handle('youtube:listChannelVideos', async () => {
+    const { clientId, clientSecret } = getCreds()
+    if (!clientId || !clientSecret) throw new Error('YouTube credentials not configured.')
+    return await getChannelVideos(clientId, clientSecret)
+  })
+
+  // Download a video's YouTube thumbnail into a stream folder (importer). Returns
+  // the saved filename within targetDir, or null on failure. Non-throwing so a
+  // bad thumbnail doesn't fail the whole import of an item.
+  ipcMain.handle('youtube:downloadThumbnail', async (_e, targetDir: string, url: string): Promise<{ filename: string; hash: string } | null> => {
+    try {
+      if (!targetDir || !url) return null
+      const { net } = await import('electron')
+      const res = await net.fetch(url)
+      if (!res.ok) return null
+      const buf = Buffer.from(await res.arrayBuffer())
+      if (buf.length === 0) return null
+      const filename = 'youtube-thumbnail.jpg'
+      fs.writeFileSync(path.join(targetDir, filename), buf)
+      // sha1 of the bytes — the same hash thumbnail:hashFile computes — so the
+      // out-of-sync thumbnail check reads this imported thumbnail as in-sync.
+      const hash = crypto.createHash('sha1').update(buf).digest('hex')
+      return { filename, hash }
+    } catch {
+      return null
+    }
   })
 
   ipcMain.handle('youtube:validateToken', async () => {
