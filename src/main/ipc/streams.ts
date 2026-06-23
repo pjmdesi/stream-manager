@@ -681,7 +681,10 @@ export function registerStreamsIPC(): void {
           date,
           meta,
           hasMeta: isMeaningfulMeta(meta),
-          detectedGames: detectGamesFromFiles(videos),
+          // Filename game-detection removed — games are assigned explicitly,
+          // not guessed from filenames (kept on the type as an empty array so
+          // the meta.games-or-detected fallbacks downstream simply no-op).
+          detectedGames: [],
           thumbnails: sortedThumbnails,
           videoCount: videos.length,
           videos,
@@ -722,7 +725,8 @@ export function registerStreamsIPC(): void {
         seenKeys.add(relativePath)
 
         const meta = allMeta[relativePath] ?? null
-        const detectedGames = detectGamesFromFolderRecursive(folderPath)
+        // Filename game-detection removed — see the dump-mode branch above.
+        const detectedGames: string[] = []
         const thumbnails = detectThumbnails(folderPath)
         if (meta?.preferredThumbnail) {
           const idx = thumbnails.findIndex(t => path.basename(t) === meta.preferredThumbnail)

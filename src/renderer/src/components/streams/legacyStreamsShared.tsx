@@ -6711,12 +6711,20 @@ function ClampedComment({ text, maxLines = 3 }: { text: string; maxLines?: numbe
  * the chip is truncated.
  */
 export function DisplayTagChip({
-  text, className, style, detectedTooltip,
+  text, className, style, detectedTooltip, onClick, actionTooltip,
 }: {
   text: string
   className: string
   style?: React.CSSProperties
   detectedTooltip?: string
+  /** When set, the chip becomes interactive (cursor + hover) and calls this
+   *  on click. Used by the streams list's tag-based multi-select. The handler
+   *  is responsible for stopping propagation if the chip sits inside another
+   *  click target. */
+  onClick?: (e: React.MouseEvent) => void
+  /** Hint shown in the chip's tooltip while it's interactive (e.g. how
+   *  click / ctrl-click behave). Always rendered when present. */
+  actionTooltip?: string
 }) {
   const [truncated, setTruncated] = useState(false)
   // The chip element changes identity when `truncated` toggles
@@ -6750,7 +6758,14 @@ export function DisplayTagChip({
   // Final cleanup on component unmount
   useEffect(() => () => { obsCleanupRef.current?.() }, [])
 
-  const chip = <span ref={setRef} className={className} style={style}>{text}</span>
+  const chip = (
+    <span
+      ref={setRef}
+      className={`${className}${onClick ? ' cursor-pointer hover:brightness-125' : ''}`}
+      style={style}
+      onClick={onClick ? (e) => { e.stopPropagation(); onClick(e) } : undefined}
+    >{text}</span>
+  )
 
   // Tooltip's default trigger wrapper is `inline-flex` which shrinks to
   // fit the chip's content. The chip's `max-w-full` then resolves to
@@ -6766,11 +6781,17 @@ export function DisplayTagChip({
   // chip and truncation stays stable.
   const triggerCls = 'inline-block max-w-full min-w-0'
 
-  if (detectedTooltip) {
-    const content = truncated ? `${detectedTooltip} · ${text}` : detectedTooltip
-    return <Tooltip content={content} side="top" triggerClassName={triggerCls}>{chip}</Tooltip>
-  }
-  return truncated ? <Tooltip content={text} side="top" triggerClassName={triggerCls}>{chip}</Tooltip> : chip
+  // Action hint (interactive chips) takes priority and always shows; it
+  // appends the full tag when the chip is also clipped. Detected-from-filename
+  // note is next, then a plain truncation tooltip.
+  const tip = actionTooltip
+    ? (truncated ? `${actionTooltip} · ${text}` : actionTooltip)
+    : detectedTooltip
+      ? (truncated ? `${detectedTooltip} · ${text}` : detectedTooltip)
+      : truncated ? text : null
+  return tip != null
+    ? <Tooltip content={tip} side="top" triggerClassName={triggerCls}>{chip}</Tooltip>
+    : chip
 }
 
 // ─── Stream card (grid view) ─────────────────────────────────────────────────

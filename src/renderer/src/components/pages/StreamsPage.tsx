@@ -1832,6 +1832,25 @@ export function StreamsPage({
     setSelectedPaths(new Set(visibleFolders.map(selectionKey)))
   }, [visibleFolders, selectionKey])
   const clearSelection = useCallback(() => setSelectedPaths(new Set()), [])
+  // Tag-based bulk select (select mode only): plain click on a row's type or
+  // game chip adds every visible row carrying that tag; ctrl/cmd-click removes
+  // them. Operates over visibleFolders so it honors the active filters/search.
+  const selectByTag = useCallback((matches: (f: StreamFolder) => boolean, additive: boolean) => {
+    setSelectedPaths(prev => {
+      const next = new Set(prev)
+      for (const f of visibleFolders) {
+        if (!matches(f)) continue
+        if (additive) next.add(selectionKey(f)); else next.delete(selectionKey(f))
+      }
+      return next
+    })
+  }, [visibleFolders, selectionKey])
+  const handleTagSelect = useCallback((kind: 'type' | 'game', value: string, additive: boolean) => {
+    const matches = kind === 'type'
+      ? (f: StreamFolder) => normalizeStreamTypes(f.meta?.streamType).includes(value)
+      : (f: StreamFolder) => (f.meta?.games ?? []).includes(value)
+    selectByTag(matches, additive)
+  }, [selectByTag])
 
   // ── Click-and-drag range selection ───────────────────────────────────
   // Same pattern as StreamsPage: mousedown on a row captures the start
@@ -2854,6 +2873,7 @@ export function StreamsPage({
                         privacyStatus={status?.privacyStatus ?? null}
                         isLivestream={status?.isLivestream ?? null}
                         isProcessing={isProcessing}
+                        onTagSelect={handleTagSelect}
                         sameDayIndex={sameDayIndexMap.get(f.folderPath)}
                         thumbsKey={thumbsKey}
                         thumbWidth={thumbWidth}
@@ -3655,7 +3675,7 @@ function StreamListItem({
   isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   isSendingToPlayer, onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
-  animDurationMs,
+  animDurationMs, onTagSelect,
 }: {
   folder: StreamFolder
   /** Full folder list — needed to render the title template ({total_episodes}
@@ -3722,6 +3742,9 @@ function StreamListItem({
   onSendToConverter: () => void
   onOpenThumbnails: () => void
   onThumbResizeStart: (e: React.MouseEvent) => void
+  /** Select-mode tag shortcut — select (additive=true) or deselect every
+   *  visible row carrying this type/game tag. */
+  onTagSelect: (kind: 'type' | 'game', value: string, additive: boolean) => void
 }) {
   // Selected-row indicator timing — drives the purple bar on the date
   // cell. Lags behind `selected` on open (waits for the sidebar to
@@ -4027,6 +4050,8 @@ function StreamListItem({
                       text={t}
                       className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border truncate max-w-full ${color.chip}`}
                       style={getTagTextureStyle(tagTextures[t])}
+                      onClick={selectMode ? (e) => onTagSelect('type', t, !(e.ctrlKey || e.metaKey)) : undefined}
+                      actionTooltip={selectMode ? `Select all "${t}" · Ctrl-click to deselect` : undefined}
                     />
                   )
                 })}
@@ -4039,22 +4064,15 @@ function StreamListItem({
           <td className="px-2 py-2 align-middle max-w-[240px] hidden @3xl:table-cell">
             {displayGames.length > 0 ? (
               <div className="flex flex-wrap gap-1">
-                {displayGames.map(g =>
-                  meta?.games?.includes(g) ? (
-                    <DisplayTagChip
-                      key={g}
-                      text={g}
-                      className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30 truncate max-w-full"
-                    />
-                  ) : (
-                    <DisplayTagChip
-                      key={g}
-                      text={g}
-                      className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-gray-500/30 italic truncate max-w-full"
-                      detectedTooltip="Detected from filename"
-                    />
-                  )
-                )}
+                {displayGames.map(g => (
+                  <DisplayTagChip
+                    key={g}
+                    text={g}
+                    className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30 truncate max-w-full"
+                    onClick={selectMode ? (e) => onTagSelect('game', g, !(e.ctrlKey || e.metaKey)) : undefined}
+                    actionTooltip={selectMode ? `Select all "${g}" · Ctrl-click to deselect` : undefined}
+                  />
+                ))}
               </div>
             ) : (
               <span className="text-xs text-gray-400">—</span>
