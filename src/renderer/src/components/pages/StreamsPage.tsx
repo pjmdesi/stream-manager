@@ -3840,7 +3840,13 @@ function StreamListItem({
               ? 'border-b border-blue-700/40 !bg-blue-700/30 hover:!bg-blue-700/40'
               : 'border-b border-teal-700/40 !bg-teal-700/30 hover:!bg-teal-700/40')
           : '!bg-purple-900/20'}`
-      ) : ''} ${selectMode && multiSelected ? '!bg-purple-900/15' : ''}`}
+      ) : ''} ${selectMode && multiSelected ? (
+        isPending
+          ? (isToday
+              ? '!bg-blue-600/30 hover:!bg-blue-600/40'
+              : '!bg-teal-600/30 hover:!bg-teal-600/40')
+          : '!bg-purple-600/30 hover:!bg-purple-600/40')
+        : ''}`}
     >
       {/* Checkbox column — only renders in select mode. The pl-3 keeps
           the checkbox off the row's left edge but tight enough that the
