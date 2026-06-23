@@ -466,6 +466,10 @@ contextBridge.exposeInMainWorld('api', {
     broadcastId: string,
     privacyStatus: 'public' | 'unlisted' | 'private',
   ) => ipcRenderer.invoke('youtube:updateBroadcastStatus', broadcastId, privacyStatus),
+  youtubeUpdateVideoStatus: (
+    videoId: string,
+    privacyStatus: 'public' | 'unlisted' | 'private',
+  ) => ipcRenderer.invoke('youtube:updateVideoStatus', videoId, privacyStatus),
 
   youtubeDeleteVideo: (videoId: string) =>
     ipcRenderer.invoke('youtube:deleteVideo', videoId),

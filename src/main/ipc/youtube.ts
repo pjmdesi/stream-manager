@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos } from '../services/youtubeApi'
 import * as ytQuotaState from '../services/ytQuotaState'
 import { getStore } from './store'
 
@@ -249,6 +249,20 @@ export function registerYouTubeIPC(): void {
       await updateBroadcastStatus(broadcastId, privacyStatus, clientId, clientSecret)
     } catch (e: any) {
       console.error('[YT main] updateBroadcastStatus — error:', e.message)
+      throw e
+    }
+  })
+
+  ipcMain.handle('youtube:updateVideoStatus', async (
+    _event,
+    videoId: string,
+    privacyStatus: 'public' | 'unlisted' | 'private',
+  ) => {
+    const { clientId, clientSecret } = getCreds()
+    try {
+      await updateVideoStatus(videoId, privacyStatus, clientId, clientSecret)
+    } catch (e: any) {
+      console.error('[YT main] updateVideoStatus — error:', e.message)
       throw e
     }
   })

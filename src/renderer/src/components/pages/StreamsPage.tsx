@@ -1341,7 +1341,16 @@ export function StreamsPage({
       // through avoids overwriting YouTube's default privacy on every
       // push.
       if (privacy) {
-        await window.api.youtubeUpdateBroadcastStatus(meta.ytVideoId, privacy)
+        try {
+          await window.api.youtubeUpdateBroadcastStatus(meta.ytVideoId, privacy)
+        } catch {
+          // No liveBroadcast record — a regular video, or a re-upload that
+          // replaced a deleted livestream — so the broadcast status endpoint
+          // 404s "Live broadcast not found". Fall back to videos.update,
+          // mirroring the snippet fallback above. (Without this the privacy
+          // call throws and the thumbnail step below never runs.)
+          await window.api.youtubeUpdateVideoStatus(meta.ytVideoId, privacy)
+        }
       }
       if (thumbToUpload) {
         try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload) }
@@ -2656,7 +2665,7 @@ export function StreamsPage({
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search title, games, notes, date…   ( / )"
+                placeholder="Search title, games, notes…  /"
                 className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
               />
               {searchQuery && (
@@ -6914,15 +6923,20 @@ function SidebarDetail({
                 YouTube rejects schedule edits once a broadcast has
                 started or finished. Edits stage in meta; the Push to
                 YouTube button picks them up. */}
-            {selectedBroadcast && displayedPrivacy && (
+            {linkedId && (
+              // Render as soon as the stream is linked (linkedId is local) and
+              // disable until the broadcast/VOD detail resolves, so the field
+              // reserves its space instead of popping in and shoving the
+              // footer once the async lookup lands.
               <BroadcastTimePrivacyRow
                 showTime={isUpcomingBroadcast}
                 time={displayedScheduledTime}
                 onTimeChange={v => onUpdateMeta({ scheduledTime: v || undefined })}
                 timeMismatch={broadcastMismatches.get('scheduledTime')}
-                privacy={displayedPrivacy}
+                privacy={displayedPrivacy ?? 'private'}
                 onPrivacyChange={v => onUpdateMeta({ ytPrivacyStatus: v })}
                 privacyMismatch={broadcastMismatches.get('privacy')}
+                disabled={!selectedBroadcast}
                 trailing={
                   <Tooltip content={copiedUrl ? 'Copied!' : 'Copy broadcast URL'} side="bottom">
                     <button

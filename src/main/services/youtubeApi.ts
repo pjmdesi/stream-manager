@@ -881,6 +881,38 @@ export async function updateBroadcastStatus(
   )
 }
 
+/** Update a regular video's privacy via `videos.update?part=status`. This is
+ *  the fallback for stream items linked to a plain video with no liveBroadcast
+ *  record — e.g. a re-upload that replaced a deleted livestream — where
+ *  updateBroadcastStatus 404s "Live broadcast not found". videos.update drops
+ *  any status field omitted from the request body, so we read the current
+ *  status and merge privacyStatus in to preserve embeddable / license /
+ *  madeForKids rather than silently resetting them. */
+export async function updateVideoStatus(
+  videoId: string,
+  privacyStatus: 'public' | 'unlisted' | 'private',
+  clientId: string,
+  clientSecret: string,
+): Promise<void> {
+  const data = await ytRequest(
+    `/videos?part=status&id=${encodeURIComponent(videoId)}`,
+    { method: 'GET' },
+    clientId, clientSecret,
+  )
+  const current = data?.items?.[0]?.status ?? {}
+  await ytRequest(
+    `/videos?part=status`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: videoId,
+        status: { ...current, privacyStatus },
+      }),
+    },
+    clientId, clientSecret,
+  )
+}
+
 /** Delete a YouTube video (including the VOD of a completed livestream).
  *  Irreversible — there's no recycle bin on YouTube. Quota cost: 50 units.
  *  Works for both regular videos and finished livestream VODs since both

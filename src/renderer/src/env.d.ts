@@ -219,6 +219,7 @@ declare global {
       youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>
       youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string; scheduledStartTime?: string }, tags: string[], categoryId?: string): Promise<void>
       youtubeUpdateBroadcastStatus(broadcastId: string, privacyStatus: 'public' | 'unlisted' | 'private'): Promise<void>
+      youtubeUpdateVideoStatus(videoId: string, privacyStatus: 'public' | 'unlisted' | 'private'): Promise<void>
       youtubeDeleteVideo(videoId: string): Promise<void>
       getYTTitleTemplates(): Promise<YTTitleTemplate[]>
       setYTTitleTemplates(v: YTTitleTemplate[]): Promise<void>
