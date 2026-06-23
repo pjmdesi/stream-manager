@@ -3,6 +3,7 @@
 ## Ongoing Tasks
 
 1. Check the "processing" status of stream items after a stream to see if it's working correctly.
+2. Check if the delay on the automatic Twitch update is working correctly. It should be delayed by 60 seconds after the stream relay stops.
 
 ## Discovery
 
