@@ -6937,6 +6937,7 @@ function SidebarDetail({
                 onPrivacyChange={v => onUpdateMeta({ ytPrivacyStatus: v })}
                 privacyMismatch={broadcastMismatches.get('privacy')}
                 disabled={!selectedBroadcast}
+                privacyLoading={!displayedPrivacy}
                 trailing={
                   <Tooltip content={copiedUrl ? 'Copied!' : 'Copy broadcast URL'} side="bottom">
                     <button
@@ -8152,7 +8153,7 @@ const PRIVACY_OPTIONS: Array<{ value: PrivacyValue; label: string; Icon: typeof 
 function BroadcastTimePrivacyRow({
   time, onTimeChange, timeMismatch, showTime = true,
   privacy, onPrivacyChange, privacyMismatch,
-  disabled,
+  disabled, privacyLoading,
   trailing,
 }: {
   time: string
@@ -8163,6 +8164,9 @@ function BroadcastTimePrivacyRow({
   onPrivacyChange: (v: PrivacyValue) => void
   privacyMismatch?: 'local' | 'remote' | 'both' | 'unknown'
   disabled?: boolean
+  /** True while the real privacy value is still resolving — shows a
+   *  "Loading…" placeholder instead of a possibly-wrong fallback value. */
+  privacyLoading?: boolean
   trailing?: React.ReactNode
 }) {
   // Same dot palette + tooltip copy as MetaRow. Kept inline here rather
@@ -8212,6 +8216,7 @@ function BroadcastTimePrivacyRow({
           value={privacy}
           onChange={onPrivacyChange}
           disabled={disabled}
+          loading={privacyLoading}
         />
       </div>
       {trailing}
@@ -8220,11 +8225,12 @@ function BroadcastTimePrivacyRow({
 }
 
 function PrivacyDropdown({
-  value, onChange, disabled,
+  value, onChange, disabled, loading,
 }: {
   value: PrivacyValue
   onChange: (next: PrivacyValue) => void
   disabled?: boolean
+  loading?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -8252,8 +8258,17 @@ function PrivacyDropdown({
         disabled={disabled}
         className="flex items-center gap-1.5 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-1.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50"
       >
-        <CurrentIcon size={11} className="shrink-0 text-gray-400" />
-        <span>{current.label}</span>
+        {loading ? (
+          <>
+            <Loader2 size={11} className="shrink-0 text-gray-400 animate-spin" />
+            <span className="text-gray-400">Loading…</span>
+          </>
+        ) : (
+          <>
+            <CurrentIcon size={11} className="shrink-0 text-gray-400" />
+            <span>{current.label}</span>
+          </>
+        )}
         <ChevronDown size={10} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
