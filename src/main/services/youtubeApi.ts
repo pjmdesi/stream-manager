@@ -594,6 +594,10 @@ export interface VideoStatus {
    *  resource carries a `liveStreamingDetails` block. Regular uploads
    *  never have it; both upcoming/active/completed broadcasts do. */
   isLivestream: boolean
+  /** status.uploadStatus — 'uploaded' while YouTube is still processing the
+   *  video (a just-ended stream's VOD isn't editable in Studio yet),
+   *  'processed' once it's ready, 'failed'/'rejected' on error. */
+  uploadStatus: string
 }
 
 /** Fetch privacy + livestream-or-not status for a list of video IDs.
@@ -618,6 +622,7 @@ export async function fetchVideoStatuses(
       map.set(item.id, {
         privacyStatus: item.status.privacyStatus,
         isLivestream: !!item.liveStreamingDetails,
+        uploadStatus: item.status.uploadStatus ?? 'processed',
       })
     }
   }

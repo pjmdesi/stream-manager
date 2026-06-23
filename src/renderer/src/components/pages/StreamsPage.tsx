@@ -755,7 +755,7 @@ export function StreamsPage({
   // Refreshed whenever the set of linked ids changes. Drives the row's
   // status badge in the date column (privacy icon + Radio/Clapperboard
   // distinguishing live broadcasts from regular video uploads).
-  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, { privacyStatus: string; isLivestream: boolean }>>({})
+  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus?: string }>>({})
   // Stable string key — depending on `folders` directly would re-fire the
   // batch on every loadFolders refresh, even when the linked-id set is
   // unchanged. Costly on large libraries.
@@ -797,7 +797,9 @@ export function StreamsPage({
           const next = { ...prev }
           for (const id of ids) {
             const p = map[id]?.privacyStatus
-            if (p) next[id] = { privacyStatus: p, isLivestream: true }
+            // Spread the existing entry so a known uploadStatus (from the
+            // linked-ids fetch / processing poll) survives this refresh.
+            if (p) next[id] = { ...next[id], privacyStatus: p, isLivestream: true }
           }
           return next
         })
@@ -807,6 +809,33 @@ export function StreamsPage({
     const interval = setInterval(check, 60_000)
     return () => clearInterval(interval)
   }, [upcomingLinkedBroadcastKey])
+
+  // Processing tracker: a just-ended stream's VOD isn't editable in YouTube
+  // Studio until upload processing finishes (often minutes, occasionally a
+  // day-plus). Poll only the small set still 'uploaded' — an old, settled
+  // video is never mid-processing, so this set is naturally just-ended streams
+  // — at a slow 10-min cadence, and stop the moment it empties. Initial status
+  // is already free from the fetches above; this only flips the row spinner off
+  // once processing completes. Quota: ~1 unit per poll while something cooks,
+  // zero otherwise.
+  const processingYtIdsKey = useMemo(() => (
+    Object.entries(ytVideoStatusMap)
+      .filter(([, s]) => s.uploadStatus === 'uploaded')
+      .map(([id]) => id)
+      .sort()
+      .join(',')
+  ), [ytVideoStatusMap])
+  useEffect(() => {
+    if (!ytConnected || !processingYtIdsKey) return
+    const ids = processingYtIdsKey.split(',')
+    const poll = () => window.api.youtubeGetVideoStatuses(ids)
+      .then(updates => setYtVideoStatusMap(prev => ({ ...prev, ...updates })))
+      .catch(() => {})
+    // No immediate poll — the current status is already fresh from the
+    // linked-ids fetch; just re-check every 10 minutes.
+    const interval = setInterval(poll, 10 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [ytConnected, processingYtIdsKey])
   useEffect(() => {
     const off = window.api.onRelayLifecycle(ev => {
       const id = ev?.broadcastId
@@ -2795,6 +2824,13 @@ export function StreamsPage({
                   return visibleFolders.map((f, i) => {
                     const ytId = f.meta?.ytVideoId
                     const status = ytId ? ytVideoStatusMap[ytId] : undefined
+                    const isLiveNow = !!(ytId && ytLiveMap[ytId])
+                    // Show the "processing" spinner only once a stream could
+                    // actually have a VOD cooking: not live right now, and
+                    // dated today-or-earlier (a future-dated broadcast's
+                    // placeholder video can read 'uploaded' without anything
+                    // to process).
+                    const isProcessing = status?.uploadStatus === 'uploaded' && !isLiveNow && f.date <= today
                     const key = selectionKey(f)
                     return (
                       <StreamListItem
@@ -2814,9 +2850,10 @@ export function StreamsPage({
                         isPending={isPendingStream(f, today)}
                         isToday={f.date === today}
                         isNextUpcoming={f.folderPath === nextUpcomingFolderPath}
-                        isLive={!!(ytId && ytLiveMap[ytId])}
+                        isLive={isLiveNow}
                         privacyStatus={status?.privacyStatus ?? null}
                         isLivestream={status?.isLivestream ?? null}
+                        isProcessing={isProcessing}
                         sameDayIndex={sameDayIndexMap.get(f.folderPath)}
                         thumbsKey={thumbsKey}
                         thumbWidth={thumbWidth}
@@ -3615,7 +3652,7 @@ export function StreamsPage({
 function StreamListItem({
   folder, folders, selected, compact, selectMode, multiSelected, onToggleMultiSelect,
   onDragStart, onDragEnter, dragMovedRef,
-  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream,
+  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   isSendingToPlayer, onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
   animDurationMs,
@@ -3664,6 +3701,10 @@ function StreamListItem({
   /** True if the linked YT id represents a liveBroadcast (Radio icon)
    *  vs a regular video upload (Clapperboard). Null while loading. */
   isLivestream: boolean | null
+  /** True while YouTube is still processing the linked video (uploadStatus
+   *  'uploaded') — a just-ended stream's VOD isn't editable in Studio yet.
+   *  Swaps the badge's kind icon for a spinner. */
+  isProcessing: boolean
   /** "#2", "#3" suffix when multiple streams share a date. */
   sameDayIndex?: number
   thumbsKey: number
@@ -3902,7 +3943,7 @@ function StreamListItem({
             {isPending && (
               meta?.ytVideoId ? (() => {
                 const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
-                const liveLabel = isLive ? 'Live now' : 'Open in YouTube Studio'
+                const liveLabel = isProcessing ? 'Processing on YouTube — not editable yet' : isLive ? 'Live now' : 'Open in YouTube Studio'
                 const tooltipText = privacyLabel ? `${liveLabel} · ${privacyLabel}` : liveLabel
                 const PrivacyIcon = privacyStatus === 'unlisted' ? LinkIcon : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
                 return (
@@ -3916,7 +3957,7 @@ function StreamListItem({
                           : 'bg-teal-900/30 text-teal-400 border-teal-400/40 hover:bg-teal-900/50 hover:text-teal-300'
                       }`}
                     >
-                      <Radio size={12} />
+                      {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <Radio size={12} />}
                       {PrivacyIcon && <PrivacyIcon size={12} />}
                     </button>
                   </Tooltip>
@@ -3936,7 +3977,8 @@ function StreamListItem({
               const PrivacyIcon = privacyStatus === 'unlisted' ? LinkIcon : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
               const KindIcon = isLivestream ? Radio : Clapperboard
               const kindLabel = isLivestream ? 'Livestream' : 'Video'
-              const tooltipText = privacyLabel ? `Edit on YouTube · ${kindLabel} · ${privacyLabel}` : `Edit on YouTube · ${kindLabel}`
+              const editLabel = isProcessing ? 'Processing on YouTube — not editable yet' : 'Edit on YouTube'
+              const tooltipText = privacyLabel ? `${editLabel} · ${kindLabel} · ${privacyLabel}` : `${editLabel} · ${kindLabel}`
               return (
                 <Tooltip content={tooltipText}>
                   <button
@@ -3944,7 +3986,7 @@ function StreamListItem({
                     onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${meta.ytVideoId}`) }}
                     className="inline-flex items-center gap-0.5 p-0.5 rounded bg-red-900/30 text-red-400 border border-red-400/40 hover:bg-red-900/50 hover:text-red-300 transition-colors shrink-0"
                   >
-                    <KindIcon size={12} />
+                    {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <KindIcon size={12} />}
                     {PrivacyIcon && <PrivacyIcon size={12} />}
                   </button>
                 </Tooltip>
