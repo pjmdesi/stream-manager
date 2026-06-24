@@ -109,6 +109,9 @@ export function ThumbImage({
       <img
         ref={imgRef}
         src={src}
+        // Decode off the main thread so a burst of thumbnails (e.g. the detail
+        // sidebar mounting on open) doesn't stutter the slide animation.
+        decoding="async"
         className={className}
         style={style}
         draggable={draggable}

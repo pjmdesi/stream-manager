@@ -5519,6 +5519,12 @@ function SidebarDetail({
   const linkedId = meta?.ytVideoId ?? ''
   const broadcastPool = isPastStream ? ytVods : ytBroadcasts
 
+  // Defer non-critical on-open YouTube fetches past the sidebar slide so their
+  // setYt* updates — which re-render the (unmemoized) streams list — don't land
+  // mid-animation. 0 when animations are off, so it's a no-op delay then.
+  const anim = useAnimationConfig()
+  const deferMs = anim.duration(230)
+
   // If a stream is linked to a VOD we haven't loaded into ytVods yet
   // (common path: past stream, ytVods is empty until the user opens the
   // dropdown), fetch the single video so the picker can show its name
@@ -5531,12 +5537,14 @@ function SidebarDetail({
     // doesn't exist anymore (deleted on YT), not that we need to fetch.
     if (!isPastStream) return
     let cancelled = false
-    window.api.youtubeGetVideoById(linkedId).then(video => {
-      if (cancelled || !video) return
-      setYtVods(prev => prev.some(v => v.id === video.id) ? prev : [video, ...prev])
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [linkedId, broadcastPool, isPastStream, setYtVods])
+    const timer = setTimeout(() => {
+      window.api.youtubeGetVideoById(linkedId).then(video => {
+        if (cancelled || !video) return
+        setYtVods(prev => prev.some(v => v.id === video.id) ? prev : [video, ...prev])
+      }).catch(() => {})
+    }, deferMs)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [linkedId, broadcastPool, isPastStream, setYtVods, deferMs])
 
   // Auto-refresh the currently-open stream's linked broadcast — once
   // on mount (and whenever the stream changes), then every 5 minutes
@@ -5570,13 +5578,15 @@ function SidebarDetail({
         // Silent — next interval / open / manual refresh will retry.
       }
     }
-    refresh()
+    // Initial refresh deferred past the slide; the 5-min interval is unaffected.
+    const initialTimer = setTimeout(refresh, deferMs)
     const interval = setInterval(refresh, 5 * 60 * 1000)
     return () => {
       cancelled = true
+      clearTimeout(initialTimer)
       clearInterval(interval)
     }
-  }, [ytConnected, linkedId, quotaExceeded, setYtBroadcasts, setYtVods])
+  }, [ytConnected, linkedId, quotaExceeded, setYtBroadcasts, setYtVods, deferMs])
 
   const selectedBroadcast = useMemo(
     () => broadcastPool.find(b => b.id === linkedId) ?? null,

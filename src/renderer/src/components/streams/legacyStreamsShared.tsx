@@ -24,6 +24,7 @@ import {
 
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { VideoRow } from '../ui/VideoRow'
+import { getCachedHydration, rememberHydration } from '../../lib/hydrationCache'
 import { v4 as uuidv4 } from 'uuid'
 import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
@@ -221,6 +222,9 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
       <img
         ref={imgRef}
         src={src}
+        // Decode off the main thread so a burst of thumbnails doesn't stutter
+        // the detail-sidebar slide animation.
+        decoding="async"
         className={className}
         style={style}
         draggable={draggable}
@@ -379,8 +383,10 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
   const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number }>({ top: 0, left: 0 })
   // Per-file hydration, re-checked on every hover (a cached duration says
   // nothing about a file's *current* local/offloaded state). VideoRow handles
-  // its own duration/encoding probing from here.
-  const [localStatus, setLocalStatus] = useState<Record<string, boolean>>({})
+  // its own duration/encoding probing from here. Seeded from the shared
+  // cross-surface cache so a re-hover (or a hover after the stream's been
+  // opened) shows the last-known cloud icons immediately instead of re-spinning.
+  const [localStatus, setLocalStatus] = useState<Record<string, boolean>>(() => getCachedHydration(videos))
   const anchorRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
 
@@ -395,11 +401,10 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
     // nothing about a file's *current* state (it may have been offloaded since).
     if (videos.length === 0) return
     const localFlags = await window.api.checkLocalFiles(videos)
-    setLocalStatus(prev => {
-      const next = { ...prev }
-      videos.forEach((v, i) => { next[v] = !!localFlags[i] })
-      return next
-    })
+    const updates: Record<string, boolean> = {}
+    videos.forEach((v, i) => { updates[v] = !!localFlags[i] })
+    rememberHydration(updates)
+    setLocalStatus(prev => ({ ...prev, ...updates }))
   }
 
   // After the tooltip renders, fit it inside the viewport. Vertically: flip

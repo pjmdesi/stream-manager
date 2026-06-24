@@ -4,6 +4,8 @@ import { VideoThumb, CHECKER } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
 import { useCloudOps } from '../../context/CloudOpsContext'
+import { useAnimationConfig } from '../../hooks/useAnimationConfig'
+import { getCachedHydration, rememberHydration, rememberHydrationOne } from '../../lib/hydrationCache'
 import type { StreamFolder, VideoEntry, VideoInfo } from '../../types'
 
 function formatBytes(bytes: number): string {
@@ -414,42 +416,61 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const [showVideo, setShowVideo] = useState(true)
   const [showImage, setShowImage] = useState(true)
 
-  // Image file sizes (videos already carry theirs in videoMap).
+  // Shared by the on-open IPC effects below to defer their work past the
+  // sidebar slide (0 when animations are off — a no-op delay then).
+  const anim = useAnimationConfig()
+
+  // Image file sizes (videos already carry theirs in videoMap). Deferred past
+  // the slide — non-essential metadata whose IPC reply would otherwise
+  // re-render the grid mid-animation.
   const [imageSizes, setImageSizes] = useState<Record<string, number>>({})
   const thumbsJoined = folder.thumbnails.join('|')
   useEffect(() => {
     if (folder.thumbnails.length === 0) { setImageSizes({}); return }
     let cancelled = false
-    window.api.getFileSizes(folder.thumbnails).then(sizes => {
-      if (cancelled) return
-      const map: Record<string, number> = {}
-      folder.thumbnails.forEach((p, i) => { const s = sizes[i]; if (s != null) map[p] = s })
-      setImageSizes(map)
-    }).catch(() => {})
-    return () => { cancelled = true }
+    const timer = setTimeout(() => {
+      window.api.getFileSizes(folder.thumbnails).then(sizes => {
+        if (cancelled) return
+        const map: Record<string, number> = {}
+        folder.thumbnails.forEach((p, i) => { const s = sizes[i]; if (s != null) map[p] = s })
+        setImageSizes(map)
+      }).catch(() => {})
+    }, anim.duration(230))
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [thumbsJoined]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Per-file hydration status (local vs offloaded). Seeded by checkLocalFiles…
-  const [localStatus, setLocalStatus] = useState<Record<string, boolean>>({})
+  // Per-file hydration status (local vs offloaded), seeded synchronously from
+  // the shared cross-surface cache so a reopen paints the last-known cloud
+  // icons on the FIRST frame — no spinner, no work during the slide. A file is
+  // only shown as a spinner when it's genuinely unknown (never checked).
+  const [localStatus, setLocalStatus] = useState<Record<string, boolean>>(
+    () => getCachedHydration([...folder.videos, ...folder.thumbnails]),
+  )
   const allJoined = [...folder.videos, ...folder.thumbnails].join('|')
   useEffect(() => {
     const all = [...folder.videos, ...folder.thumbnails]
     if (all.length === 0) return
-    // A file's status stays unknown (absent from the map) until the
-    // authoritative check resolves — the cloud icon/button show a spinner
-    // meanwhile rather than wrongly claiming the file is hydrated. Results are
-    // merged (not replaced) so revisiting a folder shows its cached status
-    // immediately instead of re-spinning.
+    // Paint cached status immediately (covers switching streams without
+    // closing — the mount-time seed above only fires once).
+    const cached = getCachedHydration(all)
+    if (Object.keys(cached).length) setLocalStatus(prev => ({ ...prev, ...cached }))
+    // Then refresh in the background, DEFERRED past the sidebar slide:
+    // checkLocalFiles' reply lands at a variable (OS-attribute-read) latency,
+    // and the resulting whole-grid re-render stutters the open animation if it
+    // hits mid-slide. Wait until the panel has settled, then check, and write
+    // the result back to the shared cache. duration() is 0 when animations are
+    // off, so this is a no-op delay in that case.
     let cancelled = false
-    window.api.checkLocalFiles(all).then(flags => {
-      if (cancelled) return
-      setLocalStatus(prev => {
-        const next = { ...prev }
-        all.forEach((p, i) => { next[p] = !!flags[i] })
-        return next
-      })
-    }).catch(() => {})
-    return () => { cancelled = true }
+    const timer = setTimeout(() => {
+      window.api.checkLocalFiles(all).then(flags => {
+        if (cancelled) return
+        const updates: Record<string, boolean> = {}
+        all.forEach((p, i) => { updates[p] = !!flags[i] })
+        rememberHydration(updates)
+        setLocalStatus(prev => ({ ...prev, ...updates }))
+      }).catch(() => {})
+    }, anim.duration(230))
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [allJoined]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // …then flipped as cloud ops for our files reach a terminal state, so the
@@ -459,10 +480,10 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
       let changed = false
       const next = { ...prev }
       for (const it of offloadItems) {
-        if (it.path in next && (it.status === 'done' || it.status === 'already-offline') && next[it.path] !== false) { next[it.path] = false; changed = true }
+        if (it.path in next && (it.status === 'done' || it.status === 'already-offline') && next[it.path] !== false) { next[it.path] = false; rememberHydrationOne(it.path, false); changed = true }
       }
       for (const it of hydrateItems) {
-        if (it.path in next && (it.status === 'done' || it.status === 'already-local') && next[it.path] !== true) { next[it.path] = true; changed = true }
+        if (it.path in next && (it.status === 'done' || it.status === 'already-local') && next[it.path] !== true) { next[it.path] = true; rememberHydrationOne(it.path, true); changed = true }
       }
       return changed ? next : prev
     })
@@ -505,10 +526,14 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   useEffect(() => {
     if (folder.videos.length === 0) { setArchivedSet(new Set()); return }
     let cancelled = false
-    window.api.checkAlreadyArchived(folder.videos)
-      .then(paths => { if (!cancelled) setArchivedSet(new Set(paths)) })
-      .catch(() => {})
-    return () => { cancelled = true }
+    // Deferred past the slide too — the archived badge isn't needed during the
+    // open animation, and its reply would otherwise re-render the grid mid-slide.
+    const timer = setTimeout(() => {
+      window.api.checkAlreadyArchived(folder.videos)
+        .then(paths => { if (!cancelled) setArchivedSet(new Set(paths)) })
+        .catch(() => {})
+    }, anim.duration(230))
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [folder.videos.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const sizeOf = (path: string): number => {
