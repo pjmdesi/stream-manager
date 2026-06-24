@@ -157,8 +157,34 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
       el.style.top       = `${top}px`
       el.style.left      = `${left}px`
       el.style.transform = TRANSFORM[trySide]
-      if (arrowEl) arrowEl.className = ARROW[trySide]
+      if (arrowEl) { arrowEl.className = ARROW[trySide]; arrowEl.style.left = ''; arrowEl.style.top = '' }
       if (fits(el.getBoundingClientRect(), vw, vh)) return
+    }
+
+    // Nothing fit cleanly on any side. Leaving the tooltip on the last-tried
+    // fallback ('bottom' for a top-preferred trigger) can shove it off-screen
+    // — that's the intermittent "delete tooltip shows below the button" bug: a
+    // wide tooltip above a wide button in the bottom-right corner overflows the
+    // right edge, so top/left/right all fail and it lands on bottom. Instead
+    // keep the PREFERRED side and clamp along the cross axis so it stays in
+    // view, then nudge the arrow back toward the trigger so it still points at
+    // it.
+    const { top, left } = computeAnchor(r, side)
+    el.style.transform = TRANSFORM[side]
+    if (arrowEl) { arrowEl.className = ARROW[side]; arrowEl.style.left = ''; arrowEl.style.top = '' }
+    const { width: tw, height: th } = el.getBoundingClientRect()
+    if (side === 'top' || side === 'bottom') {
+      const half = tw / 2
+      const clamped = Math.max(GAP + half, Math.min(vw - GAP - half, left))
+      el.style.left = `${clamped}px`
+      el.style.top  = `${top}px`
+      if (arrowEl) arrowEl.style.left = `${left - clamped + half}px`
+    } else {
+      const half = th / 2
+      const clamped = Math.max(GAP + half, Math.min(vh - GAP - half, top))
+      el.style.top  = `${clamped}px`
+      el.style.left = `${left}px`
+      if (arrowEl) arrowEl.style.top = `${top - clamped + half}px`
     }
   }, [effectiveVisible, pos, side])
 
