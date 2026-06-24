@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react'
+import { Fragment, memo, useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
@@ -2893,9 +2893,11 @@ export function StreamsPage({
                         compact={false}
                         selectMode={selectMode}
                         multiSelected={selectedPaths.has(key)}
-                        onToggleMultiSelect={() => toggleSelected(key)}
-                        onDragStart={() => startDrag(i)}
-                        onDragEnter={() => updateDrag(i)}
+                        selectKey={key}
+                        index={i}
+                        onToggleMultiSelect={toggleSelected}
+                        onDragStart={startDrag}
+                        onDragEnter={updateDrag}
                         dragMovedRef={dragMoved}
                         cloudSyncActive={cloudSyncActive}
                         isPending={isPendingStream(f, today)}
@@ -2912,10 +2914,10 @@ export function StreamsPage({
                         tagColors={tagColors}
                         tagTextures={tagTextures}
                         isSendingToPlayer={sendingPlayerPath === f.folderPath}
-                        onClick={() => onRowClick(f.folderPath)}
-                        onSendToPlayer={() => handleSendToPlayer(f)}
-                        onSendToConverter={() => handleSendToConverter(f)}
-                        onOpenThumbnails={() => handleOpenThumbnails(f)}
+                        onClick={onRowClick}
+                        onSendToPlayer={handleSendToPlayer}
+                        onSendToConverter={handleSendToConverter}
+                        onOpenThumbnails={handleOpenThumbnails}
                         onThumbResizeStart={startThumbResize}
                       />
                     )
@@ -3701,8 +3703,8 @@ export function StreamsPage({
  * just shows the archived flag, a linked-to-YT button when a video id is
  * present, and an unlinked icon when it isn't.
  */
-function StreamListItem({
-  folder, folders, selected, compact, selectMode, multiSelected, onToggleMultiSelect,
+const StreamListItem = memo(function StreamListItem({
+  folder, folders, selected, compact, selectMode, multiSelected, selectKey, index, onToggleMultiSelect,
   onDragStart, onDragEnter, dragMovedRef,
   isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
@@ -3724,12 +3726,18 @@ function StreamListItem({
   selectMode: boolean
   /** True when this row's selection key is in the multi-select set. */
   multiSelected: boolean
-  /** Fires on row click (or checkbox click) when in selectMode. */
-  onToggleMultiSelect: () => void
-  /** Mousedown on the row (selectMode only) starts a drag-select. */
-  onDragStart: () => void
-  /** Mouseenter on the row (selectMode only) extends the drag range. */
-  onDragEnter: () => void
+  /** This row's selection key (date in dump-mode, folderPath otherwise) —
+   *  passed so the row can invoke the stable, shared selection handlers with
+   *  its own identity, keeping them referentially stable for React.memo. */
+  selectKey: string
+  /** This row's index in the visible list — drives the drag-select range. */
+  index: number
+  /** Toggle this row's selection key in/out of the multi-select set. */
+  onToggleMultiSelect: (key: string) => void
+  /** Mousedown on the row (selectMode only) starts a drag-select at index. */
+  onDragStart: (index: number) => void
+  /** Mouseenter on the row (selectMode only) extends the drag range to index. */
+  onDragEnter: (index: number) => void
   /** When the drag-select moves to at least one other row, the click
    *  that fires at drag-end on the start row is suppressed via this
    *  ref so it doesn't toggle the start row off. */
@@ -3769,10 +3777,10 @@ function StreamListItem({
   /** True while this row's Send-to-Player hydration check is in flight —
    *  spins the button icon and pins the action row open. */
   isSendingToPlayer: boolean
-  onClick: () => void
-  onSendToPlayer: () => void
-  onSendToConverter: () => void
-  onOpenThumbnails: () => void
+  onClick: (folderPath: string) => void
+  onSendToPlayer: (folder: StreamFolder) => void
+  onSendToConverter: (folder: StreamFolder) => void
+  onOpenThumbnails: (folder: StreamFolder) => void
   onThumbResizeStart: (e: React.MouseEvent) => void
   /** Select-mode tag shortcut — select (additive=true) or deselect every
    *  visible row carrying this type/game tag. */
@@ -3846,16 +3854,16 @@ function StreamListItem({
     // In select mode the row click toggles the multi-select set instead
     // of opening the sidebar — matches the StreamsPage convention so the
     // bulk-action flow doesn't require precise checkbox aim.
-    if (selectMode) onToggleMultiSelect()
-    else onClick()
+    if (selectMode) onToggleMultiSelect(selectKey)
+    else onClick(folder.folderPath)
   }
 
   return (
     <tr
       data-folder-path={folder.folderPath}
       onClick={handleRowClick}
-      onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart() } : undefined}
-      onMouseEnter={selectMode ? onDragEnter : undefined}
+      onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart(index) } : undefined}
+      onMouseEnter={selectMode ? () => onDragEnter(index) : undefined}
       style={selectMode ? { userSelect: 'none' } : undefined}
       className={`group transition-colors cursor-pointer ${
         isPending
@@ -3886,7 +3894,7 @@ function StreamListItem({
       {selectMode && (
         <td
           className="pl-3 align-middle w-[36px]"
-          onClick={e => { e.stopPropagation(); onToggleMultiSelect() }}
+          onClick={e => { e.stopPropagation(); onToggleMultiSelect(selectKey) }}
         >
           <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
             multiSelected ? 'bg-purple-700 border-purple-700' : 'border-gray-600 hover:border-gray-400'
@@ -4150,18 +4158,18 @@ function StreamListItem({
                     variant="ghost"
                     size="icon-sm"
                     icon={isSendingToPlayer ? <Loader2 size={12} className="animate-spin" /> : <Film size={12} />}
-                    onClick={onSendToPlayer}
+                    onClick={() => onSendToPlayer(folder)}
                     disabled={isSendingToPlayer}
                   />
                 </Tooltip>
               )}
               {videoCount > 0 && (
                 <Tooltip content="Send to Converter">
-                  <Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={onSendToConverter} />
+                  <Button variant="ghost" size="icon-sm" icon={<Zap size={12} />} onClick={() => onSendToConverter(folder)} />
                 </Tooltip>
               )}
               <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'} shortcut="Ctrl+Shift+T">
-                <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={onOpenThumbnails} />
+                <Button variant="ghost" size="icon-sm" icon={<ImageIcon size={12} />} onClick={() => onOpenThumbnails(folder)} />
               </Tooltip>
             </div>
           </td>
@@ -4169,7 +4177,7 @@ function StreamListItem({
       )}
     </tr>
   )
-}
+})
 
 // ── Sidebar empty state: month calendar ─────────────────────────────────────
 
