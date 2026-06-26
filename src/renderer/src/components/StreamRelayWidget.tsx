@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import { TrendingUpDown, Calendar, RotateCcw, ChevronDown, X, Loader2 } from 'lucide-react'
 import { useStore } from '../hooks/useStore'
+import { useAdaptivePoll } from '../hooks/useAdaptivePoll'
 import { Tooltip } from './ui/Tooltip'
 import type { RelayStatus, RelayStats, ActivePickResult, OrchestratorEvent, LiveBroadcast, Page } from '../types'
 
@@ -55,16 +56,24 @@ export function StreamRelayWidget({
       window.api.onRelayUpcomingChanged(setUpcoming),
       window.api.onRelayLifecycle(setLifecycle),
     ]
-    // Safety-net poll — orchestrator already force-refreshes after it
-    // completes a broadcast (instant for SM-routed streams), but this
-    // catches cases the orchestrator doesn't know about: broadcasts
-    // finished via an external streaming app, deleted from YT Studio,
-    // or added on the fly. 1 quota unit per poll = ~1440/day.
-    const poll = setInterval(() => {
-      window.api.streamRelayGetUpcomingBroadcasts(true).catch(() => {})
-    }, 60_000)
-    return () => { for (const off of offs) off(); clearInterval(poll) }
+    return () => { for (const off of offs) off() }
   }, [config.streamRelayEnabled])
+
+  // Safety-net poll — catches broadcasts changed outside SM (finished via an
+  // external app, deleted in Studio, scheduled on the fly). Go-live binds
+  // against a forced refresh (orchestrator), so this is purely to keep the
+  // widget's displayed list fresh — hence it can back off hard when the user
+  // isn't around: 60s active, 15m visible-but-idle, 1h minimized/tray.
+  useAdaptivePoll(
+    () => { window.api.streamRelayGetUpcomingBroadcasts(true).catch(() => {}) },
+    {
+      activeMs: 60_000,
+      idleMs: 15 * 60_000,
+      hiddenMs: 60 * 60_000,
+      idleAfterMs: 15 * 60_000,
+      enabled: config.streamRelayEnabled,
+    },
+  )
 
   // Per-user spec: hide entirely when feature is off.
   if (!config.streamRelayEnabled) return null

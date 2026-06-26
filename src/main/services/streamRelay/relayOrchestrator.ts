@@ -101,8 +101,14 @@ class RelayOrchestrator extends EventEmitter {
       return
     }
 
-    // Fresh stream start. Pull the active broadcast at this exact moment so a
-    // later auto-pick refresh doesn't change what we bind to mid-session.
+    // Fresh stream start. Force-refresh the upcoming list FIRST so we bind
+    // against current YouTube state, not a possibly-stale background-poll cache
+    // — a broadcast scheduled moments ago must still bind correctly. Falls back
+    // to the cache on failure. This is what lets the widget's poll run as
+    // slowly as it likes (idle/minimized) without affecting go-live.
+    await activeBroadcastService.getUpcoming(true).catch(() => {})
+    // Pull the active broadcast at this exact moment so a later auto-pick
+    // refresh doesn't change what we bind to mid-session.
     const active = activeBroadcastService.getActive()
     if (!active.broadcast) {
       // User started OBS without picking a broadcast. We don't orchestrate —

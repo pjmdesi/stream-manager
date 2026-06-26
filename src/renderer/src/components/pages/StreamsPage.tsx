@@ -1,4 +1,5 @@
 import { Fragment, memo, useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react'
+import { useAdaptivePoll } from '../../hooks/useAdaptivePoll'
 import ReactDOM from 'react-dom'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
@@ -776,16 +777,28 @@ export function StreamsPage({
   const upcomingLinkedBroadcastKey = useMemo(() => {
     if (!ytConnected) return ''
     const today = todayStr()
+    // Only track liveness for streams that could actually be starting soon —
+    // today or tomorrow (covers a late-night / just-past-midnight start and
+    // back-to-back schedules) — so we never poll YouTube for broadcasts days
+    // out. A far-future stream starts getting checked once it enters the window.
+    const t = new Date(`${today}T00:00:00`)
+    t.setDate(t.getDate() + 1)
+    const tomorrow = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
     return folders
-      .filter(f => isPendingStream(f, today) && !!f.meta?.ytVideoId)
+      .filter(f => isPendingStream(f, today) && !!f.meta?.ytVideoId && (f.date === today || f.date === tomorrow))
       .map(f => f.meta!.ytVideoId!)
       .sort()
       .join(',')
   }, [ytConnected, folders])
-  useEffect(() => {
-    if (!upcomingLinkedBroadcastKey) { setYtLiveMap({}); return }
+  // Clear the live map when there's nothing imminent to track.
+  useEffect(() => { if (!upcomingLinkedBroadcastKey) setYtLiveMap({}) }, [upcomingLinkedBroadcastKey])
+  // Adaptive cadence so idle/background tracking doesn't burn quota: 60s while
+  // visible + interacting, 15m visible-but-idle, 1h minimized/tray. Re-fires
+  // immediately on return or when the tracked-id set changes.
+  useAdaptivePoll(() => {
+    if (!upcomingLinkedBroadcastKey) return
     const ids = upcomingLinkedBroadcastKey.split(',')
-    const check = () => window.api.youtubeCheckBroadcastsAreLive(ids)
+    window.api.youtubeCheckBroadcastsAreLive(ids)
       .then(map => {
         const liveById: Record<string, boolean> = {}
         for (const id of ids) liveById[id] = !!map[id]?.isLive
@@ -805,10 +818,14 @@ export function StreamsPage({
         })
       })
       .catch(() => {})
-    check()
-    const interval = setInterval(check, 60_000)
-    return () => clearInterval(interval)
-  }, [upcomingLinkedBroadcastKey])
+  }, {
+    activeMs: 60_000,
+    idleMs: 15 * 60_000,
+    hiddenMs: 60 * 60_000,
+    idleAfterMs: 15 * 60_000,
+    enabled: !!upcomingLinkedBroadcastKey,
+    resetKey: upcomingLinkedBroadcastKey,
+  })
 
   // Processing tracker: a just-ended stream's VOD isn't editable in YouTube
   // Studio until upload processing finishes (often minutes, occasionally a
