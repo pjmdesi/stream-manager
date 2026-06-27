@@ -60,10 +60,12 @@
 16. Add analytics for stream items. They should go after the date text in the title column of the stream item rows. View count, like count, dislike count.
 17. Let's remove the teal stream tag from upcoming items that are not linked to YouTube. It may be a regular video (not a livestream) and the tag confuses that. It doesn't really have a purpose for unlinked items.
 18. Add proper logging for the YouTube, Twitch, and Claude API calls. These will be log files located in the config directory in a logs folder. The logs should record every interaction with the APIs, including the request and response data, timestamps, and any errors that occur. Not sure what the best timeframe is for log rotation, perhaps monthly? We don't need to expose these in the UI, it's purely for advanced troubleshooting.
+19. Add some view options for the files grid view:
+    * List view - shows the files in a list with their names, sizes, and dates in a single line. Thumbnails would be hidden
+    * Vertical grid view - shows the files in a grid with their thumbnails stacked above the file names/metadata. Then 5 would be shown per row at max width.
+20. Add ability to use multiple search terms in the streams page search bar by separating them with commas. For instance, if I search for "rimworld, S2" it would search for all streams that have "rimworld" AND "S2" in their title, tags, or description. Maybe we could use a different separator like a semicolon to mean "OR" instead of "AND". For instance, if I search for "rimworld; S2" it would search for all streams that have "rimworld" OR "S2" in their title, tags, or description. Not sure how to mesh those together, maybe it's simple. If it's not simple and would require parantheses or something, then maybe we just stick with the AND search for now.
 
 ## Bugs
-
-(None currently — all known bugs fixed.)
 
 ## Other ideas (small)
 

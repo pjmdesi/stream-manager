@@ -5202,7 +5202,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Session Videos</h3>
                           </div>
                           {isExtracting ? (
-                            <div className="px-3 py-4 text-xs text-gray-400 text-center leading-relaxed">Available once merge is complete or cancelled</div>
+                            <div className="px-3 py-4 text-xs text-gray-400 text-center leading-relaxed">Available when audio extraction is complete or cancelled</div>
                           ) : siblingFiles.length === 0 && folderDrafts.length === 0 ? (
                             <div className="px-3 py-4 text-xs text-gray-400 text-center leading-relaxed">
                               {state.filePath ? 'No other videos in this folder' : 'Open a video to see siblings here'}

@@ -8,7 +8,7 @@ Legend: `- [ ]` = not yet confirmed · `- [x]` = confirmed working · add `⚠` 
 
 ## 1. Streaming-day critical path (exercise every stream — most important)
 
-- [x] App launches cleanly; window controls sit correctly on the **first** frame (no shift after load)
+- [ ] App launches cleanly; window controls sit correctly on the **first** frame (no shift after load)
 - [ ] YouTube stays connected across days / token refreshes without re-auth
 - [ ] Twitch stays connected / token refreshes without re-auth
 - [ ] Relay: broadcast picker selects the intended broadcast (scheduled vs. the persistent default)
