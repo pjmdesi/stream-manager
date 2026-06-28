@@ -74,9 +74,9 @@ _No installation required, runs from anywhere, can be moved freely. Stream Manag
 1. Before you stream, click the "New Stream" button and fill in the details.
 
    ![Stream Manager New Stream Button Screenshot](resources/stream-manager-new-stream-button.png)
-2. Set your streaming software to save to a **recordings folder**. This is important if you use cloud-sync software like those for a NAS, OneDrive, or Google Drive to backup your streams.  
+2. Set your streaming software to save to a **recordings folder**. This is important if you use cloud-sync software like those for a NAS, OneDrive, or Google Drive to backup your streams. In OBS, this is done in **Settings → Output → Recording → Recording Path**.  
 
-    > _⚠️ **Important:** Recording directly to a cloud-synced folder can cause encoding errors and ruin recordings (in my experience). Stream Manager detects and adapts to cloud-synced storage._
+    > _⚠️ **Important:** Recording directly to a cloud-synced folder can cause encoding errors and ruin recordings (in my experience). As Stream Manager manages your files, it detects and adapts to cloud-synced storage._
 
    ![OBS Output Settings Screenshot](resources/obs-recording-output.png)  
    

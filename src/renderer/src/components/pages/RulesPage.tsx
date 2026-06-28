@@ -256,16 +256,17 @@ export function RulesPage() {
       {/* Left column: header + rules list. The right sidebar spans full height
           (matching the rest of the app); the header sits over the content only. */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
-        <div>
+      <div className="@container flex items-center justify-between gap-3 px-6 py-4 border-b border-white/5 shrink-0">
+        <div className="min-w-0">
           <h1 className="text-lg font-semibold">Auto-Rules</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Watch folders and automatically move, copy, or rename files</p>
+          <p className="text-xs text-gray-400 mt-0.5 truncate">Watch folders and automatically move, copy, or rename files</p>
         </div>
-        <Checkbox checked={autoStart} onChange={toggleAutoStart} label="Start watcher on launch" />
+        <Checkbox checked={autoStart} onChange={toggleAutoStart} label="Start on launch" className="whitespace-nowrap shrink-0" />
         <Button
           variant="primary"
           size="sm"
           icon={<Plus size={14} />}
+          collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
           onClick={() => { setEditing(null); setShowEdit(true) }}
         >
           Add Rule
