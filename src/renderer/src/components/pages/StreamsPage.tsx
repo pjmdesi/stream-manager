@@ -4023,11 +4023,9 @@ const StreamListItem = memo(function StreamListItem({
                 </span>
               </Tooltip>
             )}
-            {/* Pending stream — either an upcoming livestream badge
-                (linked) or the unlinked teal Radio. Live broadcasts go
-                green; scheduled stay teal. */}
+            {/* Pending stream — Live broadcasts go green; scheduled stay teal. */}
             {isPending && (
-              meta?.ytVideoId ? (() => {
+              meta?.ytVideoId && (() => {
                 const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
                 const liveLabel = isProcessing ? 'Processing on YouTube — not editable yet' : isLive ? 'Live now' : 'Open in YouTube Studio'
                 const tooltipText = privacyLabel ? `${liveLabel} · ${privacyLabel}` : liveLabel
@@ -4048,13 +4046,7 @@ const StreamListItem = memo(function StreamListItem({
                     </button>
                   </Tooltip>
                 )
-              })() : (
-                <Tooltip content={isNextUpcoming ? "Upcoming — stream hasn't happened yet" : 'Scheduled upcoming stream'}>
-                  <span className="inline-flex items-center p-0.5 rounded bg-teal-900/30 text-teal-400 border border-teal-400/40 shrink-0">
-                    <Radio size={12} />
-                  </span>
-                </Tooltip>
-              )
+              })()
             )}
             {/* Past stream — Radio for livestream replays, Clapperboard
                 for regular video uploads. Both go red. */}
