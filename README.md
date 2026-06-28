@@ -7,7 +7,7 @@
 [![Downloads](https://img.shields.io/github/downloads/pjmdesi/stream-manager/total)](https://github.com/pjmdesi/stream-manager/releases)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)](https://github.com/pjmdesi/stream-manager#)
 
-A desktop app for streamers to manage, review, and process their local recording files. Yet another app built with Electron + React. Windows only (for now), feel free to adapt this to other platforms if you're so inclined. Contributions are welcome.
+A desktop app that's the central hub for your stream sessions: organize your local recordings, edit and publish your YouTube/Twitch metadata, clip and create thumbnails, and even route your broadcast live. Windows only for now; contributions welcome.
 
 ## Mission
 
@@ -17,6 +17,7 @@ Stream Manager is designed to be the central hub for everything pre- and post-st
 
 - Streamers who record and store their streams locally and want a better way to manage those files and related metadata.
 - Streamers who stream to YouTube and/or Twitch and want an easier way to keep their stream metadata in sync with their local files.
+- Streamers who go live to YouTube and want the app to bind and transition their broadcast automatically when they start and stop their encoder.
 - Streamers who want a built-in tool for clipping and thumbnail creation without needing to use separate apps like Premiere, DaVinci, HandBrake, Photoshop, Affinity, etc.
 - Streamers who want to automate parts of their workflow, like moving files from a recording folder to their main stream library, launching all their streaming apps at once, and archiving old streams with consistent encoding settings and tagging.
 
@@ -30,6 +31,7 @@ Stream Manager is designed to be the central hub for everything pre- and post-st
   - [Recommended Workflow](#recommended-workflow)
   - [Features](#features)
     - [Streams](#streams)
+    - [Stream Relay](#stream-relay)
     - [Video Player](#video-player)
     - [Thumbnail Editor](#thumbnail-editor)
     - [Converter](#converter)
@@ -58,12 +60,12 @@ Stream Manager is designed to be the central hub for everything pre- and post-st
 _No installation required, runs from anywhere, can be moved freely. Stream Manager's data (settings) is stored on your machine in AppData. Stream item data is stored next to your stream files_
 3. Select your main "Streams" folder where your recordings are stored when prompted.
 4. The app **scans the folder and auto-detects your structure** and pre-selects the right structure mode. You can change this mode as well:
-   - flat folder-per-stream — **recommended**
-   - "dump"-folder (all files loose with no subfolders) — **not recommended, some app features disabled**  
+   - flat folder-per-stream: **recommended**
+   - "dump"-folder (all files loose with no subfolders): **not recommended, some app features disabled**  
    _You can choose to convert an existing **dump** folder structure to **folder-per-stream** format during setup, or in Settings._
 5. The app will scan the folder for video files, thumbnails, and other related files. Then it will group them into stream items. Click on a stream item to view and edit its metadata.
 6. (Optional) Set up an auto-rule to watch your streaming software's recording output folder and automatically move/rename new files to your main "Streams" folder. This is recommended for the smoothest experience.
-7. (Optional) Connect the app to YouTube and/or Twitch to enable metadata synchronization for your streams (title, description, tags, game info, thumbnail, etc.).
+7. (Optional) Connect the app to YouTube and/or Twitch to enable metadata synchronization for your streams (title, description, tags, thumbnail, etc.). YouTube users can also enable the **Stream Relay**, which automatically takes your broadcast live and ends it when you start and stop your encoder.
 
 ---
 
@@ -81,9 +83,10 @@ _No installation required, runs from anywhere, can be moved freely. Stream Manag
 3. Set up an auto-rule in the app to watch that **recordings folder** and move/rename new files to your main **Streams** folder (the app will help you set this up during onboarding).
 
     ![Stream Manager Auto-Rules Screenshot](resources/stream-manager-auto-rules-setup.png)
-4. _**Stream your heart out!**_
-5. After your stream, the app will automatically organize your recordings. Find the session in the Streams page and optionally add any missing info like the topics/games, stream type, and personal comments.
-6. Review the recording in the built-in player and export clips for sharing on social media or YouTube, or send the whole session to the converter to compress it for other uses like archiving or uploading to other services.
+4. _(Optional)_ If you've set up the **Stream Relay**, point your streaming software at the app instead of YouTube directly, and it binds your scheduled broadcast, takes it live when your encoder connects, and ends it when you stop.
+5. _**Stream your heart out!**_
+6. After your stream, the app will automatically organize your recordings. Find the session in the Streams page and optionally add any missing info like the topics/games, stream type, and personal comments.
+7. Review the recording in the built-in player and export clips for sharing on social media or YouTube, or send the whole session to the converter to compress it for other uses like archiving or uploading to other services.
 
 ---
 
@@ -96,7 +99,7 @@ Claude is used heavily for architecture, implementation, debugging, code cleanup
 
 ## Features
 
-Stream Manager is built around keeping everything about your stream sessions in one place — the recording, metadata, clips, and publishing destinations all collected and organized.
+Stream Manager is built around keeping everything about your stream sessions in one place: the recording, metadata, clips, and publishing destinations all collected and organized.
 
 ### Streams
 
@@ -104,28 +107,40 @@ Stream Manager is built around keeping everything about your stream sessions in 
 
 The main hub for browsing and managing local recordings of your stream sessions. Video files, thumbnails, and other related assets in your designated folder are scanned and grouped automatically:
 
-- **Custom tagging and metadata** — games played, stream type, and freeform comments. Stream types support custom color and texture theming so you can visually distinguish categories at a glance. Add and style tags to work for you.
-- **Episode series tracking** — assign streams seasons and episodes. Episodes are iterated automatically, new seasons are manually set. `{season}`, `{episode}`, `{total_episodes}` merge fields become available in stream titles and description templates.
-- **Archive processing** — choose sessions to compress and tag as archived.
-- **Cloud-sync aware** — offline files (Synology Drive, OneDrive, DropBox, Google Drive, etc.) are detected and certain features are adapted to account for that functionality. Using the Windows Cloud Files API directly, file data can be offloaded to free local space, or pinned local in bulk.
-- **New Episode** — clone an existing stream as the next episode in its series. Stream type and games carry over, source thumbnails copy automatically, and the editing modal opens pre-filled.
-- **Reusable templates** — Use merge fields including `{game}`, `{season}`, `{episode}`, `{total_episodes}`, `{title}`, and `{season_links}` to more easily create consistent titles, descriptions, and tags. Save and edit templates using the built-in editor or directly from the editing modal.
+- **Two-way YouTube & Twitch sync:** push title, description, tags, thumbnail, and privacy to a linked broadcast or video; pull platform changes back; per-field out-of-sync indicators show exactly what differs between the app and the platform so nothing changes silently.
+- **Import & bulk-link from YouTube:** turn your existing channel videos into stream items (details + thumbnail), or match existing local folders to their YouTube videos by date.
+- **Custom tagging and metadata:** games/topics, stream type, and freeform comments per session.
+- **Episode series tracking:** seasons with auto-incrementing episodes; `{season}`, `{episode}`, `{total_episodes}` merge fields for titles and descriptions; clone a stream as the next episode to carry its settings forward.
+- **Reusable templates:** build titles, descriptions, and tags from merge fields (`{game}`, `{title}`, `{season_links}`, …) for consistency across a series. Save and edit them in the built-in editor.
+- **Archive processing:** compress and tag old sessions with consistent encoding.
+- **Cloud-sync aware:** files offloaded by Synology Drive, OneDrive, Dropbox, Google Drive, etc. are detected; offload to free local space or pin local in bulk via the Windows Cloud Files API.
 
 **Metadata** is stored in a single `_meta.json` file at the root of your streams directory, so stream info is maintained and validated separately from the files themselves allowing easy movement of your library and the location of the app.
 
-**LLM-assisted metadata** — if you have a Claude API key configured in Integrations, press **Ctrl+Space** in any YouTube title, description, or tags field while editing a stream to get an inline suggestion generated at the cursor position. When the text appears, press **Tab** to accept or **Esc** to dismiss. The model uses the stream's date, games, type tags, and the prompt field for context.
+**LLM-assisted metadata:** with a Claude API key configured in Integrations, press **Ctrl+Space** in any YouTube title, description, or tags field to get an inline AI suggestion at the cursor (Tab to accept, Esc to dismiss), drawing on the stream's date, games, and type tags for context.
+
+### Stream Relay
+
+The app can sit between your streaming software and YouTube as a local relay, managing your broadcast's lifecycle for you instead of you doing it by hand in YouTube Studio. Point your encoder (OBS, etc.) at the app's local ingest instead of YouTube directly, and it forwards the stream to YouTube using your channel's stream key.
+
+- **Automatic go-live and end:** the moment your encoder connects, the app binds the chosen broadcast and takes it live; when you stop, it ends the broadcast after a short grace period, so a momentary encoder drop-and-reconnect doesn't kill your stream.
+- **Broadcast selection:** pick which upcoming broadcast to route to, or let the app auto-select the soonest-scheduled one. Live status, bitrate, and elapsed time show in a sidebar widget.
+- **Works without a scheduled broadcast:** go live without picking one and your stream still reaches YouTube; it just isn't auto-managed.
+- **Post-stream Twitch update:** when a relay session ends, the app can roll your Twitch channel's title and category forward to your next scheduled broadcast automatically.
+
+_Running the relay adds negligible overhead: it forwards your already-encoded stream data straight through to YouTube without re-encoding, so there's no second encode and no meaningful extra CPU/GPU load beyond your existing encoder._
 
 ### Video Player
 
 ![Stream Manager screenshot](resources/sm-player.png)
 
-Open your stream videos and clips (or drop in any video file) and play it back with thumbnail and waveform tracks. Multi-track audio (common in OBS recordings) is supported. Review, clip, and export stream sessions with precision using these tools:
+Open your stream videos and clips (or drop in any video file) and play them back with thumbnail and waveform tracks. Review, clip, and export stream sessions with precision:
 
-- **Multi-track audio** — recordings with multiple audio tracks (game, mic, Discord, etc.) open into a per-track timeline view with mute, solo, and editable volume controls on every row. Tracks decode on demand to keep loads fast, waveforms normalize against each other. The export modal lets you pick which tracks to include with each track's volume applied to the mix.
-- **Clip mode** — export a polished clip directly from the player using whichever conversion preset you've set as the default Clip Export Preset (stream-copy and audio-only presets are filtered out since clips always re-encode). Your work autosaves as you go. Exported clips stay linked to their source and are one click away from being branched into a brand-new draft, so the original export always stays intact.
-- **Shape-aware cropping** — configure the aspect ratio for the video with the crop tool, works independently for each segment. Repurpose the same highlight for widescreen, square, or vertical clips without re-editing.
-- **Bleep markers** — mark regions to be bleeped or silenced (censored) while clipping. Mutes all audio for the duration of the bleep marker.
-- **Video pop-out for OBS** — pop the open video into a dedicated frameless window. Streaming software like OBS can then capture that window independently. Use the precision playback controls to go frame-by-frame forward AND BACKWARD (I'm looking at you VLC!) or seek to a specific timecode and immediately see it in the pop-up. Useful for showing videos on stream without needing to crop the source.
+- **Multi-track audio:** recordings with multiple audio tracks (game, mic, Discord, etc.) get per-track mute, solo, and volume; the export modal lets you choose which tracks land in the mix.
+- **Clip mode:** export a polished clip straight from the player using your default Clip Export Preset. Clips stay linked to their source and are one click from being branched into a new draft, so the original always stays intact.
+- **Shape-aware cropping:** set the aspect ratio per segment to repurpose the same highlight as a widescreen, square, or vertical clip without re-editing.
+- **Bleep markers:** mark regions to censor while clipping, choosing either a silent mute or an overlaid bleep tone.
+- **Video pop-out for OBS:** pop the video into a frameless window OBS can capture on its own, with frame-by-frame controls (forward and backward) and timecode seek. Handy for rolling clips on stream without capturing and cropping another video player's UI.
 
 ### Thumbnail Editor
 
@@ -133,11 +148,8 @@ Open your stream videos and clips (or drop in any video file) and play it back w
 
 A built-in canvas editor for designing stream and clip thumbnails without leaving the app. Save reusable templates, then pick one when you create a new stream to instantly get a finished thumbnail with your standard branding.
 
-- **Layered canvas** — drop in images, text, and shapes. Layers support drag, resize, rotate, opacity, ordering, and visibility toggles.
-- **Templates** — save a layout as a reusable template. When you create a new stream, pick a template to instantly generate a thumbnail with your standard design and branding.
-- **Per-stream autosave** — thumbnails save to the stream folder as you edit and re-open to exactly where you left off; exported PNGs live alongside the source video so they're detected as stream thumbnails automatically.
-- **Layer effects** — full [Konva](https://konvajs.org/) filter library on image layers with sliders + toggles, plus drop shadow on every layer type.
-- **Merge fields** — text layers can include `{title}`, `{game}`, `{date}`, `{season}`, `{episode}`, and `{total_episodes}` markers that substitute live in the canvas as you edit. When editing a template, the markers render literally so the layout can be reused across streams without manually editing text every time.
+- **Templates:** save a layout as a reusable template; pick one when you create a new stream to instantly generate a thumbnail with your standard branding.
+- **Merge fields:** text layers can include `{title}`, `{game}`, `{date}`, `{season}`, `{episode}`, `{total_episodes}` markers that substitute live, so one template works across a whole series.
 
 ### Converter
 
@@ -145,11 +157,10 @@ A built-in canvas editor for designing stream and clip thumbnails without leavin
 
 Queue video files for conversion using ffmpeg presets.
 
-- **Conversion presets** — Presets I've personally found useful are included out of the box. New presets can be imported from other apps such as HandBrake (JSON format) or created manually if you're adventurous.
-- **Batch archiving** — send stream sessions to the converter directly from the Streams page.
-- **Remuxing support** — Like the OBS "Remux Recordings" feature, the app can quickly change a video's container format (e.g. from MKV to MP4) without re-encoding.
-- **Combine tool** — concatenate multiple video files into one with zero re-encoding using ffmpeg's concat demuxer. Files are auto-sorted by timestamp parsed from OBS-style filenames and can be manually reordered by drag-and-drop.
-- **Sidebar widget** — easily visualize progress while doing other tasks in-app.
+- **Conversion presets:** Presets I've personally found useful are included out of the box. New presets can be imported from other apps such as HandBrake (JSON format) or created manually if you're adventurous.
+- **Batch archiving:** send stream sessions to the converter directly from the Streams page.
+- **Remuxing support:** Like the OBS "Remux Recordings" feature, the app can quickly change a video's container format (e.g. from MKV to MP4) without re-encoding.
+- **Combine tool:** concatenate multiple video files into one with zero re-encoding (ffmpeg concat demuxer), auto-sorted by their OBS-style timestamps.
 
 ### Auto-Rules
 
@@ -161,11 +172,11 @@ File watcher rules that can automatically **move, copy, rename, or convert** fil
 
 ![Stream Manager screenshot](resources/sm-launcher.png)
 
-Create named groups of apps that can be launched together with a single click — useful for spinning up your full streaming setup (OBS, chat apps, Discord, game launchers, browser profiles, and any other apps that help you stream) all at once.
+Create named groups of apps that can be launched together with a single click. Useful for spinning up your full streaming setup (OBS, chat apps, Discord, game launchers, browser profiles, and any other apps that help you stream) all at once.
 
-- **Launch groups** — organize apps into named groups, each with a custom icon (chosen from the full Lucide icon library) and a reorderable app list. Apps can be `.exe` files or `.lnk` shortcuts, and can be browsed or dragged directly from Explorer.
-- **Individual launch** — launch a single app from a group without firing the rest.
-- **Sidebar widget** — pin one group to the sidebar for one-click access without navigating to the Launcher page.
+- **Launch groups:** organize apps into named groups, each with a custom icon (chosen from the full Lucide icon library) and a reorderable app list. Apps can be `.exe` files or `.lnk` shortcuts, and can be browsed or dragged directly from Explorer.
+- **Individual launch:** launch a single app from a group without firing the rest.
+- **Sidebar widget:** pin one group to the sidebar for one-click access without navigating to the Launcher page.
 
 ### Integrations
 
@@ -173,10 +184,9 @@ Create named groups of apps that can be launched together with a single click �
 
 #### YouTube
 
-- OAuth connection — authorize once and the app manages token refresh automatically. Connection status is shown in the sidebar.
-- Update title, thumbnail, description, and tags, directly from Stream Manager (but not category or game titles, boo YouTube...). This works for upcoming livestreams, past VODs, and regular videos.
+Connecting YouTube powers the metadata sync, import/bulk-link, and Stream Relay described above. Authorize once and the app handles token refresh; connection status shows in the sidebar.
 
-_You will need a google cloud project and OAuth 2.0 credentials to connect your YouTube account._
+_You will need a Google Cloud project and OAuth 2.0 credentials to connect your YouTube account._
 
 ##### YouTube API Limitations
 
@@ -195,8 +205,8 @@ _You will need a google cloud project and OAuth 2.0 credentials to connect your 
 
 #### Claude AI
 
-- Connect your [Anthropic API key](https://console.anthropic.com/) to enable AI-assisted YouTube details generation, powered by [Claude Haiku](https://www.anthropic.com/claude/haiku).
-- Press **Ctrl+Space** in the title, description, or tags field while editing stream metadata to request a suggestion at the cursor position. Suggestions appear as inline ghost text — **Tab** to accept, **Esc** to dismiss.
+- Connect your [Anthropic API key](https://console.anthropic.com/) to enable AI-assisted YouTube details generation, with your choice of Claude model.
+- Press **Ctrl+Space** in the title, description, or tags field while editing stream metadata to request a suggestion at the cursor position. Suggestions appear as inline ghost text: **Tab** to accept, **Esc** to dismiss.
 - An optional system prompt lets you give the model standing instructions about your channel's style and tone.
 - The API key is stored locally and never sent to any servers other than Anthropic's.
 
@@ -222,7 +232,7 @@ npm run dev
 npm run dist
 ```
 
-Outputs a single portable `.exe` to `dist/` — no installation required, runs from anywhere.
+Outputs a single portable `.exe` to `dist/`: no installation required, runs from anywhere.
 
 > **Before building:** export `src/renderer/src/assets/stream-manager-logo.svg` as a 256×256 PNG and save it to `resources/icon.png`.
 
@@ -276,7 +286,7 @@ src/
 │       ├── waveformCacheManager.ts   # Binary PCM waveform cache
 │       └── youtubeApi.ts / youtubeAuth.ts
 ├── preload/
-│   ├── index.ts        # Context bridge — exposes typed api to renderer
+│   ├── index.ts        # Context bridge: exposes typed api to renderer
 │   └── popup.ts        # Context bridge for the video pop-out window
 └── renderer/
     ├── index.html
