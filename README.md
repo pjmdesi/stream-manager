@@ -103,7 +103,7 @@ Stream Manager is built around keeping everything about your stream sessions in 
 
 ### Streams
 
-![Stream Manager screenshot](resources/sm-streams.png)
+![Stream Manager screenshot - Streams](resources/sm-streams.png)
 
 The main hub for browsing and managing local recordings of your stream sessions. Video files, thumbnails, and other related assets in your designated folder are scanned and grouped automatically:
 
@@ -121,6 +121,8 @@ The main hub for browsing and managing local recordings of your stream sessions.
 
 ### Stream Relay
 
+![Stream Manager screenshot - Stream Relay](resources/sm-stream-relay.png)
+
 The app can sit between your streaming software and YouTube as a local relay, managing your broadcast's lifecycle for you instead of you doing it by hand in YouTube Studio. Point your encoder (OBS, etc.) at the app's local ingest instead of YouTube directly, and it forwards the stream to YouTube using your channel's stream key.
 
 - **Automatic go-live and end:** the moment your encoder connects, the app binds the chosen broadcast and takes it live; when you stop, it ends the broadcast after a short grace period, so a momentary encoder drop-and-reconnect doesn't kill your stream.
@@ -132,7 +134,7 @@ _Running the relay adds negligible overhead: it forwards your already-encoded st
 
 ### Video Player
 
-![Stream Manager screenshot](resources/sm-player.png)
+![Stream Manager screenshot - Video Player](resources/sm-player.png)
 
 Open your stream videos and clips (or drop in any video file) and play them back with thumbnail and waveform tracks. Review, clip, and export stream sessions with precision:
 
@@ -144,7 +146,7 @@ Open your stream videos and clips (or drop in any video file) and play them back
 
 ### Thumbnail Editor
 
-![Stream Manager screenshot](resources/sm-thumbnails.png)
+![Stream Manager screenshot - Thumbnail Editor](resources/sm-thumbnails.png)
 
 A built-in canvas editor for designing stream and clip thumbnails without leaving the app. Save reusable templates, then pick one when you create a new stream to instantly get a finished thumbnail with your standard branding.
 
@@ -153,7 +155,7 @@ A built-in canvas editor for designing stream and clip thumbnails without leavin
 
 ### Converter
 
-![Stream Manager screenshot](resources/sm-converter.png)
+![Stream Manager screenshot - Converter](resources/sm-converter.png)
 
 Queue video files for conversion using ffmpeg presets.
 
@@ -164,13 +166,13 @@ Queue video files for conversion using ffmpeg presets.
 
 ### Auto-Rules
 
-![Stream Manager screenshot](resources/sm-auto-rules.png)
+![Stream Manager screenshot - Auto-Rules](resources/sm-auto-rules.png)
 
 File watcher rules that can automatically **move, copy, rename, or convert** files. The watcher can be configured to start automatically on launch and is always accessible via the sidebar widget.
 
 ### Launcher
 
-![Stream Manager screenshot](resources/sm-launcher.png)
+![Stream Manager screenshot - Launcher](resources/sm-launcher.png)
 
 Create named groups of apps that can be launched together with a single click. Useful for spinning up your full streaming setup (OBS, chat apps, Discord, game launchers, browser profiles, and any other apps that help you stream) all at once.
 
@@ -180,7 +182,7 @@ Create named groups of apps that can be launched together with a single click. U
 
 ### Integrations
 
-![Stream Manager screenshot](resources/sm-integrations.png)
+![Stream Manager screenshot - Integrations](resources/sm-integrations.png)
 
 #### YouTube
 

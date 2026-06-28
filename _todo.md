@@ -61,6 +61,8 @@
 17. Add proper logging for the YouTube, Twitch, and Claude API calls. These will be log files located in the config directory in a logs folder. The logs should record every interaction with the APIs, including the request and response data, timestamps, and any errors that occur. Not sure what the best timeframe is for log rotation, perhaps monthly? We don't need to expose these in the UI, it's purely for advanced troubleshooting.
 18. Add ability to use multiple search terms in the streams page search bar by separating them with commas. For instance, if I search for "rimworld, S2" it would search for all streams that have "rimworld" AND "S2" in their title, tags, or description. Maybe we could use a different separator like a semicolon to mean "OR" instead of "AND". For instance, if I search for "rimworld; S2" it would search for all streams that have "rimworld" OR "S2" in their title, tags, or description. Not sure how to mesh those together, maybe it's simple. If it's not simple and would require parentheses or something, then maybe we just stick with the AND search for now.
 19. In the thumbnail editor, add transparency support for all color inputs, and add a clear button to set it to fully transparent (like for fills and strokes for shapes, text, drop shadows, outlines, etc.).
+20. Add subtle border and drop shadow to the video player canvas so it's easier to make out the boundaries of the video when it matches the background color of the container at the edges.
+21. Add the stream item title to the converter page items so it's more clear which stream item the file belongs to. This is especially important for bulk conversion tasks where there are multiple items in the queue.
 
 ## Bugs
 
