@@ -99,15 +99,18 @@ export function registerLauncherIPC(): void {
     }
   })
 
-  ipcMain.handle('launcher:resolveShortcut', (_event, filePath: string) => {
-    if (!filePath.toLowerCase().endsWith('.lnk')) return filePath
-    try {
-      const details = shell.readShortcutLink(filePath)
-      return details.target || filePath
-    } catch (_) {
-      return filePath
-    }
-  })
+  // Intentionally a pass-through. We keep a .lnk AS the launch target rather
+  // than resolving it to its underlying .exe. Launching the shortcut itself
+  // (shell.openPath on the .lnk, in launchApp/launchGroup) makes Windows honor
+  // the WHOLE shortcut: target, arguments, working directory, and the
+  // "Run as administrator" flag, and it also handles UWP/Store/Control-Panel
+  // shortcuts that have no plain file target. The old behavior returned
+  // `details.target`, which dropped the arguments, working directory, and
+  // run-as flag — so a shortcut calling `schtasks /run /tn "…"` to launch an app
+  // elevated lost its args and did nothing, and even a plain app shortcut lost
+  // its "Start in" directory (apps like OBS require it). The icon and auto-name
+  // come straight off the .lnk, so the renderer's add flow is unchanged.
+  ipcMain.handle('launcher:resolveShortcut', (_event, filePath: string) => filePath)
 
   ipcMain.handle('launcher:getStartMenuPath', () => {
     return path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')
