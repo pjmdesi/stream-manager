@@ -1274,18 +1274,45 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
 
   // ── Recent videos ──────────────────────────────────────────────────────
   // Most-recently-opened video files, surfaced in the empty state (mirrors
-  // the thumbnail editor's recents). Loaded once on mount, pruned to only
-  // still-existing files. Added/updated whenever a video opens.
+  // the thumbnail editor's recents). Added/updated whenever a video opens, and
+  // pruned to only still-existing files on load, on window focus/visibility,
+  // and on streams:changed (so deleting a stream or an external file drops it
+  // without needing a remount).
   const [recents, setRecents] = useState<PlayerRecentEntry[]>([])
+  // Transient notice for the Recent section (e.g. a clicked recent turned out
+  // to be deleted). Auto-clears.
+  const [recentsNotice, setRecentsNotice] = useState<string | null>(null)
   useEffect(() => {
-    let cancelled = false
-    window.api.playerGetRecents().then(async (list) => {
-      const flags = await Promise.all(list.map(r => window.api.fileExists(r.filePath).catch(() => true)))
-      if (cancelled) return
-      setRecents(list.filter((_, i) => flags[i]))
-    }).catch(() => {})
-    return () => { cancelled = true }
+    if (!recentsNotice) return
+    const t = setTimeout(() => setRecentsNotice(null), 4000)
+    return () => clearTimeout(t)
+  }, [recentsNotice])
+  // Drop recents whose file is gone, from BOTH the view and the store, so dead
+  // entries don't linger invisibly in electron-store. fileExists falling back
+  // to "keep" on error means a cloud placeholder (still on disk) or a transient
+  // error is never wrongly pruned.
+  const pruneMissingRecents = useCallback(async (list: PlayerRecentEntry[]) => {
+    const flags = await Promise.all(list.map(r => window.api.fileExists(r.filePath).catch(() => true)))
+    const alive = list.filter((_, i) => flags[i])
+    const dead = list.filter((_, i) => !flags[i])
+    setRecents(alive)
+    if (dead.length) window.api.playerRemoveRecent(dead.map(r => r.folderPath ?? r.filePath)).catch(() => {})
   }, [])
+  useEffect(() => {
+    window.api.playerGetRecents().then(list => void pruneMissingRecents(list)).catch(() => {})
+  }, [pruneMissingRecents])
+  useEffect(() => {
+    const reprune = () => { window.api.playerGetRecents().then(list => void pruneMissingRecents(list)).catch(() => {}) }
+    const onVisible = () => { if (!document.hidden) reprune() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    const off = window.api.onStreamsChanged(reprune)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+      off()
+    }
+  }, [pruneMissingRecents])
   useEffect(() => {
     if (!state.filePath) return
     const fp = state.filePath
@@ -1320,6 +1347,18 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const clearRecents = useCallback(() => {
     window.api.playerClearRecents().then(setRecents).catch(() => setRecents([]))
   }, [])
+  // Open a recent, guarding against a file deleted since the last prune. If the
+  // target is gone, drop the entry (view + store) and show a brief notice
+  // instead of pushing an ffprobe error into the player.
+  const openRecent = useCallback(async (entry: PlayerRecentEntry) => {
+    const ok = await window.api.fileExists(entry.filePath).catch(() => true)
+    if (!ok) {
+      window.api.playerRemoveRecent(entry.folderPath ?? entry.filePath).then(setRecents).catch(() => {})
+      setRecentsNotice('That video is no longer available, so it was removed from recents.')
+      return
+    }
+    loadFile(entry.filePath)
+  }, [loadFile])
   // Cache-buster for recent thumbnails — bumps whenever the folder list
   // reloads so an edited thumbnail re-fetches.
   const recentsThumbsKey = useMemo(() => Date.now(), [sortedStreamFolders])
@@ -3263,6 +3302,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                   Clear all
                 </button>
               </div>
+              {recentsNotice && <p className="text-[10px] text-amber-400/90 mb-2">{recentsNotice}</p>}
               <div className="flex flex-col gap-1.5">
                 {displayRecents.map(r => {
                   const thumb = r.folder ? resolveFolderThumb(r.folder) : null
@@ -3272,7 +3312,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     className="group flex items-center gap-3 pr-1 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 transition-colors overflow-hidden"
                   >
                     <button
-                      onClick={() => loadFile(r.filePath)}
+                      onClick={() => openRecent(r)}
                       className="flex items-center gap-3 flex-1 min-w-0 text-left"
                     >
                       <span className="relative w-16 h-10 flex items-center justify-center bg-navy-900 border-r border-white/5 shrink-0 overflow-hidden">
