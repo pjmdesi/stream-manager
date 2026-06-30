@@ -118,7 +118,19 @@ export function registerLauncherIPC(): void {
 
   ipcMain.handle('launcher:getFileIcon', async (_event, filePath: string) => {
     try {
-      const icon = await app.getFileIcon(filePath, { size: 'large' })
+      // We launch a .lnk whole (to keep its args/cwd/run-as), but for the ICON
+      // we resolve a meaningful source: the shortcut's custom icon first, then
+      // its target exe, then the .lnk itself. Without this, a shortcut whose
+      // target is a launcher (e.g. schtasks.exe) would show the launcher's icon
+      // instead of the real app's, and a target-less shortcut might show nothing.
+      let iconSource = filePath
+      if (filePath.toLowerCase().endsWith('.lnk')) {
+        try {
+          const d = shell.readShortcutLink(filePath)
+          iconSource = d.icon || d.target || filePath
+        } catch { /* fall back to the .lnk itself */ }
+      }
+      const icon = await app.getFileIcon(iconSource, { size: 'large' })
       return icon.toDataURL()
     } catch (_) {
       return null
