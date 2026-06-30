@@ -1828,6 +1828,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // thumbnail streams behave identically without any migration.
   const [variants, setVariants] = useState<number[]>([1])
   const [currentVariant, setCurrentVariant] = useState<number>(1)
+  // Inline error shown in the editor when the open thumbnail was removed from
+  // outside Stream Manager (deleting in File Explorer is discouraged). SM's own
+  // deletes reconcile gracefully instead; smHandledAtRef stamps when that
+  // happened so the debounced streams:changed echo doesn't double-flag it.
+  const [editorError, setEditorError] = useState<string | null>(null)
+  const smHandledAtRef = useRef(0)
   // Variant switcher dropdown state. `variantPickerOpen` toggles the
   // popover; an outside-click effect (further down) closes it.
   // `variantPreviewKey` is bumped after each successful canvas save so
@@ -3581,6 +3587,34 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setMode('overview')
   }, [resetLayers])
 
+  // Clear the external-deletion notice whenever the user navigates to a
+  // different stream or variant.
+  useEffect(() => { setEditorError(null) }, [currentStream, currentVariant])
+
+  // SM-initiated deletion of the open thumbnail (or its whole stream): reconcile
+  // gracefully — switch to a surviving variant, or return to the overview if
+  // none remain. Stamp smHandledAtRef so the streams:changed echo below doesn't
+  // also flag it as an external deletion.
+  useEffect(() => {
+    if (mode !== 'editor' || !currentStream) return
+    const { folderPath, date } = currentStream
+    const variant = currentVariant
+    return window.api.onSmDeleted(({ kind, paths, folderPath: deletedFolder }) => {
+      const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
+      const fp = norm(folderPath)
+      const suffix = variant <= 1 ? '' : `-${variant}`
+      const deleted = new Set(paths.map(norm))
+      const folderGone = (deletedFolder != null && norm(deletedFolder) === fp)
+        || (kind === 'stream' && paths.some(p => { const n = norm(p); return n === fp || fp.startsWith(n + '/') }))
+      const variantGone = deleted.has(norm(`${folderPath}/${date}_sm-thumbnail${suffix}.json`))
+        || deleted.has(norm(`${folderPath}/${date}_sm-thumbnail${suffix}.png`))
+      if (!folderGone && !variantGone) return
+      smHandledAtRef.current = Date.now()
+      setEditorError(null)
+      reconcileVariantGone(folderPath, date, variant)
+    })
+  }, [mode, currentStream, currentVariant, reconcileVariantGone])
+
   useEffect(() => {
     if (mode !== 'editor' || !currentStream) return
     const { folderPath, date } = currentStream
@@ -3591,10 +3625,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       // then, so this is a no-op for them. Only act when it's actually gone.
       const exists = await window.api.fileExists(`${folderPath}/${date}_sm-thumbnail${suffix}.json`)
       if (exists) return
-      await reconcileVariantGone(folderPath, date, variant)
+      // Gone, but SM just removed it — the sm:deleted handler already reconciled
+      // gracefully. Reaching here otherwise means an EXTERNAL deletion, which we
+      // surface as an error rather than silently reconciling.
+      if (Date.now() - smHandledAtRef.current < 3000) return
+      setEditorError('This thumbnail was removed outside Stream Manager. Delete thumbnails from within the app so the editor can update cleanly.')
     })
     return unsub
-  }, [mode, currentStream, currentVariant, reconcileVariantGone])
+  }, [mode, currentStream, currentVariant])
 
   // ── Export PNG ────────────────────────────────────────────────────────────
   const exportPng = useCallback(async () => {
@@ -3742,6 +3780,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         </div>
       ) : (
         <>
+          {editorError && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-red-900/30 border-b border-red-800/50 text-red-400 text-sm shrink-0">
+              <AlertTriangle size={14} className="shrink-0" />
+              <span className="flex-1 select-text cursor-text">{editorError}</span>
+              <button onClick={() => setEditorError(null)} className="shrink-0 hover:text-red-200 transition-colors" aria-label="Dismiss">
+                <X size={14} />
+              </button>
+            </div>
+          )}
           {/* Top bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0 bg-navy-800">
             <div className="flex-1 flex items-center gap-2 min-w-0">
