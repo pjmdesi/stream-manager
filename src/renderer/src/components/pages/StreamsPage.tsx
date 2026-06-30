@@ -8856,6 +8856,7 @@ function DeleteModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filesInFolder, setFilesInFolder] = useState<string[] | null>(null)
+  const [inUseByConverter, setInUseByConverter] = useState(false)
   const linkedVideoId = target.meta?.ytVideoId
 
   useEffect(() => {
@@ -8874,9 +8875,41 @@ function DeleteModal({
     }
   }, [target.folderPath, target.date, isDumpMode, target.videos])
 
+  // Block deletion while the converter is reading any of these files — deleting
+  // mid-convert corrupts the job (the OS refuses to delete an open file for the
+  // same reason). Folder mode checks the whole folder; dump mode checks the
+  // specific date's files, since its folder is shared with other streams.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const used = isDumpMode
+          ? (filesInFolder
+              ? (await Promise.all(filesInFolder.map(p => window.api.isPathInUseByConverter(p)))).some(Boolean)
+              : false)
+          : await window.api.isFolderInUseByConverter(target.folderPath)
+        if (!cancelled) setInUseByConverter(used)
+      } catch { /* leave false; the confirm-time re-check is the backstop */ }
+    })()
+    return () => { cancelled = true }
+  }, [isDumpMode, target.folderPath, filesInFolder])
+
   const confirm = async () => {
     setBusy(true)
     setError(null)
+    // Authoritative re-check against the main-process job map: a conversion may
+    // have started since the modal opened.
+    try {
+      const used = isDumpMode
+        ? (await Promise.all((filesInFolder ?? []).map(p => window.api.isPathInUseByConverter(p)))).some(Boolean)
+        : await window.api.isFolderInUseByConverter(target.folderPath)
+      if (used) {
+        setInUseByConverter(true)
+        setBusy(false)
+        setError('These files are being converted right now. Cancel the conversion in the Converter before deleting.')
+        return
+      }
+    } catch { /* fall through — the delete itself will surface any failure */ }
     try {
       if (isDumpMode) {
         await window.api.deleteStreamFiles(target.folderPath, target.date)
@@ -8915,13 +8948,18 @@ function DeleteModal({
             {error ? 'Close' : 'Cancel'}
           </Button>
           {!error && (
-            <Button variant="primary" size="sm" loading={busy} onClick={confirm}>
+            <Button variant="primary" size="sm" loading={busy} disabled={inUseByConverter} onClick={confirm}>
               {alsoDeleteYt && linkedVideoId ? 'Move to Recycle Bin & Delete from YouTube' : 'Move to Recycle Bin'}
             </Button>
           )}
         </>
       }
     >
+      {inUseByConverter && (
+        <div className="mb-3 rounded-lg border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          Some of these files are being converted right now. Cancel the conversion in the Converter before deleting.
+        </div>
+      )}
       <p className="text-sm text-gray-300 mb-3">The following will be moved to the Recycle Bin:</p>
       <div className="bg-white/5 rounded-lg px-3 py-2.5 mb-3 font-mono text-sm text-gray-200 max-h-64 overflow-y-auto">
         {!isDumpMode && (
