@@ -3292,7 +3292,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                         </p>
                       </div>
                     </button>
-                    {r.streamDate && <span className="text-[10px] text-gray-400 shrink-0 py-2">{r.streamDate}</span>}
+                    {/* Stream items show their date here; videos opened from
+                        outside the streams root get an italic "external" tag in
+                        the same slot so they read as distinct from sessions. */}
+                    {r.folderPath
+                      ? (r.streamDate && <span className="text-[10px] text-gray-400 shrink-0 py-2">{r.streamDate}</span>)
+                      : <span className="text-[10px] text-gray-400 shrink-0 py-2 italic">external</span>}
                     <Tooltip content="Remove from recents" side="left">
                       <button
                         onClick={() => removeRecent(r)}
