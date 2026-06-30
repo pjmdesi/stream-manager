@@ -625,7 +625,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('player:getRecents'),
   playerAddRecent: (entry: any) =>
     ipcRenderer.invoke('player:addRecent', entry),
-  playerRemoveRecent: (filePath: string) =>
+  playerRemoveRecent: (filePath: string | string[]) =>
     ipcRenderer.invoke('player:removeRecent', filePath),
   playerClearRecents: () =>
     ipcRenderer.invoke('player:clearRecents'),

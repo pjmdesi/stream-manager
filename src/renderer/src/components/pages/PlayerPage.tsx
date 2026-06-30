@@ -1134,6 +1134,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   // the currently-loaded video belongs to, plus prev/next navigation
   // between sibling stream items.
   const [allStreamFolders, setAllStreamFolders] = useState<import('../../types').StreamFolder[]>([])
+  // Whether the stream folder list has finished loading at least once. The
+  // recents list dedupes by stream identity, which needs the resolved folder;
+  // gating the render on this avoids painting unresolved (per-file) duplicates
+  // for a frame before the folders arrive.
+  const [foldersLoaded, setFoldersLoaded] = useState(false)
   // If the currently-loaded video is a known clip output, this holds the info needed for the
   // "New clip from current" action. Null otherwise.
   const [currentVideoClip, setCurrentVideoClip] = useState<{ clipOf: string; clipState: ClipState; sourceExists: boolean } | null>(null)
@@ -1232,7 +1237,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   // also when the active video changes (so newly-added folders or
   // freshly-written meta surface without a full app reload).
   useEffect(() => {
-    if (!config.streamsDir) { setAllStreamFolders([]); return }
+    if (!config.streamsDir) { setAllStreamFolders([]); setFoldersLoaded(true); return }
     let cancelled = false
     ;(async () => {
       try {
@@ -1242,6 +1247,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         )
         if (!cancelled) setAllStreamFolders(folders)
       } catch { /* swallow */ }
+      finally { if (!cancelled) setFoldersLoaded(true) }
     })()
     return () => { cancelled = true }
   }, [config.streamsDir, config.streamMode, state.filePath])
@@ -1286,6 +1292,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     const entry: PlayerRecentEntry = {
       filePath: fp,
       fileName: fp.split(/[\\/]/).pop() ?? fp,
+      folderPath: currentStreamFolder?.folderPath,
       streamTitle: currentStreamFolder
         ? renderStreamTitle(currentStreamFolder, sortedStreamFolders) || undefined
         : undefined,
@@ -1294,9 +1301,22 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
     window.api.playerAddRecent(entry).then(setRecents).catch(() => {})
   }, [state.filePath, currentStreamFolder, sortedStreamFolders])
-  const removeRecent = useCallback((filePath: string) => {
-    window.api.playerRemoveRecent(filePath).then(setRecents).catch(() => {})
-  }, [])
+  const removeRecent = useCallback((entry: PlayerRecentEntry & { folder?: StreamFolder }) => {
+    // A stream-item recent stands for the whole stream — its individual files
+    // live in the session videos panel, not as separate recents — so removing
+    // it clears every stored entry for that stream: the current one plus any
+    // older per-file entries from before per-stream dedupe. A file outside any
+    // stream removes only itself, even if a sibling file shares its folder.
+    // keyOf must match displayRecents' dedupe key so the group is identical.
+    const keyOf = (r: PlayerRecentEntry): string => {
+      const { metaKey } = resolveStreamContext(r.filePath, config.streamsDir)
+      const folder = sortedStreamFolders.find(f => f.relativePath === metaKey)
+      return folder?.relativePath ?? r.folderPath ?? r.filePath
+    }
+    const targetKey = entry.folder?.relativePath ?? entry.folderPath ?? entry.filePath
+    const paths = recents.filter(r => keyOf(r) === targetKey).map(r => r.filePath)
+    window.api.playerRemoveRecent(paths.length ? paths : [entry.filePath]).then(setRecents).catch(() => {})
+  }, [recents, sortedStreamFolders, config.streamsDir])
   const clearRecents = useCallback(() => {
     window.api.playerClearRecents().then(setRecents).catch(() => setRecents([]))
   }, [])
@@ -1309,15 +1329,27 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   // single video opened from outside the streams root) keep their stored
   // snapshot and fall back to the file name + path.
   const displayRecents = useMemo(() => {
-    return recents.map(r => {
+    const seen = new Set<string>()
+    const out: Array<PlayerRecentEntry & { folder?: StreamFolder }> = []
+    for (const r of recents) {
       const { metaKey } = resolveStreamContext(r.filePath, config.streamsDir)
       const folder = sortedStreamFolders.find(f => f.relativePath === metaKey)
-      return {
+      // Collapse to one row per stream item. Key on the *resolved* stream
+      // identity (relativePath) so entries stored before per-stream dedupe —
+      // or opened via a path that didn't capture folderPath — still collapse;
+      // fall back to the stored folderPath, then the file path for videos
+      // outside any stream (those stay distinct). recents is newest-first, so
+      // the first hit per key is the most-recent one we keep.
+      const key = folder?.relativePath ?? r.folderPath ?? r.filePath
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({
         ...r,
         streamTitle: folder ? (renderStreamTitle(folder, sortedStreamFolders) || r.streamTitle) : r.streamTitle,
         folder,
-      }
-    })
+      })
+    }
+    return out
   }, [recents, sortedStreamFolders, config.streamsDir])
 
   // Prev/next stream items in chronological order. Streams with zero
@@ -3220,7 +3252,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
             <p className="text-xs text-gray-400 mt-2">You can also send a video here from the Streams page using the action buttons on each row.</p>
           </section>
 
-          {displayRecents.length > 0 && (
+          {foldersLoaded && displayRecents.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent</h2>
@@ -3263,7 +3295,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     {r.streamDate && <span className="text-[10px] text-gray-400 shrink-0 py-2">{r.streamDate}</span>}
                     <Tooltip content="Remove from recents" side="left">
                       <button
-                        onClick={() => removeRecent(r.filePath)}
+                        onClick={() => removeRecent(r)}
                         className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
                         aria-label="Remove from recents"
                       >

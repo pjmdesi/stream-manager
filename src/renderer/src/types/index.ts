@@ -797,6 +797,9 @@ export interface ThumbnailRecentEntry {
 export interface PlayerRecentEntry {
   filePath: string
   fileName: string
+  /** Stream folder this video belongs to, when it's part of a stream item.
+   *  Used to dedupe recents to one entry per stream rather than per file. */
+  folderPath?: string
   streamTitle?: string
   streamDate?: string
   openedAt: number

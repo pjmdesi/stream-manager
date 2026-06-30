@@ -267,7 +267,7 @@ declare global {
       thumbnailClearRecents(): Promise<ThumbnailRecentEntry[]>
       playerGetRecents(): Promise<PlayerRecentEntry[]>
       playerAddRecent(entry: PlayerRecentEntry): Promise<PlayerRecentEntry[]>
-      playerRemoveRecent(filePath: string): Promise<PlayerRecentEntry[]>
+      playerRemoveRecent(filePath: string | string[]): Promise<PlayerRecentEntry[]>
       playerClearRecents(): Promise<PlayerRecentEntry[]>
       thumbnailGetLastFont(): Promise<string>
       thumbnailSetLastFont(font: string): Promise<void>

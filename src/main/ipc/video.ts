@@ -139,16 +139,27 @@ export function registerVideoIPC(): void {
   })
 
   ipcMain.handle('player:addRecent', (_e, entry: PlayerRecentEntry) => {
+    // Collapse to one entry per stream item: a stream-scoped entry (has a
+    // folderPath) replaces any prior entry for the same stream folder, no
+    // matter which video inside it was opened — so opening several files in
+    // one stream doesn't stack up duplicate rows. Standalone files (no
+    // folderPath) fall back to exact-path dedupe and never collapse together.
     const recents = ((getStore() as any).get('playerRecents', []) as PlayerRecentEntry[])
-      .filter(r => r.filePath !== entry.filePath)
+      .filter(r => entry.folderPath
+        ? r.folderPath !== entry.folderPath
+        : r.filePath !== entry.filePath)
     const updated = [entry, ...recents].slice(0, 20)
     ;(getStore() as any).set('playerRecents', updated)
     return updated
   })
 
-  ipcMain.handle('player:removeRecent', (_e, filePath: string) => {
+  ipcMain.handle('player:removeRecent', (_e, filePath: string | string[]) => {
+    // Accept one path or many: removing a stream-item recent drops every
+    // stored entry for that stream (the renderer resolves the group, since
+    // only it has the folder list to map a file path back to a stream).
+    const drop = new Set(Array.isArray(filePath) ? filePath : [filePath])
     const updated = ((getStore() as any).get('playerRecents', []) as PlayerRecentEntry[])
-      .filter(r => r.filePath !== filePath)
+      .filter(r => !drop.has(r.filePath))
     ;(getStore() as any).set('playerRecents', updated)
     return updated
   })
@@ -164,6 +175,9 @@ export interface PlayerRecentEntry {
   filePath: string
   /** Bare file name for display. */
   fileName: string
+  /** Stream folder this video belongs to, when it's part of a stream item.
+   *  Used to dedupe recents to one entry per stream rather than per file. */
+  folderPath?: string
   /** Resolved stream title (if the file belongs to a stream folder). */
   streamTitle?: string
   /** Resolved stream date (YYYY-MM-DD) when derivable. */
