@@ -5542,26 +5542,38 @@ function SidebarDetail({
   const anim = useAnimationConfig()
   const deferMs = anim.duration(230)
 
-  // If a stream is linked to a VOD we haven't loaded into ytVods yet
-  // (common path: past stream, ytVods is empty until the user opens the
-  // dropdown), fetch the single video so the picker can show its name
-  // instead of just the bare id.
+  // If a stream is linked to a broadcast we haven't loaded into its pool yet,
+  // fetch the single record so the picker can show its name (and the privacy /
+  // time row can resolve) instead of leaving it "unlinked". Common path: a past
+  // stream whose VOD isn't in ytVods until the user opens the dropdown.
   useEffect(() => {
     if (!linkedId) return
     if (broadcastPool.some(b => b.id === linkedId)) return
-    // Only fetch from the VODs pool — upcoming broadcasts have already
-    // been bulk-loaded on page mount, so a miss there means the broadcast
-    // doesn't exist anymore (deleted on YT), not that we need to fetch.
-    if (!isPastStream) return
     let cancelled = false
     const timer = setTimeout(() => {
-      window.api.youtubeGetVideoById(linkedId).then(video => {
-        if (cancelled || !video) return
-        setYtVods(prev => prev.some(v => v.id === video.id) ? prev : [video, ...prev])
-      }).catch(() => {})
+      // The linked broadcast isn't in its pool, so fetch it and add it. Past
+      // streams pull from the VODs endpoint; future streams from the broadcasts
+      // endpoint. We can't treat an upcoming-broadcast miss as "deleted on YT":
+      // the bulk load that fills ytBroadcasts is small + unpaginated
+      // (maxResults 50/10/5) and runs once at page mount, so a broadcast
+      // scheduled after that — or simply beyond those caps on a busy channel —
+      // is legitimately absent. Without this future branch such a stream shows
+      // "unlinked" with the privacy dropdown stuck on "Loading…" until a restart
+      // re-runs the bulk load, and the reschedule modal won't offer the YouTube
+      // update since it keys off this same pool.
+      const lookup = isPastStream
+        ? window.api.youtubeGetVideoById(linkedId).then(video => {
+            if (cancelled || !video) return
+            setYtVods(prev => prev.some(v => v.id === video.id) ? prev : [video, ...prev])
+          })
+        : window.api.youtubeGetBroadcastById(linkedId).then(bc => {
+            if (cancelled || !bc) return
+            setYtBroadcasts(prev => prev.some(b => b.id === bc.id) ? prev : [bc, ...prev])
+          })
+      lookup.catch(() => {})
     }, deferMs)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [linkedId, broadcastPool, isPastStream, setYtVods, deferMs])
+  }, [linkedId, broadcastPool, isPastStream, setYtVods, setYtBroadcasts, deferMs])
 
   // Auto-refresh the currently-open stream's linked broadcast — once
   // on mount (and whenever the stream changes), then every 5 minutes
