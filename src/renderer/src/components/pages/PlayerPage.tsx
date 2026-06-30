@@ -538,16 +538,19 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
         {/* Preset */}
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium text-gray-300">Encoding Preset</label>
-          <select
-            value={presetId}
-            onChange={e => setPresetId(e.target.value)}
-            className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-          >
-            <option value="">— Default (H.264 CRF 18 + AAC 192k) —</option>
-            {presets.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              value={presetId}
+              onChange={e => setPresetId(e.target.value)}
+              className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            >
+              <option value="">— Default (H.264 CRF 18 + AAC 192k) —</option>
+              {presets.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
           <p className="text-xs text-gray-400 leading-relaxed">
             Clip exports always re-encode (trim/crop/bleep filters require decoded frames), so stream-copy presets aren't shown.
           </p>
