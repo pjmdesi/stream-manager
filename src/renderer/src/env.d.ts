@@ -139,6 +139,8 @@ declare global {
       startQueuedJob(jobId: string): Promise<void>
       getJobs(): Promise<ConversionJob[]>
       removeJob(jobId: string): Promise<void>
+      isPathInUseByConverter(filePath: string): Promise<boolean>
+      isFolderInUseByConverter(folderPath: string): Promise<boolean>
       onJobProgress(cb: (data: { jobId: string; percent: number; status?: string }) => void): () => void
       onJobComplete(cb: (data: { jobId: string; outputPath: string }) => void): () => void
       onJobError(cb: (data: { jobId: string; error: string }) => void): () => void
@@ -174,6 +176,7 @@ declare global {
       watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
       unwatchStreamsDir(): Promise<void>
       onStreamsChanged(cb: () => void): () => void
+      onSmDeleted(cb: (payload: { kind: 'file' | 'stream'; paths: string[]; folderPath?: string }) => void): () => void
       previewReschedule(folderPath: string, oldDate: string, newDate: string): Promise<{
         isDump: boolean
         folderConflict: boolean

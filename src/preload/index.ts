@@ -249,6 +249,11 @@ contextBridge.exposeInMainWorld('api', {
   removeJob: (jobId: string) =>
     ipcRenderer.invoke('converter:removeJob', jobId),
 
+  isPathInUseByConverter: (filePath: string) =>
+    ipcRenderer.invoke('converter:isPathInUse', filePath),
+  isFolderInUseByConverter: (folderPath: string) =>
+    ipcRenderer.invoke('converter:isFolderInUse', folderPath),
+
   onJobProgress: (callback: (data: { jobId: string; percent: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('converter:jobProgress', handler)
@@ -343,6 +348,15 @@ contextBridge.exposeInMainWorld('api', {
     const handler = () => callback()
     ipcRenderer.on('streams:changed', handler)
     return () => ipcRenderer.removeListener('streams:changed', handler)
+  },
+
+  // SM-initiated deletion of a file or whole stream. Lets open player/thumbnail
+  // sessions close or advance gracefully, vs an external delete (streams:changed
+  // only) which is surfaced as an error.
+  onSmDeleted: (callback: (payload: { kind: 'file' | 'stream'; paths: string[]; folderPath?: string }) => void) => {
+    const handler = (_e: unknown, payload: { kind: 'file' | 'stream'; paths: string[]; folderPath?: string }) => callback(payload)
+    ipcRenderer.on('sm:deleted', handler)
+    return () => ipcRenderer.removeListener('sm:deleted', handler)
   },
 
   previewReschedule: (folderPath: string, oldDate: string, newDate: string) =>

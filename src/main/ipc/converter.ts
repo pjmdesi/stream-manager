@@ -161,6 +161,14 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
   }
 ]
 
+// Job statuses that mean a job still holds its input file — deleting that file
+// (or its stream folder) mid-flight would corrupt the conversion, so deletes are
+// blocked while any matching job is in one of these states. The terminal states
+// (done/error/cancelled) release the file.
+const IN_USE_STATUSES: ReadonlySet<ConversionJob['status']> = new Set([
+  'queued', 'downloading', 'running', 'replacing', 'paused',
+])
+
 // Job registry
 const jobs = new Map<string, ConversionJob>()
 const cancellers = new Map<string, () => void>()
@@ -1364,6 +1372,27 @@ export function registerConverterIPC(): void {
   })
 
   ipcMain.handle('converter:getJobs', async () => Array.from(jobs.values()))
+
+  // Delete guards: report whether a file (or anything under a stream folder) is
+  // currently held by an in-flight conversion job, so the Streams page can block
+  // its deletion the way the OS refuses to delete an open file. The main-process
+  // jobs Map is the source of truth (the renderer's ConversionContext copy can
+  // lag), so these are the authoritative pre-delete check.
+  const inUse = (job: ConversionJob): boolean => IN_USE_STATUSES.has(job.status)
+  const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  ipcMain.handle('converter:isPathInUse', async (_event, filePath: string): Promise<boolean> => {
+    const target = norm(filePath)
+    return Array.from(jobs.values()).some(j => inUse(j) && norm(j.inputFile) === target)
+  })
+  ipcMain.handle('converter:isFolderInUse', async (_event, folderPath: string): Promise<boolean> => {
+    const root = norm(folderPath)
+    const prefix = root + '/'
+    return Array.from(jobs.values()).some(j => {
+      if (!inUse(j)) return false
+      const inp = norm(j.inputFile)
+      return inp === root || inp.startsWith(prefix)
+    })
+  })
 
   // Forget a job entirely — drops it from the in-memory map (which survives
   // renderer reloads) and the persisted pending queue, so a removed job doesn't
