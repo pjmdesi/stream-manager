@@ -198,12 +198,12 @@ _You will need a Google Cloud project and OAuth 2.0 credentials to connect your 
 #### Twitch
 
 - OAuth connection with automatic token refresh.
-- Update your Twitch channel title and category from the stream item metadata dialogs.
+- Update your Twitch channel title, category, and tags from the stream item metadata dialogs.
 
 ##### Twitch API Limitations
 
-- The app does not connect to past VODs on Twitch, so stream metadata cannot be synced after the fact like with YouTube. Twitch's API only allows updating the current stream's title and category, so those are the only fields that can be managed through the app.
-- Twitch's API does not allow updating the go live notification or stream tags, so those cannot be managed through the app.
+- Twitch has no API to edit a past broadcast (VOD), so its metadata can't be synced after the fact like YouTube's. The app updates the title, category, and tags for your current or upcoming stream.
+- Twitch's API doesn't expose the go-live notification, so that can't be managed through the app.
 
 #### Claude AI
 
@@ -237,6 +237,9 @@ npm run dist
 Outputs a single portable `.exe` to `dist/`: no installation required, runs from anywhere.
 
 > **Before building:** export `src/renderer/src/assets/stream-manager-logo.svg` as a 256×256 PNG and save it to `resources/icon.png`.
+
+### Open Dev tools in production build
+While the app is running, press **Ctrl+`** to open the Chromium dev tools.
 
 ---
 

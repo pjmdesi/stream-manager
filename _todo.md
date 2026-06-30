@@ -63,6 +63,8 @@
 19. In the thumbnail editor, add transparency support for all color inputs, and add a clear button to set it to fully transparent (like for fills and strokes for shapes, text, drop shadows, outlines, etc.).
 20. Add subtle border and drop shadow to the video player canvas so it's easier to make out the boundaries of the video when it matches the background color of the container at the edges.
 21. Add the stream item title to the converter page items so it's more clear which stream item the file belongs to. This is especially important for bulk conversion tasks where there are multiple items in the queue.
+22. Add the sidebar launch group functionality to the right click menu of the taskbar tray icon.
+23. The "Stop" button in multiselect mode also needs the keyboard shortcut listed in the tooltip, it's the same as the one for the "Select" button that engages multiselect mode.
 
 ## Bugs
 
