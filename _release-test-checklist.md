@@ -75,9 +75,9 @@ Legend: `- [ ]` = not yet confirmed · `- [x]` = confirmed working · add `⚠` 
 
 ## 7. Player
 
-- [ ] Playback + multi-track audio
-- [ ] Session Videos panel switches between videos in the same folder
-- [ ] Send-to-Player hydration check (spinner) for cloud files, then opens
+- [x] Playback + multi-track audio
+- [x] Session Videos panel switches between videos in the same folder
+- [x] Send-to-Player hydration check (spinner) for cloud files, then opens
 - [ ] Clip export
 
 ## 8. Thumbnails

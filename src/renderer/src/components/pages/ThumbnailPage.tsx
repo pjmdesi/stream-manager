@@ -3601,12 +3601,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const { folderPath, date } = currentStream
     const variant = currentVariant
     const unsub = window.api.onStreamsChanged(async () => {
-      const suffix = variant <= 1 ? '' : `-${variant}`
-      // The editor's own saves also fire streams:changed, but the JSON exists
-      // then, so this is a no-op for them. Only act when it's actually gone.
-      const exists = await window.api.fileExists(`${folderPath}/${date}_sm-thumbnail${suffix}.json`)
-      if (exists) return
-      await reconcileVariantGone(folderPath, date, variant)
+      const remaining = await window.api.thumbnailListVariants(folderPath, date).catch(() => null)
+      if (!remaining) return
+      // The currently-open variant was deleted → switch to a survivor or return
+      // to the overview. (The editor's own saves also fire streams:changed, but
+      // the variant still exists then, so this branch is skipped.)
+      if (!remaining.includes(variant)) {
+        await reconcileVariantGone(folderPath, date, variant)
+        return
+      }
+      // Otherwise keep the selector honest: a non-open variant deleted elsewhere
+      // should drop out of the dropdown instead of lingering (blank) behind it.
+      setVariants(prev => (prev.length === remaining.length && prev.every((v, i) => v === remaining[i])) ? prev : remaining)
     })
     return unsub
   }, [mode, currentStream, currentVariant, reconcileVariantGone])
