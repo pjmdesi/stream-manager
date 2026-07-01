@@ -1780,8 +1780,27 @@ export function StreamsPage({
       const videos = f.videos.filter(p => !has(p))
       // Keep thumbnailLocalFlags index-aligned with thumbnails.
       const keptThumbs = f.thumbnails.map((p, i) => [p, i] as const).filter(([p]) => !has(p))
+      // Prune the deleted files from videoMap too — the row's Film/Scissors
+      // counts are category tallies over videoMap, not videos.length, so a
+      // stale entry would keep the old counts until the next full reload.
+      // videoMap keys are folder-relative forward-slash paths (basename for
+      // top-level files), so compute each deleted path's key the same way.
+      let meta = f.meta
+      if (meta?.videoMap) {
+        const dirNorm = f.folderPath.replace(/\\/g, '/').replace(/\/$/, '')
+        const relKey = (absPath: string): string => {
+          const p = absPath.replace(/\\/g, '/')
+          return p.startsWith(dirNorm + '/') ? p.slice(dirNorm.length + 1) : p.split('/').pop() ?? p
+        }
+        const goneKeys = new Set([...gone].filter(p => p.startsWith(dirNorm + '/')).map(relKey))
+        if (Object.keys(meta.videoMap).some(k => goneKeys.has(k))) {
+          const videoMap = Object.fromEntries(Object.entries(meta.videoMap).filter(([k]) => !goneKeys.has(k)))
+          meta = { ...meta, videoMap }
+        }
+      }
       return {
         ...f,
+        meta,
         videos,
         videoCount: videos.length,
         thumbnails: keptThumbs.map(([p]) => p),
