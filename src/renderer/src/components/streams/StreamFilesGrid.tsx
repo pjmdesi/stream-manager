@@ -205,7 +205,7 @@ function SelectOverlay({ onDragStart, onDragEnter, onClick }: {
   )
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onReload, blockReason }: {
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleted, blockReason }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -225,7 +225,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   onSendToConverter: (path: string) => void
   onOffload: (path: string) => void
   onPin: (path: string) => void
-  onReload: () => void
+  /** Called after this file was successfully trashed, so the parent can drop
+   *  it from folder state in place (no reload). */
+  onDeleted: () => void
   /** Why this file can't be deleted right now (converter / open elsewhere), or
    *  null when it's deletable. */
   blockReason: string | null
@@ -285,8 +287,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
                 // Authoritative backstop in case the reactive disable lags a job
                 // that just started: never trash a file the converter still holds.
                 if (await window.api.isPathInUseByConverter(path).catch(() => false)) return
-                await window.api.trashFile(path).catch(() => {})
-                onReload()
+                // Only report success — a failed trash must keep the card.
+                try { await window.api.trashFile(path) } catch { return }
+                onDeleted()
               }}
               className={`${ACTION_RED} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}
             ><Trash2 size={12} /></button>
@@ -405,7 +408,9 @@ interface Props {
   onDeleteThumbnail: (path: string) => void
   onEditThumbnail: (variantOrdinal?: number) => void
   onOpenLightbox: (index: number) => void
-  onReload: () => void
+  /** Files were trashed by the grid (single or bulk). The parent removes them
+   *  from folder state in place — deliberately no full reload/flash. */
+  onFilesDeleted: (paths: string[]) => void
 }
 
 /**
@@ -426,7 +431,7 @@ export interface FilesGridHandle {
 
 export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function StreamFilesGrid({
   folder, thumbsKey, preferredThumbnail, cloudSyncActive,
-  onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onReload,
+  onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onFilesDeleted,
 }, ref) {
   const videoMap = folder.meta?.videoMap ?? {}
   const hasVideos = folder.videos.length > 0
@@ -665,16 +670,18 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const bulkPin = () => { enqueueHydrate(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
   const selectedHasBlocked = useMemo(() => selectedPaths.some(p => fileReason(p)), [selectedPaths, fileReason])
   const bulkTrash = async () => {
+    const deleted: string[] = []
     for (const p of selectedPaths) {
       // Skip anything that's in use — open in the player/thumbnail editor, or
       // (authoritative re-check) still held by the converter; the rest of the
       // selection is deleted normally.
       if (fileReason(p)) continue
       if (await window.api.isPathInUseByConverter(p).catch(() => false)) continue
-      await window.api.trashFile(p).catch(() => {})
+      // Only successfully-trashed files leave the grid.
+      try { await window.api.trashFile(p); deleted.push(p) } catch { /* keep */ }
     }
     clearSelection()
-    onReload()
+    if (deleted.length) onFilesDeleted(deleted)
   }
 
   if (!hasVideos && !hasImages) return null
@@ -761,7 +768,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onSendToConverter={onSendToConverter}
               onOffload={offloadFile}
               onPin={pinFile}
-              onReload={onReload}
+              onDeleted={() => onFilesDeleted([path])}
               blockReason={fileReason(path)}
             />
           )

@@ -1739,11 +1739,18 @@ export function StreamsPage({
     // Debounced: streams:changed can arrive in a burst (a delete touches several
     // files, saves fire their own, etc.), and each reload is a full listStreams +
     // thumbnail classification plus a thumbsKey bump (the visible flash). Coalesce
-    // them so one logical change is one reload.
+    // them so one logical change is one reload. Deletes THIS page performed are
+    // skipped entirely (selfDeleteUntilRef): the grid was already updated in
+    // place, so the chokidar unlink echo and the refreshVideoMaps follow-up
+    // event would only re-list + re-flash for state we already have.
     let timer: ReturnType<typeof setTimeout> | null = null
     const off = window.api.onStreamsChanged(() => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => { loadFolders(); setThumbsKey(Date.now()) }, 400)
+      timer = setTimeout(() => {
+        if (Date.now() < selfDeleteUntilRef.current) return
+        loadFolders()
+        setThumbsKey(Date.now())
+      }, 400)
     })
     return () => {
       if (timer) clearTimeout(timer)
@@ -1752,10 +1759,47 @@ export function StreamsPage({
     }
   }, [streamsDir, streamMode, loadFolders])
 
+  // Timestamp until which this page's streams:changed listener stands down.
+  // Set whenever the page itself deletes files: the grid is updated
+  // optimistically in place, so the filesystem echoes of our own delete (the
+  // chokidar unlink + the refreshVideoMaps follow-up event) must not trigger
+  // full reloads — each one is a listStreams + thumbnail classification and a
+  // visible flash of every thumbnail on the page.
+  const selfDeleteUntilRef = useRef(0)
+
+  // SM-initiated file deletion (files grid single/bulk trash): remove the
+  // paths from folder state in place — no reload, no flash. The next natural
+  // listStreams (page events after the stand-down window) reconciles meta.
+  const handleFilesDeleted = useCallback((paths: string[]) => {
+    if (paths.length === 0) return
+    selfDeleteUntilRef.current = Date.now() + 5000
+    const gone = new Set(paths.map(p => p.replace(/\\/g, '/')))
+    const has = (p: string): boolean => gone.has(p.replace(/\\/g, '/'))
+    setFolders(prev => prev.map(f => {
+      if (!f.videos.some(has) && !f.thumbnails.some(has)) return f
+      const videos = f.videos.filter(p => !has(p))
+      // Keep thumbnailLocalFlags index-aligned with thumbnails.
+      const keptThumbs = f.thumbnails.map((p, i) => [p, i] as const).filter(([p]) => !has(p))
+      return {
+        ...f,
+        videos,
+        videoCount: videos.length,
+        thumbnails: keptThumbs.map(([p]) => p),
+        thumbnailLocalFlags: f.thumbnailLocalFlags
+          ? keptThumbs.map(([, i]) => f.thumbnailLocalFlags![i])
+          : f.thumbnailLocalFlags,
+      }
+    }))
+  }, [])
+
   // Trash a single thumbnail file + refresh. If the deleted file was
   // the preferred thumbnail, also clear meta.preferredThumbnail so the
   // row's primary thumb falls back to whatever's next in the list.
   const handleDeleteThumbnail = useCallback(async (folder: StreamFolder, filePath: string) => {
+    // Stand the streams:changed listener down for our own delete's echoes
+    // (chokidar unlink, the preferredThumbnail meta write's explicit event) —
+    // the optimistic update below is the whole UI change; no reload needed.
+    selfDeleteUntilRef.current = Date.now() + 5000
     // Optimistically drop the slot from state BEFORE trashing the file, so the
     // carousel removes it in one clean step. Otherwise the deleted path stays
     // in the rendered thumbnails for the duration of the async reload and the
@@ -1788,11 +1832,9 @@ export function StreamsPage({
     if (folder.meta?.preferredThumbnail === basename) {
       await updateMeta(folder.folderPath, { preferredThumbnail: '' })
     }
-    // streams:changed isn't guaranteed to fire for a trash, so reload
-    // explicitly. Bump thumbsKey too so any cached thumb URL in
-    // surviving slots re-fetches.
-    await loadFolders()
-    setThumbsKey(Date.now())
+    // No reload: the optimistic removal above already reflects the delete, and
+    // the listener stand-down swallows our own echoes. Surviving slots keep
+    // their cached thumb URLs (their files didn't change).
   }, [updateMeta, loadFolders])
 
   const selectedFolder = selectedFolderPath
@@ -3121,7 +3163,7 @@ export function StreamsPage({
                 label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
               })}
               filesGridRef={filesGridRef}
-              onReloadFolders={() => void loadFolders()}
+              onFilesDeleted={handleFilesDeleted}
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
               onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
@@ -4730,7 +4772,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onReloadFolders, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -4801,8 +4843,8 @@ function SidebarDetail({
   onSendFileToConverter: (path: string) => void
   onSendFilesToConverter: (paths: string[]) => void
   filesGridRef: React.Ref<FilesGridHandle>
-  /** Re-scan folders after a file changes (e.g. trashed from the grid). */
-  onReloadFolders: () => void
+  /** Grid files were trashed — parent drops them from folder state in place. */
+  onFilesDeleted: (paths: string[]) => void
   onOpenFolder: () => void
   /** Open the thumbnail editor for the current stream. The optional
    *  variantOrdinal lets the carousel's per-image edit buttons open
@@ -6153,7 +6195,7 @@ function SidebarDetail({
                     onDeleteThumbnail={onDeleteThumbnail}
                     onEditThumbnail={onOpenThumbnails}
                     onOpenLightbox={i => setLightboxIndex(i)}
-                    onReload={onReloadFolders}
+                    onFilesDeleted={onFilesDeleted}
                   />
                 </MetaRow>
               </div>
