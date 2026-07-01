@@ -17,6 +17,7 @@ import { Button } from '../ui/Button'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
+import { TruncatedText } from '../ui/TruncatedText'
 import { Checkbox } from '../ui/Checkbox'
 import { VideoRow } from '../ui/VideoRow'
 import { isClipExportCompatible } from '../../lib/clipExport'
@@ -381,15 +382,15 @@ function TrackColorPicker({
     >
       <div className="grid grid-cols-4 gap-1.5">
         {TAG_COLORS.map(c => (
+          <Tooltip key={c.key} content={c.label}>
           <button
-            key={c.key}
             type="button"
-            title={c.label}
             onMouseDown={e => { e.preventDefault(); onPick(c.key) }}
             className={`w-6 h-6 rounded-full ${c.swatch} transition-transform hover:scale-110 flex items-center justify-center`}
           >
             {c.key === currentKey && <Check size={11} className="text-white drop-shadow" />}
           </button>
+          </Tooltip>
         ))}
       </div>
     </div>,
@@ -643,12 +644,11 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
                       {isUnextracted && (
                         <span className="text-[10px] text-gray-400 shrink-0 italic">not playing</span>
                       )}
-                      <span
-                        className={`text-[11px] tabular-nums shrink-0 ${checked ? 'text-purple-200' : 'text-gray-400'}`}
-                        title="Volume from the audio controls row — adjust there to change it for the export."
-                      >
-                        {volPct}%
-                      </span>
+                      <Tooltip content="Volume from the audio controls row — adjust there to change it for the export." triggerClassName="shrink-0">
+                        <span className={`text-[11px] tabular-nums ${checked ? 'text-purple-200' : 'text-gray-400'}`}>
+                          {volPct}%
+                        </span>
+                      </Tooltip>
                     </div>
                   </button>
                 )
@@ -830,7 +830,6 @@ function DraftSessionItem({
         isActive ? 'bg-purple-600/20' : isExporting ? 'opacity-60' : 'hover:bg-white/5'
       }`}
       onClick={editing || isExporting ? undefined : onClick}
-      title={compact || editing ? undefined : isExporting ? 'This clip is currently exporting. Wait for the conversion to finish (or cancel it) before editing.' : `Open clip draft for ${draft.sourceName}`}
     >
       <div
         className={`shrink-0 rounded flex items-center justify-center bg-blue-950/40 border border-blue-500/20 text-blue-400 ${compact ? 'w-5 h-5' : 'w-8 h-8'}`}
@@ -841,6 +840,10 @@ function DraftSessionItem({
         <>
           <div className="min-w-0 flex-1" onClick={editing ? e => e.stopPropagation() : undefined}>
             {editing ? (
+              /* Stable Tooltip wrapper (visibility driven by `open`) so the
+                 input never remounts — and loses focus — when the error state
+                 toggles mid-typing. */
+              <Tooltip content="Name already in use by another clip draft" open={error ? undefined : false} triggerClassName="block w-full min-w-0">
               <input
                 ref={inputRef}
                 value={draftName}
@@ -854,9 +857,9 @@ function DraftSessionItem({
                 className={`w-full text-[11px] font-medium bg-navy-900 border rounded-lg px-1.5 py-0.5 text-gray-200 focus:outline-none focus:ring-1 ${
                   error ? 'border-red-500/60 focus:ring-red-500/40' : 'border-white/15 focus:ring-purple-500/40'
                 }`}
-                title={error ? 'Name already in use by another clip draft' : undefined}
                 spellCheck={false}
               />
+              </Tooltip>
             ) : (
               <div className="flex items-center gap-1 min-w-0">
                 <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
@@ -897,9 +900,18 @@ function DraftSessionItem({
     </div>
   )
 
+  // Non-compact rows explain themselves on hover (open / exporting-blocked);
+  // no tooltip while editing so it doesn't hover over the rename input.
+  const rowTitle = editing
+    ? null
+    : isExporting
+      ? 'This clip is currently exporting. Wait for the conversion to finish (or cancel it) before editing.'
+      : `Open clip draft for ${draft.sourceName}`
   return compact
     ? <Tooltip content={tooltipContent} side="right" triggerClassName="block">{body}</Tooltip>
-    : body
+    : rowTitle
+      ? <Tooltip content={rowTitle} triggerClassName="block w-full">{body}</Tooltip>
+      : body
 }
 
 // Crop aspect dropdown: Off + Original (when video doesn't match a preset) + 16:9 / 1:1 / 9:16
@@ -3988,11 +4000,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                       const swatchClass = TAG_COLOR_MAP[effectiveColorKey]?.swatch ?? 'bg-purple-500'
                       const fillClass = getWaveformFillClass(effectiveColorKey)
                       const colorDot = (
-                        <button
-                          onClick={e => setColorPicker({ trackIndex: track.index, rect: e.currentTarget.getBoundingClientRect() })}
-                          className={`w-3 h-3 rounded-full shrink-0 transition-transform hover:scale-110 ${swatchClass}`}
-                          title="Change track color"
-                        />
+                        <Tooltip content="Change track color" triggerClassName="shrink-0">
+                          <button
+                            onClick={e => setColorPicker({ trackIndex: track.index, rect: e.currentTarget.getBoundingClientRect() })}
+                            className={`w-3 h-3 rounded-full block transition-transform hover:scale-110 ${swatchClass}`}
+                          />
+                        </Tooltip>
                       )
                       return (
                         <div key={track.index} className="border-t border-navy-700/70">
@@ -4026,19 +4039,21 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                   />
                                 </div>
                                 <span className="text-[10px] tabular-nums text-gray-400 shrink-0 w-8 text-right">{track.extractProgress}%</span>
-                                <span className="text-[10px] text-gray-400 truncate ml-1 min-w-0 flex-shrink" title={label}>{label}</span>
+                                <TruncatedText text={label} className="text-[10px] text-gray-400 truncate ml-1" triggerClassName="min-w-0 flex-shrink" />
+                                <Tooltip content="Cancel extraction" triggerClassName="shrink-0">
                                 <button
                                   onClick={() => cancelTrackExtraction(track.index)}
-                                  className="shrink-0 w-4 h-4 flex items-center justify-center rounded text-gray-400 hover:text-red-300 hover:bg-red-600/20 transition-colors"
-                                  title="Cancel extraction"
+                                  className="w-4 h-4 flex items-center justify-center rounded text-gray-400 hover:text-red-300 hover:bg-red-600/20 transition-colors"
                                 >
                                   <X size={12} />
                                 </button>
+                                </Tooltip>
                               </div>
                             ) : track.status === 'extracted' ? (
                               <>
                                 <div className="flex items-center gap-1.5">
                                   {colorDot}
+                                  <Tooltip content={track.muted ? 'Unmute' : 'Mute this track'}>
                                   <button
                                     onClick={() => setTrackMuted(track.index, !track.muted)}
                                     className={`w-5 h-4 rounded text-[9px] font-semibold transition-colors ${
@@ -4046,10 +4061,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                         ? 'bg-red-600/40 text-red-100 border border-red-500/60'
                                         : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 hover:text-gray-200'
                                     }`}
-                                    title={track.muted ? 'Unmute' : 'Mute this track'}
                                   >
                                     M
                                   </button>
+                                  </Tooltip>
+                                  <Tooltip content={track.solo ? 'Unsolo' : 'Solo this track (silences others)'}>
                                   <button
                                     onClick={() => setTrackSolo(track.index, !track.solo)}
                                     className={`w-5 h-4 rounded text-[9px] font-semibold transition-colors ${
@@ -4057,10 +4073,10 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                         ? 'bg-yellow-500/35 text-yellow-100 border border-yellow-400/60'
                                         : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 hover:text-gray-200'
                                     }`}
-                                    title={track.solo ? 'Unsolo' : 'Solo this track (silences others)'}
                                   >
                                     S
                                   </button>
+                                  </Tooltip>
                                   {(() => {
                                     const pct = Math.round(track.volume * 100)
                                     // Track gradient lives on the input
@@ -4087,6 +4103,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                     }
                                     return (
                                       <>
+                                        <Tooltip content={`Volume — ${pct}%`}>
                                         <input
                                           type="range"
                                           min={0}
@@ -4098,8 +4115,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                             background: `linear-gradient(to right, #c9d5e3 ${pct}%, rgba(255,255,255,0.1) ${pct}%)`,
                                           }}
                                           className="volume-slider-mt w-[100px] h-1 rounded-full cursor-pointer appearance-none"
-                                          title={`Volume — ${pct}%`}
                                         />
+                                        </Tooltip>
                                         {/* Editable percentage — minimal styling
                                             matches the timecode inputs (transparent
                                             bg, tabular-nums, no focus ring).
@@ -4134,7 +4151,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                           }}
                                           onBlur={e => commit(e.currentTarget.value)}
                                           className="w-7 text-[11px] text-gray-300 tabular-nums bg-transparent focus:outline-none text-right"
-                                          title={`Volume — ${pct}%`}
                                         />
                                         <span className="text-[10px] text-gray-400 select-none -ml-0.5">%</span>
                                       </>
@@ -4142,34 +4158,36 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                   })()}
                                 </div>
                                 <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="truncate text-gray-300 flex-1" title={label}>{label}</span>
+                                  <TruncatedText text={label} className="truncate text-gray-300 flex-1" triggerClassName="flex-1 min-w-0" />
+                                  <Tooltip content={collapsed ? 'Expand waveform' : 'Collapse waveform'} triggerClassName="shrink-0">
                                   <button
                                     onClick={() => toggleTrackCollapsed(track.index)}
-                                    className={`shrink-0 w-5 h-4 flex items-center justify-center rounded transition-colors ${
+                                    className={`w-5 h-4 flex items-center justify-center rounded transition-colors ${
                                       collapsed
                                         ? 'text-gray-400 hover:text-gray-200 hover:bg-white/10'
                                         : 'text-purple-400 hover:text-purple-300 hover:bg-purple-600/15'
                                     }`}
-                                    title={collapsed ? 'Expand waveform' : 'Collapse waveform'}
                                   >
                                     <AudioLines size={11} className="shrink-0" />
                                   </button>
+                                  </Tooltip>
                                 </div>
                               </>
                             ) : (
                               <>
                                 <div className="flex items-center gap-1.5">
                                   {colorDot}
+                                  <Tooltip content={`Decode and play ${label}`}>
                                   <button
                                     onClick={() => playTrack(track.index)}
                                     className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] bg-white/5 border border-white/10 hover:bg-purple-600/15 hover:border-purple-500/30 text-purple-200 transition-colors"
-                                    title={`Decode and play ${label}`}
                                   >
                                     <AudioLines size={11} className="text-purple-400 shrink-0" />
                                     Add track to playback
                                   </button>
+                                  </Tooltip>
                                 </div>
-                                <span className="truncate text-gray-400" title={label}>{label}</span>
+                                <TruncatedText text={label} className="truncate text-gray-400" />
                               </>
                             )}
                           </div>
@@ -5128,8 +5146,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                               && folder.relativePath === currentStreamFolder.relativePath
                             const empty = folder.videos.length === 0
                             return (
+                              <Tooltip key={folder.relativePath || folder.folderPath} content={fTitle} side="left" triggerClassName="block w-full">
                               <button
-                                key={folder.relativePath || folder.folderPath}
                                 onClick={() => {
                                   if (empty || isCurrent) return
                                   navigateToStream(folder)
@@ -5143,7 +5161,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                       ? 'text-gray-400 cursor-default'
                                       : 'text-gray-300 hover:bg-white/5'
                                 }`}
-                                title={fTitle}
                               >
                                 <span className="text-[11px] tabular-nums leading-tight">
                                   {folder.date}
@@ -5152,6 +5169,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                                 </span>
                                 <span className="text-xs truncate w-full leading-tight">{fTitle}</span>
                               </button>
+                              </Tooltip>
                             )
                           })}
                         </div>
@@ -5246,9 +5264,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                           <span className="text-xs text-gray-200 truncate block">{title}</span>
                         </Tooltip>
                         {meta?.games && meta.games.length > 0 && meta.ytTitle && (
-                          <span className="text-[10px] text-gray-400 truncate" title={meta.games.join(' · ')}>
-                            {meta.games.join(' · ')}
-                          </span>
+                          <TruncatedText text={meta.games.join(' · ')} className="text-[10px] text-gray-400 truncate" side="bottom" />
                         )}
                       </div>
                     </div>

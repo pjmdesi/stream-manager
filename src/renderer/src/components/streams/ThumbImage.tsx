@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, Cloud, AlertTriangle } from 'lucide-react'
+import { Tooltip } from '../ui/Tooltip'
 
 export function friendlyDate(iso: string): string {
   const [year, month, day] = iso.split('-')
@@ -91,14 +92,17 @@ export function ThumbImage({
     const tooltip = status === 'syncing' ? 'Downloading from cloud…'
                   : status === 'error'   ? 'Cloud download failed — provider may be stuck or file is missing'
                                          : 'Cloud — open in the carousel to download'
+    // The Tooltip's trigger wrapper IS the placeholder box (triggerClassName /
+    // triggerStyle carry the placeholder's classes + style), so the DOM shape
+    // stays a single styled div — no layout change vs the old native title=.
     return (
-      <div className={cls} style={placeholderStyle} title={tooltip}>
+      <Tooltip content={tooltip} triggerClassName={cls} triggerStyle={placeholderStyle}>
         {status === 'syncing' && <Loader2 size={iconSize} className="text-gray-400 animate-spin" />}
         {status === 'cloud'   && <Cloud   size={iconSize} className="text-gray-400" />}
         {status === 'error'   && <AlertTriangle size={iconSize} className="text-yellow-500" />}
         {status === 'syncing' && <span className="text-[9px] text-gray-400 leading-none">Syncing…</span>}
         {status === 'error'   && <span className="text-[9px] text-yellow-600 leading-none">Sync failed</span>}
-      </div>
+      </Tooltip>
     )
   }
 

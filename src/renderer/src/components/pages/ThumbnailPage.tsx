@@ -1007,20 +1007,22 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
                 <div className="p-2 flex items-center justify-between gap-1">
                   <span className="text-xs text-gray-300 truncate">{t.name}</span>
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-all shrink-0">
+                    <Tooltip content="Edit template">
                     <button
                       className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
                       onClick={e => { e.stopPropagation(); onOpenTemplate(t) }}
-                      title="Edit template"
                     >
                       <Pencil size={12} />
                     </button>
+                    </Tooltip>
+                    <Tooltip content="Delete template">
                     <button
                       className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
                       onClick={e => { e.stopPropagation(); onDeleteTemplate(t.id) }}
-                      title="Delete template"
                     >
                       <Trash2 size={12} />
                     </button>
+                    </Tooltip>
                   </div>
                 </div>
               </div>
@@ -1059,14 +1061,15 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
                   </div>
                 </button>
                 <span className="text-[10px] text-gray-400 shrink-0 py-2">{entry.date}</span>
+                <Tooltip content="Remove from recents" triggerClassName="shrink-0">
                 <button
                   onClick={() => onRemoveRecent(entry)}
-                  className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                  className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
                   aria-label="Remove from recents"
-                  title="Remove from recents"
                 >
                   <X size={13} />
                 </button>
+                </Tooltip>
               </div>
             ))}
           </div>
@@ -1108,13 +1111,14 @@ function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0
         <span className="text-[10px] text-gray-400 tabular-nums">{Number.isInteger(step) ? value : value.toFixed(2)}</span>
       </div>
       <div className="flex items-center gap-1.5">
+        <Tooltip content="Double-click to reset" triggerClassName="flex-1 min-w-0 flex">
         <input
           type="range" min={min} max={max} step={step} value={value}
           onChange={e => onChange(Number(e.target.value))}
           onDoubleClick={() => onChange(defaultValue)}
-          title="Double-click to reset"
           className="flex-1 accent-purple-600"
         />
+        </Tooltip>
         <input
           type="number" min={min} max={max} step={step} value={value}
           onChange={e => onChange(Number(e.target.value))}
@@ -1262,15 +1266,16 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
       <section>
         <div className="flex items-center justify-between mb-2">
           <p className="text-[10px] uppercase tracking-wider text-gray-400">Transform</p>
+          <Tooltip content="Reset position, rotation, and (for images) scale to defaults">
           <button
             type="button"
             onClick={() => { resetTransform().catch(() => {}) }}
             className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
-            title="Reset position, rotation, and (for images) scale to defaults"
           >
             <RotateCcw size={10} />
             Reset
           </button>
+          </Tooltip>
         </div>
         {(() => {
           const hasWH = layer.width !== undefined && (layer.type === 'image' || layer.type === 'shape') && layer.height !== undefined
@@ -1599,15 +1604,16 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 <p className="text-[10px] uppercase tracking-wider text-gray-400">
                   Drop Shadows {shadows.length > 0 && <span className="text-gray-500 normal-case tracking-normal">({shadows.length})</span>}
                 </p>
+                <Tooltip content="Add a shadow pass">
                 <button
                   type="button"
                   onClick={addShadow}
                   className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
-                  title="Add a shadow pass"
                 >
                   <Plus size={11} />
                   Add
                 </button>
+                </Tooltip>
               </div>
               {shadows.length === 0 && (
                 <p className="text-[11px] text-gray-500 italic">No shadows. Click "Add" to stack one or more behind the layer.</p>
@@ -1617,14 +1623,15 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                   <div key={idx} className="rounded-lg border border-white/5 p-2 flex flex-col gap-1.5 bg-navy-900/40">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] uppercase tracking-wider text-gray-500">Shadow {idx + 1}</span>
+                      <Tooltip content="Remove this shadow">
                       <button
                         type="button"
                         onClick={() => removeAt(idx)}
                         className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
-                        title="Remove this shadow"
                       >
                         <Trash2 size={11} />
                       </button>
+                      </Tooltip>
                     </div>
                     <label className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-gray-400">Color</span>
@@ -4371,13 +4378,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   >
                     Fit
                   </button>
+                  <Tooltip content="Reset zoom to 100% and re-center">
                   <button
                     onClick={() => setZoomCentered(1)}
-                    title="Reset zoom to 100% and re-center"
                     className="p-1 rounded bg-black/50 text-gray-400 hover:text-gray-200 transition-colors"
                   >
                     <RotateCcw size={11} />
                   </button>
+                  </Tooltip>
                 </div>
               </div>
             </div>
@@ -4516,14 +4524,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <ImageIcon size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Assets</span>
                   <div ref={assetOptionsRef} className="ml-auto relative">
+                    <Tooltip content="Asset sources">
                     <button
                       type="button"
                       onClick={() => setAssetOptionsOpen(o => !o)}
-                      title="Asset sources"
                       className={`p-0.5 rounded transition-colors ${assetOptionsOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
                     >
                       <Sliders size={12} />
                     </button>
+                    </Tooltip>
                     {assetOptionsOpen && (
                       <div className="absolute top-full right-0 mt-1 z-30 w-56 bg-navy-900 border border-white/10 rounded-lg shadow-xl p-1">
                         {(() => {
@@ -4671,22 +4680,24 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                       stay off until visible to keep the drag
                                       affordance on the image itself unimpeded. */}
                                   <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 pointer-events-none group-hover:pointer-events-auto">
+                                    <Tooltip content="Add as layer">
                                     <button
                                       type="button"
                                       onClick={e => { e.stopPropagation(); addImageLayerFromPath(p).catch(() => {}) }}
-                                      title="Add as layer"
                                       className="flex items-center justify-center w-7 h-7 rounded-full bg-white/10 hover:bg-purple-600/60 border border-white/20 hover:border-purple-400/70 text-gray-200 hover:text-white transition-colors"
                                     >
                                       <Plus size={14} />
                                     </button>
+                                    </Tooltip>
+                                    <Tooltip content="Move to Recycle Bin">
                                     <button
                                       type="button"
                                       onClick={e => { e.stopPropagation(); setAssetDeleteTarget(p) }}
-                                      title="Move to Recycle Bin"
                                       className="flex items-center justify-center w-7 h-7 rounded-full bg-white/10 hover:bg-red-600/60 border border-white/20 hover:border-red-400/70 text-gray-200 hover:text-white transition-colors"
                                     >
                                       <Trash2 size={14} />
                                     </button>
+                                    </Tooltip>
                                   </div>
                                 </div>
                               </Tooltip>

@@ -264,11 +264,11 @@ export function StreamRelayWidget({
       {/* Active broadcast row */}
       <div ref={pickerAnchorRef} className="px-3 pb-2 flex flex-col gap-1">
         {broadcast ? (
+          <Tooltip content={isStreaming ? 'End the current stream to change the active broadcast' : 'Change active broadcast'} triggerClassName="block w-full">
           <button
             onClick={() => togglePicker()}
             disabled={isStreaming}
             className="flex items-start gap-1.5 w-full px-2 py-1 rounded text-left hover:bg-white/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-            title={isStreaming ? 'End the current stream to change the active broadcast' : 'Change active broadcast'}
           >
             <Calendar size={11} className="text-purple-400 shrink-0 mt-0.5" />
             <div className="flex flex-col flex-1 min-w-0 leading-tight">
@@ -282,19 +282,21 @@ export function StreamRelayWidget({
             </div>
             {!isStreaming && <ChevronDown size={11} className="text-gray-400 shrink-0 mt-1" />}
           </button>
+          </Tooltip>
         ) : (
           // Render an interactive trigger even with no auto-pick so the user
           // can open the picker to refresh / manually select.
+          <Tooltip content="Pick a broadcast" triggerClassName="block w-full">
           <button
             onClick={() => togglePicker()}
             disabled={isStreaming}
             className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-left hover:bg-white/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-            title="Pick a broadcast"
           >
             <Calendar size={11} className="text-gray-400 shrink-0" />
             <span className="text-[10px] text-gray-400 italic flex-1">No upcoming broadcasts.</span>
             {!isStreaming && <ChevronDown size={11} className="text-gray-400 shrink-0" />}
           </button>
+          </Tooltip>
         )}
 
         {/* Stale-pick warning */}

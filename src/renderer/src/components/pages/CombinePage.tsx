@@ -215,9 +215,11 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
               <span className="text-xs text-gray-400 font-mono w-5 text-right shrink-0">{i + 1}</span>
 
               {/* Filename */}
-              <span className="flex-1 text-sm text-gray-200 truncate font-mono" title={f.path}>
-                {f.name}
-              </span>
+              <Tooltip content={f.path} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
+                <span className="block text-sm text-gray-200 truncate font-mono">
+                  {f.name}
+                </span>
+              </Tooltip>
 
               {/* Timestamp */}
               {f.timestamp && (

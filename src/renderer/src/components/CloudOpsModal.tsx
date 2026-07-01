@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
+import { Tooltip } from './ui/Tooltip'
 import { Loader2, CheckCircle2, XCircle, Cloud, CloudCheck, CloudDownload, Pin, Ban, Info } from 'lucide-react'
 import { useCloudOps, type CloudOpItem, type CloudOpItemStatus, type CloudOpDirection } from '../context/CloudOpsContext'
 
@@ -211,7 +212,9 @@ function CloudOpsSection({ direction, items, active, cancelling, onCancel }: Sec
                 data-row={it.path}
                 className="grid grid-cols-[1fr_auto_auto] gap-x-4 px-3 h-7 text-xs items-center hover:bg-white/5 transition-colors"
               >
-                <span className="truncate text-gray-300" title={it.path}>{it.name}</span>
+                <Tooltip content={it.path} maxWidth="max-w-md" triggerClassName="block min-w-0">
+                  <span className="block truncate text-gray-300">{it.name}</span>
+                </Tooltip>
                 <span className="text-right tabular-nums text-gray-400">{formatBytes(it.size)}</span>
                 <span className="text-right w-32"><StatusBadge status={it.status} reason={it.reason} /></span>
               </div>
@@ -240,9 +243,10 @@ function StatusBadge({ status, reason }: { status: CloudOpItemStatus; reason?: s
   // Fixed-height wrapper + leading-none so icons (which lucide renders as
   // inline SVGs with implicit baseline whitespace) can't push the row
   // taller than text-only states like "Pending".
-  const wrap = (className: string, content: React.ReactNode, title?: string) => (
-    <span className={`inline-flex items-center gap-1 h-4 leading-none ${className}`} title={title}>{content}</span>
-  )
+  const wrap = (className: string, content: React.ReactNode, title?: string) => {
+    const badge = <span className={`inline-flex items-center gap-1 h-4 leading-none ${className}`}>{content}</span>
+    return title ? <Tooltip content={title}>{badge}</Tooltip> : badge
+  }
   const iconCls = 'shrink-0'
   switch (status) {
     case 'pending':

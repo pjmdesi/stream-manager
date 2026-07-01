@@ -3,6 +3,7 @@ import { Loader2, AlertCircle } from 'lucide-react'
 import { Twitch as LucideTwitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
+import { TruncatedText } from './ui/TruncatedText'
 import { useRelayPrompt } from '../context/RelayPromptContext'
 import { useStore } from '../hooks/useStore'
 
@@ -108,9 +109,7 @@ export function PostStreamTwitchModal() {
           <LucideTwitch size={14} className="text-twitch-400 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
             <div className="text-[10px] uppercase tracking-wider text-twitch-300/80">Next stream</div>
-            <div className="text-sm text-gray-100 truncate" title={suggestion.displayTitle}>
-              {suggestion.displayTitle}
-            </div>
+            <TruncatedText text={suggestion.displayTitle} className="text-sm text-gray-100 truncate" />
             {suggestion.payload.game && (
               <div className="text-xs text-gray-400 truncate">{suggestion.payload.game}</div>
             )}

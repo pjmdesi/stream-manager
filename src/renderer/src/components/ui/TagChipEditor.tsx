@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Loader2, Trash2, Copy, Check, AlertTriangle } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { TruncatedText } from './TruncatedText'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 
 function EditorTagChip({
@@ -254,8 +255,8 @@ export function TagChipEditor({
               {sg.hint === 'loading' && <><Loader2 size={9} className="animate-spin" />Generating…</>}
               {sg.hint === 'accept' && <>Tab to accept · Esc to dismiss</>}
               {sg.hint === 'error' && (
-                <span className="flex items-center gap-1 text-red-400 min-w-0" title={sg.error ?? ''}>
-                  <AlertTriangle size={9} className="shrink-0" /><span className="truncate">{sg.error}</span>
+                <span className="flex items-center gap-1 text-red-400 min-w-0">
+                  <AlertTriangle size={9} className="shrink-0" /><TruncatedText text={sg.error ?? ''} className="truncate" />
                 </span>
               )}
               {!sg.hint && <span>Ctrl+Space for AI suggestion</span>}

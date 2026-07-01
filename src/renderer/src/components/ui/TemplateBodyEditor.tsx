@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { GripHorizontal, Loader2, AlertTriangle } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { TruncatedText } from './TruncatedText'
 import { cleanClaudeError } from '../../lib/claudeError'
 
 // ─── Chip styling (shared between in-editor chips + picker buttons) ─────────
@@ -647,8 +648,8 @@ export function TemplateBodyEditor({
       {aiFetcher && (
         <p className="flex items-center gap-1 text-[10px] text-gray-400 mt-0.5 min-h-[14px] min-w-0">
           {aiError
-            ? <span className="flex items-center gap-1 text-red-400 min-w-0" title={aiError}>
-                <AlertTriangle size={9} className="shrink-0" /><span className="truncate">{aiError}</span>
+            ? <span className="flex items-center gap-1 text-red-400 min-w-0">
+                <AlertTriangle size={9} className="shrink-0" /><TruncatedText text={aiError} className="truncate" />
               </span>
             : aiLoading
               ? <><Loader2 size={9} className="animate-spin" />Generating…</>

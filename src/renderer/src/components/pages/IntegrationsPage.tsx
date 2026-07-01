@@ -614,10 +614,10 @@ export function IntegrationsPage() {
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-medium text-gray-400">In your streaming software (OBS, etc.), configure a custom output:</span>
                 <div className="flex flex-col gap-0.5">
+                  <Tooltip content="Click to copy" triggerClassName="self-start">
                   <button
                     onClick={() => srCopyToClipboard(`rtmp://localhost:${srPort || 1935}/sm`, 'server')}
-                    className="group flex items-center gap-3 px-2 py-1 rounded hover:bg-white/5 transition-colors text-left self-start"
-                    title="Click to copy"
+                    className="group flex items-center gap-3 px-2 py-1 rounded hover:bg-white/5 transition-colors text-left"
                   >
                     <span className="text-xs text-gray-400 w-20 shrink-0">Server URL</span>
                     <code className="font-mono text-xs font-semibold text-gray-200 select-all">
@@ -627,10 +627,11 @@ export function IntegrationsPage() {
                       ? <Check size={12} className="text-green-400 shrink-0" />
                       : <Copy size={12} className="text-gray-400 group-hover:text-gray-200 transition-colors shrink-0" />}
                   </button>
+                  </Tooltip>
+                  <Tooltip content="Click to copy" triggerClassName="self-start">
                   <button
                     onClick={() => srCopyToClipboard(config.streamRelayInboundKey || 'live', 'key')}
-                    className="group flex items-center gap-3 px-2 py-1 rounded hover:bg-white/5 transition-colors text-left self-start"
-                    title="Click to copy"
+                    className="group flex items-center gap-3 px-2 py-1 rounded hover:bg-white/5 transition-colors text-left"
                   >
                     <span className="text-xs text-gray-400 w-20 shrink-0">Stream Key</span>
                     <code className="font-mono text-xs font-semibold text-gray-200 select-all">
@@ -640,6 +641,7 @@ export function IntegrationsPage() {
                       ? <Check size={12} className="text-green-400 shrink-0" />
                       : <Copy size={12} className="text-gray-400 group-hover:text-gray-200 transition-colors shrink-0" />}
                   </button>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -840,20 +842,20 @@ export function IntegrationsPage() {
                   ]).map(({ value, label, desc }) => {
                     const active = (config.autoUpdateTwitchAfterStream ?? 'ask') === value
                     return (
-                      <button
-                        key={value}
-                        type="button"
-                        disabled={!twConnected}
-                        onClick={() => updateConfig({ autoUpdateTwitchAfterStream: value })}
-                        title={desc}
-                        className={`flex items-center justify-center px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                          active
-                            ? 'bg-purple-600/25 border-purple-500/40 text-purple-200'
-                            : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200'
-                        } disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/5 disabled:hover:text-gray-400`}
-                      >
-                        {label}
-                      </button>
+                      <Tooltip key={value} content={desc}>
+                        <button
+                          type="button"
+                          disabled={!twConnected}
+                          onClick={() => updateConfig({ autoUpdateTwitchAfterStream: value })}
+                          className={`flex items-center justify-center px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                            active
+                              ? 'bg-purple-600/25 border-purple-500/40 text-purple-200'
+                              : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200'
+                          } disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/5 disabled:hover:text-gray-400`}
+                        >
+                          {label}
+                        </button>
+                      </Tooltip>
                     )
                   })}
                 </div>

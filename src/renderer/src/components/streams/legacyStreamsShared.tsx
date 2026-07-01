@@ -47,6 +47,7 @@ import { useRelayPrompt } from '../../context/RelayPromptContext'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
+import { TruncatedText } from '../ui/TruncatedText'
 import { getTagColor, getTagTextureStyle, pickColorForNewTag, pickTextureForNewTag } from '../../constants/tagColors'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -206,14 +207,17 @@ function ThumbImage({ path, thumbsKey, isLocal = true, hydrate = false, classNam
     const tooltip = status === 'syncing' ? 'Downloading from cloud…'
                   : status === 'error'   ? 'Cloud download failed — provider may be stuck or file is missing'
                                          : 'Cloud — open in the carousel to download'
+    // The Tooltip's trigger wrapper IS the placeholder box (triggerClassName /
+    // triggerStyle carry the placeholder's classes + style), so the DOM shape
+    // stays a single styled div — no layout change vs the old native title=.
     return (
-      <div className={cls} style={placeholderStyle} title={tooltip}>
+      <Tooltip content={tooltip} triggerClassName={cls} triggerStyle={placeholderStyle}>
         {status === 'syncing' && <Loader2 size={iconSize} className="text-gray-400 animate-spin" />}
         {status === 'cloud'   && <Cloud   size={iconSize} className="text-gray-400" />}
         {status === 'error'   && <AlertTriangle size={iconSize} className="text-yellow-500" />}
         {status === 'syncing' && <span className="text-[9px] text-gray-400 leading-none">Syncing…</span>}
         {status === 'error'   && <span className="text-[9px] text-yellow-600 leading-none">Sync failed</span>}
-      </div>
+      </Tooltip>
     )
   }
 
@@ -827,13 +831,14 @@ export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onS
                 </button>
               </div>
             ) : (
+              <Tooltip content="Delete image (moves to Recycle Bin)">
               <button
                 onClick={() => setDeleteConfirm(currentPath)}
                 className="flex items-center justify-center p-1.5 rounded-full bg-white/10 hover:bg-red-600/30 border border-white/20 hover:border-red-500/50 text-gray-400 hover:text-red-300 transition-colors"
-                title="Delete image (moves to Recycle Bin)"
               >
                 <Trash2 size={12} />
               </button>
+              </Tooltip>
             )
           )}
         </div>
@@ -1088,7 +1093,7 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
       </div>
       <div className="flex items-center justify-center gap-2 px-1 min-h-[20px] flex-wrap">
         {!single && (
-          <p className="text-xs text-gray-400 truncate max-w-[14rem]" title={filename}>{filename}</p>
+          <TruncatedText text={filename} className="text-xs text-gray-400 truncate max-w-[14rem]" triggerClassName="block min-w-0 max-w-[14rem]" />
         )}
         <div className="flex items-center gap-1.5">
           {/* Edit control — only for SM-generated thumbnails (matches
@@ -1097,13 +1102,14 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
               because there's nothing for the SM editor to load for non-SM
               images. */}
           {onEditThumbnail && currentPath && SM_THUMB_REGEX.test(currentPath) && (
+            <Tooltip content="Edit thumbnail">
             <button
               onClick={() => onEditThumbnail(parseSmThumbnailOrdinal(currentPath) ?? undefined)}
-              title="Edit thumbnail"
               className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-purple-600/30 border border-white/15 hover:border-purple-500/45 text-gray-400 hover:text-purple-200 text-xs font-medium whitespace-nowrap transition-colors"
             >
               <PencilLine size={11} /> Edit thumbnail
             </button>
+            </Tooltip>
           )}
           {onSetAsThumbnail && (
             isPreferred ? (
@@ -1143,13 +1149,14 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
                 </button>
               </>
             ) : (
+              <Tooltip content="Delete image (moves to Recycle Bin)">
               <button
                 onClick={() => setDeleteConfirm(currentPath)}
                 className="flex items-center justify-center p-1 rounded-full bg-white/8 hover:bg-red-600/25 border border-white/15 hover:border-red-500/45 text-gray-400 hover:text-red-300 transition-colors"
-                title="Delete image (moves to Recycle Bin)"
               >
                 <Trash2 size={11} />
               </button>
+              </Tooltip>
             )
           )}
         </div>
@@ -3590,6 +3597,7 @@ export function SaveAsTemplateButton({
         size={Math.max(14, name.length + 1)}
         className={`text-xs bg-navy-900 border ${isDuplicate ? 'border-amber-500/40' : 'border-white/10'} text-gray-200 rounded-lg px-1.5 py-0.5 focus:outline-none focus:ring-1 ${isDuplicate ? 'focus:ring-amber-500/40' : 'focus:ring-purple-500/40'}`}
       />
+      <Tooltip content={isDuplicate ? (confirmOverwrite ? 'Click to confirm overwrite' : 'A template with this name exists — click to overwrite') : 'Save'}>
       <button
         type="button"
         onClick={save}
@@ -3599,18 +3607,19 @@ export function SaveAsTemplateButton({
             ? (confirmOverwrite ? 'text-amber-300 hover:text-amber-200' : 'text-amber-400 hover:text-amber-300')
             : 'text-green-400 hover:text-green-300'
         }`}
-        title={isDuplicate ? (confirmOverwrite ? 'Click to confirm overwrite' : 'A template with this name exists — click to overwrite') : 'Save'}
       >
         <Check size={12} />
       </button>
+      </Tooltip>
+      <Tooltip content="Cancel">
       <button
         type="button"
         onClick={cancel}
         className="p-0.5 text-gray-400 hover:text-gray-300 transition-colors"
-        title="Cancel"
       >
         <X size={12} />
       </button>
+      </Tooltip>
     </div>
   )
 }
@@ -6666,7 +6675,7 @@ function TreeView({ nodes, depth, rootName }: { nodes: TreeNode[]; depth: number
 // ─── Clamped tooltip ─────────────────────────────────────────────────────────
 // Only renders the Tooltip when the text is actually truncated by line-clamp.
 
-function ClampedComment({ text, maxLines = 3 }: { text: string; maxLines?: number }) {
+export function ClampedComment({ text, maxLines = 3 }: { text: string; maxLines?: number }) {
   const spanRef = useRef<HTMLSpanElement>(null)
   const [clamped, setClamped] = useState(false)
 

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { Tooltip } from '../ui/Tooltip'
+import { TruncatedText } from '../ui/TruncatedText'
 import { Button } from '../ui/Button'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { Checkbox } from '../ui/Checkbox'
@@ -22,7 +23,7 @@ import { useConversionJobs } from '../../context/ConversionContext'
 import { useOpenItems, blockReasonText, type OpenSource } from '../../context/OpenItemsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
-import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal } from '../streams/legacyStreamsShared'
+import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal, ClampedComment } from '../streams/legacyStreamsShared'
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
@@ -2791,16 +2792,17 @@ export function StreamsPage({
                 </button>
               )}
             </div>
+            <Tooltip content="Sort">
             <select
               value={sortMode}
               onChange={e => setSortMode(e.target.value as typeof sortMode)}
               className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
-              title="Sort"
             >
               <option value="date-desc">Newest first</option>
               <option value="date-asc">Oldest first</option>
               <option value="title-asc">Title A–Z</option>
             </select>
+            </Tooltip>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto" ref={listScrollRef}>
@@ -3073,16 +3075,17 @@ export function StreamsPage({
           style={{ width: normalSidebarWidth }}
         >
           {sidebarCollapsedPref ? (
+            <Tooltip content="Expand sidebar" side="left" triggerClassName="block h-full w-full">
             <button
               type="button"
               onClick={toggleSidebar}
               className="flex flex-col items-center justify-start pt-4 gap-2 h-full w-full text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
               aria-label="Expand sidebar"
-              title="Expand sidebar"
             >
               <ChevronLeft size={16} />
               <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] font-semibold uppercase tracking-wider text-gray-500 mt-2">Calendar</span>
             </button>
+            </Tooltip>
           ) : (
             <div className="h-full flex flex-col">
               {/* Fixed-height calendar widget pinned to the top; the out-of-sync
@@ -3721,7 +3724,9 @@ export function StreamsPage({
                 {pendingArchiveDecision.taggedFiles.map(p => {
                   const name = p.split(/[\\/]/).pop() ?? p
                   return (
-                    <div key={p} className="px-3 py-1.5 text-xs text-gray-400 truncate" title={p}>{name}</div>
+                    <Tooltip key={p} content={p} maxWidth="max-w-md" triggerClassName="block min-w-0">
+                      <div className="px-3 py-1.5 text-xs text-gray-400 truncate">{name}</div>
+                    </Tooltip>
                   )
                 })}
               </div>
@@ -4209,13 +4214,7 @@ const StreamListItem = memo(function StreamListItem({
 
           <td className="px-2 py-2 align-middle hidden @5xl:table-cell">
             {meta?.comments ? (
-              <div
-                className="text-[10px] leading-tight text-gray-400 overflow-hidden whitespace-pre-line"
-                style={{ display: '-webkit-box', WebkitLineClamp: Math.max(2, Math.floor((thumbWidth * 9 / 16) / 12.5)), WebkitBoxOrient: 'vertical' }}
-                title={meta.comments}
-              >
-                {meta.comments}
-              </div>
+              <ClampedComment text={meta.comments} maxLines={Math.max(2, Math.floor((thumbWidth * 9 / 16) / 12.5))} />
             ) : (
               <span className="text-xs text-gray-400">—</span>
             )}
@@ -6141,12 +6140,11 @@ function SidebarDetail({
                               ? 'bg-purple-900/25 text-purple-300 cursor-default'
                               : 'text-gray-300 hover:bg-white/5'
                           }`}
-                          title={epTitle}
                         >
                           <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{epNum}:</span>
                           <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{ep.date}</span>
                           <span className={`shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>·</span>
-                          <span className={`truncate ${isCurrent ? 'text-purple-300 font-medium' : 'text-gray-200'}`}>{epTitle}</span>
+                          <TruncatedText text={epTitle} className={`truncate ${isCurrent ? 'text-purple-300 font-medium' : 'text-gray-200'}`} />
                         </button>
                       )
                     })}
@@ -6177,7 +6175,9 @@ function SidebarDetail({
             />
           </Tooltip>
         </div>
-        <div className="text-base font-semibold text-gray-100 break-words leading-snug" title={title}>
+        {/* Wraps rather than truncates, so the full title is always visible —
+            no tooltip needed (the old native title= was redundant). */}
+        <div className="text-base font-semibold text-gray-100 break-words leading-snug">
           {title}
         </div>
       </div>
@@ -6567,9 +6567,10 @@ function SidebarDetail({
                     }}
                     onDoubleClick={() => setDescHeight(null)}
                     className="group relative z-0 cursor-ns-resize flex items-center justify-center h-4 rounded-b-lg hover:bg-white/5 transition-colors pt-[8px] mt-[-8px]"
-                    title="Drag to resize · double-click to reset"
                   >
-                    <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+                    <Tooltip content="Drag to resize · double-click to reset" side="bottom">
+                      <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+                    </Tooltip>
                   </div>
                 </div>
               ) : (
@@ -6934,14 +6935,15 @@ function SidebarDetail({
                   </Tooltip>
                 )}
                 {selectedBroadcast && (
+                  <Tooltip content="Unlink from broadcast">
                   <button
                     type="button"
                     onClick={() => onUpdateMeta({ ytVideoId: '' })}
                     className="text-[10px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1"
-                    title="Unlink from broadcast"
                   >
                     <X size={11} /> Unlink
                   </button>
+                  </Tooltip>
                 )}
               </div>
             </div>
@@ -7137,15 +7139,14 @@ function SidebarDetail({
         {banners.length > 0 && (
           <div className="flex flex-col gap-1.5">
             {banners.map(banner => (
+              <Tooltip key={banner.id} content="Dismiss" triggerClassName="block">
               <div
-                key={banner.id}
                 onClick={() => onDismissBanner(banner.id)}
                 className={`flex items-center gap-2 text-left text-[11px] rounded-md px-2.5 py-1.5 border transition-colors cursor-pointer ${
                   banner.type === 'success'
                     ? 'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/15'
                     : 'bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/15'
                 }`}
-                title="Dismiss"
               >
                 <span className="flex-1">{banner.message}</span>
                 {banner.action && (
@@ -7158,6 +7159,7 @@ function SidebarDetail({
                   </button>
                 )}
               </div>
+              </Tooltip>
             ))}
           </div>
         )}
@@ -7926,8 +7928,8 @@ function EditableTextField({
       {sg.hint === 'loading' && <><Loader2 size={9} className="animate-spin" />Generating…</>}
       {sg.hint === 'accept' && <>Tab to accept · Esc to dismiss</>}
       {sg.hint === 'error' && (
-        <span className="flex items-center gap-1 text-red-400 min-w-0" title={sg.error ?? ''}>
-          <AlertTriangle size={9} className="shrink-0" /><span className="truncate">{sg.error}</span>
+        <span className="flex items-center gap-1 text-red-400 min-w-0">
+          <AlertTriangle size={9} className="shrink-0" /><TruncatedText text={sg.error ?? ''} className="truncate" />
         </span>
       )}
       {!sg.hint && <span>Ctrl+Space for AI suggestion</span>}
@@ -7956,9 +7958,10 @@ function EditableTextField({
         onMouseDown={handleResizeStart}
         onDoubleClick={handleResizeReset}
         className="group relative z-0 cursor-ns-resize flex items-center justify-center h-4 rounded-b-lg hover:bg-white/5 transition-colors pt-[8px] mt-[-8px]"
-        title="Drag to resize · double-click to reset"
       >
-        <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+        <Tooltip content="Drag to resize · double-click to reset" side="bottom">
+          <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+        </Tooltip>
       </div>
       {aiHint}
     </div>
@@ -8246,26 +8249,28 @@ function NumberStepperField({
         className={`w-full bg-navy-900/70 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''}`}
       />
       <div className="flex flex-col">
+        <Tooltip content="Increment (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}
           onClick={e => step(e.shiftKey ? 10 : 1)}
-          title="Increment (Shift = ×10)"
           className="flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-b-0 border-white/10 rounded-tr-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
           aria-label="Increment"
         >
           <ChevronUp size={10} strokeWidth={2.5} />
         </button>
+        </Tooltip>
+        <Tooltip content="Decrement (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}
           onClick={e => step(e.shiftKey ? -10 : -1)}
-          title="Decrement (Shift = ×10)"
           className="flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-white/10 rounded-br-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
           aria-label="Decrement"
         >
           <ChevronDown size={10} strokeWidth={2.5} />
         </button>
+        </Tooltip>
       </div>
     </div>
   )
@@ -8828,10 +8833,17 @@ function RescheduleModal({
                     <li
                       key={f.from}
                       className={`text-xs font-mono px-2 py-0.5 ${f.collision ? 'text-red-400' : 'text-gray-400'}`}
-                      title={f.collision ? 'Skipped: a file with that name already exists.' : undefined}
                     >
-                      {f.collision && <AlertTriangle size={10} className="inline mr-1 mb-0.5" />}
-                      {f.from} → {f.to}
+                      {f.collision ? (
+                        <Tooltip content="Skipped: a file with that name already exists." triggerClassName="block">
+                          <span className="block">
+                            <AlertTriangle size={10} className="inline mr-1 mb-0.5" />
+                            {f.from} → {f.to}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <>{f.from} → {f.to}</>
+                      )}
                     </li>
                   ))}
                   {preview.filesToRename.length === 0 && (
@@ -9078,7 +9090,9 @@ function DeleteModal({
             return (
               <div key={f} className="flex items-center gap-1.5 text-gray-400 py-px">
                 <span className="shrink-0 text-gray-400">·</span>
-                <span className="truncate" title={f}>{display}</span>
+                <Tooltip content={f} maxWidth="max-w-md" triggerClassName="block min-w-0">
+                  <span className="block truncate">{display}</span>
+                </Tooltip>
               </div>
             )
           })

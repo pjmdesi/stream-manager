@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { GripHorizontal, ChevronUp, ChevronDown } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string
@@ -312,8 +313,8 @@ export const NumberInput: React.FC<NumberInputProps> = ({
   const atMin = min !== undefined && value <= min
   const atMax = max !== undefined && value >= max
 
-  return (
-    <div className={`flex items-stretch ${className}`} title={title}>
+  const field = (
+    <div className={`flex items-stretch ${className}`}>
       <input
         type="number"
         value={Number.isFinite(value) ? value : ''}
@@ -346,29 +347,34 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         className={`w-full bg-navy-900 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
       />
       <div className="flex flex-col shrink-0">
+        <Tooltip content="Increment (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}
           onClick={e => stepBy(1, e.shiftKey)}
           disabled={disabled || atMax}
-          title="Increment (Shift = ×10)"
           className="flex-1 flex items-center justify-center w-4 bg-navy-900 border border-l-0 border-b-0 border-white/10 rounded-tr-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
           aria-label="Increment"
         >
           <ChevronUp size={10} strokeWidth={2.5} />
         </button>
+        </Tooltip>
+        <Tooltip content="Decrement (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}
           onClick={e => stepBy(-1, e.shiftKey)}
           disabled={disabled || atMin}
-          title="Decrement (Shift = ×10)"
           className="flex-1 flex items-center justify-center w-4 bg-navy-900 border border-l-0 border-white/10 rounded-br-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
           aria-label="Decrement"
         >
           <ChevronDown size={10} strokeWidth={2.5} />
         </button>
+        </Tooltip>
       </div>
     </div>
   )
+  // The optional `title` prop is a field-level tooltip (custom Tooltip, never
+  // the native title attribute — app rule).
+  return title ? <Tooltip content={title} triggerClassName="block">{field}</Tooltip> : field
 }

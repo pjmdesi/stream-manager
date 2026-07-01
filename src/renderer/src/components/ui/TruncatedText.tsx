@@ -11,10 +11,14 @@ import { Tooltip } from './Tooltip'
  * (plus any color/size classes). The Tooltip's trigger wrapper is forced to
  * block + min-w-0 so truncation keeps working inside flex parents.
  */
-export function TruncatedText({ text, className = 'truncate', side = 'top' }: {
+export function TruncatedText({ text, className = 'truncate', side = 'top', triggerClassName = 'block min-w-0' }: {
   text: string
   className?: string
   side?: 'top' | 'bottom' | 'left' | 'right'
+  /** Classes for the Tooltip trigger wrapper used while truncated. The default
+   *  (block + min-w-0) shrink-fits in both block and flex parents; pass e.g.
+   *  'flex-1 min-w-0' when the label itself is a growing flex child. */
+  triggerClassName?: string
 }) {
   const ref = useRef<HTMLSpanElement>(null)
   const [truncated, setTruncated] = useState(false)
@@ -40,7 +44,7 @@ export function TruncatedText({ text, className = 'truncate', side = 'top' }: {
 
   if (!truncated) return label
   return (
-    <Tooltip content={text} side={side} triggerClassName="block w-full min-w-0">
+    <Tooltip content={text} side={side} triggerClassName={triggerClassName}>
       {label}
     </Tooltip>
   )

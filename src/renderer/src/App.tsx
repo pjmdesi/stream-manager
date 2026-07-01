@@ -201,7 +201,7 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
         <span>
           {allDownloading ? `${active.length} downloading` : `${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
         </span>
-        {etaText && <span title={etaTitle}>{etaText}</span>}
+        {etaText && <Tooltip content={etaTitle}><span>{etaText}</span></Tooltip>}
       </div>
     </button>
   )

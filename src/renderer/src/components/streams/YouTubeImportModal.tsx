@@ -3,6 +3,7 @@ import { Search, Radio, Film, Check, Loader2, AlertCircle, Globe, Link as LinkIc
 import type { YouTubeImportVideo } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
+import { TruncatedText } from '../ui/TruncatedText'
 import { useStore } from '../../hooks/useStore'
 
 function fmtDuration(s?: number): string {
@@ -282,7 +283,7 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-200 truncate" title={v.title}>{v.title || '(untitled)'}</p>
+                  <TruncatedText text={v.title || '(untitled)'} className="text-xs text-gray-200 truncate" />
                   <div className="flex items-center gap-1.5 mt-1 text-[10px] text-gray-400 flex-wrap">
                     {v.isLivestream
                       ? <span className="inline-flex items-center gap-1 text-pink-300"><Radio size={10} /> Live</span>

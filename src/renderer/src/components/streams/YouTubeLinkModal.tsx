@@ -4,6 +4,7 @@ import type { YouTubeImportVideo, StreamFolder } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
+import { TruncatedText } from '../ui/TruncatedText'
 import { ThumbImage } from './ThumbImage'
 import { useStore } from '../../hooks/useStore'
 
@@ -244,7 +245,7 @@ export function YouTubeLinkModal({ isOpen, onClose }: { isOpen: boolean; onClose
                   )}
                 </div>
                 <div className="w-[26%] min-w-0">
-                  <p className="text-xs text-gray-200 truncate" title={folderTitle(f)}>{folderTitle(f)}</p>
+                  <TruncatedText text={folderTitle(f)} className="text-xs text-gray-200 truncate" />
                   <p className="text-[10px] text-gray-400 tabular-nums mt-0.5">{f.date}</p>
                 </div>
                 <ArrowRight size={14} className="shrink-0 text-gray-500" />
