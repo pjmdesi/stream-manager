@@ -316,15 +316,20 @@ app.whenReady().then(() => {
 
   const mainWindow = createWindow()
 
-  // Dev-only: load the React DevTools browser extension so the Components +
-  // Profiler tabs appear in the detached DevTools. The dynamic import + is.dev
-  // guard keep this devDependency out of packaged builds (it's never required
-  // in prod). Electron registers extension content scripts asynchronously, so
-  // the first page load always races the install and misses the DevTools hook
-  // (the tabs only worked after a manual Ctrl+R) — installing before
-  // createWindow doesn't help and broke the DevTools auto-open. Instead, once
-  // the install resolves, reload the page one time to automate that Ctrl+R.
-  if (is.dev) {
+  // Dev-only AND opt-in: load the React DevTools browser extension so the
+  // Components + Profiler tabs appear in the detached DevTools. Opt-in because
+  // the extension's hook instruments every React commit even when the DevTools
+  // window is closed, which visibly degrades animation smoothness (e.g. the
+  // detail-sidebar slide) during normal dev work. Enable it only when needed:
+  //   PowerShell:  $env:REACT_DEVTOOLS='1'; npm run dev
+  // The dynamic import + is.dev guard keep this devDependency out of packaged
+  // builds (it's never required in prod). Electron registers extension content
+  // scripts asynchronously, so the first page load always races the install and
+  // misses the DevTools hook (the tabs only worked after a manual Ctrl+R) —
+  // installing before createWindow doesn't help and broke the DevTools
+  // auto-open. Instead, once the install resolves, reload the page one time to
+  // automate that Ctrl+R.
+  if (is.dev && process.env.REACT_DEVTOOLS === '1') {
     void import('electron-devtools-installer')
       .then((mod) => {
         // CJS interop varies by how electron-vite emits the externalized import

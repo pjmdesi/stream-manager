@@ -5676,8 +5676,19 @@ function SidebarDetail({
         // Upsert into whichever pool the broadcast belongs to. We don't
         // know live vs VOD at the call site, so try both — only one
         // will match an existing id, and the unmatched setter no-ops.
-        setYtBroadcasts(prev => prev.some(b => b.id === fresh.id) ? prev.map(b => b.id === fresh.id ? fresh : b) : prev)
-        setYtVods(prev => prev.some(v => v.id === fresh.id) ? prev.map(v => v.id === fresh.id ? fresh : v) : prev)
+        // Identity-preserving when the fetched data is unchanged: returning
+        // prev untouched skips the state update entirely. Without this, the
+        // on-open refresh landed a new-array/new-object update right at the
+        // sidebar slide's tail on EVERY open (a full page + SidebarDetail
+        // re-render for byte-identical data) — a visible animation hitch.
+        const upsertIfChanged = (prev: typeof ytBroadcasts): typeof ytBroadcasts => {
+          const idx = prev.findIndex(item => item.id === fresh.id)
+          if (idx === -1) return prev
+          if (JSON.stringify(prev[idx]) === JSON.stringify(fresh)) return prev
+          return prev.map(item => item.id === fresh.id ? fresh : item)
+        }
+        setYtBroadcasts(upsertIfChanged)
+        setYtVods(upsertIfChanged)
       } catch {
         // Silent — next interval / open / manual refresh will retry.
       }
