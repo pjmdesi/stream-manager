@@ -3,6 +3,7 @@ import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Sciss
 import { VideoThumb, CHECKER } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
+import { TruncatedText } from '../ui/TruncatedText'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
@@ -259,7 +260,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
       </div>
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex items-center gap-1.5 min-w-0">
-          <p className="text-xs text-gray-200 truncate" title={name}>{name}</p>
+          <TruncatedText text={name} className="text-xs text-gray-200 truncate" />
           {archived && (
             <Tooltip content="Archived by Stream Manager" side="top">
               <Archive size={11} className="shrink-0 text-emerald-400" />
@@ -368,7 +369,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
         />
       </div>
       <div className="flex-1 min-w-0 flex flex-col">
-        <p className="text-xs text-gray-200 truncate" title={name}>{name}</p>
+        <TruncatedText text={name} className="text-xs text-gray-200 truncate" />
         <div className={META_LINE}>
           {isSm ? <FileImage size={11} className={TYPE_ICON} /> : <ImageIcon size={11} className={TYPE_ICON} />}
           <span className="flex-1 truncate min-w-0">{dims ? `${dims.width}×${dims.height}` : 'Image'}</span>
