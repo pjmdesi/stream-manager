@@ -19,6 +19,8 @@ import { useStore } from '../../hooks/useStore'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useConversionJobs } from '../../context/ConversionContext'
+import { useOpenItems, blockReasonText, type OpenSource } from '../../context/OpenItemsContext'
+import { useInUse } from '../../hooks/useInUse'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
 import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal } from '../streams/legacyStreamsShared'
 import { pickColorForNewTag } from '../../constants/tagColors'
@@ -1036,6 +1038,9 @@ export function StreamsPage({
   // uses; the keys are folder relativePath OR date, matching what the
   // `archiveMarkAsArchived` group-completion hook uses for routing.
   const { jobs: conversionJobs } = useConversionJobs()
+  // Combined in-use check (converter + open in player/thumbnail) for disabling
+  // the stream's Delete button while anything inside it is in use.
+  const { streamReason } = useInUse()
   const archivingFolderKeys = useMemo(() => {
     const set = new Set<string>()
     for (const j of conversionJobs) {
@@ -3114,6 +3119,7 @@ export function StreamsPage({
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
               onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
+              deleteBlockReason={streamReason(renderedFolder.folderPath, isDumpMode ? [...renderedFolder.videos, ...renderedFolder.thumbnails] : undefined)}
               onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
               onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
               // The two callbacks above already return the promise from
@@ -4718,7 +4724,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onReloadFolders, onOpenFolder, onOpenThumbnails, onDelete,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onReloadFolders, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -4798,6 +4804,8 @@ function SidebarDetail({
    *  always defaulting to the preferred one. */
   onOpenThumbnails: (variantOrdinal?: number) => void
   onDelete: () => void
+  /** Why this stream can't be deleted right now (in use), or null. */
+  deleteBlockReason: string | null
   onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => Promise<void> | void
   onPushToTwitch: () => Promise<void> | void
   ytConnected: boolean
@@ -7526,8 +7534,8 @@ function SidebarDetail({
                 </button>
               </Tooltip>
             )}
-            <Tooltip content="Delete this stream and all its contents">
-              <button onClick={onDelete} className={PANEL_ACTION_BUTTON_RED}>
+            <Tooltip content={deleteBlockReason ? `Can't delete: this stream is ${deleteBlockReason}` : 'Delete this stream and all its contents'}>
+              <button onClick={onDelete} disabled={!!deleteBlockReason} className={`${PANEL_ACTION_BUTTON_RED} disabled:opacity-40 disabled:cursor-not-allowed`}>
                 <Trash2 size={13} />
                 <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Delete</CollapsibleLabel>
               </button>
@@ -8856,8 +8864,28 @@ function DeleteModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filesInFolder, setFilesInFolder] = useState<string[] | null>(null)
-  const [inUseByConverter, setInUseByConverter] = useState(false)
+  const [blockReason, setBlockReason] = useState<string | null>(null)
+  const { openReason, folderOpenReason } = useOpenItems()
   const linkedVideoId = target.meta?.ytVideoId
+
+  // Why this stream can't be deleted right now: any of its files is open in the
+  // player / thumbnail editor, or held by a converter job. Dump mode checks the
+  // specific date's files (its folder is shared with other streams); folder mode
+  // checks the whole folder. Open-items is sync + authoritative; the converter
+  // check is an async IPC. Returns the reason text, or null when deletable.
+  const computeBlockReason = useCallback(async (): Promise<string | null> => {
+    const openSrc: OpenSource | null = isDumpMode
+      ? (filesInFolder ? (filesInFolder.map(openReason).find(Boolean) ?? null) : null)
+      : folderOpenReason(target.folderPath)
+    if (openSrc) return blockReasonText(openSrc)
+    try {
+      const used = isDumpMode
+        ? (filesInFolder ? (await Promise.all(filesInFolder.map(p => window.api.isPathInUseByConverter(p)))).some(Boolean) : false)
+        : await window.api.isFolderInUseByConverter(target.folderPath)
+      if (used) return blockReasonText('converter')
+    } catch { /* leave null; confirm re-checks before the actual delete */ }
+    return null
+  }, [isDumpMode, filesInFolder, target.folderPath, openReason, folderOpenReason])
 
   useEffect(() => {
     if (isDumpMode) {
@@ -8875,41 +8903,25 @@ function DeleteModal({
     }
   }, [target.folderPath, target.date, isDumpMode, target.videos])
 
-  // Block deletion while the converter is reading any of these files — deleting
-  // mid-convert corrupts the job (the OS refuses to delete an open file for the
-  // same reason). Folder mode checks the whole folder; dump mode checks the
-  // specific date's files, since its folder is shared with other streams.
+  // Keep the disabled state in sync as files open/close or jobs start/finish.
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      try {
-        const used = isDumpMode
-          ? (filesInFolder
-              ? (await Promise.all(filesInFolder.map(p => window.api.isPathInUseByConverter(p)))).some(Boolean)
-              : false)
-          : await window.api.isFolderInUseByConverter(target.folderPath)
-        if (!cancelled) setInUseByConverter(used)
-      } catch { /* leave false; the confirm-time re-check is the backstop */ }
-    })()
+    computeBlockReason().then(r => { if (!cancelled) setBlockReason(r) })
     return () => { cancelled = true }
-  }, [isDumpMode, target.folderPath, filesInFolder])
+  }, [computeBlockReason])
 
   const confirm = async () => {
     setBusy(true)
     setError(null)
-    // Authoritative re-check against the main-process job map: a conversion may
-    // have started since the modal opened.
-    try {
-      const used = isDumpMode
-        ? (await Promise.all((filesInFolder ?? []).map(p => window.api.isPathInUseByConverter(p)))).some(Boolean)
-        : await window.api.isFolderInUseByConverter(target.folderPath)
-      if (used) {
-        setInUseByConverter(true)
-        setBusy(false)
-        setError('These files are being converted right now. Cancel the conversion in the Converter before deleting.')
-        return
-      }
-    } catch { /* fall through — the delete itself will surface any failure */ }
+    // Authoritative re-check: a file may have been opened, or a conversion
+    // started, since the modal opened.
+    const reason = await computeBlockReason()
+    if (reason) {
+      setBlockReason(reason)
+      setBusy(false)
+      setError(`Can't delete: this stream is ${reason}. Close it (or cancel the conversion) and try again.`)
+      return
+    }
     try {
       if (isDumpMode) {
         await window.api.deleteStreamFiles(target.folderPath, target.date)
@@ -8948,16 +8960,16 @@ function DeleteModal({
             {error ? 'Close' : 'Cancel'}
           </Button>
           {!error && (
-            <Button variant="primary" size="sm" loading={busy} disabled={inUseByConverter} onClick={confirm}>
+            <Button variant="primary" size="sm" loading={busy} disabled={!!blockReason} onClick={confirm}>
               {alsoDeleteYt && linkedVideoId ? 'Move to Recycle Bin & Delete from YouTube' : 'Move to Recycle Bin'}
             </Button>
           )}
         </>
       }
     >
-      {inUseByConverter && (
+      {blockReason && (
         <div className="mb-3 rounded-lg border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-          Some of these files are being converted right now. Cancel the conversion in the Converter before deleting.
+          This stream is {blockReason}. Close it (or cancel the conversion) before deleting.
         </div>
       )}
       <p className="text-sm text-gray-300 mb-3">The following will be moved to the Recycle Bin:</p>

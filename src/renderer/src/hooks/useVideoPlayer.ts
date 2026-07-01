@@ -489,13 +489,6 @@ export function useVideoPlayer() {
     setState(prev => ({ ...prev, error: null }))
   }, [])
 
-  // Surface a message in the player's error banner without going through
-  // loadFile. Used when the open file is removed out from under the player
-  // (e.g. deleted in File Explorer) so the user gets a clear reason.
-  const reportError = useCallback((message: string) => {
-    setState(prev => ({ ...prev, error: message }))
-  }, [])
-
   const closeVideo = useCallback(async () => {
     releaseAudioElements()
     if (videoRef.current) {
@@ -533,7 +526,6 @@ export function useVideoPlayer() {
     fastSeek,
     togglePlay,
     clearError,
-    reportError,
     closeVideo,
   }
 }

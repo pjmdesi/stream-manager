@@ -1220,15 +1220,8 @@ export function registerStreamsIPC(): void {
     const allMeta = readAllMeta(dir)
     delete allMeta[date]
     writeAllMeta(dir, allMeta)
-    const removed: string[] = []
     for (const filePath of filesForDate(dir, date)) {
-      try { await shell.trashItem(filePath); removed.push(filePath) } catch {}
-    }
-    // Announce the SM-initiated stream deletion so an open player/thumbnail
-    // session for one of these files closes gracefully (vs an external delete,
-    // which is treated as an error). See files:trashFile for the rationale.
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('sm:deleted', { kind: 'stream', paths: removed })
+      try { await shell.trashItem(filePath) } catch {}
     }
   })
 
@@ -1451,13 +1444,6 @@ export function registerStreamsIPC(): void {
     const allMeta = readAllMeta(streamsDir)
     delete allMeta[key]
     writeAllMeta(streamsDir, allMeta)
-
-    // Announce the SM-initiated stream deletion so an open player/thumbnail
-    // session under this folder closes gracefully. The watcher was paused for
-    // the trash, so this is the only deletion signal these sessions receive.
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('sm:deleted', { kind: 'stream', paths: [folderPath], folderPath })
-    }
   })
 
   ipcMain.handle('streams:removeOrphans', async (_event, streamsDir: string, folderNames: string[]) => {

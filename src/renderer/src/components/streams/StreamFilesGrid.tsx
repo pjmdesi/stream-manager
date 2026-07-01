@@ -4,7 +4,7 @@ import { VideoThumb, CHECKER } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
 import { useCloudOps } from '../../context/CloudOpsContext'
-import { useConversionJobs } from '../../context/ConversionContext'
+import { useInUse } from '../../hooks/useInUse'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { getCachedHydration, rememberHydration, rememberHydrationOne } from '../../lib/hydrationCache'
 import type { StreamFolder, VideoEntry, VideoInfo } from '../../types'
@@ -205,7 +205,7 @@ function SelectOverlay({ onDragStart, onDragEnter, onClick }: {
   )
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onReload, inUseByConverter }: {
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onReload, blockReason }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -226,8 +226,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   onOffload: (path: string) => void
   onPin: (path: string) => void
   onReload: () => void
-  /** True when a converter job currently holds this file — its delete is blocked. */
-  inUseByConverter: boolean
+  /** Why this file can't be deleted right now (converter / open elsewhere), or
+   *  null when it's deletable. */
+  blockReason: string | null
 }) {
   const name = path.split(/[\\/]/).pop() ?? path
   const isShort = entry?.category === 'short'
@@ -277,9 +278,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
             <button onClick={() => onSendToConverter(path)} className={ACTION_GREEN}><Zap size={12} /> Convert</button>
           </Tooltip>
           <CloudAction isLocal={isLocal} active={cloudSyncActive} busy={busy} onOffload={() => onOffload(path)} onPin={() => onPin(path)} />
-          <Tooltip content={inUseByConverter ? 'In use by the converter' : 'Move to recycle bin'} side="top">
+          <Tooltip content={blockReason ? `Can't delete: ${blockReason}` : 'Move to recycle bin'} side="top">
             <button
-              disabled={inUseByConverter}
+              disabled={!!blockReason}
               onClick={async () => {
                 // Authoritative backstop in case the reactive disable lags a job
                 // that just started: never trash a file the converter still holds.
@@ -296,7 +297,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   )
 }
 
-function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin }: {
+function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin, blockReason }: {
   path: string
   thumbIndex: number
   /** Scan-flag-based local hint for rendering the image (immediate). */
@@ -319,6 +320,9 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
   onOpenLightbox: (index: number) => void
   onOffload: (path: string) => void
   onPin: (path: string) => void
+  /** Why this image can't be deleted (open in the thumbnail editor, etc.), or
+   *  null when it's deletable. */
+  blockReason: string | null
 }) {
   const name = path.split(/[\\/]/).pop() ?? path
   const [dims, setDims] = useState<{ width: number; height: number } | null>(null)
@@ -375,8 +379,12 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
             </Tooltip>
           )}
           <CloudAction isLocal={cloudIsLocal} active={cloudSyncActive} busy={busy} onOffload={() => onOffload(path)} onPin={() => onPin(path)} />
-          <Tooltip content="Move to recycle bin" side="top">
-            <button onClick={() => onDeleteThumbnail(path)} className={ACTION_RED}><Trash2 size={12} /></button>
+          <Tooltip content={blockReason ? `Can't delete: ${blockReason}` : 'Move to recycle bin'} side="top">
+            <button
+              disabled={!!blockReason}
+              onClick={() => onDeleteThumbnail(path)}
+              className={`${ACTION_RED} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+            ><Trash2 size={12} /></button>
           </Tooltip>
         </div>
       </div>
@@ -426,18 +434,12 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
 
   const { enqueueOffload, enqueueHydrate, offloadItems, hydrateItems } = useCloudOps()
 
-  // Files the converter is actively holding (queued/running/etc). Deleting one
-  // mid-convert corrupts the job, so its trash action is disabled. Sourced from
-  // the reactive ConversionContext for the UI; the click handler re-checks the
-  // authoritative main-process state to cover the rare just-started-job race.
-  const { jobs: conversionJobs } = useConversionJobs()
-  const converterBusyPaths = useMemo(() => {
-    const inUse = new Set(['queued', 'downloading', 'running', 'replacing', 'paused'])
-    const s = new Set<string>()
-    for (const j of conversionJobs) if (inUse.has(j.status)) s.add(j.inputFile.replace(/\\/g, '/'))
-    return s
-  }, [conversionJobs])
-  const isConverterBusy = useCallback((p: string) => converterBusyPaths.has(p.replace(/\\/g, '/')), [converterBusyPaths])
+  // A file can't be deleted while it's in use: held by a converter job, or open
+  // in the player / thumbnail editor. fileReason returns the reason (or null
+  // when deletable) so the disabled control can explain itself. The click
+  // handler re-checks the authoritative main-process converter state for the
+  // rare just-started-job race.
+  const { fileReason } = useInUse()
 
   const [showVideo, setShowVideo] = useState(true)
   const [showImage, setShowImage] = useState(true)
@@ -661,11 +663,13 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const bulkConvert = () => { if (selectedVideos.length) { onSendFilesToConverter(selectedVideos); clearSelection() } }
   const bulkOffload = () => { enqueueOffload(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
   const bulkPin = () => { enqueueHydrate(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
-  const selectedHasConverterBusy = useMemo(() => selectedVideos.some(isConverterBusy), [selectedVideos, isConverterBusy])
+  const selectedHasBlocked = useMemo(() => selectedPaths.some(p => fileReason(p)), [selectedPaths, fileReason])
   const bulkTrash = async () => {
     for (const p of selectedPaths) {
-      // Never trash a file the converter still holds (authoritative re-check); the
-      // rest of the selection is deleted normally.
+      // Skip anything that's in use — open in the player/thumbnail editor, or
+      // (authoritative re-check) still held by the converter; the rest of the
+      // selection is deleted normally.
+      if (fileReason(p)) continue
       if (await window.api.isPathInUseByConverter(p).catch(() => false)) continue
       await window.api.trashFile(p).catch(() => {})
     }
@@ -706,7 +710,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                 </>
               )}
               {selectedPaths.length > 0 && (
-                <Tooltip content={selectedHasConverterBusy ? 'Move selected to recycle bin (skips files in use by the converter)' : 'Move selected to recycle bin'} side="top">
+                <Tooltip content={selectedHasBlocked ? 'Move selected to recycle bin (skips files in use)' : 'Move selected to recycle bin'} side="top">
                   <button onClick={bulkTrash} className={ACTION_RED}><Trash2 size={12} /></button>
                 </Tooltip>
               )}
@@ -758,7 +762,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onOffload={offloadFile}
               onPin={pinFile}
               onReload={onReload}
-              inUseByConverter={isConverterBusy(path)}
+              blockReason={fileReason(path)}
             />
           )
         })}
@@ -788,6 +792,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onOpenLightbox={onOpenLightbox}
               onOffload={offloadFile}
               onPin={pinFile}
+              blockReason={fileReason(path)}
             />
           )
         })}

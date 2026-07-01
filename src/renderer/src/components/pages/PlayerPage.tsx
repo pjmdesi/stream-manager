@@ -4,6 +4,7 @@ import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, C
 import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass } from '../../constants/tagColors'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
+import { useOpenItems } from '../../context/OpenItemsContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry } from '../../types'
@@ -738,20 +739,6 @@ interface SiblingFile {
   entry?: Partial<VideoEntry>  // full videoMap entry (size/duration/codec/dims) for VideoRow
 }
 
-/** When the open video `openNorm` is deleted, pick the next session video to
- *  open: the nearest surviving sibling after it, else the nearest before it,
- *  else null when none remain (caller closes the session). `deleted` holds the
- *  just-removed paths since the list may not have refreshed yet. */
-function pickNextSibling(siblings: SiblingFile[], openNorm: string, deleted: Set<string>): string | null {
-  const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/$/, '')
-  const alive = (s: SiblingFile): boolean => { const n = norm(s.path); return n !== openNorm && !deleted.has(n) }
-  const idx = siblings.findIndex(s => norm(s.path) === openNorm)
-  const after = siblings.slice(idx + 1).find(alive)
-  if (after) return after.path
-  const before = [...siblings.slice(0, Math.max(idx, 0))].reverse().find(alive)
-  return before ? before.path : null
-}
-
 function SiblingVideoItem({
   item,
   isActive,
@@ -1015,8 +1002,16 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     videoRef, state, loadFile,
     enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction, cancelTrackExtraction,
     setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, recomputeAudibility,
-    clearError, reportError, closeVideo, seek, fastSeek, togglePlay,
+    clearError, closeVideo, seek, fastSeek, togglePlay,
   } = useVideoPlayer()
+
+  // Mark the open video as in-use so the Streams page blocks deleting it (and
+  // its stream) until it's closed here — the same guard the converter uses.
+  const { setOpen: setOpenItems } = useOpenItems()
+  useEffect(() => {
+    setOpenItems('player', state.filePath ? [state.filePath] : [])
+  }, [state.filePath, setOpenItems])
+  useEffect(() => () => setOpenItems('player', []), [setOpenItems])
   // Publish "player has video loaded" to the page-activity bus so
   // App.tsx can drive the nav's activity indicator. filePath is null
   // before load + after closeVideo, so the boolean is always in sync
@@ -1186,9 +1181,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       const videoMap: Record<string, Partial<VideoEntry>> = folderMeta.videoMap ?? {}
       const drafts: Record<string, import('../../types').ClipDraft> = folderMeta.clipDrafts ?? {}
       setFolderDrafts(Object.values(drafts))
+      const seenPaths = new Set<string>()
       const videoFiles = files
         .filter(f => !f.isDirectory && SESSION_VIDEO_EXTS.has(f.extension.toLowerCase()))
         .filter(f => !isDump || !date || f.name.includes(date))
+        // Dedupe by path: a synced-folder quirk (reparse points / junctions) can
+        // surface the same file twice, which would collide keys in the panel.
+        .filter(f => { const k = f.path.replace(/\\/g, '/'); if (seenPaths.has(k)) return false; seenPaths.add(k); return true })
         .sort((a, b) => a.name.localeCompare(b.name))
       // videoMap keys are forward-slash paths relative to the stream folder.
       // For top-level files this equals the basename; for nested files (e.g.
@@ -1373,56 +1372,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     }
     loadFile(entry.filePath)
   }, [loadFile])
-
-  // ── Deletion handling ───────────────────────────────────────────────────
-  // Fresh values for the event handlers below, so they don't re-subscribe on
-  // every file/list change.
-  const filePathRef = useRef(state.filePath)
-  useEffect(() => { filePathRef.current = state.filePath }, [state.filePath])
-  const siblingFilesRef = useRef(siblingFiles)
-  useEffect(() => { siblingFilesRef.current = siblingFiles }, [siblingFiles])
-  // Paths SM just deleted out from under the player — suppresses the external
-  // "removed outside SM" error during the brief window before the graceful
-  // close/advance settles (sm:deleted fires immediately; streams:changed and the
-  // <video> onError can fire a beat later on the same, now-gone path).
-  const smHandledRef = useRef<Set<string>>(new Set())
-
-  // SM-initiated deletion: close the session when the whole stream (or the last
-  // applicable video) is gone, otherwise advance to the next surviving sibling.
-  useEffect(() => {
-    return window.api.onSmDeleted(({ kind, paths, folderPath }) => {
-      const open = filePathRef.current
-      if (!open) return
-      const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/$/, '')
-      const openN = norm(open)
-      const deleted = new Set(paths.map(norm))
-      const underFolder = folderPath ? (openN === norm(folderPath) || openN.startsWith(norm(folderPath) + '/')) : false
-      if (!deleted.has(openN) && !underFolder) {
-        // A sibling went away, not the open file — just refresh the panel.
-        reloadSessionPanel(filePathRef.current)
-        return
-      }
-      smHandledRef.current.add(openN)
-      if (kind === 'stream') { closeVideo(); return }
-      const next = pickNextSibling(siblingFilesRef.current, openN, deleted)
-      if (next) loadFile(next); else closeVideo()
-    })
-  }, [closeVideo, loadFile, reloadSessionPanel])
-
-  // External deletion (File Explorer): the open file vanished with no sm:deleted
-  // signal. Surface it as an error rather than handling it silently — deleting
-  // outside SM is discouraged, so the error is the intended deterrent.
-  useEffect(() => {
-    return window.api.onStreamsChanged(async () => {
-      const open = filePathRef.current
-      if (!open) return
-      const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/$/, '')
-      if (smHandledRef.current.has(norm(open))) return
-      const exists = await window.api.fileExists(open).catch(() => true)
-      if (!exists) reportError('This video was removed outside Stream Manager. Delete videos from within the app so the player can update cleanly.')
-    })
-  }, [reportError])
-
   // Cache-buster for recent thumbnails — bumps whenever the folder list
   // reloads so an edited thumbnail re-fetches.
   const recentsThumbsKey = useMemo(() => Date.now(), [sortedStreamFolders])
@@ -1763,6 +1712,20 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     })
     return unsub
   }, [reloadSessionPanel, state.filePath, clearExportingDraftId])
+
+  // Refresh the Session Videos panel when the stream's files change on disk, so
+  // a sibling deleted from the Streams page (which is allowed while another of
+  // its videos is open here) drops out of the list instead of lingering.
+  // Debounced: streams:changed fires in bursts, and each reload runs a
+  // recursive listing + a PowerShell hydration check, so coalesce them.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = window.api.onStreamsChanged(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => reloadSessionPanel(state.filePath), 500)
+    })
+    return () => { if (timer) clearTimeout(timer); off() }
+  }, [reloadSessionPanel, state.filePath])
 
   // Cover error/cancel paths: if the job failed or was cancelled, release the draft lock so the
   // user can retry. (onJobError is broadcast; cancels surface via the jobs context state.)
@@ -3443,18 +3406,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                     className="w-full h-full object-contain cursor-pointer"
                     preload="auto"
                     onClick={effectiveTogglePlay}
-                    onError={async () => {
-                      // Only surface an error when the file genuinely vanished
-                      // (external delete) — not for codec issues or the empty src
-                      // set during closeVideo — and not for an SM delete we're
-                      // already handling gracefully.
-                      const open = filePathRef.current
-                      if (!open) return
-                      const norm = open.replace(/\\/g, '/').replace(/\/$/, '')
-                      if (smHandledRef.current.has(norm)) return
-                      const exists = await window.api.fileExists(open).catch(() => true)
-                      if (!exists) reportError('This video was removed outside Stream Manager. Delete videos from within the app so the player can update cleanly.')
-                    }}
                   />
                   {/* Crop overlay — values come from the active clip region + selected aspect */}
                   {isClipMode && clipState.cropAspect !== 'off' && videoInfo && vcSize.w > 0 && (() => {

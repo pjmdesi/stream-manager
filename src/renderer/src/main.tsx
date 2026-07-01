@@ -4,6 +4,7 @@ import App from './App'
 import { StoreProvider } from './context/StoreContext'
 import { WatcherProvider } from './context/WatcherContext'
 import { ConversionProvider } from './context/ConversionContext'
+import { OpenItemsProvider } from './context/OpenItemsContext'
 import './assets/index.css'
 
 // Top-level fallback: shown when the entire app tree crashes (e.g. a broken context provider).
@@ -74,7 +75,9 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
       <StoreProvider>
         <WatcherProvider>
           <ConversionProvider>
-            <App />
+            <OpenItemsProvider>
+              <App />
+            </OpenItemsProvider>
           </ConversionProvider>
         </WatcherProvider>
       </StoreProvider>

@@ -243,18 +243,10 @@ export function registerFilesIPC(): void {
   // surface to the caller so the UI can show a failure.
   ipcMain.handle('files:trashFile', async (event, filePath: string) => {
     await shell.trashItem(path.normalize(filePath))
-    // Announce an SM-initiated deletion so open player/thumbnail sessions can
-    // close or advance gracefully. This deliberate signal is what distinguishes
-    // an in-app delete from an external (Explorer) one: the latter only ever
-    // surfaces via the debounced chokidar `streams:changed` and is treated as
-    // an error. Fires immediately, so it always beats that ~800ms echo.
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('sm:deleted', { kind: 'file', paths: [filePath] })
-    }
-    // If an SM-generated thumbnail file was trashed, also notify the renderer
-    // right away so an open thumbnail-editor session for that variant can switch
-    // to an alternate or close — otherwise a quick edit would re-save
-    // (resurrect) it before the chokidar watcher's debounced event arrives.
+    // If an SM-generated thumbnail file was trashed, notify the renderer right
+    // away so an open thumbnail-editor session for that variant can switch to
+    // an alternate or close — otherwise a quick edit would re-save (resurrect)
+    // it before the chokidar watcher's debounced `streams:changed` arrives.
     if (/[_-]sm-thumbnail(?:-\d+)?\.(png|json)$/i.test(filePath)) {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (win && !win.isDestroyed()) win.webContents.send('streams:changed')

@@ -176,7 +176,6 @@ declare global {
       watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
       unwatchStreamsDir(): Promise<void>
       onStreamsChanged(cb: () => void): () => void
-      onSmDeleted(cb: (payload: { kind: 'file' | 'stream'; paths: string[]; folderPath?: string }) => void): () => void
       previewReschedule(folderPath: string, oldDate: string, newDate: string): Promise<{
         isDump: boolean
         folderConflict: boolean

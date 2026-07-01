@@ -350,15 +350,6 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('streams:changed', handler)
   },
 
-  // SM-initiated deletion of a file or whole stream. Lets open player/thumbnail
-  // sessions close or advance gracefully, vs an external delete (streams:changed
-  // only) which is surfaced as an error.
-  onSmDeleted: (callback: (payload: { kind: 'file' | 'stream'; paths: string[]; folderPath?: string }) => void) => {
-    const handler = (_e: unknown, payload: { kind: 'file' | 'stream'; paths: string[]; folderPath?: string }) => callback(payload)
-    ipcRenderer.on('sm:deleted', handler)
-    return () => ipcRenderer.removeListener('sm:deleted', handler)
-  },
-
   previewReschedule: (folderPath: string, oldDate: string, newDate: string) =>
     ipcRenderer.invoke('streams:previewReschedule', folderPath, oldDate, newDate),
 
