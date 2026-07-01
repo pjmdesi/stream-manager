@@ -144,22 +144,27 @@ export function registerVideoIPC(): void {
     // matter which video inside it was opened — so opening several files in
     // one stream doesn't stack up duplicate rows. Standalone files (no
     // folderPath) fall back to exact-path dedupe and never collapse together.
+    // Same-filePath entries are ALWAYS replaced regardless of folderPath: the
+    // renderer's add effect re-fires once its folder list resolves, so the
+    // same open can arrive first without a folderPath and again with one —
+    // without this, that pair persists as a same-key duplicate.
     const recents = ((getStore() as any).get('playerRecents', []) as PlayerRecentEntry[])
-      .filter(r => entry.folderPath
-        ? r.folderPath !== entry.folderPath
-        : r.filePath !== entry.filePath)
+      .filter(r =>
+        r.filePath !== entry.filePath &&
+        (!entry.folderPath || r.folderPath !== entry.folderPath))
     const updated = [entry, ...recents].slice(0, 20)
     ;(getStore() as any).set('playerRecents', updated)
     return updated
   })
 
   ipcMain.handle('player:removeRecent', (_e, filePath: string | string[]) => {
-    // Accept one path or many: removing a stream-item recent drops every
-    // stored entry for that stream (the renderer resolves the group, since
-    // only it has the folder list to map a file path back to a stream).
+    // Accept one path or many; each may be a file path OR a stream folderPath.
+    // Matching entries on either drops a whole stream's group when its folder
+    // is passed (callers like the prune and the stale-click guard identify a
+    // stream recent by folderPath, not by which file happened to be stored).
     const drop = new Set(Array.isArray(filePath) ? filePath : [filePath])
     const updated = ((getStore() as any).get('playerRecents', []) as PlayerRecentEntry[])
-      .filter(r => !drop.has(r.filePath))
+      .filter(r => !drop.has(r.filePath) && !(r.folderPath && drop.has(r.folderPath)))
     ;(getStore() as any).set('playerRecents', updated)
     return updated
   })

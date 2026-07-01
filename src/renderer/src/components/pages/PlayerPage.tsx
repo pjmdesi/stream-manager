@@ -1393,8 +1393,13 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       // outside any stream (those stay distinct). recents is newest-first, so
       // the first hit per key is the most-recent one we keep.
       const key = folder?.relativePath ?? r.folderPath ?? r.filePath
-      if (seen.has(key)) continue
+      // Also dedupe on the raw filePath (the row's React key): two store
+      // entries for the same file can key differently here when the folder
+      // doesn't resolve (folders still loading, or the stream was deleted),
+      // and must never both render.
+      if (seen.has(key) || seen.has(r.filePath)) continue
       seen.add(key)
+      seen.add(r.filePath)
       out.push({
         ...r,
         streamTitle: folder ? (renderStreamTitle(folder, sortedStreamFolders) || r.streamTitle) : r.streamTitle,
