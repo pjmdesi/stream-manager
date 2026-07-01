@@ -81,21 +81,6 @@
 4. When I delete a file through the files grid (in this case an exported clip video file), the whole streams page and files grid seems to refresh multiple times (the thumbnails all disappear and reappear more than once). This makes the app seem unstable and finicky. If a file is deleted by SM, it should skip the refresh of the streams page and just update the files grid to remove the deleted file.
 5. In the player page, sometimes when seeking or skipping using keyboard shortcuts, the video will be paused after the action instead of resuming (if it was playing before the action). This happens rarely, but it has happened a few times. I haven't found a way to reliably reproduce it yet.
 6. While I was using the clipping tool in the player page, the playhead element got stuck at a specific timecode and would not move. I was still able to use all the playback controls and the video still played, and everything else related to the playhead position still seemed to work (clicking on the timeline, skipping, even clicking on the stuck playhead and dragging (it stay in its stuck position, but the video updated), segment insertion, current timecode value). It is suck in both the tracks timeline and the zoom/scroll bar. The focus mode was on, and there were 2 segments in the timeline. It seemed to happen when I click on an area outside the segments. I don't know if its relevant, but it stuck at about the half way point of the entire timeline. When I exited the clipping tool, it remained stuck, but when I entered the clipping mode again by clicking the clip item in the session videos list, it was no longer stuck. I haven't been able to reproduce.
-7. Noticed some errors in the terminal when launching the dev version of the app:
-```
-[31964:0630/161703.190:ERROR:CONSOLE(2)] "Electron sandboxed_renderer.bundle.js script failed to run", source: node:electron/js2c/sandbox_bundle (2)
-[31964:0630/161703.190:ERROR:CONSOLE(2)] "TypeError: object is not iterable (cannot read property Symbol(Symbol.iterator))", source: node:electron/js2c/sandbox_bundle (2)
-[devtools] React DevTools failed to load: Error: Invalid header: Does not start with Cr24
-    at crxToZip (D:\GitHub\Stream Manager\node_modules\unzip-crx-3\dist\index.js:32:15)
-    at D:\GitHub\Stream Manager\node_modules\unzip-crx-3\dist\index.js:69:32
-    at callHanler (D:\GitHub\Stream Manager\node_modules\yaku\lib\yaku.js:719:16)
-    at tryCatcher (D:\GitHub\Stream Manager\node_modules\yaku\lib\yaku.js:436:32)
-    at D:\GitHub\Stream Manager\node_modules\yaku\lib\yaku.js:575:38
-    at flush (D:\GitHub\Stream Manager\node_modules\yaku\lib\yaku.js:478:17)
-    at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
-[31964:0630/161703.641:ERROR:CONSOLE(1)] "Request Autofill.enable failed. {"code":-32601,"message":"'Autofill.enable' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
-[31964:0630/161703.641:ERROR:CONSOLE(1)] "Request Autofill.setAddresses failed. {"code":-32601,"message":"'Autofill.setAddresses' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
-```
 
 ## Other ideas (small)
 

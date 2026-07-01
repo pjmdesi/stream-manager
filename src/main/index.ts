@@ -292,27 +292,6 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
 }
 
 app.whenReady().then(() => {
-  // Dev-only: load the React DevTools browser extension so the Components +
-  // Profiler tabs appear in the detached DevTools. The dynamic import + is.dev
-  // guard keep this devDependency out of packaged builds (it's never required
-  // in prod). First launch downloads + caches the extension; later launches
-  // load it from cache. A DevTools reload (Ctrl+R) may be needed the first time.
-  if (is.dev) {
-    void import('electron-devtools-installer')
-      .then((mod) => {
-        // CJS interop varies by how electron-vite emits the externalized import
-        // (require → module.exports; dynamic import → namespace), so resolve the
-        // installer fn + React id defensively from both the module.exports
-        // object and any lexer-detected named export.
-        const m = mod as any
-        const exp = m.default ?? m
-        const installExtension = typeof exp === 'function' ? exp : (exp.default ?? exp)
-        const reactTools = exp.REACT_DEVELOPER_TOOLS ?? m.REACT_DEVELOPER_TOOLS
-        return installExtension(reactTools, { loadExtensionOptions: { allowFileAccess: true } })
-      })
-      .then((name: unknown) => console.log(`[devtools] React DevTools loaded: ${(name as any)?.name ?? name}`))
-      .catch((err: unknown) => console.warn('[devtools] React DevTools failed to load:', err))
-  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -336,6 +315,38 @@ app.whenReady().then(() => {
   }
 
   const mainWindow = createWindow()
+
+  // Dev-only: load the React DevTools browser extension so the Components +
+  // Profiler tabs appear in the detached DevTools. The dynamic import + is.dev
+  // guard keep this devDependency out of packaged builds (it's never required
+  // in prod). Electron registers extension content scripts asynchronously, so
+  // the first page load always races the install and misses the DevTools hook
+  // (the tabs only worked after a manual Ctrl+R) — installing before
+  // createWindow doesn't help and broke the DevTools auto-open. Instead, once
+  // the install resolves, reload the page one time to automate that Ctrl+R.
+  if (is.dev) {
+    void import('electron-devtools-installer')
+      .then((mod) => {
+        // CJS interop varies by how electron-vite emits the externalized import
+        // (require → module.exports; dynamic import → namespace), so resolve the
+        // installer fn + React id defensively from both the module.exports
+        // object and any lexer-detected named export.
+        const m = mod as any
+        const exp = m.default ?? m
+        const installExtension = typeof exp === 'function' ? exp : (exp.default ?? exp)
+        const reactTools = exp.REACT_DEVELOPER_TOOLS ?? m.REACT_DEVELOPER_TOOLS
+        return installExtension(reactTools, { loadExtensionOptions: { allowFileAccess: true } })
+      })
+      .then((res: unknown) => {
+        console.log(`[devtools] React DevTools loaded: ${(res as any)?.name ?? res}`)
+        const wc = mainWindow.webContents
+        if (wc.isDestroyed()) return
+        // Reload after the initial load settles so the two don't interleave.
+        if (wc.isLoading()) wc.once('did-finish-load', () => { if (!wc.isDestroyed()) wc.reload() })
+        else wc.reload()
+      })
+      .catch((err: unknown) => console.warn('[devtools] React DevTools failed to load:', err))
+  }
 
   // Create system tray — always visible while app is running
   const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
