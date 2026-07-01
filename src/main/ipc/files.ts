@@ -241,16 +241,15 @@ export function registerFilesIPC(): void {
   // broad. Normalize because shell.trashItem on Windows rejects mixed
   // forward/back-slash paths even though Node's fs handles them. Errors
   // surface to the caller so the UI can show a failure.
-  ipcMain.handle('files:trashFile', async (event, filePath: string) => {
+  ipcMain.handle('files:trashFile', async (_event, filePath: string) => {
     await shell.trashItem(path.normalize(filePath))
-    // If an SM-generated thumbnail file was trashed, notify the renderer right
-    // away so an open thumbnail-editor session for that variant can switch to
-    // an alternate or close — otherwise a quick edit would re-save (resurrect)
-    // it before the chokidar watcher's debounced `streams:changed` arrives.
-    if (/[_-]sm-thumbnail(?:-\d+)?\.(png|json)$/i.test(filePath)) {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (win && !win.isDestroyed()) win.webContents.send('streams:changed')
-    }
+    // No explicit streams:changed here. This used to fire one immediately for SM
+    // thumbnails so an open editor could reconcile before a quick re-save
+    // resurrected the file — but the in-use guard now blocks deleting the variant
+    // that's currently open, so that race is gone. Firing per-file (a thumbnail's
+    // png + json = two events) also bypassed the chokidar debounce and made the
+    // Streams page reload several times per delete. The watcher's single
+    // debounced event now covers the refresh; the editor reconciles off that.
   })
 
   // Pull the OS-cached shell thumbnail for a file (the same image Explorer

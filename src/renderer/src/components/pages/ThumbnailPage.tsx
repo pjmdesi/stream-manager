@@ -2187,9 +2187,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
 
     load()
-    const unsubscribe = window.api.onStreamsChanged(() => { load() })
+    // Debounced: streams:changed arrives in bursts and load() runs a full
+    // listStreams, so coalesce them instead of re-scanning per event.
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const unsubscribe = window.api.onStreamsChanged(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => load(), 400)
+    })
     return () => {
       cancelled = true
+      if (timer) clearTimeout(timer)
       unsubscribe()
     }
   }, [currentStream, config.streamsDir, config.streamMode, config.thumbnailAssetsFromSeason, config.thumbnailAssetsFromTopicGame, assetRefreshTrigger])

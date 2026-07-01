@@ -1736,11 +1736,17 @@ export function StreamsPage({
     // (a reschedule, a thumbnail save, etc.) accidentally pushes the
     // event manually.
     void window.api.watchStreamsDir(streamsDir, streamMode as 'folder-per-stream' | 'dump-folder')
+    // Debounced: streams:changed can arrive in a burst (a delete touches several
+    // files, saves fire their own, etc.), and each reload is a full listStreams +
+    // thumbnail classification plus a thumbsKey bump (the visible flash). Coalesce
+    // them so one logical change is one reload.
+    let timer: ReturnType<typeof setTimeout> | null = null
     const off = window.api.onStreamsChanged(() => {
-      loadFolders()
-      setThumbsKey(Date.now())
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => { loadFolders(); setThumbsKey(Date.now()) }, 400)
     })
     return () => {
+      if (timer) clearTimeout(timer)
       off()
       void window.api.unwatchStreamsDir()
     }
@@ -7534,7 +7540,7 @@ function SidebarDetail({
                 </button>
               </Tooltip>
             )}
-            <Tooltip content={deleteBlockReason ? `Can't delete: this stream is ${deleteBlockReason}` : 'Delete this stream and all its contents'}>
+            <Tooltip content={deleteBlockReason ? "Can't delete: files are currently in use" : 'Delete this stream and all its contents'}>
               <button onClick={onDelete} disabled={!!deleteBlockReason} className={`${PANEL_ACTION_BUTTON_RED} disabled:opacity-40 disabled:cursor-not-allowed`}>
                 <Trash2 size={13} />
                 <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Delete</CollapsibleLabel>
@@ -8919,7 +8925,7 @@ function DeleteModal({
     if (reason) {
       setBlockReason(reason)
       setBusy(false)
-      setError(`Can't delete: this stream is ${reason}. Close it (or cancel the conversion) and try again.`)
+      setError('Can\'t delete: files are currently in use. Close them (or cancel any conversion) and try again.')
       return
     }
     try {
@@ -8969,7 +8975,7 @@ function DeleteModal({
     >
       {blockReason && (
         <div className="mb-3 rounded-lg border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-          This stream is {blockReason}. Close it (or cancel the conversion) before deleting.
+          Some of these files are currently in use. Close them (or cancel any conversion) before deleting.
         </div>
       )}
       <p className="text-sm text-gray-300 mb-3">The following will be moved to the Recycle Bin:</p>
