@@ -53,15 +53,15 @@ function SwatchPicker({
     >
       <div className="grid grid-cols-4 gap-1.5">
         {TAG_COLORS.map(c => (
+          <Tooltip key={c.key} content={c.label}>
           <button
-            key={c.key}
             type="button"
-            title={c.label}
             onMouseDown={e => { e.preventDefault(); onPick(c.key) }}
             className={`w-7 h-7 rounded-full ${c.swatch} transition-transform hover:scale-110 flex items-center justify-center`}
           >
             {c.key === currentKey && <Check size={12} className="text-white drop-shadow" />}
           </button>
+          </Tooltip>
         ))}
       </div>
     </div>,
@@ -460,11 +460,12 @@ function TagListPanel({
                 }
               `}
             >
-              {/* Combine checkbox */}
+              {/* Combine checkbox — stable Tooltip wrapper (visibility via
+                  `open`) so the explanation only shows for dying rows. */}
               {combineMode && (
+                <Tooltip content="Click to uncheck · Double-click to choose as survivor" open={isDying ? undefined : false} triggerClassName="shrink-0">
                 <button
                   type="button"
-                  title={isDying ? 'Click to uncheck · Double-click to choose as survivor' : undefined}
                   onClick={() => {
                     if (!isSelected) onAddToSelected(item)
                     else if (isSurvivor) onRemoveFromSelected(item)
@@ -483,6 +484,7 @@ function TagListPanel({
                   {isSurvivor && <Star size={11} fill="currentColor" />}
                   {isDying && <X size={11} />}
                 </button>
+                </Tooltip>
               )}
 
               {/* Chip / rename input */}

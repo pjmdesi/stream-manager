@@ -173,17 +173,18 @@ function TaggedThumb({ thumb, tag, suppressHover }: { thumb: React.ReactNode; ta
  *  mode is on; shows the file's selected state. Shift-click extends a range. */
 function SelectBox({ checked, onToggle }: { checked: boolean; onToggle: (shiftKey: boolean) => void }) {
   return (
+    <Tooltip content="Select (Shift-click for a range)" triggerClassName="absolute bottom-1 right-1 z-10">
     <button
       type="button"
       onMouseDown={e => e.stopPropagation()}
       onClick={e => { e.stopPropagation(); onToggle(e.shiftKey) }}
-      title="Select (Shift-click for a range)"
-      className={`absolute bottom-1 right-1 z-10 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+      className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
         checked ? 'bg-purple-700 border-purple-700' : 'bg-navy-900/70 border-gray-500 hover:border-gray-300'
       }`}
     >
       {checked && <Check size={10} className="text-white" strokeWidth={3} />}
     </button>
+    </Tooltip>
   )
 }
 

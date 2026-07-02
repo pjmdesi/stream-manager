@@ -8027,22 +8027,23 @@ function UseSuggestedTagsButton({
   }
 
   return (
+    <Tooltip content={
+      armed
+        ? `Click again to overwrite ${existingCount} tag${existingCount === 1 ? '' : 's'}`
+        : `Apply the "${template.name}" tag template to this stream`
+    }>
     <button
       type="button"
       onClick={handleClick}
       className={`text-xs transition-colors ${
         armed ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-gray-200'
       }`}
-      title={
-        armed
-          ? `Click again to overwrite ${existingCount} tag${existingCount === 1 ? '' : 's'}`
-          : `Apply the "${template.name}" tag template to this stream`
-      }
     >
       {armed
         ? `Overwrite ${existingCount} tag${existingCount === 1 ? '' : 's'}?`
         : `Use "${template.name}" tags`}
     </button>
+    </Tooltip>
   )
 }
 

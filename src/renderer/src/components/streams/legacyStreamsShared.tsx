@@ -629,7 +629,7 @@ function SeriesEpisodesTooltip({
                 <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{epNum}:</span>
                 <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{ep.date}</span>
                 <span className={`shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>·</span>
-                <span className={`truncate ${isCurrent ? 'text-purple-300 font-medium' : 'text-gray-200'}`} title={title}>{title}</span>
+                <TruncatedText text={title} className={`truncate ${isCurrent ? 'text-purple-300 font-medium' : 'text-gray-200'}`} />
               </div>
             )
             return isCurrent ? (
@@ -3042,14 +3042,15 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                       />
                     </div>
                     {ytSelectedBroadcastId && (
+                      <Tooltip content="Unlink from broadcast" triggerClassName="shrink-0">
                       <button
                         type="button"
                         onClick={() => { setYtSelectedBroadcastId(''); setYtVideoUnlinked(true); setYtManualUrl(''); setYtManualError('') }}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors shrink-0"
-                        title="Unlink from broadcast"
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors"
                       >
                         <X size={12} />
                       </button>
+                      </Tooltip>
                     )}
                   </div>
 
@@ -3208,17 +3209,16 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                   {(broadcastMismatch || ytSelectedBroadcastId) && (
                     <div className="flex items-center gap-2">
                       {broadcastMismatch && (
+                        <Tooltip content="Replace the metadata in this modal with the title/description/tags from YouTube">
                         <button
                           type="button"
                           onClick={applyBroadcastToMeta}
                           className="flex items-center gap-1.5 text-xs text-gray-200 bg-surface-100 border border-white/10 hover:bg-surface-200 transition-colors rounded-lg px-3 py-1.5"
-                          title={isPastStream
-                            ? 'Replace the metadata in this modal with the title/description/tags from YouTube'
-                            : 'Replace the metadata in this modal with the title/description/tags from YouTube'}
                         >
                           <RefreshCw size={11} className="shrink-0" />
                           Pull info from YouTube
                         </button>
+                        </Tooltip>
                       )}
                       {ytSelectedBroadcastId && (
                         <button
@@ -3869,24 +3869,24 @@ function VideoPickerModal({
           const name = f.split(/[\\/]/).pop() ?? f
           const isOffline = offlineFiles?.has(f) ?? false
           return isOffline ? (
+            <Tooltip key={f} content="Not available locally — sync from cloud first" triggerClassName="block">
             <div
-              key={f}
               className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-white/5 opacity-50 cursor-not-allowed"
-              title="Not available locally — sync from cloud first"
             >
               <Cloud size={13} className="text-gray-400 shrink-0" />
               <span className="text-sm text-gray-400 font-mono truncate">{name}</span>
               <span className="ml-auto text-[10px] text-gray-400 shrink-0">cloud only</span>
             </div>
+            </Tooltip>
           ) : (
+            <Tooltip key={f} content={f} maxWidth="max-w-md" triggerClassName="block">
             <button
-              key={f}
               onClick={() => { onPick(f); onClose() }}
               className="w-full text-left px-3 py-2.5 rounded-lg text-sm text-gray-200 hover:bg-purple-600/20 hover:text-purple-200 border border-transparent hover:border-purple-600/30 transition-colors font-mono truncate"
-              title={f}
             >
               {name}
             </button>
+            </Tooltip>
           )
         })}
       </div>
@@ -6009,10 +6009,17 @@ return (
                         <li
                           key={f.from}
                           className={`text-xs font-mono px-2 py-0.5 ${f.collision ? 'text-red-400' : 'text-gray-400'}`}
-                          title={f.collision ? 'Skipped: a file with that name already exists.' : undefined}
                         >
-                          {f.collision && <AlertTriangle size={10} className="inline mr-1 mb-0.5" />}
-                          {f.from} → {f.to}
+                          {f.collision ? (
+                            <Tooltip content="Skipped: a file with that name already exists." triggerClassName="block">
+                              <span className="block">
+                                <AlertTriangle size={10} className="inline mr-1 mb-0.5" />
+                                {f.from} → {f.to}
+                              </span>
+                            </Tooltip>
+                          ) : (
+                            <>{f.from} → {f.to}</>
+                          )}
                         </li>
                       ))}
                       {reschedulePreview.filesToRename.length === 0 && (
@@ -6446,7 +6453,9 @@ return (
                 {pendingArchiveDecision.taggedFiles.map(p => {
                   const name = p.split(/[\\/]/).pop() ?? p
                   return (
-                    <div key={p} className="px-3 py-1.5 text-xs text-gray-400 truncate" title={p}>{name}</div>
+                    <Tooltip key={p} content={p} maxWidth="max-w-md" triggerClassName="block min-w-0">
+                      <div className="px-3 py-1.5 text-xs text-gray-400 truncate">{name}</div>
+                    </Tooltip>
                   )
                 })}
               </div>

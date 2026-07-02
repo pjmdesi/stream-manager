@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { Search, X } from 'lucide-react'
 import { Modal } from './Modal'
+import { Tooltip } from './Tooltip'
 import tagsRaw from '../../assets/lucide-tags.json'
 
 const tags = tagsRaw as Record<string, string[]>
@@ -83,11 +84,10 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
                   const Icon = ((LucideIcons as unknown) as Record<string, React.ComponentType<{ size?: number }>>)[pascal]
                   const isSelected = value === name
                   return (
+                    <Tooltip key={name} content={name} triggerClassName="block">
                     <button
-                      key={name}
-                      title={name}
                       onClick={() => select(name)}
-                      className={`flex flex-col items-center justify-center h-12 rounded-lg transition-colors ${
+                      className={`w-full flex flex-col items-center justify-center h-12 rounded-lg transition-colors ${
                         isSelected
                           ? 'bg-purple-600/30 text-purple-300 ring-1 ring-purple-500/50'
                           : 'text-gray-300 hover:bg-white/5 hover:text-white'
@@ -95,6 +95,7 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
                     >
                       <Icon size={18} />
                     </button>
+                    </Tooltip>
                   )
                 })}
               </div>

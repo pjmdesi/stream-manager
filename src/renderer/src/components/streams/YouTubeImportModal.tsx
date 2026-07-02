@@ -3,6 +3,7 @@ import { Search, Radio, Film, Check, Loader2, AlertCircle, Globe, Link as LinkIc
 import type { YouTubeImportVideo } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
+import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
 import { useStore } from '../../hooks/useStore'
 
@@ -298,14 +299,15 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
                     {isDraft && <span className="px-1.5 rounded border border-amber-400/40 text-amber-300">Draft</span>}
                   </div>
                 </div>
+                <Tooltip content="Open in YouTube Studio" triggerClassName="shrink-0">
                 <button
                   type="button"
                   onClick={e => { e.stopPropagation(); window.api.openUrl(`https://studio.youtube.com/video/${v.videoId}/edit`) }}
-                  title="Open in YouTube Studio"
-                  className="shrink-0 p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                  className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
                 >
                   <ExternalLink size={13} />
                 </button>
+                </Tooltip>
               </div>
             )
           })}

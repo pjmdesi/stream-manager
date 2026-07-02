@@ -209,9 +209,10 @@ export const Textarea: React.FC<TextareaProps> = ({
             onMouseDown={handleResizeStart}
             onDoubleClick={handleResizeReset}
             className="group relative z-0 cursor-ns-resize flex items-center justify-center h-4 rounded-b-lg hover:bg-white/5 transition-colors pt-[8px] mt-[-8px]"
-            title="Drag to resize · double-click to reset"
           >
-            <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+            <Tooltip content="Drag to resize · double-click to reset" side="bottom">
+              <GripHorizontal size={10} className="text-gray-500 group-hover:text-gray-300" />
+            </Tooltip>
           </div>
         )}
       </div>

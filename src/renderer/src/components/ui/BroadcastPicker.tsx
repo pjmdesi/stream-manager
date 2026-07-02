@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom'
 import { ChevronDown, Loader2, AlertTriangle, Link2, Radio } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 import type { LiveBroadcast } from '../../types'
 
 /** Cross-link map entry — surfaced under any broadcast in the dropdown that
@@ -114,12 +115,14 @@ export function BroadcastPicker({
 
   return (
     <>
+      {/* Stable Tooltip wrapper (visibility via `open`) — only surfaces the
+          quota explanation while the picker is actually disabled. */}
+      <Tooltip content="Picker disabled while YouTube quota is exhausted." open={disableOpen ? undefined : false} triggerClassName="block w-full">
       <button
         ref={anchorRef}
         type="button"
         onClick={handleOpen}
         disabled={loading}
-        title={disableOpen ? 'Picker disabled while YouTube quota is exhausted.' : undefined}
         className={`w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 ${cursorCls} text-left relative ${
           open ? 'ring-2 ring-purple-500/50' : ''
         } ${disableOpen ? 'opacity-70' : ''}`}
@@ -150,6 +153,7 @@ export function BroadcastPicker({
           : <ChevronDown size={12} className={`absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-transform ${open ? 'rotate-180' : ''} ${disableOpen ? 'opacity-40' : ''}`} />
         }
       </button>
+      </Tooltip>
       {triggerHint && fallbackInUse && (
         <p className="mt-1 text-[10px] text-gray-400 italic">{triggerHint}</p>
       )}
