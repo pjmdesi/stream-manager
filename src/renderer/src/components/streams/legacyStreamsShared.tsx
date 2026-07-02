@@ -24,7 +24,7 @@ import {
 
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { VideoRow } from '../ui/VideoRow'
-import { getCachedHydration, rememberHydration } from '../../lib/hydrationCache'
+import { getCachedHydration, rememberHydration, stalePaths, subscribeHydration } from '../../lib/hydrationCache'
 import { v4 as uuidv4 } from 'uuid'
 import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
@@ -394,6 +394,18 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
   const anchorRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
 
+  // Mirror shared-cache status changes into this tooltip's state while mounted
+  // — the files grid's check (or a completed download) keeps our icons honest
+  // without a hover-time re-check.
+  useEffect(() => {
+    const mine = new Set(videos)
+    return subscribeHydration((path, isLocal) => {
+      if (!mine.has(path)) return
+      setLocalStatus(prev => prev[path] === isLocal ? prev : { ...prev, [path]: isLocal })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videos.join('|')])
+
   // Initial position: just below the anchor. useLayoutEffect repositions if it overflows.
   const show = async () => {
     if (!anchorRef.current) return
@@ -401,12 +413,18 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
     setPos({ top: rect.bottom + 6, left: rect.left })
     setVisible(true)
 
-    // Re-check hydration on every hover for ALL files: a cached duration says
-    // nothing about a file's *current* state (it may have been offloaded since).
     if (videos.length === 0) return
-    const localFlags = await window.api.checkLocalFiles(videos)
+    // Adopt whatever the shared cache already knows (the sidebar's grid may
+    // have just verified these), then re-check only the paths whose status is
+    // missing or older than the shared TTL — hovering right after opening the
+    // sidebar shouldn't repeat the exact check the grid just ran.
+    const cached = getCachedHydration(videos)
+    if (Object.keys(cached).length) setLocalStatus(prev => ({ ...prev, ...cached }))
+    const toCheck = stalePaths(videos)
+    if (toCheck.length === 0) return
+    const localFlags = await window.api.checkLocalFiles(toCheck)
     const updates: Record<string, boolean> = {}
-    videos.forEach((v, i) => { updates[v] = !!localFlags[i] })
+    toCheck.forEach((v, i) => { updates[v] = !!localFlags[i] })
     rememberHydration(updates)
     setLocalStatus(prev => ({ ...prev, ...updates }))
   }

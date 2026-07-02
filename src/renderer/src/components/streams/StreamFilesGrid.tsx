@@ -7,7 +7,7 @@ import { TruncatedText } from '../ui/TruncatedText'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
-import { getCachedHydration, rememberHydration, rememberHydrationOne } from '../../lib/hydrationCache'
+import { getCachedHydration, rememberHydration, rememberHydrationOne, stalePaths, subscribeHydration } from '../../lib/hydrationCache'
 import type { StreamFolder, VideoEntry, VideoInfo } from '../../types'
 
 function formatBytes(bytes: number): string {
@@ -492,20 +492,36 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     // Then refresh in the background, DEFERRED past the sidebar slide:
     // checkLocalFiles' reply lands at a variable (OS-attribute-read) latency,
     // and the resulting whole-grid re-render stutters the open animation if it
-    // hits mid-slide. Wait until the panel has settled, then check, and write
-    // the result back to the shared cache. duration() is 0 when animations are
-    // off, so this is a no-op delay in that case.
+    // hits mid-slide. Wait until the panel has settled, then check ONLY the
+    // paths whose cached status is missing or older than the shared TTL —
+    // another surface (the video-counter tooltip, a previous open) may have
+    // just verified them, and re-verifying fresh entries is wasted IPC. The
+    // result is written back to the shared cache. duration() is 0 when
+    // animations are off, so this is a no-op delay in that case.
     let cancelled = false
     const timer = setTimeout(() => {
-      window.api.checkLocalFiles(all).then(flags => {
+      const toCheck = stalePaths(all)
+      if (toCheck.length === 0) return
+      window.api.checkLocalFiles(toCheck).then(flags => {
         if (cancelled) return
         const updates: Record<string, boolean> = {}
-        all.forEach((p, i) => { updates[p] = !!flags[i] })
+        toCheck.forEach((p, i) => { updates[p] = !!flags[i] })
         rememberHydration(updates)
         setLocalStatus(prev => ({ ...prev, ...updates }))
       }).catch(() => {})
     }, anim.duration(230))
     return () => { cancelled = true; clearTimeout(timer) }
+  }, [allJoined]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mirror shared-cache status CHANGES into this grid's state while mounted —
+  // a hydration completed anywhere (send-to-player, the player page, another
+  // surface's check) flips the icons live instead of waiting for a reopen.
+  useEffect(() => {
+    const mine = new Set([...folder.videos, ...folder.thumbnails])
+    return subscribeHydration((path, isLocal) => {
+      if (!mine.has(path)) return
+      setLocalStatus(prev => prev[path] === isLocal ? prev : { ...prev, [path]: isLocal })
+    })
   }, [allJoined]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // …then flipped as cloud ops for our files reach a terminal state, so the

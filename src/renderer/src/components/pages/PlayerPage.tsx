@@ -5,6 +5,7 @@ import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass }
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useOpenItems } from '../../context/OpenItemsContext'
+import { rememberHydrationOne } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry } from '../../types'
@@ -1338,6 +1339,16 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       off()
     }
   }, [pruneMissingRecents])
+
+  // A successfully-loaded video is (or is becoming) local: opening a cloud
+  // placeholder hydrates it implicitly via the OS recall-on-read, with no
+  // cloud-download event fired anywhere. Record it in the shared hydration
+  // cache so an open streams-page sidebar flips its cloud icon live instead
+  // of showing the file as offloaded until a reopen.
+  useEffect(() => {
+    if (state.filePath && state.videoInfo) rememberHydrationOne(state.filePath, true)
+  }, [state.filePath, state.videoInfo])
+
   useEffect(() => {
     if (!state.filePath) return
     const fp = state.filePath
