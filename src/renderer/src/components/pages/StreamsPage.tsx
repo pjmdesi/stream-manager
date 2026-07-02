@@ -759,7 +759,7 @@ export function StreamsPage({
   // Refreshed whenever the set of linked ids changes. Drives the row's
   // status badge in the date column (privacy icon + Radio/Clapperboard
   // distinguishing live broadcasts from regular video uploads).
-  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus?: string }>>({})
+  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus?: string; missing?: boolean }>>({})
   // Stable string key — depending on `folders` directly would re-fire the
   // batch on every loadFolders refresh, even when the linked-id set is
   // unchanged. Costly on large libraries.
@@ -2998,6 +2998,7 @@ export function StreamsPage({
                         privacyStatus={status?.privacyStatus ?? null}
                         isLivestream={status?.isLivestream ?? null}
                         isProcessing={isProcessing}
+                        linkMissing={status?.missing === true}
                         onTagSelect={handleTagSelect}
                         sameDayIndex={sameDayIndexMap.get(f.folderPath)}
                         thumbsKey={thumbsKey}
@@ -3190,6 +3191,7 @@ export function StreamsPage({
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
               onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
               deleteBlockReason={streamReason(renderedFolder.folderPath, isDumpMode ? [...renderedFolder.videos, ...renderedFolder.thumbnails] : undefined)}
+              linkedVideoMissing={!!renderedFolder.meta?.ytVideoId && ytVideoStatusMap[renderedFolder.meta.ytVideoId]?.missing === true}
               onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
               onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
               // The two callbacks above already return the promise from
@@ -3801,7 +3803,7 @@ export function StreamsPage({
 const StreamListItem = memo(function StreamListItem({
   folder, folders, selected, compact, selectMode, multiSelected, selectKey, index, onToggleMultiSelect,
   onDragStart, onDragEnter, dragMovedRef,
-  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing,
+  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   isSendingToPlayer, onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
   animDurationMs, onTagSelect,
@@ -3860,6 +3862,10 @@ const StreamListItem = memo(function StreamListItem({
    *  'uploaded') — a just-ended stream's VOD isn't editable in Studio yet.
    *  Swaps the badge's kind icon for a spinner. */
   isProcessing: boolean
+  /** True when the linked YouTube video no longer exists (queried but absent
+   *  from videos.list — deleted on YT). Replaces the privacy badge with a
+   *  yellow caution badge. */
+  linkMissing: boolean
   /** "#2", "#3" suffix when multiple streams share a date. */
   sameDayIndex?: number
   thumbsKey: number
@@ -4101,8 +4107,18 @@ const StreamListItem = memo(function StreamListItem({
                 </span>
               </Tooltip>
             )}
+            {/* Linked, but the YouTube video no longer exists (deleted on
+                YT) — a yellow caution badge replaces the privacy/kind badge
+                for pending and past alike. */}
+            {meta?.ytVideoId && linkMissing && (
+              <Tooltip content="Linked YouTube video is no longer available.">
+                <span className="inline-flex items-center p-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-400/40 shrink-0">
+                  <AlertTriangle size={12} />
+                </span>
+              </Tooltip>
+            )}
             {/* Pending stream — Live broadcasts go green; scheduled stay teal. */}
-            {isPending && (
+            {isPending && !linkMissing && (
               meta?.ytVideoId && (() => {
                 const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
                 const liveLabel = isProcessing ? 'Processing on YouTube — not editable yet' : isLive ? 'Live now' : 'Open in YouTube Studio'
@@ -4128,7 +4144,7 @@ const StreamListItem = memo(function StreamListItem({
             )}
             {/* Past stream — Radio for livestream replays, Clapperboard
                 for regular video uploads. Both go red. */}
-            {!isPending && meta?.ytVideoId && (() => {
+            {!isPending && !linkMissing && meta?.ytVideoId && (() => {
               const privacyLabel = privacyStatus === 'public' ? 'Public' : privacyStatus === 'unlisted' ? 'Unlisted' : privacyStatus === 'private' ? 'Private' : null
               const PrivacyIcon = privacyStatus === 'unlisted' ? LinkIcon : privacyStatus === 'private' ? Lock : privacyStatus === 'public' ? Globe : null
               const KindIcon = isLivestream ? Radio : Clapperboard
@@ -4790,7 +4806,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, linkedVideoMissing,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -4872,6 +4888,9 @@ function SidebarDetail({
   onDelete: () => void
   /** Why this stream can't be deleted right now (in use), or null. */
   deleteBlockReason: string | null
+  /** True when the linked YouTube video was queried and no longer exists —
+   *  the link section shows a warning + Unlink instead of privacy/time. */
+  linkedVideoMissing: boolean
   onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => Promise<void> | void
   onPushToTwitch: () => Promise<void> | void
   ytConnected: boolean
@@ -5622,6 +5641,9 @@ function SidebarDetail({
   // stream whose VOD isn't in ytVods until the user opens the dropdown.
   useEffect(() => {
     if (!linkedId) return
+    // Known-deleted on YouTube — the lookup can never succeed; the link
+    // section shows the missing-video warning instead.
+    if (linkedVideoMissing) return
     if (broadcastPool.some(b => b.id === linkedId)) return
     let cancelled = false
     const timer = setTimeout(() => {
@@ -5647,7 +5669,7 @@ function SidebarDetail({
       lookup.catch(() => {})
     }, deferMs)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [linkedId, broadcastPool, isPastStream, setYtVods, setYtBroadcasts, deferMs])
+  }, [linkedId, linkedVideoMissing, broadcastPool, isPastStream, setYtVods, setYtBroadcasts, deferMs])
 
   // Auto-refresh the currently-open stream's linked broadcast — once
   // on mount (and whenever the stream changes), then every 5 minutes
@@ -6934,7 +6956,7 @@ function SidebarDetail({
                     </button>
                   </Tooltip>
                 )}
-                {selectedBroadcast && (
+                {(selectedBroadcast || linkedVideoMissing) && (
                   <Tooltip content="Unlink from broadcast">
                   <button
                     type="button"
@@ -6947,6 +6969,12 @@ function SidebarDetail({
                 )}
               </div>
             </div>
+            {linkedVideoMissing && (
+              <div className="flex items-start gap-2 mb-1.5 rounded-lg border border-yellow-400/40 bg-yellow-900/20 px-2.5 py-1.5 text-[11px] text-yellow-400">
+                <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                <span>The linked YouTube video is no longer available. It may have been deleted on YouTube. Unlink to clear it.</span>
+              </div>
+            )}
             <BroadcastPicker
               value={linkedId}
               onChange={id => onUpdateMeta({ ytVideoId: id })}
@@ -7073,11 +7101,13 @@ function SidebarDetail({
                 YouTube rejects schedule edits once a broadcast has
                 started or finished. Edits stage in meta; the Push to
                 YouTube button picks them up. */}
-            {linkedId && (
+            {linkedId && !linkedVideoMissing && (
               // Render as soon as the stream is linked (linkedId is local) and
               // disable until the broadcast/VOD detail resolves, so the field
               // reserves its space instead of popping in and shoving the
-              // footer once the async lookup lands.
+              // footer once the async lookup lands. Hidden entirely when the
+              // linked video no longer exists — otherwise it sits on
+              // "Loading…" forever (the lookup can never resolve).
               <BroadcastTimePrivacyRow
                 showTime={isUpcomingBroadcast}
                 time={displayedScheduledTime}

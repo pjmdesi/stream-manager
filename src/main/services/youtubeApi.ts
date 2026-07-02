@@ -598,6 +598,11 @@ export interface VideoStatus {
    *  video (a just-ended stream's VOD isn't editable in Studio yet),
    *  'processed' once it's ready, 'failed'/'rejected' on error. */
   uploadStatus: string
+  /** True when the video ID was queried but absent from the videos.list
+   *  response — i.e. the video no longer exists on YouTube (deleted, or not
+   *  visible to this account). Lets the UI flag dead links explicitly rather
+   *  than leaving them indistinguishable from a not-yet-fetched status. */
+  missing?: boolean
 }
 
 /** Fetch privacy + livestream-or-not status for a list of video IDs.
@@ -617,13 +622,25 @@ export async function fetchVideoStatuses(
       { method: 'GET' },
       clientId, clientSecret
     )
+    // videos.list silently omits IDs that no longer exist — the response just
+    // has fewer items. Track which of the chunk's IDs actually came back so
+    // the absentees can be marked `missing` explicitly (a dead link the UI
+    // should warn about) instead of being left out of the map entirely
+    // (indistinguishable from "not fetched yet").
+    const returned = new Set<string>()
     for (const item of (data?.items ?? [])) {
+      if (item.id) returned.add(item.id)
       if (!item.status?.privacyStatus) continue
       map.set(item.id, {
         privacyStatus: item.status.privacyStatus,
         isLivestream: !!item.liveStreamingDetails,
         uploadStatus: item.status.uploadStatus ?? 'processed',
       })
+    }
+    for (const id of chunk) {
+      if (!returned.has(id)) {
+        map.set(id, { privacyStatus: '', isLivestream: false, uploadStatus: 'processed', missing: true })
+      }
     }
   }
   return map
