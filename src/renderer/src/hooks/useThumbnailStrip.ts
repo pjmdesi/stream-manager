@@ -34,8 +34,16 @@ export function useThumbnailStrip(
 
   const generatingRef = useRef(false)
   useEffect(() => { generatingRef.current = generating }, [generating])
+  const zoomGeneratingRef = useRef(false)
+  useEffect(() => { zoomGeneratingRef.current = zoomGenerating }, [zoomGenerating])
 
-  // Per-generation cancel handle for zoom; calling it aborts the current seek loop
+  // Per-generation cancel handle for zoom; calling it aborts the current seek loop.
+  // Disarmed (reset to a no-op) when a generation completes, and the armed
+  // closure only touches state when a generation is actually running — the
+  // zoom effect re-runs on every viewport pan/zoom tick and calls this from
+  // both its body and its cleanup, so an unconditional setState here schedules
+  // a real update per tick and can chain into React's nested-update limit
+  // ("Maximum update depth exceeded") under sustained viewport churn.
   const cancelZoomRef = useRef<() => void>(() => {})
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -116,9 +124,11 @@ export function useThumbnailStrip(
 
   useEffect(() => {
     if (!filePath || !videoUrl || duration <= 0 || videoWidth <= 0 || videoHeight <= 0) {
-      setCachedFrames([])
-      setZoomFrames([])
-      setGenerating(false)
+      // Identity-preserving resets: fresh [] literals here would schedule a
+      // real update on every run of this branch even when already empty.
+      setCachedFrames(prev => prev.length ? [] : prev)
+      setZoomFrames(prev => prev.length ? [] : prev)
+      setGenerating(prev => prev ? false : prev)
       return
     }
 
@@ -228,12 +238,18 @@ export function useThumbnailStrip(
       const genEnd   = Math.min(duration, ve + bufferTime)
       const genSpan  = Math.max(0.001, genEnd - genStart)
 
-      // Arm cancellation for this generation
+      // Arm cancellation for this generation. Only touch state when a
+      // generation is actually in flight — this handle is also called on every
+      // effect re-run (body + cleanup), long after the generation finished.
       let cancelled = false
-      cancelZoomRef.current = () => { cancelled = true; setZoomGenerating(false) }
+      cancelZoomRef.current = () => {
+        cancelled = true
+        if (zoomGeneratingRef.current) setZoomGenerating(false)
+      }
 
       const run = async () => {
         setZoomGenerating(true)
+        zoomGeneratingRef.current = true
         // Keep old zoom frames visible — they stay until replaced slot-by-slot
 
         const { captureAt, ready, destroy } = makeCapturer(videoUrl, videoWidth, videoHeight)
@@ -263,10 +279,18 @@ export function useThumbnailStrip(
         }
 
         destroy()
-        if (!cancelled) setZoomGenerating(false)
+        if (!cancelled) {
+          setZoomGenerating(false)
+          // Disarm — the generation is over, so later effect re-runs (every
+          // viewport tick) calling the handle must be pure no-ops.
+          cancelZoomRef.current = () => {}
+        }
       }
 
-      run().catch(() => { setZoomGenerating(false) })
+      run().catch(() => {
+        setZoomGenerating(false)
+        cancelZoomRef.current = () => {}
+      })
     }, ZOOM_DEBOUNCE_MS)
 
     return () => {
