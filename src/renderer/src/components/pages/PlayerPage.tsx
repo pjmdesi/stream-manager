@@ -2230,6 +2230,18 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
         seekRef.current(handleDragSavedTimeRef.current)
         setHandleDragDisplayTime(handleDragSavedTimeRef.current)
         setHandlePopup(null)
+        // Failsafe: the catch-up clear compares currentTime against the frozen
+        // value, but the restore seek isn't guaranteed to LAND there — with
+        // clip focus on and the saved position outside every segment, the
+        // focus loop instantly teleports playback to a region in-point, so
+        // currentTime never approaches the frozen time and the playhead stays
+        // pinned forever (the "stuck playhead" bug). The freeze only exists to
+        // mask the sub-second settle of the restore seek, so drop it
+        // unconditionally after that window. The dragging check keeps a timer
+        // from a previous release from clearing a NEW drag's freeze.
+        setTimeout(() => {
+          if (!isDraggingHandleRef.current) setHandleDragDisplayTime(null)
+        }, 700)
       }
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
