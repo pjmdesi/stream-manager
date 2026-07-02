@@ -21,7 +21,7 @@ Legend: `- [ ]` = not yet confirmed · `- [x]` = confirmed working · add `⚠` 
 
 ## 2. Stream metadata & YouTube publishing
 
-- [ ] Create a stream item; metadata persists to `_meta.json` and reloads correctly
+- [x] Create a stream item; metadata persists to `_meta.json` and reloads correctly
 - [ ] Chip title editor: merge fields render right — `{game}`, `{episode}`, `{total_episodes}`, `{topic}`/`{topics}`, dates
 - [ ] Rendered title preview matches what actually gets pushed
 - [ ] Description chip editor + inline merge-field picker
@@ -66,8 +66,8 @@ Legend: `- [ ]` = not yet confirmed · `- [x]` = confirmed working · add `⚠` 
 
 ## 6. Converter
 
-- [ ] Presets + per-file output settings
-- [ ] Queue UI + ETA widget; concurrent-conversion cap holds
+- [x] Presets + per-file output settings
+- [x] Queue UI + ETA widget; concurrent-conversion cap holds
 - [ ] Send to converter — whole stream **and** an individual file
 - [ ] Extracted-audio filename includes the track number + name
 - [ ] Exported clips carry the container/provenance marker

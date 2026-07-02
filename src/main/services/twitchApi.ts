@@ -78,20 +78,29 @@ export async function getChannelInfo(
 
 /** Update the channel title and optionally the game/category + tags.
  *  Tags must already conform to Twitch's rules (≤10, ≤25 chars each,
- *  alphanumeric only) — the renderer filters before sending. */
+ *  alphanumeric only) — the renderer filters before sending.
+ *
+ *  Returns whether the requested category was actually applied: when the
+ *  category search finds no match for `gameName`, the PATCH still succeeds
+ *  (title/tags) but game_id is omitted — the channel's category is left
+ *  unchanged. Callers MUST surface that, or the push looks fully successful
+ *  while Twitch silently keeps the old category. `categoryApplied` is true
+ *  when no category change was requested. */
 export async function updateChannelInfo(
   title: string,
   gameName: string | undefined,
   tags: string[] | undefined,
   clientId: string,
   clientSecret: string
-): Promise<void> {
+): Promise<{ categoryApplied: boolean }> {
   const broadcasterId = await getBroadcasterId(clientId, clientSecret)
 
   const body: Record<string, any> = { title }
+  let categoryApplied = true
   if (gameName) {
     const gameId = await findGameId(gameName, clientId, clientSecret)
     if (gameId) body.game_id = gameId
+    else categoryApplied = false
   }
   if (tags) body.tags = tags
 
@@ -100,4 +109,5 @@ export async function updateChannelInfo(
     { method: 'PATCH', body: JSON.stringify(body) },
     clientId, clientSecret
   )
+  return { categoryApplied }
 }

@@ -939,7 +939,11 @@ export function StreamsPage({
         twitchUpdateTimerRef.current = setTimeout(async () => {
           twitchUpdateTimerRef.current = null
           try {
-            await window.api.twitchUpdateChannel(payload.title, payload.game, payload.tags)
+            const result = await window.api.twitchUpdateChannel(payload.title, payload.game, payload.tags)
+            if (payload.game && result?.categoryApplied === false) {
+              console.warn(`[auto-update Twitch] no category matches "${payload.game}" — category left unchanged`)
+              showBanner({ folderPath: next.folderPath, type: 'error', message: `Auto-updated Twitch title/tags, but no Twitch category matches "${payload.game}" — the category was left unchanged.` })
+            }
           } catch (e) {
             console.warn('[auto-update Twitch] push failed:', e)
           }
@@ -1699,8 +1703,16 @@ export function StreamsPage({
     const effectiveGame = resolveTwitchGame(meta)
     const { compat: twitchSendTags } = toTwitchCompatibleTags(meta.twitchTags ?? [])
     try {
-      await window.api.twitchUpdateChannel(effectiveTitle, effectiveGame || undefined, twitchSendTags)
-      showBanner({ folderPath: folder.folderPath, type: 'success', message: 'Pushed to Twitch.' })
+      const result = await window.api.twitchUpdateChannel(effectiveTitle, effectiveGame || undefined, twitchSendTags)
+      // A category that matches no Twitch category is silently skipped by the
+      // API layer (title/tags still update) — say so loudly, or the user only
+      // finds out mid-stream that Twitch is still on the old category.
+      if (effectiveGame && result?.categoryApplied === false) {
+        showBanner({ folderPath: folder.folderPath, type: 'error', message: `Pushed title/tags, but Twitch has no category matching "${effectiveGame}" — the category was left unchanged. Pick a category in the Twitch section (it searches real Twitch categories).` })
+      } else {
+        showBanner({ folderPath: folder.folderPath, type: 'success', message: 'Pushed to Twitch.' })
+      }
+      return result
     } catch (err: any) {
       showBanner({ folderPath: folder.folderPath, type: 'error', message: `Twitch push failed: ${err?.message ?? String(err)}` })
       // Re-throw so the sidebar's wrapper handler can skip the
@@ -4892,7 +4904,7 @@ function SidebarDetail({
    *  the link section shows a warning + Unlink instead of privacy/time. */
   linkedVideoMissing: boolean
   onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => Promise<void> | void
-  onPushToTwitch: () => Promise<void> | void
+  onPushToTwitch: () => Promise<{ categoryApplied: boolean } | void> | void
   ytConnected: boolean
   /** YouTube video categories list (session-cached at the page level
    *  and reused across sidebar opens). Drives the Category dropdown in
@@ -7343,7 +7355,14 @@ function SidebarDetail({
               // already shown by the parent). On throw we skip both
               // the refetch and the last-pushed snapshot so we don't
               // record values that never actually made it to Twitch.
-              await onPushToTwitch()
+              const pushResult = await onPushToTwitch()
+              // False only when a category was requested and Twitch's search
+              // found no match — the category on Twitch did NOT change, so it
+              // must be excluded from the cache seed and the last-pushed
+              // snapshot below, or the in-sync check would claim the category
+              // landed when it didn't (that lie hid a wrong live category
+              // through an entire stream).
+              const categoryApplied = !pushResult || pushResult.categoryApplied !== false
               // Refetch Twitch's canonical state — but don't blindly trust it.
               // Twitch's read side lags the PATCH we just made (read-after-
               // write), so an immediate GET often still reports the PRE-push
@@ -7358,7 +7377,9 @@ function SidebarDetail({
               const refetchCaughtUp = !!refreshed && refreshed.title.trim() === twEffectiveTitle.trim()
               setTwitchChannel({
                 title: twEffectiveTitle,
-                gameName: refetchCaughtUp ? refreshed!.gameName : twEffectiveGame,
+                gameName: refetchCaughtUp
+                  ? refreshed!.gameName
+                  : categoryApplied ? twEffectiveGame : (twitchChannel?.gameName ?? ''),
                 tags: refetchCaughtUp ? refreshed!.tags : twEffectiveTags,
               })
               // Persist what we just pushed into meta so the in-sync
@@ -7373,7 +7394,9 @@ function SidebarDetail({
               // overwrite their preferred naming.
               await onUpdateMeta({
                 twitchLastPushedTitle: twEffectiveTitle,
-                twitchLastPushedGame: twEffectiveGame,
+                // Only snapshot the game when it actually landed — otherwise
+                // the in-sync check must keep flagging the category mismatch.
+                ...(categoryApplied ? { twitchLastPushedGame: twEffectiveGame } : {}),
                 twitchLastPushedTags: twEffectiveTags,
               })
               // After-push fuzzy-match detection. Twitch resolves the
@@ -7389,7 +7412,7 @@ function SidebarDetail({
               // could suggest a bogus rename back to the old name.
               const sent = twEffectiveGame.trim()
               const canonical = (refreshed?.gameName ?? '').trim()
-              if (refetchCaughtUp && sent && canonical && twNormalize(sent) !== twNormalize(canonical)) {
+              if (categoryApplied && refetchCaughtUp && sent && canonical && twNormalize(sent) !== twNormalize(canonical)) {
                 onSuggestCategoryRename(sent, canonical)
               }
             }
@@ -8530,7 +8553,7 @@ function RescheduleModal({
   ) => Promise<void>
   /** Push title / game / tags to the Twitch channel — used when the
    *  rescheduled stream becomes the new "next upcoming". */
-  onPushTwitch: () => Promise<void>
+  onPushTwitch: () => Promise<{ categoryApplied: boolean } | void>
   /** Used by pull mode to write the matching sync snapshot to meta
    *  after the folder rename succeeds — without this, the date dot
    *  would immediately re-appear because `ytLastPushedDate` is still

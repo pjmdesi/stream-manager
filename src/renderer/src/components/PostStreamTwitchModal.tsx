@@ -47,7 +47,14 @@ export function PostStreamTwitchModal() {
     setError(null)
     try {
       const { title, game, tags } = suggestion.payload
-      await window.api.twitchUpdateChannel(title, game, tags)
+      const result = await window.api.twitchUpdateChannel(title, game, tags)
+      // Title/tags landed, but the category search found no match — Twitch
+      // kept the old category. Keep the modal open so the user actually sees
+      // it, instead of a silent "success" that leaves the wrong live category.
+      if (game && result?.categoryApplied === false) {
+        setError(`Updated title/tags, but no Twitch category matches "${game}" — the category was left unchanged.`)
+        return false
+      }
       return true
     } catch (e: any) {
       setError(e?.message ?? String(e))
