@@ -2661,7 +2661,11 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   const stepFrame = useCallback((dir: 1 | -1) => {
     const vid = videoRef.current
     if (!vid) return
-    if (!vid.paused) vid.pause()
+    // Deliberately does NOT pause: every transport action preserves the
+    // playback state (user decision, overriding the earlier pause-to-step
+    // design — a modifier slipping off a skip shortcut kept landing here and
+    // pausing playback by surprise). While playing, a one-frame nudge is
+    // simply washed out by playback; while paused, it steps as always.
     const fps = videoInfo?.fps ?? 30
     const regions = clipStateRef.current.clipRegions
     const lo = clipFocusRef.current && regions.length > 0 ? regions[0].inPoint : 0

@@ -121,6 +121,11 @@ export function useVideoPlayer() {
 
   const isSeeking = useRef(false)
   const pendingSeekTime = useRef<number | null>(null)
+  // True when the video was playing as a seek started — re-asserted once the
+  // seek settles, so a pause sneaking in mid-seek (an aborted play() promise,
+  // engine hiccups on rapid successive seeks) can't leave the video stuck
+  // paused after a skip. Cleared by an explicit user pause.
+  const resumeAfterSeek = useRef(false)
 
   // Detach all extracted audio elements (does NOT delete cache files —
   // the persistent cache survives so re-enabling is cheap).
@@ -138,6 +143,9 @@ export function useVideoPlayer() {
     savedSettings?: Record<number, AudioTrackSetting>,
   ) => {
     setState(prev => ({ ...prev, error: null }))
+    // A stale resume flag from the previous file must not auto-play this one
+    // on its first seek.
+    resumeAfterSeek.current = false
     releaseAudioElements()
 
     try {
@@ -408,6 +416,14 @@ export function useVideoPlayer() {
         }
       } else {
         isSeeking.current = false
+        // The seek settled — restore the play state captured when it started.
+        // No-op in the normal case (still playing). Skips resuming at the very
+        // end: a forward skip clamped to the duration legitimately ends (and
+        // pauses) the video, and fighting that would loop the last frame.
+        if (resumeAfterSeek.current) {
+          resumeAfterSeek.current = false
+          if (video.paused && !video.ended) video.play().catch(() => {})
+        }
       }
     }
     const onTimeUpdate = () => {
@@ -448,6 +464,7 @@ export function useVideoPlayer() {
   const seek = useCallback((time: number) => {
     const video = videoRef.current
     if (!video) return
+    if (!video.paused && !video.ended) resumeAfterSeek.current = true
     pendingSeekTime.current = null
     isSeeking.current = true
     video.currentTime = time
@@ -459,6 +476,7 @@ export function useVideoPlayer() {
   const fastSeek = useCallback((time: number) => {
     const video = videoRef.current
     if (!video) return
+    if (!video.paused && !video.ended) resumeAfterSeek.current = true
     if (isSeeking.current) {
       pendingSeekTime.current = time
     } else {
@@ -473,8 +491,15 @@ export function useVideoPlayer() {
   const togglePlay = useCallback(() => {
     const video = videoRef.current
     if (!video) return
-    if (video.paused) video.play()
-    else video.pause()
+    if (video.paused) {
+      video.play()
+    } else {
+      // A deliberate pause always wins — including one made while a seek is
+      // still settling. Without this, the resume-after-seek guard would undo
+      // the user's pause a moment later.
+      resumeAfterSeek.current = false
+      video.pause()
+    }
   }, [])
 
   /** Re-derive video.muted / audioEl.muted from the current track M/S state.
@@ -490,6 +515,7 @@ export function useVideoPlayer() {
   }, [])
 
   const closeVideo = useCallback(async () => {
+    resumeAfterSeek.current = false
     releaseAudioElements()
     if (videoRef.current) {
       videoRef.current.pause()
