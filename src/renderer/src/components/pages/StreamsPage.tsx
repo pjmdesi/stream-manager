@@ -501,6 +501,10 @@ export function StreamsPage({
   const showBanner = useCallback((entry: Omit<BannerShape, 'id'>) => {
     const id = `b-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     setBanners(prev => [...prev, { ...entry, id }])
+    // Errors don't auto-dismiss: they're rare, actionable, and often several
+    // sentences (the 4s fade cut them off mid-read). They stay until clicked
+    // away — and still clear automatically on stream switch / sidebar close.
+    if (entry.type === 'error') return
     const delay = entry.action ? 10000 : 4000
     // No need to track this timeout for clearing — the filter is a
     // no-op if the entry has already been removed (manual dismiss /
