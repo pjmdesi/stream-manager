@@ -633,21 +633,54 @@ export async function startConversionJob(
       // extension differs from the input's (e.g. archiving a .mp4 with an
       // mkv-output preset), the final file takes the new extension so the
       // container matches the actual content.
+      //
+      // Swap order matters: (1) rename the original aside as a backup,
+      // (2) rename the temp into the final name, (3) delete the backup only
+      // after 2 succeeded. Every failure leaves the original recoverable —
+      // step 1 failing touches nothing, step 2 failing renames the backup
+      // straight back. The old unlink-then-rename order permanently lost
+      // BOTH copies when a sync client/AV held a handle at the wrong moment:
+      // the unlink succeeded (no recycle bin), the rename failed, and the
+      // error path then deleted the finished temp too.
       if (job.replaceInput) {
         setStatus('replacing')
+        const inputExt = (job.inputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
+        const outputExt = (job.outputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
+        const finalPath = inputExt === outputExt
+          ? job.inputFile
+          : job.inputFile.replace(/\.[^.]+$/, outputExt)
+        const backupPath = job.inputFile + '.smbak'
         try {
-          const inputExt = (job.inputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
-          const outputExt = (job.outputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
-          const finalPath = inputExt === outputExt
-            ? job.inputFile
-            : job.inputFile.replace(/\.[^.]+$/, outputExt)
-          fs.unlinkSync(job.inputFile)
+          fs.renameSync(job.inputFile, backupPath)
+        } catch (e: any) {
+          try { if (fs.existsSync(job.outputFile)) fs.unlinkSync(job.outputFile) } catch {}
+          handleError(new Error(`Replace failed (original untouched): ${e.message}`))
+          return
+        }
+        try {
           fs.renameSync(job.outputFile, finalPath)
         } catch (e: any) {
+          try {
+            fs.renameSync(backupPath, job.inputFile)
+          } catch (restoreErr: any) {
+            // Both renames failing back-to-back means the folder is hard
+            // locked. Nothing has been deleted — the original is intact
+            // under the backup name, so say exactly that. (handleError's
+            // cleanup takes care of the temp.)
+            handleError(new Error(
+              `Replace failed and the original could not be renamed back — it is intact as "${path.basename(backupPath)}" in the stream folder. (${e.message}; restore: ${restoreErr.message})`
+            ))
+            return
+          }
           try { if (fs.existsSync(job.outputFile)) fs.unlinkSync(job.outputFile) } catch {}
           handleError(new Error(`Replace failed: ${e.message}`))
           return
         }
+        // Success — the backup is now a duplicate, and archiving exists to
+        // reclaim space, so it's a permanent delete (with retries for
+        // transient handles). Worst case a .smbak lingers: costs disk,
+        // never data.
+        deleteWithRetry(backupPath, 'replace-original backup')
       }
       jobs.set(id, { ...cur, status: 'done', progress: 100 })
       cancellers.delete(id)
