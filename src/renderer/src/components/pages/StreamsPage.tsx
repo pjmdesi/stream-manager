@@ -3231,6 +3231,7 @@ export function StreamsPage({
               onPickEpisode={(f) => setSelectedFolderPath(f.folderPath)}
               onClose={() => setSelectedFolderPath(null)}
               onUpdateMeta={partial => updateMeta(renderedFolder.folderPath, partial)}
+              onUpdateMetaFor={updateMeta}
               cloudSyncActive={cloudSyncActive}
               allGames={allGames}
               allStreamTypes={allStreamTypes}
@@ -4886,7 +4887,7 @@ const META_HISTORY_SKIP = new Set<string>([
  *  state stays cleanly separated and the metadata + action layout can
  *  evolve independently. */
 function SidebarDetail({
-  folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, onClose, onUpdateMeta: onUpdateMetaRaw, cloudSyncActive,
+  folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, onClose, onUpdateMeta: onUpdateMetaRaw, onUpdateMetaFor, cloudSyncActive,
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
@@ -4908,6 +4909,13 @@ function SidebarDetail({
   onPickEpisode: (f: StreamFolder) => void
   onClose: () => void
   onUpdateMeta: (partial: Partial<StreamMeta>) => Promise<void> | void
+  /** Targeted meta write for ASYNC handlers. onUpdateMeta resolves its
+   *  target through a render-rebound ref, so a write issued after an await
+   *  lands on whichever stream is selected when the promise settles — the
+   *  create-broadcast flow wrote its new ytVideoId to the wrong stream if
+   *  the user clicked another row mid-flight. Handlers that await capture
+   *  folderPathRef.current at entry and write through this instead. */
+  onUpdateMetaFor: (folderPath: string, partial: Partial<StreamMeta>) => Promise<void> | void
   cloudSyncActive: boolean
   allGames: string[]
   allStreamTypes: string[]
@@ -5047,6 +5055,15 @@ function SidebarDetail({
   const sidebarRootRef = useRef<HTMLDivElement>(null)
   const metaRef = useRef(meta)
   useEffect(() => { metaRef.current = meta })
+  // Current stream's folderPath, always fresh at event time. Async handlers
+  // capture this at ENTRY (before their first await) and pass it to
+  // onUpdateMetaFor so late-settling writes stay pinned to the stream the
+  // user acted on — reading it (or the render-rebound onUpdateMeta) AFTER
+  // an await would target whichever stream is selected by then.
+  const folderPathRef = useRef(folder.folderPath)
+  useEffect(() => { folderPathRef.current = folder.folderPath })
+  const onUpdateMetaForRef = useRef(onUpdateMetaFor)
+  useEffect(() => { onUpdateMetaForRef.current = onUpdateMetaFor })
   // The parent passes a fresh inline onUpdateMeta arrow each render; route
   // through a ref so the wrappers below stay reference-stable (which also
   // keeps every downstream callback that depends on `onUpdateMeta` stable).
@@ -5519,16 +5536,18 @@ function SidebarDetail({
   // ytTitleTemplateId to meta (persists across sessions). For the
   // others, the ephemeral selectedId in local state is updated.
   const handleSaveTitleTemplate = useCallback(async (name: string) => {
+    const targetPath = folderPathRef.current
     const id = await onSaveYtTitleTemplate(name, meta?.ytTitle ?? '')
-    onUpdateMeta({ ytTitleTemplateId: id })
-  }, [onSaveYtTitleTemplate, meta?.ytTitle, onUpdateMeta])
+    onUpdateMetaForRef.current(targetPath, { ytTitleTemplateId: id })
+  }, [onSaveYtTitleTemplate, meta?.ytTitle])
   // Twitch title saves into the SAME Titles template store as the YT
   // title — the group is shared. Binds the new template to the Twitch
   // title only.
   const handleSaveTwitchTitleTemplate = useCallback(async (name: string) => {
+    const targetPath = folderPathRef.current
     const id = await onSaveYtTitleTemplate(name, meta?.twitchTitle ?? '')
-    onUpdateMeta({ twitchTitleTemplateId: id })
-  }, [onSaveYtTitleTemplate, meta?.twitchTitle, onUpdateMeta])
+    onUpdateMetaForRef.current(targetPath, { twitchTitleTemplateId: id })
+  }, [onSaveYtTitleTemplate, meta?.twitchTitle])
   const handleSaveDescTemplate = useCallback(async (name: string) => {
     // Save the raw template body (tokens intact) so the template is reusable,
     // not the baked output for this one stream.
@@ -5536,12 +5555,14 @@ function SidebarDetail({
     setDescTplId(id)
   }, [onSaveYtDescTemplate, meta?.ytDescriptionTemplate, meta?.ytDescription])
   const handleSaveTagsTemplate = useCallback(async (name: string) => {
+    const targetPath = folderPathRef.current
     const id = await onSaveYtTagsTemplate(name, meta?.ytTags ?? [])
-    onUpdateMetaRef.current({ ytTagsTemplateId: id })
+    onUpdateMetaForRef.current(targetPath, { ytTagsTemplateId: id })
   }, [onSaveYtTagsTemplate, meta?.ytTags])
   const handleSaveTwitchTagsTemplate = useCallback(async (name: string) => {
+    const targetPath = folderPathRef.current
     const id = await onSaveTwitchTagsTemplate(name, meta?.twitchTags ?? [])
-    onUpdateMetaRef.current({ twitchTagsTemplateId: id })
+    onUpdateMetaForRef.current(targetPath, { twitchTagsTemplateId: id })
   }, [onSaveTwitchTagsTemplate, meta?.twitchTags])
 
   // Pick → write the raw template body into ytTitle verbatim and
@@ -5960,6 +5981,7 @@ function SidebarDetail({
     return null
   }
   const handleManualUrlChange = async (value: string) => {
+    const targetPath = folderPathRef.current
     setManualUrl(value)
     setManualUrlError('')
     if (!value.trim()) return
@@ -5970,7 +5992,7 @@ function SidebarDetail({
       const video = await window.api.youtubeGetVideoById(videoId)
       if (!video) { setManualUrlError('Video not found or not accessible.'); return }
       setYtVods(prev => prev.some(v => v.id === video.id) ? prev : [video, ...prev])
-      onUpdateMeta({ ytVideoId: video.id })
+      onUpdateMetaForRef.current(targetPath, { ytVideoId: video.id })
       setManualUrl('')
     } catch (err: any) {
       setManualUrlError(err?.message ?? 'Failed to fetch video info.')
@@ -5995,6 +6017,7 @@ function SidebarDetail({
     return eod.getTime() > Date.now()
   })()
   const handleCreateBroadcast = async () => {
+    const targetPath = folderPathRef.current
     setCreatingBroadcast(true)
     setCreateError('')
     try {
@@ -6049,7 +6072,10 @@ function SidebarDetail({
       setYtBroadcasts(prev => [enriched, ...prev])
       const metaPatch: Partial<StreamMeta> = { ytVideoId: created.id }
       if (thumbnailPushedHash) metaPatch.ytThumbnailPushedHash = thumbnailPushedHash
-      onUpdateMeta(metaPatch)
+      // Targeted: several awaited API calls ran since the click — writing
+      // through onUpdateMeta here would link the broadcast to whichever
+      // stream the user has selected NOW, not the one they created it for.
+      onUpdateMetaForRef.current(targetPath, metaPatch)
       if (followupWarning) setCreateError(followupWarning)
     } catch (err: any) {
       setCreateError(err?.message ?? 'Failed to create broadcast')
@@ -7419,6 +7445,7 @@ function SidebarDetail({
             finally { setYtPushing(false) }
           }
           const handleTwitchPush = async () => {
+            const targetPath = folderPathRef.current
             setTwPushing(true)
             try {
               // `onPushToTwitch` (parent's handlePushToTwitch) now
@@ -7464,7 +7491,7 @@ function SidebarDetail({
               // local still matches what we sent. Stored alongside
               // (not replacing) the user's typed values so we don't
               // overwrite their preferred naming.
-              await onUpdateMeta({
+              await onUpdateMetaForRef.current(targetPath, {
                 twitchLastPushedTitle: twEffectiveTitle,
                 // Only snapshot the game when it actually landed — otherwise
                 // the in-sync check must keep flagging the category mismatch.

@@ -204,6 +204,13 @@ export function buildPullUpdate(broadcast: LiveBroadcast): Partial<StreamMeta> {
     // verbatim (no merge fields). Clear the template binding too.
     ytTitle: broadcast.snippet.title,
     ytDescription: broadcast.snippet.description,
+    // The pulled description must ALSO become the description body — the
+    // chip editor's source (ytDescriptionTemplate), which the sidebar
+    // re-bakes into ytDescription whenever the two diverge. Without this,
+    // the stale body immediately baked back over the pulled text: pull
+    // looked like it worked, then reverted within one render. Mirrors the
+    // title treatment: pulled text is the new body verbatim, chips gone.
+    ytDescriptionTemplate: broadcast.snippet.description,
     ytTitleTemplateId: '',
   }
   if (broadcast.snippet.gameTitle) update.ytGameTitle = broadcast.snippet.gameTitle
