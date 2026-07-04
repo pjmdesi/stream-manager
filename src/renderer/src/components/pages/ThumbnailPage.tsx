@@ -27,6 +27,7 @@ import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import { theme, rgba } from '../../theme'
 import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
+import { Modal } from '../ui/Modal'
 import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta, StreamFolder } from '../../types'
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
@@ -255,7 +256,10 @@ export function applyThumbnailMergeFields(text: string, fields: Record<string, s
  *  `mergeFieldValues` resolves (see the editor body). The series-specific
  *  trio is flagged inapplicable on standalone streams — same treatment as
  *  the YouTube-title chip editor on the Streams page. */
-const THUMBNAIL_MERGE_KEYS = ['title', 'game', 'date', 'season', 'episode', 'total_episodes'] as const
+// 'topic' is the canonical key post topic/game rename; {game} stays a
+// resolvable alias (see mergeFieldValues + knownKeys) so text layers
+// authored before the rename keep rendering.
+const THUMBNAIL_MERGE_KEYS = ['title', 'topic', 'date', 'season', 'episode', 'total_episodes'] as const
 const THUMBNAIL_SERIES_KEYS = ['season', 'episode', 'total_episodes']
 
 function snapGrid(v: number) { return Math.round(v / GRID_SIZE) * GRID_SIZE }
@@ -1149,7 +1153,9 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
   // live above the early return. Stable sets keep TemplateBodyEditor from
   // rebuilding its chips every render.
   const textInsertRef = useRef<((text: string) => void) | null>(null)
-  const knownKeys = useMemo(() => new Set<string>(THUMBNAIL_MERGE_KEYS), [])
+  // Include the legacy {game} alias so pre-rename text layers still read as
+  // chips (the picker only offers the canonical {topic}).
+  const knownKeys = useMemo(() => new Set<string>([...THUMBNAIL_MERGE_KEYS, 'game']), [])
   const inapplicableKeys = useMemo(
     () => standalone ? new Set<string>(THUMBNAIL_SERIES_KEYS) : new Set<string>(),
     [standalone],
@@ -3838,6 +3844,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         totalEpisodes: currentStream.totalEpisodes,
         fallback: currentStream.title,
       }) || '',
+      // topic is canonical; game stays as the alias so text layers authored
+      // before the topic/game rename keep resolving.
+      topic: m?.ytGameTitle || m?.games?.[0] || '',
       game: m?.ytGameTitle || m?.games?.[0] || '',
       date: currentStream.date,
       season: m?.ytSeason || '1',
@@ -4957,65 +4966,61 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           {/* Close-without-saving confirm — template sessions only. Templates
               are never autosaved (the whole point: experiments can be
               abandoned), so a dirty close gets the Save / Discard / Cancel
-              choice instead of the stream sessions' silent flush-and-save. */}
+              choice. Mirrors the Settings page's unsaved-changes prompt. */}
           {confirmCloseTemplate && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-              <div className="bg-navy-800 border border-white/10 rounded-xl shadow-2xl w-[420px] flex flex-col overflow-hidden">
-                <div className="flex items-start gap-3 px-5 pt-5 pb-4">
-                  <div className="shrink-0 mt-0.5 p-2 rounded-lg bg-amber-500/15">
-                    <AlertTriangle size={18} className="text-amber-400" />
-                  </div>
-                  <div>
-                    <h2 className="text-sm font-semibold text-gray-200 mb-1">Close without saving?</h2>
-                    <p className="text-xs text-gray-400 leading-relaxed">
-                      The template{' '}
-                      <span className="text-gray-200">{templates.find(t => t.id === currentTemplateId)?.name ?? 'you are editing'}</span>{' '}
-                      has unsaved changes. Templates only save when you click "Update template": closing now discards these edits.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/10">
-                  <Button variant="ghost" size="sm" onClick={() => setConfirmCloseTemplate(false)}>
+            <Modal
+              isOpen
+              onClose={() => { if (!closingSession) setConfirmCloseTemplate(false) }}
+              title="Unsaved changes"
+              width="sm"
+              dismissible={!closingSession}
+              footer={
+                <>
+                  <Button variant="ghost" size="sm" disabled={closingSession} onClick={() => setConfirmCloseTemplate(false)}>
                     Cancel
                   </Button>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={closingSession}
+                    onClick={() => {
+                      setConfirmCloseTemplate(false)
+                      saveEpochRef.current++
+                      setIsDirty(false)
+                      setCurrentTemplateId(undefined)
+                      setMode('overview')
+                    }}
+                    className="text-red-400 hover:text-red-300"
+                  >
+                    Discard changes
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={closingSession}
+                    onClick={async () => {
+                      setClosingSession(true)
+                      try {
+                        await updateCurrentTemplate()
+                      } finally {
                         setConfirmCloseTemplate(false)
                         saveEpochRef.current++
-                        setIsDirty(false)
                         setCurrentTemplateId(undefined)
+                        setClosingSession(false)
                         setMode('overview')
-                      }}
-                    >
-                      Discard changes
-                    </Button>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      icon={closingSession ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                      disabled={closingSession}
-                      onClick={async () => {
-                        setClosingSession(true)
-                        try {
-                          await updateCurrentTemplate()
-                        } finally {
-                          setConfirmCloseTemplate(false)
-                          saveEpochRef.current++
-                          setCurrentTemplateId(undefined)
-                          setClosingSession(false)
-                          setMode('overview')
-                        }
-                      }}
-                    >
-                      Save and close
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
+                      }
+                    }}
+                  >
+                    Save & close
+                  </Button>
+                </>
+              }
+            >
+              <p className="text-sm text-gray-300">
+                The template <span className="text-gray-100">{templates.find(t => t.id === currentTemplateId)?.name ?? 'you are editing'}</span> has
+                unsaved changes. Templates only save when you click "Update template".
+              </p>
+            </Modal>
           )}
         </>
       )}
