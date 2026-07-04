@@ -725,8 +725,16 @@ function classifyVideo(
 }
 
 /**
- * Probes uncached/stale video files and updates allMeta in-place.
- * Returns true if anything changed (so the caller can decide to persist).
+ * Probes uncached/stale video files and records the results into `allMeta`
+ * in-place. Returns true if anything changed.
+ *
+ * IMPORTANT: `allMeta` is the caller's scan-time snapshot and this can run
+ * for minutes — by completion the snapshot is stale, so it is SCRATCH SPACE
+ * for the probe results, never to be persisted wholesale. The streams:list
+ * caller re-reads the current _meta.json and merges only the per-file
+ * videoMap entries computed here. Removals are not this function's job
+ * either — see pruneStaleVideoMapEntries (applied synchronously at scan
+ * time).
  */
 async function refreshVideoMaps(
   entries: Array<{ key: string; folderPath: string; date: string; videos: string[] }>,
@@ -857,8 +865,21 @@ async function refreshVideoMaps(
     }
   }
 
-  // Prune stale entries: remove videoMap keys whose files are no longer in the folder.
-  // Handles renames and deletes that happened outside the app (or via converter rename).
+  return changed
+}
+
+/**
+ * Remove videoMap entries whose files are no longer in their folder — renames
+ * and deletes done outside the app (or via converter rename). Pure scan-time
+ * bookkeeping (no probing), so streams:list applies + persists it
+ * synchronously BEFORE kicking off the async probe; see the call site for why
+ * it must not be deferred. Returns true if anything was removed.
+ */
+function pruneStaleVideoMapEntries(
+  entries: Array<{ key: string; folderPath: string; videos: string[] }>,
+  allMeta: Record<string, StreamMeta>,
+): boolean {
+  let changed = false
   for (const { key, folderPath, videos } of entries) {
     const map = allMeta[key]?.videoMap
     if (!map) continue
@@ -870,7 +891,6 @@ async function refreshVideoMaps(
       }
     }
   }
-
   return changed
 }
 
@@ -1080,12 +1100,26 @@ export function registerStreamsIPC(): void {
       }
     }
 
-    // Only refresh video maps if the set of video files has changed since last cache.
     // Keys are paths relative to each stream folder (forward-slash) — for flat layouts
     // this equals the bare filename, so legacy maps are still valid.
     const videoEntries = folders
       .filter(f => f.videos.length > 0 && !f.isMissing)
       .map(f => ({ key: f.relativePath, folderPath: f.folderPath, date: f.date, videos: f.videos }))
+
+    // Prune videoMap entries for files that no longer exist (renames/deletes
+    // done outside the app). This needs only scan-time data, so it runs — and
+    // persists — synchronously right here. It must NOT ride along with the
+    // async probe below: prune decisions from a minutes-old file listing
+    // applied to a fresh future _meta.json could wrongly delete entries for
+    // files that appeared in the meantime (e.g. a clip exported mid-probe).
+    if (pruneStaleVideoMapEntries(videoEntries, allMeta)) {
+      try { writeAllMeta(dir, allMeta) }
+      catch (err) { console.error('[streams:list] prune write failed:', err) }
+    }
+
+    // Only probe if video files APPEARED since the last cache (the prune
+    // above already applied removals, so a delete-only change no longer
+    // spins up the probe pipeline at all).
     const videoSetChanged = videoEntries.some(({ key, folderPath, videos }) => {
       const cached = allMeta[key]?.videoMap
       if (!cached) return videos.length > 0
@@ -1099,8 +1133,43 @@ export function registerStreamsIPC(): void {
       refreshVideoMaps(videoEntries, allMeta)
         .then(changed => {
           if (!changed) return
-          try { writeAllMeta(dir, allMeta) }
-          catch (err) { console.error('[streams:list] writeAllMeta failed:', err) }
+          // The probe can run for minutes (first scan, big import), so by
+          // now `allMeta` is a stale scan-time snapshot. Never write it
+          // back: re-read the CURRENT file and merge in only what the probe
+          // computed (per-file videoMap entries). The read-merge-write is
+          // synchronous, so nothing can interleave — metadata edits,
+          // deletions, and clip exports made while probing all survive.
+          try {
+            const fresh = readAllMeta(dir)
+            let touched = false
+            for (const { key, folderPath, date } of videoEntries) {
+              const computed = allMeta[key]?.videoMap
+              if (!computed || Object.keys(computed).length === 0) continue
+              let target = fresh[key]
+              if (!target) {
+                // Entry vanished while probing. A deleted stream (folder
+                // gone) stays deleted; a folder that still exists just has
+                // no meta yet — recreate the cache stub. (Dump mode's shared
+                // folderPath always exists, matching its pre-existing
+                // stub-resurrection behavior for cache-only entries.)
+                if (!fs.existsSync(folderPath)) continue
+                target = ensureMetaEntry(fresh, key, date)
+              }
+              // Additive per-file overlay: files that appeared after the
+              // scan (absent from `computed`) keep whatever entry a
+              // concurrent writer gave them.
+              target.videoMap = { ...(target.videoMap ?? {}), ...computed }
+              touched = true
+            }
+            if (!touched) return
+            writeAllMeta(dir, fresh)
+          } catch (err) {
+            // Meta locked/corrupt right now — drop the merge. The probed
+            // entries were never persisted, so the next scan simply
+            // re-probes them.
+            console.error('[streams:list] videoMap merge failed:', err)
+            return
+          }
           // Notify the renderer so it re-fetches with the freshly-written
           // videoMap entries (e.g. categories for newly-arrived files). The
           // chokidar self-loop guard means our own _meta.json write doesn't
