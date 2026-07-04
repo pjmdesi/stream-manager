@@ -20,6 +20,21 @@ export function registerCombineIPC(): void {
       const { default: ffmpegStatic } = await import('ffmpeg-static')
       if (!ffmpegStatic) throw new Error('ffmpeg binary not found')
 
+      // Guard rails: the output must be a NEW file that isn't also an input.
+      // Overwriting is never right here — the concat starts by truncating the
+      // target, so a colliding path silently destroys a previous combine, and
+      // if that file is also in the input list ffmpeg reads the very file it
+      // is writing. The renderer pre-uniquifies its default name; these catch
+      // hand-typed paths and races.
+      const normalize = (p: string) => path.resolve(p).toLowerCase()
+      const outNorm = normalize(outputPath)
+      if (files.some(f => normalize(f) === outNorm)) {
+        throw new Error('The output path is one of the input files. Pick a different output name.')
+      }
+      if (fs.existsSync(outputPath)) {
+        throw new Error(`The output file already exists: ${path.basename(outputPath)}. Pick a different name.`)
+      }
+
       // Write a concat list file to a temp location
       const listPath = path.join(os.tmpdir(), `sm_concat_${Date.now()}.txt`)
       const listContent = files
@@ -35,7 +50,10 @@ export function registerCombineIPC(): void {
 
       return new Promise<void>((resolve, reject) => {
         const args = [
-          '-y',
+          // -n (never overwrite) instead of -y: the existence check above
+          // already guarantees a fresh target, so this only matters if a
+          // file appears in the race window — fail instead of truncating it.
+          '-n',
           '-f', 'concat',
           '-safe', '0',
           '-i', listPath,
@@ -45,24 +63,45 @@ export function registerCombineIPC(): void {
         ]
 
         const proc = spawn(fixAsarPath(ffmpegStatic as string), args)
+        proc.stdin?.end()
+
+        // A failed run's partial output is garbage — clean it up like the
+        // archive error path does its temp. Gated on ffmpeg having actually
+        // started writing (first progress block): if -n refused because a
+        // file appeared in the race window, that file is NOT ours and must
+        // not be deleted. Worst case of the gate is an orphaned header-stub
+        // when ffmpeg dies before its first progress tick — better a stub
+        // than deleting someone else's file.
+        let startedWriting = false
+        const cleanupPartialOutput = () => {
+          if (!startedWriting) return
+          try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath) } catch (_) {}
+        }
 
         proc.stdout?.on('data', (data: Buffer) => {
           const text = data.toString()
           const match = text.match(/out_time_ms=(\d+)/)
-          if (match && totalDurationSec > 0) {
-            const outSec = parseInt(match[1]) / 1_000_000
-            send(Math.min(99, Math.round((outSec / totalDurationSec) * 100)))
+          if (match) {
+            startedWriting = true
+            if (totalDurationSec > 0) {
+              const outSec = parseInt(match[1]) / 1_000_000
+              send(Math.min(99, Math.round((outSec / totalDurationSec) * 100)))
+            }
           }
         })
 
         proc.on('close', (code) => {
           try { fs.unlinkSync(listPath) } catch (_) {}
           if (code === 0) { send(100); resolve() }
-          else reject(new Error(`ffmpeg exited with code ${code}`))
+          else {
+            cleanupPartialOutput()
+            reject(new Error(`ffmpeg exited with code ${code}`))
+          }
         })
 
         proc.on('error', (err) => {
           try { fs.unlinkSync(listPath) } catch (_) {}
+          cleanupPartialOutput()
           reject(err)
         })
       })

@@ -80,11 +80,13 @@
 36. Add the ability to collapse the asset panel in the thumbnail editor sidebar. Sometimes its not needed and it may just be a distraction or get in the way of the rest of the items in the sidebar. It would need a button to the right of the filters button in the header of the panel and would basically shrink the panel to be just the header with the button to expand it again (hiding the filters button and the list of assets). The button would toggle between collapse and expand. The collapsed state should persist across sessions.
 37. In the convert-to-folder-per-stream modal, on the final step (showing the changed files), the close and undo changes buttons need to swap positions. The close button should be the one on the right in the primary location since that's the most likely next step for the user. This UX rule should be written into the style guide.
 38. Update tge dump mode detection banner in the onboarding modal to a more noticeable color (like a yellow/orange) and replace the info icon with a warning icon. Then add "(Not recommended)" to the end of the text. This is to make it more clear to the user that this mode is not recommended and they should consider switching to folder mode.
+39. Add a "combine" button to the stream page detail side bar files grid when in the multi-select mode. This would allow the user to pick video files to send to the combine page, so they don't have to add all and remove from there.
 
 ## Bugs
 
 1. Pull-from-YouTube silently reverts descriptions (the bake effect rewrites from the unchanged template within one render), and a slow "Create broadcast" can link the broadcast to whichever stream you clicked next. Both are sync-integrity landmines on unchecked checklist items (§2 pull, §3 Twitch).
 2. Settings Save writes the whole config from a stale snapshot, so converting dump→folder mode then saving any unrelated setting reverts the mode; several config writers (tray, relay, convert flow) never reach renderer state at all.
+3. After loading in a list of video files into the Converter page, removing items from the list, then navigating to another page and back to the converter page, the items that were removed come back and need to be removed again.
 
 ## Other ideas (small)
 
