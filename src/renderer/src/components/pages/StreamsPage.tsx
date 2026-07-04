@@ -1552,6 +1552,12 @@ export function StreamsPage({
           refreshed.snippet.tags = tags
           if (categoryId) refreshed.snippet.categoryId = categoryId
           if (privacy) refreshed.status.privacyStatus = privacy
+          // Schedule too — a stale read here would resurrect the OLD
+          // start time in the cached broadcast, and the time dot would
+          // keep glowing right after a successful schedule push.
+          if (scheduleApplied && newScheduledStartTime) {
+            refreshed.snippet.scheduledStartTime = newScheduledStartTime
+          }
           setYtBroadcasts(prev => prev.some(b => b.id === refreshed.id)
             ? prev.map(b => b.id === refreshed.id ? refreshed : b)
             : prev
@@ -5993,6 +5999,34 @@ function SidebarDetail({
     !selectedBroadcast.snippet.actualStartTime
   )
   const displayedScheduledTime = meta?.scheduledTime ?? broadcastScheduledTimeHHMM
+  // The scheduledStartTime a YouTube push would send RIGHT NOW, or null
+  // when a push would leave the broadcast's schedule untouched (local
+  // date + time match the remote schedule, or the broadcast can't be
+  // rescheduled anymore). New schedule = the item's date + the staged
+  // time, falling back to the broadcast's existing time-of-day so a
+  // date-only reschedule preserves the original hour. Single source for
+  // BOTH the push handler and the staged-time validation below, so the
+  // warning can never disagree with what a push actually sends.
+  const stagedScheduleForPush = useMemo((): Date | null => {
+    if (!selectedBroadcast?.snippet.scheduledStartTime || selectedBroadcast.snippet.actualStartTime) return null
+    const existing = new Date(selectedBroadcast.snippet.scheduledStartTime)
+    if (isNaN(existing.getTime())) return null
+    const remoteLocalDate = `${existing.getFullYear()}-${String(existing.getMonth() + 1).padStart(2, '0')}-${String(existing.getDate()).padStart(2, '0')}`
+    const remoteLocalTime = `${String(existing.getHours()).padStart(2, '0')}:${String(existing.getMinutes()).padStart(2, '0')}`
+    const wantedDate = folder.date
+    const wantedTime = meta?.scheduledTime ?? remoteLocalTime
+    if (remoteLocalDate === wantedDate && remoteLocalTime === wantedTime) return null
+    const [y, mo, d] = wantedDate.split('-').map(n => parseInt(n, 10))
+    const [h, mi] = wantedTime.split(':').map(n => parseInt(n, 10))
+    return new Date(y, mo - 1, d, h, mi, existing.getSeconds(), existing.getMilliseconds())
+  }, [selectedBroadcast, folder.date, meta?.scheduledTime])
+  // YouTube rejects past start times on liveBroadcasts.update, so a
+  // staged schedule that has already passed can never be pushed. Warn
+  // at the field the moment it's staged (and disable the push buttons)
+  // instead of letting the user find out from a failed push. Evaluated
+  // per render; the push handler's own preflight backstops the case
+  // where a staged future time crosses "now" while the sidebar idles.
+  const stagedScheduleInPast = !!stagedScheduleForPush && stagedScheduleForPush.getTime() <= Date.now()
 
   // ── Paste-URL fallback ──────────────────────────────────────────────
   // For VODs that don't appear in the picker (unlisted, from a sub-channel,
@@ -7342,6 +7376,7 @@ function SidebarDetail({
                 time={displayedScheduledTime}
                 onTimeChange={v => onUpdateMeta({ scheduledTime: v || undefined })}
                 timeMismatch={broadcastMismatches.get('scheduledTime')}
+                timeInvalid={stagedScheduleInPast}
                 privacy={displayedPrivacy ?? 'private'}
                 onPrivacyChange={v => onUpdateMeta({ ytPrivacyStatus: v })}
                 privacyMismatch={broadcastMismatches.get('privacy')}
@@ -7366,6 +7401,17 @@ function SidebarDetail({
                   </Tooltip>
                 }
               />
+            )}
+
+            {/* Staged-time sanity warning. A start time that has already
+                passed can never be pushed (YouTube rejects it), so say
+                so at the field the moment it's staged. The Push to
+                YouTube button below disables on the same condition. */}
+            {stagedScheduleInPast && (
+              <p className="text-[10px] text-red-400 flex items-start gap-1">
+                <AlertTriangle size={10} className="shrink-0 mt-0.5" />
+                <span>This start time has already passed. YouTube rejects past start times, so fix the date or time before pushing.</span>
+              </p>
             )}
 
             {/* Shared-link warning — other stream items also pointing
@@ -7430,6 +7476,7 @@ function SidebarDetail({
           // triggered together by Push to all.
           const ytDisabled = ytPushing || !ytConnected || !meta?.ytVideoId || !selectedBroadcast
             || quotaExceeded
+            || stagedScheduleInPast
             || (!broadcastMismatch && !thumbnailNeedsPush)
           // Effective Twitch values for the in-sync comparison —
           // matches what handlePushToTwitch above would actually send.
@@ -7529,36 +7576,10 @@ function SidebarDetail({
               onMissingYtCategory()
               return
             }
-            // Compute a new scheduledStartTime when EITHER the local
-            // date or the local scheduled-time differs from what the
-            // broadcast currently has. Only relevant for upcoming
-            // broadcasts (past / live ones can't have their schedule
-            // edited via the YT API anyway). The local time falls back
-            // to the broadcast's existing time-of-day when the user
-            // hasn't overridden it via the time picker, so a date-only
-            // reschedule preserves the original hour exactly as before.
-            let newScheduled: string | undefined
-            if (
-              selectedBroadcast?.snippet.scheduledStartTime &&
-              !selectedBroadcast.snippet.actualStartTime
-            ) {
-              const existing = new Date(selectedBroadcast.snippet.scheduledStartTime)
-              if (!isNaN(existing.getTime())) {
-                const remoteLocalDate = `${existing.getFullYear()}-${String(existing.getMonth() + 1).padStart(2, '0')}-${String(existing.getDate()).padStart(2, '0')}`
-                const remoteLocalTime = `${String(existing.getHours()).padStart(2, '0')}:${String(existing.getMinutes()).padStart(2, '0')}`
-                const wantedDate = folder.date
-                const wantedTime = meta?.scheduledTime ?? remoteLocalTime
-                if (remoteLocalDate !== wantedDate || remoteLocalTime !== wantedTime) {
-                  const [y, mo, d] = wantedDate.split('-').map(n => parseInt(n, 10))
-                  const [h, mi] = wantedTime.split(':').map(n => parseInt(n, 10))
-                  const next = new Date(
-                    y, mo - 1, d,
-                    h, mi, existing.getSeconds(), existing.getMilliseconds(),
-                  )
-                  newScheduled = next.toISOString()
-                }
-              }
-            }
+            // Schedule to send (if any) comes from the same derivation
+            // that drives the staged-time warning + button disable, so
+            // what's pushed is exactly what the UI validated.
+            const newScheduled = stagedScheduleForPush?.toISOString()
             setYtPushing(true)
             try { await onPushToYoutube(effectiveYtThumb, newScheduled) }
             finally { setYtPushing(false) }
@@ -7716,6 +7737,7 @@ function SidebarDetail({
                         : !meta?.ytVideoId ? 'No linked broadcast or video — link one first'
                         : !selectedBroadcast ? 'Loading broadcast info…'
                         : quotaExceeded ? 'YouTube API quota exceeded — try again after midnight Pacific Time'
+                        : stagedScheduleInPast ? 'The staged broadcast time is in the past. Fix the date or time, then push.'
                         : !broadcastMismatch && !thumbnailNeedsPush ? 'Already in sync with YouTube'
                         : !broadcastMismatch && thumbnailNeedsPush ? 'Push updated thumbnail to YouTube'
                         : 'Push title / description / tags to YouTube'
@@ -7762,7 +7784,8 @@ function SidebarDetail({
                     like the primary Button (purple-800 → purple-700
                     on hover, soft purple-900 shadow). */}
                 <Tooltip content={
-                  allDisabled ? 'Nothing to push on any connected platform'
+                  allDisabled && stagedScheduleInPast ? 'The staged broadcast time is in the past. Fix the date or time, then push.'
+                    : allDisabled ? 'Nothing to push on any connected platform'
                     : 'Push to every connected platform with pending changes. Skips platforms that are already in sync or not connected.'
                 }>
                   <button
@@ -8576,7 +8599,7 @@ const PRIVACY_OPTIONS: Array<{ value: PrivacyValue; label: string; Icon: typeof 
  * accept schedule edits — only the privacy column renders in that case.
  */
 function BroadcastTimePrivacyRow({
-  time, onTimeChange, timeMismatch, showTime = true,
+  time, onTimeChange, timeMismatch, timeInvalid, showTime = true,
   privacy, onPrivacyChange, privacyMismatch,
   disabled, privacyLoading,
   trailing,
@@ -8584,6 +8607,9 @@ function BroadcastTimePrivacyRow({
   time: string
   onTimeChange: (v: string) => void
   timeMismatch?: 'local' | 'remote' | 'both' | 'unknown'
+  /** True when the staged date + time sits in the past — tints the
+   *  input's border red to anchor the warning text under the row. */
+  timeInvalid?: boolean
   showTime?: boolean
   privacy: PrivacyValue
   onPrivacyChange: (v: PrivacyValue) => void
@@ -8631,7 +8657,7 @@ function BroadcastTimePrivacyRow({
             // Asymmetric padding compensates for native time-input chrome
             // so the input height lines up with the PrivacyDropdown next to
             // it (pt-[5px] pb-1 → both rest on the same baseline).
-            className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]"
+            className={`bg-navy-900 border ${timeInvalid ? 'border-red-500/60' : 'border-white/10'} text-gray-200 text-xs rounded-lg px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]`}
           />
         </div>
       )}
