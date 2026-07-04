@@ -22,12 +22,12 @@ Legend: `- [ ]` = not yet confirmed · `- [x]` = confirmed working · add `⚠` 
 ## 2. Stream metadata & YouTube publishing
 
 - [x] Create a stream item; metadata persists to `_meta.json` and reloads correctly
-- [ ] Chip title editor: merge fields render right — `{game}`, `{episode}`, `{total_episodes}`, `{topic}`/`{topics}`, dates
-- [ ] Rendered title preview matches what actually gets pushed
-- [ ] Description chip editor + inline merge-field picker
-- [ ] Push to YouTube: title / description / tags / category all land
-- [ ] Push **thumbnail** to YouTube — both a **livestream** VOD and a **regular video** (incl. a re-upload that replaced a deleted livestream → should no longer error)
-- [ ] Push **privacy** (public / unlisted / private) — both broadcast and regular-video paths
+- [x] Chip title editor: merge fields render right — `{game}`, `{episode}`, `{total_episodes}`, `{topic}`/`{topics}`, dates
+- [x] Rendered title preview matches what actually gets pushed
+- [x] Description chip editor + inline merge-field picker
+- [x] Push to YouTube: title / description / tags / category all land
+- [x] Push **thumbnail** to YouTube — both a **livestream** VOD and a **regular video** (incl. a re-upload that replaced a deleted livestream → should no longer error)
+- [x] Push **privacy** (public / unlisted / private) — both broadcast and regular-video paths
 - [ ] Out-of-sync panel: per-field mismatch dots (local / remote / both) are accurate
 - [ ] Pull-from-YouTube (overwrite local) works
 - [ ] Broadcast date/time sync — push, pull, and the reschedule conflict modes
@@ -68,8 +68,8 @@ Legend: `- [ ]` = not yet confirmed · `- [x]` = confirmed working · add `⚠` 
 
 - [x] Presets + per-file output settings
 - [x] Queue UI + ETA widget; concurrent-conversion cap holds
-- [ ] Send to converter — whole stream **and** an individual file
-- [ ] Extracted-audio filename includes the track number + name
+- [x] Send to converter — whole stream **and** an individual file
+- [x] Extracted-audio filename includes the track number + name
 - [ ] Exported clips carry the container/provenance marker
 - [ ] No failed or stuck jobs across the test period
 
@@ -78,7 +78,7 @@ Legend: `- [ ]` = not yet confirmed · `- [x]` = confirmed working · add `⚠` 
 - [x] Playback + multi-track audio
 - [x] Session Videos panel switches between videos in the same folder
 - [x] Send-to-Player hydration check (spinner) for cloud files, then opens
-- [ ] Clip export
+- [x] Clip export
 
 ## 8. Thumbnails
 
@@ -107,7 +107,7 @@ Legend: `- [ ]` = not yet confirmed · `- [x]` = confirmed working · add `⚠` 
 
 ## 12. App shell / foundational
 
-- [ ] Tray menu reflects current state (not stale)
+- [x] Tray menu reflects current state (not stale)
 - [x] Settings; unsaved-changes nav-guard
 - [x] Quota tracker estimate looks right; auto-clears at PT midnight
 - [x] Keyboard shortcuts work (and are surfaced in button tooltips)

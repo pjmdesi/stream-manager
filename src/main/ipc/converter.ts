@@ -4,7 +4,7 @@ import path from 'path'
 import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import { getStore } from './store'
-import { suppressNextStreamsChokidarFire } from './streams'
+import { suppressNextStreamsChokidarFire, readAllMeta, writeAllMeta } from './streams'
 
 /** Form state for the simplified custom-preset editor. Stored on the preset so
  *  the user can re-open and edit it in form mode later, and so exports preserve
@@ -774,23 +774,19 @@ async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void>
     // resurrected by a late hook firing.
     const { streamsDir, metaKey, date } = hook
     const key = metaKey ?? date
-    const metaPath = path.join(streamsDir, '_meta.json')
-    let allMeta: Record<string, any> = {}
-    try { allMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) } catch {}
+    const allMeta = readAllMeta(streamsDir)
     if (!allMeta[key]) {
       console.log(`[archiveMarkAsArchived] no meta entry at "${key}" — skipping (stream was deleted before archive finished)`)
       return
     }
     allMeta[key] = { ...allMeta[key], archived: true }
-    // On Windows the _meta.json is hidden (+H attribute) — unhide before write,
-    // re-hide after.
-    const isWin = process.platform === 'win32'
-    if (isWin && fs.existsSync(metaPath)) {
-      try { (await import('child_process')).spawnSync('attrib', ['-H', metaPath], { timeout: 2000 }) } catch {}
-    }
-    fs.writeFileSync(metaPath, JSON.stringify(allMeta, null, 2), 'utf-8')
-    if (isWin) {
-      try { (await import('child_process')).spawnSync('attrib', ['+H', metaPath], { timeout: 2000 }) } catch {}
+    try {
+      writeAllMeta(streamsDir, allMeta)
+    } catch (err) {
+      // Fire-and-forget hook: a failed swap leaves _meta.json intact, so the
+      // only casualty is the archived flag. Never let it take the queue down.
+      console.error('[archiveMarkAsArchived] meta write failed:', err)
+      return
     }
     // Tell the renderer to refresh the streams page. Suppress the
     // chokidar echo for the final output file (chokidar fires on the

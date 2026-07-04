@@ -336,7 +336,7 @@ function getStreamsDir(): string {
   return ((getStore().get('config') as any)?.streamsDir as string) ?? ''
 }
 
-function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
+export function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
   try {
     return JSON.parse(fs.readFileSync(metaFilePath(streamsDir), 'utf-8'))
   } catch {
@@ -344,25 +344,72 @@ function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
   }
 }
 
-function writeAllMeta(streamsDir: string, allMeta: Record<string, StreamMeta>): void {
+/** Synchronous sleep for writeAllMeta's rename retries. The write path must
+ *  stay fully synchronous: every caller is a read-modify-write sequence, and
+ *  an await between the read and the write would let two IPC handlers
+ *  interleave and clobber each other's changes. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+// streamsDirs whose _meta.json has had the legacy hidden attribute stripped
+// this session (see step 3 in writeAllMeta).
+const hiddenAttrStripped = new Set<string>()
+
+/** Crash-safe _meta.json write: write a temp sibling, verify its shape, then
+ *  atomically rename it over the real file. At no point is _meta.json itself
+ *  in a partially-written state — any failure (including a crash or power
+ *  loss mid-write) leaves the previous version intact on disk, with the temp
+ *  file beside it. Throws on failure; callers' IPC rejections surface it. */
+export function writeAllMeta(streamsDir: string, allMeta: Record<string, StreamMeta>): void {
   const filePath = metaFilePath(streamsDir)
-  // On Windows, fs.writeFileSync fails with EPERM when overwriting a hidden file (CREATE_ALWAYS
-  // on a hidden file returns ACCESS_DENIED). Unhide before writing, write, then re-hide.
-  const isWin = process.platform === 'win32'
-  if (isWin && fs.existsSync(filePath)) {
-    try { spawnSync('attrib', ['-H', filePath], { timeout: 2000 }) } catch {}
+  const tmpPath = filePath + '.tmp'
+
+  // 1. Write the temp sibling and flush it to disk before the swap.
+  const fd = fs.openSync(tmpPath, 'w')
+  try {
+    fs.writeSync(fd, JSON.stringify(allMeta, null, 2), null, 'utf-8')
+    fs.fsyncSync(fd)
+  } finally {
+    fs.closeSync(fd)
   }
-  fs.writeFileSync(filePath, JSON.stringify(allMeta, null, 2), 'utf-8')
-  if (isWin) {
+
+  // 2. Shape check before the swap: parseable, and the same entry count as
+  //    memory. Catches truncated/garbled writes without a byte-for-byte diff.
+  const readBack = JSON.parse(fs.readFileSync(tmpPath, 'utf-8')) as Record<string, unknown>
+  const expected = Object.keys(allMeta).length
+  const actual = Object.keys(readBack).length
+  if (actual !== expected) {
+    throw new Error(`_meta.json verify failed: temp file has ${actual} entries, memory has ${expected}`)
+  }
+
+  // 3. Legacy migration: _meta.json used to carry the Windows hidden
+  //    attribute, which makes overwrite AND rename-over fail with EPERM. The
+  //    file is no longer hidden — strip the attribute once per session so
+  //    pre-existing libraries swap cleanly.
+  if (process.platform === 'win32' && !hiddenAttrStripped.has(filePath)) {
+    if (fs.existsSync(filePath)) {
+      try { spawnSync('attrib', ['-H', filePath], { timeout: 2000 }) } catch {}
+    }
+    hiddenAttrStripped.add(filePath)
+  }
+
+  // 4. Atomic swap. The rename can transiently fail while a sync client
+  //    (Synology Drive) holds the target for upload — retry briefly, then
+  //    give up with BOTH files intact (old data in place, new data in .tmp).
+  let lastErr: unknown = null
+  for (const delayMs of [0, 100, 250]) {
+    if (delayMs) sleepSync(delayMs)
     try {
-      const result = spawnSync('attrib', ['+H', filePath], { timeout: 2000 })
-      if (result.status !== 0) {
-        console.warn('[writeAllMeta] attrib +H failed', { status: result.status, stderr: result.stderr?.toString() })
-      }
+      fs.renameSync(tmpPath, filePath)
+      return
     } catch (err) {
-      console.warn('[writeAllMeta] attrib +H threw', err)
+      lastErr = err
+      const code = (err as { code?: string }).code
+      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES') break
     }
   }
+  throw lastErr
 }
 
 /**
@@ -1561,12 +1608,15 @@ export function registerStreamsIPC(): void {
       // 'change' events for every internal write and the renderer re-runs
       // loadFolders → refreshVideoMaps in a tight feedback loop:
       //   - _meta.json: the metadata store (saved on every edit)
+      //   - _meta.json.tmp: writeAllMeta's atomic-swap sibling — written and
+      //     renamed away on every save; without the ignore each save would
+      //     fire a phantom add/unlink pair and re-trigger the reload storm
       //   - *__arc_tmp.*: archive job temp output. ffmpeg writes incrementally
       //     while encoding so 'change' events fire continuously through a
       //     multi-hour archive run, and the renderer was thrashing thumbnails.
       //     The temp file is renamed/swapped to the real file at end-of-job
       //     anyway, so the user only needs to see the final state.
-      ignored: (p: string) => p.endsWith('_meta.json') || /__arc_tmp\.[^.]+$/.test(p),
+      ignored: (p: string) => p.endsWith('_meta.json') || p.endsWith('_meta.json.tmp') || /__arc_tmp\.[^.]+$/.test(p),
     })
 
     const onChange = () => notifyChange(win)
