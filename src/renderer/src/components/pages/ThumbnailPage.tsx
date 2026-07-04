@@ -3130,7 +3130,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // editor's image handling) and alpha is preserved when present. Placed
   // below addImageLayerFromPath so the deps reference is in scope.
   useEffect(() => {
-    if (!currentStream) return
+    // Kept-alive page: the document-level paste listener must only be live
+    // while the editor is actually on screen. Without the visibility/mode
+    // gate, Ctrl+V anywhere in the app (say, a fresh screenshot on the
+    // clipboard while the Streams page is focused) silently wrote a
+    // pasted-*.png into the bound stream's folder and overwrote its saved
+    // thumbnail via autosave — currentStream survives "Close session", so
+    // gating on it alone wasn't enough.
+    if (!isVisible || mode !== 'editor' || !currentStream) return
     const onPaste = async (e: ClipboardEvent) => {
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, [contenteditable="true"]')) return
@@ -3179,7 +3186,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)
-  }, [currentStream, addImageLayerFromPath])
+  }, [isVisible, mode, currentStream, addImageLayerFromPath])
 
   const addTextLayer = useCallback(() => {
     const layer: ThumbnailLayer = {

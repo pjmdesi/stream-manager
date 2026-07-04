@@ -245,7 +245,6 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             { keys: ['F'], label: 'Toggle clip-region focus' },
             { keys: ['P'], label: 'Toggle pop-out video' },
             { keys: ['C'], label: 'Toggle clip mode' },
-            { keys: ['Esc'], label: 'Close current session' },
           ]} />
           <ShortcutGroup title="File & capture" rows={[
             { keys: ['Ctrl', 'O'], label: 'Open video file' },

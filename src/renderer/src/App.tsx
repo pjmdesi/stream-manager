@@ -852,7 +852,7 @@ function AppInner() {
         <PageErrorBoundary>
           {/* Persistent pages — must live outside ErrorBoundary so key={page} doesn't remount them */}
           <div className={`h-full ${page === 'player' ? '' : 'hidden'}`}>
-            <PlayerPage initialFile={pendingPlayer} onNavigateToConverter={() => setPage('converter')} />
+            <PlayerPage isVisible={page === 'player'} initialFile={pendingPlayer} onNavigateToConverter={() => setPage('converter')} />
           </div>
           <div className={`h-full ${page === 'converter' ? '' : 'hidden'}`}>
             <ConverterPage pending={pendingConverter} onNavigateToStream={navigateToStream} />

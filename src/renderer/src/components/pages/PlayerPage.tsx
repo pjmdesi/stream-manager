@@ -7,6 +7,7 @@ import { useConversionJobs } from '../../context/ConversionContext'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { rememberHydrationOne } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
+import { isAnyModalOpen } from '../../lib/shortcuts'
 import { useStore } from '../../hooks/useStore'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry } from '../../types'
 import { ThumbImage } from '../streams/ThumbImage'
@@ -1006,7 +1007,8 @@ function CropAspectSelector({ value, onChange, videoW, videoH }: {
   )
 }
 
-export function PlayerPage({ initialFile, onNavigateToConverter }: {
+export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
+  isVisible: boolean
   initialFile?: PendingFile | null
   onNavigateToConverter?: () => void
 }) {
@@ -3135,6 +3137,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
   }, [siblingFiles, folderDrafts])
 
   useEffect(() => {
+    // Kept-alive page: only listen while actually visible — otherwise every
+    // one of these document-level shortcuts fires from the other pages too
+    // (Space playing invisible audio from Streams, plain arrows frame-
+    // stepping the hidden video while nudging thumbnail layers, Ctrl+O
+    // opening a file dialog anywhere, C opening an invisible modal).
+    if (!isVisible) return
     const handler = (e: KeyboardEvent) => {
       // Don't fire while user is typing
       const target = e.target as HTMLElement | null
@@ -3142,6 +3150,8 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return
       // Don't fire while a player modal is open
       if (clipModeModal || draftPendingDelete || showExportDialog) return
+      // …or any app-level modal (Help, delete confirms, post-stream prompt).
+      if (isAnyModalOpen()) return
 
       const ctrl = e.ctrlKey || e.metaKey
       const shift = e.shiftKey
@@ -3265,11 +3275,6 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
           setTimeout(() => timecodeInputRef.current?.select(), 0)
           return
         }
-        // Esc — close session
-        if (k === 'Escape') {
-          if (state.filePath) { e.preventDefault(); closeVideo() }
-          return
-        }
       }
 
       // ── Clip mode only ──────────────────────────────────────────────────
@@ -3332,11 +3337,12 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
   }, [
+    isVisible,
     clipModeModal, draftPendingDelete, showExportDialog,
     effectiveTogglePlay, skip, stepFrame, multiTrack, multiTrackEnabled, isExtracting,
     config.skipClipMergeWarning, exitClipMode,
     setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
-    closeVideo, state.filePath, addSegment, splitSegment, jumpToMarker,
+    state.filePath, addSegment, splitSegment, jumpToMarker,
     activeBleepId, flatSessionItems, loadFile, loadDraft, activeDraftId,
   ])
 
@@ -5077,7 +5083,7 @@ export function PlayerPage({ initialFile, onNavigateToConverter }: {
                 return (
                   <div className={`${topStackCls} border-b border-white/5`}>
                     {videoInfo && (
-                      <Tooltip content="Close session (Esc)" side="left">
+                      <Tooltip content="Close session" side="left">
                         <button
                           onClick={() => closeVideo()}
                           className={`${topBtnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
