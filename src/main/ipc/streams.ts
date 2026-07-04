@@ -1540,12 +1540,24 @@ export function registerStreamsIPC(): void {
   })
 
   ipcMain.handle('streams:deleteStreamFiles', async (_event, dir: string, date: string): Promise<void> => {
+    // Trash FIRST, metadata second — the same order streams:deleteFolder
+    // uses. The old order wrote the meta removal up front and swallowed
+    // every trash failure, so a file locked by an external app kept the
+    // files on disk while the stream's games/comments/YT link were already
+    // destroyed, silently.
+    const failed: string[] = []
+    for (const filePath of filesForDate(dir, date)) {
+      try { await shell.trashItem(filePath) } catch { failed.push(path.basename(filePath)) }
+    }
+    if (failed.length > 0) {
+      const shown = failed.slice(0, 3).join(', ')
+      throw new Error(
+        `Could not move ${failed.length} file${failed.length === 1 ? '' : 's'} to the recycle bin (probably in use by another program): ${shown}${failed.length > 3 ? ', …' : ''}. The stream's metadata was left untouched — close whatever is using the file${failed.length === 1 ? '' : 's'} and delete again.`
+      )
+    }
     const allMeta = readAllMeta(dir)
     delete allMeta[date]
     writeAllMeta(dir, allMeta)
-    for (const filePath of filesForDate(dir, date)) {
-      try { await shell.trashItem(filePath) } catch {}
-    }
   })
 
 
