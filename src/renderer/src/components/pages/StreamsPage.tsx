@@ -3047,12 +3047,20 @@ export function StreamsPage({
                     const key = selectionKey(f)
                     return (
                       <StreamListItem
-                        // selectionKey, NOT folderPath: in dump mode every
-                        // stream shares folderPath (the dump dir), and
-                        // duplicate React keys make reconciliation undefined
-                        // — rows visibly duplicated/omitted after the live
-                        // dump→folder conversion flip.
-                        key={key}
+                        // relativePath, NOT folderPath and NOT selectionKey:
+                        // dump-mode rows all share folderPath (the dump dir),
+                        // and selectionKey derives from the PAGE's current
+                        // mode — during the live dump→folder conversion the
+                        // mode flips one render before the new scan lands, so
+                        // a mode-dependent key re-collides on the stale rows
+                        // for that frame. Duplicate keys corrupt React's
+                        // child reconciliation in a way only a remount heals
+                        // (rows visibly duplicated/omitted, reload-proof).
+                        // relativePath is intrinsic to the row (date in dump
+                        // scans, folder path in folder scans): unique in any
+                        // scan, regardless of what mode the page thinks it's
+                        // in.
+                        key={f.relativePath}
                         folder={f}
                         folders={folders}
                         selected={f.folderPath === selectedFolderPath}
