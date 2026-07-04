@@ -40,6 +40,7 @@ import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { SendToConverterModal } from '../streams/SendToConverterModal'
 import { isAnyModalOpen, isTypingTarget } from '../../lib/shortcuts'
+import { releaseThumbDecodes } from '../ui/VideoThumb'
 import { StreamFilesGrid, type FilesGridHandle } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
@@ -403,7 +404,31 @@ export function StreamsPage({
   // accidentally drops the user's current selection just because the
   // underlying array reshuffles. folderPath is unique per folder in both
   // folder-per-stream and dump-folder modes.
-  const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null)
+  // Canonical stream identity = folder.relativePath (the date in dump mode,
+  // the root-relative folder path in folder mode). NEVER folderPath: in dump
+  // mode every stream shares folderPath (the dump dir), which collapsed
+  // selection/edits/archive onto the first row.
+  const [selectedStreamKey, setSelectedStreamKey] = useState<string | null>(null)
+  // Path-shaped select requests (App's navigateToStream, reschedule + new-
+  // stream success) may arrive before the folder exists in state — stash and
+  // resolve to the stream key as soon as the row appears. In dump mode a
+  // bare folderPath is inherently ambiguous (shared root) and resolves to
+  // the first row, same as before.
+  const pendingSelectPathRef = useRef<string | null>(null)
+  // (foldersRef is declared further down with the relay-lifecycle refs and
+  // kept fresh there; the callback below only reads it at call time.)
+  const selectByFolderPath = useCallback((folderPath: string) => {
+    const f = foldersRef.current.find(x => x.folderPath === folderPath)
+    if (f) setSelectedStreamKey(f.relativePath)
+    else pendingSelectPathRef.current = folderPath
+  }, [])
+  useEffect(() => {
+    foldersRef.current = folders
+    const pending = pendingSelectPathRef.current
+    if (!pending) return
+    const f = folders.find(x => x.folderPath === pending)
+    if (f) { pendingSelectPathRef.current = null; setSelectedStreamKey(f.relativePath) }
+  }, [folders])
   // When set, the "pick which videos to send to the converter" modal is open
   // for this folder (shown only for folders with more than one video).
   const [sendConverterFolder, setSendConverterFolder] = useState<StreamFolder | null>(null)
@@ -413,8 +438,8 @@ export function StreamsPage({
   useEffect(() => {
     if (!pendingSelect || pendingSelect.token === lastSelectTokenRef.current) return
     lastSelectTokenRef.current = pendingSelect.token
-    setSelectedFolderPath(pendingSelect.folderPath)
-  }, [pendingSelect])
+    selectByFolderPath(pendingSelect.folderPath)
+  }, [pendingSelect]) // eslint-disable-line react-hooks/exhaustive-deps
   // Stream-type color/texture assignments live in electron-store; we load
   // them once on mount. Currently read-only here — the swatch picker UX
   // for editing them stays on the old page until phase 4. The keys are
@@ -481,10 +506,10 @@ export function StreamsPage({
   // YouTube success message and a Twitch success message from the same
   // "Push to all" can coexist (each platform's handler appends its own
   // banner; both stack vertically in the sidebar until each times out).
-  // Banners are tagged with the `folderPath` they were emitted from so
-  // a banner from a push that completes after the user switches streams
+  // Banners are tagged with the stream key they were emitted from so a
+  // banner from a push that completes after the user switches streams
   // doesn't surface on the new stream — only banners matching the
-  // currently-selected folder render.
+  // currently-selected stream render.
   // `action`, when supplied, renders a small inline button next to the
   // message that opens an external URL via `window.api.openUrl`. Plain
   // banners auto-dismiss after 4 s; banners with an action stay up for
@@ -492,7 +517,7 @@ export function StreamsPage({
   // clicked anywhere to dismiss early.
   type BannerShape = {
     id: string
-    folderPath: string
+    streamKey: string
     type: 'success' | 'error'
     message: string
     action?: { url: string; label: string }
@@ -520,16 +545,16 @@ export function StreamsPage({
   // Banners belong to the stream they were emitted from — switching
   // streams (or closing the sidebar) drops all banners so the new
   // selection doesn't read a leftover notice from the previous item.
-  useEffect(() => { setBanners([]) }, [selectedFolderPath])
+  useEffect(() => { setBanners([]) }, [selectedStreamKey])
   // Reschedule modal target — when set, the modal is rendered. Captures the
   // folder by path (not reference) so the modal survives a folders refresh.
-  const [rescheduleTargetPath, setRescheduleTargetPath] = useState<string | null>(null)
+  const [rescheduleTargetKey, setRescheduleTargetKey] = useState<string | null>(null)
   // Captured at click time from the sidebar's date dot — drives the
   // RescheduleModal's pull-mode / conflict-mode behaviour. Cleared
   // when the modal closes so a subsequent normal reschedule reverts
   // to edit mode.
   const [rescheduleDateDirection, setRescheduleDateDirection] = useState<'local' | 'remote' | 'both' | 'unknown' | undefined>(undefined)
-  const [deleteTargetPath, setDeleteTargetPath] = useState<string | null>(null)
+  const [deleteTargetKey, setDeleteTargetKey] = useState<string | null>(null)
   // After-push rename prompt state. Set when a Twitch push's canonical
   // game name differs from what we sent — surfaces the
   // TwitchCategoryRenamePrompt modal. Gated against
@@ -549,13 +574,13 @@ export function StreamsPage({
   // When set, the New Stream modal opens in "New episode" mode with this
   // folder as the source. Cleared on close. The path-based key (not the
   // folder object) survives folder-list refreshes without going stale.
-  const [newEpisodeSourcePath, setNewEpisodeSourcePath] = useState<string | null>(null)
-  // Archive flow state — mirrors StreamsPage. `archiveTargetPaths`
+  const [newEpisodeSourceKey, setNewEpisodeSourceKey] = useState<string | null>(null)
+  // Archive flow state — mirrors StreamsPage. `archiveTargetKeys`
   // is the list of folders waiting for a preset pick. Single-folder
   // archive from the sidebar populates a 1-element array; bulk archive
   // from select mode populates many. After the preset is picked,
   // `pendingArchiveDecision` holds the already-archived-files warning.
-  const [archiveTargetPaths, setArchiveTargetPaths] = useState<string[]>([])
+  const [archiveTargetKeys, setArchiveTargetKeys] = useState<string[]>([])
   const [pendingArchiveDecision, setPendingArchiveDecision] = useState<{
     preset: ConversionPreset
     selectedFolders: StreamFolder[]
@@ -600,17 +625,17 @@ export function StreamsPage({
   // off-screen row into the scroll container. The data-folder-path
   // marker on each <tr> is the lookup key.
   useEffect(() => {
-    if (!selectedFolderPath) return
+    if (!selectedStreamKey) return
     const scrollEl = listScrollRef.current
     if (!scrollEl) return
     // Defer one frame so the row exists in the DOM after the selection
     // state change triggers its render.
     const id = requestAnimationFrame(() => {
-      const row = scrollEl.querySelector<HTMLElement>(`tr[data-folder-path="${CSS.escape(selectedFolderPath)}"]`)
+      const row = scrollEl.querySelector<HTMLElement>(`tr[data-stream-key="${CSS.escape(selectedStreamKey)}"]`)
       row?.scrollIntoView({ block: 'nearest', behavior: anim.scrollBehavior })
     })
     return () => cancelAnimationFrame(id)
-  }, [selectedFolderPath])
+  }, [selectedStreamKey])
   const dragThumbElRef = useRef<HTMLElement | null>(null)
   const dragStartThumbTopRef = useRef<number>(0)
   useLayoutEffect(() => {
@@ -946,7 +971,7 @@ export function StreamsPage({
             const result = await window.api.twitchUpdateChannel(payload.title, payload.game, payload.tags)
             if (payload.game && result?.categoryApplied === false) {
               console.warn(`[auto-update Twitch] no category matches "${payload.game}" — category left unchanged`)
-              showBanner({ folderPath: next.folderPath, type: 'error', message: `Auto-updated Twitch title/tags, but no Twitch category matches "${payload.game}" — the category was left unchanged.` })
+              showBanner({ streamKey: next.relativePath, type: 'error', message: `Auto-updated Twitch title/tags, but no Twitch category matches "${payload.game}" — the category was left unchanged.` })
             }
           } catch (e) {
             console.warn('[auto-update Twitch] push failed:', e)
@@ -1023,11 +1048,11 @@ export function StreamsPage({
   // when nothing is selected. To collapse while a stream is selected the
   // user has to deselect first (via row re-click or the sidebar's close X).
   const sidebarCollapsedPref = !!config.streamsNewSidebarCollapsed
-  const sidebarCollapsed = sidebarCollapsedPref && !selectedFolderPath
+  const sidebarCollapsed = sidebarCollapsedPref && !selectedStreamKey
   const toggleSidebar = useCallback(() => {
-    if (selectedFolderPath) return // not collapsible while a stream is selected
+    if (selectedStreamKey) return // not collapsible while a stream is selected
     updateConfig({ streamsNewSidebarCollapsed: !sidebarCollapsedPref })
-  }, [selectedFolderPath, sidebarCollapsedPref, updateConfig])
+  }, [selectedStreamKey, sidebarCollapsedPref, updateConfig])
 
   const streamsDir = config.streamsDir
   const streamMode = config.streamMode || 'folder-per-stream'
@@ -1067,22 +1092,24 @@ export function StreamsPage({
   // Row click selects, or deselects when clicking the already-selected row.
   // Deselect collapses the sidebar back to whatever the user's preference is
   // (rail if collapsed-pref, empty state if expanded-pref).
-  const onRowClick = useCallback((folderPath: string) => {
-    setSelectedFolderPath(cur => cur === folderPath ? null : folderPath)
+  const onRowClick = useCallback((streamKey: string) => {
+    setSelectedStreamKey(cur => cur === streamKey ? null : streamKey)
   }, [])
 
   // Partial-merge meta update used by every inline editable field in the
-  // sidebar. Always sources the latest folder via folderPath to avoid stale
-  // closures — important since this gets called from autosave handlers that
-  // may fire after the selected folder has been swapped out.
+  // sidebar. Keyed by the canonical stream key (relativePath — unique in
+  // BOTH modes; folderPath is shared by every dump-mode stream) and always
+  // sources the latest folder from state to avoid stale closures —
+  // important since this gets called from autosave handlers that may fire
+  // after the selected folder has been swapped out.
   //
   // After the disk write succeeds, optimistically merges the partial into
   // the local `folders` state. streams:updateMeta doesn't fire a
   // streams:changed event, so without this the UI would keep showing the
   // pre-edit value on re-selection (and on a refresh from another source
   // we'd already have the right data anyway — the merge is idempotent).
-  const updateMeta = useCallback(async (folderPath: string, partial: Partial<StreamMeta>) => {
-    const folder = folders.find(f => f.folderPath === folderPath)
+  const updateMeta = useCallback(async (streamKey: string, partial: Partial<StreamMeta>) => {
+    const folder = folders.find(f => f.relativePath === streamKey)
     if (!folder) return
     const key = streamMetaKey(folder.folderPath, folder.date, streamsDir)
     // Update in-memory state FIRST so two concurrent calls land in the
@@ -1093,7 +1120,7 @@ export function StreamsPage({
     // if Pull's IPC resolves first the user sees the pulled values
     // briefly, then the slower blur write completes and reverts them.
     setFolders(prev => prev.map(f =>
-      f.folderPath === folderPath
+      f.relativePath === streamKey
         ? { ...f, meta: { ...(f.meta ?? {} as StreamMeta), ...partial }, hasMeta: true }
         : f
     ))
@@ -1288,9 +1315,9 @@ export function StreamsPage({
 
   const startArchive = useCallback(async (preset: ConversionPreset, setAsDefault: boolean) => {
     if (setAsDefault) await updateConfig({ archivePresetId: preset.id })
-    if (!streamsDir || archiveTargetPaths.length === 0) { setArchiveTargetPaths([]); return }
-    const targets = folders.filter(f => archiveTargetPaths.includes(f.folderPath))
-    setArchiveTargetPaths([])
+    if (!streamsDir || archiveTargetKeys.length === 0) { setArchiveTargetKeys([]); return }
+    const targets = folders.filter(f => archiveTargetKeys.includes(f.relativePath))
+    setArchiveTargetKeys([])
     if (targets.length === 0) return
     const allCandidateFiles = targets.flatMap(f => fullVideos(f))
     if (allCandidateFiles.length === 0) return
@@ -1302,7 +1329,7 @@ export function StreamsPage({
       return
     }
     await executeArchive(preset, targets, new Set())
-  }, [archiveTargetPaths, folders, streamsDir, updateConfig, executeArchive])
+  }, [archiveTargetKeys, folders, streamsDir, updateConfig, executeArchive])
 
   const handleArchiveDecision = useCallback(async (decision: 'skip' | 'continue') => {
     if (!pendingArchiveDecision) return
@@ -1313,7 +1340,7 @@ export function StreamsPage({
   }, [pendingArchiveDecision, executeArchive])
 
   const handleArchive = useCallback((folder: StreamFolder) => {
-    setArchiveTargetPaths([folder.folderPath])
+    setArchiveTargetKeys([folder.relativePath])
   }, [])
 
   const handleOpenThumbnails = useCallback((folder: StreamFolder, variantOrdinal?: number) => {
@@ -1352,7 +1379,7 @@ export function StreamsPage({
   ) => {
     const meta = folder.meta
     if (!meta?.ytVideoId) {
-      showBanner({ folderPath: folder.folderPath, type: 'error', message: 'No linked YouTube broadcast or video. Link one before pushing.' })
+      showBanner({ streamKey: folder.relativePath, type: 'error', message: 'No linked YouTube broadcast or video. Link one before pushing.' })
       return
     }
     // meta.ytTitle is the raw template BODY ("{game} [PART {episode}]")
@@ -1409,7 +1436,7 @@ export function StreamsPage({
       if (thumbToUpload) {
         try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload) }
         catch (thumbErr: any) {
-          showBanner({ folderPath: folder.folderPath, type: 'error', message: `Pushed metadata, but thumbnail upload failed: ${thumbErr?.message ?? String(thumbErr)}` })
+          showBanner({ streamKey: folder.relativePath, type: 'error', message: `Pushed metadata, but thumbnail upload failed: ${thumbErr?.message ?? String(thumbErr)}` })
           return
         }
         // Record the SHA-1 of the bytes we just pushed so the sidebar's
@@ -1419,7 +1446,7 @@ export function StreamsPage({
         // can re-trigger the push, no data lost.
         try {
           const newHash = await window.api.thumbnailHashFile(thumbToUpload)
-          if (newHash) await updateMeta(folder.folderPath, { ytThumbnailPushedHash: newHash })
+          if (newHash) await updateMeta(folder.relativePath, { ytThumbnailPushedHash: newHash })
         } catch {}
       }
       // Refresh the local copy of this broadcast so the sidebar's
@@ -1496,7 +1523,7 @@ export function StreamsPage({
               snapshot.ytLastPushedScheduledTime = `${String(sent.getHours()).padStart(2, '0')}:${String(sent.getMinutes()).padStart(2, '0')}`
             }
           }
-          await updateMeta(folder.folderPath, snapshot)
+          await updateMeta(folder.relativePath, snapshot)
         }
       } catch {
         // Refresh failure is non-fatal — the push already succeeded.
@@ -1517,7 +1544,7 @@ export function StreamsPage({
       const reminderFragment = categoryId ? STUDIO_REMINDER_FRAGMENTS[categoryId] : undefined
       if (reminderFragment) {
         showBanner({
-          folderPath: folder.folderPath,
+          streamKey: folder.relativePath,
           type: 'success',
           message: `Pushed to YouTube. Don't forget to set ${reminderFragment} in Studio.`,
           action: {
@@ -1526,10 +1553,10 @@ export function StreamsPage({
           },
         })
       } else {
-        showBanner({ folderPath: folder.folderPath, type: 'success', message: 'Pushed to YouTube.' })
+        showBanner({ streamKey: folder.relativePath, type: 'success', message: 'Pushed to YouTube.' })
       }
     } catch (err: any) {
-      showBanner({ folderPath: folder.folderPath, type: 'error', message: `YouTube push failed: ${err?.message ?? String(err)}` })
+      showBanner({ streamKey: folder.relativePath, type: 'error', message: `YouTube push failed: ${err?.message ?? String(err)}` })
     }
   }, [showBanner, setYtBroadcasts, setYtVods, updateMeta, folders])
 
@@ -1589,13 +1616,13 @@ export function StreamsPage({
   // loading (length transitions), so upcoming-broadcast schedule mismatches
   // are picked up. NOT keyed on `folders` to avoid churn during resolves.
   useEffect(() => {
-    if (!isVisible || selectedFolderPath || !ytConnected) return
+    if (!isVisible || selectedStreamKey || !ytConnected) return
     // Wait for the folder list to finish loading — running while `folders` is
     // still empty would hit the no-linked-ids path and prematurely mark the
     // panel "checked" (showing the green in-sync state) before the real check.
     if (loading) return
     refreshOutOfSyncRef.current()
-  }, [isVisible, selectedFolderPath, ytConnected, loading, folders.length, ytBroadcasts.length, ytVods.length])
+  }, [isVisible, selectedStreamKey, ytConnected, loading, folders.length, ytBroadcasts.length, ytVods.length])
 
   const outOfSyncItems = useMemo<OutOfSyncItem[]>(() => {
     const out: OutOfSyncItem[] = []
@@ -1629,13 +1656,13 @@ export function StreamsPage({
   // delete), so the empty-state panel / row dot reflect it immediately rather
   // than waiting for the next full re-check.
   const selectedResolvedThumb = useMemo(() => {
-    if (!selectedFolderPath) return null
-    const f = folders.find(ff => ff.folderPath === selectedFolderPath)
+    if (!selectedStreamKey) return null
+    const f = folders.find(ff => ff.relativePath === selectedStreamKey)
     return f ? resolveStreamThumb(f) : null
-  }, [selectedFolderPath, folders])
+  }, [selectedStreamKey, folders])
   useEffect(() => {
-    if (!selectedFolderPath) return
-    const key = selectedFolderPath
+    if (!selectedStreamKey) return
+    const key = selectedStreamKey
     if (!selectedResolvedThumb) {
       setThumbHashById(prev => (prev[key] == null ? prev : { ...prev, [key]: null }))
       return
@@ -1645,7 +1672,7 @@ export function StreamsPage({
       .then(h => { if (!cancelled) setThumbHashById(prev => (prev[key] === h ? prev : { ...prev, [key]: h })) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [selectedFolderPath, selectedResolvedThumb, thumbsKey])
+  }, [selectedStreamKey, selectedResolvedThumb, thumbsKey])
 
   const handleBulkResolve = useCallback(async (kind: 'push' | 'pull', targets: StreamFolder[]) => {
     for (const f of targets) {
@@ -1660,7 +1687,7 @@ export function StreamsPage({
         } else {
           const id = f.meta?.ytVideoId
           const remote = id ? outOfSyncRemote[id] : undefined
-          if (remote) await updateMeta(f.folderPath, buildPullUpdate(remote))
+          if (remote) await updateMeta(f.relativePath, buildPullUpdate(remote))
         }
       } catch (e) {
         console.warn('Bulk resolve failed for', f.folderPath, e)
@@ -1676,13 +1703,13 @@ export function StreamsPage({
     for (const f of targets) {
       const item = outOfSyncItemsRef.current.find(i => i.folder.folderPath === f.folderPath)
       if (!item) continue
-      await updateMeta(f.folderPath, { ignoreOutOfSyncSig: item.signature, ignoreOutOfSyncAt: Date.now() })
+      await updateMeta(f.relativePath, { ignoreOutOfSyncSig: item.signature, ignoreOutOfSyncAt: Date.now() })
     }
     await refreshOutOfSyncRef.current()
   }, [updateMeta])
   const handleUnignoreOutOfSync = useCallback(async (targets: StreamFolder[]) => {
     for (const f of targets) {
-      await updateMeta(f.folderPath, { ignoreOutOfSyncSig: undefined, ignoreOutOfSyncAt: undefined })
+      await updateMeta(f.relativePath, { ignoreOutOfSyncSig: undefined, ignoreOutOfSyncAt: undefined })
     }
     await refreshOutOfSyncRef.current()
   }, [updateMeta])
@@ -1695,7 +1722,7 @@ export function StreamsPage({
   const handlePushToTwitch = useCallback(async (folder: StreamFolder) => {
     const meta = folder.meta
     if (!meta) {
-      showBanner({ folderPath: folder.folderPath, type: 'error', message: 'No metadata to push.' })
+      showBanner({ streamKey: folder.relativePath, type: 'error', message: 'No metadata to push.' })
       throw new Error('No metadata to push.')
     }
     const syncTitle = meta.syncTitle !== false
@@ -1712,13 +1739,13 @@ export function StreamsPage({
       // API layer (title/tags still update) — say so loudly, or the user only
       // finds out mid-stream that Twitch is still on the old category.
       if (effectiveGame && result?.categoryApplied === false) {
-        showBanner({ folderPath: folder.folderPath, type: 'error', message: `Pushed title/tags, but Twitch has no category matching "${effectiveGame}" — the category was left unchanged. Pick a category in the Twitch section (it searches real Twitch categories).` })
+        showBanner({ streamKey: folder.relativePath, type: 'error', message: `Pushed title/tags, but Twitch has no category matching "${effectiveGame}" — the category was left unchanged. Pick a category in the Twitch section (it searches real Twitch categories).` })
       } else {
-        showBanner({ folderPath: folder.folderPath, type: 'success', message: 'Pushed to Twitch.' })
+        showBanner({ streamKey: folder.relativePath, type: 'success', message: 'Pushed to Twitch.' })
       }
       return result
     } catch (err: any) {
-      showBanner({ folderPath: folder.folderPath, type: 'error', message: `Twitch push failed: ${err?.message ?? String(err)}` })
+      showBanner({ streamKey: folder.relativePath, type: 'error', message: `Twitch push failed: ${err?.message ?? String(err)}` })
       // Re-throw so the sidebar's wrapper handler can skip the
       // post-push refetch + last-pushed snapshot. Without this the
       // snapshot would record values that never made it to Twitch,
@@ -1886,15 +1913,15 @@ export function StreamsPage({
     }
     const basename = filePath.split(/[\\/]/).pop() ?? ''
     if (folder.meta?.preferredThumbnail === basename) {
-      await updateMeta(folder.folderPath, { preferredThumbnail: '' })
+      await updateMeta(folder.relativePath, { preferredThumbnail: '' })
     }
     // No reload: the optimistic removal above already reflects the delete, and
     // the listener stand-down swallows our own echoes. Surviving slots keep
     // their cached thumb URLs (their files didn't change).
   }, [updateMeta, loadFolders])
 
-  const selectedFolder = selectedFolderPath
-    ? folders.find(f => f.folderPath === selectedFolderPath) ?? null
+  const selectedFolder = selectedStreamKey
+    ? folders.find(f => f.relativePath === selectedStreamKey) ?? null
     : null
 
   // Autocomplete option pools — built from existing folders so users can
@@ -1975,7 +2002,7 @@ export function StreamsPage({
   const toggleSelectMode = useCallback(() => {
     setSelectMode(m => {
       if (m) setSelectedPaths(new Set())
-      else setSelectedFolderPath(null)
+      else setSelectedStreamKey(null)
       return !m
     })
   }, [])
@@ -2062,7 +2089,7 @@ export function StreamsPage({
   )
   const clickBulkArchive = useCallback(() => {
     if (selectedFolderList.length === 0) return
-    setArchiveTargetPaths(selectedFolderList.map(f => f.folderPath))
+    setArchiveTargetKeys(selectedFolderList.map(f => f.relativePath))
     setSelectedPaths(new Set())
   }, [selectedFolderList])
   const clickBulkOffload = useCallback(async () => {
@@ -2127,7 +2154,7 @@ export function StreamsPage({
       // updateMeta writes via streams:updateMeta which does a partial
       // merge — passing the full new arrays for both keys overwrites
       // them in place without disturbing other meta fields.
-      await updateMeta(f.folderPath, { streamType: nextTypes, games: nextGames })
+      await updateMeta(f.relativePath, { streamType: nextTypes, games: nextGames })
       onProgress(++done)
     }
     setShowBulkTag(false)
@@ -2286,7 +2313,7 @@ export function StreamsPage({
         const epB = parseInt(b.meta?.ytEpisode ?? '', 10)
         return (isNaN(epA) ? Infinity : epA) - (isNaN(epB) ? Infinity : epB)
       })
-    const idx = list.findIndex(f => f.folderPath === selectedFolder.folderPath)
+    const idx = list.findIndex(f => f.relativePath === selectedFolder.relativePath)
     return {
       prev: idx > 0 ? list[idx - 1] : null,
       next: idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null,
@@ -2317,7 +2344,7 @@ export function StreamsPage({
         }
         if (isTypingTarget(e.target)) return
         if (selectMode) { toggleSelectMode(); return }
-        if (selectedFolderPath) { setSelectedFolderPath(null); return }
+        if (selectedStreamKey) { setSelectedStreamKey(null); return }
         return
       }
 
@@ -2353,12 +2380,12 @@ export function StreamsPage({
       if (!e.shiftKey && k === 'n') { e.preventDefault(); setNewStreamOpen(true); return }
       // Ctrl+Shift+N → new episode for the open stream
       if (e.shiftKey && k === 'n') {
-        if (selectedFolderPath) { e.preventDefault(); setNewEpisodeSourcePath(selectedFolderPath) }
+        if (selectedStreamKey) { e.preventDefault(); setNewEpisodeSourceKey(selectedStreamKey) }
         return
       }
       // Ctrl+Shift+T → open the thumbnail editor for the open stream
       if (e.shiftKey && k === 't') {
-        const f = folders.find(ff => ff.folderPath === selectedFolderPath)
+        const f = folders.find(ff => ff.relativePath === selectedStreamKey)
         if (f) { e.preventDefault(); handleOpenThumbnails(f) }
         return
       }
@@ -2368,32 +2395,32 @@ export function StreamsPage({
       if (!e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
         if (visibleFolders.length === 0) return
         e.preventDefault()
-        const idx = selectedFolderPath ? visibleFolders.findIndex(f => f.folderPath === selectedFolderPath) : -1
-        if (idx === -1) { setSelectedFolderPath(visibleFolders[0].folderPath); return }
+        const idx = selectedStreamKey ? visibleFolders.findIndex(f => f.relativePath === selectedStreamKey) : -1
+        if (idx === -1) { setSelectedStreamKey(visibleFolders[0].relativePath); return }
         const next = e.key === 'ArrowDown' ? Math.min(visibleFolders.length - 1, idx + 1) : Math.max(0, idx - 1)
-        if (next !== idx) setSelectedFolderPath(visibleFolders[next].folderPath)
+        if (next !== idx) setSelectedStreamKey(visibleFolders[next].relativePath)
         return
       }
       // Ctrl+Shift+↑/↓ → navigate episodes within the series, in the list's
       // visual (sort-order) direction so up/down matches what's on screen
       // rather than episode-number order. Hops over non-sibling rows.
       if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        if (!selectedFolderPath) return
-        const sibPaths = new Set(seriesNav.siblings.map(s => s.folderPath))
-        const visibleSiblings = visibleFolders.filter(f => sibPaths.has(f.folderPath))
-        const idx = visibleSiblings.findIndex(f => f.folderPath === selectedFolderPath)
+        if (!selectedStreamKey) return
+        const sibKeys = new Set(seriesNav.siblings.map(s => s.relativePath))
+        const visibleSiblings = visibleFolders.filter(f => sibKeys.has(f.relativePath))
+        const idx = visibleSiblings.findIndex(f => f.relativePath === selectedStreamKey)
         if (idx === -1) return
         const nextIdx = e.key === 'ArrowDown' ? idx + 1 : idx - 1
         if (nextIdx < 0 || nextIdx >= visibleSiblings.length) return
         e.preventDefault()
-        setSelectedFolderPath(visibleSiblings[nextIdx].folderPath)
+        setSelectedStreamKey(visibleSiblings[nextIdx].relativePath)
         return
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isVisible, searchQuery, selectMode, selectedPaths, visibleFolders, selectedFolderPath, folders, seriesNav, toggleSelectMode, selectAllVisible, clearSelection, handleOpenThumbnails])
+  }, [isVisible, searchQuery, selectMode, selectedPaths, visibleFolders, selectedStreamKey, folders, seriesNav, toggleSelectMode, selectAllVisible, clearSelection, handleOpenThumbnails])
 
   // Width of the visible-when-selected portion of the list (the area
   // NOT covered by the sidebar overlay). Equals the sum of the always-
@@ -2482,7 +2509,7 @@ export function StreamsPage({
   // between `calc(100% - Npx)` and `${M}px` interpolate (both are
   // <length-percentage>), so the open/close/collapse animations work.
   const listWidthCss = `calc(100% - ${normalSidebarWidth}px)`
-  const currentSidebarWidthCss = selectedFolderPath
+  const currentSidebarWidthCss = selectedStreamKey
     ? `calc(100% - ${rowWidth}px)`
     : `${normalSidebarWidth}px`
   // The detail layer's width MUST equal the OUTER container's
@@ -2575,7 +2602,7 @@ export function StreamsPage({
             the overlay slides in.
 
             Header buttons collapse to icon-only via `labelCollapsed`
-            keyed on `selectedFolderPath`. The button's label transition
+            keyed on `selectedStreamKey`. The button's label transition
             fires at t=0 of the selection, matching the slide. Their
             container-query fallback (`@2xl:` on the OUTER list area)
             handles the window-resize case when nothing is selected,
@@ -2586,7 +2613,7 @@ export function StreamsPage({
         <div
           className="px-6 py-4 border-b border-white/5 shrink-0 flex flex-col gap-3 transition-[width] ease-linear"
           style={{
-            width: selectedFolderPath ? `${rowWidth}px` : '100%',
+            width: selectedStreamKey ? `${rowWidth}px` : '100%',
             transitionDuration: `${animDurationMs}ms`,
           }}
         >
@@ -2704,7 +2731,7 @@ export function StreamsPage({
                     onClick={() => setShowBulkTag(true)}
                     disabled={selectedPaths.size === 0}
                     collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}
+                    labelCollapsed={selectedStreamKey ? true : undefined}
                   >
                     Edit Tags
                   </Button>
@@ -2717,7 +2744,7 @@ export function StreamsPage({
                     onClick={clickBulkSendToConverter}
                     disabled={selectedPaths.size === 0}
                     collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}
+                    labelCollapsed={selectedStreamKey ? true : undefined}
                   >
                     Convert
                   </Button>
@@ -2732,7 +2759,7 @@ export function StreamsPage({
                         onClick={clickBulkOffload}
                         disabled={selectedPaths.size === 0 || selectionContainsArchiving}
                         collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}
+                    labelCollapsed={selectedStreamKey ? true : undefined}
                       >
                         Offload
                       </Button>
@@ -2745,7 +2772,7 @@ export function StreamsPage({
                         onClick={clickBulkPinLocal}
                         disabled={selectedPaths.size === 0 || selectionContainsArchiving}
                         collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}
+                    labelCollapsed={selectedStreamKey ? true : undefined}
                       >
                         Pin Local
                       </Button>
@@ -2767,7 +2794,7 @@ export function StreamsPage({
                     onClick={clickBulkArchive}
                     disabled={selectedPaths.size === 0 || selectionContainsArchiving || selectionAllArchived}
                     collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}
+                    labelCollapsed={selectedStreamKey ? true : undefined}
                   >
                     Archive
                   </Button>
@@ -2786,7 +2813,7 @@ export function StreamsPage({
                       onClick={selectAllVisible}
                       disabled={selectedPaths.size === visibleFolders.length}
                       collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                      labelCollapsed={selectedFolderPath ? true : undefined}
+                      labelCollapsed={selectedStreamKey ? true : undefined}
                     >
                       Select All
                     </Button>
@@ -2799,7 +2826,7 @@ export function StreamsPage({
                       onClick={clearSelection}
                       disabled={selectedPaths.size === 0}
                       collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                      labelCollapsed={selectedFolderPath ? true : undefined}
+                      labelCollapsed={selectedStreamKey ? true : undefined}
                     >
                       Clear
                     </Button>
@@ -2807,7 +2834,7 @@ export function StreamsPage({
                   <div className="w-px h-5 bg-white/10 mx-1 self-center" />
                   <Tooltip content="Exit selection mode" side="bottom">
                     <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                      labelCollapsed={selectedFolderPath ? true : undefined}>
+                      labelCollapsed={selectedStreamKey ? true : undefined}>
                       Stop
                     </Button>
                   </Tooltip>
@@ -2817,25 +2844,25 @@ export function StreamsPage({
               <div className="flex items-center gap-1">
                 <Tooltip content="Manage title, description, and tag templates" side="bottom">
                   <Button variant="ghost" size="sm" icon={<SquareDashedText size={14} />} onClick={() => setShowTemplatesModal(true)} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}>
+                    labelCollapsed={selectedStreamKey ? true : undefined}>
                     Templates
                   </Button>
                 </Tooltip>
                 <Tooltip content="Manage stream type tags" side="bottom">
                   <Button variant="ghost" size="sm" icon={<Tags size={14} />} onClick={() => setShowManageTags(true)} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}>
+                    labelCollapsed={selectedStreamKey ? true : undefined}>
                     Manage Tags
                   </Button>
                 </Tooltip>
                 <Tooltip content="Select multiple streams for bulk actions" side="bottom" shortcut="Ctrl+Shift+A">
                   <Button variant="ghost" size="sm" icon={<ListChecks size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                    labelCollapsed={selectedFolderPath ? true : undefined}>
+                    labelCollapsed={selectedStreamKey ? true : undefined}>
                     Select
                   </Button>
                 </Tooltip>
                 <Tooltip content="Create a new stream" side="bottom" shortcut="Ctrl+N">
                   <Button variant="primary" size="sm" icon={<Plus size={14} />} onClick={() => setNewStreamOpen(true)} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
-                      labelCollapsed={selectedFolderPath ? true : undefined}>
+                      labelCollapsed={selectedStreamKey ? true : undefined}>
                     New stream
                   </Button>
                 </Tooltip>
@@ -3063,7 +3090,7 @@ export function StreamsPage({
                         key={f.relativePath}
                         folder={f}
                         folders={folders}
-                        selected={f.folderPath === selectedFolderPath}
+                        selected={f.relativePath === selectedStreamKey}
                         animDurationMs={animDurationMs}
                         compact={false}
                         selectMode={selectMode}
@@ -3134,7 +3161,7 @@ export function StreamsPage({
         {/* Edge toggle — only present when no stream is selected. The
             sidebar isn't collapsible while a stream is open (the user
             has to deselect first via the X). */}
-        {!selectedFolderPath && (
+        {!selectedStreamKey && (
           <Tooltip
             content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             side="left"
@@ -3178,7 +3205,7 @@ export function StreamsPage({
               <div className="h-[345px] shrink-0">
                 <SidebarMonthCalendar
                   folders={folders}
-                  onSelectStream={(f) => setSelectedFolderPath(f.folderPath)}
+                  onSelectStream={(f) => setSelectedStreamKey(f.relativePath)}
                 />
               </div>
               {ytConnected && folders.some(f => f.meta?.ytVideoId) && (
@@ -3191,7 +3218,7 @@ export function StreamsPage({
                     checkedAt={outOfSyncCheckedAt}
                     quotaExceeded={ytQuota.exceeded}
                     onRefresh={refreshOutOfSync}
-                    onOpenStream={(f) => setSelectedFolderPath(f.folderPath)}
+                    onOpenStream={(f) => setSelectedStreamKey(f.relativePath)}
                     onResolve={handleBulkResolve}
                     onIgnore={handleIgnoreOutOfSync}
                     onUnignore={handleUnignoreOutOfSync}
@@ -3210,7 +3237,7 @@ export function StreamsPage({
             user sees the content fade out instead of pop. */}
         {renderedFolder && (
           <div
-            className={`opacity-mount-from-0 absolute top-0 left-0 bottom-0 bg-navy-800 transition-opacity ease-linear ${selectedFolderPath ? '' : 'opacity-0'}`}
+            className={`opacity-mount-from-0 absolute top-0 left-0 bottom-0 bg-navy-800 transition-opacity ease-linear ${selectedStreamKey ? '' : 'opacity-0'}`}
             style={{
               width: selectedSidebarWidthCss,
               // `opacity` is intentionally NOT set inline — inline styles
@@ -3218,7 +3245,7 @@ export function StreamsPage({
               // and would override its frame-0 opacity:0, killing the
               // fade-in. Opacity is class-driven: default (no class) = 1,
               // `opacity-0` for the close fade-out.
-              pointerEvents: selectedFolderPath ? 'auto' : 'none',
+              pointerEvents: selectedStreamKey ? 'auto' : 'none',
               transitionDuration: `${animDurationMs}ms`,
             }}
           >
@@ -3228,9 +3255,9 @@ export function StreamsPage({
               prevEpisode={seriesNav.prev}
               nextEpisode={seriesNav.next}
               seriesEpisodes={seriesNav.siblings}
-              onPickEpisode={(f) => setSelectedFolderPath(f.folderPath)}
-              onClose={() => setSelectedFolderPath(null)}
-              onUpdateMeta={partial => updateMeta(renderedFolder.folderPath, partial)}
+              onPickEpisode={(f) => setSelectedStreamKey(f.relativePath)}
+              onClose={() => setSelectedStreamKey(null)}
+              onUpdateMeta={partial => updateMeta(renderedFolder.relativePath, partial)}
               onUpdateMetaFor={updateMeta}
               cloudSyncActive={cloudSyncActive}
               allGames={allGames}
@@ -3239,10 +3266,10 @@ export function StreamsPage({
               tagTextures={tagTextures}
               onNewStreamType={handleNewStreamType}
               onReschedule={dir => {
-                setRescheduleTargetPath(renderedFolder.folderPath)
+                setRescheduleTargetKey(renderedFolder.relativePath)
                 setRescheduleDateDirection(dir)
               }}
-              onNewEpisode={() => setNewEpisodeSourcePath(renderedFolder.folderPath)}
+              onNewEpisode={() => setNewEpisodeSourceKey(renderedFolder.relativePath)}
               onOffload={() => handleOffload(renderedFolder)}
               onPinLocal={() => handlePinLocal(renderedFolder)}
               onArchive={() => handleArchive(renderedFolder)}
@@ -3274,7 +3301,7 @@ export function StreamsPage({
               onFilesDeleted={handleFilesDeleted}
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
-              onDelete={() => setDeleteTargetPath(renderedFolder.folderPath)}
+              onDelete={() => setDeleteTargetKey(renderedFolder.relativePath)}
               deleteBlockReason={streamReason(renderedFolder.folderPath, isDumpMode ? [...renderedFolder.videos, ...renderedFolder.thumbnails] : undefined)}
               linkedVideoMissing={!!renderedFolder.meta?.ytVideoId && ytVideoStatusMap[renderedFolder.meta.ytVideoId]?.missing === true}
               onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
@@ -3289,10 +3316,10 @@ export function StreamsPage({
               twConnected={twConnected}
               twitchChannel={twitchChannel}
               setTwitchChannel={setTwitchChannel}
-              banners={banners.filter(b => b.folderPath === renderedFolder.folderPath)}
+              banners={banners.filter(b => b.streamKey === renderedFolder.relativePath)}
               onDismissBanner={dismissBanner}
               onMissingYtCategory={() => showBanner({
-                folderPath: renderedFolder.folderPath,
+                streamKey: renderedFolder.relativePath,
                 type: 'error',
                 message: 'Pick a YouTube category before pushing — YouTube requires one on every video.',
               })}
@@ -3318,8 +3345,8 @@ export function StreamsPage({
           later phases can do mount-time work conditionally if needed. */}
       {!isVisible && null}
 
-      {rescheduleTargetPath && (() => {
-        const target = folders.find(f => f.folderPath === rescheduleTargetPath)
+      {rescheduleTargetKey && (() => {
+        const target = folders.find(f => f.relativePath === rescheduleTargetKey)
         if (!target) return null
         return (
           <RescheduleModal
@@ -3329,10 +3356,9 @@ export function StreamsPage({
             twConnected={twConnected}
             ytBroadcasts={ytBroadcasts}
             dateDirection={rescheduleDateDirection}
-            onUpdateMeta={(folderPath, partial) => updateMeta(folderPath, partial)}
-            onClose={() => { setRescheduleTargetPath(null); setRescheduleDateDirection(undefined) }}
+            onClose={() => { setRescheduleTargetKey(null); setRescheduleDateDirection(undefined) }}
             onSuccess={async (newFolderPath) => {
-              setRescheduleTargetPath(null)
+              setRescheduleTargetKey(null)
               setRescheduleDateDirection(undefined)
               // Refresh the folder list BEFORE re-selecting the renamed folder.
               // The renderedFolder fade timer keys on the *resolved* folder, so
@@ -3352,7 +3378,7 @@ export function StreamsPage({
               // between streams, where the renderer can briefly serve cached
               // bytes for paths that no longer exist.
               setThumbsKey(Date.now())
-              setSelectedFolderPath(newFolderPath)
+              selectByFolderPath(newFolderPath)
             }}
             onPushYoutube={async (newScheduledStartTime, privacy) => {
               // Find the linked broadcast (might have already shifted
@@ -3398,17 +3424,17 @@ export function StreamsPage({
         )
       })()}
 
-      {deleteTargetPath && (() => {
-        const target = folders.find(f => f.folderPath === deleteTargetPath)
+      {deleteTargetKey && (() => {
+        const target = folders.find(f => f.relativePath === deleteTargetKey)
         if (!target) return null
         return (
           <DeleteModal
             target={target}
             isDumpMode={isDumpMode}
-            onClose={() => setDeleteTargetPath(null)}
+            onClose={() => setDeleteTargetKey(null)}
             onSuccess={() => {
-              setDeleteTargetPath(null)
-              setSelectedFolderPath(null)
+              setDeleteTargetKey(null)
+              setSelectedStreamKey(null)
               void loadFolders()
             }}
           />
@@ -3430,13 +3456,13 @@ export function StreamsPage({
         />
       )}
 
-      {archiveTargetPaths.length > 0 && (
+      {archiveTargetKeys.length > 0 && (
         <PresetPickerModal
           onPick={(preset, setAsDefault) => startArchive(preset, setAsDefault)}
-          onClose={() => setArchiveTargetPaths([])}
+          onClose={() => setArchiveTargetKeys([])}
           isDumpMode={isDumpMode}
           defaultPresetId={config.archivePresetId}
-          selectionCount={archiveTargetPaths.length}
+          selectionCount={archiveTargetKeys.length}
         />
       )}
 
@@ -3822,19 +3848,19 @@ export function StreamsPage({
         </Modal>
       )}
 
-      {(newStreamOpen || newEpisodeSourcePath) && (() => {
-        const source = newEpisodeSourcePath
-          ? folders.find(f => f.folderPath === newEpisodeSourcePath) ?? undefined
+      {(newStreamOpen || newEpisodeSourceKey) && (() => {
+        const source = newEpisodeSourceKey
+          ? folders.find(f => f.relativePath === newEpisodeSourceKey) ?? undefined
           : undefined
         return (
           <NewStreamModal
             existingDates={folders.map(f => f.date)}
-            onClose={() => { setNewStreamOpen(false); setNewEpisodeSourcePath(null) }}
+            onClose={() => { setNewStreamOpen(false); setNewEpisodeSourceKey(null) }}
             onCreated={async (newFolderPath) => {
               setNewStreamOpen(false)
-              setNewEpisodeSourcePath(null)
+              setNewEpisodeSourceKey(null)
               await loadFolders()
-              setSelectedFolderPath(newFolderPath)
+              selectByFolderPath(newFolderPath)
             }}
             streamsDir={streamsDir!}
             streamMode={streamMode}
@@ -3963,7 +3989,7 @@ const StreamListItem = memo(function StreamListItem({
   /** True while this row's Send-to-Player hydration check is in flight —
    *  spins the button icon and pins the action row open. */
   isSendingToPlayer: boolean
-  onClick: (folderPath: string) => void
+  onClick: (streamKey: string) => void
   onSendToPlayer: (folder: StreamFolder) => void
   onSendToConverter: (folder: StreamFolder) => void
   onOpenThumbnails: (folder: StreamFolder) => void
@@ -4041,12 +4067,12 @@ const StreamListItem = memo(function StreamListItem({
     // of opening the sidebar — matches the StreamsPage convention so the
     // bulk-action flow doesn't require precise checkbox aim.
     if (selectMode) onToggleMultiSelect(selectKey)
-    else onClick(folder.folderPath)
+    else onClick(folder.relativePath)
   }
 
   return (
     <tr
-      data-folder-path={folder.folderPath}
+      data-stream-key={folder.relativePath}
       onClick={handleRowClick}
       onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart(index) } : undefined}
       onMouseEnter={selectMode ? () => onDragEnter(index) : undefined}
@@ -4909,13 +4935,14 @@ function SidebarDetail({
   onPickEpisode: (f: StreamFolder) => void
   onClose: () => void
   onUpdateMeta: (partial: Partial<StreamMeta>) => Promise<void> | void
-  /** Targeted meta write for ASYNC handlers. onUpdateMeta resolves its
-   *  target through a render-rebound ref, so a write issued after an await
-   *  lands on whichever stream is selected when the promise settles — the
-   *  create-broadcast flow wrote its new ytVideoId to the wrong stream if
-   *  the user clicked another row mid-flight. Handlers that await capture
-   *  folderPathRef.current at entry and write through this instead. */
-  onUpdateMetaFor: (folderPath: string, partial: Partial<StreamMeta>) => Promise<void> | void
+  /** Targeted meta write for ASYNC handlers, keyed by the canonical stream
+   *  key (relativePath). onUpdateMeta resolves its target through a
+   *  render-rebound ref, so a write issued after an await lands on whichever
+   *  stream is selected when the promise settles — the create-broadcast flow
+   *  wrote its new ytVideoId to the wrong stream if the user clicked another
+   *  row mid-flight. Handlers that await capture streamKeyRef.current at
+   *  entry and write through this instead. */
+  onUpdateMetaFor: (streamKey: string, partial: Partial<StreamMeta>) => Promise<void> | void
   cloudSyncActive: boolean
   allGames: string[]
   allStreamTypes: string[]
@@ -5010,7 +5037,7 @@ function SidebarDetail({
    *  full array tagged with `folderPath`; the parent filters before
    *  passing so banners emitted from a previous stream don't surface
    *  if a push completes after the user switched. */
-  banners: { id: string; folderPath: string; type: 'success' | 'error'; message: string; action?: { url: string; label: string } }[]
+  banners: { id: string; streamKey: string; type: 'success' | 'error'; message: string; action?: { url: string; label: string } }[]
   onDismissBanner: (id: string) => void
   /** Fires when the user clicks Push to YouTube but `meta.ytCategoryId`
    *  is empty. The sidebar handles the scroll-into-view + focus on its
@@ -5055,13 +5082,15 @@ function SidebarDetail({
   const sidebarRootRef = useRef<HTMLDivElement>(null)
   const metaRef = useRef(meta)
   useEffect(() => { metaRef.current = meta })
-  // Current stream's folderPath, always fresh at event time. Async handlers
-  // capture this at ENTRY (before their first await) and pass it to
-  // onUpdateMetaFor so late-settling writes stay pinned to the stream the
-  // user acted on — reading it (or the render-rebound onUpdateMeta) AFTER
-  // an await would target whichever stream is selected by then.
-  const folderPathRef = useRef(folder.folderPath)
-  useEffect(() => { folderPathRef.current = folder.folderPath })
+  // Current stream's canonical key (relativePath — unique in both modes;
+  // folderPath is shared by every dump-mode stream), always fresh at event
+  // time. Async handlers capture this at ENTRY (before their first await)
+  // and pass it to onUpdateMetaFor so late-settling writes stay pinned to
+  // the stream the user acted on — reading it (or the render-rebound
+  // onUpdateMeta) AFTER an await would target whichever stream is selected
+  // by then.
+  const streamKeyRef = useRef(folder.relativePath)
+  useEffect(() => { streamKeyRef.current = folder.relativePath })
   const onUpdateMetaForRef = useRef(onUpdateMetaFor)
   useEffect(() => { onUpdateMetaForRef.current = onUpdateMetaFor })
   // The parent passes a fresh inline onUpdateMeta arrow each render; route
@@ -5369,12 +5398,12 @@ function SidebarDetail({
   // semantics — manual edits never get clobbered). Tracked per-folder
   // via a ref so switching between streams doesn't re-fire it for
   // a stream that already had its primary at mount.
-  const prevPrimaryGameRef = useRef<{ folderPath: string; primary: string } | null>(null)
+  const prevPrimaryGameRef = useRef<{ streamKey: string; primary: string } | null>(null)
   useEffect(() => {
     const primary = meta?.games?.[0] ?? ''
     const prev = prevPrimaryGameRef.current
-    const prevPrimary = prev?.folderPath === folder.folderPath ? prev.primary : ''
-    prevPrimaryGameRef.current = { folderPath: folder.folderPath, primary }
+    const prevPrimary = prev?.streamKey === folder.relativePath ? prev.primary : ''
+    prevPrimaryGameRef.current = { streamKey: folder.relativePath, primary }
     if (!primary || prevPrimary) return
     if (meta?.ytTags?.length) return
     const linkedId = gameTagsLinks[primary]
@@ -5382,7 +5411,7 @@ function SidebarDetail({
     const tpl = ytTagTemplates.find(t => t.id === linkedId)
     if (!tpl || !tpl.tags.length) return
     onUpdateMetaRef.current({ ytTags: [...tpl.tags], ytTagsTemplateId: linkedId })
-  }, [folder.folderPath, meta?.games, meta?.ytTags, gameTagsLinks, ytTagTemplates])
+  }, [folder.relativePath, meta?.games, meta?.ytTags, gameTagsLinks, ytTagTemplates])
 
   // Lazy refresh of bound tag templates. If the bound YT/Twitch tag
   // template has been edited since the last time this stream was
@@ -5536,17 +5565,17 @@ function SidebarDetail({
   // ytTitleTemplateId to meta (persists across sessions). For the
   // others, the ephemeral selectedId in local state is updated.
   const handleSaveTitleTemplate = useCallback(async (name: string) => {
-    const targetPath = folderPathRef.current
+    const targetKey = streamKeyRef.current
     const id = await onSaveYtTitleTemplate(name, meta?.ytTitle ?? '')
-    onUpdateMetaForRef.current(targetPath, { ytTitleTemplateId: id })
+    onUpdateMetaForRef.current(targetKey, { ytTitleTemplateId: id })
   }, [onSaveYtTitleTemplate, meta?.ytTitle])
   // Twitch title saves into the SAME Titles template store as the YT
   // title — the group is shared. Binds the new template to the Twitch
   // title only.
   const handleSaveTwitchTitleTemplate = useCallback(async (name: string) => {
-    const targetPath = folderPathRef.current
+    const targetKey = streamKeyRef.current
     const id = await onSaveYtTitleTemplate(name, meta?.twitchTitle ?? '')
-    onUpdateMetaForRef.current(targetPath, { twitchTitleTemplateId: id })
+    onUpdateMetaForRef.current(targetKey, { twitchTitleTemplateId: id })
   }, [onSaveYtTitleTemplate, meta?.twitchTitle])
   const handleSaveDescTemplate = useCallback(async (name: string) => {
     // Save the raw template body (tokens intact) so the template is reusable,
@@ -5555,14 +5584,14 @@ function SidebarDetail({
     setDescTplId(id)
   }, [onSaveYtDescTemplate, meta?.ytDescriptionTemplate, meta?.ytDescription])
   const handleSaveTagsTemplate = useCallback(async (name: string) => {
-    const targetPath = folderPathRef.current
+    const targetKey = streamKeyRef.current
     const id = await onSaveYtTagsTemplate(name, meta?.ytTags ?? [])
-    onUpdateMetaForRef.current(targetPath, { ytTagsTemplateId: id })
+    onUpdateMetaForRef.current(targetKey, { ytTagsTemplateId: id })
   }, [onSaveYtTagsTemplate, meta?.ytTags])
   const handleSaveTwitchTagsTemplate = useCallback(async (name: string) => {
-    const targetPath = folderPathRef.current
+    const targetKey = streamKeyRef.current
     const id = await onSaveTwitchTagsTemplate(name, meta?.twitchTags ?? [])
-    onUpdateMetaForRef.current(targetPath, { twitchTagsTemplateId: id })
+    onUpdateMetaForRef.current(targetKey, { twitchTagsTemplateId: id })
   }, [onSaveTwitchTagsTemplate, meta?.twitchTags])
 
   // Pick → write the raw template body into ytTitle verbatim and
@@ -5981,7 +6010,7 @@ function SidebarDetail({
     return null
   }
   const handleManualUrlChange = async (value: string) => {
-    const targetPath = folderPathRef.current
+    const targetKey = streamKeyRef.current
     setManualUrl(value)
     setManualUrlError('')
     if (!value.trim()) return
@@ -5992,7 +6021,7 @@ function SidebarDetail({
       const video = await window.api.youtubeGetVideoById(videoId)
       if (!video) { setManualUrlError('Video not found or not accessible.'); return }
       setYtVods(prev => prev.some(v => v.id === video.id) ? prev : [video, ...prev])
-      onUpdateMetaForRef.current(targetPath, { ytVideoId: video.id })
+      onUpdateMetaForRef.current(targetKey, { ytVideoId: video.id })
       setManualUrl('')
     } catch (err: any) {
       setManualUrlError(err?.message ?? 'Failed to fetch video info.')
@@ -6017,7 +6046,7 @@ function SidebarDetail({
     return eod.getTime() > Date.now()
   })()
   const handleCreateBroadcast = async () => {
-    const targetPath = folderPathRef.current
+    const targetKey = streamKeyRef.current
     setCreatingBroadcast(true)
     setCreateError('')
     try {
@@ -6075,7 +6104,7 @@ function SidebarDetail({
       // Targeted: several awaited API calls ran since the click — writing
       // through onUpdateMeta here would link the broadcast to whichever
       // stream the user has selected NOW, not the one they created it for.
-      onUpdateMetaForRef.current(targetPath, metaPatch)
+      onUpdateMetaForRef.current(targetKey, metaPatch)
       if (followupWarning) setCreateError(followupWarning)
     } catch (err: any) {
       setCreateError(err?.message ?? 'Failed to create broadcast')
@@ -7445,7 +7474,7 @@ function SidebarDetail({
             finally { setYtPushing(false) }
           }
           const handleTwitchPush = async () => {
-            const targetPath = folderPathRef.current
+            const targetKey = streamKeyRef.current
             setTwPushing(true)
             try {
               // `onPushToTwitch` (parent's handlePushToTwitch) now
@@ -7491,7 +7520,7 @@ function SidebarDetail({
               // local still matches what we sent. Stored alongside
               // (not replacing) the user's typed values so we don't
               // overwrite their preferred naming.
-              await onUpdateMetaForRef.current(targetPath, {
+              await onUpdateMetaForRef.current(targetKey, {
                 twitchLastPushedTitle: twEffectiveTitle,
                 // Only snapshot the game when it actually landed — otherwise
                 // the in-sync check must keep flagging the category mismatch.
@@ -8625,7 +8654,6 @@ function RescheduleModal({
   onSuccess,
   onPushYoutube,
   onPushTwitch,
-  onUpdateMeta,
 }: {
   target: StreamFolder
   folders: StreamFolder[]
@@ -8653,11 +8681,6 @@ function RescheduleModal({
   /** Push title / game / tags to the Twitch channel — used when the
    *  rescheduled stream becomes the new "next upcoming". */
   onPushTwitch: () => Promise<{ categoryApplied: boolean } | void>
-  /** Used by pull mode to write the matching sync snapshot to meta
-   *  after the folder rename succeeds — without this, the date dot
-   *  would immediately re-appear because `ytLastPushedDate` is still
-   *  stale from before the pull. */
-  onUpdateMeta?: (folderPath: string, partial: Partial<StreamMeta>) => Promise<void> | void
 }) {
   // YouTube-derived date string from the linked broadcast (local
   // calendar, YYYY-MM-DD). Used as the prefill source in pull + conflict
@@ -8798,19 +8821,27 @@ function RescheduleModal({
       // sameDate skips the rename entirely (only happens in pull mode
       // with a degenerate state) — we still write the snapshot so the
       // dot disappears.
-      const finalPath = sameDate
-        ? target.folderPath
-        : (await window.api.rescheduleStream(target.folderPath, target.date, newDate)).newFolderPath
-      if (pullMode && onUpdateMeta) {
+      let finalPath = target.folderPath
+      let finalKey = target.relativePath
+      if (!sameDate) {
+        const result = await window.api.rescheduleStream(target.folderPath, target.date, newDate)
+        finalPath = result.newFolderPath
+        finalKey = result.newMetaKey
+      }
+      if (pullMode) {
         // Snapshot writes so the date + time dots both clear after
         // the pull completes. scheduledTime cleared so the local
         // override doesn't immediately re-flag a mismatch against
-        // what we just pulled.
-        await onUpdateMeta(finalPath, {
+        // what we just pulled. Written straight through the IPC with
+        // the reschedule's canonical meta key: the page's updateMeta
+        // resolves through `folders` state, which doesn't contain the
+        // renamed stream yet, so routing through it was a silent no-op
+        // (the time dot stayed lit right after pulling).
+        await window.api.updateStreamMeta(finalPath, {
           scheduledTime: undefined,
           ytLastPushedDate: newDate,
           ...(ytTimeForPull ? { ytLastPushedScheduledTime: ytTimeForPull } : {}),
-        })
+        }, finalKey)
       }
       if (showStep2) {
         setNewFolderPath(finalPath)
@@ -9165,6 +9196,10 @@ function DeleteModal({
       setError('Can\'t delete: files are currently in use. Close them (or cancel any conversion) and try again.')
       return
     }
+    // Drop any in-flight offscreen thumbnail decodes for this stream's files
+    // first — their <video> handles block the recycle-bin move (deleting a
+    // stream while a thumbnail was still rendering failed as "in use").
+    releaseThumbDecodes(filesInFolder ?? target.videos)
     try {
       if (isDumpMode) {
         await window.api.deleteStreamFiles(target.folderPath, target.date)

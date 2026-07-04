@@ -81,6 +81,26 @@ function runAttrCheckViaStdin(filePaths: string[]): Promise<boolean[]> {
   })
 }
 
+/** shell.trashItem with a short retry ladder (~5s total). Transient locks
+ *  are the norm here: the renderer releases its offscreen thumbnail-decode
+ *  handles right before deleting (Chromium drops them asynchronously), and
+ *  AV/sync clients poke at fresh files. A single attempt turned those
+ *  moments into "file in use" failures blaming the wrong program. */
+export async function trashItemWithRetry(filePath: string): Promise<void> {
+  // Normalize because shell.trashItem on Windows rejects mixed
+  // forward/back-slash paths even though Node's fs handles them.
+  const normalized = path.normalize(filePath)
+  let lastErr: unknown
+  for (const delayMs of [0, 250, 500, 1000, 1500, 2000]) {
+    if (delayMs) await new Promise(r => setTimeout(r, delayMs))
+    try {
+      await shell.trashItem(normalized)
+      return
+    } catch (err) { lastErr = err }
+  }
+  throw lastErr
+}
+
 export interface FileInfo {
   name: string
   path: string
@@ -238,11 +258,9 @@ export function registerFilesIPC(): void {
 
   // Single-file recycle-bin move. Used by per-image delete buttons (e.g.
   // carousel thumbnails) where streams:deleteStreamFiles would be too
-  // broad. Normalize because shell.trashItem on Windows rejects mixed
-  // forward/back-slash paths even though Node's fs handles them. Errors
-  // surface to the caller so the UI can show a failure.
+  // broad. Errors surface to the caller so the UI can show a failure.
   ipcMain.handle('files:trashFile', async (_event, filePath: string) => {
-    await shell.trashItem(path.normalize(filePath))
+    await trashItemWithRetry(filePath)
     // No explicit streams:changed here. This used to fire one immediately for SM
     // thumbnails so an open editor could reconcile before a quick re-save
     // resurrected the file — but the in-use guard now blocks deleting the variant

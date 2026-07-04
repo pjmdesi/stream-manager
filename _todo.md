@@ -87,8 +87,7 @@
 
 1. Pull-from-YouTube silently reverts descriptions (the bake effect rewrites from the unchanged template within one render), and a slow "Create broadcast" can link the broadcast to whichever stream you clicked next. Both are sync-integrity landmines on unchecked checklist items (§2 pull, §3 Twitch).
 2. Settings Save writes the whole config from a stale snapshot, so converting dump→folder mode then saving any unrelated setting reverts the mode; several config writers (tray, relay, convert flow) never reach renderer state at all.
-3. After loading in a list of video files into the Converter page, removing items from the list, then navigating to another page and back to the converter page, the items that were removed come back and need to be removed again.
-4. Deleting a stream item of video file via SM showed an error while the thumbnail was rendering. If a delete action is taken while the thumbnail is rendering, it should cancel the thumbnail render and then delete the stream item or video file.
+3. Deleting a stream item of video file via SM showed an error while the thumbnail was rendering. If a delete action is taken while the thumbnail is rendering, it should cancel the thumbnail render and then delete the stream item or video file.
 
 ## Other ideas (small)
 

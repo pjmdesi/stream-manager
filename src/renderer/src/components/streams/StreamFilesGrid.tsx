@@ -1,6 +1,6 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X } from 'lucide-react'
-import { VideoThumb, CHECKER } from '../ui/VideoThumb'
+import { VideoThumb, CHECKER, releaseThumbDecodes } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
@@ -289,6 +289,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
                 // Authoritative backstop in case the reactive disable lags a job
                 // that just started: never trash a file the converter still holds.
                 if (await window.api.isPathInUseByConverter(path).catch(() => false)) return
+                // Release any in-flight offscreen thumbnail decode of this
+                // file — its <video> handle blocks the recycle-bin move.
+                releaseThumbDecodes([path])
                 // Only report success — a failed trash must keep the card.
                 try { await window.api.trashFile(path) } catch { return }
                 onDeleted()
@@ -689,6 +692,10 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const selectedHasBlocked = useMemo(() => selectedPaths.some(p => fileReason(p)), [selectedPaths, fileReason])
   const bulkTrash = async () => {
     const deleted: string[] = []
+    // Release in-flight thumbnail decodes only for the files that will
+    // actually be trashed — cancelling one for a kept (in-use) file would
+    // leave its card thumbless until remount.
+    releaseThumbDecodes(selectedPaths.filter(p => !fileReason(p)))
     for (const p of selectedPaths) {
       // Skip anything that's in use — open in the player/thumbnail editor, or
       // (authoritative re-check) still held by the converter; the rest of the

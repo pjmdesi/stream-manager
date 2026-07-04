@@ -5,6 +5,25 @@ import { Film } from 'lucide-react'
 // same file remounts somewhere else (converter panels, the files grid, etc.).
 const thumbCache = new Map<string, { url: string; aspect: number }>()
 
+// Offscreen decodes currently holding a Chromium read handle on their file,
+// keyed by path. The handle lives from src-set until cleanup — long enough on
+// multi-GB videos to block moving the file to the recycle bin (media opens
+// without delete sharing on Windows). Delete flows call releaseThumbDecodes()
+// first so the handle drops before main touches the file; main's trash retry
+// ladder absorbs the asynchronous release.
+const activeDecodes = new Map<string, Set<() => void>>()
+
+/** Cancel any in-flight offscreen frame decodes for these paths, releasing
+ *  their file handles. Paths with no active decode are ignored. */
+export function releaseThumbDecodes(paths: string[]): void {
+  for (const p of paths) {
+    const set = activeDecodes.get(p)
+    if (!set) continue
+    activeDecodes.delete(p)
+    for (const cancel of [...set]) cancel()
+  }
+}
+
 /** Checkerboard backdrop — shows through the letterbox bars of contained media
  *  (non-16:9 video, transparent images) so the content reads clearly. */
 export const CHECKER: React.CSSProperties = {
@@ -45,10 +64,15 @@ export function VideoThumb({ path, width, height = 56, checker = false, rounded 
       vid.preload = 'metadata'
       let sought = false
       const cleanup = () => {
+        const set = activeDecodes.get(path)
+        if (set) { set.delete(cleanup); if (set.size === 0) activeDecodes.delete(path) }
         vid.removeEventListener('loadedmetadata', onMeta)
         vid.removeEventListener('seeked', onSeeked)
         vid.removeEventListener('error', onErr)
         vid.src = ''
+        // Detach the resource for real — without load() Chromium can keep
+        // the old file's handle open well past the src clear.
+        vid.load()
       }
       const onMeta = () => {
         const dur = vid.duration
@@ -79,6 +103,9 @@ export function VideoThumb({ path, width, height = 56, checker = false, rounded 
       vid.addEventListener('loadedmetadata', onMeta)
       vid.addEventListener('seeked', onSeeked)
       vid.addEventListener('error', onErr)
+      const set = activeDecodes.get(path) ?? new Set<() => void>()
+      set.add(cleanup)
+      activeDecodes.set(path, set)
       return cleanup
     }
 

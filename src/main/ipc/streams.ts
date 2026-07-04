@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell, app } from 'electron'
+import { ipcMain, BrowserWindow, app } from 'electron'
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -7,7 +7,7 @@ import { spawnSync } from 'child_process'
 import chokidar, { FSWatcher } from 'chokidar'
 import { getStore } from './store'
 import type { ConversionPreset } from './converter'
-import { checkLocalFiles, isFileConfirmedLocal } from './files'
+import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './files'
 import { probeFile, parseClipProvenance } from '../services/ffmpegService'
 
 export type VideoCategory = 'full' | 'short' | 'clip'
@@ -1547,7 +1547,7 @@ export function registerStreamsIPC(): void {
     // destroyed, silently.
     const failed: string[] = []
     for (const filePath of filesForDate(dir, date)) {
-      try { await shell.trashItem(filePath) } catch { failed.push(path.basename(filePath)) }
+      try { await trashItemWithRetry(filePath) } catch { failed.push(path.basename(filePath)) }
     }
     if (failed.length > 0) {
       const shown = failed.slice(0, 3).join(', ')
@@ -1769,7 +1769,7 @@ export function registerStreamsIPC(): void {
     // needs exclusive access, same constraint as rename).
     const restartWatcher = await pauseDirWatcher()
     try {
-      await shell.trashItem(folderPath)
+      await trashItemWithRetry(folderPath)
     } finally {
       restartWatcher()
     }
