@@ -336,11 +336,103 @@ function getStreamsDir(): string {
   return ((getStore().get('config') as any)?.streamsDir as string) ?? ''
 }
 
+// ── _meta.json health ─────────────────────────────────────────────────────
+// When a read of an EXISTING _meta.json fails (locked or unparseable), the
+// store enters a failed state: readAllMeta throws instead of returning {},
+// and writeAllMeta refuses to write, so a bad read can never be laundered
+// into a "save" that wipes the library. Cleared by the next successful read.
+// Global rather than per-dir — the app runs against one streams root at a
+// time, and a false-positive lockout on a secondary dir only pauses edits.
+export type MetaHealth =
+  | { ok: true }
+  | { ok: false; kind: 'locked' | 'corrupt'; detail: string }
+
+let metaHealth: MetaHealth = { ok: true }
+// Corrupt originals already preserved this session (one copy per file, so a
+// render-loop of failing reads doesn't spray copies).
+const corruptCopySaved = new Set<string>()
+
+function setMetaHealth(next: MetaHealth): void {
+  const changed = metaHealth.ok !== next.ok
+    || (!metaHealth.ok && !next.ok && (metaHealth.kind !== next.kind || metaHealth.detail !== next.detail))
+  metaHealth = next
+  if (!changed) return
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('streams:metaHealth', metaHealth)
+  }
+}
+
 export function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
+  const filePath = metaFilePath(streamsDir)
+  const tmpPath = filePath + '.tmp'
+
+  // Read with brief retries — sync clients (Synology Drive) can hold the
+  // file for a moment while uploading it.
+  let raw: string | null = null
+  let lastErr: unknown = null
+  for (const delayMs of [0, 100, 250, 500]) {
+    if (delayMs) sleepSync(delayMs)
+    try {
+      raw = fs.readFileSync(filePath, 'utf-8')
+      break
+    } catch (err) {
+      if ((err as { code?: string }).code === 'ENOENT') {
+        // Missing file = legitimately empty library (fresh root). Never to
+        // be confused with an unreadable EXISTING file, which is a failure.
+        setMetaHealth({ ok: true })
+        return {}
+      }
+      lastErr = err
+    }
+  }
+
+  if (raw === null) {
+    // Exists but unreadable after retries. Do NOT return {} — that used to
+    // let the next write commit an empty library over the real one.
+    setMetaHealth({ ok: false, kind: 'locked', detail: (lastErr as Error)?.message ?? String(lastErr) })
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+  }
+
   try {
-    return JSON.parse(fs.readFileSync(metaFilePath(streamsDir), 'utf-8'))
+    const parsed = JSON.parse(raw) as Record<string, StreamMeta>
+    setMetaHealth({ ok: true })
+    // A leftover temp sibling means a previous swap didn't complete (that
+    // write's caller already saw the error). The main file parses, so it is
+    // the truth — drop the stale temp so it can never be mistaken for
+    // recovery data later.
+    try { fs.unlinkSync(tmpPath) } catch { /* usually ENOENT */ }
+    return parsed
   } catch {
-    return {}
+    // Exists and reads but doesn't parse: torn by a crash on a pre-swap
+    // build, or mangled by a sync conflict. Preserve the evidence once…
+    if (!corruptCopySaved.has(filePath)) {
+      corruptCopySaved.add(filePath)
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      try { fs.copyFileSync(filePath, path.join(streamsDir, `_meta.corrupt-${stamp}.json`)) }
+      catch (copyErr) { console.error('[readAllMeta] failed to preserve corrupt copy:', copyErr) }
+    }
+    // …then try the temp sibling: a crash BETWEEN the temp fsync and the
+    // rename leaves the new, already-verified data in the temp, so
+    // completing that swap is the correct recovery.
+    let recovered: Record<string, StreamMeta> | null = null
+    try { recovered = JSON.parse(fs.readFileSync(tmpPath, 'utf-8')) as Record<string, StreamMeta> } catch { /* no temp / also bad */ }
+    if (recovered !== null) {
+      setMetaHealth({ ok: true }) // before writeAllMeta so the lockout doesn't trip on our own heal
+      try {
+        writeAllMeta(streamsDir, recovered)
+        console.warn('[readAllMeta] _meta.json was corrupt; recovered from the temp sibling')
+      } catch (healErr) {
+        // Memory is good even if the disk heal failed — the next successful
+        // write repairs the file. Health stays ok: we HAVE the data.
+        console.warn('[readAllMeta] recovered from temp, but rewriting _meta.json failed (next write retries):', healErr)
+      }
+      return recovered
+    }
+    setMetaHealth({
+      ok: false, kind: 'corrupt',
+      detail: 'The file exists but is not valid JSON. A copy was preserved next to it as _meta.corrupt-*.json.',
+    })
+    throw new Error('_meta.json is damaged (not valid JSON). Metadata edits are paused; the damaged file was preserved as _meta.corrupt-*.json.')
   }
 }
 
@@ -362,6 +454,15 @@ const hiddenAttrStripped = new Set<string>()
  *  loss mid-write) leaves the previous version intact on disk, with the temp
  *  file beside it. Throws on failure; callers' IPC rejections surface it. */
 export function writeAllMeta(streamsDir: string, allMeta: Record<string, StreamMeta>): void {
+  // Refuse to write while the store is in a failed-read state — the caller's
+  // in-memory map may be empty or stale, and committing it would make a
+  // transient read failure permanent. Synchronous callers can't get here
+  // (their own readAllMeta already threw); this catches detached async
+  // writers holding a pre-failure snapshot (e.g. refreshVideoMaps' .then).
+  if (!metaHealth.ok) {
+    throw new Error(`_meta.json write refused: the last read failed (${metaHealth.kind}). ${metaHealth.detail}`)
+  }
+
   const filePath = metaFilePath(streamsDir)
   const tmpPath = filePath + '.tmp'
 
@@ -679,6 +780,10 @@ async function refreshVideoMaps(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerStreamsIPC(): void {
+  // Current _meta.json health for late-mounting renderers; transitions are
+  // pushed via the 'streams:metaHealth' event (see setMetaHealth).
+  ipcMain.handle('streams:getMetaHealth', () => metaHealth)
+
   ipcMain.handle('streams:list', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'): Promise<StreamFolder[]> => {
     if (!dir || !fs.existsSync(dir)) return []
 
@@ -1607,16 +1712,17 @@ export function registerStreamsIPC(): void {
       // Ignore files the app writes itself, otherwise chokidar fires
       // 'change' events for every internal write and the renderer re-runs
       // loadFolders → refreshVideoMaps in a tight feedback loop:
-      //   - _meta.json: the metadata store (saved on every edit)
-      //   - _meta.json.tmp: writeAllMeta's atomic-swap sibling — written and
-      //     renamed away on every save; without the ignore each save would
-      //     fire a phantom add/unlink pair and re-trigger the reload storm
+      //   - _meta.* family: the metadata store itself (saved on every edit),
+      //     writeAllMeta's atomic-swap sibling (_meta.json.tmp — written and
+      //     renamed away on every save, so it would fire a phantom add/unlink
+      //     pair each time), and readAllMeta's preserved corrupt copies
+      //     (_meta.corrupt-*.json)
       //   - *__arc_tmp.*: archive job temp output. ffmpeg writes incrementally
       //     while encoding so 'change' events fire continuously through a
       //     multi-hour archive run, and the renderer was thrashing thumbnails.
       //     The temp file is renamed/swapped to the real file at end-of-job
       //     anyway, so the user only needs to see the final state.
-      ignored: (p: string) => p.endsWith('_meta.json') || p.endsWith('_meta.json.tmp') || /__arc_tmp\.[^.]+$/.test(p),
+      ignored: (p: string) => path.basename(p).startsWith('_meta.') || /__arc_tmp\.[^.]+$/.test(p),
     })
 
     const onChange = () => notifyChange(win)

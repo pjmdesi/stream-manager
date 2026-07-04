@@ -1740,6 +1740,26 @@ export function StreamsPage({
     setLoading(false)
   }, [streamsDir, streamMode])
 
+  // _meta.json health — pushed by main whenever the metadata store enters or
+  // leaves a failed-read state (locked or corrupt). While failed, main also
+  // refuses all meta writes, so the banner explains why edits don't stick.
+  const [metaHealth, setMetaHealth] = useState<{ ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string }>({ ok: true })
+  useEffect(() => {
+    let alive = true
+    window.api.getMetaHealth().then(h => { if (alive) setMetaHealth(h) }).catch(() => {})
+    const off = window.api.onMetaHealth(h => setMetaHealth(h))
+    return () => { alive = false; off() }
+  }, [])
+  // While the store is failed, retry gently: each loadFolders re-reads
+  // _meta.json in main, and the first success flips health back to ok (the
+  // banner promises "clears automatically", so something has to actually
+  // re-read once the lock releases).
+  useEffect(() => {
+    if (metaHealth.ok) return
+    const t = setInterval(() => { loadFolders().catch(() => {}) }, 5000)
+    return () => clearInterval(t)
+  }, [metaHealth.ok, loadFolders])
+
   useEffect(() => {
     if (!streamsDir) return
     loadFolders()
@@ -2593,6 +2613,21 @@ export function StreamsPage({
               </div>
             )
           })()}
+          {!metaHealth.ok && (
+            <div className="flex items-start gap-2 text-[11px] bg-red-500/10 border border-red-500/30 text-red-300 rounded-md px-3 py-2">
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="font-medium">
+                  {metaHealth.kind === 'corrupt' ? 'Stream metadata file is damaged' : "Stream metadata can't be read right now"}
+                </div>
+                <div className="text-red-300/80 mt-0.5">
+                  {metaHealth.kind === 'corrupt'
+                    ? 'The metadata file (_meta.json) is not valid JSON. Metadata edits are paused so nothing gets overwritten. A copy of the damaged file was preserved in the streams folder as _meta.corrupt-*.json: restore a known-good _meta.json to recover.'
+                    : 'The metadata file (_meta.json) appears to be locked by another program (usually a sync client). Metadata edits are paused so nothing gets overwritten. This clears automatically once the file is readable again.'}
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-lg font-semibold flex items-center gap-2">

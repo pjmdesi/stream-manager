@@ -176,6 +176,8 @@ declare global {
       watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
       unwatchStreamsDir(): Promise<void>
       onStreamsChanged(cb: () => void): () => void
+      getMetaHealth(): Promise<{ ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string }>
+      onMetaHealth(cb: (health: { ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string }) => void): () => void
       previewReschedule(folderPath: string, oldDate: string, newDate: string): Promise<{
         isDump: boolean
         folderConflict: boolean
