@@ -572,6 +572,29 @@ function deleteWithRetry(filePath: string, label: string): void {
   setTimeout(tryOnce, delays[0])
 }
 
+/** deleteWithRetry's sibling for preserving files instead: renames with the
+ *  same ~30s ladder, for when the source is briefly locked (sync client/AV).
+ *  Gives up with a warn — the file stays at its old (watcher-ignored) name. */
+function renameWithRetry(fromPath: string, toPath: string, label: string): void {
+  if (!fromPath || !toPath) return
+  const delays = [250, 500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 5000, 5000]
+  let attempt = 0
+  const tryOnce = () => {
+    if (!fs.existsSync(fromPath)) return
+    try {
+      fs.renameSync(fromPath, toPath)
+    } catch (err: any) {
+      attempt++
+      if (attempt < delays.length) {
+        setTimeout(tryOnce, delays[attempt])
+      } else {
+        console.warn(`[converter] could not rename ${label} after ${delays.length} attempts:`, fromPath, err?.message)
+      }
+    }
+  }
+  setTimeout(tryOnce, delays[0])
+}
+
 /** Resolve a preset by id from builtins or the user's imported presets store. */
 export function getPresetById(id: string): ConversionPreset | null {
   const builtin = BUILTIN_PRESETS.find(p => p.id === id)
@@ -650,11 +673,30 @@ export async function startConversionJob(
           ? job.inputFile
           : job.inputFile.replace(/\.[^.]+$/, outputExt)
         const backupPath = job.inputFile + '.smbak'
+        // On swap failure the encode itself SUCCEEDED (handleComplete only
+        // runs on ffmpeg exit 0) — that's potentially hours of work, so
+        // instead of deleting the finished output, keep it as a visible
+        // "<name>-archived.<ext>" sibling the user can swap in manually
+        // (or just delete). Replaces any previous preserve of the same
+        // input — repeat failures would produce the same content anyway.
+        // Only failed ENCODES still delete their (garbage) temp, via
+        // handleError's default cleanup.
+        const preserveOutput = (): string => {
+          const preservedPath = job.inputFile.replace(/\.[^.]+$/, '') + `-archived${outputExt}`
+          try {
+            fs.renameSync(job.outputFile, preservedPath)
+            return `The finished conversion was kept as "${path.basename(preservedPath)}" — delete the original and rename it to finish manually, without re-encoding.`
+          } catch {
+            // Temp itself locked — leave it in place and keep trying in the
+            // background; it stays watcher-ignored (__arc_tmp) until then.
+            renameWithRetry(job.outputFile, preservedPath, 'preserved archive output')
+            return `The finished conversion is being kept as "${path.basename(preservedPath)}" (rename pending — the file is still locked).`
+          }
+        }
         try {
           fs.renameSync(job.inputFile, backupPath)
         } catch (e: any) {
-          try { if (fs.existsSync(job.outputFile)) fs.unlinkSync(job.outputFile) } catch {}
-          handleError(new Error(`Replace failed (original untouched): ${e.message}`))
+          handleError(new Error(`Replace failed (original untouched): ${e.message}. ${preserveOutput()}`), { keepOutput: true })
           return
         }
         try {
@@ -665,15 +707,13 @@ export async function startConversionJob(
           } catch (restoreErr: any) {
             // Both renames failing back-to-back means the folder is hard
             // locked. Nothing has been deleted — the original is intact
-            // under the backup name, so say exactly that. (handleError's
-            // cleanup takes care of the temp.)
+            // under the backup name, so say exactly that.
             handleError(new Error(
-              `Replace failed and the original could not be renamed back — it is intact as "${path.basename(backupPath)}" in the stream folder. (${e.message}; restore: ${restoreErr.message})`
-            ))
+              `Replace failed and the original could not be renamed back — it is intact as "${path.basename(backupPath)}" in the stream folder. (${e.message}; restore: ${restoreErr.message}) ${preserveOutput()}`
+            ), { keepOutput: true })
             return
           }
-          try { if (fs.existsSync(job.outputFile)) fs.unlinkSync(job.outputFile) } catch {}
-          handleError(new Error(`Replace failed: ${e.message}`))
+          handleError(new Error(`Replace failed: ${e.message}. ${preserveOutput()}`), { keepOutput: true })
           return
         }
         // Success — the backup is now a duplicate, and archiving exists to
@@ -695,7 +735,7 @@ export async function startConversionJob(
       scheduleNext()
       resolve()
     }
-    const handleError = (err: Error) => {
+    const handleError = (err: Error, opts?: { keepOutput?: boolean }) => {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
       cancellers.delete(id)
       pausers.delete(id)
@@ -703,8 +743,10 @@ export async function startConversionJob(
       downloadCancelFlags.delete(id)
       notifyAll('converter:jobError', { jobId: id, error: err.message })
       // For replaceInput jobs, clean up the temp output that ffmpeg wrote
-      // before failing — otherwise __arc_tmp.* files accumulate.
-      if (job.replaceInput && job.outputFile) {
+      // before failing — otherwise __arc_tmp.* files accumulate. Swap
+      // failures pass keepOutput: their encode FINISHED and the output was
+      // preserved as "<name>-archived.<ext>" instead (see preserveOutput).
+      if (job.replaceInput && job.outputFile && !opts?.keepOutput) {
         deleteWithRetry(job.outputFile, 'archive temp file (error path)')
       }
       // Group bookkeeping — a failure short-circuits the hook for the whole group.
