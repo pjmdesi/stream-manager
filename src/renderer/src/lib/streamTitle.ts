@@ -36,7 +36,7 @@ export function resolvePrimaryGame(meta: StreamMeta | null | undefined): string 
 
 /** Total streams in (game, season). Counts the current folder too; falls
  *  back to 1 so `{total_episodes}` never renders as 0. */
-function detectTotalEpisodes(allFolders: StreamFolder[], gameName: string, season: string): number {
+export function detectTotalEpisodes(allFolders: StreamFolder[], gameName: string, season: string): number {
   if (!gameName) return 1
   const lower = gameName.toLowerCase()
   const s = season || '1'

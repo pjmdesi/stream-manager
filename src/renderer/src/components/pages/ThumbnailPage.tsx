@@ -26,7 +26,7 @@ import { useOpenItems } from '../../context/OpenItemsContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import { theme, rgba } from '../../theme'
-import { renderStreamTitle, renderTitleFromMeta } from '../../lib/streamTitle'
+import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
 import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta, StreamFolder } from '../../types'
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
@@ -2477,6 +2477,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   // ── Auto-save timer ───────────────────────────────────────────────────────
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Monotonic id for "which canvas session is mounted" — bumped whenever the
+  // editor's content identity changes (open / variant switch / delete /
+  // close). doSave captures it at entry and aborts after its awaits if it
+  // changed: the capture reads the LIVE shared stage, so a save started for
+  // stream A must never screenshot whatever replaced it (that wrote B's
+  // pixels as A's PNG — a persistent JSON/PNG desync).
+  const saveEpochRef = useRef(0)
+  // The save currently running, if any. Close/switch/open await it so a
+  // session is never retired with a write still in flight.
+  const pendingSaveRef = useRef<Promise<void> | null>(null)
+  const [closingSession, setClosingSession] = useState(false)
+  const [confirmCloseTemplate, setConfirmCloseTemplate] = useState(false)
 
   // ─── Load system fonts + variants ─────────────────────────────────────────
   useEffect(() => {
@@ -2518,7 +2530,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const overviewLoadedKeyRef = useRef<string | null>(null)
   useEffect(() => {
     if (!isVisible || !config.streamsDir) return
-    const key = `${config.streamsDir} ${config.streamMode || 'folder-per-stream'}`
+    const key = `${config.streamsDir}${config.streamMode || 'folder-per-stream'}`
     if (overviewLoadedKeyRef.current === key) return
     overviewLoadedKeyRef.current = key
     setOverviewLoading(true)
@@ -2788,31 +2800,56 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     ordinal: number,
   ) => {
     if (!stageRef.current) return
-    const canvasFile: ThumbnailCanvasFile = {
-      version: 1,
-      templateId,
-      updatedAt: Date.now(),
-      layers: saveLayers,
-    }
-    await preloadLayerImages(saveLayers)
-    await waitForStageImages()
-    const pngDataUrl = getCanvasDataUrl()
+    const epoch = saveEpochRef.current
+    const run = (async () => {
+      const canvasFile: ThumbnailCanvasFile = {
+        version: 1,
+        templateId,
+        updatedAt: Date.now(),
+        layers: saveLayers,
+      }
+      await preloadLayerImages(saveLayers)
+      await waitForStageImages()
+      // The stage is shared. If another stream/variant mounted while the
+      // image waits ran (up to 5s with a broken asset), its pixels are on
+      // the stage now — abort instead of writing them under OUR json.
+      // Whoever replaced the session flushed us first, so nothing is lost.
+      if (saveEpochRef.current !== epoch || !stageRef.current) return
+      const pngDataUrl = getCanvasDataUrl()
+      try {
+        await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl, ordinal)
+        // Merge only the thumbnail flags — prevents closure-stale `currentStream.meta` from
+        // clobbering fields edited concurrently in other UI (e.g. MetaModal).
+        await window.api.updateStreamMeta(folderPath, {
+          smThumbnail: true,
+          smThumbnailTemplate: templateId,
+        }, streamMetaKey(folderPath, date, config.streamsDir))
+        if (saveEpochRef.current === epoch) setIsDirty(false)
+        // Bump the variant-preview cache buster so the switcher dropdown
+        // shows the fresh PNG for whichever variant we just wrote.
+        setVariantPreviewKey(k => k + 1)
+      } catch (err) {
+        console.error('Auto-save failed:', err)
+      }
+    })()
+    pendingSaveRef.current = run
     try {
-      await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl, ordinal)
-      // Merge only the thumbnail flags — prevents closure-stale `currentStream.meta` from
-      // clobbering fields edited concurrently in other UI (e.g. MetaModal).
-      await window.api.updateStreamMeta(folderPath, {
-        smThumbnail: true,
-        smThumbnailTemplate: templateId,
-      }, streamMetaKey(folderPath, date, config.streamsDir))
-      setIsDirty(false)
-      // Bump the variant-preview cache buster so the switcher dropdown
-      // shows the fresh PNG for whichever variant we just wrote.
-      setVariantPreviewKey(k => k + 1)
-    } catch (err) {
-      console.error('Auto-save failed:', err)
+      await run
+    } finally {
+      if (pendingSaveRef.current === run) pendingSaveRef.current = null
     }
   }, [getCanvasDataUrl, waitForStageImages, preloadLayerImages, currentStream])
+
+  // Flush everything the autosave owes: turn a pending debounce into an
+  // immediate save, then await whatever save is in flight. Session-retiring
+  // callers (close, open, variant switch) run this BEFORE bumping the epoch.
+  const flushStreamSaves = useCallback(async () => {
+    if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
+    if (currentStream && isDirty) {
+      await doSave(layers, currentStream.folderPath, currentStream.date, currentTemplateId, currentVariant)
+    }
+    await pendingSaveRef.current
+  }, [currentStream, isDirty, layers, currentTemplateId, currentVariant, doSave])
 
   // ── Layer mutations ────────────────────────────────────────────────────────
   const commitLayers = useCallback((next: ThumbnailLayer[]) => {
@@ -3238,6 +3275,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   }
 
   const openStreamEditor = useCallback(async (folderPath: string, date: string, title?: string, meta?: StreamMeta, totalEpisodes?: number, requestedVariantOrdinal?: number) => {
+    // Retire the previous canvas session first: flush its pending saves,
+    // then bump the epoch so a straggler can't capture the new stage.
+    await flushStreamSaves()
+    saveEpochRef.current++
     // Scan for existing variants in parallel with everything else.
     // The variant the user sees first is whichever the streams page
     // currently considers "preferred" — `meta.preferredThumbnail`
@@ -3269,8 +3310,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       : null
 
     if (!canvas && !presetTemplate && freshTemplates.length > 0) {
-      // No existing canvas, no preselection, but templates exist → ask user to pick one first
-      setTemplatePickerStream({ folderPath, date, title, meta, totalEpisodes })
+      // No existing canvas, no preselection, but templates exist → ask user to pick one first.
+      // When a variant EXISTED but its JSON couldn't be read (deleted or
+      // corrupt), bind the picker to THAT ordinal — confirmPickTemplate
+      // defaults to 1, which re-templated healthy variant 1 instead of the
+      // broken one the user actually opened.
+      setTemplatePickerStream({
+        folderPath, date, title, meta, totalEpisodes,
+        targetVariant: foundVariants.length > 0 ? initialVariant : undefined,
+      })
       setMode('overview')
       return
     }
@@ -3329,11 +3377,29 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         await doSave(layersToSave, folderPath, date, templateIdToSave, initialVariant)
       }
     }
-  }, [resetLayers, config.streamsDir, doSave])
+  }, [resetLayers, config.streamsDir, doSave, flushStreamSaves])
 
-  const openFromRecent = useCallback((entry: ThumbnailRecentEntry) => {
-    openStreamEditor(entry.folderPath, entry.date, entry.title)
-  }, [openStreamEditor])
+  const openFromRecent = useCallback(async (entry: ThumbnailRecentEntry) => {
+    // Recents persist only path/date/title — re-resolve the stream's meta
+    // and series length before opening so merge-field text ({title},
+    // {game}, {episode}, …) renders real values. Without this the canvas
+    // rendered blanks and the next save BAKED them into the PNG.
+    let meta: StreamMeta | undefined
+    let totalEpisodes: number | undefined
+    try {
+      const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream')
+      const f = all.find(x => x.folderPath === entry.folderPath && x.date === entry.date)
+        ?? all.find(x => x.folderPath === entry.folderPath)
+      if (f) {
+        meta = f.meta ?? undefined
+        const primaryGame = resolvePrimaryGame(f.meta) || f.detectedGames?.[0] || ''
+        totalEpisodes = f.meta?.isSeries === false
+          ? 0
+          : detectTotalEpisodes(all, primaryGame, f.meta?.ytSeason || '1')
+      }
+    } catch { /* open with just the basics — same as before */ }
+    await openStreamEditor(entry.folderPath, entry.date, entry.title, meta, totalEpisodes)
+  }, [openStreamEditor, config.streamsDir, config.streamMode])
 
   const removeRecent = useCallback((entry: ThumbnailRecentEntry) => {
     window.api.thumbnailRemoveRecent(entry.folderPath, entry.date).then(setRecents).catch(() => {
@@ -3349,6 +3415,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (!templatePickerStream) return
     const { folderPath, date, title, meta, totalEpisodes, targetVariant } = templatePickerStream
     setTemplatePickerStream(null)
+    // Retire whatever session the stage currently shows (the "new
+    // alternative" flow arrives here from an OPEN editor session).
+    await flushStreamSaves()
+    saveEpochRef.current++
     setCurrentStream({ folderPath, date, title, meta, totalEpisodes })
     setSelectedIds([])
     // Compute the layers locally so we can both seed the editor AND
@@ -3380,7 +3450,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       await new Promise<void>(r => requestAnimationFrame(() => r()))
       await doSave(newLayers, folderPath, date, t?.id, ordinal)
     }
-  }, [templatePickerStream, resetLayers, doSave])
+  }, [templatePickerStream, resetLayers, doSave, flushStreamSaves])
 
   // Switch the editor to a different already-existing variant. Auto-
   // save fires for the current variant first (no work lost if the
@@ -3388,12 +3458,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const switchVariant = useCallback(async (ordinal: number) => {
     if (!currentStream) return
     if (ordinal === currentVariant) return
-    // Flush any pending auto-save against the CURRENT variant so we
-    // don't lose unsaved changes when we swap to the next one.
-    if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
-    if (isDirty) {
-      await doSave(layers, currentStream.folderPath, currentStream.date, currentTemplateId, currentVariant)
-    }
+    // Flush pending + in-flight saves against the CURRENT variant, then
+    // retire it so a straggler can't capture the target variant's stage.
+    await flushStreamSaves()
+    saveEpochRef.current++
     const canvas = await window.api.thumbnailLoadCanvas(currentStream.folderPath, currentStream.date, ordinal)
     setCurrentVariant(ordinal)
     if (canvas) {
@@ -3404,7 +3472,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       setCurrentTemplateId(undefined)
     }
     setIsDirty(false)
-  }, [currentStream, currentVariant, currentTemplateId, isDirty, layers, doSave, resetLayers])
+  }, [currentStream, currentVariant, flushStreamSaves, resetLayers])
 
   // Open the template picker in "new alternative" mode. Computes the
   // next available ordinal from the variants list (gaps left by a
@@ -3456,6 +3524,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   const openFromTemplate = useCallback((t: ThumbnailTemplate) => {
     // Open editor with template layers but no stream association
+    saveEpochRef.current++
     setCurrentStream(null)
     setSelectedIds([])
     resetLayers(t.layers.map(l => ({ ...l, id: newId() })))
@@ -3465,6 +3534,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   }, [resetLayers])
 
   const openNewBlank = useCallback(() => {
+    saveEpochRef.current++
     setCurrentStream(null)
     setSelectedIds([])
     resetLayers([])
@@ -3524,6 +3594,32 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     await doSave(layers, currentStream.folderPath, currentStream.date, currentTemplateId, currentVariant)
   }, [currentStream, layers, currentTemplateId, currentVariant, doSave])
 
+  // ── Close session ─────────────────────────────────────────────────────────
+  // Stream sessions: finish ALL saving first (flush the debounce, await any
+  // in-flight save), showing "Closing session…" while it runs — closing used
+  // to drop the timer on the floor, silently losing the last ~500ms of edits
+  // (or several seconds of a rapid burst). Template sessions are the
+  // opposite by design: they are never autosaved ("Update template" is the
+  // only write path, so experiments can be abandoned), so closing one dirty
+  // asks Save / Discard / Cancel instead.
+  const closeSession = useCallback(async () => {
+    if (closingSession) return
+    if (!currentStream && currentTemplateId && isDirty) {
+      setConfirmCloseTemplate(true)
+      return
+    }
+    setClosingSession(true)
+    try {
+      await flushStreamSaves()
+    } finally {
+      saveEpochRef.current++
+      setCurrentStream(null)
+      setCurrentTemplateId(undefined)
+      setClosingSession(false)
+      setMode('overview')
+    }
+  }, [closingSession, currentStream, currentTemplateId, isDirty, flushStreamSaves])
+
   // ── Delete thumbnail files ────────────────────────────────────────────────
   const confirmDeleteThumbnail = useCallback(async () => {
     if (!currentStream) return
@@ -3531,8 +3627,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const { folderPath, date } = currentStream
     const variantToDelete = currentVariant
     const suffix = variantToDelete <= 1 ? '' : `-${variantToDelete}`
-    // Cancel any pending auto-save first
+    // Cancel any pending auto-save, then retire the session and wait out an
+    // in-flight save — a straggler completing after the delete would write
+    // the doomed variant's files right back.
     if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null }
+    saveEpochRef.current++
+    await pendingSaveRef.current
     // Delete the JSON + PNG for the CURRENTLY-OPEN variant only.
     // Other variants are left alone — multi-thumbnail stream items
     // keep the remaining alternatives intact.
@@ -3731,7 +3831,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (!currentStream) return null
     const m = currentStream.meta
     return {
-      title: m?.ytCatchyTitle || m?.ytTitle || '',
+      // ytTitle is a raw template body — render it, never inline it, or a
+      // {title} text layer bakes literal "{game} [PART {episode}]" markers
+      // into the exported PNG for streams without a tagline.
+      title: m?.ytCatchyTitle || renderTitleFromMeta(m, {
+        totalEpisodes: currentStream.totalEpisodes,
+        fallback: currentStream.title,
+      }) || '',
       game: m?.ytGameTitle || m?.games?.[0] || '',
       date: currentStream.date,
       season: m?.ytSeason || '1',
@@ -4045,11 +4151,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <Button
                   variant="danger"
                   size="sm"
-                  icon={<X size={14} />}
-                  onClick={() => setMode('overview')}
+                  icon={closingSession ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
+                  onClick={() => void closeSession()}
+                  disabled={closingSession}
                   collapsibleLabel="min-[1300px]:grid-cols-[1fr] min-[1300px]:ms-0"
                 >
-                  Close session
+                  {closingSession ? 'Closing session…' : 'Close session'}
                 </Button>
               </Tooltip>
             </div>
@@ -4823,10 +4930,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     </p>
                     <ul className="mt-2 flex flex-col gap-0.5">
                       <li className="text-[11px] text-gray-400 font-mono truncate">
-                        {currentStream.date}_sm-thumbnail.json
+                        {currentStream.date}_sm-thumbnail{currentVariant > 1 ? `-${currentVariant}` : ''}.json
                       </li>
                       <li className="text-[11px] text-gray-400 font-mono truncate">
-                        {currentStream.date}_sm-thumbnail.png
+                        {currentStream.date}_sm-thumbnail{currentVariant > 1 ? `-${currentVariant}` : ''}.png
                       </li>
                     </ul>
                     <p className="text-xs text-gray-400 mt-2">This cannot be undone.</p>
@@ -4842,6 +4949,70 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   >
                     Delete
                   </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Close-without-saving confirm — template sessions only. Templates
+              are never autosaved (the whole point: experiments can be
+              abandoned), so a dirty close gets the Save / Discard / Cancel
+              choice instead of the stream sessions' silent flush-and-save. */}
+          {confirmCloseTemplate && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="bg-navy-800 border border-white/10 rounded-xl shadow-2xl w-[420px] flex flex-col overflow-hidden">
+                <div className="flex items-start gap-3 px-5 pt-5 pb-4">
+                  <div className="shrink-0 mt-0.5 p-2 rounded-lg bg-amber-500/15">
+                    <AlertTriangle size={18} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-gray-200 mb-1">Close without saving?</h2>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      The template{' '}
+                      <span className="text-gray-200">{templates.find(t => t.id === currentTemplateId)?.name ?? 'you are editing'}</span>{' '}
+                      has unsaved changes. Templates only save when you click "Update template": closing now discards these edits.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/10">
+                  <Button variant="ghost" size="sm" onClick={() => setConfirmCloseTemplate(false)}>
+                    Cancel
+                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setConfirmCloseTemplate(false)
+                        saveEpochRef.current++
+                        setIsDirty(false)
+                        setCurrentTemplateId(undefined)
+                        setMode('overview')
+                      }}
+                    >
+                      Discard changes
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={closingSession ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                      disabled={closingSession}
+                      onClick={async () => {
+                        setClosingSession(true)
+                        try {
+                          await updateCurrentTemplate()
+                        } finally {
+                          setConfirmCloseTemplate(false)
+                          saveEpochRef.current++
+                          setCurrentTemplateId(undefined)
+                          setClosingSession(false)
+                          setMode('overview')
+                        }
+                      }}
+                    >
+                      Save and close
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
