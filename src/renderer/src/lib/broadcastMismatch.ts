@@ -214,10 +214,12 @@ export function buildPullUpdate(broadcast: LiveBroadcast): Partial<StreamMeta> {
     ytTitleTemplateId: '',
   }
   if (broadcast.snippet.gameTitle) update.ytGameTitle = broadcast.snippet.gameTitle
-  if (broadcast.snippet.tags?.length) {
-    update.ytTags = broadcast.snippet.tags
-    update.ytTagsTemplateId = ''
-  }
+  // Pull mirrors YouTube exactly — INCLUDING an empty remote tag list. The
+  // old skip-when-empty guard kept the local tags but still snapshotted []
+  // below, so the item instantly re-flagged as "Ready to push" and a later
+  // Push All re-added tags the user deliberately deleted in Studio.
+  update.ytTags = broadcast.snippet.tags ?? []
+  update.ytTagsTemplateId = ''
   if (broadcast.snippet.categoryId) update.ytCategoryId = broadcast.snippet.categoryId
   const remotePrivacy = broadcast.status?.privacyStatus
   if (remotePrivacy === 'public' || remotePrivacy === 'unlisted' || remotePrivacy === 'private') {

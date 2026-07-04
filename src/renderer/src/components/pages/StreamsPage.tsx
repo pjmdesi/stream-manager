@@ -309,7 +309,13 @@ async function computeSeasonLinks(
   const ordered = [...previous].sort((a, b) => b.date.localeCompare(a.date))
   return ordered.map(f => {
     const ep = f.meta?.ytEpisode || String(positionByPath.get(f.folderPath) ?? '?')
-    const title = f.meta?.ytCatchyTitle || f.meta?.ytTitle || fetchedTitles.get(f.folderPath) || '(unknown)'
+    // ytTitle is a raw template body — RENDER it (episodes without a
+    // tagline used to put literal "{game} [PART {episode}]" markers into
+    // pushed descriptions).
+    const title = f.meta?.ytCatchyTitle
+      || (f.meta?.ytTitle ? renderStreamTitle(f, allFolders) : '')
+      || fetchedTitles.get(f.folderPath)
+      || '(unknown)'
     const url = `https://youtu.be/${f.meta?.ytVideoId}`
     return `Episode ${ep}: ${title} - ${url}`
   }).join('\n')
@@ -1405,6 +1411,21 @@ export function StreamsPage({
       showBanner({ streamKey: folder.relativePath, type: 'error', message: 'No linked YouTube broadcast or video. Link one before pushing.' })
       return
     }
+    // Preflight the staged schedule: YouTube rejects start times in the
+    // past, and the old flow's catch-all turned that rejection into a
+    // silent reroute (metadata landed, schedule didn't, success banner
+    // lied). Catch it before any API call instead.
+    if (newScheduledStartTime) {
+      const t = new Date(newScheduledStartTime).getTime()
+      if (!isNaN(t) && t <= Date.now()) {
+        showBanner({
+          streamKey: folder.relativePath,
+          type: 'error',
+          message: `The staged broadcast time (${new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}) is in the past — YouTube rejects past start times. Fix the date or time, then push again.`,
+        })
+        return
+      }
+    }
     // meta.ytTitle is the raw template BODY ("{game} [PART {episode}]")
     // — resolve to the final string before pushing so YouTube receives
     // the rendered title instead of the placeholder tokens.
@@ -1427,14 +1448,40 @@ export function StreamsPage({
     try {
       const snippet: { title: string; description: string; scheduledStartTime?: string } = { title, description }
       if (newScheduledStartTime) snippet.scheduledStartTime = newScheduledStartTime
-      try {
-        await window.api.youtubeUpdateBroadcast(meta.ytVideoId, snippet, tags, categoryId)
-      } catch {
-        // VOD path — no scheduledStartTime to update on a past video; the
-        // sidebar's mismatch check already gates the date diff on
-        // !actualStartTime, so we won't reach here with a date change
-        // intended. The videos.update endpoint is the right one for
-        // past streams.
+      // Pick the endpoint up front instead of always trying the broadcast
+      // one and catching everything. liveBroadcasts.update only works on
+      // non-completed broadcasts (and is the only carrier for schedule
+      // changes); videos.update is correct for plain videos and completed
+      // VODs. The old catch-all shape burned a doomed 50-unit call on every
+      // plain-video push, and worse: ANY broadcast-leg failure (bad
+      // schedule, transient 5xx) silently rerouted to videos.update —
+      // success banner + snapshots recorded the schedule as pushed while
+      // Studio kept the old time, and the next mismatch check read
+      // backwards as "Changed on YouTube".
+      const isUpcomingBroadcast = ytBroadcasts.some(b => b.id === meta.ytVideoId)
+      const useBroadcastEndpoint = isUpcomingBroadcast || !!newScheduledStartTime
+      let scheduleApplied = false
+      if (useBroadcastEndpoint) {
+        try {
+          await window.api.youtubeUpdateBroadcast(meta.ytVideoId, snippet, tags, categoryId)
+          scheduleApplied = !!newScheduledStartTime
+        } catch (broadcastErr: any) {
+          const msg = broadcastErr?.message ?? String(broadcastErr)
+          // Only the genuine "this id isn't an (upcoming) broadcast" case
+          // falls back to the video endpoint — pool staleness, or a
+          // completed broadcast that outlived our cache. Everything else
+          // (schedule rejected, auth, 5xx) surfaces via the outer catch.
+          if (!/not\s*found|liveBroadcastNotFound/i.test(msg)) throw broadcastErr
+          await window.api.youtubeUpdateVideo(meta.ytVideoId, title, description, tags, categoryId)
+          if (newScheduledStartTime) {
+            showBanner({
+              streamKey: folder.relativePath,
+              type: 'error',
+              message: 'Metadata was pushed, but the schedule change was not: the linked video is not an upcoming broadcast, and only broadcasts carry a start time.',
+            })
+          }
+        }
+      } else {
         await window.api.youtubeUpdateVideo(meta.ytVideoId, title, description, tags, categoryId)
       }
       // Privacy is a separate Status endpoint, not part of the snippet
@@ -1526,21 +1573,22 @@ export function StreamsPage({
             ytLastPushedTitle: title,
             ytLastPushedDescription: description,
             ytLastPushedTags: tags,
-            // Date snapshot tracks the folder.date at push time so the
-            // direction-aware mismatch can later distinguish "Studio
-            // moved the broadcast" from "the user reschedule'd locally
-            // but hasn't pushed yet."
-            ytLastPushedDate: folder.date,
+          }
+          // Date snapshot tracks the folder.date at push time so the
+          // direction-aware mismatch can later distinguish "Studio moved
+          // the broadcast" from "the user reschedule'd locally but hasn't
+          // pushed yet." Recorded ONLY when no schedule was staged, or the
+          // staged one actually landed — recording an unsent schedule as
+          // pushed is how the mismatch dots ended up pointing backwards.
+          if (!newScheduledStartTime || scheduleApplied) {
+            snapshot.ytLastPushedDate = folder.date
           }
           if (categoryId) snapshot.ytLastPushedCategoryId = categoryId
           if (privacy) snapshot.ytLastPushedPrivacy = privacy
-          // Time snapshot: when newScheduledStartTime was actually
-          // computed (meaning either date or time was sent), capture
-          // the time portion we sent. Falls back to undefined when we
-          // didn't push a schedule change — that preserves whatever
-          // was already in the snapshot rather than clobbering it
-          // with a derived value.
-          if (newScheduledStartTime) {
+          // Time snapshot: only when the schedule change was actually
+          // carried by the broadcast endpoint. Omitting preserves whatever
+          // was already in the snapshot rather than recording a lie.
+          if (scheduleApplied && newScheduledStartTime) {
             const sent = new Date(newScheduledStartTime)
             if (!isNaN(sent.getTime())) {
               snapshot.ytLastPushedScheduledTime = `${String(sent.getHours()).padStart(2, '0')}:${String(sent.getMinutes()).padStart(2, '0')}`
@@ -1581,7 +1629,7 @@ export function StreamsPage({
     } catch (err: any) {
       showBanner({ streamKey: folder.relativePath, type: 'error', message: `YouTube push failed: ${err?.message ?? String(err)}` })
     }
-  }, [showBanner, setYtBroadcasts, setYtVods, updateMeta, folders])
+  }, [showBanner, setYtBroadcasts, setYtVods, updateMeta, folders, ytBroadcasts])
 
   // ── Out-of-sync panel (sidebar empty state) ───────────────────────────────
   // Compares every linked stream's local meta against YouTube and surfaces the
@@ -5312,36 +5360,54 @@ function SidebarDetail({
   // the baked output. Re-resolves on stream-open + this stream's series-field
   // edits; `folders` is read via closure (excluded from deps) so unrelated meta
   // writes don't trigger constant re-resolves.
-  const [descSeasonLinks, setDescSeasonLinks] = useState('')
+  //
+  // KEYED to the stream it was resolved for: this component is one persistent
+  // instance, so after a stream switch the previous stream's links linger
+  // until the new resolve lands — the bake below used to run in that window
+  // and write stream A's episode list (or blanks) into stream B's saved
+  // description. Consumers treat a key mismatch as "not ready" and the bake
+  // stands down.
+  const [descSeasonLinks, setDescSeasonLinks] = useState<{ streamKey: string; text: string } | null>(null)
   useEffect(() => {
-    if (isStandalone(meta)) { setDescSeasonLinks(''); return }
+    if (isStandalone(meta)) { setDescSeasonLinks({ streamKey: folder.relativePath, text: '' }); return }
     let cancelled = false
     computeSeasonLinks(
       folders,
       meta?.ytGameTitle?.trim() || meta?.games?.[0] || folder.detectedGames?.[0] || '',
       meta?.ytSeason || '1',
       folder.date,
-    ).then(links => { if (!cancelled) setDescSeasonLinks(links) }).catch(() => {})
+    ).then(links => { if (!cancelled) setDescSeasonLinks({ streamKey: folder.relativePath, text: links }) })
+      // Resolve failure (quota, offline): leave the stale/absent entry in
+      // place — the key mismatch keeps the bake frozen, preserving the
+      // last-saved description instead of baking blanks.
+      .catch(() => {})
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta?.isSeries, meta?.ytGameTitle, meta?.games, meta?.ytSeason, folder.folderPath, folder.date])
+  }, [meta?.isSeries, meta?.ytGameTitle, meta?.games, meta?.ytSeason, folder.relativePath, folder.date])
+  const seasonLinksText = descSeasonLinks?.streamKey === folder.relativePath ? descSeasonLinks.text : ''
 
   // Token → resolved-value map for the description chips: the sync title merge
   // fields plus the async-resolved {season_links}. Memoized so the chip editor
   // only rebuilds chips when a value actually changes.
   const descResolvedValues = useMemo(() => {
     const map = new Map<string, string>(Object.entries(mergeFields))
-    map.set('season_links', descSeasonLinks)
+    map.set('season_links', seasonLinksText)
     return map
-  }, [mergeFields, descSeasonLinks])
+  }, [mergeFields, seasonLinksText])
 
   // Editable raw body + its baked output. Baking is synchronous: substitute the
   // pre-resolved {season_links}, then the sync merge fields. The baked value is
   // what's pushed + compared by the out-of-sync check (meta.ytDescription).
   const descBody = meta?.ytDescriptionTemplate ?? meta?.ytDescription ?? ''
+  // Links are "ready" when the body doesn't use them, or the resolved set
+  // belongs to THIS stream. The disk-write effect below stands down until
+  // then — baking with a mismatched set wrote the previous stream's episode
+  // links (or blanks, mid-resolve) into this stream's ytDescription.
+  const seasonLinksReady = !/\{season_links\}/.test(descBody)
+    || descSeasonLinks?.streamKey === folder.relativePath
   const descBaked = useMemo(
-    () => applyMergeFields(descBody.replace(/\{season_links\}/g, descSeasonLinks), mergeFields),
-    [descBody, descSeasonLinks, mergeFields],
+    () => applyMergeFields(descBody.replace(/\{season_links\}/g, seasonLinksText), mergeFields),
+    [descBody, seasonLinksText, mergeFields],
   )
   // True when the body contains at least one known merge-field token (i.e. a
   // chip). Without any, the preview would be identical to the editor, so the
@@ -5361,8 +5427,9 @@ function SidebarDetail({
   // can't feed back into descBaked — no loop.
   useEffect(() => {
     if (meta?.ytDescriptionTemplate === undefined) return
+    if (!seasonLinksReady) return
     if (descBaked !== (meta?.ytDescription ?? '')) onUpdateMetaRef.current({ ytDescription: descBaked })
-  }, [descBaked, meta?.ytDescriptionTemplate, meta?.ytDescription])
+  }, [descBaked, meta?.ytDescriptionTemplate, meta?.ytDescription, seasonLinksReady])
 
   // One-shot series auto-detect on first game-add. Only fires for streams
   // explicitly marked `seriesAutoDetectPending: true` at creation (the
@@ -5644,7 +5711,7 @@ function SidebarDetail({
     // {season_links}. The bake effect keeps ytDescription in sync on later
     // edits (and re-bakes once season_links finishes resolving for a fresh
     // stream).
-    const baked = applyMergeFields(tpl.description.replace(/\{season_links\}/g, descSeasonLinks), mergeFields)
+    const baked = applyMergeFields(tpl.description.replace(/\{season_links\}/g, seasonLinksText), mergeFields)
     onUpdateMeta({ ytDescriptionTemplate: tpl.description, ytDescription: baked })
   }
   const applyTagsTemplate = (id: string) => {

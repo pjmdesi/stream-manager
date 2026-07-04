@@ -1041,6 +1041,10 @@ export async function updateVideoTags(
           description: updatedDescription ?? currentSnippet.description,
           categoryId: updatedCategoryId ?? currentSnippet.categoryId,
           defaultLanguage: currentSnippet.defaultLanguage,
+          // snippet updates DROP omitted mutable fields — without carrying
+          // the current audio language forward, every SM push cleared the
+          // "Video language" a user set in Studio.
+          defaultAudioLanguage: currentSnippet.defaultAudioLanguage,
           tags,
         },
       }),
