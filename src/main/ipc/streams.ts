@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow, shell } from 'electron'
+import { ipcMain, BrowserWindow, shell, app } from 'electron'
+import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
@@ -344,7 +345,7 @@ function getStreamsDir(): string {
 // Global rather than per-dir — the app runs against one streams root at a
 // time, and a false-positive lockout on a secondary dir only pauses edits.
 export type MetaHealth =
-  | { ok: true }
+  | { ok: true; note?: { kind: 'restored'; from: string; at: string } }
   | { ok: false; kind: 'locked' | 'corrupt'; detail: string }
 
 let metaHealth: MetaHealth = { ok: true }
@@ -353,8 +354,7 @@ let metaHealth: MetaHealth = { ok: true }
 const corruptCopySaved = new Set<string>()
 
 function setMetaHealth(next: MetaHealth): void {
-  const changed = metaHealth.ok !== next.ok
-    || (!metaHealth.ok && !next.ok && (metaHealth.kind !== next.kind || metaHealth.detail !== next.detail))
+  const changed = JSON.stringify(metaHealth) !== JSON.stringify(next)
   metaHealth = next
   if (!changed) return
   for (const win of BrowserWindow.getAllWindows()) {
@@ -379,7 +379,8 @@ export function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
       if ((err as { code?: string }).code === 'ENOENT') {
         // Missing file = legitimately empty library (fresh root). Never to
         // be confused with an unreadable EXISTING file, which is a failure.
-        setMetaHealth({ ok: true })
+        // Preserves an active 'restored' note (ok stays ok).
+        setMetaHealth(metaHealth.ok ? metaHealth : { ok: true })
         return {}
       }
       lastErr = err
@@ -395,7 +396,9 @@ export function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
 
   try {
     const parsed = JSON.parse(raw) as Record<string, StreamMeta>
-    setMetaHealth({ ok: true })
+    // Healthy read clears a failed state but preserves a 'restored' note —
+    // the user dismisses that one explicitly (streams:dismissMetaNote).
+    setMetaHealth(metaHealth.ok ? metaHealth : { ok: true })
     // A leftover temp sibling means a previous swap didn't complete (that
     // write's caller already saw the error). The main file parses, so it is
     // the truth — drop the stale temp so it can never be mistaken for
@@ -428,11 +431,28 @@ export function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
       }
       return recovered
     }
+    // …then the rolling backups, newest parseable first. Restoring loses
+    // whatever changed after that backup was taken, so a successful restore
+    // carries a 'restored' note that the renderer surfaces until dismissed.
+    for (const backupPath of listMetaBackups(streamsDir)) {
+      let restored: Record<string, StreamMeta> | null = null
+      try { restored = JSON.parse(fs.readFileSync(backupPath, 'utf-8')) as Record<string, StreamMeta> } catch { continue }
+      let takenAt = ''
+      try { takenAt = fs.statSync(backupPath).mtime.toISOString() } catch { /* stamp stays empty */ }
+      setMetaHealth({ ok: true, note: { kind: 'restored', from: path.basename(backupPath), at: takenAt } })
+      try {
+        writeAllMeta(streamsDir, restored)
+        console.warn(`[readAllMeta] _meta.json was corrupt; restored from backup ${path.basename(backupPath)}`)
+      } catch (healErr) {
+        console.warn('[readAllMeta] restored from backup, but rewriting _meta.json failed (next write retries):', healErr)
+      }
+      return restored
+    }
     setMetaHealth({
       ok: false, kind: 'corrupt',
-      detail: 'The file exists but is not valid JSON. A copy was preserved next to it as _meta.corrupt-*.json.',
+      detail: 'The file is not valid JSON and no usable backup was found. A copy was preserved next to it as _meta.corrupt-*.json.',
     })
-    throw new Error('_meta.json is damaged (not valid JSON). Metadata edits are paused; the damaged file was preserved as _meta.corrupt-*.json.')
+    throw new Error('_meta.json is damaged (not valid JSON) and no usable backup was found. Metadata edits are paused; the damaged file was preserved as _meta.corrupt-*.json.')
   }
 }
 
@@ -503,6 +523,7 @@ export function writeAllMeta(streamsDir: string, allMeta: Record<string, StreamM
     if (delayMs) sleepSync(delayMs)
     try {
       fs.renameSync(tmpPath, filePath)
+      maybeBackupMeta(streamsDir)
       return
     } catch (err) {
       lastErr = err
@@ -511,6 +532,82 @@ export function writeAllMeta(streamsDir: string, allMeta: Record<string, StreamM
     }
   }
   throw lastErr
+}
+
+// ── _meta.json rolling backups ──────────────────────────────────────────────
+// Copies of the verified on-disk file, kept OUTSIDE the streams root — and so
+// outside the sync client's scope — in userData/meta-backups/<dir-hash>/.
+// Cadence: at most one per 30 minutes of active editing (piggybacked on
+// writes, so every backup is a copy of a just-verified file), plus one at
+// quit when writes happened since the last one. Newest BACKUP_KEEP kept.
+// readAllMeta restores from these (newest parseable first) when _meta.json
+// is corrupt and the temp sibling can't help.
+const BACKUP_INTERVAL_MS = 30 * 60_000
+const BACKUP_KEEP = 10
+const lastBackupAt = new Map<string, number>()
+const dirtySinceBackup = new Set<string>()
+
+function metaBackupDir(streamsDir: string): string {
+  // Hash the normalized root path so libraries never share a backup folder —
+  // restoring library A's backup into library B would itself be data loss.
+  const hash = createHash('sha1')
+    .update(path.resolve(streamsDir).toLowerCase().split(path.sep).join('/'))
+    .digest('hex').slice(0, 8)
+  return path.join(app.getPath('userData'), 'meta-backups', hash)
+}
+
+/** Existing backups for this library, newest first (ISO stamps in the names
+ *  make lexicographic order chronological). */
+function listMetaBackups(streamsDir: string): string[] {
+  try {
+    return fs.readdirSync(metaBackupDir(streamsDir))
+      .filter(n => /^_meta-.*\.json$/.test(n))
+      .sort((a, b) => b.localeCompare(a))
+      .map(n => path.join(metaBackupDir(streamsDir), n))
+  } catch {
+    return []
+  }
+}
+
+function backupMeta(streamsDir: string): void {
+  const filePath = metaFilePath(streamsDir)
+  try {
+    if (!fs.existsSync(filePath)) return
+    const dir = metaBackupDir(streamsDir)
+    fs.mkdirSync(dir, { recursive: true })
+    // Human breadcrumb for manual recovery — says which library these
+    // hashed-folder backups belong to.
+    const marker = path.join(dir, 'location.txt')
+    if (!fs.existsSync(marker)) {
+      try { fs.writeFileSync(marker, streamsDir, 'utf-8') } catch { /* cosmetic */ }
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    fs.copyFileSync(filePath, path.join(dir, `_meta-${stamp}.json`))
+    lastBackupAt.set(filePath, Date.now())
+    dirtySinceBackup.delete(filePath)
+    for (const old of listMetaBackups(streamsDir).slice(BACKUP_KEEP)) {
+      try { fs.unlinkSync(old) } catch { /* next prune retries */ }
+    }
+  } catch (err) {
+    // Backups are best-effort — never let one fail a save.
+    console.warn('[backupMeta] backup failed (non-fatal):', err)
+  }
+}
+
+/** Called after every successful writeAllMeta swap: back up at most once per
+ *  interval, otherwise just remember there's unsaved-to-backup work so the
+ *  quit hook can catch the tail. */
+function maybeBackupMeta(streamsDir: string): void {
+  const filePath = metaFilePath(streamsDir)
+  if (Date.now() - (lastBackupAt.get(filePath) ?? 0) >= BACKUP_INTERVAL_MS) backupMeta(streamsDir)
+  else dirtySinceBackup.add(filePath)
+}
+
+/** One last backup of the active library at shutdown, only when writes
+ *  happened since the previous backup. Called from main/index.ts. */
+export function backupMetaOnQuit(): void {
+  const streamsDir = getStreamsDir()
+  if (streamsDir && dirtySinceBackup.has(metaFilePath(streamsDir))) backupMeta(streamsDir)
 }
 
 /**
@@ -783,6 +880,11 @@ export function registerStreamsIPC(): void {
   // Current _meta.json health for late-mounting renderers; transitions are
   // pushed via the 'streams:metaHealth' event (see setMetaHealth).
   ipcMain.handle('streams:getMetaHealth', () => metaHealth)
+
+  // Clear the restored-from-backup note once the user has acknowledged it.
+  ipcMain.handle('streams:dismissMetaNote', () => {
+    if (metaHealth.ok) setMetaHealth({ ok: true })
+  })
 
   ipcMain.handle('streams:list', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'): Promise<StreamFolder[]> => {
     if (!dir || !fs.existsSync(dir)) return []

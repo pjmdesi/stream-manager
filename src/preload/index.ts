@@ -353,11 +353,14 @@ contextBridge.exposeInMainWorld('api', {
   getMetaHealth: () =>
     ipcRenderer.invoke('streams:getMetaHealth'),
 
-  onMetaHealth: (callback: (health: { ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string }) => void) => {
-    const handler = (_e: Electron.IpcRendererEvent, health: { ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string }) => callback(health)
+  onMetaHealth: (callback: (health: { ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string; note?: { kind: 'restored'; from: string; at: string } }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, health: { ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string; note?: { kind: 'restored'; from: string; at: string } }) => callback(health)
     ipcRenderer.on('streams:metaHealth', handler)
     return () => ipcRenderer.removeListener('streams:metaHealth', handler)
   },
+
+  dismissMetaNote: () =>
+    ipcRenderer.invoke('streams:dismissMetaNote'),
 
   previewReschedule: (folderPath: string, oldDate: string, newDate: string) =>
     ipcRenderer.invoke('streams:previewReschedule', folderPath, oldDate, newDate),

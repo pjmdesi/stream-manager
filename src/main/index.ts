@@ -72,7 +72,7 @@ import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
 import { registerConverterIPC, getConverterStatus, getActiveConversionCounts } from './ipc/converter'
 import { registerStoreIPC, getStore } from './ipc/store'
-import { registerStreamsIPC } from './ipc/streams'
+import { registerStreamsIPC, backupMetaOnQuit } from './ipc/streams'
 import { registerCombineIPC } from './ipc/combine'
 import { registerYouTubeIPC } from './ipc/youtube'
 import { registerTwitchIPC } from './ipc/twitch'
@@ -437,6 +437,9 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   fileWatcher.stop()
   tempManager.cleanupAll()
+  // Catch the tail of the rolling _meta.json backups: writes since the last
+  // interval-gated backup get one final copy before shutdown.
+  backupMetaOnQuit()
   if (process.platform !== 'darwin') {
     app.quit()
   }
