@@ -830,6 +830,24 @@ export async function getBroadcastContentDetails(
   }
 }
 
+/** A broadcast's lifeCycleStatus ('created' / 'ready' / 'testing' / 'live' /
+ *  'complete' / …), or null when the broadcast can't be found. Used by the
+ *  relay orchestrator's went-live gate: a session that never reached 'live'
+ *  (an accidental 3-second OBS start/stop) must not run the post-stream
+ *  flow. */
+export async function getBroadcastLifeCycleStatus(
+  broadcastId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string | null> {
+  const data = await ytRequest(
+    `/liveBroadcasts?${new URLSearchParams({ part: 'status', id: broadcastId })}`,
+    { method: 'GET' },
+    clientId, clientSecret,
+  )
+  return data?.items?.[0]?.status?.lifeCycleStatus ?? null
+}
+
 /** Fetch a liveStream's ingest status. Used by the orchestrator to poll
  *  until YouTube is actually receiving + validating data before calling
  *  transition('live') — calling it before the stream is 'active' is the

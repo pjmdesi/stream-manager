@@ -133,6 +133,11 @@ export async function refreshAccessToken(
   const updated: TwitchTokens = {
     ...tokens,
     accessToken: data.access_token,
+    // Twitch may ROTATE the refresh token on refresh and expects the new
+    // one to be persisted. Keeping the old one meant the next refresh
+    // failed with "Invalid refresh token" and every Twitch feature died
+    // silently until a manual reconnect.
+    refreshToken: data.refresh_token || tokens.refreshToken,
     expiresAt: Date.now() + data.expires_in * 1000,
   }
   setTokens(updated)

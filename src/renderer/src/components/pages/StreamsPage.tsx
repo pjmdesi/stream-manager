@@ -387,14 +387,21 @@ export function StreamsPage({
   onSendToConverter,
   onSendToCombine,
   pendingSelect,
+  onAutoPushCategoryMiss,
 }: {
   isVisible: boolean
   onSendToPlayer: (file: string) => void
   onSendToConverter: (files: string[], stream?: { folderPath: string; label: string }) => void
   onSendToCombine: (files: string[]) => void
-  /** When the token bumps, select/open this folder's detail sidebar — used to
-   *  navigate back from the converter's "from stream" link. */
-  pendingSelect?: { folderPath: string; token: number } | null
+  /** When the token bumps, select/open this stream's detail sidebar — by
+   *  folderPath (converter's "from stream" link) or by exact stream key
+   *  (App's auto-push failure modal). */
+  pendingSelect?: { folderPath?: string; streamKey?: string; token: number } | null
+  /** The unattended ('always') post-stream Twitch push couldn't apply the
+   *  category. App surfaces this as an app-level modal — page banners are
+   *  unreachable for an unattended push (they render only in the affected
+   *  stream's open sidebar and clear on selection). */
+  onAutoPushCategoryMiss?: (info: { streamKey: string; title: string; game: string }) => void
 }) {
   const { config, updateConfig } = useStore()
   const { openEditor: openThumbnailEditor } = useThumbnailEditor()
@@ -402,8 +409,7 @@ export function StreamsPage({
   const [loading, setLoading] = useState(true)
   // ID-based selection so a refresh of `folders` (e.g. streams:changed) never
   // accidentally drops the user's current selection just because the
-  // underlying array reshuffles. folderPath is unique per folder in both
-  // folder-per-stream and dump-folder modes.
+  // underlying array reshuffles.
   // Canonical stream identity = folder.relativePath (the date in dump mode,
   // the root-relative folder path in folder mode). NEVER folderPath: in dump
   // mode every stream shares folderPath (the dump dir), which collapsed
@@ -438,7 +444,8 @@ export function StreamsPage({
   useEffect(() => {
     if (!pendingSelect || pendingSelect.token === lastSelectTokenRef.current) return
     lastSelectTokenRef.current = pendingSelect.token
-    selectByFolderPath(pendingSelect.folderPath)
+    if (pendingSelect.streamKey) setSelectedStreamKey(pendingSelect.streamKey)
+    else if (pendingSelect.folderPath) selectByFolderPath(pendingSelect.folderPath)
   }, [pendingSelect]) // eslint-disable-line react-hooks/exhaustive-deps
   // Stream-type color/texture assignments live in electron-store; we load
   // them once on mount. Currently read-only here — the swatch picker UX
@@ -919,6 +926,8 @@ export function StreamsPage({
   useEffect(() => { foldersRef.current = folders }, [folders])
   useEffect(() => { twConnectedRef.current = twConnected }, [twConnected])
   useEffect(() => { autoUpdateTwitchRef.current = config.autoUpdateTwitchAfterStream ?? 'ask' }, [config.autoUpdateTwitchAfterStream])
+  const onAutoPushCategoryMissRef = useRef(onAutoPushCategoryMiss)
+  useEffect(() => { onAutoPushCategoryMissRef.current = onAutoPushCategoryMiss }, [onAutoPushCategoryMiss])
   useEffect(() => {
     // Delay before the auto ('always' mode) post-stream Twitch update fires.
     // Gives Twitch time to officially close the just-ended session before we
@@ -939,39 +948,53 @@ export function StreamsPage({
       if (!twConnectedRef.current) return
       const justCompletedId = ev.broadcastId
       const today = todayStr()
+      // Resolve a stream's Twitch-pushable payload from its CURRENT meta.
+      // Both title fields store raw template bodies — resolve through merge
+      // fields before treating them as pushable strings; when title-sync is
+      // on the YT-resolved title stands in. Null when there's nothing valid
+      // to push (Twitch's PATCH /channels rejects an empty title).
+      const buildPayload = (f: StreamFolder) => {
+        const fm = f.meta
+        if (!fm) return null
+        const syncTitle = fm.syncTitle ?? true
+        const title = syncTitle
+          ? resolveYtTitle(fm, f, foldersRef.current)
+          : resolveTwitchTitle(fm, f, foldersRef.current)
+        if (!title.trim()) return null
+        const game = resolveTwitchGame(fm)
+        const { compat: tags } = toTwitchCompatibleTags(fm.twitchTags ?? [])
+        return { title, game: game || undefined, tags }
+      }
       const candidates = foldersRef.current
         .filter(f => f.meta?.ytVideoId !== justCompletedId)
         .filter(f => isPendingStream(f, today))
         .sort((a, b) => a.date.localeCompare(b.date))
       const next = candidates[0]
       if (!next?.meta) return
-      const m = next.meta
-      const syncTitle = m.syncTitle ?? true
-      // Both title fields store raw template bodies now — resolve each
-      // through merge fields before treating it as a Twitch-pushable
-      // string. When sync is on, the YT-resolved title stands in.
-      const ytResolved = resolveYtTitle(m, next, foldersRef.current)
-      const twResolved = resolveTwitchTitle(m, next, foldersRef.current)
-      const title = syncTitle ? ytResolved : twResolved
-      const game = resolveTwitchGame(m)
-      // Twitch's PATCH /channels rejects an empty title — skip silently.
-      if (!title.trim()) return
-      const { compat: tags } = toTwitchCompatibleTags(m.twitchTags ?? [])
-      const payload = { title, game: game || undefined, tags }
+      const payload = buildPayload(next)
+      if (!payload) return
       const mode = autoUpdateTwitchRef.current
       if (mode === 'always') {
         // Delay the push (see TWITCH_AUTO_UPDATE_DELAY_MS) so Twitch finishes
         // closing the just-ended session first. Replace any still-pending
         // timer so the latest completion wins. ('ask' mode is naturally
         // user-paced, so it fires the prompt immediately.)
+        const nextKey = next.relativePath
         if (twitchUpdateTimerRef.current) clearTimeout(twitchUpdateTimerRef.current)
         twitchUpdateTimerRef.current = setTimeout(async () => {
           twitchUpdateTimerRef.current = null
+          // Re-resolve from CURRENT meta at fire time. Nothing blocks edits
+          // during this 60s window ('always' mode shows no modal), so
+          // "stream ends → immediately tidy tomorrow's title → the timer
+          // pushes the pre-edit values" was a real loss. The completion-time
+          // payload stays as the fallback if the stream vanished meanwhile.
+          const freshFolder = foldersRef.current.find(f => f.relativePath === nextKey)
+          const fresh = (freshFolder && buildPayload(freshFolder)) || payload
           try {
-            const result = await window.api.twitchUpdateChannel(payload.title, payload.game, payload.tags)
-            if (payload.game && result?.categoryApplied === false) {
-              console.warn(`[auto-update Twitch] no category matches "${payload.game}" — category left unchanged`)
-              showBanner({ streamKey: next.relativePath, type: 'error', message: `Auto-updated Twitch title/tags, but no Twitch category matches "${payload.game}" — the category was left unchanged.` })
+            const result = await window.api.twitchUpdateChannel(fresh.title, fresh.game, fresh.tags)
+            if (fresh.game && result?.categoryApplied === false) {
+              console.warn(`[auto-update Twitch] no category matches "${fresh.game}" — category left unchanged`)
+              onAutoPushCategoryMissRef.current?.({ streamKey: nextKey, title: fresh.title, game: fresh.game })
             }
           } catch (e) {
             console.warn('[auto-update Twitch] push failed:', e)
@@ -980,7 +1003,7 @@ export function StreamsPage({
       } else if (mode === 'ask') {
         setPostStreamTwitchSuggestion({
           folderPath: next.folderPath,
-          displayTitle: title,
+          displayTitle: payload.title,
           payload,
         })
       }

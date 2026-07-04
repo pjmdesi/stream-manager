@@ -91,10 +91,11 @@ export function IntegrationsPage() {
   // has historically used both 4x4 and 5x4 patterns over the years.
   const srOutboundKeyLooksValid = /^[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4,5}(-[a-z0-9]{4,5})?$/i.test(srOutboundKey.trim())
 
-  // Lock configuration fields while a stream is actively flowing through the
-  // relay — any edit that triggers a ffmpeg rebind (port, outbound key) would
-  // tear down the live connection. The Enabled checkbox stays actionable so
-  // the user can still kill the relay deliberately if they need to.
+  // Lock configuration fields AND the Enabled checkbox while a stream is
+  // actively flowing through the relay — any edit that triggers a ffmpeg
+  // rebind (port, outbound key) tears down the live connection, and
+  // disabling mid-stream kills the feed with the broadcast still live.
+  // Emergency exit if it's ever truly needed: quit SM (ffmpeg dies with it).
   const srIsStreaming = srStatus.state === 'streaming'
   const srFieldsLocked = !ytConnected || srIsStreaming
 
@@ -545,13 +546,18 @@ export function IntegrationsPage() {
                  '○ Off'}
               </span>
               <div className="ml-auto">
-                <Checkbox
-                  size="sm"
-                  checked={config.streamRelayEnabled}
-                  onChange={srToggleEnabled}
-                  disabled={!ytConnected || (!config.streamRelayEnabled && !srOutboundKeyLooksValid)}
-                  label="Enabled"
-                />
+                <Tooltip
+                  content="Streaming through the relay right now. Stop your encoder first."
+                  open={srIsStreaming ? undefined : false}
+                >
+                  <Checkbox
+                    size="sm"
+                    checked={config.streamRelayEnabled}
+                    onChange={srToggleEnabled}
+                    disabled={!ytConnected || srIsStreaming || (!config.streamRelayEnabled && !srOutboundKeyLooksValid)}
+                    label="Enabled"
+                  />
+                </Tooltip>
               </div>
             </div>
             {/* Live activity strip — mirrors the sidebar widget so the user

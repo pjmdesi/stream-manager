@@ -82,14 +82,27 @@ export class RelayManager extends EventEmitter {
   private lastStatsAt = 0
   private respawnTimer: NodeJS.Timeout | null = null
   private intentionalStop = false
+  // Latest error-looking ffmpeg stderr line — appended to the
+  // crashed-repeatedly message so the root cause (wrong key, port in use)
+  // reaches the user instead of only the generic text.
+  private lastErrorLine: string | null = null
 
   /** Start (or restart) the relay with the given config. Idempotent — calling
    *  with the same config while running is a no-op; calling with a different
    *  config does a clean restart. */
   start(config: RelayConfig): void {
     if (this.child && this.config && this.configEquals(this.config, config)) return
+    // A pending crash-respawn must not survive a start: its timer would
+    // spawn a SECOND ffmpeg moments after this one — the untracked ghost
+    // then holds the port with stale config while the tracked child loops
+    // on EADDRINUSE.
+    if (this.respawnTimer) {
+      clearTimeout(this.respawnTimer)
+      this.respawnTimer = null
+    }
     if (this.child) {
       // Config changed — clean restart
+      this.emitSyntheticStopIfStreaming()
       this.intentionalStop = true
       this.child.kill('SIGTERM')
       this.child = null
@@ -109,6 +122,7 @@ export class RelayManager extends EventEmitter {
       this.respawnTimer = null
     }
     if (this.child) {
+      this.emitSyntheticStopIfStreaming()
       this.child.kill('SIGTERM')
       // Force-kill if it doesn't exit cleanly
       const c = this.child
@@ -117,6 +131,20 @@ export class RelayManager extends EventEmitter {
     }
     this.streamingNow = false
     this.updateStatus({ state: 'idle', error: undefined, streamStartedAt: undefined })
+  }
+
+  /** stop() and start()'s config-change branch null `this.child` before its
+   *  exit event arrives, so the exit handler's stale-child guard swallows
+   *  the 'stream-stopped' signal — the orchestrator then never completed
+   *  the broadcast, no post-stream flow ran, and the session pin stayed
+   *  stuck on the dead broadcast. Emit it synthetically whenever a stream
+   *  is active at teardown time. (The Integrations checkbox is disabled
+   *  while streaming, but this guarantees the state machine can't wedge
+   *  from ANY caller — config reapplies included.) */
+  private emitSyntheticStopIfStreaming(): void {
+    if (!this.streamingNow) return
+    this.streamingNow = false
+    this.emit('stream-stopped', { code: null })
   }
 
   getStatus(): RelayStatus {
@@ -239,7 +267,14 @@ export class RelayManager extends EventEmitter {
       // The "Conversion failed!" line is the bookend after an error chain;
       // the actual error came earlier and would already have fired this branch.
       const line = text.trim().split('\n').find(l => /Error|error|failed|refused/.test(l))
-      if (line) this.emit('error', line.trim())
+      if (line) {
+        // Remember the latest meaningful line so the crashed-repeatedly
+        // error can say WHY (nothing subscribes to the 'error' event, so
+        // without this the user only ever saw the generic message while
+        // e.g. YouTube was rejecting a mistyped outbound key).
+        this.lastErrorLine = line.trim()
+        this.emit('error', line.trim())
+      }
     }
   }
 
@@ -273,7 +308,9 @@ export class RelayManager extends EventEmitter {
     if (this.restartAttempts > 2) {
       this.updateStatus({
         state: 'error',
-        error: 'Relay crashed repeatedly within a short window. Disable + re-enable to retry.',
+        error: `Relay crashed repeatedly within a short window. Disable + re-enable to retry.${
+          this.lastErrorLine ? ` Last ffmpeg error: ${this.lastErrorLine}` : ''
+        }`,
       })
       return
     }

@@ -569,8 +569,16 @@ function AppInner() {
   const [pendingConverter, setPendingConverter] = useState<PendingConverterFile | null>(null)
   const [pendingCombine, setPendingCombine] = useState<PendingFiles | null>(null)
   // Bumped (token++) when something wants the streams page to select/open a
-  // specific folder's detail sidebar — e.g. the converter's "from stream" link.
-  const [pendingStreamSelect, setPendingStreamSelect] = useState<{ folderPath: string; token: number } | null>(null)
+  // specific folder's detail sidebar — e.g. the converter's "from stream"
+  // link (folderPath) or the auto-push failure modal (streamKey, which is
+  // exact in both stream modes; a bare folderPath is ambiguous in dump mode).
+  const [pendingStreamSelect, setPendingStreamSelect] = useState<{ folderPath?: string; streamKey?: string; token: number } | null>(null)
+  // Post-stream Twitch auto-update failure awaiting acknowledgement — the
+  // push runs unattended, so its category miss needs an app-level modal the
+  // user can't miss regardless of the page they're on. (Banners can't do
+  // it: they render only inside the affected stream's open sidebar and are
+  // cleared on selection, so the unattended path was effectively silent.)
+  const [autoPushError, setAutoPushError] = useState<{ streamKey: string; title: string; game: string } | null>(null)
 
   const sendToPlayer = (filePath: string) => {
     setPendingPlayer(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1 }))
@@ -582,6 +590,10 @@ function AppInner() {
   }
   const navigateToStream = (folderPath: string) => {
     setPendingStreamSelect(prev => ({ folderPath, token: (prev?.token ?? 0) + 1 }))
+    setPage('streams')
+  }
+  const navigateToStreamByKey = (streamKey: string) => {
+    setPendingStreamSelect(prev => ({ streamKey, token: (prev?.token ?? 0) + 1 }))
     setPage('streams')
   }
 
@@ -861,7 +873,7 @@ function AppInner() {
             <ThumbnailPage isVisible={page === 'thumbnails'} />
           </div>
           <div className={`h-full ${page === 'streams' ? '' : 'hidden'}`}>
-            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} />
+            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} onAutoPushCategoryMiss={setAutoPushError} />
           </div>
           {/* Combine is persistent too: switch-mounting it meant every
               navigation away unmounted the page, and the remount re-ran the
@@ -892,6 +904,43 @@ function AppInner() {
         initialStreamsDir={config.streamsDir}
         onComplete={() => { setOnboardingOpen(false); refreshConfig(); refreshRules() }}
       />
+      {/* Unattended post-stream Twitch update failed to apply the category —
+          attention-grabbing by design: it fires ~60s after a stream ends,
+          when the user is rarely looking at the affected stream. */}
+      {autoPushError && (
+        <Modal
+          isOpen
+          onClose={() => setAutoPushError(null)}
+          title="Twitch auto-update problem"
+          width="md"
+          footer={
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setAutoPushError(null)}>
+                Ignore
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const key = autoPushError.streamKey
+                  setAutoPushError(null)
+                  navigateToStreamByKey(key)
+                }}
+              >
+                Go to stream
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-300 leading-relaxed">
+            The post-stream update pushed the title and tags for{' '}
+            <span className="text-gray-100">{autoPushError.title}</span> to Twitch, but no Twitch category
+            matches <span className="text-gray-100">"{autoPushError.game}"</span> — the channel's category was
+            left unchanged. Open the stream and pick a category in its Twitch section (it searches real
+            Twitch categories).
+          </p>
+        </Modal>
+      )}
 
       <Modal
         isOpen={!!quitConfirm}

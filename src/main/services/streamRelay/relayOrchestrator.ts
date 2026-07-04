@@ -22,7 +22,7 @@
 import { EventEmitter } from 'events'
 import { relayManager } from './relayManager'
 import { activeBroadcastService } from './activeBroadcast'
-import { bindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus, getBroadcastContentDetails } from '../youtubeApi'
+import { bindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus, getBroadcastContentDetails, getBroadcastLifeCycleStatus } from '../youtubeApi'
 import { getStore, setConfigPartial } from '../../ipc/store'
 
 /** Stages the renderer can observe via the lifecycle event. Pure information —
@@ -79,6 +79,13 @@ class RelayOrchestrator extends EventEmitter {
   private graceTimer: NodeJS.Timeout | null = null
   private graceTick: NodeJS.Timeout | null = null
   private graceStartedAt = 0
+  // Session token. handleStreamStarted spans several awaits (upcoming
+  // refresh, bind, up to 90s of ingest polling); a stream-stop or a fresh
+  // start mid-flight bumps this so the orphaned run goes silent instead of
+  // emitting a late 'error' (which dismissed the post-stream modal and
+  // cancelled the pending auto-push) or double-running bind/transition
+  // after an encoder reconnect.
+  private startSeq = 0
 
   constructor() {
     super()
@@ -101,12 +108,19 @@ class RelayOrchestrator extends EventEmitter {
       return
     }
 
-    // Fresh stream start. Force-refresh the upcoming list FIRST so we bind
+    // Fresh stream start. Everything below is cancellation-checked against
+    // the session token: a stop (or a reconnect starting a NEW session)
+    // bumps startSeq, and this run must then stop touching shared state.
+    const seq = ++this.startSeq
+    const cancelled = () => seq !== this.startSeq
+
+    // Force-refresh the upcoming list FIRST so we bind
     // against current YouTube state, not a possibly-stale background-poll cache
     // — a broadcast scheduled moments ago must still bind correctly. Falls back
     // to the cache on failure. This is what lets the widget's poll run as
     // slowly as it likes (idle/minimized) without affecting go-live.
     await activeBroadcastService.getUpcoming(true).catch(() => {})
+    if (cancelled()) return
     // Pull the active broadcast at this exact moment so a later auto-pick
     // refresh doesn't change what we bind to mid-session.
     const active = activeBroadcastService.getActive()
@@ -134,6 +148,7 @@ class RelayOrchestrator extends EventEmitter {
 
     // Look up streamId — cached from auto-fill, looked up if missing.
     const streamId = await this.getStreamId()
+    if (cancelled()) return
     if (!streamId) {
       this.emit('lifecycle', {
         stage: 'error',
@@ -150,6 +165,7 @@ class RelayOrchestrator extends EventEmitter {
       const { clientId, clientSecret } = this.getCreds()
       await bindBroadcast(broadcastId, streamId, clientId, clientSecret)
     } catch (e: any) {
+      if (cancelled()) return
       this.emit('lifecycle', {
         stage: 'error',
         broadcastId,
@@ -158,6 +174,7 @@ class RelayOrchestrator extends EventEmitter {
       })
       return
     }
+    if (cancelled()) return
 
     // Wait for YouTube to actually be receiving the stream before trying to
     // go live — calling transition('live') before the bound stream is
@@ -165,7 +182,13 @@ class RelayOrchestrator extends EventEmitter {
     // status, surfacing a 'waiting-for-ingest' stage so the widget can say
     // "Waiting for YouTube to receive stream…".
     this.emit('lifecycle', { stage: 'waiting-for-ingest', broadcastId, broadcastTitle })
-    const ingestActive = await this.waitForStreamActive(streamId)
+    const ingestActive = await this.waitForStreamActive(streamId, cancelled)
+    // An aborted wait means the session ended (or restarted) while we were
+    // polling — say nothing. The old behavior let this poll run to its 90s
+    // timeout and emit a late 'error' the renderer read as a new session:
+    // it dismissed the post-stream modal mid-decision and cancelled the
+    // pending 'always' auto-push.
+    if (ingestActive === 'aborted' || cancelled()) return
     if (!ingestActive) {
       this.emit('lifecycle', {
         stage: 'error',
@@ -193,6 +216,7 @@ class RelayOrchestrator extends EventEmitter {
       // response that we retry past) than to skip and 100% fail on a
       // monitor-on broadcast.
       needsTestingTransition = cd?.enableMonitorStream !== false
+      if (cancelled()) return
     } catch {
       // ContentDetails lookup failed — fall back to assuming testing is
       // needed. Same reasoning as above: an extra testing call is far
@@ -217,11 +241,13 @@ class RelayOrchestrator extends EventEmitter {
       // existing transition retry cadence so the failure window is small.
       await new Promise(r => setTimeout(r, RelayOrchestrator.TRANSITION_RETRY_MS))
     }
+    if (cancelled()) return
 
     // Stream is active — transition to live. A couple of quick retries cover
     // the brief window where 'active' is reported but transition still 409s.
     this.emit('lifecycle', { stage: 'going-live', broadcastId, broadcastTitle })
-    const ok = await this.transitionToLiveWithRetry(broadcastId)
+    const ok = await this.transitionToLiveWithRetry(broadcastId, cancelled)
+    if (cancelled()) return
     if (ok) {
       this.liveBroadcastId = broadcastId
       this.liveBroadcastTitle = broadcastTitle
@@ -241,10 +267,11 @@ class RelayOrchestrator extends EventEmitter {
    *  mid-wait (graceTimer/no child) — handled implicitly because a later
    *  stream-stopped clears state, but the poll itself is bounded by the
    *  timeout regardless. */
-  private async waitForStreamActive(streamId: string): Promise<boolean> {
+  private async waitForStreamActive(streamId: string, cancelled: () => boolean): Promise<boolean | 'aborted'> {
     const deadline = Date.now() + RelayOrchestrator.INGEST_TIMEOUT_MS
     const { clientId, clientSecret } = this.getCreds()
     while (Date.now() < deadline) {
+      if (cancelled()) return 'aborted'
       try {
         const { streamStatus } = await getStreamStatus(streamId, clientId, clientSecret)
         if (streamStatus === 'active') return true
@@ -261,22 +288,49 @@ class RelayOrchestrator extends EventEmitter {
   // ─── Stream-stopped ─────────────────────────────────────────────────────
 
   private handleStreamStopped(): void {
-    // Stream-stopped without a clean SM go-live (bind/transition failed, or
-    // user went live manually). Nothing to finalize, but the session still
-    // ended — emit 'completed' with the bound broadcast so the renderer's
-    // post-stream Twitch prompt still fires, then release the session pin.
+    // Kill any in-flight handleStreamStarted (it may be deep in the 90s
+    // ingest wait) — the session it was starting no longer exists.
+    this.startSeq++
+
+    // Stream-stopped without a clean SM go-live: either a false start
+    // (accidental OBS start/stop that never got anywhere) or the user went
+    // live manually after a bind/transition failure. One status read tells
+    // them apart — the post-stream flow (Twitch auto-update / prompt) only
+    // runs for sessions that ACTUALLY reached 'live'. A 3-second blip used
+    // to push the next stream's metadata to Twitch 60s later, potentially
+    // right as the real stream started.
     if (!this.liveBroadcastId) {
-      if (this.boundBroadcastId) {
-        this.emit('lifecycle', {
-          stage: 'completed',
-          broadcastId: this.boundBroadcastId,
-          broadcastTitle: this.boundBroadcastTitle ?? undefined,
-        })
-      }
+      const boundId = this.boundBroadcastId
+      const boundTitle = this.boundBroadcastTitle ?? undefined
       this.boundBroadcastId = null
       this.boundBroadcastTitle = null
-      activeBroadcastService.getUpcoming(true).catch(() => {})
-      activeBroadcastService.unlockSession()
+      void (async () => {
+        let wentLive = false
+        if (boundId) {
+          try {
+            const { clientId, clientSecret } = this.getCreds()
+            const status = await getBroadcastLifeCycleStatus(boundId, clientId, clientSecret)
+            wentLive = status === 'live' || status === 'liveStarting' || status === 'complete'
+          } catch {
+            // Can't verify → treat as not-live. Worst case the user pushes
+            // to Twitch manually; the false-start auto-push was the far
+            // worse failure mode.
+          }
+        }
+        if (boundId && wentLive) {
+          this.emit('lifecycle', {
+            stage: 'completed',
+            broadcastId: boundId,
+            broadcastTitle: boundTitle,
+          })
+        } else {
+          // Clears any transitional stage (binding / waiting-for-ingest)
+          // the widget may still be showing for the aborted session.
+          this.emit('lifecycle', { stage: 'idle' })
+        }
+        await activeBroadcastService.getUpcoming(true).catch(() => {})
+        activeBroadcastService.unlockSession()
+      })()
       return
     }
 
@@ -341,9 +395,10 @@ class RelayOrchestrator extends EventEmitter {
     if (this.graceTick) { clearInterval(this.graceTick); this.graceTick = null }
   }
 
-  private async transitionToLiveWithRetry(broadcastId: string): Promise<boolean> {
+  private async transitionToLiveWithRetry(broadcastId: string, cancelled?: () => boolean): Promise<boolean> {
     const { clientId, clientSecret } = this.getCreds()
     for (let attempt = 1; attempt <= RelayOrchestrator.MAX_LIVE_ATTEMPTS; attempt++) {
+      if (cancelled?.()) return false
       try {
         await transitionBroadcast(broadcastId, 'live', clientId, clientSecret)
         return true
