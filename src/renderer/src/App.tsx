@@ -863,9 +863,15 @@ function AppInner() {
           <div className={`h-full ${page === 'streams' ? '' : 'hidden'}`}>
             <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} />
           </div>
+          {/* Combine is persistent too: switch-mounting it meant every
+              navigation away unmounted the page, and the remount re-ran the
+              initialFiles ingest — resurrecting removed files and resetting
+              the sort order, output path, and delete-sources checkbox. */}
+          <div className={`h-full ${page === 'combine' ? '' : 'hidden'}`}>
+            <CombinePage initialFiles={pendingCombine} />
+          </div>
           {page === 'templates' && <TemplatesPage />}
           {page === 'rules'     && <RulesPage />}
-          {page === 'combine'   && <CombinePage initialFiles={pendingCombine} />}
           {page === 'launcher'  && <LauncherPage />}
           {page === 'integrations'   && <IntegrationsPage />}
           {page === 'settings'  && (
