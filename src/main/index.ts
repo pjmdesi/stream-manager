@@ -71,7 +71,7 @@ import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
 import { registerConverterIPC, getConverterStatus, getActiveConversionCounts } from './ipc/converter'
-import { registerStoreIPC, getStore } from './ipc/store'
+import { registerStoreIPC, getStore, setConfigPartial } from './ipc/store'
 import { registerStreamsIPC, backupMetaOnQuit } from './ipc/streams'
 import { registerCombineIPC } from './ipc/combine'
 import { registerYouTubeIPC } from './ipc/youtube'
@@ -257,13 +257,11 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
       // builds.
       enabled: app.isPackaged,
       click: (item) => {
-        const startMinimized = !!config?.startMinimized
-        ipcMain.emit('_setStartup', item.checked, startMinimized)
         const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
         app.setLoginItemSettings({ openAtLogin: item.checked, path: exePath })
-        const s = getStore()
-        const cur = s.get('config') as any
-        s.set('config', { ...cur, startWithWindows: item.checked })
+        // Through the broadcasting helper so an open Settings page (and any
+        // other consumer of the shared config state) sees the change live.
+        setConfigPartial({ startWithWindows: item.checked })
       }
     },
     {
@@ -272,9 +270,7 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
       checked: !!config?.startMinimized,
       enabled: app.isPackaged && !!config?.startWithWindows,
       click: (item) => {
-        const s = getStore()
-        const cur = s.get('config') as any
-        s.set('config', { ...cur, startMinimized: item.checked })
+        setConfigPartial({ startMinimized: item.checked })
       }
     },
     { type: 'separator' },

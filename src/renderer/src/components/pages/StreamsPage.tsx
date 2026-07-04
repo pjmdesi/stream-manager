@@ -3047,7 +3047,12 @@ export function StreamsPage({
                     const key = selectionKey(f)
                     return (
                       <StreamListItem
-                        key={f.folderPath}
+                        // selectionKey, NOT folderPath: in dump mode every
+                        // stream shares folderPath (the dump dir), and
+                        // duplicate React keys make reconciliation undefined
+                        // — rows visibly duplicated/omitted after the live
+                        // dump→folder conversion flip.
+                        key={key}
                         folder={f}
                         folders={folders}
                         selected={f.folderPath === selectedFolderPath}
@@ -4726,7 +4731,7 @@ function SidebarMonthCalendar({
                     const archived = !!f.meta?.archived
                     return (
                       <span
-                        key={f.folderPath}
+                        key={f.relativePath}
                         className={`w-1.5 h-1.5 rounded-full ${dotColor} ${archived ? 'ring-1 ring-green-400' : ''}`}
                       />
                     )
@@ -4755,7 +4760,7 @@ function SidebarMonthCalendar({
                 const title = renderStreamTitle(f, folders)
                 return (
                   <button
-                    key={f.folderPath}
+                    key={f.relativePath}
                     type="button"
                     onClick={() => onSelectStream(f)}
                     className="text-left text-xs text-gray-100 hover:bg-white/10 rounded px-2 py-1 truncate max-w-[260px] transition-colors"
@@ -6669,7 +6674,7 @@ function SidebarDetail({
               ) : (
                 <>
                   <TemplateBodyEditor
-                    key={folder.folderPath}
+                    key={folder.relativePath}
                     value={descBody}
                     placeholder="Description for YouTube upload…"
                     onSave={v => onUpdateMeta({ ytDescriptionTemplate: v })}

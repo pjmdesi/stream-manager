@@ -150,6 +150,7 @@ declare global {
       // ── Store ────────────────────────────────────────────────────────────────
       getConfig(): Promise<AppConfig>
       setConfig(config: Partial<AppConfig>): Promise<void>
+      onConfigChanged(cb: () => void): () => void
       getWatchRules(): Promise<WatchRule[]>
       setWatchRules(rules: WatchRule[]): Promise<void>
       getStreamTypeTags(): Promise<Record<string, string>>

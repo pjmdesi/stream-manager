@@ -187,8 +187,35 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
   const [convertResult, setConvertResult] = useState<ConvertResult | null>(null)
   const [convertError, setConvertError] = useState<string | null>(null)
 
+  // Config the draft was last synced against — the baseline that tells a
+  // user-staged edit (draft differs from BASE) apart from a config change
+  // that landed underneath the page (config differs from base, draft
+  // doesn't). Comparing the draft against the NEW config can't make that
+  // distinction.
+  const draftBaseRef = useRef(config)
+  // Adopt config changes into the draft WITHOUT discarding unsaved edits:
+  // clean keys track the incoming values, user-edited keys keep their staged
+  // values. The old `setLocal(config)` reset silently wiped the whole draft
+  // whenever ANY config write landed while the page sat open (post-stream
+  // Twitch modal, startup-page star, tray toggles, relay bookkeeping).
   useEffect(() => {
-    if (!loading) setLocal(config)
+    if (loading) return
+    // Capture the base BEFORE updating the ref: setLocal's functional
+    // updater runs during the NEXT render, not synchronously, so reading
+    // draftBaseRef inside it would see the already-advanced baseline — every
+    // out-of-band config change would then read as a "user edit" and be
+    // kept stale (which made the convert-dump-folder flow's streamMode
+    // write stick in the draft and re-revert on the next Save).
+    const base = draftBaseRef.current
+    draftBaseRef.current = config
+    setLocal(prev => {
+      const merged = { ...config }
+      for (const key of Object.keys(prev) as (keyof typeof config)[]) {
+        const userEdited = JSON.stringify(prev[key]) !== JSON.stringify(base[key])
+        if (userEdited) (merged as Record<string, unknown>)[key as string] = prev[key]
+      }
+      return merged
+    })
   }, [loading, config])
 
   useEffect(() => {
@@ -322,12 +349,28 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
   const save = async () => {
     const prevStreamsDir = lastSavedStreamsDirRef.current
     const newStreamsDir = local.streamsDir
-    await updateConfig(local)
-    await window.api.setStartupSettings(!!local.startWithWindows, !!local.startMinimized)
+    // Write ONLY the keys the user actually edited — the same per-key dirty
+    // check that drives the blue dots. Writing the whole ~60-key draft used
+    // to make any out-of-band config write (tray toggles, the convert-dump-
+    // folder flow, RulesPage autostart, relay bookkeeping) revert on the
+    // next Save, because the draft was cloned before that write happened.
+    const changed: Partial<typeof config> = {}
+    for (const key of Object.keys(local) as (keyof typeof config)[]) {
+      if (keyDirty(key)) (changed as Record<string, unknown>)[key as string] = local[key]
+    }
+    if (Object.keys(changed).length > 0) await updateConfig(changed)
+    // Side effects only when their inputs changed: re-running these with
+    // clean draft values would stamp stale state over changes made from the
+    // tray (OS login item) while the page sat open.
+    if ('startWithWindows' in changed || 'startMinimized' in changed) {
+      await window.api.setStartupSettings(!!local.startWithWindows, !!local.startMinimized)
+    }
     // Dev-only: apply the just-persisted force-quota flag to the live
-    // runtime in ytQuotaState. No-op in production builds since the
-    // toggle isn't visible there; safe to call unconditionally.
-    await window.api.youtubeSetForcedQuotaExceeded(!!local.devForceYouTubeQuotaExceeded).catch(() => {})
+    // runtime in ytQuotaState. The toggle isn't visible in production
+    // builds, so this only ever fires from dev.
+    if ('devForceYouTubeQuotaExceeded' in changed) {
+      await window.api.youtubeSetForcedQuotaExceeded(!!local.devForceYouTubeQuotaExceeded).catch(() => {})
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
 

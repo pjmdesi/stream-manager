@@ -291,6 +291,12 @@ contextBridge.exposeInMainWorld('api', {
   setConfig: (config: any) =>
     ipcRenderer.invoke('store:setConfig', config),
 
+  onConfigChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('config:changed', handler)
+    return () => ipcRenderer.removeListener('config:changed', handler)
+  },
+
   getWatchRules: () =>
     ipcRenderer.invoke('store:getWatchRules'),
 

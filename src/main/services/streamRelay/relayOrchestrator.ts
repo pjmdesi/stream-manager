@@ -23,7 +23,7 @@ import { EventEmitter } from 'events'
 import { relayManager } from './relayManager'
 import { activeBroadcastService } from './activeBroadcast'
 import { bindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus, getBroadcastContentDetails } from '../youtubeApi'
-import { getStore } from '../../ipc/store'
+import { getStore, setConfigPartial } from '../../ipc/store'
 
 /** Stages the renderer can observe via the lifecycle event. Pure information —
  *  the orchestrator's behavior doesn't branch on which stage the UI shows. */
@@ -371,7 +371,7 @@ class RelayOrchestrator extends EventEmitter {
       const { clientId, clientSecret } = this.getCreds()
       const found = await findStreamIdByName(cfg?.streamRelayOutboundKey ?? '', clientId, clientSecret)
       if (found) {
-        store.set('config', { ...cfg, streamRelayStreamId: found })
+        setConfigPartial({ streamRelayStreamId: found })
         return found
       }
     } catch {

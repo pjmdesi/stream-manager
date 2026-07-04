@@ -238,7 +238,7 @@ export function YouTubeLinkModal({ isOpen, onClose }: { isOpen: boolean; onClose
             const smIdx = smThumbPath ? f.thumbnails.indexOf(smThumbPath) : -1
             const smLocal = smIdx >= 0 ? (f.thumbnailLocalFlags?.[smIdx] ?? true) : true
             return (
-              <div key={f.folderPath} className="flex items-center gap-2.5 px-3 py-2">
+              <div key={f.relativePath} className="flex items-center gap-2.5 px-3 py-2">
                 <div className="w-[56px] aspect-video shrink-0 rounded overflow-hidden bg-navy-900">
                   {smThumbPath && (
                     <ThumbImage path={smThumbPath} thumbsKey={0} isLocal={smLocal} hydrate={false} className="w-full h-full object-cover" placeholderClassName="w-full h-full" iconSize={13} />

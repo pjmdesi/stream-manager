@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import Store from 'electron-store'
 import { app } from 'electron'
 import path from 'path'
@@ -249,6 +249,24 @@ export function getStore(): Store<StoreShape> {
   return store
 }
 
+/** Merge a partial into the persisted config and broadcast a
+ *  'config:changed' signal to every renderer (StoreContext re-fetches on
+ *  it). ALL config writes must go through here — the IPC handler below, the
+ *  tray toggles, the relay's bookkeeping. Writes that skip the broadcast
+ *  leave renderer state stale until relaunch, which is how "convert to
+ *  folder-per-stream" kept behaving as dump mode and a later Settings save
+ *  reverted it. The event carries no payload on purpose: receivers re-invoke
+ *  store:getConfig so the defaults-merge + legacy migrations there stay the
+ *  single source of truth for the config's shape. */
+export function setConfigPartial(partial: Partial<AppConfig>): void {
+  const s = getStore()
+  const current = s.get('config', getDefaultConfig())
+  s.set('config', { ...current, ...partial })
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('config:changed')
+  }
+}
+
 export function registerStoreIPC(): void {
   ipcMain.handle('store:getConfig', async () => {
     // Merge defaults so the returned config always has every key. Older
@@ -270,11 +288,9 @@ export function registerStoreIPC(): void {
   })
 
   ipcMain.handle('store:setConfig', async (_event, partial: Partial<AppConfig>) => {
-    const s = getStore()
-    const current = s.get('config', getDefaultConfig())
-    const next = { ...current, ...partial }
-    s.set('config', next)
-    if (partial.streamsDir !== undefined && partial.streamsDir !== current.streamsDir) {
+    const prevStreamsDir = getStore().get('config', getDefaultConfig()).streamsDir
+    setConfigPartial(partial)
+    if (partial.streamsDir !== undefined && partial.streamsDir !== prevStreamsDir) {
       const { invalidateCloudSyncCache } = await import('./cloudSync')
       invalidateCloudSyncCache()
     }
