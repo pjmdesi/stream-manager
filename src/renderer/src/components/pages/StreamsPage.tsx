@@ -507,6 +507,9 @@ export function StreamsPage({
   const [thumbHashById, setThumbHashById] = useState<Record<string, string | null>>({})
   const [outOfSyncLoading, setOutOfSyncLoading] = useState(false)
   const [outOfSyncCheckedAt, setOutOfSyncCheckedAt] = useState<number | null>(null)
+  // Last check failure — drives the panel's "check failed" + Retry state
+  // instead of the old infinite "Checking YouTube…" spinner.
+  const [outOfSyncError, setOutOfSyncError] = useState<string | null>(null)
   const [twConnected, setTwConnected] = useState(false)
   // Cached Twitch channel snapshot — the title / category / tags
   // currently set on the channel. Compared against local stream meta
@@ -1790,6 +1793,10 @@ export function StreamsPage({
   // loaded broadcasts pool), so we re-check whenever the empty state is shown.
   const refreshOutOfSync = useCallback(async () => {
     if (!ytConnected) { setOutOfSyncRemote({}); return }
+    // A check while offline is doomed — keep whatever state is showing
+    // (the panel renders its own offline notice) and let the recovery
+    // path re-fire this once the connection is back.
+    if (netProblemRef.current === 'offline') return
     const linkedIds = Array.from(new Set(
       folders.map(f => f.meta?.ytVideoId).filter((id): id is string => !!id)
     ))
@@ -1824,12 +1831,15 @@ export function StreamsPage({
       setOutOfSyncRemote(map)
       setThumbHashById(byFolder)
       setOutOfSyncCheckedAt(Date.now())
-    } catch (e) {
+      setOutOfSyncError(null)
+    } catch (e: any) {
       console.warn('Out-of-sync check failed', e)
+      setOutOfSyncError(e?.message ?? String(e))
+      void classifyNetFailure()
     } finally {
       setOutOfSyncLoading(false)
     }
-  }, [ytConnected, folders, ytBroadcasts, ytVods])
+  }, [ytConnected, folders, ytBroadcasts, ytVods, classifyNetFailure])
   // Ref to the latest checker so the auto-trigger doesn't depend on `folders`
   // (which would re-fetch on every optimistic meta write during a bulk resolve).
   const refreshOutOfSyncRef = useRef(refreshOutOfSync)
@@ -1845,8 +1855,12 @@ export function StreamsPage({
     // still empty would hit the no-linked-ids path and prematurely mark the
     // panel "checked" (showing the green in-sync state) before the real check.
     if (loading) return
+    // Skip doomed checks while offline; the netProblem → null transition
+    // re-fires this effect, which is what makes the panel re-check
+    // automatically after a reconnect.
+    if (netProblem === 'offline') return
     refreshOutOfSyncRef.current()
-  }, [isVisible, selectedStreamKey, ytConnected, loading, folders.length, ytBroadcasts.length, ytVods.length])
+  }, [isVisible, selectedStreamKey, ytConnected, loading, folders.length, ytBroadcasts.length, ytVods.length, netProblem])
 
   const outOfSyncItems = useMemo<OutOfSyncItem[]>(() => {
     const out: OutOfSyncItem[] = []
@@ -3456,6 +3470,8 @@ export function StreamsPage({
                     loading={outOfSyncLoading}
                     checkedAt={outOfSyncCheckedAt}
                     quotaExceeded={ytQuota.exceeded}
+                    netProblem={netProblem}
+                    error={outOfSyncError}
                     onRefresh={refreshOutOfSync}
                     onOpenStream={(f) => setSelectedStreamKey(f.relativePath)}
                     onResolve={handleBulkResolve}
@@ -7501,14 +7517,22 @@ function SidebarDetail({
                       onPrivacyChange={setNewBroadcastPrivacy}
                       disabled={creatingBroadcast}
                       trailing={
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          loading={creatingBroadcast}
-                          onClick={handleCreateBroadcast}
+                        <Tooltip
+                          content={netProblem === 'offline'
+                            ? 'No internet connection.'
+                            : 'YouTube is not responding right now. It usually recovers on its own, try again shortly.'}
+                          open={netProblem ? undefined : false}
                         >
-                          Create broadcast
-                        </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            loading={creatingBroadcast}
+                            disabled={netProblem !== null}
+                            onClick={handleCreateBroadcast}
+                          >
+                            Create broadcast
+                          </Button>
+                        </Tooltip>
                       }
                     />
                     {createError && (

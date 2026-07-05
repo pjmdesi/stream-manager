@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, Upload, Download, Check, Loader2, ChevronRight, ListChecks, X, Eye, EyeOff, RotateCcw, ArrowUpDown, ImageOff } from 'lucide-react'
+import { RefreshCw, Upload, Download, Check, Loader2, ChevronRight, ListChecks, X, Eye, EyeOff, RotateCcw, ArrowUpDown, ImageOff, WifiOff, AlertTriangle } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -10,11 +10,15 @@ import type { StreamFolder } from '../../types'
 
 // Quota model (YouTube Data API v3): writes cost 50 units each. A push does one
 // snippet update (title/description/tags/category) + a status update when a
-// privacy value is staged + a thumbnail upload when the thumbnail diverges.
+// privacy value is staged + a thumbnail upload when the thumbnail diverges,
+// then ~2 read units refreshing the pushed video's canonical state. Privacy on
+// a non-broadcast can burn a second 50-unit call (broadcast-status 404 → video
+// fallback) — the estimate stays at 50 and the label says "~" for a reason.
 // Default daily quota is 10,000 units; remaining isn't reported by the API.
 const PUSH_UNITS_SNIPPET = 50
 const PUSH_UNITS_PRIVACY = 50
 const PUSH_UNITS_THUMBNAIL = 50
+const PUSH_UNITS_REFRESH_READS = 2
 const DAILY_QUOTA = 10_000
 const HEAVY_PUSH_STREAMS = 10
 const HEAVY_PUSH_UNITS = 2_000
@@ -23,7 +27,8 @@ function estimatePushUnits(items: OutOfSyncItem[]): number {
   return items.reduce((sum, it) =>
     sum + PUSH_UNITS_SNIPPET
     + (it.folder.meta?.ytPrivacyStatus ? PUSH_UNITS_PRIVACY : 0)
-    + (it.mismatch.has('thumbnail') ? PUSH_UNITS_THUMBNAIL : 0), 0)
+    + (it.mismatch.has('thumbnail') ? PUSH_UNITS_THUMBNAIL : 0)
+    + PUSH_UNITS_REFRESH_READS, 0)
 }
 
 /** Direction → accent. Matches the sidebar's per-field dots: blue = local-ahead
@@ -135,6 +140,7 @@ function Row({
 
 export function OutOfSyncPanel({
   items, folders, thumbsKey, loading, checkedAt, quotaExceeded,
+  netProblem, error,
   onRefresh, onOpenStream, onResolve, onIgnore, onUnignore,
 }: {
   items: OutOfSyncItem[]
@@ -143,6 +149,12 @@ export function OutOfSyncPanel({
   loading: boolean
   checkedAt: number | null
   quotaExceeded: boolean
+  /** Page-level network problem: 'offline' blocks checks and all resolve
+   *  actions; 'yt' blocks pushes but leaves pulls (cached data) and the
+   *  re-check (doubles as a retry) available. */
+  netProblem: null | 'offline' | 'yt'
+  /** Last check failure, if the most recent refresh threw. */
+  error: string | null
   onRefresh: () => void
   onOpenStream: (folder: StreamFolder) => void
   onResolve: (kind: 'push' | 'pull', folders: StreamFolder[]) => Promise<void>
@@ -316,7 +328,10 @@ export function OutOfSyncPanel({
         selected={selected.has(path)}
         ignoredRow={opts?.ignoredRow}
         onOpen={() => onOpenStream(it.folder)}
-        onQuickResolve={it.kind === 'conflict' || (it.kind === 'push' && quotaExceeded) ? undefined
+        onQuickResolve={it.kind === 'conflict'
+          || (it.kind === 'push' && (quotaExceeded || netProblem !== null))
+          || (it.kind === 'pull' && netProblem === 'offline')
+          ? undefined
           : () => directResolve(it.kind === 'push' ? 'push' : 'pull', it)}
         onUnignore={() => onUnignore([it.folder])}
         onSelectMouseDown={() => startDrag(index)}
@@ -350,7 +365,9 @@ export function OutOfSyncPanel({
         ) : (
           <>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-              {checkedAt === null ? 'Checking YouTube…' : active.length > 0 ? `Out of sync · ${active.length}` : 'In sync with YouTube'}
+              {checkedAt === null
+                ? (netProblem === 'offline' ? 'Can’t check YouTube' : error ? 'YouTube check failed' : 'Checking YouTube…')
+                : active.length > 0 ? `Out of sync · ${active.length}` : 'In sync with YouTube'}
             </span>
             <div className="flex items-center gap-0.5">
               {active.length > 0 && (
@@ -360,8 +377,11 @@ export function OutOfSyncPanel({
                   </button>
                 </Tooltip>
               )}
-              <Tooltip content={checkedLabel ? `Re-check YouTube — ${checkedLabel}` : 'Re-check YouTube'} side="top">
-                <button onClick={onRefresh} disabled={loading} className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-50" aria-label="Re-check YouTube">
+              <Tooltip content={
+                netProblem === 'offline' ? 'No internet connection.'
+                  : checkedLabel ? `Re-check YouTube — ${checkedLabel}` : 'Re-check YouTube'
+              } side="top">
+                <button onClick={onRefresh} disabled={loading || netProblem === 'offline'} className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-50" aria-label="Re-check YouTube">
                   {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
                 </button>
               </Tooltip>
@@ -372,10 +392,36 @@ export function OutOfSyncPanel({
 
       {/* List (flows; the parent scrolls) */}
       <div className="px-1.5 pb-2">
-        {checkedAt === null ? (
-          <p className="flex items-center gap-1.5 text-[10px] text-gray-400 px-1.5 py-1">
-            <Loader2 size={11} className="animate-spin" /> Checking YouTube…
+        {/* Mid-session disconnect with results on screen: keep the list
+            visible but say plainly that it's a snapshot, not live truth. */}
+        {checkedAt !== null && netProblem === 'offline' && (
+          <p className="flex items-start gap-1.5 text-[10px] text-amber-300 px-1.5 pb-1">
+            <WifiOff size={11} className="shrink-0 mt-0.5" />
+            <span>No internet connection. Shown from the last successful check{checkedLabel ? ` (${checkedLabel})` : ''}, so it may be out of date.</span>
           </p>
+        )}
+        {checkedAt === null ? (
+          netProblem === 'offline' ? (
+            <p className="flex items-start gap-1.5 text-[10px] text-amber-300 px-1.5 py-1">
+              <WifiOff size={11} className="shrink-0 mt-0.5" />
+              <span>Can’t check YouTube: no internet connection. The check runs automatically once the connection is restored.</span>
+            </p>
+          ) : error ? (
+            <div className="flex flex-col items-start gap-1.5 px-1.5 py-1">
+              <p className="flex items-start gap-1.5 text-[10px] text-red-400">
+                <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                <span>Couldn’t reach YouTube{netProblem === 'yt' ? ' (it looks like a YouTube problem, not your connection)' : ''}. The sync state is unknown.</span>
+              </p>
+              <button onClick={onRefresh} disabled={loading}
+                className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-gray-200 hover:text-white transition-colors disabled:opacity-50">
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Retry
+              </button>
+            </div>
+          ) : (
+            <p className="flex items-center gap-1.5 text-[10px] text-gray-400 px-1.5 py-1">
+              <Loader2 size={11} className="animate-spin" /> Checking YouTube…
+            </p>
+          )
         ) : active.length === 0 && ignored.length === 0 ? (
           <p className="flex items-center gap-1.5 text-[10px] text-gray-400 px-1.5 py-1">
             <Check size={11} className="text-green-400" /> Every linked stream matches YouTube.
@@ -384,13 +430,13 @@ export function OutOfSyncPanel({
           <div className="flex flex-col gap-3 pt-0.5">
             {pushShown.length > 0 && (
               <Group title="Ready to push" count={push.length} accent="text-blue-300"
-                action={!selectMode && !quotaExceeded ? { label: 'Push all', icon: <Upload size={12} />, onClick: () => requestResolve(push, []) } : undefined}>
+                action={!selectMode && !quotaExceeded && !netProblem ? { label: 'Push all', icon: <Upload size={12} />, onClick: () => requestResolve(push, []) } : undefined}>
                 {pushShown.map(it => renderRow(it))}
               </Group>
             )}
             {pullShown.length > 0 && (
               <Group title="Changed on YouTube" count={pull.length} accent="text-orange-300"
-                action={!selectMode ? { label: 'Pull all', icon: <Download size={12} />, onClick: () => requestResolve([], pull) } : undefined}>
+                action={!selectMode && netProblem !== 'offline' ? { label: 'Pull all', icon: <Download size={12} />, onClick: () => requestResolve([], pull) } : undefined}>
                 {pullShown.map(it => renderRow(it))}
               </Group>
             )}
@@ -421,13 +467,13 @@ export function OutOfSyncPanel({
       {/* Select-mode action bar */}
       {selectMode && selected.size > 0 && (
         <div className="sticky bottom-0 z-10 border-t border-white/5 px-2 py-1.5 flex items-center gap-1 bg-navy-800">
-          {selPush.length > 0 && selPull.length > 0 && !quotaExceeded && (
+          {selPush.length > 0 && selPull.length > 0 && !quotaExceeded && !netProblem && (
             <ActionBtn icon={<ArrowUpDown size={12} />} label="Sync" onClick={() => requestResolve(selPush, selPull)} />
           )}
-          {selPush.length > 0 && !quotaExceeded && (
+          {selPush.length > 0 && !quotaExceeded && !netProblem && (
             <ActionBtn icon={<Upload size={12} />} label="Push" onClick={() => requestResolve(selPush, [])} accent="text-blue-300" />
           )}
-          {selPull.length > 0 && (
+          {selPull.length > 0 && netProblem !== 'offline' && (
             <ActionBtn icon={<Download size={12} />} label="Pull" onClick={() => requestResolve([], selPull)} accent="text-orange-300" />
           )}
           <ActionBtn icon={<EyeOff size={12} />} label="Ignore" onClick={runIgnore} />
