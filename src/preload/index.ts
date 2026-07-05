@@ -435,6 +435,12 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetVideoStatuses: (videoIds: string[]) =>
     ipcRenderer.invoke('youtube:getVideoStatuses', videoIds),
 
+  youtubeGetVideoStatusCache: () =>
+    ipcRenderer.invoke('youtube:getVideoStatusCache'),
+
+  netCheckInternet: () =>
+    ipcRenderer.invoke('net:checkInternet'),
+
   youtubeCheckBroadcastsAreLive: (broadcastIds: string[]) =>
     ipcRenderer.invoke('youtube:checkBroadcastsAreLive', broadcastIds),
 

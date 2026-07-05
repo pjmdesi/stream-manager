@@ -5,7 +5,7 @@ import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
   Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ChevronsDown, ChevronsUp, X,
   Film, Zap, Combine, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
-  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon, ListRestart, Eye,
+  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon, ListRestart, Eye, WifiOff, CloudOff,
 } from 'lucide-react'
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { Tooltip } from '../ui/Tooltip'
@@ -740,6 +740,50 @@ export function StreamsPage({
   const toggleGameFilter = (g: string) => setFilterGames(prev => {
     const next = new Set(prev); next.has(g) ? next.delete(g) : next.add(g); return next
   })
+  // ── Network state ──────────────────────────────────────────────────
+  // 'offline' = no usable internet (interface down, or up with no route
+  // out — probe-verified). 'yt' = internet reachable but YouTube isn't
+  // responding. Set by classifyNetFailure when a YouTube fetch fails,
+  // cleared by the next successful one. Drives the page banner and the
+  // sidebar's push-button gating.
+  const [netProblem, setNetProblem] = useState<null | 'offline' | 'yt'>(() => (navigator.onLine ? null : 'offline'))
+  const netProblemRef = useRef(netProblem)
+  useEffect(() => { netProblemRef.current = netProblem })
+  // Bumping re-arms the badge-status fetch below (fresh retry ladder).
+  // Fired by the OS 'online' event and the 60s recovery tick.
+  const [netRetryToken, setNetRetryToken] = useState(0)
+  const classifyNetFailure = useCallback(async () => {
+    if (!navigator.onLine) { setNetProblem('offline'); return }
+    const probe = window.api.netCheckInternet
+    if (!probe) return
+    try {
+      const internet = await probe()
+      setNetProblem(internet ? 'yt' : 'offline')
+    } catch { /* IPC hiccup — leave the current state alone */ }
+  }, [])
+  // Shared YouTube bootstrap (broadcast pool + categories). Runs on
+  // mount once connected, and again after connectivity returns so the
+  // pickers don't sit empty until a restart. Debounced so a flapping
+  // connection can't spam reads.
+  const lastYtBootstrapAtRef = useRef(0)
+  const loadYtBootstrap = useCallback(() => {
+    const now = Date.now()
+    if (now - lastYtBootstrapAtRef.current < 10_000) return
+    lastYtBootstrapAtRef.current = now
+    setYtBroadcastsLoading(true)
+    window.api.youtubeGetBroadcasts()
+      .then(setYtBroadcasts)
+      .catch(err => { console.warn('Failed to load YouTube broadcasts', err); void classifyNetFailure() })
+      .finally(() => setYtBroadcastsLoading(false))
+    // Categories list is static enough that one fetch per session is
+    // sufficient. Failure is non-fatal — the sidebar just shows an
+    // empty dropdown and the push falls back to passthrough.
+    window.api.youtubeGetCategories()
+      .then(setYtCategories)
+      .catch(err => console.warn('Failed to load YouTube categories', err))
+  }, [classifyNetFailure])
+  const loadYtBootstrapRef = useRef(loadYtBootstrap)
+  useEffect(() => { loadYtBootstrapRef.current = loadYtBootstrap })
   useEffect(() => {
     window.api.getStreamTypeTags().then(setTagColors)
     window.api.getStreamTypeTextures().then(setTagTextures)
@@ -749,19 +793,7 @@ export function StreamsPage({
       // Eager-load upcoming/scheduled broadcasts so the sidebar's
       // BroadcastPicker has data ready the moment the user opens a
       // future-dated stream. VODs stay lazy — see loadAllVods.
-      if (s.connected) {
-        setYtBroadcastsLoading(true)
-        window.api.youtubeGetBroadcasts()
-          .then(setYtBroadcasts)
-          .catch(err => console.warn('Failed to load YouTube broadcasts', err))
-          .finally(() => setYtBroadcastsLoading(false))
-        // Categories list is static enough that one fetch per session
-        // is sufficient. Failure is non-fatal — the sidebar just shows
-        // an empty dropdown and the push falls back to passthrough.
-        window.api.youtubeGetCategories()
-          .then(setYtCategories)
-          .catch(err => console.warn('Failed to load YouTube categories', err))
-      }
+      if (s.connected) loadYtBootstrapRef.current()
     }).catch(() => {})
     window.api.twitchGetStatus?.().then(s => {
       setTwConnected(s.connected)
@@ -808,6 +840,16 @@ export function StreamsPage({
   const linkedYtIdsKey = useMemo(() => (
     folders.map(f => f.meta?.ytVideoId).filter(Boolean).sort().join(',')
   ), [folders])
+  // Seed the badges from the last-known cache immediately, before any
+  // network round-trip, so a launch without internet still shows
+  // privacy/kind badges. In-session values win over the cache; live
+  // fetches overlay both and re-persist (main side).
+  useEffect(() => {
+    window.api.youtubeGetVideoStatusCache?.().then(cached => {
+      if (!cached || Object.keys(cached).length === 0) return
+      setYtVideoStatusMap(prev => ({ ...cached, ...prev }))
+    }).catch(() => {})
+  }, [])
   useEffect(() => {
     if (!ytConnected || !linkedYtIdsKey) return
     const allIds = linkedYtIdsKey.split(',')
@@ -831,9 +873,16 @@ export function StreamsPage({
         .then(res => {
           if (cancelled) return
           if (!res) {
+            void classifyNetFailure()
             if (rung < RETRY_LADDER.length) timer = setTimeout(() => attempt(ids, rung + 1), RETRY_LADDER[rung])
             return
           }
+          // A successful fetch is the definitive "we're back" signal —
+          // clear the network banner and, when recovering from an
+          // outage, refresh the pools/categories that failed to load
+          // during it.
+          if (netProblemRef.current) loadYtBootstrapRef.current()
+          setNetProblem(null)
           // Merge over the previous map — a subset retry must not blank
           // the other ids' badges — but prune ids that are no longer
           // linked, so a stale 'uploaded' entry can't keep the
@@ -853,7 +902,36 @@ export function StreamsPage({
     }
     attempt(allIds, 0)
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
+  }, [ytConnected, linkedYtIdsKey, netRetryToken, classifyNetFailure])
+  // Recovery paths. The strongest "we're back" signal is a successful
+  // YouTube fetch, so poke the status ladder; when no such fetch can
+  // run (nothing linked, or YT not connected) fall back to the probe
+  // and clear on confirmed internet. Wired to the OS 'online' event
+  // (interface came back) and a 60s tick while a problem is showing
+  // (covers recoveries the OS can't see: router up with WAN restored,
+  // or a YouTube outage ending). The 'offline' event is definitive and
+  // flips the banner immediately.
+  const netRecoveryPoke = useCallback(() => {
+    if (ytConnected && linkedYtIdsKey) { setNetRetryToken(t => t + 1); return }
+    const probe = window.api.netCheckInternet
+    if (!probe) { if (navigator.onLine) setNetProblem(null); return }
+    probe().then(internet => { if (internet) setNetProblem(null) }).catch(() => {})
   }, [ytConnected, linkedYtIdsKey])
+  useEffect(() => {
+    const onOnline = () => netRecoveryPoke()
+    const onOffline = () => setNetProblem('offline')
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [netRecoveryPoke])
+  useEffect(() => {
+    if (!netProblem) return
+    const iv = setInterval(netRecoveryPoke, 60_000)
+    return () => clearInterval(iv)
+  }, [netProblem, netRecoveryPoke])
   // Effective status map for the UI: `missing` flags cross-checked
   // against the loaded broadcast/VOD pools. An id present in either
   // pool is provably alive whatever videos.list says (its index can lag
@@ -2786,6 +2864,21 @@ export function StreamsPage({
               </div>
             )
           })()}
+          {netProblem && (
+            <div className="flex items-start gap-2 text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-md px-3 py-2">
+              {netProblem === 'offline'
+                ? <WifiOff size={13} className="shrink-0 mt-0.5" />
+                : <CloudOff size={13} className="shrink-0 mt-0.5" />}
+              <div className="flex-1">
+                <div className="font-medium">{netProblem === 'offline' ? 'No internet connection' : 'YouTube is not responding'}</div>
+                <div className="text-amber-200/80 mt-0.5">
+                  {netProblem === 'offline'
+                    ? 'YouTube and Twitch data can’t load or update until the connection is restored, so pushes are paused. Local editing is unaffected. SM keeps checking and recovers on its own.'
+                    : 'Your internet connection looks fine, so this is likely a YouTube hiccup. YouTube pushes and syncing will fail until it recovers; Twitch is unaffected. SM keeps checking and recovers on its own.'}
+                </div>
+              </div>
+            </div>
+          )}
           {!metaHealth.ok && (
             <div className="flex items-start gap-2 text-[11px] bg-red-500/10 border border-red-500/30 text-red-300 rounded-md px-3 py-2">
               <AlertTriangle size={13} className="shrink-0 mt-0.5" />
@@ -3450,6 +3543,7 @@ export function StreamsPage({
               onDelete={() => setDeleteTargetKey(renderedFolder.relativePath)}
               deleteBlockReason={streamReason(renderedFolder.folderPath, isDumpMode ? [...renderedFolder.videos, ...renderedFolder.thumbnails] : undefined)}
               linkedVideoMissing={!!renderedFolder.meta?.ytVideoId && effectiveYtVideoStatusMap[renderedFolder.meta.ytVideoId]?.missing === true}
+              netProblem={netProblem}
               onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
               onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
               // The two callbacks above already return the promise from
@@ -5063,7 +5157,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, linkedVideoMissing,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, linkedVideoMissing, netProblem,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -5156,6 +5250,9 @@ function SidebarDetail({
   /** True when the linked YouTube video was queried and no longer exists —
    *  the link section shows a warning + Unlink instead of privacy/time. */
   linkedVideoMissing: boolean
+  /** Page-level network problem: 'offline' pauses all pushes, 'yt'
+   *  pauses only YouTube pushes (Twitch is unaffected). */
+  netProblem: null | 'offline' | 'yt'
   onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => Promise<void> | void
   onPushToTwitch: () => Promise<{ categoryApplied: boolean } | void> | void
   ytConnected: boolean
@@ -7545,6 +7642,7 @@ function SidebarDetail({
           // triggered together by Push to all.
           const ytDisabled = ytPushing || !ytConnected || !meta?.ytVideoId || !selectedBroadcast
             || quotaExceeded
+            || netProblem !== null
             || stagedScheduleInPast
             || (!broadcastMismatch && !thumbnailNeedsPush)
           // Effective Twitch values for the in-sync comparison —
@@ -7629,6 +7727,7 @@ function SidebarDetail({
           // option entirely for past streams. Also disable when local
           // meta already matches what's on Twitch (nothing to push).
           const twDisabled = twPushing || !twConnected || isPastStream || twitchInSync
+            || netProblem === 'offline'
           const handleYouTubePush = async () => {
             // Soft-block when the user hasn't picked a category. YouTube
             // requires one on every video; sending undefined preserves
@@ -7802,7 +7901,9 @@ function SidebarDetail({
                       makes the trio 2px taller overall. */}
                   <div className="relative z-10 flex items-center gap-1.5 p-[5px]">
                     <Tooltip content={
-                      !ytConnected ? 'YouTube not connected (Settings → Integrations)'
+                      netProblem === 'offline' ? 'No internet connection.'
+                        : netProblem === 'yt' ? 'YouTube is not responding right now. It usually recovers on its own, try again shortly.'
+                        : !ytConnected ? 'YouTube not connected (Settings → Integrations)'
                         : !meta?.ytVideoId ? 'No linked broadcast or video — link one first'
                         : !selectedBroadcast ? 'Loading broadcast info…'
                         : quotaExceeded ? 'YouTube API quota exceeded — try again after midnight Pacific Time'
@@ -7822,7 +7923,8 @@ function SidebarDetail({
                       </button>
                     </Tooltip>
                     <Tooltip content={
-                      !twConnected ? 'Twitch not connected (Settings → Integrations)'
+                      netProblem === 'offline' ? 'No internet connection.'
+                        : !twConnected ? 'Twitch not connected (Settings → Integrations)'
                         : isPastStream ? 'Past stream — Twitch only reflects the channel’s current state'
                         : twitchInSync ? 'Twitch channel info already matches this stream'
                         : 'Push title/category/tags to Twitch channel'
@@ -7853,7 +7955,8 @@ function SidebarDetail({
                     like the primary Button (purple-800 → purple-700
                     on hover, soft purple-900 shadow). */}
                 <Tooltip content={
-                  allDisabled && stagedScheduleInPast ? 'The staged broadcast time is in the past. Fix the date or time, then push.'
+                  allDisabled && netProblem === 'offline' ? 'No internet connection.'
+                    : allDisabled && stagedScheduleInPast ? 'The staged broadcast time is in the past. Fix the date or time, then push.'
                     : allDisabled ? 'Nothing to push on any connected platform'
                     : 'Push to every connected platform with pending changes. Skips platforms that are already in sync or not connected.'
                 }>

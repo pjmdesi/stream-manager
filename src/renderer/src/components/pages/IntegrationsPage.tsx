@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, Radio, Copy, Check } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, Radio, Copy, Check, WifiOff } from 'lucide-react'
 import type { RelayStatus, RelayStats, OrchestratorEvent } from '../../types'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
@@ -8,6 +8,7 @@ import { Textarea } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
+import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { quotaColor } from '../../lib/quotaColor'
 import { YouTubeImportModal } from '../streams/YouTubeImportModal'
 import { YouTubeLinkModal } from '../streams/YouTubeLinkModal'
@@ -29,6 +30,9 @@ function srFormatDuration(s: number): string {
 
 export function IntegrationsPage() {
   const { config, updateConfig } = useStore()
+  // OS-level connectivity — drives the offline banner and blocks
+  // ENABLING the relay (never disables an already-running session).
+  const online = useOnlineStatus()
 
   // ── YouTube state ─────────────────────────────────────────────────────────
   // Credential inputs bind directly to config (auto-save on every keystroke).
@@ -340,6 +344,20 @@ export function IntegrationsPage() {
       <div className="h-full overflow-y-auto">
       <div className="flex flex-col gap-6 p-4">
 
+        {/* Offline notice — everything on this page needs internet
+            (OAuth flows, API calls, the relay's push to YouTube). */}
+        {!online && (
+          <div className="flex items-start gap-2 text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-md px-3 py-2">
+            <WifiOff size={13} className="shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="font-medium">No internet connection</div>
+              <div className="text-amber-200/80 mt-0.5">
+                Connecting accounts, syncing, and streaming through the relay need internet. This clears on its own once the connection is restored.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── YouTube ─────────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 px-1">
@@ -547,14 +565,19 @@ export function IntegrationsPage() {
               </span>
               <div className="ml-auto">
                 <Tooltip
-                  content="Streaming through the relay right now. Stop your encoder first."
-                  open={srIsStreaming ? undefined : false}
+                  content={srIsStreaming
+                    ? 'Streaming through the relay right now. Stop your encoder first.'
+                    : 'No internet connection.'}
+                  open={srIsStreaming || (!online && !config.streamRelayEnabled) ? undefined : false}
                 >
                   <Checkbox
                     size="sm"
                     checked={config.streamRelayEnabled}
                     onChange={srToggleEnabled}
-                    disabled={!ytConnected || srIsStreaming || (!config.streamRelayEnabled && !srOutboundKeyLooksValid)}
+                    // Offline blocks ENABLING only — turning the relay
+                    // off (or an already-enabled one) stays available,
+                    // and a running session is never touched.
+                    disabled={!ytConnected || srIsStreaming || (!config.streamRelayEnabled && (!srOutboundKeyLooksValid || !online))}
                     label="Enabled"
                   />
                 </Tooltip>

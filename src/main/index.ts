@@ -79,6 +79,7 @@ import { registerTwitchIPC } from './ipc/twitch'
 import { registerVideoPopupIPC } from './ipc/videoPopup'
 import { registerLauncherIPC } from './ipc/launcher'
 import { registerClaudeIPC } from './ipc/claude'
+import { registerNetIPC } from './ipc/net'
 import { registerThumbnailIPC } from './ipc/thumbnail'
 import { registerCloudSyncIPC } from './ipc/cloudSync'
 import { registerStreamRelayIPC } from './ipc/streamRelay'
@@ -412,6 +413,7 @@ app.whenReady().then(() => {
     registerVideoPopupIPC()
     registerLauncherIPC()
     registerClaudeIPC()
+    registerNetIPC()
     registerThumbnailIPC()
     // Stream Relay — registers IPC + auto-starts the ffmpeg child if the
     // user had it enabled when SM last quit. Deferred since the YouTube

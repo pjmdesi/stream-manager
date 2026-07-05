@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import Store from 'electron-store'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
 import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos } from '../services/youtubeApi'
 import * as ytQuotaState from '../services/ytQuotaState'
@@ -14,6 +15,17 @@ function getCreds() {
     clientSecret: (config.youtubeClientSecret ?? '') as string,
   }
 }
+
+// Last-known per-video status (privacy / kind / processing), persisted so
+// the streams list can render badges instantly on launch, even with no
+// network. Disposable UI cache — deliberately NOT in _meta.json (that
+// file is synced, backed up user data). `missing` is never cached so a
+// stale "video deleted" warning can't resurrect from disk; a genuinely
+// missing id is also evicted, for the same reason.
+const ytStatusCache = new Store<{ statuses: Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string }> }>({
+  name: 'yt-status-cache',
+  defaults: { statuses: {} },
+})
 
 export function registerYouTubeIPC(): void {
   // Dev-only: re-apply the persisted force-quota flag on every launch
@@ -109,7 +121,22 @@ export function registerYouTubeIPC(): void {
     const { clientId, clientSecret } = getCreds()
     try {
       const map = await fetchVideoStatuses(videoIds, clientId, clientSecret)
-      return Object.fromEntries(map)
+      const obj = Object.fromEntries(map)
+      // Persist last-known statuses for instant badges on next launch.
+      try {
+        const prev = ytStatusCache.get('statuses', {})
+        const merged: typeof prev = { ...prev }
+        for (const [id, st] of Object.entries(obj)) {
+          if (st.missing) { delete merged[id]; continue }
+          merged[id] = { privacyStatus: st.privacyStatus, isLivestream: st.isLivestream, uploadStatus: st.uploadStatus ?? 'processed' }
+        }
+        // Soft cap — once unlinked videos have accumulated past this,
+        // keep only the ids from the current fetch.
+        const keys = Object.keys(merged)
+        if (keys.length > 2000) for (const k of keys) { if (!(k in obj)) delete merged[k] }
+        ytStatusCache.set('statuses', merged)
+      } catch { /* cache write is best-effort */ }
+      return obj
     } catch {
       // null, NOT {} — the renderer must be able to tell "the fetch
       // failed, keep what you have and retry" from "none of these ids
@@ -117,6 +144,10 @@ export function registerYouTubeIPC(): void {
       // for the whole session on one transient network/API error.
       return null
     }
+  })
+
+  ipcMain.handle('youtube:getVideoStatusCache', () => {
+    try { return ytStatusCache.get('statuses', {}) } catch { return {} }
   })
 
   ipcMain.handle('youtube:checkBroadcastsAreLive', async (_event, broadcastIds: string[]) => {
