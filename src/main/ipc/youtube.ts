@@ -113,7 +113,13 @@ export function registerYouTubeIPC(): void {
       await getValidToken(clientId, clientSecret)
       return { valid: true }
     } catch (e: any) {
-      return { valid: false, error: e.message as string }
+      const msg = (e?.message ?? String(e)) as string
+      // Only a definitive auth response from Google means the token is
+      // actually bad. Anything else (offline, DNS, timeout, 5xx) is a
+      // connectivity problem — reporting those as "expired" sent users
+      // into reconnect flows that couldn't possibly help.
+      const authProblem = /invalid_grant|invalid_client|unauthorized|expired|revoked/i.test(msg)
+      return { valid: false, error: msg, reason: authProblem ? 'auth' as const : 'network' as const }
     }
   })
 

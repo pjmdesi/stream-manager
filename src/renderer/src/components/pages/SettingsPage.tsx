@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Plus, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
+import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
@@ -177,8 +178,11 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
   const { navigateToEditor } = useThumbnailEditor()
   const [cacheSize, setCacheSize] = useState<number>(0)
   const [clearingCache, setClearingCache] = useState(false)
-  const [ytStatus, setYtStatus] = useState<{ connected: boolean; valid: boolean } | null>(null)
+  const [ytStatus, setYtStatus] = useState<{ connected: boolean; valid: boolean; reason?: 'auth' | 'network' } | null>(null)
   const [twStatus, setTwStatus] = useState<{ connected: boolean } | null>(null)
+  // OS-level connectivity — the status chips below show "Offline"
+  // instead of pretending a service is reachable with no internet.
+  const online = useOnlineStatus()
   // Convert dump → folder-per-stream modal state
   const [convertModalOpen, setConvertModalOpen] = useState(false)
   type ConvertManifest = { moves: { from: string; to: string }[]; createdFolders: string[] }
@@ -236,8 +240,8 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
   useEffect(() => {
     window.api.youtubeGetStatus().then(async (s: { connected: boolean }) => {
       if (!s.connected) { setYtStatus({ connected: false, valid: false }); return }
-      const v = await window.api.youtubeValidateToken().catch(() => ({ valid: false }))
-      setYtStatus({ connected: true, valid: v.valid })
+      const v = await window.api.youtubeValidateToken().catch(() => ({ valid: false, reason: 'network' as const }))
+      setYtStatus({ connected: true, valid: v.valid, reason: v.valid ? undefined : ((v as { reason?: 'auth' | 'network' }).reason ?? 'auth') })
       // Categories list — only fetchable when YT is connected. Used to
       // populate the "Default YouTube category" dropdown in the
       // Streams section. Failure is non-fatal — dropdown just stays
@@ -250,6 +254,19 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
       setTwStatus({ connected: s.connected })
     }).catch(() => {})
   }, [])
+  // Re-verify the YouTube token when connectivity returns — a check
+  // that failed offline reads 'network' and would stick until remount.
+  const onlineWasRef = useRef(online)
+  useEffect(() => {
+    const was = onlineWasRef.current
+    onlineWasRef.current = online
+    if (was || !online) return
+    window.api.youtubeGetStatus().then(async (s: { connected: boolean }) => {
+      if (!s.connected) return
+      const v = await window.api.youtubeValidateToken().catch(() => ({ valid: false, reason: 'network' as const }))
+      setYtStatus({ connected: true, valid: v.valid, reason: v.valid ? undefined : ((v as { reason?: 'auth' | 'network' }).reason ?? 'auth') })
+    }).catch(() => {})
+  }, [online])
 
   const [ytCategories, setYtCategories] = useState<{ id: string; title: string; assignable: boolean }[]>([])
 
@@ -455,28 +472,35 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
             <div className="flex items-center gap-4 flex-wrap">
               {ytStatus && (
                 <span className={`flex items-center gap-1.5 text-xs ${
+                  !online ? 'text-amber-400' :
                   ytStatus.connected && ytStatus.valid ? 'text-green-400' :
                   ytStatus.connected && !ytStatus.valid ? 'text-amber-400' :
                   'text-gray-400'
                 }`}>
-                  {ytStatus.connected && !ytStatus.valid
+                  {online && ytStatus.connected && !ytStatus.valid && ytStatus.reason !== 'network'
                     ? <AlertCircle size={18} />
                     : <Youtube size={18} />
                   }
-                  {ytStatus.connected && ytStatus.valid ? 'Connected' :
+                  {!online ? 'Offline' :
+                   ytStatus.connected && ytStatus.valid ? 'Connected' :
+                   ytStatus.connected && ytStatus.reason === 'network' ? 'Can’t reach YouTube' :
                    ytStatus.connected ? 'Token expired' :
                    'Not connected'}
                 </span>
               )}
               {twStatus && (
-                <span className={`flex items-center gap-1.5 text-xs ${twStatus.connected ? 'text-twitch-400' : 'text-gray-400'}`}>
+                <span className={`flex items-center gap-1.5 text-xs ${
+                  !online ? 'text-amber-400' : twStatus.connected ? 'text-twitch-400' : 'text-gray-400'
+                }`}>
                   <Twitch size={18} />
-                  {twStatus.connected ? 'Connected' : 'Not connected'}
+                  {!online ? 'Offline' : twStatus.connected ? 'Connected' : 'Not connected'}
                 </span>
               )}
-              <span className={`flex items-center gap-1.5 text-xs ${local.claudeApiKey ? 'text-orange-400' : 'text-gray-400'}`}>
+              <span className={`flex items-center gap-1.5 text-xs ${
+                !online ? 'text-amber-400' : local.claudeApiKey ? 'text-orange-400' : 'text-gray-400'
+              }`}>
                 <Bot size={18} />
-                {local.claudeApiKey ? 'Connected' : 'Not connected'}
+                {!online ? 'Offline' : local.claudeApiKey ? 'Connected' : 'Not connected'}
               </span>
               <button
                 type="button"

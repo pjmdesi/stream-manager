@@ -222,7 +222,7 @@ declare global {
       youtubeGetBroadcastById(broadcastId: string): Promise<LiveBroadcast | null>
       youtubeGetCategories(regionCode?: string): Promise<{ id: string; title: string; assignable: boolean }[]>
       youtubeUpdateVideo(videoId: string, title: string, description: string, tags: string[], categoryId?: string): Promise<void>
-      youtubeValidateToken(): Promise<{ valid: boolean; error?: string }>
+      youtubeValidateToken(): Promise<{ valid: boolean; error?: string; reason?: 'auth' | 'network' }>
       youtubeGetQualifyingThumbnails(paths: string[]): Promise<{ bestFit: string[]; rest: string[] }>
       youtubeUploadThumbnail(videoId: string, imagePath: string): Promise<void>
       youtubeUpdateBroadcast(broadcastId: string, snippet: { title: string; description: string; scheduledStartTime?: string }, tags: string[], categoryId?: string): Promise<void>

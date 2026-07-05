@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, Radio, Copy, Check, WifiOff } from 'lucide-react'
 import type { RelayStatus, RelayStats, OrchestratorEvent } from '../../types'
 import { Youtube, Twitch } from '../ui/BrandIcons'
@@ -40,6 +40,10 @@ export function IntegrationsPage() {
   const [ytConnected, setYtConnected] = useState(false)
   const [ytTokenValid, setYtTokenValid] = useState(true)
   const [ytTokenError, setYtTokenError] = useState<string | null>(null)
+  // Why the last validation failed: 'auth' = Google rejected the token
+  // (genuinely expired/revoked), 'network' = the check itself couldn't
+  // reach Google — NOT a token problem, so don't say "expired".
+  const [ytTokenIssue, setYtTokenIssue] = useState<'auth' | 'network' | null>(null)
   const [ytConnecting, setYtConnecting] = useState(false)
   const [ytError, setYtError] = useState<string | null>(null)
   const [ytQuota, setYtQuota] = useState<{ exceeded: boolean; resetsAt: string | null; used: number; limit: number } | null>(null)
@@ -252,14 +256,18 @@ export function IntegrationsPage() {
     setClaudeTestResult(null)
   }, [config.claudeApiKey])
 
+  const checkYtToken = useCallback(() => {
+    window.api.youtubeValidateToken().then(r => {
+      setYtTokenValid(r.valid)
+      setYtTokenIssue(r.valid ? null : (r.reason ?? 'auth'))
+      setYtTokenError(r.valid ? null : (r.error ?? 'Token is invalid'))
+    }).catch(() => {})
+  }, [])
   useEffect(() => {
     window.api.youtubeGetStatus().then((s: { connected: boolean }) => {
       setYtConnected(s.connected)
       if (!s.connected) return
-      window.api.youtubeValidateToken().then(r => {
-        setYtTokenValid(r.valid)
-        setYtTokenError(r.valid ? null : (r.error ?? 'Token is invalid'))
-      }).catch(() => {})
+      checkYtToken()
     }).catch(() => {})
     window.api.twitchGetStatus().then((s: { connected: boolean }) => {
       setTwConnected(s.connected)
@@ -268,6 +276,15 @@ export function IntegrationsPage() {
     if (key) loadClaudeModels(key)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // Re-verify the token when connectivity returns — a validation that
+  // failed while offline would otherwise stick as a failure until the
+  // app restarts. Transition-guarded so mount doesn't double-validate.
+  const onlineWasRef = useRef(online)
+  useEffect(() => {
+    const was = onlineWasRef.current
+    onlineWasRef.current = online
+    if (!was && online && ytConnected) checkYtToken()
+  }, [online, ytConnected, checkYtToken])
 
   // Live YouTube quota usage — fetch once, then update on every API call
   // (main pushes 'youtube:quota-changed' as usage accrues / resets at PT midnight).
@@ -284,6 +301,7 @@ export function IntegrationsPage() {
       setYtConnected(true)
       setYtTokenValid(true)
       setYtTokenError(null)
+      setYtTokenIssue(null)
     }
     catch (e: any) { setYtError(e.message) }
     finally { setYtConnecting(false) }
@@ -293,6 +311,7 @@ export function IntegrationsPage() {
     setYtConnected(false)
     setYtTokenValid(true)
     setYtTokenError(null)
+    setYtTokenIssue(null)
   }
 
   // ── Claude actions ────────────────────────────────────────────────────────
@@ -364,18 +383,24 @@ export function IntegrationsPage() {
             <Youtube size={16} className="text-red-400 shrink-0" />
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">YouTube</span>
             <span className={`ml-auto text-xs font-medium ${
+              !online ? 'text-amber-400' :
               ytConnected && ytTokenValid ? 'text-green-400' :
               ytConnected && !ytTokenValid ? 'text-amber-400' :
               'text-gray-400'
             }`}>
-              {ytConnected && ytTokenValid ? 'Connected' :
+              {!online ? 'Offline' :
+               ytConnected && ytTokenValid ? 'Connected' :
+               ytConnected && ytTokenIssue === 'network' ? 'Can’t reach YouTube' :
                ytConnected && !ytTokenValid ? 'Token expired' :
                'Not connected'}
             </span>
           </div>
 
-          {/* Token expired banner */}
-          {ytConnected && !ytTokenValid && (
+          {/* Token expired banner — genuine auth failures only. A check
+              that failed for network reasons says nothing about the
+              token, and the Reconnect flow can't help (or even run)
+              without internet. */}
+          {online && ytConnected && !ytTokenValid && ytTokenIssue === 'auth' && (
             <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
               <AlertCircle size={15} className="text-amber-400 shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
@@ -786,8 +811,10 @@ export function IntegrationsPage() {
           <div className="flex items-center gap-2 px-1">
             <Twitch size={16} className="text-twitch-400 shrink-0" />
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Twitch</span>
-            <span className={`ml-auto text-xs font-medium ${twConnected ? 'text-green-400' : 'text-gray-400'}`}>
-              {twConnected ? 'Connected' : 'Not connected'}
+            <span className={`ml-auto text-xs font-medium ${
+              !online ? 'text-amber-400' : twConnected ? 'text-green-400' : 'text-gray-400'
+            }`}>
+              {!online ? 'Offline' : twConnected ? 'Connected' : 'Not connected'}
             </span>
           </div>
 
@@ -898,8 +925,10 @@ export function IntegrationsPage() {
           <div className="flex items-center gap-2 px-1">
             <Bot size={16} className="text-orange-400 shrink-0" />
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Claude AI</span>
-            <span className={`ml-auto text-xs font-medium ${config.claudeApiKey ? 'text-green-400' : 'text-gray-400'}`}>
-              {config.claudeApiKey ? 'Connected' : 'Not connected'}
+            <span className={`ml-auto text-xs font-medium ${
+              !online ? 'text-amber-400' : config.claudeApiKey ? 'text-green-400' : 'text-gray-400'
+            }`}>
+              {!online ? 'Offline' : config.claudeApiKey ? 'Connected' : 'Not connected'}
             </span>
           </div>
 
