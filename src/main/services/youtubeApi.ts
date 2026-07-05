@@ -399,11 +399,15 @@ export interface YouTubeImportVideo {
   categoryId?: string
   /** 'public' | 'unlisted' | 'private' */
   privacyStatus: string
-  /** Local YYYY-MM-DD: actual stream start for livestreams, else publish date. */
+  /** Local YYYY-MM-DD: actual stream start for livestreams, scheduled
+   *  start for upcoming broadcasts, else publish date. */
   date: string
   /** Raw ISO publish timestamp. */
   publishedAt: string
   isLivestream: boolean
+  /** Scheduled broadcast that hasn't started yet — labeled "Upcoming"
+   *  in the import list instead of the misleading "Draft". */
+  isUpcoming: boolean
   /** status.uploadStatus — 'processed' for a normal published video; drafts and
    *  failed/rejected uploads report something else. */
   uploadStatus: string
@@ -503,7 +507,13 @@ export async function getChannelVideos(
         ? Number(vs.aspectRatio) < 1
         : (vs?.widthPixels && vs?.heightPixels) ? vs.heightPixels > vs.widthPixels : undefined
       if (!live && durationSeconds != null && durationSeconds <= SHORT_MAX_SECONDS && portrait !== false) continue
-      const dateIso = (live?.actualStartTime as string | undefined) || sn.publishedAt
+      // Upcoming scheduled broadcasts have no actualStartTime yet — date
+      // them by their scheduled start, not the day they were created in
+      // Studio (importing next Friday's broadcast used to make a folder
+      // dated today).
+      const dateIso = (live?.actualStartTime as string | undefined)
+        || (live?.scheduledStartTime as string | undefined)
+        || sn.publishedAt
       out.push({
         videoId: item.id,
         title: sn.title ?? '',
@@ -514,6 +524,7 @@ export async function getChannelVideos(
         date: isoToLocalDate(dateIso),
         publishedAt: sn.publishedAt ?? '',
         isLivestream: !!live,
+        isUpcoming: !!live && !live.actualStartTime && !!live.scheduledStartTime,
         uploadStatus: item.status?.uploadStatus ?? 'processed',
         durationSeconds,
         thumbnailUrl: pickThumbUrl(sn.thumbnails),

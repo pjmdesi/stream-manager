@@ -296,7 +296,9 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
                       ? <span className={`px-1.5 rounded border inline-flex items-center gap-1 ${p.cls}`}><p.Icon size={9} /> {p.label}</span>
                       : <span className="px-1.5 rounded border border-white/20 text-gray-400">{v.privacyStatus}</span>}
                     {imported && <span className="px-1.5 rounded border border-blue-400/40 text-blue-300">Imported</span>}
-                    {isDraft && <span className="px-1.5 rounded border border-amber-400/40 text-amber-300">Draft</span>}
+                    {v.isUpcoming
+                      ? <span className="px-1.5 rounded border border-teal-400/40 text-teal-300">Upcoming</span>
+                      : isDraft && <span className="px-1.5 rounded border border-amber-400/40 text-amber-300">Draft</span>}
                   </div>
                 </div>
                 <Tooltip content="Open in YouTube Studio" triggerClassName="shrink-0">

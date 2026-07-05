@@ -1677,12 +1677,22 @@ export function registerStreamsIPC(): void {
     // which is enough on its own to make a directory rename fail with EPERM.
     // Cloud-sync clients (Synology Drive, OneDrive) can also briefly lock the
     // folder, so we still retry a few times.
-    const oldKey = isDump ? oldDate : path.basename(folderPath)
-    const newKey = isDump ? newDate : nextFolderName(path.dirname(folderPath), newDate)
-    const needsFolderRename = !isDump && oldKey !== newKey
+    // Folder NAMES are basenames; meta KEYS are root-relative (metaKey —
+    // the same keys listStreams hands out as relativePath). The old code
+    // used basenames for both, so in nested layouts (year/month/stream)
+    // the meta lookup below missed entirely: the folder renamed on disk
+    // while its meta entry (title, YT link, videoMap) stayed orphaned
+    // under the old key. Flat layouts were unaffected because basename
+    // and relative path coincide there.
+    const oldName = path.basename(folderPath)
+    const newName = isDump ? oldName : nextFolderName(path.dirname(folderPath), newDate)
+    const newFolderPathPlanned = isDump ? folderPath : path.join(path.dirname(folderPath), newName)
+    const oldKey = isDump ? oldDate : metaKey(streamsDir, folderPath)
+    const newKey = isDump ? newDate : metaKey(streamsDir, newFolderPathPlanned)
+    const needsFolderRename = !isDump && oldName !== newName
     let finalFolderPath = folderPath
     if (needsFolderRename) {
-      const newFolderPath = path.join(path.dirname(folderPath), newKey)
+      const newFolderPath = newFolderPathPlanned
       const restartWatcher = await pauseDirWatcher()
       let lastErr: unknown = null
       try {

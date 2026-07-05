@@ -597,10 +597,14 @@ export interface YouTubeImportVideo {
   tags: string[]
   categoryId?: string
   privacyStatus: string
-  /** Local YYYY-MM-DD: actual stream start for livestreams, else publish date. */
+  /** Local YYYY-MM-DD: actual stream start for livestreams, scheduled
+   *  start for upcoming broadcasts, else publish date. */
   date: string
   publishedAt: string
   isLivestream: boolean
+  /** Scheduled broadcast that hasn't started yet — labeled "Upcoming"
+   *  in the import list instead of the misleading "Draft". */
+  isUpcoming: boolean
   /** status.uploadStatus — non-'processed' marks drafts / failed uploads. */
   uploadStatus: string
   durationSeconds?: number

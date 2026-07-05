@@ -89,6 +89,7 @@
 
 1. The spinner for a "processing" stream item in the stream item row tag starts showing on a "today" stream item before the stream has even started, but it's only relevant for streams that have finished and are still processing on YouTube's side. The spinner should only show for streams that have finished and are still processing, not for streams that haven't started yet. We need to check for if the stream actually happened yet and if it has finished before showing the spinner.
 2. Messages in the relay widget are getting cut off by the narrow width of the widget. We need to make sure a tooltip appears when the user hovers over a message that is too long to fit in the widget, so they can see the full message. and we should make sure that the text gets truncated properly with an ellipsis when it doesn't fit in the widget, so the user knows this is happening.
+3. The close button for the launcher sidebar needs to be styled like the other close buttons throughout the app, for instance the detail sidebar on the streams page.
 
 ## Other ideas (small)
 
