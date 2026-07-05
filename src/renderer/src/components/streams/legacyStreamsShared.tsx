@@ -4954,7 +4954,10 @@ export function StreamsPage({
   useEffect(() => {
     if (!ytConnectedOuter || !linkedYtIdsKey) return
     const ids = linkedYtIdsKey.split(',')
-    window.api.youtubeGetVideoStatuses(ids).then(setYtVideoStatusMap).catch(() => {})
+    // null = fetch failed — keep the last-known statuses instead of
+    // blanking every badge (the modern page adds retries on top; this
+    // legacy copy just needs to not destroy state).
+    window.api.youtubeGetVideoStatuses(ids).then(m => { if (m) setYtVideoStatusMap(m) }).catch(() => {})
   }, [ytConnectedOuter, linkedYtIdsKey])
 
   // Collect every upcoming linked broadcast as a stable joined key so the

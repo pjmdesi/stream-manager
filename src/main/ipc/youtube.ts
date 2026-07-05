@@ -111,7 +111,11 @@ export function registerYouTubeIPC(): void {
       const map = await fetchVideoStatuses(videoIds, clientId, clientSecret)
       return Object.fromEntries(map)
     } catch {
-      return {}
+      // null, NOT {} — the renderer must be able to tell "the fetch
+      // failed, keep what you have and retry" from "none of these ids
+      // exist anymore". An empty object here blanked every status badge
+      // for the whole session on one transient network/API error.
+      return null
     }
   })
 

@@ -810,9 +810,78 @@ export function StreamsPage({
   ), [folders])
   useEffect(() => {
     if (!ytConnected || !linkedYtIdsKey) return
-    const ids = linkedYtIdsKey.split(',')
-    window.api.youtubeGetVideoStatuses(ids).then(setYtVideoStatusMap).catch(() => {})
+    const allIds = linkedYtIdsKey.split(',')
+    // Transient-failure recovery, two shapes, one retry ladder:
+    //   • fetch failed outright (null — network still waking up, YT
+    //     5xx, quota): retry the full id list, keeping the previous map
+    //     so one bad fetch doesn't blank every badge for the session;
+    //   • ids flagged `missing`: videos.list lags the broadcasts index
+    //     for brand-new broadcasts, so "missing" seconds after Create
+    //     broadcast is usually propagation, not deletion — re-check
+    //     just those ids.
+    // The ladder stops after ~8.5 minutes: a video still missing by
+    // then is genuinely gone, and polling it all session would burn
+    // quota for nothing. Any link change re-arms the ladder from the
+    // top (this effect re-runs on the id-set key).
+    const RETRY_LADDER = [15_000, 30_000, 60_000, 120_000, 300_000]
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const attempt = (ids: string[], rung: number) => {
+      window.api.youtubeGetVideoStatuses(ids)
+        .then(res => {
+          if (cancelled) return
+          if (!res) {
+            if (rung < RETRY_LADDER.length) timer = setTimeout(() => attempt(ids, rung + 1), RETRY_LADDER[rung])
+            return
+          }
+          // Merge over the previous map — a subset retry must not blank
+          // the other ids' badges — but prune ids that are no longer
+          // linked, so a stale 'uploaded' entry can't keep the
+          // processing poll below alive for an unlinked video.
+          setYtVideoStatusMap(prev => {
+            const keep = new Set(allIds)
+            const next: typeof prev = {}
+            for (const [id, st] of Object.entries(prev)) if (keep.has(id)) next[id] = st
+            return { ...next, ...res }
+          })
+          const stillMissing = ids.filter(id => res[id]?.missing)
+          if (stillMissing.length > 0 && rung < RETRY_LADDER.length) {
+            timer = setTimeout(() => attempt(stillMissing, rung + 1), RETRY_LADDER[rung])
+          }
+        })
+        .catch(() => {})
+    }
+    attempt(allIds, 0)
+    return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [ytConnected, linkedYtIdsKey])
+  // Effective status map for the UI: `missing` flags cross-checked
+  // against the loaded broadcast/VOD pools. An id present in either
+  // pool is provably alive whatever videos.list says (its index can lag
+  // for brand-new broadcasts), so the "video was deleted" treatment is
+  // suppressed and the badge borrows the pool's privacy status while
+  // the videos index catches up. Costs nothing — both pools are already
+  // in memory.
+  const effectiveYtVideoStatusMap = useMemo(() => {
+    const flagged = Object.entries(ytVideoStatusMap).filter(([, s]) => s.missing)
+    if (flagged.length === 0) return ytVideoStatusMap
+    const poolIds = new Map<string, LiveBroadcast>()
+    for (const b of ytBroadcasts) poolIds.set(b.id, b)
+    for (const v of ytVods) poolIds.set(v.id, v)
+    let changed = false
+    const next = { ...ytVideoStatusMap }
+    for (const [id, st] of flagged) {
+      const pooled = poolIds.get(id)
+      if (!pooled) continue
+      next[id] = {
+        ...st,
+        missing: false,
+        isLivestream: true,
+        privacyStatus: st.privacyStatus || pooled.status?.privacyStatus || '',
+      }
+      changed = true
+    }
+    return changed ? next : ytVideoStatusMap
+  }, [ytVideoStatusMap, ytBroadcasts, ytVods])
 
   // Live-now tracking for upcoming linked broadcasts. 60s poll for
   // baseline freshness; the relay-orchestrator push subscription below
@@ -891,7 +960,7 @@ export function StreamsPage({
     if (!ytConnected || !processingYtIdsKey) return
     const ids = processingYtIdsKey.split(',')
     const poll = () => window.api.youtubeGetVideoStatuses(ids)
-      .then(updates => setYtVideoStatusMap(prev => ({ ...prev, ...updates })))
+      .then(updates => { if (updates) setYtVideoStatusMap(prev => ({ ...prev, ...updates })) })
       .catch(() => {})
     // No immediate poll — the current status is already fresh from the
     // linked-ids fetch; just re-check every 10 minutes.
@@ -3140,7 +3209,7 @@ export function StreamsPage({
                   const today = todayStr()
                   return visibleFolders.map((f, i) => {
                     const ytId = f.meta?.ytVideoId
-                    const status = ytId ? ytVideoStatusMap[ytId] : undefined
+                    const status = ytId ? effectiveYtVideoStatusMap[ytId] : undefined
                     const isLiveNow = !!(ytId && ytLiveMap[ytId])
                     // Show the "processing" spinner only once a stream could
                     // actually have a VOD cooking: not live right now, and
@@ -3380,7 +3449,7 @@ export function StreamsPage({
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
               onDelete={() => setDeleteTargetKey(renderedFolder.relativePath)}
               deleteBlockReason={streamReason(renderedFolder.folderPath, isDumpMode ? [...renderedFolder.videos, ...renderedFolder.thumbnails] : undefined)}
-              linkedVideoMissing={!!renderedFolder.meta?.ytVideoId && ytVideoStatusMap[renderedFolder.meta.ytVideoId]?.missing === true}
+              linkedVideoMissing={!!renderedFolder.meta?.ytVideoId && effectiveYtVideoStatusMap[renderedFolder.meta.ytVideoId]?.missing === true}
               onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
               onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
               // The two callbacks above already return the promise from
