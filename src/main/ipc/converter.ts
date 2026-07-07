@@ -300,14 +300,21 @@ async function ensureHydrated(jobId: string): Promise<void> {
 }
 
 // ── Pending-queue persistence ─────────────────────────────────────────────
-// Only jobs with status 'queued' (auto-rules with start-immediately disabled)
-// survive across restarts. Running/paused/done/error/cancelled are dropped
-// because their underlying ffmpeg state isn't recoverable.
+// Queued jobs survive verbatim; in-flight jobs (running / downloading /
+// replacing / paused) persist RE-QUEUED — their ffmpeg state isn't
+// recoverable, but silently dropping them (the old behavior) meant an
+// archive group interrupted by a quit lost its running member: the group
+// completion hook then saw only the survivors and could stamp a stream
+// "archived" with one file never actually converted. Done/error/cancelled
+// are dropped as before.
 const PENDING_JOBS_KEY = 'pendingJobs'
+const PERSIST_RESUMABLE = new Set(['queued', 'running', 'downloading', 'replacing', 'paused'])
 
 function persistPendingJobs(): void {
-  const queued = [...jobs.values()].filter(j => j.status === 'queued')
-  getStore().set(PENDING_JOBS_KEY, queued)
+  const pending = [...jobs.values()]
+    .filter(j => PERSIST_RESUMABLE.has(j.status))
+    .map(j => (j.status === 'queued' ? j : { ...j, status: 'queued' as const, progress: 0 }))
+  getStore().set(PENDING_JOBS_KEY, pending)
 }
 
 export function restorePendingJobs(): void {
@@ -323,6 +330,12 @@ export function restorePendingJobs(): void {
     console.warn(`[converter] dropped ${dropped} pending job(s) — input file missing`)
     persistPendingJobs()
   }
+  // Kick the scheduler so interrupted GROUP jobs (archives) resume on
+  // launch — restored queues used to sit inert until something else
+  // happened to call scheduleNext. Parked non-group jobs (auto-rules
+  // with start-immediately off) are untouched: scheduleNext only
+  // auto-starts queued jobs that carry a groupId.
+  scheduleNext()
 }
 
 // ── HandBrake JSON → ffmpeg args translation ───────────────────────────────
@@ -771,17 +784,44 @@ export async function startConversionJob(
         const inputIsLocal = async () => (await checkLocalFiles([job.inputFile]))[0]
         if (!(await inputIsLocal())) {
           setStatus('downloading')
-          const flag = { cancelled: false }
+          const flag = { cancelled: false, paused: false }
           downloadCancelFlags.set(id, flag)
           // Cancel handler available during the download wait — the cancel IPC
           // looks up cancellers.get(id) and calls it.
           cancellers.set(id, () => { flag.cancelled = true })
+          // Pause during the download phase: the sync client's transfer
+          // can't be paused from here, but the user's intent CAN be
+          // honored by not launching the encode when the file lands.
+          // Without these, the pause button set status 'paused' while the
+          // poll kept running and silently un-paused the job minutes
+          // later. (The encode section replaces these with the real
+          // ffmpeg suspend/resume handles once it starts.)
+          pausers.set(id, () => { flag.paused = true })
+          resumers.set(id, () => { flag.paused = false })
           fs.open(job.inputFile, 'r', (err, fd) => {
             if (err) return
             const buf = Buffer.alloc(1)
             fs.read(fd, buf, 0, 1, 0, () => fs.close(fd, () => {}))
           })
-          while (!flag.cancelled && !(await inputIsLocal())) {
+          // Timeout guards a download that will never finish (sync client
+          // paused or offline) — the job used to sit "downloading"
+          // forever. The clock resets while paused so a long deliberate
+          // pause can't expire the job.
+          const DOWNLOAD_TIMEOUT_MS = 2 * 60 * 60 * 1000
+          let downloadClock = Date.now()
+          for (;;) {
+            if (flag.cancelled) break
+            if (flag.paused) {
+              downloadClock = Date.now()
+              await new Promise(r => setTimeout(r, 500))
+              continue
+            }
+            if (await inputIsLocal()) break
+            if (Date.now() - downloadClock > DOWNLOAD_TIMEOUT_MS) {
+              downloadCancelFlags.delete(id)
+              handleError(new Error('Cloud download timed out after 2 hours. Check that the sync client is running and the file is available, then requeue.'))
+              return
+            }
             await new Promise(r => setTimeout(r, 2000))
           }
           downloadCancelFlags.delete(id)

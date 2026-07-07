@@ -1,7 +1,7 @@
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
-import { spawn, spawnSync } from 'child_process'
+import { spawn } from 'child_process'
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -500,11 +500,23 @@ public class NtProc {
 }
 `
 
+/** Fire-and-forget PowerShell invocation with a hard kill timeout. The old
+ *  spawnSync versions blocked the MAIN PROCESS 1-2s per call (PowerShell
+ *  startup + Add-Type compile) — "Pause all" stacked that into a
+ *  multi-second hard freeze, N jobs deep. Suspend/resume don't need a
+ *  result, so async is free. */
+function runNtProcCommand(pid: number, fn: 'NtSuspendProcess' | 'NtResumeProcess'): void {
+  const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+    `Add-Type -TypeDefinition '${WIN_NT_TYPE_DEF.replace(/\n/g, ' ')}'; $p=[System.Diagnostics.Process]::GetProcessById(${pid}); [NtProc]::${fn}($p.Handle)`
+  ], { stdio: 'ignore' })
+  const t = setTimeout(() => { try { proc.kill() } catch { /* already gone */ } }, 5000)
+  proc.on('exit', () => clearTimeout(t))
+  proc.on('error', () => clearTimeout(t))
+}
+
 function suspendProcess(pid: number): void {
   if (process.platform === 'win32') {
-    spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
-      `Add-Type -TypeDefinition '${WIN_NT_TYPE_DEF.replace(/\n/g, ' ')}'; $p=[System.Diagnostics.Process]::GetProcessById(${pid}); [NtProc]::NtSuspendProcess($p.Handle)`
-    ], { timeout: 5000 })
+    runNtProcCommand(pid, 'NtSuspendProcess')
   } else {
     process.kill(pid, 'SIGSTOP')
   }
@@ -512,9 +524,7 @@ function suspendProcess(pid: number): void {
 
 function resumeProcess(pid: number): void {
   if (process.platform === 'win32') {
-    spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
-      `Add-Type -TypeDefinition '${WIN_NT_TYPE_DEF.replace(/\n/g, ' ')}'; $p=[System.Diagnostics.Process]::GetProcessById(${pid}); [NtProc]::NtResumeProcess($p.Handle)`
-    ], { timeout: 5000 })
+    runNtProcCommand(pid, 'NtResumeProcess')
   } else {
     process.kill(pid, 'SIGCONT')
   }
