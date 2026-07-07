@@ -3309,17 +3309,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       ? await window.api.thumbnailLoadCanvas(folderPath, date, initialVariant)
       : null
 
-    // smThumbnailTemplate records which template this stream's thumbnail
-    // was last built from (written on every canvas save, inherited by New
-    // Episode for series consistency). No saved canvas but the record
-    // present = a fresh episode → auto-apply it and skip the picker.
-    // Delete flows clear the record when a stream's last SM thumbnail
-    // goes, so a deliberately emptied stream asks fresh.
-    const presetTemplate = !canvas && meta?.smThumbnailTemplate
-      ? freshTemplates.find((t: ThumbnailTemplate) => t.id === meta.smThumbnailTemplate)
-      : null
-
-    if (!canvas && !presetTemplate && freshTemplates.length > 0) {
+    // No canvas → always ask which template to start from (or blank).
+    // meta.smThumbnailTemplate is only a RECORD of which template the
+    // last saved canvas used (doSave writes it; New Episode inherits it
+    // alongside the copied thumbnail files). It is deliberately NOT
+    // auto-applied here: a new episode arrives with its canvas files
+    // already copied, so the only way to reach this point with the
+    // record set is a stale leftover (thumbnails deleted) — and
+    // silently re-applying that template instead of asking was a
+    // reported bug.
+    if (!canvas && freshTemplates.length > 0) {
       // No existing canvas, no preselection, but templates exist → ask user to pick one first.
       // When a variant EXISTED but its JSON couldn't be read (deleted or
       // corrupt), bind the picker to THAT ordinal — confirmPickTemplate
@@ -3337,18 +3336,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setVariants(foundVariants.length > 0 ? foundVariants : [1])
     setCurrentVariant(initialVariant)
     setSelectedIds([])
-    // Local layer ref so the eager-save path below can pass the new
-    // layers directly without waiting on a state read.
-    let seededLayers: ThumbnailLayer[] | null = null
     if (canvas) {
       resetLayers(canvas.layers)
       setCurrentTemplateId(canvas.templateId)
-    } else if (presetTemplate) {
-      const fresh = presetTemplate.layers.map((l: ThumbnailLayer) => ({ ...l, id: newId() }))
-      seededLayers = fresh
-      resetLayers(fresh)
-      setCurrentTemplateId(presetTemplate.id)
     } else {
+      // No templates exist at all (picker skipped) — open a blank canvas.
       resetLayers([])
       setCurrentTemplateId(undefined)
     }
@@ -3357,20 +3349,6 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     // Add to recents
     const entry: ThumbnailRecentEntry = { folderPath, date, title, updatedAt: Date.now() }
     window.api.thumbnailAddRecent(entry).then(setRecents).catch(() => {})
-    // Eager save for the preset-template path so a stream item bound
-    // to a built-in template at creation time gets its PNG + JSON on
-    // disk immediately — without this the thumbnail only persists
-    // after the user nudges a layer. Same rAF wait as
-    // confirmPickTemplate so react-konva commits the seeded layers
-    // to the stage before getCanvasDataUrl reads it.
-    if (seededLayers !== null && presetTemplate) {
-      // Capture as a non-nullable const before the await so TS keeps
-      // the narrow across the suspension point.
-      const layersToSave: ThumbnailLayer[] = seededLayers
-      const templateIdToSave: string = presetTemplate.id
-      await new Promise<void>(r => requestAnimationFrame(() => r()))
-      await doSave(layersToSave, folderPath, date, templateIdToSave, initialVariant)
-    }
     // Self-heal a missing render: the variant's editable JSON exists (that's
     // how we got here) but its PNG is gone — deleted externally, or a save
     // that wrote the JSON but never finished the image. Regenerate it from the
