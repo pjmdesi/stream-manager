@@ -292,14 +292,47 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   const setFileAudioTrack = (p: string, audioTrackIndex: number) =>
     setQueuedFiles(prev => prev.map(f => f.path === p ? { ...f, audioTrackIndex } : f))
 
+  /** Collision-proof output path. `<base>_<preset>.<ext>` collides whenever
+   *  the output already exists on disk (silently overwritten via -y) or
+   *  another queued/active job produces the same name — two LIVE jobs then
+   *  interleave writes into ONE file and corrupt it. Bumps a `-2` style
+   *  suffix until the candidate is free; `claimed` accumulates within a
+   *  batch so its own jobs can't collide with each other either. */
+  const uniqueOutputPath = async (candidate: string, claimed: Set<string>): Promise<string> => {
+    const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+    const dot = candidate.lastIndexOf('.')
+    const stem = candidate.slice(0, dot)
+    const ext = candidate.slice(dot)
+    let out = candidate
+    let n = 2
+    while (claimed.has(norm(out)) || await window.api.fileExists(out)) {
+      out = `${stem}-${n}${ext}`
+      n++
+    }
+    claimed.add(norm(out))
+    return out
+  }
+  /** Outputs already claimed by jobs still in flight (any state that can
+   *  still write, plus done rows whose file is on disk anyway — covered
+   *  by the fileExists check, so only in-flight states matter here). */
+  const claimedOutputs = () => new Set(
+    jobs
+      .filter(j => j.status === 'queued' || j.status === 'downloading' || j.status === 'running' || j.status === 'replacing' || j.status === 'paused')
+      .map(j => j.outputFile.replace(/\\/g, '/').toLowerCase())
+  )
+
   /** Queue one ready file as a conversion job, then drop it from the ready list. */
   const startOne = async (file: { path: string; presetId: string; outputDir: string; audioTrackIndex?: number }) => {
     const preset = presetForId(file.presetId)
     if (!preset) return
+    const outputFile = await uniqueOutputPath(
+      getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex)),
+      claimedOutputs(),
+    )
     const job: ConversionJob = {
       id: uuidv4(),
       inputFile: file.path,
-      outputFile: getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex)),
+      outputFile,
       preset,
       status: 'queued',
       progress: 0,
@@ -323,15 +356,19 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     // Build every job up front so the UI can update in one tick — add them all
     // to Converting and clear the started files from the ready list — before
     // firing the IPC calls, so nothing lingers in both panels during the loop.
-    const jobs: ConversionJob[] = []
+    const newJobs: ConversionJob[] = []
     const startedPaths = new Set<string>()
+    const claimed = claimedOutputs()
     for (const file of queuedFiles) {
       const preset = presetForId(file.presetId)
       if (!preset) continue
-      jobs.push({
+      newJobs.push({
         id: uuidv4(),
         inputFile: file.path,
-        outputFile: getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex)),
+        outputFile: await uniqueOutputPath(
+          getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex)),
+          claimed,
+        ),
         preset,
         status: 'queued',
         progress: 0,
@@ -341,11 +378,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
       })
       startedPaths.add(file.path)
     }
-    if (jobs.length === 0) return
+    if (newJobs.length === 0) return
 
-    setJobs(prev => [...prev, ...jobs])
+    setJobs(prev => [...prev, ...newJobs])
     setQueuedFiles(prev => prev.filter(f => !startedPaths.has(f.path)))
-    for (const job of jobs) await window.api.addToQueue(job)
+    for (const job of newJobs) await window.api.addToQueue(job)
   }
 
   const removeJob = (id: string) => {

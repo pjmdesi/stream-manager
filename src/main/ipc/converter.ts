@@ -282,7 +282,9 @@ async function ensureHydrated(jobId: string): Promise<void> {
       if (cur2) {
         jobs.set(jobId, { ...cur2, status: 'cancelled' })
         notifyAll('converter:jobStatus', { jobId, status: 'cancelled' })
-        notifyAll('converter:jobError', { jobId, error: 'Cancelled' })
+        // NO jobError here — cancelling is a user action, and the error
+        // event overwrote the row's 'cancelled' state with a red error,
+        // losing the Requeue affordance.
       }
       scheduleNext()
       return
@@ -761,9 +763,13 @@ export async function startConversionJob(
         // ── Cloud-hydrate wait ──────────────────────────────────────────────
         // If the input is a cloud placeholder, kick the OS into hydrating it
         // and poll until it's local. Cancel-aware — the cancel IPC flips the
-        // flag, the next poll iteration sees it and aborts.
-        const { isFileConfirmedLocal } = await import('./files')
-        if (!isFileConfirmedLocal(job.inputFile)) {
+        // flag, the next poll iteration sees it and aborts. Uses the ASYNC
+        // attribute check: the old isFileConfirmedLocal was a synchronous
+        // PowerShell spawn (up to 5s) every 2s for the whole download,
+        // hard-blocking the main process.
+        const { checkLocalFiles } = await import('./files')
+        const inputIsLocal = async () => (await checkLocalFiles([job.inputFile]))[0]
+        if (!(await inputIsLocal())) {
           setStatus('downloading')
           const flag = { cancelled: false }
           downloadCancelFlags.set(id, flag)
@@ -775,12 +781,21 @@ export async function startConversionJob(
             const buf = Buffer.alloc(1)
             fs.read(fd, buf, 0, 1, 0, () => fs.close(fd, () => {}))
           })
-          while (!flag.cancelled && !isFileConfirmedLocal(job.inputFile)) {
+          while (!flag.cancelled && !(await inputIsLocal())) {
             await new Promise(r => setTimeout(r, 2000))
           }
           downloadCancelFlags.delete(id)
           if (flag.cancelled) {
-            handleError(new Error('Cancelled'))
+            // Cancelled is a user action, not an error — handleError painted
+            // the row red and lost the Requeue affordance.
+            jobs.set(id, { ...jobs.get(id)!, status: 'cancelled' })
+            cancellers.delete(id)
+            pausers.delete(id)
+            resumers.delete(id)
+            notifyAll('converter:jobStatus', { jobId: id, status: 'cancelled' })
+            maybeFireGroupHook(id)
+            scheduleNext()
+            resolve()
             return
           }
           setStatus('running')
@@ -887,7 +902,12 @@ export function getConverterStatus(): { active: boolean; percent: number; label:
 export function getActiveConversionCounts(): { running: number; queued: number } {
   let running = 0, queued = 0
   for (const j of jobs.values()) {
-    if (j.status === 'running') running++
+    // "Running" for quit-confirm purposes = any job that dying would
+    // strand mid-work: encoding, downloading its input, mid archive-swap,
+    // or paused (a suspended ffmpeg child dies with the app, leaving
+    // __arc_tmp partials). Counting only 'running' let quits kill these
+    // silently.
+    if (j.status === 'running' || j.status === 'downloading' || j.status === 'replacing' || j.status === 'paused') running++
     else if (j.status === 'queued') queued++
   }
   return { running, queued }

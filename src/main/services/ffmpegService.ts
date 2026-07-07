@@ -696,8 +696,11 @@ export function runClipConversion(params: {
     return { cancel: () => {}, pause: () => {}, resume: () => {} }
   }
 
-  // Build args: -i temp0 -i temp1 ... -filter_complex "..." [output args] outputFile
-  const args: string[] = []
+  // Build args: -y -i temp0 -i temp1 ... -filter_complex "..." [output args] outputFile
+  // -y matches every other conversion path — without it, the natural
+  // tweak-and-re-export flow (same clip name) died on ffmpeg's
+  // "File exists. Not overwriting" prompt-refusal.
+  const args: string[] = ['-y']
   for (const f of inputFiles) args.push('-i', f)
   args.push('-filter_complex', filterComplex)
   args.push(...outputArgs, outputFile)
