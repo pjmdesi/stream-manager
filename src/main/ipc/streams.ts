@@ -1870,20 +1870,33 @@ export function registerStreamsIPC(): void {
 
   function notifyChange(win: BrowserWindow) {
     if (debounceTimer) clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(() => {
-      // Skip the chokidar echo when a known local write just fired its
-      // own explicit streams:changed (thumbnail save, converter
-      // completion, etc.) — without this guard the renderer reloads
-      // twice for every such action: once instantly via the explicit
-      // send, then again ~1.8s later when chokidar settles on the same
-      // file. The window is set via `suppressChokidarFireFor` from
-      // those handlers. Check is at FIRE time (inside the debounce
-      // callback) rather than at notifyChange entry — that handles
-      // the converter case where chokidar's `add` event can arrive
-      // *before* the completion handler sets the suppression window,
-      // since the encoding finished a while before the handler runs.
-      if (Date.now() < suppressChokidarUntil) return
-      if (!win.isDestroyed()) win.webContents.send('streams:changed')
+    debounceTimer = setTimeout(function fire(isDeferred?: boolean) {
+      // Suppression check is at FIRE time (inside the debounce callback)
+      // rather than at notifyChange entry — that handles the converter
+      // case where chokidar's `add` event can arrive *before* the
+      // completion handler sets the suppression window, since the
+      // encoding finished a while before the handler runs.
+      //
+      // A known local write just fired its own explicit streams:changed
+      // (thumbnail save, converter completion, etc.), so a fire inside
+      // the window is usually that write's chokidar echo — reloading for
+      // it would double every such action. But the window is GLOBAL: the
+      // fire can just as well be a genuinely external change (OBS
+      // delivering a recording, a user dropping in files) that has
+      // nothing to do with the write that armed it. So DEFER to just
+      // past the window instead of dropping — dropped fires left the
+      // list stale until an unrelated event. Deferred fires are sent
+      // with `quiet: true` so the renderer reconciles data without the
+      // full thumbnail cache-bust flash: an echo-only defer reloads
+      // invisibly, a real change still appears (a few seconds late).
+      const waitMs = suppressChokidarUntil - Date.now()
+      if (waitMs > 0) {
+        debounceTimer = setTimeout(() => fire(true), waitMs + 50)
+        return
+      }
+      if (!win.isDestroyed()) {
+        win.webContents.send('streams:changed', isDeferred ? { quiet: true } : undefined)
+      }
     }, DEBOUNCE_MS)
   }
 

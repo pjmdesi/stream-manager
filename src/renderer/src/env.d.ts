@@ -176,7 +176,7 @@ declare global {
       deleteStreamFiles(dir: string, date: string): Promise<void>
       watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
       unwatchStreamsDir(): Promise<void>
-      onStreamsChanged(cb: () => void): () => void
+      onStreamsChanged(cb: (info?: { quiet?: boolean }) => void): () => void
       getMetaHealth(): Promise<{ ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string; note?: { kind: 'restored'; from: string; at: string } }>
       onMetaHealth(cb: (health: { ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string; note?: { kind: 'restored'; from: string; at: string } }) => void): () => void
       dismissMetaNote(): Promise<void>

@@ -350,8 +350,10 @@ contextBridge.exposeInMainWorld('api', {
   unwatchStreamsDir: () =>
     ipcRenderer.invoke('streams:unwatchDir'),
 
-  onStreamsChanged: (callback: () => void) => {
-    const handler = () => callback()
+  onStreamsChanged: (callback: (info?: { quiet?: boolean }) => void) => {
+    // `quiet` marks main's deferred echo fires — reload data, skip the
+    // thumbnail cache-bust flash. Absent on normal events.
+    const handler = (_e: unknown, info?: { quiet?: boolean }) => callback(info)
     ipcRenderer.on('streams:changed', handler)
     return () => ipcRenderer.removeListener('streams:changed', handler)
   },

@@ -2010,16 +2010,21 @@ export function StreamsPage({
     }
   }, [showBanner, folders])
 
+  // Request token: a slow listStreams (big library, cold disk) can resolve
+  // AFTER a newer one and overwrite fresher data with staler data. Only the
+  // latest request's response is applied; superseded ones are discarded.
+  const listReqSeqRef = useRef(0)
   const loadFolders = useCallback(async () => {
     if (!streamsDir) return
+    const seq = ++listReqSeqRef.current
     setLoading(true)
     try {
       const result = await window.api.listStreams(streamsDir, streamMode as any)
-      setFolders(result)
+      if (seq === listReqSeqRef.current) setFolders(result)
     } catch (err) {
       console.error('Failed to load streams', err)
     }
-    setLoading(false)
+    if (seq === listReqSeqRef.current) setLoading(false)
   }, [streamsDir, streamMode])
 
   // _meta.json health — pushed by main whenever the metadata store enters or
@@ -2058,17 +2063,35 @@ export function StreamsPage({
     // Debounced: streams:changed can arrive in a burst (a delete touches several
     // files, saves fire their own, etc.), and each reload is a full listStreams +
     // thumbnail classification plus a thumbsKey bump (the visible flash). Coalesce
-    // them so one logical change is one reload. Deletes THIS page performed are
-    // skipped entirely (selfDeleteUntilRef): the grid was already updated in
-    // place, so the chokidar unlink echo and the refreshVideoMaps follow-up
-    // event would only re-list + re-flash for state we already have.
+    // them so one logical change is one reload.
+    //
+    // Events landing inside the self-delete stand-down (selfDeleteUntilRef)
+    // are DEFERRED to the end of the window, not dropped: they're usually
+    // the filesystem echoes of our own delete (grid already updated in
+    // place), but they can just as well be a converter finishing an encode
+    // or an external file landing — dropped ones stayed invisible until an
+    // unrelated event. Deferred passes (and bursts made up only of main's
+    // `quiet` echo fires) reload the data WITHOUT the thumbsKey bump: new
+    // files have new paths and render fine without a cache-bust, which
+    // preserves the no-flash behavior the stand-down was built for.
     let timer: ReturnType<typeof setTimeout> | null = null
-    const off = window.api.onStreamsChanged(() => {
+    let deferred = false
+    let burstQuiet = true
+    const off = window.api.onStreamsChanged(info => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        if (Date.now() < selfDeleteUntilRef.current) return
+      if (!info?.quiet) burstQuiet = false
+      deferred = false
+      timer = setTimeout(function fire() {
+        const waitMs = selfDeleteUntilRef.current - Date.now()
+        if (waitMs > 0) {
+          deferred = true
+          timer = setTimeout(fire, waitMs + 100)
+          return
+        }
         loadFolders()
-        setThumbsKey(Date.now())
+        if (!deferred && !burstQuiet) setThumbsKey(Date.now())
+        deferred = false
+        burstQuiet = true
       }, 400)
     })
     return () => {
@@ -2082,8 +2105,10 @@ export function StreamsPage({
   // Set whenever the page itself deletes files: the grid is updated
   // optimistically in place, so the filesystem echoes of our own delete (the
   // chokidar unlink + the refreshVideoMaps follow-up event) must not trigger
-  // full reloads — each one is a listStreams + thumbnail classification and a
-  // visible flash of every thumbnail on the page.
+  // immediate full reloads — each one is a listStreams + thumbnail
+  // classification and a visible flash of every thumbnail on the page.
+  // Events during the window are deferred into ONE quiet (no-flash)
+  // reconcile at window close, never dropped — see the listener above.
   const selfDeleteUntilRef = useRef(0)
 
   // SM-initiated file deletion (files grid single/bulk trash): remove the
