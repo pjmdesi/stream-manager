@@ -3254,9 +3254,19 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
           : Math.max(0, Math.min(flatSessionItems.length - 1, currentIdx + (k === 'ArrowDown' ? 1 : -1)))
         const target = flatSessionItems[nextIdx]
         if (target.kind === 'video' && target.video) {
-          // If we're leaving a clip draft for a plain video, exit clip mode first so the
-          // autosave effect doesn't carry the previous draft's state onto the new file.
-          if (isClipModeRef.current && target.video.path !== state.filePath) exitClipMode()
+          if (isClipModeRef.current && target.video.path === state.filePath) {
+            // Draft → its own source video: same file, nothing to load —
+            // this move IS "close the clip session". exitClipMode flushes
+            // the draft and clears the binding, which is what moves the
+            // active highlight from the draft row onto the video row.
+            exitClipMode()
+            return
+          }
+          // Leaving a clip draft for a DIFFERENT video — exit clip mode
+          // first so the flush targets the old path while it's still
+          // current (the central guard would catch a miss, but this is
+          // the ideal ordering).
+          if (isClipModeRef.current) exitClipMode()
           loadFile(target.video.path)
         } else if (target.kind === 'draft' && target.draft) {
           loadDraft(target.draft)
