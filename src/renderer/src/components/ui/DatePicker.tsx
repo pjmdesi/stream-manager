@@ -108,12 +108,19 @@ export function DatePicker({
     setPos({ left, top })
   }, [open, viewYear, viewMonth, monthPickerOpen])
 
-  // Close on Escape.
+  // Close on Escape. Capture phase + stopPropagation so the Esc that
+  // closes the CALENDAR is consumed here and can't also reach the
+  // containing Modal's own Escape handler — one keypress used to close
+  // the calendar AND the whole New Stream / Reschedule modal behind it.
   useEffect(() => {
     if (!open) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setOpen(false)
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
   }, [open])
 
   // 6-week grid (42 cells) starting on the first-day-of-week column on or

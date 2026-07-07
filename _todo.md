@@ -88,6 +88,7 @@
 44. Onboarding: properly explain dump-mode drawbacks (second-class mode, reduced feature set, full-scan refreshes) and steer users toward folder-per-stream.
 45. Need to add a way to show when clip drafts exist for a stream item. I think the best place for these would be in the files grid.
 46. Move the "start blank" button for the thumbnail variant creation modal into the same grid list as the templates and "copy of current" options. Then instead of just clicking on one of the options and having it open the new file in the editor, the modal will have a create button at the bottom that will be disabled until the user selects one of the options.
+47. When the user clicks on a stream item in the streams page list, it opens the stream item detail sidebar. But if the user is holding the shift or ctrl key when clicking a stream item, it should turn on multi-select mode and select that stream item. This should also apply to all places where multi-select mode is available and a toggle (like the files grid in the stream item detail sidebar).
 
 ## Bugs
 

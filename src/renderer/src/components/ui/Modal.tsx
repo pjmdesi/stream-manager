@@ -6,6 +6,19 @@ import { X } from 'lucide-react'
 let openModalCount = 0
 export function isAnyModalOpen(): boolean { return openModalCount > 0 }
 
+/** Counts a NON-Modal overlay (Lightbox, etc.) as open for
+ *  isAnyModalOpen() while `open` is true. Page/app shortcut handlers —
+ *  notably the streams page's Esc-closes-the-sidebar — then stand down
+ *  exactly as they do for real Modals, so the overlay's own Escape
+ *  handling doesn't double-fire into the page underneath. */
+export function useModalOpenRegistration(open: boolean): void {
+  useEffect(() => {
+    if (!open) return
+    openModalCount++
+    return () => { openModalCount-- }
+  }, [open])
+}
+
 interface ModalProps {
   isOpen: boolean
   onClose: () => void

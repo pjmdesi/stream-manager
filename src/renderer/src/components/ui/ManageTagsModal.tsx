@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { SwatchBook, Trash2, Star, X, GitMerge, Check, Plus, Layers, PencilLine, Link2, Link2Off } from 'lucide-react'
+import { SwatchBook, Trash2, Star, X, GitMerge, Check, Plus, Layers, PencilLine, Link2, Link2Off, Loader2 } from 'lucide-react'
 import { Modal } from './Modal'
 import { Button } from './Button'
 import { Tooltip } from './Tooltip'
@@ -260,9 +260,10 @@ interface TagListPanelProps {
   /** Inline-rename handler. When provided, each row shows a pencil
    *  button that swaps the chip for an input field. Save commits via
    *  this callback (parent does the global rewrite across folders +
-   *  re-keys the color/texture maps for stream-type tags). Omit on
-   *  panels where rename isn't supported. */
-  onRenameItem?: (oldName: string, newName: string) => void
+   *  re-keys the color/texture maps for stream-type tags). Return the
+   *  promise of that rewrite — the row shows a busy spinner until it
+   *  resolves. Omit on panels where rename isn't supported. */
+  onRenameItem?: (oldName: string, newName: string) => void | Promise<void>
   /** Per-item link to a YT tag template id. Only meaningful for the
    *  Topics/Games panel. When `onSetLink` is set, each row shows a
    *  link button that opens a template picker; the linked template is
@@ -314,6 +315,12 @@ function TagListPanel({
   const [renameDraft, setRenameDraft] = useState('')
   const [renameError, setRenameError] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
+  // In-flight rename (from → to). While set, the old row renders with
+  // the NEW label + a spinner, and the new name is suppressed from the
+  // list — without this the modal showed a rogue 0-stream duplicate of
+  // the new name for the whole rewrite window (per-folder meta writes +
+  // color/texture re-key + reload, seconds on a big library).
+  const [renameBusy, setRenameBusy] = useState<{ from: string; to: string } | null>(null)
 
   // New-tag inline state
   const [newTag, setNewTag] = useState<{ name: string; colorKey: string; textureKey: string } | null>(null)
@@ -373,16 +380,19 @@ function TagListPanel({
     setRenameError('')
   }
 
-  const commitRename = () => {
-    if (!renamingItem || !onRenameItem) return
+  const commitRename = async () => {
+    if (!renamingItem || !onRenameItem || renameBusy) return
     const next = renameDraft.trim()
     if (!next) { setRenameError('Name is required.'); return }
     if (next === renamingItem) { cancelRename(); return }
     // Duplicate check — case-sensitive to match the new-tag rule above,
     // so case-only renames ("Black Flag" → "BLACK FLAG") are allowed.
     if (items.includes(next)) { setRenameError('Already exists.'); return }
-    onRenameItem(renamingItem, next)
+    const from = renamingItem
     cancelRename()
+    setRenameBusy({ from, to: next })
+    try { await onRenameItem(from, next) }
+    finally { setRenameBusy(null) }
   }
 
   // Autofocus + select-all when rename mode opens so the user can either
@@ -435,13 +445,19 @@ function TagListPanel({
           <p className="text-sm text-gray-400 italic text-center py-6">Nothing here yet.</p>
         )}
 
-        {sorted.map(item => {
+        {(renameBusy && sorted.includes(renameBusy.from)
+          // Suppress the new name while its rewrite is in flight — it
+          // otherwise pops in as a 0-stream duplicate next to the old row.
+          ? sorted.filter(t => t !== renameBusy.to)
+          : sorted
+        ).map(item => {
           const resolvedChip = chipClass ?? getTagColor(tagColors?.[item]).chip
           const isSelected = selected.includes(item)
           const isSurvivor = survivor === item
           const isDying = isSelected && !isSurvivor
           const isPendingDelete = deleteTarget === item
           const isRenaming = renamingItem === item
+          const isRenameBusy = renameBusy?.from === item
 
           return (
             <div
@@ -510,7 +526,7 @@ function TagListPanel({
                   className={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${resolvedChip}`}
                   style={chipClass ? {} : getTagTextureStyle(tagTextures?.[item])}
                 >
-                  {item}
+                  {isRenameBusy ? renameBusy!.to : item}
                 </span>
               )}
 
@@ -523,8 +539,15 @@ function TagListPanel({
 
               {!isRenaming && <div className="flex-1" />}
 
+              {/* In-flight rename — spinner replaces the action cluster */}
+              {isRenameBusy && (
+                <span className="flex items-center gap-1.5 text-xs text-gray-400 shrink-0">
+                  <Loader2 size={13} className="animate-spin" /> Renaming…
+                </span>
+              )}
+
               {/* Action buttons */}
-              {!combineMode && !isPendingDelete && !isRenaming && (
+              {!combineMode && !isPendingDelete && !isRenaming && !isRenameBusy && (
                 <div className="flex items-center gap-1">
                   {onRenameItem && (
                     <Tooltip content="Rename">
@@ -846,9 +869,10 @@ interface Props {
   onCombineGames: (dying: string[], survivor: string) => void
   /** Global rename. Parent rewrites every folder's meta to replace the
    *  old name with the new one (and, for stream types, re-keys the
-   *  color + texture maps). Mirrors the delete/combine pattern. */
-  onRenameTag: (oldName: string, newName: string) => void
-  onRenameGame: (oldName: string, newName: string) => void
+   *  color + texture maps). Return the rewrite's promise — the row
+   *  shows a busy spinner until it resolves. */
+  onRenameTag: (oldName: string, newName: string) => void | Promise<void>
+  onRenameGame: (oldName: string, newName: string) => void | Promise<void>
   /** Game-tag → YT tag template id map. Surfaced as a link icon per
    *  game; consumed by SidebarDetail's auto-apply effect. */
   gameTagsLinks?: Record<string, string>

@@ -38,7 +38,7 @@ import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { GhostTextArea } from '../ui/GhostTextArea'
 import type { GhostTextAreaHandle } from '../ui/GhostTextArea'
 import { Button } from '../ui/Button'
-import { Modal } from '../ui/Modal'
+import { Modal, useModalOpenRegistration } from '../ui/Modal'
 import { TagComboBox } from '../ui/TagComboBox'
 import { BroadcastPicker, BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
@@ -694,6 +694,10 @@ interface LightboxProps {
 }
 
 export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, deleteBlockReason, onEditThumbnail, onClose, onNavigate, localFlags }: LightboxProps) {
+  // Register as an open overlay so page-level shortcut handlers (Esc
+  // closes the detail sidebar) stand down — the Lightbox isn't a Modal,
+  // so isAnyModalOpen() didn't know about it and one Esc closed both.
+  useModalOpenRegistration(true)
   const total = thumbnails.length
   const currentPath = thumbnails[index]
   const currentIsLocal = localFlags?.[index] ?? true
@@ -3381,6 +3385,7 @@ export function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId
   const [loading, setLoading] = useState(true)
   const isOverride = !!defaultPresetId
 
+  const [loadError, setLoadError] = useState(false)
   useEffect(() => {
     Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
       .then(([builtin, imported]) => {
@@ -3393,6 +3398,9 @@ export function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId
         setSelected(initial)
         setLoading(false)
       })
+      // Without this, an IPC rejection left the spinner up forever with
+      // no way forward but Cancel.
+      .catch(() => { setLoading(false); setLoadError(true) })
   }, [defaultPresetId])
 
   const confirm = () => {
@@ -3428,6 +3436,8 @@ export function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId
         )}
         {loading ? (
           <div className="flex items-center gap-2 text-gray-400 text-sm"><Loader2 size={14} className="animate-spin" /> Loading presets…</div>
+        ) : loadError ? (
+          <p className="text-sm text-red-400">Couldn’t load the preset list. Close this dialog and try again.</p>
         ) : presets.length === 0 ? (
           <p className="text-sm text-yellow-600">No presets found. Configure your presets directory in Settings first.</p>
         ) : (
@@ -3670,13 +3680,14 @@ export function BulkTagModal({
   presentGames: string[]
   tagColors: Record<string, string>
   onNewStreamType: (tag: string) => void
-  onApply: (mode: 'add' | 'remove', streamTypes: string[], games: string[], onProgress: (done: number) => void) => void
+  onApply: (mode: 'add' | 'remove', streamTypes: string[], games: string[], onProgress: (done: number) => void) => Promise<{ failed: number } | void> | void
   onClose: () => void
 }) {
   const [mode, setMode] = useState<'add' | 'remove'>('add')
   const [streamTypes, setStreamTypes] = useState<string[]>([])
   const [games, setGames] = useState<string[]>([])
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [applyError, setApplyError] = useState<string | null>(null)
 
   const switchMode = (next: 'add' | 'remove') => {
     setMode(next)
@@ -3687,9 +3698,23 @@ export function BulkTagModal({
   const canApply = (streamTypes.length > 0 || games.length > 0) && !progress
   const isRemoving = mode === 'remove'
 
-  const handleApply = () => {
+  // The parent resolves with a failure count (it keeps going past bad
+  // writes). Full success closes the modal from the parent side; any
+  // failure lands back here so the modal can say so and stay closable —
+  // it used to hang on the progress bar forever with close as a no-op.
+  const handleApply = async () => {
+    setApplyError(null)
     setProgress({ done: 0, total: count })
-    onApply(mode, streamTypes, games, (done) => setProgress({ done, total: count }))
+    try {
+      const res = await onApply(mode, streamTypes, games, (done) => setProgress({ done, total: count }))
+      if (res && res.failed > 0) {
+        setProgress(null)
+        setApplyError(`${res.failed} of ${count} stream${count === 1 ? '' : 's'} couldn’t be updated (the metadata file may be locked). The rest were updated. You can retry or close.`)
+      }
+    } catch (e: any) {
+      setProgress(null)
+      setApplyError(`Tag update failed: ${e?.message ?? String(e)}. Some streams may have been updated. You can retry or close.`)
+    }
   }
 
   const pct = progress ? Math.round((progress.done / progress.total) * 100) : 0
@@ -3715,20 +3740,23 @@ export function BulkTagModal({
           </div>
         ) : (
           <div className="flex gap-2 justify-end w-full">
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button variant="ghost" onClick={onClose}>{applyError ? 'Close' : 'Cancel'}</Button>
             <Button
               variant="primary"
               icon={<Tags size={13} />}
               onClick={handleApply}
               disabled={!canApply}
             >
-              {isRemoving ? 'Remove from' : 'Add to'} {count}
+              {applyError ? 'Retry' : `${isRemoving ? 'Remove from' : 'Add to'} ${count}`}
             </Button>
           </div>
         )
       }
     >
       <div className="flex flex-col gap-5">
+        {applyError && (
+          <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">{applyError}</p>
+        )}
         {/* Mode toggle */}
         {!progress && (
           <div className="flex rounded-lg overflow-hidden border border-white/10 self-start">

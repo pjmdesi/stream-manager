@@ -444,6 +444,22 @@ export function StreamsPage({
     const f = folders.find(x => x.folderPath === pending)
     if (f) { pendingSelectPathRef.current = null; setSelectedStreamKey(f.relativePath) }
   }, [folders])
+  // Reconcile a selection whose stream vanished OUTSIDE SM (folder deleted
+  // in Explorer, removed by the sync client): without this the sidebar sat
+  // full-width empty until an unsignposted Esc. Keyed on `folders` only —
+  // NOT on the selection — so flows that set a new key just before their
+  // reload lands (reschedule, dump→folder conversion) aren't clobbered:
+  // the check only runs when a fresh list arrives, and by then those keys
+  // resolve.
+  const selectedKeyForReconcileRef = useRef<string | null>(null)
+  useEffect(() => { selectedKeyForReconcileRef.current = selectedStreamKey })
+  useEffect(() => {
+    if (loading || folders.length === 0) return
+    const key = selectedKeyForReconcileRef.current
+    if (!key) return
+    if (folders.some(f => f.relativePath === key)) return
+    setSelectedStreamKey(null)
+  }, [folders, loading])
   // When set, the "pick which videos to send to the converter" modal is open
   // for this folder (shown only for folders with more than one video).
   const [sendConverterFolder, setSendConverterFolder] = useState<StreamFolder | null>(null)
@@ -2459,10 +2475,11 @@ export function StreamsPage({
     editStreamTypes: string[],
     editGames: string[],
     onProgress: (done: number) => void,
-  ) => {
+  ): Promise<{ failed: number } | void> => {
     const removingTypes = new Set(editStreamTypes)
     const removingGames = new Set(editGames)
     let done = 0
+    let failed = 0
     for (const f of selectedFolderList) {
       const existingTypes = normalizeStreamTypes(f.meta?.streamType)
       const existingGames = f.meta?.games ?? []
@@ -2474,10 +2491,18 @@ export function StreamsPage({
         : existingGames.filter(g => !removingGames.has(g))
       // updateMeta writes via streams:updateMeta which does a partial
       // merge — passing the full new arrays for both keys overwrites
-      // them in place without disturbing other meta fields.
-      await updateMeta(f.relativePath, { streamType: nextTypes, games: nextGames })
+      // them in place without disturbing other meta fields. A single
+      // bad write (locked meta file) must not abort the run — the old
+      // uncaught rejection left the modal stuck on its progress bar
+      // with close as a no-op.
+      try {
+        await updateMeta(f.relativePath, { streamType: nextTypes, games: nextGames })
+      } catch {
+        failed++
+      }
       onProgress(++done)
     }
+    if (failed > 0) return { failed }
     setShowBulkTag(false)
     setSelectedPaths(new Set())
   }, [selectedFolderList, updateMeta])
@@ -3963,11 +3988,15 @@ export function StreamsPage({
           // Then re-keys the color + texture maps so the chip styling
           // moves with the renamed tag. Mirrors the delete/combine
           // bulk-write pattern above.
-          onRenameTag={(oldName, newName) => {
+          // Awaitable so the modal's row can show its busy spinner for
+          // the WHOLE rewrite (meta writes + map re-key + reload) — the
+          // old fire-and-forget version let the list render its rogue
+          // intermediate states.
+          onRenameTag={async (oldName, newName) => {
             const affected = folders.filter(f =>
               normalizeStreamTypes(f.meta?.streamType).includes(oldName)
             )
-            Promise.all(
+            await Promise.all(
               affected.map(f =>
                 window.api.writeStreamMeta(f.folderPath, {
                   ...(f.meta ?? { date: f.date, streamType: [], games: [], comments: '' }),
@@ -3975,19 +4004,18 @@ export function StreamsPage({
                     .map(t => t === oldName ? newName : t),
                 }, f.relativePath)
               )
-            ).then(() => {
-              if (oldName in tagColors) {
-                const updatedColors = { ...tagColors, [newName]: tagColors[oldName] }
-                delete updatedColors[oldName]
-                saveTagColors(updatedColors)
-              }
-              if (oldName in tagTextures) {
-                const updatedTextures = { ...tagTextures, [newName]: tagTextures[oldName] }
-                delete updatedTextures[oldName]
-                saveTagTextures(updatedTextures)
-              }
-              void loadFolders()
-            })
+            )
+            if (oldName in tagColors) {
+              const updatedColors = { ...tagColors, [newName]: tagColors[oldName] }
+              delete updatedColors[oldName]
+              saveTagColors(updatedColors)
+            }
+            if (oldName in tagTextures) {
+              const updatedTextures = { ...tagTextures, [newName]: tagTextures[oldName] }
+              delete updatedTextures[oldName]
+              saveTagTextures(updatedTextures)
+            }
+            await loadFolders()
           }}
           // Global rename of a topic/game tag. Mirrors the rename
           // performed by the after-push category-rename prompt — touches
@@ -3996,7 +4024,7 @@ export function StreamsPage({
           // doesn't trip the snapshot's staleness guard after the
           // rename. Strict (case-sensitive) equality so case-only
           // renames don't accidentally rope in unrelated tags.
-          onRenameGame={(oldName, newName) => {
+          onRenameGame={async (oldName, newName) => {
             const affected = folders.filter(f => {
               const m = f.meta
               if (!m) return false
@@ -4006,7 +4034,7 @@ export function StreamsPage({
                 || m.twitchLastPushedGame === oldName
                 || m.primaryGame === oldName
             })
-            Promise.all(
+            await Promise.all(
               affected.map(f => {
                 const m = f.meta
                 if (!m) return Promise.resolve()
@@ -4020,15 +4048,14 @@ export function StreamsPage({
                 if (m.primaryGame === oldName) next.primaryGame = newName
                 return window.api.writeStreamMeta(f.folderPath, next, f.relativePath)
               })
-            ).then(() => {
-              if (oldName in gameTagsLinks) {
-                const next = { ...gameTagsLinks, [newName]: gameTagsLinks[oldName] }
-                delete next[oldName]
-                setGameTagsLinks(next)
-                window.api.setGameTagsLinks(next)
-              }
-              void loadFolders()
-            })
+            )
+            if (oldName in gameTagsLinks) {
+              const next = { ...gameTagsLinks, [newName]: gameTagsLinks[oldName] }
+              delete next[oldName]
+              setGameTagsLinks(next)
+              window.api.setGameTagsLinks(next)
+            }
+            await loadFolders()
           }}
           gameTagsLinks={gameTagsLinks}
           tagTemplates={ytTagTemplates.map(t => ({ id: t.id, name: t.name }))}
