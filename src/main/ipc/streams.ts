@@ -1125,16 +1125,30 @@ export function registerStreamsIPC(): void {
       catch (err) { console.error('[streams:list] prune write failed:', err) }
     }
 
-    // Only probe if video files APPEARED since the last cache (the prune
+    // Probe when video files APPEARED since the last cache (the prune
     // above already applied removals, so a delete-only change no longer
-    // spins up the probe pipeline at all).
+    // spins up the probe pipeline at all) — or when a file was
+    // OVERWRITTEN IN PLACE: a clip re-export (-y) changes content
+    // without changing the name set, and gating on names alone meant
+    // the stale entry (old duration/size) survived every restart
+    // because refreshVideoMaps' mtime-mismatch re-probe never ran.
+    // The mtime drift check is stat-only — cheap next to the directory
+    // walk that just happened; ffprobe still only runs inside
+    // refreshVideoMaps for the files that actually changed.
     const videoSetChanged = videoEntries.some(({ key, folderPath, videos }) => {
       const cached = allMeta[key]?.videoMap
       if (!cached) return videos.length > 0
+      const currentNames = videos.map(v => videoRelKey(folderPath, v))
       const cachedNames = new Set(Object.keys(cached))
-      const currentNames = new Set(videos.map(v => videoRelKey(folderPath, v)))
-      if (cachedNames.size !== currentNames.size) return true
+      if (cachedNames.size !== currentNames.length) return true
       for (const name of currentNames) if (!cachedNames.has(name)) return true
+      for (let i = 0; i < videos.length; i++) {
+        const entry = cached[currentNames[i]]
+        if (!entry) continue
+        try {
+          if (fs.statSync(videos[i]).mtimeMs !== entry.mtime) return true
+        } catch { /* unreadable right now — the prune/placeholder paths own it */ }
+      }
       return false
     })
     if (videoSetChanged) {
@@ -1360,6 +1374,14 @@ export function registerStreamsIPC(): void {
     }
     videoMap[outputFilename] = {
       ...base,
+      // Re-exports overwrite the file in place (-y): refresh the size
+      // from the NEW stat so the grid shows it immediately. The mtime is
+      // deliberately NOT refreshed — the stale mtime is exactly what
+      // marks this entry dirty to the listStreams probe gate, which
+      // re-probes and heals duration/dimensions on the next scan.
+      // Copying the fresh mtime here would declare the stale duration
+      // "current" forever.
+      ...(stat ? { size: stat.size } : {}),
       category: forcedCategory,
       clipOf: sourceName,
       clipState: clipState as any,
