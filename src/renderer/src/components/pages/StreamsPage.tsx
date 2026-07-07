@@ -37,6 +37,7 @@ import { BroadcastPicker, BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { Globe, Lock, Link as LinkIcon, Link2 } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
+import { videoMapKey } from '../../lib/videoMapKey'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { SendToConverterModal } from '../streams/SendToConverterModal'
 import { isAnyModalOpen, isTypingTarget } from '../../lib/shortcuts'
@@ -332,8 +333,10 @@ function isPendingStream(folder: StreamFolder, today: string): boolean {
   return !folder.videos.some(v => {
     const name = v.split(/[\\/]/).pop() ?? ''
     if (!name.startsWith(folder.date)) return false
-    const key = name
-    return map?.[key]?.category === 'full'
+    // Rel-path key, NOT basename — a recording living in a subfolder
+    // would otherwise never match and the stream stayed teal "upcoming"
+    // after it landed.
+    return map?.[videoMapKey(folder.folderPath, v)]?.category === 'full'
   })
 }
 
@@ -1334,7 +1337,7 @@ export function StreamsPage({
   const pickPrimaryFrom = (folder: StreamFolder, videos: string[]): string | null => {
     if (videos.length === 0) return null
     const map = folder.meta?.videoMap
-    const firstFull = videos.find(v => map?.[v.split(/[\\/]/).pop() ?? v]?.category === 'full')
+    const firstFull = videos.find(v => map?.[videoMapKey(folder.folderPath, v)]?.category === 'full')
     return firstFull ?? videos[0]
   }
   const pickPrimaryVideo = (folder: StreamFolder): string | null =>
@@ -1441,12 +1444,7 @@ export function StreamsPage({
   const fullVideos = (f: StreamFolder): string[] => {
     const map = f.meta?.videoMap
     if (!map) return []
-    const root = norm(f.folderPath)
-    return f.videos.filter(v => {
-      const n = norm(v)
-      const relKey = n.startsWith(root + '/') ? n.slice(root.length + 1) : n.split('/').pop() ?? n
-      return map[relKey]?.category === 'full'
-    })
+    return f.videos.filter(v => map[videoMapKey(f.folderPath, v)]?.category === 'full')
   }
 
   const executeArchive = useCallback(async (
@@ -2119,6 +2117,39 @@ export function StreamsPage({
     selfDeleteUntilRef.current = Date.now() + 5000
     const gone = new Set(paths.map(p => p.replace(/\\/g, '/')))
     const has = (p: string): boolean => gone.has(p.replace(/\\/g, '/'))
+    // SM-generated thumbnails carry a companion `<name>.json` (the editable
+    // canvas data). The grid's single/bulk trash flows only removed the PNG,
+    // orphaning the JSON — the variant stayed listed in the editor, and
+    // saving it there resurrected the deleted image. Sweep the sidecars here
+    // so every grid delete path gets pair handling (the carousel/Lightbox
+    // path does its own in handleDeleteThumbnail below).
+    for (const p of paths) {
+      if (/[_-]sm-thumbnail(?:-\d+)?\.png$/i.test(p)) {
+        void window.api.trashFile(p.replace(/\.png$/i, '.json')).catch(() => {})
+      }
+    }
+    // Meta cleanup per affected folder, mirroring what the thumbnail
+    // editor's own delete flow maintains:
+    //   • deleted the preferred image → clear meta.preferredThumbnail so
+    //     the row falls back to the next thumbnail instead of dangling;
+    //   • deleted the LAST SM thumbnail → clear the smThumbnail flags,
+    //     otherwise the stale smThumbnailTemplate record makes the next
+    //     editor open silently re-apply that template instead of asking.
+    const goneBasenames = new Set(paths.map(p => p.split(/[\\/]/).pop() ?? ''))
+    const smRe = /[_-]sm-thumbnail(?:-\d+)?\.png$/i
+    for (const f of foldersRef.current) {
+      if (!f.thumbnails.some(has)) continue
+      const patch: Partial<StreamMeta> = {}
+      const pref = f.meta?.preferredThumbnail
+      if (pref && goneBasenames.has(pref)) patch.preferredThumbnail = ''
+      const deletedSm = f.thumbnails.some(p => has(p) && smRe.test(p))
+      const smLeft = f.thumbnails.some(p => !has(p) && smRe.test(p))
+      if (deletedSm && !smLeft && (f.meta?.smThumbnail || f.meta?.smThumbnailTemplate)) {
+        patch.smThumbnail = undefined
+        patch.smThumbnailTemplate = undefined
+      }
+      if (Object.keys(patch).length > 0) void updateMeta(f.relativePath, patch)
+    }
     setFolders(prev => prev.map(f => {
       if (!f.videos.some(has) && !f.thumbnails.some(has)) return f
       const videos = f.videos.filter(p => !has(p))
@@ -2153,7 +2184,7 @@ export function StreamsPage({
           : f.thumbnailLocalFlags,
       }
     }))
-  }, [])
+  }, [updateMeta])
 
   // Trash a single thumbnail file + refresh. If the deleted file was
   // the preferred thumbnail, also clear meta.preferredThumbnail so the
@@ -2192,8 +2223,18 @@ export function StreamsPage({
       return
     }
     const basename = filePath.split(/[\\/]/).pop() ?? ''
-    if (folder.meta?.preferredThumbnail === basename) {
-      await updateMeta(folder.relativePath, { preferredThumbnail: '' })
+    const patch: Partial<StreamMeta> = {}
+    if (folder.meta?.preferredThumbnail === basename) patch.preferredThumbnail = ''
+    // Last SM thumbnail gone → clear the flags (matching the editor's own
+    // delete flow), so the next editor open asks for a template instead
+    // of silently re-applying the stale smThumbnailTemplate record.
+    const smRe = /[_-]sm-thumbnail(?:-\d+)?\.png$/i
+    if (smRe.test(filePath) && !folder.thumbnails.some(p => p !== filePath && smRe.test(p))) {
+      patch.smThumbnail = undefined
+      patch.smThumbnailTemplate = undefined
+    }
+    if (Object.keys(patch).length > 0) {
+      await updateMeta(folder.relativePath, patch)
     }
     // No reload: the optimistic removal above already reflects the delete, and
     // the listener stand-down swallows our own echoes. Surviving slots keep
@@ -6202,6 +6243,10 @@ function SidebarDetail({
   // Transient "Copied!" state for the copy-broadcast-URL button.
   // Resets via timeout — see copyBroadcastUrl below.
   const [copiedUrl, setCopiedUrl] = useState(false)
+  // In-use guard for the Lightbox's delete control — the files grid
+  // already blocks deleting a file that's open elsewhere (e.g. in the
+  // thumbnail editor); the Lightbox applies the same rule.
+  const { openReason: lightboxOpenReason } = useOpenItems()
   // Displayed privacy: staged local value first, falls back to YouTube's
   // current status (so existing streams without an explicit override
   // show the remote value as their starting point). Mirrors the same
@@ -8171,6 +8216,11 @@ function SidebarDetail({
           index={Math.min(lightboxIndex, folder.thumbnails.length - 1)}
           thumbsKey={thumbsKey}
           preferredThumbnail={meta?.preferredThumbnail}
+          deleteBlockReason={(() => {
+            const cur = folder.thumbnails[Math.min(lightboxIndex, folder.thumbnails.length - 1)]
+            const src = cur ? lightboxOpenReason(cur) : null
+            return src ? blockReasonText(src) : null
+          })()}
           onSetAsThumbnail={(filePath) => {
             const basename = filePath.split(/[\\/]/).pop() ?? ''
             onUpdateMeta({ preferredThumbnail: basename })

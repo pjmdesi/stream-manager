@@ -25,6 +25,7 @@ import {
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { VideoRow } from '../ui/VideoRow'
 import { getCachedHydration, rememberHydration, stalePaths, subscribeHydration } from '../../lib/hydrationCache'
+import { videoMapKey } from '../../lib/videoMapKey'
 import { v4 as uuidv4 } from 'uuid'
 import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
@@ -351,15 +352,8 @@ const CATEGORY_STYLES: Record<string, string> = {
   clip:  'text-gray-400 border-gray-600',
 }
 
-/** videoMap is keyed by the video's path relative to its stream folder, forward-slash
- *  normalized. For flat layouts that's just the basename; for nested layouts (e.g.
- *  clips/highlight.mp4) it includes the sub-folder. */
-function videoMapKey(folderPath: string, videoPath: string): string {
-  // Normalize both to forward slashes, then strip the folder prefix.
-  const fp = folderPath.replace(/\\/g, '/').replace(/\/$/, '')
-  const vp = videoPath.replace(/\\/g, '/')
-  return vp.startsWith(fp + '/') ? vp.slice(fp.length + 1) : vp.split('/').pop() ?? vp
-}
+// videoMapKey moved to lib/videoMapKey so the modern page + files grid share
+// the same lookup rule (basename-only lookups miss subfolder entries).
 
 /** A stream is "pending" when it hasn't aired yet:
  *   - missing or archived → never pending
@@ -681,6 +675,10 @@ interface LightboxProps {
    *  Caller is expected to move the file to the recycle bin and refresh
    *  the source thumbnails list so the lightbox re-renders without it. */
   onDeleteImage?: (path: string) => Promise<void> | void
+  /** Non-null disables the delete control for the CURRENT image, with
+   *  this text as the tooltip reason (e.g. the image is open in the
+   *  thumbnail editor — same guard the files grid applies). */
+  deleteBlockReason?: string | null
   /** Opens the SM thumbnail editor for the folder. Surfaced as an "Edit
    *  thumbnail" button only when the current image is an SM thumbnail.
    *  Caller is expected to close the lightbox as part of the transition. */
@@ -695,7 +693,7 @@ interface LightboxProps {
   localFlags?: boolean[]
 }
 
-export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, onEditThumbnail, onClose, onNavigate, localFlags }: LightboxProps) {
+export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onSetAsThumbnail, onDeleteImage, deleteBlockReason, onEditThumbnail, onClose, onNavigate, localFlags }: LightboxProps) {
   const total = thumbnails.length
   const currentPath = thumbnails[index]
   const currentIsLocal = localFlags?.[index] ?? true
@@ -828,7 +826,17 @@ export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onS
               has to demote it before they can trash it — prevents accidentally
               orphaning the row's main image. The icon button expands inline
               into a Cancel / Delete pair on first click. */}
-          {!isPreferred && onDeleteImage && (
+          {!isPreferred && onDeleteImage && deleteBlockReason && (
+            <Tooltip content={deleteBlockReason}>
+              <button
+                disabled
+                className="flex items-center justify-center p-1.5 rounded-full bg-white/10 border border-white/20 text-gray-400 opacity-40 cursor-not-allowed"
+              >
+                <Trash2 size={12} />
+              </button>
+            </Tooltip>
+          )}
+          {!isPreferred && onDeleteImage && !deleteBlockReason && (
             deleteConfirm === currentPath ? (
               <div className="flex items-center gap-1.5">
                 <button

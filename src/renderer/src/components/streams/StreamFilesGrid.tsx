@@ -8,6 +8,7 @@ import { useCloudOps } from '../../context/CloudOpsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { getCachedHydration, rememberHydration, rememberHydrationOne, stalePaths, subscribeHydration } from '../../lib/hydrationCache'
+import { videoMapKey } from '../../lib/videoMapKey'
 import type { StreamFolder, VideoEntry, VideoInfo } from '../../types'
 
 function formatBytes(bytes: number): string {
@@ -591,8 +592,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   }, [folder.videos.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const sizeOf = (path: string): number => {
-    const name = path.split(/[\\/]/).pop() ?? ''
-    return videoMap[name]?.size ?? imageSizes[path] ?? 0
+    return videoMap[videoMapKey(folder.folderPath, path)]?.size ?? imageSizes[path] ?? 0
   }
   // Per-file actions surface via the widget/icons only — don't pop the modal.
   const offloadFile = (path: string) => enqueueOffload([{ path, size: sizeOf(path) }], false)
@@ -773,7 +773,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
       </div>
       <div className="grid gap-3 max-h-[318px] overflow-y-auto p-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
         {showVideo && folder.videos.map(path => {
-          const entry = videoMap[path.split(/[\\/]/).pop() ?? '']
+          const entry = videoMap[videoMapKey(folder.folderPath, path)]
           return (
             <VideoCard
               key={`${path}:${thumbVersion[path] ?? 0}`}

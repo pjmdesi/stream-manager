@@ -3309,8 +3309,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       ? await window.api.thumbnailLoadCanvas(folderPath, date, initialVariant)
       : null
 
-    // If meta carries a pre-selected built-in template (set during stream creation)
-    // and there's no saved canvas yet, auto-load that template — skip the picker.
+    // smThumbnailTemplate records which template this stream's thumbnail
+    // was last built from (written on every canvas save, inherited by New
+    // Episode for series consistency). No saved canvas but the record
+    // present = a fresh episode → auto-apply it and skip the picker.
+    // Delete flows clear the record when a stream's last SM thumbnail
+    // goes, so a deliberately emptied stream asks fresh.
     const presetTemplate = !canvas && meta?.smThumbnailTemplate
       ? freshTemplates.find((t: ThumbnailTemplate) => t.id === meta.smThumbnailTemplate)
       : null
@@ -3740,6 +3744,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       // Otherwise keep the selector honest: a non-open variant deleted elsewhere
       // should drop out of the dropdown instead of lingering (blank) behind it.
       setVariants(prev => (prev.length === remaining.length && prev.every((v, i) => v === remaining[i])) ? prev : remaining)
+      // And bust the preview cache: the PNGs may have changed CONTENT
+      // without changing paths (restored from the Recycle Bin, edited
+      // externally) — the ?v= querystring only bumps on our own saves,
+      // so the popover would keep showing the pre-restore image forever.
+      setVariantPreviewKey(k => k + 1)
     })
     return unsub
   }, [mode, currentStream, currentVariant, reconcileVariantGone])

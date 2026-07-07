@@ -86,6 +86,8 @@
 42. Add support for different audio language options for stream items to sync with the field in YouTube (and possible Twitch, need to see how that works). Possibly a "default language" setting in the settings page for the user to set their default language for new stream items and an override option in the stream item details sidebar to change it for a specific stream item. This would be useful for users who stream in multiple languages or want to set a different language for a specific stream item.
 43. Refactor streams:changed to folder-scoped reloads: events carry the stream key (relativePath), main re-scans just that folder, renderer splices it into state. Full reload only for structural changes (create/delete/reschedule) + a quiet idle reconcile (no thumbnail flash unless a folder actually changed). Includes a per-path echo registry so SM's own writes stop triggering watcher reloads. Dump mode keeps full-scan behavior. (Foundation already shipped: defer-and-coalesce suppression + slow-list token.)
 44. Onboarding: properly explain dump-mode drawbacks (second-class mode, reduced feature set, full-scan refreshes) and steer users toward folder-per-stream.
+45. Need to add a way to show when clip drafts exist for a stream item. I think the best place for these would be in the files grid.
+46. Move the "start blank" button for the thumbnail variant creation modal into the same grid list as the templates and "copy of current" options. Then instead of just clicking on one of the options and having it open the new file in the editor, the modal will have a create button at the bottom that will be disabled until the user selects one of the options.
 
 ## Bugs
 
@@ -93,6 +95,7 @@
 2. Messages in the relay widget are getting cut off by the narrow width of the widget. We need to make sure a tooltip appears when the user hovers over a message that is too long to fit in the widget, so they can see the full message. and we should make sure that the text gets truncated properly with an ellipsis when it doesn't fit in the widget, so the user knows this is happening.
 3. The close button for the launcher sidebar needs to be styled like the other close buttons throughout the app, for instance the detail sidebar on the streams page.
 4. While I have a stream item video open in the player, and I click the open video file button and then open an external video, the previous stream item video is not listed in the recent items list when I close the session. Instead only the external video shows.
+5. When sending a clip to the converter for export, the new clip file is available immediately in the files grid in the stream item detail sidebar and the session videos panel on the videos page (and though it shows as a clip in the session videos panel, it does not show as a descendant of the source file), and both sites treat it as a normal video file. It should not be available until the export is complete or at the vary least, interaction with it should be disabled (thumbnail generation should not trigger, all action buttons should be disabled in the files grid, should not be clickable in the session videos panel) until the file is finished. Once the file is finished, it does show properly as the child of the source file in the session videos panel.
 
 ## Other ideas (small)
 
