@@ -126,6 +126,11 @@ export function useVideoPlayer() {
   // engine hiccups on rapid successive seeks) can't leave the video stuck
   // paused after a skip. Cleared by an explicit user pause.
   const resumeAfterSeek = useRef(false)
+  // Monotonic load-session token, bumped by loadFile/closeVideo. Async work
+  // started against a previous file (track extraction, its progress events)
+  // checks it before landing results — a late extraction used to graft the
+  // OLD file's audio onto the NEW file's track state and play it "in sync".
+  const loadSessionRef = useRef(0)
 
   // Detach all extracted audio elements (does NOT delete cache files —
   // the persistent cache survives so re-enabling is cheap).
@@ -143,9 +148,20 @@ export function useVideoPlayer() {
     savedSettings?: Record<number, AudioTrackSetting>,
   ) => {
     setState(prev => ({ ...prev, error: null }))
+    loadSessionRef.current++
     // A stale resume flag from the previous file must not auto-play this one
     // on its first seek.
     resumeAfterSeek.current = false
+    // A seek still settling on the previous file must not deaden scrubbing
+    // on this one — these were never reset, so the scrollbar needle
+    // (fastSeek-gated on !isSeeking) went inert until something forced a
+    // full seek().
+    isSeeking.current = false
+    pendingSeekTime.current = null
+    // Kill in-flight extractions from the previous file. Their late
+    // resolutions are token-guarded in playTrack too; this just stops
+    // orphaned ffmpeg jobs from burning CPU for a file we've left.
+    void window.api.cancelExtractAudioTracks()
     releaseAudioElements()
 
     try {
@@ -254,6 +270,10 @@ export function useVideoPlayer() {
   const playTrack = useCallback(async (index: number) => {
     const filePath = state.filePath
     if (!filePath || index === 0) return
+    // Guards every async landing below: if the loaded file changed while
+    // ffmpeg ran, this result belongs to the previous session and must be
+    // dropped, not grafted onto the new file's track list.
+    const session = loadSessionRef.current
     const already = tracksRef.current.find(t => t.index === index)?.status
     if (already === 'extracting' || already === 'extracted') return
 
@@ -265,7 +285,7 @@ export function useVideoPlayer() {
     }))
 
     const unsubProgress = window.api.onExtractProgress(({ trackIndex, percent }) => {
-      if (trackIndex !== index) return
+      if (trackIndex !== index || session !== loadSessionRef.current) return
       setState(prev => ({
         ...prev,
         tracks: prev.tracks.map(t =>
@@ -276,6 +296,7 @@ export function useVideoPlayer() {
 
     try {
       const paths = await window.api.extractAudioTracks(filePath, [index])
+      if (session !== loadSessionRef.current) return
       const path = paths[index]
       if (!path) throw new Error(`Track ${index} extraction returned no path`)
 
@@ -300,6 +321,10 @@ export function useVideoPlayer() {
         applyAudibility(tracksRef.current, multiTrackEnabledRef.current, videoRef.current)
       })
     } catch (err: any) {
+      // A stale failure (including the cancel loadFile fires on switch)
+      // must not touch the NEW file's track state — its track at this
+      // index may be legitimately extracting right now.
+      if (session !== loadSessionRef.current) return
       if (!err?.message?.includes('cancelled')) {
         setState(prev => ({ ...prev, error: err.message }))
       }
@@ -492,7 +517,14 @@ export function useVideoPlayer() {
     const video = videoRef.current
     if (!video) return
     if (video.paused) {
-      video.play()
+      video.play().catch((err: DOMException) => {
+        // AbortError = a load/pause interrupted the play() — routine
+        // during rapid seeks and file switches. Anything else (e.g.
+        // NotSupportedError on an undecodable file) used to vanish
+        // silently, leaving a black frame with live-looking controls.
+        if (err?.name === 'AbortError') return
+        setState(prev => ({ ...prev, error: `Playback failed: ${err?.message ?? String(err)}` }))
+      })
     } else {
       // A deliberate pause always wins — including one made while a seek is
       // still settling. Without this, the resume-after-seek guard would undo
@@ -514,8 +546,39 @@ export function useVideoPlayer() {
     setState(prev => ({ ...prev, error: null }))
   }, [])
 
+  // Surface decode failures. There was no error listener on the <video>
+  // element at all — an unsupported codec (.wmv, HEVC without the codec
+  // pack, MPEG-2) rendered a black frame with live-looking controls and
+  // no message anywhere. Re-attached whenever the source changes so the
+  // listener exists even if the element mounted after the hook.
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    const onError = () => {
+      // Clearing the src (closeVideo, file switch) fires a spurious
+      // "src not supported" for the empty source — ignore those.
+      if (!v.src) return
+      const me = v.error
+      const codecProblem = me?.code === MediaError.MEDIA_ERR_DECODE
+        || me?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+      setState(prev => ({
+        ...prev,
+        isPlaying: false,
+        error: codecProblem
+          ? 'Can’t play this file: its codec isn’t supported by the built-in player. Convert it (H.264/MP4) in the Converter to view it here.'
+          : `Video playback error${me?.message ? `: ${me.message}` : ''}`,
+      }))
+    }
+    v.addEventListener('error', onError)
+    return () => v.removeEventListener('error', onError)
+  }, [state.videoUrl])
+
   const closeVideo = useCallback(async () => {
+    loadSessionRef.current++
     resumeAfterSeek.current = false
+    isSeeking.current = false
+    pendingSeekTime.current = null
+    void window.api.cancelExtractAudioTracks()
     releaseAudioElements()
     if (videoRef.current) {
       videoRef.current.pause()

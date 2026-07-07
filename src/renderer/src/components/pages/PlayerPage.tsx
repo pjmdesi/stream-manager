@@ -3107,9 +3107,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     popupRtcCleanupRef.current = window.api.onPopupRtcSignal(async (data) => {
       const msg = data as { type: string; sdp?: string }
       if (!popupPCRef.current || msg.type !== 'answer' || !msg.sdp) return
-      await popupPCRef.current.setRemoteDescription(
-        new RTCSessionDescription({ type: 'answer', sdp: msg.sdp })
-      )
+      try {
+        await popupPCRef.current.setRemoteDescription(
+          new RTCSessionDescription({ type: 'answer', sdp: msg.sdp })
+        )
+      } catch {
+        // Stale answer for a superseded offer (rapid double-P: the popup
+        // answers both; the first answer doesn't match the current pc).
+        // Drop it — the answer for the CURRENT offer follows and applies.
+        return
+      }
       // Reinforce the bitrate cap after negotiation — Chrome's congestion
       // control can override encoding params; setting them again post-answer
       // ensures the high cap is applied for the life of the connection.

@@ -231,6 +231,19 @@ export function registerVideoPopupIPC(): void {
     const popup = getOrCreatePopup()
 
     if (popup.isVisible()) {
+      // Re-negotiate instead of bailing. A visible popup can be holding a
+      // dead stream (a double-P raced the handshake; a previous offer was
+      // never answered) and re-pressing P was the user's only recovery
+      // gesture — early-returning dropped the fresh offer and left the
+      // popup frozen with no way back from the main window. Re-sending to
+      // a healthy popup is harmless: it answers the new offer and swaps
+      // streams seamlessly.
+      const { aspectRatio: liveAspect } = computePopupSize(videoWidth, videoHeight, cropMode)
+      popup.setAspectRatio(liveAspect)
+      const [curW, curH] = popup.getSize()
+      const liveCrop = computeCropStyle(curW, curH, videoWidth, videoHeight, cropMode, cropX)
+      popup.webContents.send('popup:command', 'crop', liveCrop ?? null)
+      popup.webContents.send('popup:command', 'webrtc-offer', offerSdp)
       popup.focus()
       return
     }
