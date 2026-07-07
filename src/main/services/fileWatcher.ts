@@ -131,7 +131,18 @@ class FileWatcher {
       awaitWriteFinish: {
         stabilityThreshold: 2000,
         pollInterval: 500
-      }
+      },
+      // Never track a file the converter is actively writing: a rule
+      // acting on a half-encoded output would move/copy garbage, and the
+      // write-stability stat-polling can race a cancelled job's handle
+      // release into EPERM errors. (Lazy import avoids a load cycle.)
+      ignored: (p: string) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { isConverterWritingPath } = require('../ipc/converter') as typeof import('../ipc/converter')
+          return isConverterWritingPath(p)
+        } catch { return false }
+      },
     })
 
     this.watcher.on('add', (filePath) => {

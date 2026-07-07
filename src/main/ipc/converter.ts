@@ -943,6 +943,20 @@ export function getConverterStatus(): { active: boolean; percent: number; label:
   return { active: true, percent: current.progress ?? 0, label }
 }
 
+/** True when `filePath` is the OUTPUT of a conversion that is currently
+ *  writing (running or mid archive-swap). Both file watchers consult this
+ *  in their ignore functions: watching a growing ffmpeg output is pure
+ *  churn, and the write-stability stat-polling can race a cancelled job's
+ *  file-handle release into EPERM errors. */
+export function isConverterWritingPath(filePath: string): boolean {
+  const target = filePath.replace(/\\/g, '/').toLowerCase()
+  for (const j of jobs.values()) {
+    if (j.status !== 'running' && j.status !== 'replacing') continue
+    if (j.outputFile && j.outputFile.replace(/\\/g, '/').toLowerCase() === target) return true
+  }
+  return false
+}
+
 export function getActiveConversionCounts(): { running: number; queued: number } {
   let running = 0, queued = 0
   for (const j of jobs.values()) {

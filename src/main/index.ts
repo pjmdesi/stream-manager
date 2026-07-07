@@ -288,6 +288,20 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
   ])
 }
 
+// Last-resort error traps. Without these, ANY uncaught exception or
+// unhandled rejection in main (observed: a transient EPERM stat from a
+// watcher's write-stability polling racing a killed ffmpeg's file-handle
+// release) pops Electron's modal "JavaScript error in the main process"
+// dialog — scary, stackless, and for transient fs races entirely
+// pointless. Log the FULL stack instead so the next occurrence is
+// actually diagnosable, and keep the app running.
+process.on('uncaughtException', (err) => {
+  console.error('[main] uncaught exception:', err?.stack ?? err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandled rejection:', (reason as Error)?.stack ?? reason)
+})
+
 app.whenReady().then(() => {
 
   app.on('browser-window-created', (_, window) => {

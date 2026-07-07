@@ -1969,7 +1969,19 @@ export function registerStreamsIPC(): void {
       //     multi-hour archive run, and the renderer was thrashing thumbnails.
       //     The temp file is renamed/swapped to the real file at end-of-job
       //     anyway, so the user only needs to see the final state.
-      ignored: (p: string) => path.basename(p).startsWith('_meta.') || /__arc_tmp\.[^.]+$/.test(p),
+      //   - in-flight converter outputs: watching a growing ffmpeg output
+      //     is churn, and chokidar's write-stability stat-polling can race
+      //     a cancelled job's file-handle release into an EPERM. The
+      //     completion/cancel paths fire their own explicit events, so
+      //     nothing is missed. (Lazy import — converter registers later.)
+      ignored: (p: string) => {
+        if (path.basename(p).startsWith('_meta.') || /__arc_tmp\.[^.]+$/.test(p)) return true
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { isConverterWritingPath } = require('./converter') as typeof import('./converter')
+          return isConverterWritingPath(p)
+        } catch { return false }
+      },
     })
 
     const onChange = () => notifyChange(win)
