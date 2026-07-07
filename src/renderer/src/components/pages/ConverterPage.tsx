@@ -229,7 +229,17 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     if (missing.length === 0) return
     let cancelled = false
     ;(async () => {
-      const probed = await Promise.all(missing.map(async p => {
+      // Probe only files whose bytes are LOCAL. ffprobe reads the file,
+      // which makes Windows recall a cloud placeholder — merely ADDING an
+      // offloaded file to the ready list kicked off a multi-GB download
+      // before the user ever pressed Convert. Cloud files skip the probe
+      // (the audio-track picker just doesn't appear until they're local);
+      // the conversion itself hydrates them when it actually starts.
+      const localFlags = await window.api.checkLocalFiles(missing)
+      if (cancelled) return
+      const probeable = missing.filter((_, i) => localFlags[i])
+      if (probeable.length === 0) return
+      const probed = await Promise.all(probeable.map(async p => {
         try { const info = await window.api.probeFile(p); return [p, info.audioTracks ?? []] as const }
         catch { return [p, [] as AudioTrackInfo[]] as const }
       }))
@@ -597,7 +607,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
             </button>
           )}
-          {isActive && (
+          {(isActive || isDownloading) && (
             <button
               onClick={() => job.status === 'paused' ? resumeJob(job.id) : pauseJob(job.id)}
               className={job.status === 'paused' ? ROW_ACTION_BLUE : ROW_ACTION_YELLOW}

@@ -2481,8 +2481,11 @@ export function StreamsPage({
     [visibleFolders, selectedPaths, selectionKey],
   )
   const clickBulkArchive = useCallback(() => {
-    if (selectedFolderList.length === 0) return
-    setArchiveTargetKeys(selectedFolderList.map(f => f.relativePath))
+    // Already-archived streams are excluded, not re-encoded — archiving
+    // is lossy, so a second pass through the preset only costs quality.
+    const targets = selectedFolderList.filter(f => !f.meta?.archived)
+    if (targets.length === 0) return
+    setArchiveTargetKeys(targets.map(f => f.relativePath))
     setSelectedPaths(new Set())
   }, [selectedFolderList])
   const clickBulkOffload = useCallback(async () => {
@@ -8273,7 +8276,7 @@ function SidebarDetail({
             </Tooltip>
           </div>
           <div className="flex-1 min-w-0 flex items-center justify-center gap-0.5">
-            {videoCount > 0 && (
+            {videoCount > 0 && !meta?.archived && (
               <Tooltip content={isArchiving ? 'Already in the converter — archive in progress' : 'Archive'}>
                 <button onClick={onArchive} disabled={isArchiving} className={PANEL_ACTION_BUTTON_GREEN}>
                   <Archive size={13} />

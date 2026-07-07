@@ -300,21 +300,18 @@ async function ensureHydrated(jobId: string): Promise<void> {
 }
 
 // ── Pending-queue persistence ─────────────────────────────────────────────
-// Queued jobs survive verbatim; in-flight jobs (running / downloading /
-// replacing / paused) persist RE-QUEUED — their ffmpeg state isn't
-// recoverable, but silently dropping them (the old behavior) meant an
-// archive group interrupted by a quit lost its running member: the group
-// completion hook then saw only the survivors and could stamp a stream
-// "archived" with one file never actually converted. Done/error/cancelled
-// are dropped as before.
+// Only PARKED queued jobs (no groupId — auto-rules with start-immediately
+// disabled) survive restarts. In-flight work and group (archive) queues
+// are deliberately forgotten: quitting mid-archive already shows the quit
+// warning, and the user expects to redo the archive on relaunch — while
+// persisting a PARTIAL group (its running member's ffmpeg state is
+// unrecoverable) risked the group completion hook later stamping a stream
+// "archived" with one file never actually converted.
 const PENDING_JOBS_KEY = 'pendingJobs'
-const PERSIST_RESUMABLE = new Set(['queued', 'running', 'downloading', 'replacing', 'paused'])
 
 function persistPendingJobs(): void {
-  const pending = [...jobs.values()]
-    .filter(j => PERSIST_RESUMABLE.has(j.status))
-    .map(j => (j.status === 'queued' ? j : { ...j, status: 'queued' as const, progress: 0 }))
-  getStore().set(PENDING_JOBS_KEY, pending)
+  const parked = [...jobs.values()].filter(j => j.status === 'queued' && !j.groupId)
+  getStore().set(PENDING_JOBS_KEY, parked)
 }
 
 export function restorePendingJobs(): void {
@@ -330,12 +327,6 @@ export function restorePendingJobs(): void {
     console.warn(`[converter] dropped ${dropped} pending job(s) — input file missing`)
     persistPendingJobs()
   }
-  // Kick the scheduler so interrupted GROUP jobs (archives) resume on
-  // launch — restored queues used to sit inert until something else
-  // happened to call scheduleNext. Parked non-group jobs (auto-rules
-  // with start-immediately off) are untouched: scheduleNext only
-  // auto-starts queued jobs that carry a groupId.
-  scheduleNext()
 }
 
 // ── HandBrake JSON → ffmpeg args translation ───────────────────────────────
@@ -807,7 +798,10 @@ export async function startConversionJob(
           // paused or offline) — the job used to sit "downloading"
           // forever. The clock resets while paused so a long deliberate
           // pause can't expire the job.
-          const DOWNLOAD_TIMEOUT_MS = 2 * 60 * 60 * 1000
+          // Generous — a slow NAS recalling several large files can
+          // legitimately run for hours; the cap only exists so a STOPPED
+          // sync client can't leave the job "downloading" forever.
+          const DOWNLOAD_TIMEOUT_MS = 6 * 60 * 60 * 1000
           let downloadClock = Date.now()
           for (;;) {
             if (flag.cancelled) break
@@ -819,7 +813,7 @@ export async function startConversionJob(
             if (await inputIsLocal()) break
             if (Date.now() - downloadClock > DOWNLOAD_TIMEOUT_MS) {
               downloadCancelFlags.delete(id)
-              handleError(new Error('Cloud download timed out after 2 hours. Check that the sync client is running and the file is available, then requeue.'))
+              handleError(new Error('Cloud download timed out after 6 hours. Check that the sync client is running and the file is available, then requeue.'))
               return
             }
             await new Promise(r => setTimeout(r, 2000))
@@ -1493,13 +1487,25 @@ export function registerConverterIPC(): void {
   ipcMain.handle('converter:pauseJob', async (_event, jobId: string) => {
     pausers.get(jobId)?.()
     const j = jobs.get(jobId)
-    if (j) jobs.set(jobId, { ...j, status: 'paused' })
+    if (j) {
+      jobs.set(jobId, { ...j, status: 'paused' })
+      // Broadcast the change — "Pause all" loops this IPC with no local
+      // state update of its own, so without the event nothing in the UI
+      // moved even though the jobs were genuinely suspended.
+      notifyAll('converter:jobStatus', { jobId, status: 'paused' })
+    }
   })
 
   ipcMain.handle('converter:resumeJob', async (_event, jobId: string) => {
     resumers.get(jobId)?.()
     const j = jobs.get(jobId)
-    if (j) jobs.set(jobId, { ...j, status: 'running' })
+    if (j) {
+      // A job paused during its cloud-download phase resumes to
+      // 'downloading' (the wait loop is still polling), not 'running'.
+      const next = downloadCancelFlags.has(jobId) ? 'downloading' as const : 'running' as const
+      jobs.set(jobId, { ...j, status: next })
+      notifyAll('converter:jobStatus', { jobId, status: next })
+    }
   })
 
   ipcMain.handle('converter:getJobs', async () => Array.from(jobs.values()))
