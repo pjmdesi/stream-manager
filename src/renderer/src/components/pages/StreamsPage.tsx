@@ -455,14 +455,26 @@ export function StreamsPage({
   // conversion) aren't clobbered, and deliberately selecting an
   // already-missing row sticks (it was never healthy while selected).
   const selectedKeyForReconcileRef = useRef<string | null>(null)
-  useEffect(() => { selectedKeyForReconcileRef.current = selectedStreamKey })
   const reconcileStateRef = useRef<{ key: string | null; sawHealthy: boolean }>({ key: null, sawHealthy: false })
+  useEffect(() => {
+    selectedKeyForReconcileRef.current = selectedStreamKey
+    const st = reconcileStateRef.current
+    if (st.key !== selectedStreamKey) {
+      st.key = selectedStreamKey
+      // Snapshot health AT SELECTION TIME. The folders-keyed effect below
+      // only samples when the list changes, and selecting a stream doesn't
+      // change the list — without this snapshot, a selection made and then
+      // externally deleted never registered as "was healthy", so the
+      // transition check below never fired.
+      const row = selectedStreamKey ? foldersRef.current.find(f => f.relativePath === selectedStreamKey) : undefined
+      st.sawHealthy = !!row && !row.isMissing
+    }
+  })
   useEffect(() => {
     if (loading || folders.length === 0) return
     const key = selectedKeyForReconcileRef.current
     const st = reconcileStateRef.current
-    if (st.key !== key) { st.key = key; st.sawHealthy = false }
-    if (!key) return
+    if (st.key !== key || !key) return
     const row = folders.find(f => f.relativePath === key)
     const healthy = !!row && !row.isMissing
     if (healthy) { st.sawHealthy = true; return }
@@ -2354,13 +2366,30 @@ export function StreamsPage({
       return !m
     })
   }, [])
-  const toggleSelected = useCallback((key: string) => {
+  // Row toggle with shift-range support: plain click toggles the row and
+  // moves the anchor; shift-click selects the whole anchor→row span
+  // (files-grid and out-of-sync panel behavior, finally on the list too).
+  const rowAnchorIndexRef = useRef<number | null>(null)
+  const toggleSelectedAt = useCallback((index: number, shiftKey: boolean) => {
+    const f = visibleFolders[index]
+    if (!f) return
+    const key = selectionKey(f)
     setSelectedPaths(prev => {
       const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
+      const anchor = rowAnchorIndexRef.current
+      if (shiftKey && anchor !== null && anchor !== index) {
+        const [lo, hi] = anchor < index ? [anchor, index] : [index, anchor]
+        for (let i = lo; i <= hi; i++) {
+          const rf = visibleFolders[i]
+          if (rf) next.add(selectionKey(rf))
+        }
+      } else {
+        next.has(key) ? next.delete(key) : next.add(key)
+      }
       return next
     })
-  }, [])
+    rowAnchorIndexRef.current = index
+  }, [visibleFolders, selectionKey])
   const selectAllVisible = useCallback(() => {
     setSelectedPaths(new Set(visibleFolders.map(selectionKey)))
   }, [visibleFolders, selectionKey])
@@ -2423,7 +2452,19 @@ export function StreamsPage({
     })
   }, [visibleFolders, selectionKey])
   useEffect(() => {
-    const handler = () => { isDragging.current = false }
+    const handler = () => {
+      if (isDragging.current && dragMoved.current) {
+        // A completed drag re-anchors future shift-ranges at its start row.
+        rowAnchorIndexRef.current = dragStartIndex.current
+      }
+      isDragging.current = false
+      // Clear the click-swallow latch even when the drag ended off-row
+      // (gap, header, outside the table) and no click ever fired — a
+      // latched dragMoved silently ate the NEXT legitimate row click.
+      // The synthetic click after an on-row drag dispatches before this
+      // timeout, so the swallow still works for the normal case.
+      if (dragMoved.current) setTimeout(() => { dragMoved.current = false }, 0)
+    }
     document.addEventListener('mouseup', handler)
     return () => document.removeEventListener('mouseup', handler)
   }, [])
@@ -3467,9 +3508,8 @@ export function StreamsPage({
                         compact={false}
                         selectMode={selectMode}
                         multiSelected={selectedPaths.has(key)}
-                        selectKey={key}
                         index={i}
-                        onToggleMultiSelect={toggleSelected}
+                        onToggleMultiSelect={toggleSelectedAt}
                         onDragStart={startDrag}
                         onDragEnter={updateDrag}
                         dragMovedRef={dragMoved}
@@ -4293,7 +4333,7 @@ export function StreamsPage({
  * present, and an unlinked icon when it isn't.
  */
 const StreamListItem = memo(function StreamListItem({
-  folder, folders, selected, compact, selectMode, multiSelected, selectKey, index, onToggleMultiSelect,
+  folder, folders, selected, compact, selectMode, multiSelected, index, onToggleMultiSelect,
   onDragStart, onDragEnter, dragMovedRef,
   isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
@@ -4315,14 +4355,13 @@ const StreamListItem = memo(function StreamListItem({
   selectMode: boolean
   /** True when this row's selection key is in the multi-select set. */
   multiSelected: boolean
-  /** This row's selection key (date in dump-mode, folderPath otherwise) —
-   *  passed so the row can invoke the stable, shared selection handlers with
-   *  its own identity, keeping them referentially stable for React.memo. */
-  selectKey: string
-  /** This row's index in the visible list — drives the drag-select range. */
+  /** This row's index in the visible list — identifies the row to the
+   *  stable, shared selection handlers (drag-select range + shift-click
+   *  range anchor), keeping them referentially stable for React.memo. */
   index: number
-  /** Toggle this row's selection key in/out of the multi-select set. */
-  onToggleMultiSelect: (key: string) => void
+  /** Toggle this row in/out of the multi-select set (by visible index);
+   *  shift extends a range from the last-clicked anchor row. */
+  onToggleMultiSelect: (index: number, shiftKey: boolean) => void
   /** Mousedown on the row (selectMode only) starts a drag-select at index. */
   onDragStart: (index: number) => void
   /** Mouseenter on the row (selectMode only) extends the drag range to index. */
@@ -4447,7 +4486,7 @@ const StreamListItem = memo(function StreamListItem({
     // In select mode the row click toggles the multi-select set instead
     // of opening the sidebar — matches the StreamsPage convention so the
     // bulk-action flow doesn't require precise checkbox aim.
-    if (selectMode) onToggleMultiSelect(selectKey)
+    if (selectMode) onToggleMultiSelect(index, e.shiftKey)
     else onClick(folder.relativePath)
   }
 
@@ -4455,7 +4494,7 @@ const StreamListItem = memo(function StreamListItem({
     <tr
       data-stream-key={folder.relativePath}
       onClick={handleRowClick}
-      onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart(index) } : undefined}
+      onMouseDown={selectMode ? (e) => { if (e.button !== 0) return; e.preventDefault(); onDragStart(index) } : undefined}
       onMouseEnter={selectMode ? () => onDragEnter(index) : undefined}
       style={selectMode ? { userSelect: 'none' } : undefined}
       className={`group transition-colors cursor-pointer ${
@@ -4487,7 +4526,7 @@ const StreamListItem = memo(function StreamListItem({
       {selectMode && (
         <td
           className="pl-3 align-middle w-[36px]"
-          onClick={e => { e.stopPropagation(); onToggleMultiSelect(selectKey) }}
+          onClick={e => { e.stopPropagation(); onToggleMultiSelect(index, e.shiftKey) }}
         >
           <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
             multiSelected ? 'bg-purple-700 border-purple-700' : 'border-gray-600 hover:border-gray-400'

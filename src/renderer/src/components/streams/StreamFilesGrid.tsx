@@ -201,7 +201,10 @@ function SelectOverlay({ onDragStart, onDragEnter, onClick }: {
   return (
     <div
       className="absolute inset-0 z-[5] cursor-pointer select-none"
-      onMouseDown={e => { e.preventDefault(); onDragStart() }}
+      // Left button only — arming the drag machinery on right/middle
+      // clicks left isDragging latched through context menus, and later
+      // mouseenters silently rewrote the selection as phantom ranges.
+      onMouseDown={e => { if (e.button !== 0) return; e.preventDefault(); onDragStart() }}
       onMouseEnter={onDragEnter}
       onClick={e => onClick(e.shiftKey)}
     />
@@ -634,6 +637,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   // the click handler ignore the synthetic click fired at the end of a drag.
   const isDragging = useRef(false)
   const dragStartIndex = useRef<number | null>(null)
+  const dragStartPath = useRef<string | null>(null)
   const dragAction = useRef<'add' | 'remove'>('add')
   const preDragRef = useRef<Set<string>>(new Set())
   const dragMoved = useRef(false)
@@ -642,6 +646,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     if (index === -1) return
     isDragging.current = true
     dragStartIndex.current = index
+    dragStartPath.current = path
     dragAction.current = selected.has(path) ? 'remove' : 'add'
     preDragRef.current = new Set(selected)
     dragMoved.current = false
@@ -649,7 +654,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     // before the click that needs the PREVIOUS anchor, so seeding it
     // with the current card made every shift-click range collapse into
     // a plain toggle. The anchor moves in toggleSelect (plain clicks)
-    // and in handleCardClick's drag-end branch instead.
+    // and at drag end (global mouseup below) instead.
   }
   const updateDrag = (path: string) => {
     if (!isDragging.current || dragStartIndex.current === null) return
@@ -667,18 +672,24 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     })
   }
   const handleCardClick = (path: string, shiftKey: boolean) => {
-    if (dragMoved.current) {
-      dragMoved.current = false
-      // A completed drag re-anchors future shift-ranges at its start card.
-      lastClickedRef.current = dragStartIndex.current !== null
-        ? (visiblePaths[dragStartIndex.current] ?? path)
-        : path
-      return
-    }
+    if (dragMoved.current) { dragMoved.current = false; return }
     toggleSelect(path, shiftKey)
   }
   useEffect(() => {
-    const onUp = () => { isDragging.current = false }
+    const onUp = () => {
+      if (isDragging.current && dragMoved.current) {
+        // A completed drag re-anchors future shift-ranges at its start card.
+        lastClickedRef.current = dragStartPath.current
+      }
+      isDragging.current = false
+      // Clear the click-swallow latch even when the drag ended off-card
+      // (grid gap, outside the grid) and no click ever fired — a latched
+      // dragMoved silently ate the NEXT legitimate card click, which is
+      // exactly the "sometimes shift-select just doesn't work" flakiness.
+      // The synthetic click after an on-card drag dispatches before this
+      // timeout, so the normal swallow still works.
+      if (dragMoved.current) setTimeout(() => { dragMoved.current = false }, 0)
+    }
     document.addEventListener('mouseup', onUp)
     return () => document.removeEventListener('mouseup', onUp)
   }, [])
