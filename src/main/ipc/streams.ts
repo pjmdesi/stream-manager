@@ -311,6 +311,11 @@ function ensureMetaEntry(allMeta: Record<string, StreamMeta>, key: string, date:
  *  still surfaces for streams whose only entry is a cached videoMap. */
 function isMeaningfulMeta(m: StreamMeta | null | undefined): boolean {
   if (!m) return false
+  // Explicit creation stamp (New stream / New episode) — a deliberately
+  // created stream counts even when every other field is still empty.
+  // Cache stubs (ensureMetaEntry) never carry it, so in dump mode a bare
+  // new stream gets its meta-only row instead of vanishing as a "stub".
+  if ((m as { createdAt?: number }).createdAt) return true
   if (m.streamType?.length) return true
   if (m.games?.length) return true
   if (m.comments?.trim()) return true

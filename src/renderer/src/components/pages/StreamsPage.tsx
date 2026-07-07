@@ -9956,6 +9956,10 @@ function NewStreamModal({
     // undefined — those keep behaving as series like they always did.
     const base: StreamMeta = {
       date, streamType: [], games: [], comments: '',
+      // Creation stamp — marks the entry as user-created so dump mode's
+      // meta-only row synthesis shows it even when nothing else is set
+      // (isMeaningfulMeta treats cache stubs as invisible).
+      createdAt: Date.now(),
       isSeries: false,
       seriesAutoDetectPending: true,
     }
@@ -9988,6 +9992,7 @@ function NewStreamModal({
       streamType: streamTypes,
       games: games ?? [],
       comments: '',  // notes start fresh per episode
+      createdAt: Date.now(),
       ytSeason: season,
       ytEpisode,
       // New Episode mode is always a series — set explicitly so the

@@ -315,6 +315,12 @@ export interface StreamMeta {
   streamType: string[]
   games: string[]
   comments: string
+  /** Epoch ms stamped when the stream item was explicitly created in SM
+   *  (New stream / New episode). Marks the entry as user-meaningful even
+   *  when otherwise empty — in dump mode there's no physical folder, so
+   *  without this a bare new stream was indistinguishable from an
+   *  app-managed cache stub and never got a row. */
+  createdAt?: number
   archived?: boolean
   videoMap?: Record<string, VideoEntry>  // key = filename (not full path)
   clipDrafts?: Record<string, ClipDraft> // key = draft id
