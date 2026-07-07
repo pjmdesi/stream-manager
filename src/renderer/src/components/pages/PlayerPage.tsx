@@ -1581,8 +1581,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     return () => clearTimeout(timer)
   }, [state.tracks, state.filePath, folderPath, state.multiTrackEnabled, config.streamsDir])
 
-  // Any time the source video changes, drop the draft binding so a fresh clip session starts fresh.
-  useEffect(() => { setActiveDraftId(null) }, [state.filePath])
+  // The old "drop the draft binding on source change" effect lived here —
+  // it's now part of the central clip-mode guard next to exitClipMode,
+  // which also exits clip mode itself (the binding alone wasn't enough:
+  // surviving clip mode wrote the old video's segments onto the new one).
 
   // Pending "open in clip editor" — applied once the requested source video finishes loading.
   // draftId=null means start a fresh draft on the first edit (e.g. reopening a clip output).
@@ -1597,6 +1599,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       setClipState(draft.state)
       setIsClipMode(true)
     } else {
+      // Persist the current clip session's tail against the CURRENT path
+      // before switching — the central guard can't flush once
+      // state.filePath has moved on to the new video.
+      void flushDraftSaveRef.current()
       setPendingClipOpen({ sourceName: draft.sourceName, state: draft.state, draftId: draft.id })
       loadFile(sourcePath)
     }
@@ -1614,6 +1620,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       setClipState(savedState)
       setIsClipMode(true)
     } else {
+      // Same tail-flush as loadDraft above — see the central guard.
+      void flushDraftSaveRef.current()
       setPendingClipOpen({ sourceName, state: savedState, draftId: null })
       loadFile(sourcePath)
     }
@@ -1632,6 +1640,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   // exitClipMode is declared later in the file; use a ref so deleteDraft can call it
   // without hitting a TDZ reference and without listing it as a dep.
   const exitClipModeRef = useRef<() => void>(() => {})
+  // Same forward-ref pattern for flushDraftSave (also declared later) so
+  // loadDraft/reopenClipOutput can persist the CURRENT session's tail
+  // before switching files.
+  const flushDraftSaveRef = useRef<() => void | Promise<void>>(() => {})
 
   // Draft pending deletion — when set, a confirmation modal is shown.
   const [draftPendingDelete, setDraftPendingDelete] = useState<import('../../types').ClipDraft | null>(null)
@@ -1862,6 +1874,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     if (!fp || !dir) return
     await persistDraftState(clipState, fp, dir)
   }, [clipState, state.filePath, persistDraftState])
+  // Keep the forward ref (used by loadDraft/reopenClipOutput above) in sync
+  flushDraftSaveRef.current = flushDraftSave
 
   // Multi-track warning modal before entering clip mode. Only the 'warn'
   // variant is used now — the legacy 'merge' selection step was removed
@@ -1929,8 +1943,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   const popupPCRef          = useRef<RTCPeerConnection | null>(null)
   const popupRtcCleanupRef  = useRef<(() => void) | null>(null)
 
-  const exitClipMode = useCallback(() => {
-    flushDraftSave()
+  // Clears every piece of clip-mode state WITHOUT persisting anything.
+  // exitClipMode (below) flushes first; the central file-change guard
+  // flushes against the PREVIOUS file instead, because by the time it
+  // runs, state.filePath already points at the new video.
+  const resetClipModeState = useCallback(() => {
     setIsClipMode(false)
     setActiveBleepId(null)
     setActiveDraftId(null)
@@ -1940,9 +1957,54 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     setEditingDurationId(null)
     setClipFocus(false)
     setAddSegmentError(null)
-  }, [flushDraftSave])
+  }, [])
+  const exitClipMode = useCallback(() => {
+    flushDraftSave()
+    resetClipModeState()
+  }, [flushDraftSave, resetClipModeState])
   // Keep the forward ref from deleteDraft in sync
   exitClipModeRef.current = exitClipMode
+
+  // ── Central clip-mode guard on source changes ────────────────────────
+  // Every path that switches the loaded video funnels through
+  // state.filePath, so this is the one place clip mode can't survive a
+  // switch by accident. The keyboard-nav path exits clip mode explicitly
+  // before loading (ideal: it flushes while the old path is still
+  // current); the mouse paths (Session panel click, Open Video,
+  // drag-drop, send-to-player) never did — clip mode and its segments
+  // stayed alive across the switch, and the autosave then wrote the OLD
+  // video's segments as a brand-new draft on the NEW one.
+  //
+  // By the time this effect sees the change the path already points at
+  // the new video, so exitClipMode's flush would target the wrong file:
+  // instead the pending autosave is cancelled and the tail is persisted
+  // explicitly against the PREVIOUS file, then everything resets.
+  //
+  // pendingClipOpen marks the one sanctioned cross-file clip entry
+  // (open a draft / reopen an exported clip): its applier effect owns
+  // all clip-mode state including the draft binding, so it's left
+  // alone — unless the pending open no longer matches the file that
+  // actually loaded (a failed/abandoned open), which clears it so a
+  // dangling pending can't suppress future exits.
+  const prevLoadedFileRef = useRef<{ filePath: string | null; folderPath: string | null }>({ filePath: null, folderPath: null })
+  useEffect(() => {
+    const prev = prevLoadedFileRef.current
+    prevLoadedFileRef.current = { filePath: state.filePath, folderPath: folderPathRef.current }
+    if (prev.filePath === state.filePath) return
+    if (pendingClipOpen) {
+      if (state.filePath && state.filePath.endsWith(pendingClipOpen.sourceName)) return
+      setPendingClipOpen(null)
+    }
+    if (isClipModeRef.current) {
+      if (draftSaveTimerRef.current) { clearTimeout(draftSaveTimerRef.current); draftSaveTimerRef.current = null }
+      if (prev.filePath) void persistDraftState(clipStateRef.current, prev.filePath, prev.folderPath)
+      resetClipModeState()
+    } else {
+      // Fresh source video — drop the draft binding so a fresh clip
+      // session starts fresh.
+      setActiveDraftId(null)
+    }
+  }, [state.filePath, pendingClipOpen, persistDraftState, resetClipModeState])
 
   // Shared zoom/pan handler — uses refs to avoid stale closures in non-passive listeners.
   // Horizontal scroll (|deltaX| dominant) pans the timeline; vertical scroll zooms.
