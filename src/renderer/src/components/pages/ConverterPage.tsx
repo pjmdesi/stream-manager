@@ -578,8 +578,9 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
           {isDownloading && (
             <div className="flex items-center gap-3 text-xs text-blue-300 tabular-nums">
+              {/* No Elapsed here — that clock measures the CONVERSION and
+                  doesn't tick during the cloud download. */}
               <span>Downloading from cloud…</span>
-              {elapsed > 0 && <span className="text-gray-400">Elapsed: {formatDuration(elapsed)}</span>}
             </div>
           )}
 
@@ -592,7 +593,9 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
           {isActive && (
             <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
-              <span>{job.progress.toFixed(1)}%</span>
+              {/* Guard: ffmpeg's first progress events can carry NaN before
+                  a real timemark lands — show 0% instead of "NaN%". */}
+              <span>{(Number.isFinite(job.progress) ? job.progress : 0).toFixed(1)}%</span>
               {elapsed > 0 && <span>Elapsed: {formatDuration(elapsed)}</span>}
               <span>
                 {job.progress === 0
@@ -796,11 +799,27 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                         </div>
                         {/* Cloud file + Extract Audio: hydration in flight —
                             the track picker (and this row's Start) unlock
-                            once the file lands. */}
+                            once the file lands. The disabled placeholder
+                            dropdown shows WHERE the picker will appear. */}
                         {isAudioPreset(preset) && localByPath[path] === false && (
-                          <span className="flex items-center gap-1.5 text-[11px] text-sky-300 shrink-0">
-                            <Loader2 size={12} className="animate-spin shrink-0" /> Downloading from cloud…
-                          </span>
+                          <>
+                            {/* Dropdown first — it sits exactly where the real
+                                track picker appears once the download lands. */}
+                            <Tooltip content="The audio track list becomes available once the download finishes." side="top">
+                              <div className="relative shrink-0">
+                                <select
+                                  disabled
+                                  className="appearance-none max-w-[200px] bg-navy-900 border border-white/10 text-gray-400 text-xs rounded-lg pl-2 pr-6 py-1 opacity-60 cursor-not-allowed"
+                                >
+                                  <option>Audio track…</option>
+                                </select>
+                                <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                              </div>
+                            </Tooltip>
+                            <span className="flex items-center gap-1.5 text-[11px] text-sky-300 shrink-0">
+                              <Loader2 size={12} className="animate-spin shrink-0" /> Downloading from cloud…
+                            </span>
+                          </>
                         )}
                         {/* Audio-track picker — only for audio-extraction presets
                             on files with more than one audio track. */}
@@ -826,6 +845,10 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                         Button with a label that smoothly collapses to icon-only
                         as the row narrows. */}
                     <div className="shrink-0 self-center flex items-center gap-1">
+                      <Tooltip
+                        content="Waiting for the download to finish so an audio track can be picked."
+                        open={isAudioPreset(preset) && localByPath[path] === false ? undefined : false}
+                      >
                       <button
                         onClick={() => startOne(file)}
                         disabled={!preset || (isAudioPreset(preset) && localByPath[path] === false)}
@@ -834,6 +857,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                         <Zap size={13} />
                         <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
                       </button>
+                      </Tooltip>
                       <button onClick={() => removeFile(path)} className={ROW_ACTION_RED}>
                         <Trash2 size={13} />
                         <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
@@ -861,34 +885,39 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                 <span className="text-xs font-medium text-gray-400">Converting ({jobs.length})</span>
                 <div className="flex items-center gap-1">
                   {(() => {
+                    // Both buttons can show at once (mixed running + paused),
+                    // styled to match the per-row pause/resume actions.
+                    // Downloading jobs are NOT pause targets — cloud
+                    // hydration has no pause; cancel is its only control.
                     const anyRunning = jobs.some(j => j.status === 'running')
                     const anyPaused = jobs.some(j => j.status === 'paused')
-                    if (!anyRunning && !anyPaused) return null
-                    // If anything is running, the action is "Pause all"; otherwise
-                    // (only paused jobs left) the action is "Resume all".
-                    const action = anyRunning ? 'pause' : 'resume'
-                    const label = action === 'pause' ? 'Pause all' : 'Resume all'
-                    const Icon = action === 'pause' ? Pause : Play
                     return (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        icon={<Icon size={13} />}
-                        onClick={async () => {
-                          if (action === 'pause') {
-                            // Downloading jobs are NOT pausable — cloud
-                            // hydration has no pause; cancel is its only
-                            // control.
-                            const targets = jobs.filter(j => j.status === 'running')
-                            await Promise.all(targets.map(j => window.api.pauseJob(j.id).catch(() => {})))
-                          } else {
-                            const targets = jobs.filter(j => j.status === 'paused')
-                            await Promise.all(targets.map(j => window.api.resumeJob(j.id).catch(() => {})))
-                          }
-                        }}
-                      >
-                        {label}
-                      </Button>
+                      <>
+                        {anyRunning && (
+                          <button
+                            onClick={async () => {
+                              const targets = jobs.filter(j => j.status === 'running')
+                              await Promise.all(targets.map(j => window.api.pauseJob(j.id).catch(() => {})))
+                            }}
+                            className={ROW_ACTION_YELLOW}
+                          >
+                            <Pause size={13} />
+                            Pause all
+                          </button>
+                        )}
+                        {anyPaused && (
+                          <button
+                            onClick={async () => {
+                              const targets = jobs.filter(j => j.status === 'paused')
+                              await Promise.all(targets.map(j => window.api.resumeJob(j.id).catch(() => {})))
+                            }}
+                            className={ROW_ACTION_BLUE}
+                          >
+                            <Play size={13} />
+                            Resume all
+                          </button>
+                        )}
+                      </>
                     )
                   })()}
                   <Button variant="ghost" size="sm" onClick={clearDone} disabled={!jobs.some(j => j.status === 'done' || j.status === 'cancelled' || j.status === 'error')}>Clear done</Button>

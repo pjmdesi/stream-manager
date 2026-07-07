@@ -811,12 +811,32 @@ export async function startConversionJob(
             resumers.delete(id)
             notifyAll('converter:jobStatus', { jobId: id, status: 'cancelled' })
             // Abort the OS-level recall too — a dehydrate command cancels
-            // an in-progress hydration (the only way to stop it), so the
-            // transfer doesn't keep running for a job that no longer
-            // wants the file. Best-effort.
-            import('../services/cfapi')
-              .then(m => m.dehydratePaths([job.inputFile], () => {}, () => false))
-              .catch(() => {})
+            // an in-progress hydration (the only control CFAPI offers;
+            // there is no pause). The streams watcher MUST be paused
+            // around the call: its directory handles make Synology reject
+            // CfDehydratePlaceholder with 0x80070187 "file in use" — an
+            // earlier version skipped the pause and the abort silently
+            // failed. Short retries cover the transfer's own transient
+            // handles. Best-effort throughout.
+            void (async () => {
+              try {
+                const { pauseStreamsWatcher } = await import('./streams')
+                const { dehydratePaths } = await import('../services/cfapi')
+                const restartWatcher = await pauseStreamsWatcher()
+                try {
+                  for (const delay of [0, 1000, 3000]) {
+                    if (delay) await new Promise(r => setTimeout(r, delay))
+                    const res = await dehydratePaths([job.inputFile], () => {}, () => false)
+                    if (res.ok.length > 0 || res.skippedAlreadyOffline.length > 0) return
+                  }
+                  console.warn('[converter] could not abort hydration for', job.inputFile)
+                } finally {
+                  restartWatcher()
+                }
+              } catch (err) {
+                console.warn('[converter] hydration abort failed:', err)
+              }
+            })()
             maybeFireGroupHook(id)
             scheduleNext()
             resolve()
