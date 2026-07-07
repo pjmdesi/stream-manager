@@ -613,9 +613,16 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   )
   useEffect(() => { setSelectMode(false); setSelected(new Set()); lastClickedRef.current = null }, [folder.folderPath])
   const toggleSelect = (path: string, shiftKey: boolean) => {
+    // Capture the anchor BEFORE queueing the update and BEFORE moving the
+    // ref. React only runs setState updaters eagerly when the queue is
+    // clean — when it defers them, a ref read inside the updater sees the
+    // reassignment below (anchor === path) and the range collapses to a
+    // plain toggle. That's exactly the "range works once, then never
+    // again" flakiness.
+    const anchor = lastClickedRef.current
+    lastClickedRef.current = path
     setSelected(prev => {
       const next = new Set(prev)
-      const anchor = lastClickedRef.current
       if (shiftKey && anchor && anchor !== path) {
         const a = visiblePaths.indexOf(anchor)
         const b = visiblePaths.indexOf(path)
@@ -626,7 +633,6 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
       } else if (next.has(path)) { next.delete(path) } else { next.add(path) }
       return next
     })
-    lastClickedRef.current = path
   }
   const clearSelection = () => { setSelected(new Set()); lastClickedRef.current = null }
   const exitSelectMode = () => { setSelectMode(false); clearSelection() }

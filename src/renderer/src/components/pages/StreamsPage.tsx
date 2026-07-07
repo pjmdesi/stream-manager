@@ -2374,9 +2374,14 @@ export function StreamsPage({
     const f = visibleFolders[index]
     if (!f) return
     const key = selectionKey(f)
+    // Capture the anchor BEFORE queueing the update and BEFORE moving the
+    // ref — deferred setState updaters run after the reassignment below
+    // and would see anchor === index, collapsing the range to a plain
+    // toggle (same eager-vs-deferred updater trap as the files grid).
+    const anchor = rowAnchorIndexRef.current
+    rowAnchorIndexRef.current = index
     setSelectedPaths(prev => {
       const next = new Set(prev)
-      const anchor = rowAnchorIndexRef.current
       if (shiftKey && anchor !== null && anchor !== index) {
         const [lo, hi] = anchor < index ? [anchor, index] : [index, anchor]
         for (let i = lo; i <= hi; i++) {
@@ -2388,7 +2393,6 @@ export function StreamsPage({
       }
       return next
     })
-    rowAnchorIndexRef.current = index
   }, [visibleFolders, selectionKey])
   const selectAllVisible = useCallback(() => {
     setSelectedPaths(new Set(visibleFolders.map(selectionKey)))
