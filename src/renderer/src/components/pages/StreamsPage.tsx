@@ -4281,11 +4281,16 @@ export function StreamsPage({
           <NewStreamModal
             existingDates={folders.map(f => f.date)}
             onClose={() => { setNewStreamOpen(false); setNewEpisodeSourceKey(null) }}
-            onCreated={async (newFolderPath) => {
+            onCreated={async (newFolderPath, date) => {
               setNewStreamOpen(false)
               setNewEpisodeSourceKey(null)
               await loadFolders()
-              selectByFolderPath(newFolderPath)
+              // Dump mode: createStreamFolder returns the dump ROOT (every
+              // stream shares it), so a path-based select resolves to the
+              // FIRST row — the top stream item, not the new one. The
+              // canonical dump key is the date.
+              if (isDumpMode) setSelectedStreamKey(date)
+              else selectByFolderPath(newFolderPath)
             }}
             streamsDir={streamsDir!}
             streamMode={streamMode}
@@ -9884,7 +9889,9 @@ function NewStreamModal({
 }: {
   existingDates: string[]
   onClose: () => void
-  onCreated: (newFolderPath: string) => Promise<void> | void
+  /** `date` rides along because dump mode's newFolderPath is the shared
+   *  dump root — the date IS the canonical stream key there. */
+  onCreated: (newFolderPath: string, date: string) => Promise<void> | void
   streamsDir: string
   streamMode: 'folder-per-stream' | 'dump-folder'
   /** When set, the modal acts as "New episode": the new folder inherits
@@ -10032,7 +10039,7 @@ function NewStreamModal({
         source?.folderPath,
         streamMode,
       )
-      await onCreated(newFolderPath)
+      await onCreated(newFolderPath, date)
     } catch (err: any) {
       setBusy(false)
       setError(err?.message ?? String(err))

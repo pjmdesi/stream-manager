@@ -534,14 +534,27 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   // …then flipped as cloud ops for our files reach a terminal state, so the
   // button/icon update without a folder rescan.
   useEffect(() => {
+    // Cache writes OUTSIDE the state updater: rememberHydrationOne
+    // notifies subscribers synchronously (VideoCountTooltip setStates in
+    // its listener), and React can run updaters during another
+    // component's render — doing the write inside the updater produced
+    // "Cannot update VideoCountTooltip while rendering StreamFilesGrid".
+    // Unconditional per completed item; the cache is global truth by
+    // path, so re-remembering an already-known status is a no-op.
+    for (const it of offloadItems) {
+      if (it.status === 'done' || it.status === 'already-offline') rememberHydrationOne(it.path, false)
+    }
+    for (const it of hydrateItems) {
+      if (it.status === 'done' || it.status === 'already-local') rememberHydrationOne(it.path, true)
+    }
     setLocalStatus(prev => {
       let changed = false
       const next = { ...prev }
       for (const it of offloadItems) {
-        if (it.path in next && (it.status === 'done' || it.status === 'already-offline') && next[it.path] !== false) { next[it.path] = false; rememberHydrationOne(it.path, false); changed = true }
+        if (it.path in next && (it.status === 'done' || it.status === 'already-offline') && next[it.path] !== false) { next[it.path] = false; changed = true }
       }
       for (const it of hydrateItems) {
-        if (it.path in next && (it.status === 'done' || it.status === 'already-local') && next[it.path] !== true) { next[it.path] = true; rememberHydrationOne(it.path, true); changed = true }
+        if (it.path in next && (it.status === 'done' || it.status === 'already-local') && next[it.path] !== true) { next[it.path] = true; changed = true }
       }
       return changed ? next : prev
     })

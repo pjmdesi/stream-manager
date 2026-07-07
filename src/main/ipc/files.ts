@@ -56,10 +56,23 @@ function runAttrCheckViaStdin(filePaths: string[]): Promise<boolean[]> {
   return new Promise(resolve => {
     // Reads paths from stdin one per line, prints "<int>" per line in order.
     // -1 marker for paths whose attributes can't be read (file gone, etc.).
+    //
+    // Paths travel base64-encoded: PowerShell decodes piped stdin with the
+    // OEM code page no matter what Node writes, so any non-ASCII character
+    // (é, ü, an em-dash — common in game names) arrived garbled, failed
+    // GetAttributes, and the -1 error mapped to "local". That silently
+    // defeated the placeholder system for those files: scans ffprobed
+    // cloud placeholders (triggering multi-GB Synology recalls) and the
+    // renderer loaded file:// URLs for placeholder thumbnails — the exact
+    // Chromium hang thumbnailLocalFlags exists to prevent. Base64 is pure
+    // ASCII, so it survives any code page.
     const script = `
       $ErrorActionPreference = 'Continue'
       while (($line = [Console]::In.ReadLine()) -ne $null) {
-        try { [int][System.IO.File]::GetAttributes($line) } catch { -1 }
+        try {
+          $p = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line))
+          [int][System.IO.File]::GetAttributes($p)
+        } catch { -1 }
       }
     `
     let stdout = ''
@@ -75,8 +88,8 @@ function runAttrCheckViaStdin(filePaths: string[]): Promise<boolean[]> {
       }))
     })
     proc.on('error', () => resolve(filePaths.map(() => true)))
-    // Stream paths to PowerShell. Each path on its own line.
-    proc.stdin.write(filePaths.join('\n') + '\n')
+    // Stream paths to PowerShell. Each path base64-encoded on its own line.
+    proc.stdin.write(filePaths.map(p => Buffer.from(p, 'utf8').toString('base64')).join('\n') + '\n')
     proc.stdin.end()
   })
 }
@@ -358,14 +371,34 @@ export function registerFilesIPC(): void {
     // Clear any existing poller for this file before starting a new one
     const existing = activeDownloadPollers.get(filePath)
     if (existing) clearInterval(existing)
+    // Async attribute check per tick — the old isFileConfirmedLocal was a
+    // SYNCHRONOUS PowerShell spawn (up to 5s) every 2s, forever, per stuck
+    // file, hard-blocking the main process. Overlap guard so a slow check
+    // can't stack; stops when the window goes away (it used to outlive it)
+    // or after a hard lifetime cap for downloads that will never finish
+    // (sync client paused, file unpinned server-side).
+    const startedAt = Date.now()
+    const MAX_POLL_MS = 4 * 60 * 60 * 1000
+    let checking = false
     const t = setInterval(() => {
-      if (isFileConfirmedLocal(filePath)) {
+      if (!win || win.isDestroyed() || Date.now() - startedAt > MAX_POLL_MS) {
         clearInterval(t)
         activeDownloadPollers.delete(filePath)
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('files:cloudDownloadDone', filePath)
-        }
+        return
       }
+      if (checking) return
+      checking = true
+      checkLocalFiles([filePath])
+        .then(([local]) => {
+          checking = false
+          if (!local) return
+          clearInterval(t)
+          activeDownloadPollers.delete(filePath)
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('files:cloudDownloadDone', filePath)
+          }
+        })
+        .catch(() => { checking = false })
     }, 2000)
     activeDownloadPollers.set(filePath, t)
   })

@@ -150,7 +150,10 @@ function nextFolderName(parentDir: string, calDate: string): string {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  // LOCAL calendar date — toISOString() is UTC, which flagged tonight's
+  // dump-mode stream as "missing" every evening in western timezones.
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /** Extract game names from a list of file paths (dump folder mode). */
@@ -1906,7 +1909,18 @@ export function registerStreamsIPC(): void {
     suppressChokidarUntil = Math.max(suppressChokidarUntil, Date.now() + durationMs)
   }
 
+  // Generation counter guarding the pause/restart dance: a restart closure
+  // from pauseDirWatcher only fires if no NEWER watcher lifecycle event
+  // (watchDir, unwatchDir, another pause) happened since. Without it, a
+  // watchDir call landing mid-pause created a second watcher and the
+  // stale restart then stacked a third over it — leaking the second's
+  // ReadDirectoryChangesW handles forever, after which every delete /
+  // reschedule / offload failed EPERM until an app restart.
+  let watchGeneration = 0
+
   function startDirWatcher(dir: string, mode: 'folder-per-stream' | 'dump-folder', win: BrowserWindow) {
+    // Never stack: close whatever is running before overwriting the ref.
+    if (dirWatcher) { void dirWatcher.close(); dirWatcher = null }
     dirWatcher = chokidar.watch(dir, {
       // dump: root files only. folder: deep enough to cover year/month grouping
       // above the stream folder PLUS sub-org (clips/, recordings/, …) below it.
@@ -1963,10 +1977,25 @@ export function registerStreamsIPC(): void {
     const config = currentWatchConfig
     await dirWatcher.close()
     dirWatcher = null
-    return () => { startDirWatcher(config.dir, config.mode, config.win) }
+    const gen = ++watchGeneration
+    return () => {
+      // A newer watchDir/unwatchDir superseded this pause — restarting
+      // with the stale config would stack a watcher over the new one.
+      if (gen !== watchGeneration) return
+      startDirWatcher(config.dir, config.mode, config.win)
+      // FS events during the pause were simply lost (nothing rescans on
+      // resume) — nudge one QUIET reconcile so anything that landed
+      // mid-pause (OBS finishing a recording during an offload drain)
+      // shows up without waiting for an unrelated event or flashing
+      // the thumbnails.
+      if (!config.win.isDestroyed()) {
+        config.win.webContents.send('streams:changed', { quiet: true })
+      }
+    }
   }
 
   ipcMain.handle('streams:watchDir', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream') => {
+    watchGeneration++
     if (dirWatcher) { await dirWatcher.close(); dirWatcher = null }
     if (!dir || !fs.existsSync(dir)) { currentWatchConfig = null; return }
 
@@ -1978,6 +2007,7 @@ export function registerStreamsIPC(): void {
   })
 
   ipcMain.handle('streams:unwatchDir', async () => {
+    watchGeneration++
     if (dirWatcher) { await dirWatcher.close(); dirWatcher = null }
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null }
     currentWatchConfig = null

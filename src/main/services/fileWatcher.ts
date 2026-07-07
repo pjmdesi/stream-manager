@@ -190,8 +190,10 @@ class FileWatcher {
 
   private async handleFile(filePath: string): Promise<void> {
     for (const rule of this.rules) {
-      // Check if file is in watch path
-      if (!filePath.startsWith(rule.watchPath)) continue
+      // Separator-aware containment — a raw prefix check let a rule on
+      // D:\Rec swallow files landing in D:\Recordings.
+      const root = rule.watchPath.replace(/[\\/]+$/, '')
+      if (!(filePath.startsWith(root + path.sep) || filePath.startsWith(root + '/'))) continue
 
       const fileName = path.basename(filePath)
       if (!micromatch.isMatch(fileName, rule.pattern)) continue
