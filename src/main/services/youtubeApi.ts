@@ -510,9 +510,11 @@ export async function getChannelVideos(
       // Upcoming scheduled broadcasts have no actualStartTime yet — date
       // them by their scheduled start, not the day they were created in
       // Studio (importing next Friday's broadcast used to make a folder
-      // dated today).
+      // dated today). Regular videos scheduled for future publish carry
+      // their date in status.publishAt instead.
       const dateIso = (live?.actualStartTime as string | undefined)
         || (live?.scheduledStartTime as string | undefined)
+        || (item.status?.publishAt as string | undefined)
         || sn.publishedAt
       out.push({
         videoId: item.id,
@@ -530,6 +532,21 @@ export async function getChannelVideos(
         thumbnailUrl: pickThumbUrl(sn.thumbnails),
       })
     }
+  }
+  // Tags fallback. The multi-part hydration above has been seen to come
+  // back without snippet.tags on upcoming broadcasts even when tags are
+  // set in Studio; the dedicated part=snippet lookup (the same call the
+  // broadcast pool uses) returns them reliably. Re-query only the ids
+  // that came back tagless — 1 read unit per 50 ids, best-effort.
+  const tagless = out.filter(v => v.tags.length === 0).map(v => v.videoId)
+  if (tagless.length > 0) {
+    try {
+      const extras = await fetchVideoExtras(tagless, clientId, clientSecret)
+      for (const v of out) {
+        const e = extras.get(v.videoId)
+        if (e?.tags && v.tags.length === 0) v.tags = e.tags
+      }
+    } catch { /* import proceeds without tags */ }
   }
   return out
 }

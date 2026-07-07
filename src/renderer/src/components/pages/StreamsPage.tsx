@@ -963,6 +963,10 @@ export function StreamsPage({
     }
     return changed ? next : ytVideoStatusMap
   }, [ytVideoStatusMap, ytBroadcasts, ytVods])
+  // Ref mirror for mount-once effects (the post-stream Twitch picker)
+  // that must read the CURRENT map at fire time without re-subscribing.
+  const effectiveYtVideoStatusMapRef = useRef(effectiveYtVideoStatusMap)
+  useEffect(() => { effectiveYtVideoStatusMapRef.current = effectiveYtVideoStatusMap })
 
   // Live-now tracking for upcoming linked broadcasts. 60s poll for
   // baseline freshness; the relay-orchestrator push subscription below
@@ -1124,6 +1128,13 @@ export function StreamsPage({
       const candidates = foldersRef.current
         .filter(f => f.meta?.ytVideoId !== justCompletedId)
         .filter(f => isPendingStream(f, today))
+        // Linked to something we KNOW is a plain video (imported draft /
+        // scheduled upload)? Not an upcoming stream — don't let it win
+        // "next stream" and push its title to the Twitch channel.
+        .filter(f => {
+          const id = f.meta?.ytVideoId
+          return !id || effectiveYtVideoStatusMapRef.current[id]?.isLivestream !== false
+        })
         .sort((a, b) => a.date.localeCompare(b.date))
       const next = candidates[0]
       if (!next?.meta) return
@@ -1193,10 +1204,16 @@ export function StreamsPage({
   // stream"). Mirrors StreamsPage exactly.
   const nextUpcomingFolderPath = useMemo(() => {
     const today = todayStr()
-    const upcoming = folders.filter(f => isPendingStream(f, today))
+    // Items linked to a known plain video (imported draft / scheduled
+    // upload) don't count as upcoming streams.
+    const upcoming = folders.filter(f => {
+      if (!isPendingStream(f, today)) return false
+      const id = f.meta?.ytVideoId
+      return !id || effectiveYtVideoStatusMap[id]?.isLivestream !== false
+    })
     upcoming.sort((a, b) => a.date.localeCompare(b.date))
     return upcoming[0]?.folderPath ?? null
-  }, [folders])
+  }, [folders, effectiveYtVideoStatusMap])
 
   // Claude AI suggestions. Enabled only when an API key is configured;
   // when off, EditableTextField's aiFetcher prop receives `undefined`
@@ -3355,7 +3372,10 @@ export function StreamsPage({
                         onDragEnter={updateDrag}
                         dragMovedRef={dragMoved}
                         cloudSyncActive={cloudSyncActive}
-                        isPending={isPendingStream(f, today)}
+                        // Known plain videos (imported drafts / scheduled
+                        // uploads) never read as upcoming streams, whatever
+                        // their date says.
+                        isPending={isPendingStream(f, today) && status?.isLivestream !== false}
                         isToday={f.date === today}
                         isNextUpcoming={f.folderPath === nextUpcomingFolderPath}
                         isLive={isLiveNow}
@@ -3687,6 +3707,7 @@ export function StreamsPage({
           <DeleteModal
             target={target}
             isDumpMode={isDumpMode}
+            linkedVideoMissing={!!target.meta?.ytVideoId && effectiveYtVideoStatusMap[target.meta.ytVideoId]?.missing === true}
             onClose={() => setDeleteTargetKey(null)}
             onSuccess={() => {
               setDeleteTargetKey(null)
@@ -9438,11 +9459,15 @@ function RescheduleModal({
 function DeleteModal({
   target,
   isDumpMode,
+  linkedVideoMissing,
   onClose,
   onSuccess,
 }: {
   target: StreamFolder
   isDumpMode: boolean
+  /** The linked YT video is known-deleted on YouTube — the "also delete
+   *  on YouTube" option is pointless (and fails) so it's suppressed. */
+  linkedVideoMissing: boolean
   onClose: () => void
   onSuccess: () => void
 }) {
@@ -9496,6 +9521,16 @@ function DeleteModal({
     return () => { cancelled = true }
   }, [computeBlockReason])
 
+  // Local deletion already happened → any close must refresh the list.
+  // Folder-mode deletes pause the watcher around the trash, so no
+  // streams:changed event ever fires for them; without this the trashed
+  // stream lingers as a ghost row.
+  const localDeletedRef = useRef(false)
+  const handleClose = () => {
+    if (busy) return
+    if (localDeletedRef.current) onSuccess()
+    else onClose()
+  }
   const confirm = async () => {
     setBusy(true)
     setError(null)
@@ -9523,14 +9558,17 @@ function DeleteModal({
       setError(`Local delete failed: ${err?.message ?? String(err)}`)
       return
     }
-    if (alsoDeleteYt && linkedVideoId) {
+    localDeletedRef.current = true
+    if (alsoDeleteYt && linkedVideoId && !linkedVideoMissing) {
       try {
         await window.api.youtubeDeleteVideo(linkedVideoId)
       } catch (err: any) {
         setBusy(false)
         setError(`Files moved to Recycle Bin, but deleting the YouTube video failed: ${err?.message ?? String(err)}`)
-        // Still call success since the local part worked — parent refreshes
-        // folders, but we leave the modal open so the YT error stays visible.
+        // The modal stays open so the YT error is visible; the eventual
+        // Close routes through onSuccess (handleClose below) so the list
+        // still refreshes — the local folder IS gone, and skipping the
+        // refresh left a ghost row until a manual reload.
         return
       }
     }
@@ -9541,12 +9579,12 @@ function DeleteModal({
   return (
     <Modal
       isOpen
-      onClose={() => { if (!busy) onClose() }}
+      onClose={handleClose}
       title={isDumpMode ? 'Move files to Recycle Bin?' : 'Move folder to Recycle Bin?'}
       width="sm"
       footer={
         <>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={handleClose}>
             {error ? 'Close' : 'Cancel'}
           </Button>
           {!error && (
@@ -9600,7 +9638,14 @@ function DeleteModal({
       </div>
       <p className="text-xs text-gray-400 mb-3">This action can be undone from the Recycle Bin.</p>
 
-      {linkedVideoId && (
+      {linkedVideoId && linkedVideoMissing && (
+        <div className="border-t border-white/10 pt-3">
+          <p className="text-xs text-gray-400">
+            The linked YouTube video (<span className="font-mono">{linkedVideoId}</span>) no longer exists on YouTube, so there is nothing to delete there.
+          </p>
+        </div>
+      )}
+      {linkedVideoId && !linkedVideoMissing && (
         <div className="border-t border-white/10 pt-3 flex flex-col gap-2">
           <Checkbox
             checked={alsoDeleteYt}
