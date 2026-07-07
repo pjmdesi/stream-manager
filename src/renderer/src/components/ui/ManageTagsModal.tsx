@@ -451,13 +451,18 @@ function TagListPanel({
           ? sorted.filter(t => t !== renameBusy.to)
           : sorted
         ).map(item => {
-          const resolvedChip = chipClass ?? getTagColor(tagColors?.[item]).chip
           const isSelected = selected.includes(item)
           const isSurvivor = survivor === item
           const isDying = isSelected && !isSurvivor
           const isPendingDelete = deleteTarget === item
           const isRenaming = renamingItem === item
           const isRenameBusy = renameBusy?.from === item
+          // Mid-rename the color/texture maps may already be re-keyed to
+          // the NEW name while this row still keys by the old one — fall
+          // back so the chip keeps its picked styling instead of flashing
+          // the default for the tail of the rewrite.
+          const styleKey = isRenameBusy && tagColors && !(item in tagColors) ? renameBusy!.to : item
+          const resolvedChip = chipClass ?? getTagColor(tagColors?.[styleKey]).chip
 
           return (
             <div
@@ -524,7 +529,7 @@ function TagListPanel({
               ) : (
                 <span
                   className={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${resolvedChip}`}
-                  style={chipClass ? {} : getTagTextureStyle(tagTextures?.[item])}
+                  style={chipClass ? {} : getTagTextureStyle(tagTextures?.[styleKey])}
                 >
                   {isRenameBusy ? renameBusy!.to : item}
                 </span>

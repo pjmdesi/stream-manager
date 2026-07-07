@@ -645,7 +645,11 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     dragAction.current = selected.has(path) ? 'remove' : 'add'
     preDragRef.current = new Set(selected)
     dragMoved.current = false
-    lastClickedRef.current = path
+    // Deliberately NOT touching lastClickedRef here: mousedown fires
+    // before the click that needs the PREVIOUS anchor, so seeding it
+    // with the current card made every shift-click range collapse into
+    // a plain toggle. The anchor moves in toggleSelect (plain clicks)
+    // and in handleCardClick's drag-end branch instead.
   }
   const updateDrag = (path: string) => {
     if (!isDragging.current || dragStartIndex.current === null) return
@@ -663,7 +667,14 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     })
   }
   const handleCardClick = (path: string, shiftKey: boolean) => {
-    if (dragMoved.current) { dragMoved.current = false; return }
+    if (dragMoved.current) {
+      dragMoved.current = false
+      // A completed drag re-anchors future shift-ranges at its start card.
+      lastClickedRef.current = dragStartIndex.current !== null
+        ? (visiblePaths[dragStartIndex.current] ?? path)
+        : path
+      return
+    }
     toggleSelect(path, shiftKey)
   }
   useEffect(() => {

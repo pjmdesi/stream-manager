@@ -446,19 +446,30 @@ export function StreamsPage({
   }, [folders])
   // Reconcile a selection whose stream vanished OUTSIDE SM (folder deleted
   // in Explorer, removed by the sync client): without this the sidebar sat
-  // full-width empty until an unsignposted Esc. Keyed on `folders` only —
-  // NOT on the selection — so flows that set a new key just before their
-  // reload lands (reschedule, dump→folder conversion) aren't clobbered:
-  // the check only runs when a fresh list arrives, and by then those keys
-  // resolve.
+  // full-width showing the dead stream's details. An externally-deleted
+  // folder doesn't leave the list — its meta entry keeps it as a red
+  // `isMissing` row — so the trigger is the HEALTH TRANSITION: the
+  // selected row was healthy on a previous pass and is now missing/absent.
+  // Keyed on `folders` only (not the selection) so flows that set a new
+  // key just before their reload lands (reschedule, dump→folder
+  // conversion) aren't clobbered, and deliberately selecting an
+  // already-missing row sticks (it was never healthy while selected).
   const selectedKeyForReconcileRef = useRef<string | null>(null)
   useEffect(() => { selectedKeyForReconcileRef.current = selectedStreamKey })
+  const reconcileStateRef = useRef<{ key: string | null; sawHealthy: boolean }>({ key: null, sawHealthy: false })
   useEffect(() => {
     if (loading || folders.length === 0) return
     const key = selectedKeyForReconcileRef.current
+    const st = reconcileStateRef.current
+    if (st.key !== key) { st.key = key; st.sawHealthy = false }
     if (!key) return
-    if (folders.some(f => f.relativePath === key)) return
-    setSelectedStreamKey(null)
+    const row = folders.find(f => f.relativePath === key)
+    const healthy = !!row && !row.isMissing
+    if (healthy) { st.sawHealthy = true; return }
+    if (st.sawHealthy) {
+      st.sawHealthy = false
+      setSelectedStreamKey(null)
+    }
   }, [folders, loading])
   // When set, the "pick which videos to send to the converter" modal is open
   // for this folder (shown only for folders with more than one video).
@@ -4397,7 +4408,7 @@ const StreamListItem = memo(function StreamListItem({
         <td colSpan={missingColSpan} className="px-2 py-2 align-middle">
           <div className="flex items-center gap-3">
             <span className="text-sm font-mono text-red-400">{folder.folderName}</span>
-            <span className="text-xs text-red-700 italic">Folder not found on disk</span>
+            <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-red-300/40 bg-red-500/10 text-red-300">Folder not found on disk</span>
           </div>
         </td>
       </tr>

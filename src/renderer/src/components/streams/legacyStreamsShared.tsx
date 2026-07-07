@@ -6892,7 +6892,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
         </div>
         <div className="p-2">
           <p className="text-xs font-mono text-red-400 truncate">{folder.folderName}</p>
-          <p className="text-[10px] text-red-700 italic mt-0.5">Folder not found on disk</p>
+          <p className="text-[10px] text-red-300 mt-0.5">Folder not found on disk</p>
         </div>
       </div>
     )
@@ -7230,7 +7230,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
         <td colSpan={selectMode ? 6 : 5} className="px-2 py-2 align-middle">
           <div className="flex items-center gap-3">
             <span className="text-sm font-mono text-red-400">{folder.folderName}</span>
-            <span className="text-xs text-red-700 italic">Folder not found on disk</span>
+            <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-red-300/40 bg-red-500/10 text-red-300">Folder not found on disk</span>
           </div>
         </td>
         <td className="px-2 py-2 align-middle w-[160px]" />
