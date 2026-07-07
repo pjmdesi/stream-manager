@@ -9478,6 +9478,26 @@ function DeleteModal({
   const [blockReason, setBlockReason] = useState<string | null>(null)
   const { openReason, folderOpenReason } = useOpenItems()
   const linkedVideoId = target.meta?.ytVideoId
+  // `linkedVideoMissing` (prop) is the page's LAST-KNOWN state and can be
+  // seconds stale — a video deleted in Studio moments ago still reads as
+  // present. Verify the one linked id on open (1 read unit) before
+  // offering a YouTube delete that would just 404. 'unknown' (check
+  // failed — offline, API error) falls back to offering the option; a
+  // doomed attempt surfaces its own error and the close still refreshes.
+  const [ytLinkCheck, setYtLinkCheck] = useState<'checking' | 'exists' | 'missing' | 'unknown'>(
+    !linkedVideoId ? 'unknown' : linkedVideoMissing ? 'missing' : 'checking'
+  )
+  useEffect(() => {
+    if (!linkedVideoId || linkedVideoMissing) return
+    let cancelled = false
+    window.api.youtubeGetVideoStatuses([linkedVideoId]).then(res => {
+      if (cancelled) return
+      if (!res) { setYtLinkCheck('unknown'); return }
+      setYtLinkCheck(res[linkedVideoId]?.missing ? 'missing' : 'exists')
+    }).catch(() => { if (!cancelled) setYtLinkCheck('unknown') })
+    return () => { cancelled = true }
+  }, [linkedVideoId, linkedVideoMissing])
+  const videoMissing = ytLinkCheck === 'missing'
 
   // Why this stream can't be deleted right now: any of its files is open in the
   // player / thumbnail editor, or held by a converter job. Dump mode checks the
@@ -9559,7 +9579,7 @@ function DeleteModal({
       return
     }
     localDeletedRef.current = true
-    if (alsoDeleteYt && linkedVideoId && !linkedVideoMissing) {
+    if (alsoDeleteYt && linkedVideoId && !videoMissing) {
       try {
         await window.api.youtubeDeleteVideo(linkedVideoId)
       } catch (err: any) {
@@ -9589,7 +9609,7 @@ function DeleteModal({
           </Button>
           {!error && (
             <Button variant="primary" size="sm" loading={busy} disabled={!!blockReason} onClick={confirm}>
-              {alsoDeleteYt && linkedVideoId ? 'Move to Recycle Bin & Delete from YouTube' : 'Move to Recycle Bin'}
+              {alsoDeleteYt && linkedVideoId && !videoMissing ? 'Move to Recycle Bin & Delete from YouTube' : 'Move to Recycle Bin'}
             </Button>
           )}
         </>
@@ -9638,19 +9658,19 @@ function DeleteModal({
       </div>
       <p className="text-xs text-gray-400 mb-3">This action can be undone from the Recycle Bin.</p>
 
-      {linkedVideoId && linkedVideoMissing && (
+      {linkedVideoId && videoMissing && (
         <div className="border-t border-white/10 pt-3">
           <p className="text-xs text-gray-400">
             The linked YouTube video (<span className="font-mono">{linkedVideoId}</span>) no longer exists on YouTube, so there is nothing to delete there.
           </p>
         </div>
       )}
-      {linkedVideoId && !linkedVideoMissing && (
+      {linkedVideoId && !videoMissing && (
         <div className="border-t border-white/10 pt-3 flex flex-col gap-2">
           <Checkbox
             checked={alsoDeleteYt}
             onChange={setAlsoDeleteYt}
-            disabled={busy}
+            disabled={busy || ytLinkCheck === 'checking'}
             size="sm"
             label={
               <div>
@@ -9659,6 +9679,11 @@ function DeleteModal({
               </div>
             }
           />
+          {ytLinkCheck === 'checking' && (
+            <p className="text-[10px] text-gray-400 flex items-center gap-1">
+              <Loader2 size={10} className="animate-spin shrink-0" /> Checking that the linked video still exists on YouTube…
+            </p>
+          )}
           {alsoDeleteYt && (
             <div className="flex items-start gap-1.5 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 leading-relaxed">
               <AlertTriangle size={12} className="shrink-0 mt-0.5" />
