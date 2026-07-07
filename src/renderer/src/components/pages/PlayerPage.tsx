@@ -1062,6 +1062,20 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   const isClipModeRef = useRef(isClipMode)
   useEffect(() => { isClipModeRef.current = isClipMode }, [isClipMode])
   const durationRef = useRef(0)
+  // ── Extraction-open guard ─────────────────────────────────────────────
+  // While audio tracks are extracting, every path that opens a different
+  // video REFUSES (with a modal) instead of interrupting ffmpeg mid-run.
+  // The Session Videos panel already disables itself, but external entry
+  // points (files grid send-to-player, Ctrl+O, drag-drop, recents) walked
+  // straight past it and killed the extraction. Ref-mirrored from
+  // isExtracting (synced below, after the hook state exists) so handlers
+  // declared anywhere can read the live value.
+  const isExtractingRef = useRef(false)
+  const [extractionBlocked, setExtractionBlocked] = useState(false)
+  const guardedLoadFile = useCallback((path: string) => {
+    if (isExtractingRef.current) { setExtractionBlocked(true); return }
+    void loadFile(path)
+  }, [loadFile])
 
   // Waveform element ref for non-passive wheel listener
   const waveformStripRef = useRef<HTMLDivElement>(null)
@@ -1395,8 +1409,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       setRecentsNotice('That video is no longer available, so it was removed from recents.')
       return
     }
-    loadFile(entry.filePath)
-  }, [loadFile])
+    guardedLoadFile(entry.filePath)
+  }, [guardedLoadFile])
   // Cache-buster for recent thumbnails — bumps whenever the folder list
   // reloads so an edited thumbnail re-fetches.
   const recentsThumbsKey = useMemo(() => Date.now(), [sortedStreamFolders])
@@ -1481,8 +1495,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       const firstLocal = localFlags.findIndex(b => b)
       if (firstLocal >= 0) videoPath = preferred[firstLocal]
     } catch { /* fall back to preferred[0] */ }
-    loadFile(videoPath)
-  }, [loadFile])
+    guardedLoadFile(videoPath)
+  }, [guardedLoadFile])
 
   // Session Videos hover popup (collapsed-sidebar only). Replaces the
   // squeezed inline list with a single icon trigger that pops out the
@@ -1599,6 +1613,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       setClipState(draft.state)
       setIsClipMode(true)
     } else {
+      // Opening a draft on ANOTHER file is a file switch — refuse while
+      // extracting, and refuse BEFORE arming pendingClipOpen so a blocked
+      // open can't leave a dangling pending.
+      if (isExtractingRef.current) { setExtractionBlocked(true); return }
       // Persist the current clip session's tail against the CURRENT path
       // before switching — the central guard can't flush once
       // state.filePath has moved on to the new video.
@@ -1620,7 +1638,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       setClipState(savedState)
       setIsClipMode(true)
     } else {
-      // Same tail-flush as loadDraft above — see the central guard.
+      // Same refusal + tail-flush as loadDraft above.
+      if (isExtractingRef.current) { setExtractionBlocked(true); return }
       void flushDraftSaveRef.current()
       setPendingClipOpen({ sourceName, state: savedState, draftId: null })
       loadFile(sourcePath)
@@ -2039,12 +2058,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   }, [])
 
   useEffect(() => {
-    if (initialFile) loadFile(initialFile.path)
+    if (initialFile) guardedLoadFile(initialFile.path)
   }, [initialFile?.token]) // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const { videoInfo, tracks, multiTrackEnabled, isPlaying, currentTime, duration, videoUrl, error } = state
   const isExtracting = tracks.some(t => t.status === 'extracting')
+  // Live mirror for the extraction-open guard declared above.
+  useEffect(() => { isExtractingRef.current = isExtracting }, [isExtracting])
   const multiTrack = (videoInfo?.audioTracks.length ?? 0) > 1
 
   // How many of the file's tracks already have a cached .opus on disk, so the
@@ -2724,15 +2745,18 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
 
   const handleFiles = useCallback((paths: string[]) => {
-    if (paths[0]) loadFile(paths[0])
-  }, [loadFile])
+    if (paths[0]) guardedLoadFile(paths[0])
+  }, [guardedLoadFile])
 
   const handleBrowse = useCallback(async () => {
+    // Refuse before the dialog, not after — picking a file and THEN being
+    // told no would be worse.
+    if (isExtractingRef.current) { setExtractionBlocked(true); return }
     const paths = await window.api.openFileDialog({
       filters: [{ name: 'Video Files', extensions: ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm'] }]
     })
-    if (paths && paths[0]) loadFile(paths[0])
-  }, [loadFile])
+    if (paths && paths[0]) guardedLoadFile(paths[0])
+  }, [guardedLoadFile])
 
   const stepFrame = useCallback((dir: 1 | -1) => {
     const vid = videoRef.current
@@ -3273,8 +3297,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
           // first so the flush targets the old path while it's still
           // current (the central guard would catch a miss, but this is
           // the ideal ordering).
+          if (isExtractingRef.current) { setExtractionBlocked(true); return }
           if (isClipModeRef.current) exitClipMode()
-          loadFile(target.video.path)
+          guardedLoadFile(target.video.path)
         } else if (target.kind === 'draft' && target.draft) {
           loadDraft(target.draft)
         }
@@ -3422,7 +3447,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     config.skipClipMergeWarning, exitClipMode,
     setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
     state.filePath, addSegment, splitSegment, jumpToMarker,
-    activeBleepId, flatSessionItems, loadFile, loadDraft, activeDraftId,
+    activeBleepId, flatSessionItems, guardedLoadFile, loadDraft, activeDraftId,
   ])
 
   return (
@@ -5473,7 +5498,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                       item={item}
                                       isActive={item.path === state.filePath}
                                       cloudSyncActive={cloudSyncActive}
-                                      onClick={() => loadFile(item.path)}
+                                      onClick={() => guardedLoadFile(item.path)}
                                     />
                                     {(draftsBySource[item.name] ?? []).map(draft => (
                                       <DraftSessionItem
@@ -5679,6 +5704,25 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
           audio (only Track 1 audible) or enables multi-track for this
           session. Track extraction itself is now lazy / per-track from the
           timeline, so this modal no longer needs a selection step. */}
+      {/* Extraction-open refusal — every open path (files grid, Ctrl+O,
+          drag-drop, recents, keyboard nav, draft opens) routes through the
+          guard and lands here while tracks are extracting. */}
+      <Modal
+        isOpen={extractionBlocked}
+        onClose={() => setExtractionBlocked(false)}
+        title="Audio extraction in progress"
+        width="sm"
+        footer={
+          <Button variant="primary" size="sm" onClick={() => setExtractionBlocked(false)}>
+            OK
+          </Button>
+        }
+      >
+        <p className="text-sm text-gray-300 leading-relaxed">
+          Audio tracks are still being extracted for the current video. Wait for the extraction to finish, or cancel it from the track list, before opening another video.
+        </p>
+      </Modal>
+
       <Modal
         isOpen={clipModeModal === 'warn'}
         onClose={() => setClipModeModal(null)}
