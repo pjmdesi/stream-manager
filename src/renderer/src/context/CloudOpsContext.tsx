@@ -66,6 +66,11 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [offloadCancelling, setOffloadCancelling] = useState(false)
   const [hydrateCancelling, setHydrateCancelling] = useState(false)
+  // Batches that already auto-opened the modal on a failure. Per-item actions
+  // enqueue with openModal=false, so without this a failed offload/pin would
+  // look like SM silently refused the command. Popping once per batch keeps
+  // the error visible while respecting a user who closes the modal mid-batch.
+  const failurePoppedBatches = useRef<Set<string>>(new Set())
 
   // Listen for progress events from main. One listener for the lifetime of
   // the provider — events carry direction + batchId so we route them to the
@@ -83,6 +88,10 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
             : it
         ))
       } else if (ev.type === 'item') {
+        if (ev.status === 'failed' && !failurePoppedBatches.current.has(ev.batchId)) {
+          failurePoppedBatches.current.add(ev.batchId)
+          setModalOpen(true)
+        }
         setter(prev => prev.map(it =>
           it.batchId === ev.batchId && it.path === ev.path
             ? {

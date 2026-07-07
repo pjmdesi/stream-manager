@@ -34,6 +34,30 @@ export interface CloudOpResult {
   failed: { path: string; reason: string }[]
 }
 
+// Friendly translations for HRESULTs CFAPI commonly returns. The raw code is
+// kept in the string so it stays searchable. Only codes we've verified are
+// listed — anything else passes through untranslated.
+const CLOUD_HRESULT_HINTS: Record<string, string> = {
+  // ERROR_NOT_A_CLOUD_FILE: the sync client hasn't converted this file into a
+  // placeholder (not uploaded yet, or it lost track of it), so there is no
+  // cloud copy to offload to / recall from.
+  '0x80070178': 'This file is not synced to the cloud yet (the sync client has not uploaded it), so there is no cloud copy. Check that your sync client is running and fully synced, then retry',
+  // ERROR_CLOUD_FILE_PROVIDER_NOT_RUNNING
+  '0x8007016A': 'The cloud sync client is not running',
+  // ERROR_CLOUD_FILE_INVALID_REQUEST
+  '0x8007017C': 'The cloud provider rejected the operation as invalid',
+  // Synology rejects operations with this while another process holds the file
+  '0x80070187': 'The cloud provider could not complete the operation, the file may be in use',
+}
+
+function friendlyCloudReason(reason: string): string {
+  const m = reason.match(/0x[0-9A-Fa-f]{8}/)
+  if (!m) return reason
+  const code = '0x' + m[0].slice(2).toUpperCase()
+  const hint = CLOUD_HRESULT_HINTS[code]
+  return hint ? `${hint} (${code})` : reason
+}
+
 // Per-file dehydrate script — same shape as the spike that's known to work.
 // We write it to a temp file once and invoke `powershell.exe -File` per path.
 // CALLER must pause the chokidar streams watcher around this call — its
@@ -111,7 +135,7 @@ function runOnePath(scriptPath: string, filePath: string): Promise<{ outcome: De
       const last = lines[lines.length - 1] ?? ''
       if (last === 'OK') { resolve({ outcome: 'ok' }); return }
       if (last === 'SKIP-ALREADY-OFFLINE') { resolve({ outcome: 'already-offline' }); return }
-      if (last.startsWith('ERR|||')) { resolve({ outcome: 'failed', reason: last.slice(6) }); return }
+      if (last.startsWith('ERR|||')) { resolve({ outcome: 'failed', reason: friendlyCloudReason(last.slice(6)) }); return }
       resolve({ outcome: 'failed', reason: stderr.trim() || 'no-output' })
     })
     proc.on('error', err => resolve({ outcome: 'failed', reason: err.message }))
@@ -260,7 +284,7 @@ function runOneHydrate(scriptPath: string, filePath: string): Promise<{ outcome:
       const last = lines[lines.length - 1] ?? ''
       if (last === 'OK') { resolve({ outcome: 'ok' }); return }
       if (last === 'SKIP-ALREADY-LOCAL') { resolve({ outcome: 'already-local' }); return }
-      if (last.startsWith('ERR|||')) { resolve({ outcome: 'failed', reason: last.slice(6) }); return }
+      if (last.startsWith('ERR|||')) { resolve({ outcome: 'failed', reason: friendlyCloudReason(last.slice(6)) }); return }
       resolve({ outcome: 'failed', reason: stderr.trim() || 'no-output' })
     })
     proc.on('error', err => resolve({ outcome: 'failed', reason: err.message }))
