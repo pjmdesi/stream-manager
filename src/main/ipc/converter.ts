@@ -775,43 +775,26 @@ export async function startConversionJob(
         const inputIsLocal = async () => (await checkLocalFiles([job.inputFile]))[0]
         if (!(await inputIsLocal())) {
           setStatus('downloading')
-          const flag = { cancelled: false, paused: false }
+          const flag = { cancelled: false }
           downloadCancelFlags.set(id, flag)
           // Cancel handler available during the download wait — the cancel IPC
-          // looks up cancellers.get(id) and calls it.
+          // looks up cancellers.get(id) and calls it. Cancel is the ONLY
+          // control here: cloud hydration has no pause (neither CFAPI nor
+          // Synology offer one).
           cancellers.set(id, () => { flag.cancelled = true })
-          // Pause during the download phase: the sync client's transfer
-          // can't be paused from here, but the user's intent CAN be
-          // honored by not launching the encode when the file lands.
-          // Without these, the pause button set status 'paused' while the
-          // poll kept running and silently un-paused the job minutes
-          // later. (The encode section replaces these with the real
-          // ffmpeg suspend/resume handles once it starts.)
-          pausers.set(id, () => { flag.paused = true })
-          resumers.set(id, () => { flag.paused = false })
           fs.open(job.inputFile, 'r', (err, fd) => {
             if (err) return
             const buf = Buffer.alloc(1)
             fs.read(fd, buf, 0, 1, 0, () => fs.close(fd, () => {}))
           })
           // Timeout guards a download that will never finish (sync client
-          // paused or offline) — the job used to sit "downloading"
-          // forever. The clock resets while paused so a long deliberate
-          // pause can't expire the job.
-          // Generous — a slow NAS recalling several large files can
-          // legitimately run for hours; the cap only exists so a STOPPED
-          // sync client can't leave the job "downloading" forever.
+          // stopped or offline) — the job used to sit "downloading"
+          // forever. Generous: a slow NAS recalling several large files
+          // can legitimately run for hours.
           const DOWNLOAD_TIMEOUT_MS = 6 * 60 * 60 * 1000
-          let downloadClock = Date.now()
-          for (;;) {
-            if (flag.cancelled) break
-            if (flag.paused) {
-              downloadClock = Date.now()
-              await new Promise(r => setTimeout(r, 500))
-              continue
-            }
-            if (await inputIsLocal()) break
-            if (Date.now() - downloadClock > DOWNLOAD_TIMEOUT_MS) {
+          const downloadStart = Date.now()
+          while (!flag.cancelled && !(await inputIsLocal())) {
+            if (Date.now() - downloadStart > DOWNLOAD_TIMEOUT_MS) {
               downloadCancelFlags.delete(id)
               handleError(new Error('Cloud download timed out after 6 hours. Check that the sync client is running and the file is available, then requeue.'))
               return
@@ -827,6 +810,13 @@ export async function startConversionJob(
             pausers.delete(id)
             resumers.delete(id)
             notifyAll('converter:jobStatus', { jobId: id, status: 'cancelled' })
+            // Abort the OS-level recall too — a dehydrate command cancels
+            // an in-progress hydration (the only way to stop it), so the
+            // transfer doesn't keep running for a job that no longer
+            // wants the file. Best-effort.
+            import('../services/cfapi')
+              .then(m => m.dehydratePaths([job.inputFile], () => {}, () => false))
+              .catch(() => {})
             maybeFireGroupHook(id)
             scheduleNext()
             resolve()
@@ -1500,11 +1490,8 @@ export function registerConverterIPC(): void {
     resumers.get(jobId)?.()
     const j = jobs.get(jobId)
     if (j) {
-      // A job paused during its cloud-download phase resumes to
-      // 'downloading' (the wait loop is still polling), not 'running'.
-      const next = downloadCancelFlags.has(jobId) ? 'downloading' as const : 'running' as const
-      jobs.set(jobId, { ...j, status: next })
-      notifyAll('converter:jobStatus', { jobId, status: next })
+      jobs.set(jobId, { ...j, status: 'running' })
+      notifyAll('converter:jobStatus', { jobId, status: 'running' })
     }
   })
 

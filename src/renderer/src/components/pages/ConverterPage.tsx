@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
-import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw } from 'lucide-react'
+import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw, Loader2 } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, AudioTrackInfo } from '../../types'
 import { Button } from '../ui/Button'
@@ -165,6 +165,13 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   // Probed audio-track lists keyed by file path — drives the per-file audio-track
   // picker for audio-extraction presets. Probed lazily as files are queued.
   const [audioTracksByPath, setAudioTracksByPath] = useState<Record<string, AudioTrackInfo[]>>({})
+  // Cloud-placeholder tracking for the ready list. true/false once checked;
+  // absent = unknown. Extract-audio presets need ffprobe (which needs the
+  // bytes), so picking that preset on a cloud file deliberately triggers a
+  // hydration — hydratingReadyPaths drives the row's downloading indicator
+  // and holds its Start button until the file lands.
+  const [localByPath, setLocalByPath] = useState<Record<string, boolean>>({})
+  const [hydratingReadyPaths, setHydratingReadyPaths] = useState<Set<string>>(new Set())
   // Source-stream origin keyed by file path, kept separately from queuedFiles
   // so the "from stream" link survives the file moving into an active job.
   const [streamOrigins, setStreamOrigins] = useState<Record<string, { folderPath: string; label: string }>>({})
@@ -232,11 +239,17 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
       // Probe only files whose bytes are LOCAL. ffprobe reads the file,
       // which makes Windows recall a cloud placeholder — merely ADDING an
       // offloaded file to the ready list kicked off a multi-GB download
-      // before the user ever pressed Convert. Cloud files skip the probe
-      // (the audio-track picker just doesn't appear until they're local);
-      // the conversion itself hydrates them when it actually starts.
+      // before the user ever pressed Convert. Cloud files skip the probe;
+      // picking the Extract Audio preset is the deliberate hydration
+      // trigger (effect below), and other presets hydrate when the
+      // conversion actually starts.
       const localFlags = await window.api.checkLocalFiles(missing)
       if (cancelled) return
+      setLocalByPath(prev => {
+        const next = { ...prev }
+        missing.forEach((p, i) => { next[p] = localFlags[i] })
+        return next
+      })
       const probeable = missing.filter((_, i) => localFlags[i])
       if (probeable.length === 0) return
       const probed = await Promise.all(probeable.map(async p => {
@@ -252,6 +265,39 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     })()
     return () => { cancelled = true }
   }, [queuedFiles, audioTracksByPath])
+
+  // Deliberate hydration for the Extract Audio preset: its track picker
+  // needs ffprobe, and ffprobe needs the bytes. Picking the preset IS the
+  // user's intent signal — start the cloud download, show it on the row,
+  // and hold that row's Start until the file lands. Other presets never
+  // trigger recalls from the ready list.
+  useEffect(() => {
+    for (const f of queuedFiles) {
+      if (!isAudioPreset(presetForId(f.presetId))) continue
+      if (localByPath[f.path] !== false) continue // local, or not checked yet
+      if (hydratingReadyPaths.has(f.path)) continue
+      setHydratingReadyPaths(prev => new Set(prev).add(f.path))
+      void window.api.startCloudDownload(f.path)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedFiles, localByPath, hydratingReadyPaths])
+  // Download landed: mark local, clear the row's downloading state, and
+  // probe the tracks the picker was waiting for.
+  useEffect(() => {
+    const off = window.api.onCloudDownloadDone((filePath: string) => {
+      setLocalByPath(prev => (prev[filePath] === true ? prev : { ...prev, [filePath]: true }))
+      setHydratingReadyPaths(prev => {
+        if (!prev.has(filePath)) return prev
+        const next = new Set(prev)
+        next.delete(filePath)
+        return next
+      })
+      window.api.probeFile(filePath)
+        .then(info => setAudioTracksByPath(prev => ({ ...prev, [filePath]: info.audioTracks ?? [] })))
+        .catch(() => {})
+    })
+    return off
+  }, [])
 
   // Note: IPC job listeners and the 1Hz ETA tick now live in
   // ConversionContext so the sidebar widget keeps getting fresh data
@@ -372,6 +418,8 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     for (const file of queuedFiles) {
       const preset = presetForId(file.presetId)
       if (!preset) continue
+      // Still downloading for the track picker — leave it in the ready list.
+      if (isAudioPreset(preset) && localByPath[file.path] === false) continue
       newJobs.push({
         id: uuidv4(),
         inputFile: file.path,
@@ -607,7 +655,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
             </button>
           )}
-          {(isActive || isDownloading) && (
+          {isActive && (
             <button
               onClick={() => job.status === 'paused' ? resumeJob(job.id) : pauseJob(job.id)}
               className={job.status === 'paused' ? ROW_ACTION_BLUE : ROW_ACTION_YELLOW}
@@ -746,6 +794,14 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                           </select>
                           <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                         </div>
+                        {/* Cloud file + Extract Audio: hydration in flight —
+                            the track picker (and this row's Start) unlock
+                            once the file lands. */}
+                        {isAudioPreset(preset) && localByPath[path] === false && (
+                          <span className="flex items-center gap-1.5 text-[11px] text-sky-300 shrink-0">
+                            <Loader2 size={12} className="animate-spin shrink-0" /> Downloading from cloud…
+                          </span>
+                        )}
                         {/* Audio-track picker — only for audio-extraction presets
                             on files with more than one audio track. */}
                         {isAudioPreset(preset) && (audioTracksByPath[path]?.length ?? 0) > 1 && (
@@ -770,7 +826,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                         Button with a label that smoothly collapses to icon-only
                         as the row narrows. */}
                     <div className="shrink-0 self-center flex items-center gap-1">
-                      <button onClick={() => startOne(file)} disabled={!preset} className={ROW_ACTION_GREEN}>
+                      <button
+                        onClick={() => startOne(file)}
+                        disabled={!preset || (isAudioPreset(preset) && localByPath[path] === false)}
+                        className={ROW_ACTION_GREEN}
+                      >
                         <Zap size={13} />
                         <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
                       </button>
@@ -801,7 +861,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                 <span className="text-xs font-medium text-gray-400">Converting ({jobs.length})</span>
                 <div className="flex items-center gap-1">
                   {(() => {
-                    const anyRunning = jobs.some(j => j.status === 'running' || j.status === 'downloading')
+                    const anyRunning = jobs.some(j => j.status === 'running')
                     const anyPaused = jobs.some(j => j.status === 'paused')
                     if (!anyRunning && !anyPaused) return null
                     // If anything is running, the action is "Pause all"; otherwise
@@ -816,7 +876,10 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                         icon={<Icon size={13} />}
                         onClick={async () => {
                           if (action === 'pause') {
-                            const targets = jobs.filter(j => j.status === 'running' || j.status === 'downloading')
+                            // Downloading jobs are NOT pausable — cloud
+                            // hydration has no pause; cancel is its only
+                            // control.
+                            const targets = jobs.filter(j => j.status === 'running')
                             await Promise.all(targets.map(j => window.api.pauseJob(j.id).catch(() => {})))
                           } else {
                             const targets = jobs.filter(j => j.status === 'paused')
