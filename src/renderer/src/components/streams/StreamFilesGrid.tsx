@@ -105,7 +105,7 @@ function CloudStatus({ isLocal, active, busy }: { isLocal: boolean | undefined; 
 /** Dynamic offload / pin-local action — mirrors the sidebar-footer buttons but
  *  toggles by the file's current hydration state. Icon-only; tooltip names the
  *  action. Hidden when cloud sync isn't active. */
-function CloudAction({ isLocal, active, busy, onOffload, onPin }: { isLocal: boolean | undefined; active: boolean; busy: boolean; onOffload: () => void; onPin: () => void }) {
+function CloudAction({ isLocal, active, busy, onOffload, onPin, offloadBlockReason }: { isLocal: boolean | undefined; active: boolean; busy: boolean; onOffload: () => void; onPin: () => void; offloadBlockReason?: string | null }) {
   if (!active) return null
   if (busy || isLocal === undefined) {
     return (
@@ -117,7 +117,13 @@ function CloudAction({ isLocal, active, busy, onOffload, onPin }: { isLocal: boo
     )
   }
   return isLocal
-    ? (
+    ? offloadBlockReason
+      ? (
+        <Tooltip content={`Can't offload: ${offloadBlockReason}`} side="top">
+          <button disabled className={`${ACTION_BASE} opacity-60 cursor-not-allowed`}><Cloud size={12} /></button>
+        </Tooltip>
+      )
+      : (
       <Tooltip content="Offload to cloud" side="top">
         <button onClick={onOffload} className={ACTION_PINK}><Cloud size={12} /></button>
       </Tooltip>
@@ -390,7 +396,16 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
               <button onClick={() => onEditThumbnail(ordinal!)} className={ACTION_GRAY}><FileImage size={12} /> Edit</button>
             </Tooltip>
           )}
-          <CloudAction isLocal={cloudIsLocal} active={cloudSyncActive} busy={busy} onOffload={() => onOffload(path)} onPin={() => onPin(path)} />
+          <CloudAction
+            isLocal={cloudIsLocal}
+            active={cloudSyncActive}
+            busy={busy}
+            onOffload={() => onOffload(path)}
+            onPin={() => onPin(path)}
+            // Mirrors main-side getProtectedPaths: the displayed thumbnail is
+            // excluded from offloading, so the button would silently no-op.
+            offloadBlockReason={isPreferred ? 'the stream item thumbnail is kept pinned on this device' : null}
+          />
           <Tooltip content={blockReason ? `Can't delete: ${blockReason}` : 'Move to recycle bin'} side="top">
             <button
               disabled={!!blockReason}
@@ -841,7 +856,12 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
         })}
         {showImage && folder.thumbnails.map((path, i) => {
           const name = path.split(/[\\/]/).pop() ?? ''
-          const isPreferred = preferredThumbnail ? name === preferredThumbnail : i === 0
+          // Match main-side pickDisplayed: a preferredThumbnail that no longer
+          // names an existing file falls back to the first thumbnail, which is
+          // what actually gets displayed and protected from offloading.
+          const prefExists = !!preferredThumbnail &&
+            folder.thumbnails.some(p => (p.split(/[\\/]/).pop() ?? '') === preferredThumbnail)
+          const isPreferred = prefExists ? name === preferredThumbnail : i === 0
           return (
             <ImageCard
               key={path}
