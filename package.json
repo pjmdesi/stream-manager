@@ -3,6 +3,7 @@
     "version": "2.0.7",
     "description": "A streaming file management app for Twitch/YouTube streamers",
     "main": "./out/main/index.js",
+    "author": "PJ Mullen <contact@pjm.design>",
     "scripts": {
         "dev": "electron-vite dev",
         "build": "electron-vite build",
