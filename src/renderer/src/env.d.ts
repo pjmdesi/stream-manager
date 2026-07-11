@@ -309,8 +309,9 @@ declare global {
       editRedo(): void
       windowIsMaximized(): Promise<boolean>
       onMaximizeChange(cb: (maximized: boolean) => void): () => void
-      onConfirmQuit(cb: (data: { running: number; queued: number; fileOps: number }) => void): () => void
+      onConfirmQuit(cb: (data: { running: number; queued: number; fileOps: number; settingsDirty: boolean }) => void): () => void
       proceedQuit(): void
+      setSettingsDirty(dirty: boolean): void
       getStartupSettings(): Promise<{ startWithWindows: boolean; startMinimized: boolean }>
       setStartupSettings(startWithWindows: boolean, startMinimized: boolean): Promise<void>
       resetOnboarding(): Promise<void>
@@ -318,8 +319,8 @@ declare global {
       // ── Launcher ─────────────────────────────────────────────────────────────
       getLauncherGroups(): Promise<LauncherGroup[]>
       setLauncherGroups(groups: LauncherGroup[]): Promise<void>
-      launchGroup(groupId: string): Promise<{ launched: number }>
-      launchApp(filePath: string): Promise<{ launched: boolean }>
+      launchGroup(groupId: string): Promise<{ launched: number; failed: { name: string; error: string }[] }>
+      launchApp(filePath: string): Promise<{ launched: boolean; error?: string }>
       getFileIcon(filePath: string): Promise<string | null>
       getFavicon(pageUrl: string): Promise<string | null>
       resolveShortcut(filePath: string): Promise<string>

@@ -588,6 +588,10 @@ contextBridge.exposeInMainWorld('api', {
   },
   proceedQuit: () => ipcRenderer.send('app:proceedQuit'),
 
+  // Mirrors the Settings draft's dirty state to main so the window-close
+  // guard can warn about discarding it (window X / tray Quit / Alt+F4).
+  setSettingsDirty: (dirty: boolean) => ipcRenderer.send('app:settingsDirty', dirty),
+
   // ── Startup settings ──────────────────────────────────────────────────────
   getStartupSettings: (): Promise<{ startWithWindows: boolean; startMinimized: boolean }> =>
     ipcRenderer.invoke('app:getStartupSettings'),

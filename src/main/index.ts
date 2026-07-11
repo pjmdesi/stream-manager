@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain, globalShortcut, screen, Tray, Menu, MenuItem, nativeImage } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, screen, Tray, Menu, MenuItem, nativeImage } from 'electron'
 import { join } from 'path'
 import fs from 'fs'
 import Store from 'electron-store'
@@ -29,23 +29,35 @@ const __origMkdirP = fs.promises.mkdir.bind(fs.promises)
 
 const is = { dev: process.env['NODE_ENV'] === 'development' || !!process.env['ELECTRON_RENDERER_URL'] }
 
-interface WindowState { x: number; y: number; width: number; height: number; maximized: boolean }
+// x/y are optional: absent means "no saved position" (first run) and lets
+// Electron center the window. They must NOT default to 0,0 — a genuine save
+// at 0,0 (window snapped to the top-left) is a real position, and the old
+// `|| undefined` falsy check treated it as unsaved and re-centered on every
+// restart.
+interface WindowState { x?: number; y?: number; width: number; height: number; maximized: boolean }
 const windowStateStore = new Store<{ windowState: WindowState }>({
   name: 'window-state',
-  defaults: { windowState: { x: 0, y: 0, width: 1400, height: 900, maximized: false } }
+  defaults: { windowState: { width: 1400, height: 900, maximized: false } }
 })
 
 function loadWindowState(): WindowState {
   const state = windowStateStore.get('windowState')
-  // Validate that the saved position is still on a connected display
+  // First run (or legacy 0,0 default that was never a real save): no
+  // position — leave x/y undefined so Electron centers the window.
+  if (typeof state.x !== 'number' || typeof state.y !== 'number') {
+    return { ...state, x: undefined, y: undefined }
+  }
+  // Validate that the saved position is still on a connected display.
   const displays = screen.getAllDisplays()
   const onScreen = displays.some(d =>
-    state.x < d.bounds.x + d.bounds.width &&
-    state.x + state.width > d.bounds.x &&
-    state.y < d.bounds.y + d.bounds.height &&
-    state.y + state.height > d.bounds.y
+    state.x! < d.bounds.x + d.bounds.width &&
+    state.x! + state.width > d.bounds.x &&
+    state.y! < d.bounds.y + d.bounds.height &&
+    state.y! + state.height > d.bounds.y
   )
-  return onScreen ? state : { ...state, x: 0, y: 0 }
+  // Off-screen (display disconnected): drop the position and re-center
+  // rather than pinning to 0,0.
+  return onScreen ? state : { ...state, x: undefined, y: undefined }
 }
 
 function saveWindowState(win: BrowserWindow): void {
@@ -91,8 +103,8 @@ function createWindow(): BrowserWindow {
   const savedState = loadWindowState()
 
   const mainWindow = new BrowserWindow({
-    x: savedState.x || undefined,
-    y: savedState.y || undefined,
+    x: savedState.x,
+    y: savedState.y,
     width: savedState.width,
     height: savedState.height,
     minWidth: 1000,
@@ -186,9 +198,18 @@ function createWindow(): BrowserWindow {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Ctrl+` opens DevTools in any build
-  globalShortcut.register('CommandOrControl+`', () => {
-    mainWindow.webContents.toggleDevTools()
+  // Ctrl+` opens DevTools in any build — scoped to the app window via
+  // before-input-event. The old globalShortcut.register was OS-GLOBAL: it
+  // stole the key from every other app (VS Code's terminal toggle) the
+  // whole time SM ran, even hidden in the tray.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (
+      input.type === 'keydown' && input.code === 'Backquote' &&
+      (input.control || input.meta) && !input.alt && !input.shift
+    ) {
+      event.preventDefault()
+      mainWindow.webContents.toggleDevTools()
+    }
   })
 
   // Window control IPC
@@ -389,21 +410,28 @@ app.whenReady().then(() => {
   })
 
   // Confirm before quitting if conversions or auto-rule file operations are
-  // still running. Intercepts the window's 'close' event and asks the
-  // renderer to show its own styled modal; the renderer calls back via
-  // 'app:proceedQuit'.
+  // still running, or the Settings page holds an unsaved draft. Intercepts
+  // the window's 'close' event and asks the renderer to show its own styled
+  // modal; the renderer calls back via 'app:proceedQuit'. Because app.quit()
+  // routes through this close event too, tray Quit and Alt+F4 are covered.
   let confirmedClose = false
+  // Mirrored from the renderer (SettingsPage → App → here) so the close
+  // path can see the draft state the in-app nav guard already tracks.
+  let rendererSettingsDirty = false
+  ipcMain.on('app:settingsDirty', (_event, dirty: boolean) => {
+    rendererSettingsDirty = !!dirty
+  })
   mainWindow.on('close', (event) => {
     if (confirmedClose) return
     const { running, queued } = getActiveConversionCounts()
     const fileOps = fileWatcher.getActiveFileOpCount()
-    if (running === 0 && fileOps === 0) return
+    if (running === 0 && fileOps === 0 && !rendererSettingsDirty) return
     event.preventDefault()
     if (!mainWindow.isVisible()) {
       mainWindow.show()
       mainWindow.focus()
     }
-    mainWindow.webContents.send('app:confirmQuit', { running, queued, fileOps })
+    mainWindow.webContents.send('app:confirmQuit', { running, queued, fileOps, settingsDirty: rendererSettingsDirty })
   })
   ipcMain.on('app:proceedQuit', async () => {
     confirmedClose = true

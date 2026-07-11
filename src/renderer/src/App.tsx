@@ -288,10 +288,15 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
   const { config } = useStore()
   const [groups, setGroups] = useState<LauncherGroup[]>([])
   const [launching, setLaunching] = useState(false)
-  const [feedback, setFeedback] = useState<number | null>(null)
+  const [feedback, setFeedback] = useState<string | null>(null)
 
   useEffect(() => {
-    window.api.getLauncherGroups().then(setGroups).catch(() => {})
+    const refetch = () => { window.api.getLauncherGroups().then(setGroups).catch(() => {}) }
+    refetch()
+    // LauncherPage dispatches this on every save so the widget reflects
+    // renames / app-list edits live instead of serving a stale snapshot.
+    window.addEventListener('sm:launcher-groups-changed', refetch)
+    return () => window.removeEventListener('sm:launcher-groups-changed', refetch)
   }, [config.launcherWidgetGroupId])
 
   const group = groups.find(g => g.id === config.launcherWidgetGroupId) ?? null
@@ -302,8 +307,10 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
     setLaunching(true)
     try {
       const result = await window.api.launchGroup(group.id)
-      setFeedback(result.launched)
-      setTimeout(() => setFeedback(null), 2000)
+      setFeedback(result.failed.length > 0
+        ? `${result.launched} of ${result.launched + result.failed.length} launched`
+        : `Launched ${result.launched}`)
+      setTimeout(() => setFeedback(null), result.failed.length > 0 ? 4000 : 2000)
     } finally {
       setLaunching(false)
     }
@@ -354,7 +361,7 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
             disabled={launching || appCount === 0}
             onClick={launch}
           >
-            {collapsed ? null : (feedback != null ? `Launched ${feedback}` : `Launch ${appCount} app${appCount === 1 ? '' : 's'}`)}
+            {collapsed ? null : (feedback ?? `Launch ${appCount} app${appCount === 1 ? '' : 's'}`)}
           </Button>
         </Tooltip>
       </div>
@@ -400,6 +407,9 @@ function AppInner() {
     }
     setPageRaw(target)
   }, [page, settingsDirty])
+  // Mirror the dirty state to main: the window-close guard (X / tray Quit /
+  // Alt+F4) lives there and would otherwise discard the draft silently.
+  useEffect(() => { window.api.setSettingsDirty(settingsDirty) }, [settingsDirty])
   const [aboutOpen, setAboutOpen] = useState(false)
   // Update detection — fires once on mount, results cached for 6h in the
   // store. Honors the `checkForUpdates` config opt-out. Failures are silent.
@@ -421,7 +431,10 @@ function AppInner() {
   // store for UI-only prefs (matches the streams page's viewMode pattern).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
   useEffect(() => { localStorage.setItem('sidebarCollapsed', String(sidebarCollapsed)) }, [sidebarCollapsed])
-  const [quitConfirm, setQuitConfirm] = useState<{ running: number; queued: number; fileOps: number } | null>(null)
+  const [quitConfirm, setQuitConfirm] = useState<{ running: number; queued: number; fileOps: number; settingsDirty: boolean } | null>(null)
+  // Ctrl+L in-flight latch — OS key-repeat and double-presses must not stack
+  // launchGroup calls (each repeat opened another browser tab per URL item).
+  const launchHotkeyBusyRef = useRef(false)
   const { config, loading, updateConfig, refreshConfig } = useStore()
   const { refreshRules } = useWatcher()
   const { _setNavigate } = useThumbnailEditor()
@@ -463,8 +476,8 @@ function AppInner() {
   }, [page])
 
   useEffect(() => {
-    return window.api.onConfirmQuit(({ running, queued, fileOps }) => {
-      setQuitConfirm({ running, queued, fileOps: fileOps ?? 0 })
+    return window.api.onConfirmQuit(({ running, queued, fileOps, settingsDirty: dirtyDraft }) => {
+      setQuitConfirm({ running, queued, fileOps: fileOps ?? 0, settingsDirty: !!dirtyDraft })
     })
   }, [])
 
@@ -540,9 +553,18 @@ function AppInner() {
       if (!mod) return
       // Ctrl+, → Settings
       if (e.key === ',') { e.preventDefault(); setPage('settings'); return }
-      // Ctrl+L → launch the widget's default launch group
+      // Ctrl+L → launch the widget's default launch group. Repeat-guarded:
+      // holding the key fires keydown per OS repeat, and each un-guarded
+      // call re-launched the whole group (one browser tab per URL item).
       if (!e.shiftKey && e.key.toLowerCase() === 'l') {
-        if (config.launcherWidgetGroupId) { e.preventDefault(); window.api.launchGroup(config.launcherWidgetGroupId).catch(() => {}) }
+        if (config.launcherWidgetGroupId) {
+          e.preventDefault()
+          if (e.repeat || launchHotkeyBusyRef.current) return
+          launchHotkeyBusyRef.current = true
+          window.api.launchGroup(config.launcherWidgetGroupId)
+            .catch(() => {})
+            .finally(() => { launchHotkeyBusyRef.current = false })
+        }
         return
       }
       // Ctrl+1…6 → jump directly to a page
@@ -945,9 +967,10 @@ function AppInner() {
       <Modal
         isOpen={!!quitConfirm}
         onClose={() => setQuitConfirm(null)}
-        title={quitConfirm && quitConfirm.running === 0 && quitConfirm.fileOps > 0
-          ? 'File operations in progress'
-          : 'Conversions in progress'}
+        title={!quitConfirm ? 'Conversions in progress'
+          : quitConfirm.running > 0 ? 'Conversions in progress'
+          : quitConfirm.fileOps > 0 ? 'File operations in progress'
+          : 'Unsaved settings'}
         width="sm"
         footer={
           <>
@@ -974,9 +997,15 @@ function AppInner() {
                   moving or copying files.
                 </p>
               )}
+              {quitConfirm.settingsDirty && (
+                <p className="text-gray-200">
+                  The Settings page has unsaved changes.
+                </p>
+              )}
               <p className="text-gray-400">
-                Quitting now will cancel them and any progress will be lost. A partially-transferred
-                file is cleaned up and its original stays in place.
+                {(quitConfirm.running > 0 || quitConfirm.fileOps > 0) &&
+                  'Quitting now will cancel them and any progress will be lost. A partially-transferred file is cleaned up and its original stays in place. '}
+                {quitConfirm.settingsDirty && 'Unsaved Settings changes will be discarded.'}
               </p>
             </div>
           </div>

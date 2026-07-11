@@ -10,8 +10,16 @@ interface LauncherGroup { id: string; name: string; apps: LauncherApp[] }
 // path opened with shell.openPath. A Windows drive path ("C:\…") has no `//`
 // after the colon, so it never matches.
 const isUrl = (p: string): boolean => /^[a-z][a-z\d+.-]*:\/\//i.test(p)
-const openTarget = (target: string): Promise<unknown> =>
-  isUrl(target) ? shell.openExternal(target) : shell.openPath(target)
+// shell.openPath never rejects — it resolves an error STRING on failure ('' on
+// success), so a bare try/catch counted every missing app as launched.
+const openTarget = async (target: string): Promise<void> => {
+  if (isUrl(target)) {
+    await shell.openExternal(target)
+    return
+  }
+  const errMsg = await shell.openPath(target)
+  if (errMsg) throw new Error(errMsg)
+}
 
 // Favicon resolution for website launch items. Cached per origin (favicons
 // rarely change within a session) and fetched only from the site itself — no
@@ -74,19 +82,23 @@ export function registerLauncherIPC(): void {
   ipcMain.handle('launcher:launchGroup', async (_event, groupId: string) => {
     const groups: LauncherGroup[] = (getStore() as any).get('launcherGroups', [])
     const group = groups.find(g => g.id === groupId)
-    if (!group) return { launched: 0 }
+    if (!group) return { launched: 0, failed: [] }
 
     let launched = 0
+    const failed: { name: string; error: string }[] = []
     for (const entry of group.apps) {
       if (!entry.path) continue
       try {
         await openTarget(entry.path)
         launched++
-      } catch (_) {
-        // continue launching remaining apps even if one fails
+      } catch (err: any) {
+        // Keep launching the remaining apps, but report the failure — a
+        // "Launched 3" with nothing opened right before going live is the
+        // worst possible lie.
+        failed.push({ name: entry.name || path.basename(entry.path), error: err?.message ?? 'Unknown error' })
       }
     }
-    return { launched }
+    return { launched, failed }
   })
 
   ipcMain.handle('launcher:launchApp', async (_event, filePath: string) => {
@@ -94,8 +106,8 @@ export function registerLauncherIPC(): void {
     try {
       await openTarget(filePath)
       return { launched: true }
-    } catch (_) {
-      return { launched: false }
+    } catch (err: any) {
+      return { launched: false, error: err?.message ?? 'Unknown error' }
     }
   })
 

@@ -605,7 +605,7 @@ function GroupRow({
   animMs: number
   isWidget: boolean
   launching: boolean
-  feedback?: number
+  feedback?: string
   onSelect: () => void
   onLaunchGroup: () => void
   onLaunchApp: (app: LauncherApp) => void
@@ -684,7 +684,7 @@ function GroupRow({
             disabled={launching || !launchable}
             onClick={e => { e.stopPropagation(); onLaunchGroup() }}
           >
-            {feedback != null ? `Launched ${feedback}` : 'Launch all'}
+            {feedback ?? 'Launch all'}
           </Button>
         </div>
       </div>
@@ -702,7 +702,7 @@ export function LauncherPage() {
   const [groups, setGroups] = useState<LauncherGroup[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [launching, setLaunching] = useState<string | null>(null)
-  const [launchFeedback, setLaunchFeedback] = useState<Record<string, number>>({})
+  const [launchFeedback, setLaunchFeedback] = useState<Record<string, string>>({})
   const [addAppOpen, setAddAppOpen] = useState(false)
   const [addAppPrefill, setAddAppPrefill] = useState<{ path: string; name: string } | undefined>(undefined)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
@@ -758,6 +758,9 @@ export function LauncherPage() {
   const save = (updated: LauncherGroup[]) => {
     setGroups(updated)
     window.api.setLauncherGroups(updated)
+    // Tell the sidebar widget (App.tsx) to refetch — it otherwise keeps the
+    // snapshot from its mount and shows stale names/apps after edits here.
+    window.dispatchEvent(new Event('sm:launcher-groups-changed'))
   }
 
   const addGroup = () => {
@@ -775,6 +778,9 @@ export function LauncherPage() {
     const updated = groups.filter(g => g.id !== id)
     save(updated)
     if (selectedId === id) setSelectedId(updated[0]?.id ?? null)
+    // Deleting the pinned group must also unpin it, or the sidebar keeps a
+    // ghost widget pointing at a group that no longer exists.
+    if (widgetGroupId === id) setWidgetGroupId('')
   }
 
   const addApp = (groupId: string, app: LauncherApp) => {
@@ -808,8 +814,14 @@ export function LauncherPage() {
     setLaunching(groupId)
     try {
       const result = await window.api.launchGroup(groupId)
-      setLaunchFeedback(prev => ({ ...prev, [groupId]: result.launched }))
-      setTimeout(() => setLaunchFeedback(prev => { const n = { ...prev }; delete n[groupId]; return n }), 2000)
+      // Honest counts: shell.openPath failures used to be counted as
+      // launched. Failures show as "N of M launched" and linger longer.
+      const label = result.failed.length > 0
+        ? `${result.launched} of ${result.launched + result.failed.length} launched`
+        : `Launched ${result.launched}`
+      setLaunchFeedback(prev => ({ ...prev, [groupId]: label }))
+      setTimeout(() => setLaunchFeedback(prev => { const n = { ...prev }; delete n[groupId]; return n }),
+        result.failed.length > 0 ? 4000 : 2000)
     } finally {
       setLaunching(null)
     }
@@ -966,10 +978,7 @@ export function LauncherPage() {
                   disabled={launching === sidebarGroup.id || sidebarGroup.apps.length === 0 || sidebarGroup.apps.every(a => !a.path)}
                   onClick={() => launchGroup(sidebarGroup.id)}
                 >
-                  {launchFeedback[sidebarGroup.id] != null
-                    ? `Launched ${launchFeedback[sidebarGroup.id]}`
-                    : 'Launch All'
-                  }
+                  {launchFeedback[sidebarGroup.id] ?? 'Launch All'}
                 </Button>
                 <Tooltip content="Close" side="left">
                   <button

@@ -253,7 +253,7 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
 
 // ── Step 2: Convert dump folder (only shown when mode is 'dump-folder') ───────
 
-type ConvertStatus = 'idle' | 'converting' | 'done' | 'undoing' | 'undone'
+type ConvertStatus = 'idle' | 'converting' | 'done' | 'undoing' | 'undone' | 'error'
 interface ConvertManifest { moves: { from: string; to: string }[]; createdFolders: string[] }
 interface ConvertResult { moved: number; skipped: number; manifest: ConvertManifest }
 
@@ -266,25 +266,41 @@ interface StepConvertProps {
 
 function StepConvert({ dir, result, onResult, onConverted }: StepConvertProps) {
   const [status, setStatus] = useState<ConvertStatus>(result ? 'done' : 'idle')
+  const [error, setError] = useState<string | null>(null)
 
   const convert = async () => {
     if (!dir) return
     setStatus('converting')
-    const res = await window.api.convertDumpFolder(dir)
-    onResult(res)
-    setStatus('done')
-    // Conversion turns this dir into folder-per-stream
-    await window.api.setConfig({ streamMode: 'folder-per-stream' })
-    onConverted()
+    setError(null)
+    try {
+      const res = await window.api.convertDumpFolder(dir)
+      onResult(res)
+      // Conversion turns this dir into folder-per-stream
+      await window.api.setConfig({ streamMode: 'folder-per-stream' })
+      setStatus('done')
+      onConverted()
+    } catch (err: any) {
+      // Without this catch a rejection left the button stuck on
+      // "Converting…" forever with no message.
+      setStatus('error')
+      setError(err?.message ?? 'The folder conversion failed.')
+    }
   }
 
   const undo = async () => {
     if (!result) return
     setStatus('undoing')
-    await window.api.undoConvertDumpFolder(result.manifest)
-    setStatus('undone')
-    onResult(null)
-    await window.api.setConfig({ streamMode: 'dump-folder' })
+    setError(null)
+    try {
+      await window.api.undoConvertDumpFolder(result.manifest)
+      setStatus('undone')
+      onResult(null)
+      await window.api.setConfig({ streamMode: 'dump-folder' })
+    } catch (err: any) {
+      // result is kept so the Undo button stays available for a retry.
+      setStatus('error')
+      setError(err?.message ?? 'Undoing the conversion failed.')
+    }
   }
 
   return (
@@ -292,9 +308,9 @@ function StepConvert({ dir, result, onResult, onConverted }: StepConvertProps) {
       <DumpConvertExplainer />
 
       <div className="flex justify-center">
-        {status === 'done' ? (
+        {(status === 'done' || (status === 'error' && result)) ? (
           <Button variant="secondary" size="lg" onClick={undo}>
-            Undo structure update
+            {status === 'error' ? 'Retry undo' : 'Undo structure update'}
           </Button>
         ) : (
           <Button
@@ -322,6 +338,13 @@ function StepConvert({ dir, result, onResult, onConverted }: StepConvertProps) {
         <div className="flex items-start gap-2 text-sm text-gray-400 bg-white/5 border border-white/10 rounded-lg px-4 py-3">
           <CheckCircle size={16} className="shrink-0 mt-0.5" />
           <span>Undone — files have been moved back to their original locations.</span>
+        </div>
+      )}
+
+      {status === 'error' && error && (
+        <div className="flex items-start gap-2 text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <span>{error} Files already moved stay where they are — resolve the issue (folder access, files in use) and try again.</span>
         </div>
       )}
     </div>
