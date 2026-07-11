@@ -421,7 +421,7 @@ function AppInner() {
   // store for UI-only prefs (matches the streams page's viewMode pattern).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
   useEffect(() => { localStorage.setItem('sidebarCollapsed', String(sidebarCollapsed)) }, [sidebarCollapsed])
-  const [quitConfirm, setQuitConfirm] = useState<{ running: number; queued: number } | null>(null)
+  const [quitConfirm, setQuitConfirm] = useState<{ running: number; queued: number; fileOps: number } | null>(null)
   const { config, loading, updateConfig, refreshConfig } = useStore()
   const { refreshRules } = useWatcher()
   const { _setNavigate } = useThumbnailEditor()
@@ -463,8 +463,8 @@ function AppInner() {
   }, [page])
 
   useEffect(() => {
-    return window.api.onConfirmQuit(({ running, queued }) => {
-      setQuitConfirm({ running, queued })
+    return window.api.onConfirmQuit(({ running, queued, fileOps }) => {
+      setQuitConfirm({ running, queued, fileOps: fileOps ?? 0 })
     })
   }, [])
 
@@ -945,7 +945,9 @@ function AppInner() {
       <Modal
         isOpen={!!quitConfirm}
         onClose={() => setQuitConfirm(null)}
-        title="Conversions in progress"
+        title={quitConfirm && quitConfirm.running === 0 && quitConfirm.fileOps > 0
+          ? 'File operations in progress'
+          : 'Conversions in progress'}
         width="sm"
         footer={
           <>
@@ -960,12 +962,21 @@ function AppInner() {
           <div className="flex gap-3 py-1">
             <AlertTriangle size={20} className="text-yellow-400 shrink-0 mt-0.5" />
             <div className="flex flex-col gap-1.5 text-sm">
-              <p className="text-gray-200">
-                {quitConfirm.running} conversion{quitConfirm.running === 1 ? ' is' : 's are'} still running
-                {quitConfirm.queued > 0 ? ` (and ${quitConfirm.queued} queued)` : ''}.
-              </p>
+              {quitConfirm.running > 0 && (
+                <p className="text-gray-200">
+                  {quitConfirm.running} conversion{quitConfirm.running === 1 ? ' is' : 's are'} still running
+                  {quitConfirm.queued > 0 ? ` (and ${quitConfirm.queued} queued)` : ''}.
+                </p>
+              )}
+              {quitConfirm.fileOps > 0 && (
+                <p className="text-gray-200">
+                  {quitConfirm.fileOps} auto-rule file operation{quitConfirm.fileOps === 1 ? ' is' : 's are'} still
+                  moving or copying files.
+                </p>
+              )}
               <p className="text-gray-400">
-                Quitting now will cancel them and any progress will be lost.
+                Quitting now will cancel them and any progress will be lost. A partially-transferred
+                file is cleaned up and its original stays in place.
               </p>
             </div>
           </div>

@@ -12,7 +12,8 @@ const PROGRESS_THROTTLE_MS = 250
 async function copyWithProgress(
   src: string,
   dest: string,
-  onProgress: (pct: number) => void
+  onProgress: (pct: number) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const { size } = await fs.promises.stat(src)
   let transferred = 0
@@ -31,8 +32,23 @@ async function copyWithProgress(
   })
 
   onProgress(0)
-  await pipeline(createReadStream(src), tracker, createWriteStream(dest))
+  await pipeline(createReadStream(src), tracker, createWriteStream(dest), { signal })
   onProgress(100)
+}
+
+/** Remove a partially-written destination file. The just-aborted write
+ *  stream can hold its Windows handle for a moment, so failed unlinks retry
+ *  briefly rather than silently leaving a corrupt partial in the library. */
+async function removePartialWithRetry(p: string, attempts = 3): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await fs.promises.unlink(p)
+      return
+    } catch (err: any) {
+      if (err.code === 'ENOENT') return
+      await new Promise(r => setTimeout(r, 300))
+    }
+  }
 }
 
 /** Walk streamsDir recursively (capped depth) and return the absolute path
@@ -94,17 +110,35 @@ export interface WatchEvent {
   timestamp: number
   lastChecked?: number
   progress?: number
-  status: 'matched' | 'applied' | 'error' | 'waiting'
+  status: 'matched' | 'applied' | 'error' | 'waiting' | 'cancelled'
   error?: string
 }
 
 type EventCallback = (event: WatchEvent) => void
 
+/** One in-flight rule execution: a copy/move/rename mid-transfer, a waiting
+ *  EBUSY retry, or a convert handoff. Keyed by event id (`ruleId:filePath`)
+ *  so a second chokidar fire, a processExistingFiles pass, or a watcher
+ *  restart can never start a parallel operation on the same file —
+ *  overlapping copies truncate each other's destination and interleave
+ *  their progress onto a single activity row. */
+interface InFlightOp {
+  controller: AbortController
+  /** Destination currently being written — non-null only while its content
+   *  is unverified. This is the cleanup target for cancel and app-quit;
+   *  it MUST be nulled the moment the destination becomes the real file. */
+  destPath: string | null
+  retryTimer: ReturnType<typeof setTimeout> | null
+  attemptRunning: boolean
+  cancelled: boolean
+  event: WatchEvent
+}
+
 class FileWatcher {
   private watcher: FSWatcher | null = null
   private rules: WatchRule[] = []
   private callbacks: EventCallback[] = []
-  private retryTimers = new Map<string, ReturnType<typeof setInterval>>()
+  private inFlight = new Map<string, InFlightOp>()
 
   // Read streamsDir / streamMode live from the store on each rule firing
   // rather than caching them at start() time. Without this, changing the
@@ -159,8 +193,59 @@ class FileWatcher {
       this.watcher.close()
       this.watcher = null
     }
-    for (const timer of this.retryTimers.values()) clearInterval(timer)
-    this.retryTimers.clear()
+    // Waiting retries die with the watcher (as before). An actively-copying
+    // op keeps running to completion and STAYS registered, so a restart's
+    // processExistingFiles pass can't start a duplicate writer on it.
+    for (const [id, op] of this.inFlight) {
+      if (op.retryTimer) { clearTimeout(op.retryTimer); op.retryTimer = null }
+      if (!op.attemptRunning) this.inFlight.delete(id)
+    }
+  }
+
+  /** Cancel an in-flight or waiting operation. Aborts the active copy (its
+   *  error path removes the partial destination), kills any pending retry,
+   *  and emits a terminal 'cancelled' event. The source file is never
+   *  touched — move only deletes it after a verified copy. */
+  cancel(eventId: string): boolean {
+    const op = this.inFlight.get(eventId)
+    if (!op || op.cancelled) return false
+    op.cancelled = true
+    if (op.retryTimer) { clearTimeout(op.retryTimer); op.retryTimer = null }
+    op.controller.abort()
+    // A running attempt cleans up and deregisters itself when the abort
+    // lands in its catch; a waiting op has nothing running — finish here.
+    if (!op.attemptRunning) this.inFlight.delete(eventId)
+    this.emit({ ...op.event, status: 'cancelled' })
+    return true
+  }
+
+  /** Abort every in-flight operation (app quit). Each aborted pipeline's
+   *  error path removes its own partial; the post-abort sweep here catches
+   *  any the event loop didn't get to before shutdown. Await this before
+   *  closing the window so write handles have a beat to release. */
+  async abortAllInFlight(): Promise<void> {
+    const partials: string[] = []
+    for (const [id, op] of this.inFlight) {
+      op.cancelled = true
+      if (op.retryTimer) { clearTimeout(op.retryTimer); op.retryTimer = null }
+      op.controller.abort()
+      if (op.destPath) partials.push(op.destPath)
+      if (!op.attemptRunning) this.inFlight.delete(id)
+    }
+    if (partials.length === 0) return
+    await new Promise(r => setTimeout(r, 250))
+    for (const p of partials) {
+      try { fs.unlinkSync(p) } catch { /* best-effort — may already be gone */ }
+    }
+  }
+
+  /** In-flight move/copy/rename count for the quit guard. Convert handoffs
+   *  are excluded — those run as converter jobs and are already counted by
+   *  getActiveConversionCounts. */
+  getActiveFileOpCount(): number {
+    let n = 0
+    for (const op of this.inFlight.values()) if (op.event.action !== 'convert') n++
+    return n
   }
 
   getStatus(): { active: boolean; ruleCount: number } {
@@ -214,6 +299,10 @@ class FileWatcher {
         : rule.destination
 
       const eventId = `${rule.id}:${filePath}`
+      // In-flight guard: whatever fired us (chokidar, processExistingFiles,
+      // a watcher restart), this rule+file is already being handled.
+      if (this.inFlight.has(eventId)) continue
+
       const event: WatchEvent = {
         id: eventId,
         ruleId: rule.id,
@@ -225,40 +314,76 @@ class FileWatcher {
         status: 'matched'
       }
 
+      const op: InFlightOp = {
+        controller: new AbortController(),
+        destPath: null,
+        retryTimer: null,
+        attemptRunning: false,
+        cancelled: false,
+        event,
+      }
+      this.inFlight.set(eventId, op)
       this.emit({ ...event, status: 'matched' })
 
-      const onProgress = (pct: number) => this.emit({ ...event, status: 'matched', progress: pct })
+      // The cancelled gate stops a throttled tracker tick that lands after
+      // the abort from flipping the row back out of its 'cancelled' state.
+      const onProgress = (pct: number) => {
+        if (!op.cancelled) this.emit({ ...event, status: 'matched', progress: pct })
+      }
 
+      op.attemptRunning = true
       try {
-        await this.applyRule(rule, filePath, onProgress)
+        await this.applyRule(rule, filePath, onProgress, op)
+        this.inFlight.delete(eventId)
         this.emit({ ...event, status: 'applied' })
       } catch (err: any) {
-        if (err.code === 'EBUSY') {
+        if (op.cancelled) {
+          this.inFlight.delete(eventId) // cancel() already emitted + cleaned up
+        } else if (err.code === 'EBUSY') {
           this.emit({ ...event, status: 'waiting' })
-          const timer = setInterval(async () => {
-            const onRetryProgress = (pct: number) =>
-              this.emit({ ...event, status: 'waiting', lastChecked: Date.now(), progress: pct })
-            try {
-              await this.applyRule(rule, filePath, onRetryProgress)
-              clearInterval(timer)
-              this.retryTimers.delete(eventId)
-              this.emit({ ...event, status: 'applied', lastChecked: Date.now() })
-            } catch (retryErr: any) {
-              if (retryErr.code === 'EBUSY') {
-                this.emit({ ...event, status: 'waiting', lastChecked: Date.now() })
-              } else {
-                clearInterval(timer)
-                this.retryTimers.delete(eventId)
-                this.emit({ ...event, status: 'error', error: retryErr.message, lastChecked: Date.now() })
-              }
-            }
-          }, 30_000)
-          this.retryTimers.set(eventId, timer)
+          this.scheduleRetry(rule, filePath, op)
         } else {
+          this.inFlight.delete(eventId)
           this.emit({ ...event, status: 'error', error: err.message })
         }
+      } finally {
+        op.attemptRunning = false
       }
     }
+  }
+
+  /** Sequential EBUSY retry: the next attempt is armed only after the
+   *  current one fully finishes. The previous setInterval version re-entered
+   *  applyRule every 30s regardless of whether the last attempt was still
+   *  running — a minutes-long cross-drive copy accumulated concurrent
+   *  writers that truncated each other's destination and interleaved their
+   *  progress onto one activity row. */
+  private scheduleRetry(rule: WatchRule, filePath: string, op: InFlightOp): void {
+    op.retryTimer = setTimeout(async () => {
+      op.retryTimer = null
+      if (op.cancelled) return
+      const onRetryProgress = (pct: number) => {
+        if (!op.cancelled) this.emit({ ...op.event, status: 'waiting', lastChecked: Date.now(), progress: pct })
+      }
+      op.attemptRunning = true
+      try {
+        await this.applyRule(rule, filePath, onRetryProgress, op)
+        this.inFlight.delete(op.event.id)
+        this.emit({ ...op.event, status: 'applied', lastChecked: Date.now() })
+      } catch (err: any) {
+        if (op.cancelled) {
+          this.inFlight.delete(op.event.id)
+        } else if (err.code === 'EBUSY') {
+          this.emit({ ...op.event, status: 'waiting', lastChecked: Date.now() })
+          this.scheduleRetry(rule, filePath, op)
+        } else {
+          this.inFlight.delete(op.event.id)
+          this.emit({ ...op.event, status: 'error', error: err.message, lastChecked: Date.now() })
+        }
+      } finally {
+        op.attemptRunning = false
+      }
+    }, 30_000)
   }
 
   private resolveAutoDestination(rule: WatchRule, filePath: string): string | null {
@@ -292,10 +417,53 @@ class FileWatcher {
     return findDatedFolderRecursive(this.streamsDir, match[1]) ?? destination
   }
 
+  /** Copy with abort support and dirty-failure cleanup: registers dest as
+   *  the op's cleanup target and removes the partial on any failure,
+   *  including a cancel/quit abort. On success dest stays registered as
+   *  unverified — the caller nulls op.destPath once it accepts the file. */
+  private async runTrackedCopy(
+    src: string,
+    dest: string,
+    onProgress: ((pct: number) => void) | undefined,
+    op: InFlightOp | undefined
+  ): Promise<void> {
+    if (op) op.destPath = dest
+    try {
+      await copyWithProgress(src, dest, onProgress ?? (() => {}), op?.controller.signal)
+    } catch (err) {
+      await removePartialWithRetry(dest)
+      if (op) op.destPath = null
+      throw err
+    }
+  }
+
+  /** Cross-device move fallback: copy, verify the destination byte count
+   *  against the source, and only then delete the original. A truncated or
+   *  aborted copy can never cost the source file. */
+  private async crossDeviceMove(
+    src: string,
+    dest: string,
+    onProgress: ((pct: number) => void) | undefined,
+    op: InFlightOp | undefined
+  ): Promise<void> {
+    await this.runTrackedCopy(src, dest, onProgress, op)
+    const [srcStat, destStat] = await Promise.all([fs.promises.stat(src), fs.promises.stat(dest)])
+    if (op?.cancelled || destStat.size !== srcStat.size) {
+      await removePartialWithRetry(dest)
+      if (op) op.destPath = null
+      throw op?.cancelled
+        ? new Error('Cancelled')
+        : new Error(`Copy verification failed: destination is ${destStat.size} of ${srcStat.size} bytes — the original was not deleted`)
+    }
+    if (op) op.destPath = null
+    await fs.promises.unlink(src)
+  }
+
   private async applyRule(
     rule: WatchRule,
     filePath: string,
-    onProgress?: (pct: number) => void
+    onProgress?: (pct: number) => void,
+    op?: InFlightOp
   ): Promise<void> {
     const fileName = path.basename(filePath)
     const ext = path.extname(fileName)
@@ -331,14 +499,19 @@ class FileWatcher {
           await fs.promises.rename(filePath, destPath)
         } catch (err: any) {
           if (err.code === 'EXDEV') {
-            await copyWithProgress(filePath, destPath, onProgress ?? (() => {}))
-            await fs.promises.unlink(filePath)
+            await this.crossDeviceMove(filePath, destPath, onProgress, op)
           } else {
             throw err
           }
         }
       } else {
-        await copyWithProgress(filePath, destPath, onProgress ?? (() => {}))
+        await this.runTrackedCopy(filePath, destPath, onProgress, op)
+        if (op?.cancelled) {
+          await removePartialWithRetry(destPath)
+          op.destPath = null
+          throw new Error('Cancelled')
+        }
+        if (op) op.destPath = null
       }
     } else if (rule.action === 'rename') {
       const dir = path.dirname(filePath)
@@ -347,8 +520,7 @@ class FileWatcher {
         await fs.promises.rename(filePath, destPath)
       } catch (err: any) {
         if (err.code === 'EXDEV') {
-          await copyWithProgress(filePath, destPath, onProgress ?? (() => {}))
-          await fs.promises.unlink(filePath)
+          await this.crossDeviceMove(filePath, destPath, onProgress, op)
         } else {
           throw err
         }

@@ -66,7 +66,7 @@ export interface WatchEvent {
   timestamp: number
   lastChecked?: number
   progress?: number
-  status: 'matched' | 'applied' | 'error' | 'waiting'
+  status: 'matched' | 'applied' | 'error' | 'waiting' | 'cancelled'
   error?: string
 }
 

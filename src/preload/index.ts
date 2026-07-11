@@ -178,6 +178,9 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('watcher:fileMatched', handler)
   },
 
+  cancelWatcherEvent: (eventId: string) =>
+    ipcRenderer.invoke('watcher:cancelEvent', eventId),
+
   // ── Templates ─────────────────────────────────────────────────────────────
   getTemplates: () =>
     ipcRenderer.invoke('templates:getAll'),

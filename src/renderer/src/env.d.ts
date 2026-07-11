@@ -101,6 +101,7 @@ declare global {
       startWatcher(rules: WatchRule[]): Promise<void>
       stopWatcher(): Promise<void>
       onFileMatched(cb: (event: WatchEvent) => void): () => void
+      cancelWatcherEvent(eventId: string): Promise<boolean>
 
       // ── Templates ────────────────────────────────────────────────────────────
       getTemplates(): Promise<FolderTemplate[]>
@@ -308,7 +309,7 @@ declare global {
       editRedo(): void
       windowIsMaximized(): Promise<boolean>
       onMaximizeChange(cb: (maximized: boolean) => void): () => void
-      onConfirmQuit(cb: (data: { running: number; queued: number }) => void): () => void
+      onConfirmQuit(cb: (data: { running: number; queued: number; fileOps: number }) => void): () => void
       proceedQuit(): void
       getStartupSettings(): Promise<{ startWithWindows: boolean; startMinimized: boolean }>
       setStartupSettings(startWithWindows: boolean, startMinimized: boolean): Promise<void>

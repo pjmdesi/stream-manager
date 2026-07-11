@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Trash2, FolderOpen, CheckCircle, AlertCircle, Clock } from 'lucide-react'
+import { Plus, Trash2, FolderOpen, CheckCircle, AlertCircle, Clock, Ban, X } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { WatchRule, WatchEvent, ConversionPreset } from '../../types'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Input, Select } from '../ui/Input'
 import { Modal } from '../ui/Modal'
+import { Tooltip } from '../ui/Tooltip'
 import { useWatcher } from '../../context/WatcherContext'
 
 function RuleModal({
@@ -214,6 +215,7 @@ function EventBadge({ status }: { status: WatchEvent['status'] }) {
     <div className="w-3 h-3 shrink-0 flex items-center justify-center mt-0.5">
       {status === 'applied'                      && <CheckCircle size={12} className="text-green-400" />}
       {status === 'error'                        && <AlertCircle size={12} className="text-red-400" />}
+      {status === 'cancelled'                    && <Ban size={12} className="text-gray-500" />}
       {(status === 'matched' || status === 'waiting') && <Clock size={12} className="text-yellow-500" />}
     </div>
   )
@@ -344,7 +346,7 @@ export function RulesPage() {
                 <div className="min-w-0 w-full">
                   <div className="text-xs text-gray-300 truncate">{ev.filePath.split(/[\\/]/).pop()}</div>
                   <div className="text-xs text-gray-400">{ev.action} · {new Date(ev.timestamp).toLocaleTimeString()}</div>
-                  {ev.progress !== undefined && ev.status !== 'applied' && ev.status !== 'error' && (
+                  {ev.progress !== undefined && ev.status !== 'applied' && ev.status !== 'error' && ev.status !== 'cancelled' && (
                     <div className="mt-1">
                       <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                         <div
@@ -361,10 +363,27 @@ export function RulesPage() {
                       {ev.lastChecked && <span> · last checked {new Date(ev.lastChecked).toLocaleTimeString()}</span>}
                     </div>
                   )}
+                  {ev.status === 'cancelled' && (
+                    <div className="text-xs text-gray-500">Cancelled — partial file removed, original untouched</div>
+                  )}
                   {ev.status === 'error' && ev.error && (
                     <div className="text-xs text-red-400 break-words whitespace-pre-wrap">{ev.error}</div>
                   )}
                 </div>
+                {/* Cancel: only for in-progress transfers and busy-waits. Convert
+                    rows are converter jobs — they cancel from the Converter page. */}
+                {ev.action !== 'convert' &&
+                  (ev.status === 'waiting' || (ev.status === 'matched' && ev.progress !== undefined && ev.progress < 100)) && (
+                  <Tooltip content="Cancel — removes the partial destination file; the original stays in place" triggerClassName="shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => { void window.api.cancelWatcherEvent(ev.id) }}
+                      className="p-1 rounded text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors"
+                    >
+                      <X size={12} />
+                    </button>
+                  </Tooltip>
+                )}
               </div>
             ))}
           </div></div>

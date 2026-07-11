@@ -388,23 +388,28 @@ app.whenReady().then(() => {
     mainWindow.hide()
   })
 
-  // Confirm before quitting if conversions are still running.
-  // Intercepts the window's 'close' event and asks the renderer to show its
-  // own styled modal; the renderer calls back via 'app:proceedQuit'.
+  // Confirm before quitting if conversions or auto-rule file operations are
+  // still running. Intercepts the window's 'close' event and asks the
+  // renderer to show its own styled modal; the renderer calls back via
+  // 'app:proceedQuit'.
   let confirmedClose = false
   mainWindow.on('close', (event) => {
     if (confirmedClose) return
     const { running, queued } = getActiveConversionCounts()
-    if (running === 0) return
+    const fileOps = fileWatcher.getActiveFileOpCount()
+    if (running === 0 && fileOps === 0) return
     event.preventDefault()
     if (!mainWindow.isVisible()) {
       mainWindow.show()
       mainWindow.focus()
     }
-    mainWindow.webContents.send('app:confirmQuit', { running, queued })
+    mainWindow.webContents.send('app:confirmQuit', { running, queued, fileOps })
   })
-  ipcMain.on('app:proceedQuit', () => {
+  ipcMain.on('app:proceedQuit', async () => {
     confirmedClose = true
+    // Abort in-flight watcher copies and sweep their partial destination
+    // files while the process is still alive to do it.
+    await fileWatcher.abortAllInFlight()
     mainWindow.close()
   })
 

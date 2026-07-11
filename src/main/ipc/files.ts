@@ -443,4 +443,10 @@ export function registerFilesIPC(): void {
   ipcMain.handle('watcher:stop', async () => {
     fileWatcher.stop()
   })
+
+  // Cancel one in-flight watcher operation (activity-row cancel button).
+  // Returns false when the id is no longer in flight (already finished).
+  ipcMain.handle('watcher:cancelEvent', async (_event, eventId: string) => {
+    return fileWatcher.cancel(eventId)
+  })
 }
