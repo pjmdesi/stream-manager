@@ -203,8 +203,10 @@ function createWindow(): BrowserWindow {
   // stole the key from every other app (VS Code's terminal toggle) the
   // whole time SM ran, even hidden in the tray.
   mainWindow.webContents.on('before-input-event', (event, input) => {
+    // NOTE: Electron's Input.type is camelCase ('keyDown'), not the DOM's
+    // lowercase 'keydown' — matching the wrong casing silently never fires.
     if (
-      input.type === 'keydown' && input.code === 'Backquote' &&
+      input.type === 'keyDown' && input.code === 'Backquote' &&
       (input.control || input.meta) && !input.alt && !input.shift
     ) {
       event.preventDefault()

@@ -1,4 +1,5 @@
 import { ipcMain, app, shell, net } from 'electron'
+import fs from 'fs'
 import path from 'path'
 import { getStore } from './store'
 
@@ -11,11 +12,32 @@ interface LauncherGroup { id: string; name: string; apps: LauncherApp[] }
 // after the colon, so it never matches.
 const isUrl = (p: string): boolean => /^[a-z][a-z\d+.-]*:\/\//i.test(p)
 // shell.openPath never rejects — it resolves an error STRING on failure ('' on
-// success), so a bare try/catch counted every missing app as launched.
+// success), so a bare try/catch counted every missing app as launched. Worse,
+// a .lnk whose TARGET is gone "opens" successfully as far as openPath is
+// concerned, and WINDOWS then pops a blocking "Windows cannot find …" dialog
+// that stalls the rest of the group launch until dismissed. So existence is
+// validated here, before ShellExecute ever gets a chance to show UI.
 const openTarget = async (target: string): Promise<void> => {
   if (isUrl(target)) {
     await shell.openExternal(target)
     return
+  }
+  let checkPath: string | null = target
+  if (target.toLowerCase().endsWith('.lnk')) {
+    if (!fs.existsSync(target)) throw new Error('Shortcut file not found')
+    try {
+      const d = shell.readShortcutLink(target)
+      // UWP/Store/Control-Panel shortcuts have no plain file target — nothing
+      // to pre-check; let the shell launch the .lnk whole.
+      checkPath = d.target || null
+    } catch {
+      checkPath = null // unreadable shortcut — attempt the launch anyway
+    }
+  }
+  if (checkPath && !fs.existsSync(checkPath)) {
+    throw new Error(checkPath === target
+      ? 'File not found'
+      : `Shortcut target not found: ${checkPath}`)
   }
   const errMsg = await shell.openPath(target)
   if (errMsg) throw new Error(errMsg)
@@ -85,7 +107,7 @@ export function registerLauncherIPC(): void {
     if (!group) return { launched: 0, failed: [] }
 
     let launched = 0
-    const failed: { name: string; error: string }[] = []
+    const failed: { id: string; name: string; error: string }[] = []
     for (const entry of group.apps) {
       if (!entry.path) continue
       try {
@@ -94,8 +116,9 @@ export function registerLauncherIPC(): void {
       } catch (err: any) {
         // Keep launching the remaining apps, but report the failure — a
         // "Launched 3" with nothing opened right before going live is the
-        // worst possible lie.
-        failed.push({ name: entry.name || path.basename(entry.path), error: err?.message ?? 'Unknown error' })
+        // worst possible lie. The id lets the renderer pin the error to the
+        // exact app item (error chip + red launch button).
+        failed.push({ id: entry.id, name: entry.name || path.basename(entry.path), error: err?.message ?? 'Unknown error' })
       }
     }
     return { launched, failed }

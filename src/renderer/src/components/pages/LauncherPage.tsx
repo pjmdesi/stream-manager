@@ -489,6 +489,8 @@ function AppRow({
   app,
   onUpdate,
   onRemove,
+  onLaunch,
+  error,
   defaultPath,
   isDragging,
   style,
@@ -497,6 +499,11 @@ function AppRow({
   app: LauncherApp
   onUpdate: (updated: LauncherApp) => void
   onRemove: () => void
+  /** Page-level launcher — resolves true only if the app actually opened,
+   *  and maintains the shared per-app error state. */
+  onLaunch: () => Promise<boolean>
+  /** Last launch failure for this app, if any (cleared on a good launch). */
+  error?: string
   defaultPath?: string
   isDragging?: boolean
   style?: React.CSSProperties
@@ -520,9 +527,11 @@ function AppRow({
 
   const launch = async () => {
     if (!app.path) return
-    await window.api.launchApp(app.path)
-    setLaunched(true)
-    setTimeout(() => setLaunched(false), 2000)
+    const ok = await onLaunch()
+    if (ok) {
+      setLaunched(true)
+      setTimeout(() => setLaunched(false), 2000)
+    }
   }
 
   return (
@@ -539,12 +548,21 @@ function AppRow({
       />
       <AppIcon path={app.path} size={20} />
       <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-        <EditableLabel
-          value={app.name}
-          onSave={name => onUpdate({ ...app, name })}
-          placeholder="App name"
-          className="text-sm font-medium text-gray-200"
-        />
+        <div className="flex items-center gap-1.5 min-w-0">
+          <EditableLabel
+            value={app.name}
+            onSave={name => onUpdate({ ...app, name })}
+            placeholder="App name"
+            className="text-sm font-medium text-gray-200"
+          />
+          {error && (
+            <Tooltip content={error} side="top">
+              <span className="shrink-0 max-w-[160px] truncate text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-400">
+                {error}
+              </span>
+            </Tooltip>
+          )}
+        </div>
         <div className="flex items-center gap-1 min-w-0">
           {isUrlPath(app.path) ? (
             <EditableLabel
@@ -570,12 +588,16 @@ function AppRow({
           )}
         </div>
       </div>
-      <Tooltip content={launched ? 'Launched!' : 'Launch'} side="left">
+      <Tooltip content={error ? `Launch failed — try again` : launched ? 'Launched!' : 'Launch'} side="left">
         <button
           onClick={launch}
           disabled={!app.path}
-          className={`shrink-0 p-1 transition-colors opacity-0 group-hover:opacity-100 disabled:pointer-events-none ${
-            launched ? 'text-green-400' : 'text-gray-400 hover:text-green-400'
+          className={`shrink-0 p-1 transition-colors disabled:pointer-events-none ${
+            error
+              ? 'text-red-400 hover:text-red-300' // errored: always visible, red
+              : launched
+                ? 'text-green-400 opacity-0 group-hover:opacity-100'
+                : 'text-gray-400 hover:text-green-400 opacity-0 group-hover:opacity-100'
           }`}
         >
           <Play size={13} />
@@ -596,7 +618,7 @@ function AppRow({
 // ── Group row (main list) ──────────────────────────────────────────────────────
 
 function GroupRow({
-  group, selected, isWidget, launching, feedback, animMs, onSelect, onLaunchGroup, onLaunchApp, onToggleWidget,
+  group, selected, isWidget, launching, feedback, appErrors, animMs, onSelect, onLaunchGroup, onLaunchApp, onToggleWidget,
 }: {
   group: LauncherGroup
   selected: boolean
@@ -606,6 +628,8 @@ function GroupRow({
   isWidget: boolean
   launching: boolean
   feedback?: string
+  /** Per-app launch errors — errored app icons get a red ring + error tooltip. */
+  appErrors: Record<string, string>
   onSelect: () => void
   onLaunchGroup: () => void
   onLaunchApp: (app: LauncherApp) => void
@@ -655,11 +679,19 @@ function GroupRow({
           {group.apps.length === 0 ? (
             <span className="text-xs text-gray-400 italic">No apps yet</span>
           ) : group.apps.map(app => (
-            <Tooltip key={app.id} content={app.path ? `Launch ${app.name}` : `${app.name} — no path set`} side="top">
+            <Tooltip
+              key={app.id}
+              content={appErrors[app.id]
+                ? `${app.name} — ${appErrors[app.id]}`
+                : app.path ? `Launch ${app.name}` : `${app.name} — no path set`}
+              side="top"
+            >
               <button
                 onClick={e => { e.stopPropagation(); if (app.path) onLaunchApp(app) }}
                 disabled={!app.path}
-                className="shrink-0 p-1 rounded hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className={`shrink-0 p-1 rounded hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${
+                  appErrors[app.id] ? 'ring-1 ring-red-500/60' : ''
+                }`}
               >
                 <AppIcon path={app.path} size={22} />
               </button>
@@ -703,6 +735,10 @@ export function LauncherPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [launching, setLaunching] = useState<string | null>(null)
   const [launchFeedback, setLaunchFeedback] = useState<Record<string, string>>({})
+  // Per-app launch errors keyed by app id. Set when a launch fails (missing
+  // exe, dead shortcut target), cleared the moment the same app launches
+  // successfully — individually or as part of a group run.
+  const [appErrors, setAppErrors] = useState<Record<string, string>>({})
   const [addAppOpen, setAddAppOpen] = useState(false)
   const [addAppPrefill, setAddAppPrefill] = useState<{ path: string; name: string } | undefined>(undefined)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
@@ -822,9 +858,37 @@ export function LauncherPage() {
       setLaunchFeedback(prev => ({ ...prev, [groupId]: label }))
       setTimeout(() => setLaunchFeedback(prev => { const n = { ...prev }; delete n[groupId]; return n }),
         result.failed.length > 0 ? 4000 : 2000)
+      // Pin failures to their app items; clear errors for everything in this
+      // group that launched fine (a fixed path heals its chip on next run).
+      const failedById = new Map(result.failed.map(f => [f.id, f.error]))
+      const groupApps = groups.find(g => g.id === groupId)?.apps ?? []
+      setAppErrors(prev => {
+        const next = { ...prev }
+        for (const a of groupApps) {
+          if (failedById.has(a.id)) next[a.id] = failedById.get(a.id)!
+          else if (a.path) delete next[a.id]
+        }
+        return next
+      })
     } finally {
       setLaunching(null)
     }
+  }
+
+  /** Single-app launch used by the sidebar rows and the group-row app icons.
+   *  Returns success so callers only flash their "launched" state when the
+   *  app actually opened; failure lands in appErrors for the chip + red
+   *  button treatment. */
+  const launchSingleApp = async (app: LauncherApp): Promise<boolean> => {
+    if (!app.path) return false
+    const res = await window.api.launchApp(app.path).catch(() => ({ launched: false as const, error: 'Launch failed' }))
+    setAppErrors(prev => {
+      const next = { ...prev }
+      if (res.launched) delete next[app.id]
+      else next[app.id] = res.error ?? 'Launch failed'
+      return next
+    })
+    return res.launched
   }
 
   const selected = groups.find(g => g.id === selectedId) ?? null
@@ -909,10 +973,11 @@ export function LauncherPage() {
                 isWidget={widgetGroupId === group.id}
                 launching={launching === group.id}
                 feedback={launchFeedback[group.id]}
+                appErrors={appErrors}
                 animMs={animMs}
                 onSelect={() => setSelectedId(selectedId === group.id ? null : group.id)}
                 onLaunchGroup={() => launchGroup(group.id)}
-                onLaunchApp={app => { if (app.path) window.api.launchApp(app.path) }}
+                onLaunchApp={app => { void launchSingleApp(app) }}
                 onToggleWidget={() => setWidgetGroupId(widgetGroupId === group.id ? '' : group.id)}
               />
             ))
@@ -1008,6 +1073,8 @@ export function LauncherPage() {
                       app={app}
                       onUpdate={updated => updateApp(sidebarGroup.id, app.id, updated)}
                       onRemove={() => removeApp(sidebarGroup.id, app.id)}
+                      onLaunch={() => launchSingleApp(app)}
+                      error={appErrors[app.id]}
                       defaultPath={startMenuPath}
                       isDragging={dragState?.groupId === sidebarGroup.id && dragState.dragIdx === i}
                       style={getItemStyle(sidebarGroup.id, i)}
