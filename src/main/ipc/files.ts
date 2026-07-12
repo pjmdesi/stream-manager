@@ -241,11 +241,24 @@ export function registerFilesIPC(): void {
   })
 
   ipcMain.handle('files:openInExplorer', async (_event, filePath: string) => {
-    const stat = fs.statSync(filePath)
-    if (stat.isDirectory()) {
-      shell.openPath(filePath)
-    } else {
-      shell.showItemInFolder(filePath)
+    try {
+      const stat = fs.statSync(filePath)
+      if (stat.isDirectory()) {
+        shell.openPath(filePath)
+      } else {
+        shell.showItemInFolder(filePath)
+      }
+    } catch {
+      // Path doesn't exist (e.g. a launcher item whose exe is gone) — open
+      // the nearest existing ancestor so the user still lands near the
+      // problem instead of nothing happening.
+      let dir = path.dirname(filePath)
+      while (dir && !fs.existsSync(dir)) {
+        const parent = path.dirname(dir)
+        if (parent === dir) return
+        dir = parent
+      }
+      if (dir) shell.openPath(dir)
     }
   })
 

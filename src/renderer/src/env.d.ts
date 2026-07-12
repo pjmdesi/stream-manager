@@ -321,7 +321,7 @@ declare global {
       setLauncherGroups(groups: LauncherGroup[]): Promise<void>
       launchGroup(groupId: string): Promise<{ launched: number; failed: { id: string; name: string; error: string }[] }>
       launchApp(filePath: string): Promise<{ launched: boolean; error?: string }>
-      getFileIcon(filePath: string): Promise<string | null>
+      getFileIcon(filePath: string, fresh?: boolean): Promise<string | null>
       getFavicon(pageUrl: string): Promise<string | null>
       resolveShortcut(filePath: string): Promise<string>
       getStartMenuPath(): Promise<string>

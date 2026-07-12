@@ -151,7 +151,7 @@ export function registerLauncherIPC(): void {
     return path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')
   })
 
-  ipcMain.handle('launcher:getFileIcon', async (_event, filePath: string) => {
+  ipcMain.handle('launcher:getFileIcon', async (_event, filePath: string, fresh?: boolean) => {
     try {
       // We launch a .lnk whole (to keep its args/cwd/run-as), but for the ICON
       // we resolve a meaningful source: the shortcut's custom icon first, then
@@ -164,6 +164,16 @@ export function registerLauncherIPC(): void {
           const d = shell.readShortcutLink(filePath)
           iconSource = d.icon || d.target || filePath
         } catch { /* fall back to the .lnk itself */ }
+      }
+      // Chromium's icon manager caches exe icons by exact path string for the
+      // whole session, so an icon fetched while the file was MISSING (Windows'
+      // generic placeholder) would be served forever, even after the file is
+      // restored and refetched. `fresh` dodges the stale entry by toggling the
+      // drive letter's case — same file, different cache key. (One variant per
+      // session; good enough for the restore-then-relaunch flow.)
+      if (fresh && /^[a-zA-Z]:[\\/]/.test(iconSource)) {
+        const c = iconSource[0]
+        iconSource = (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()) + iconSource.slice(1)
       }
       const icon = await app.getFileIcon(iconSource, { size: 'large' })
       return icon.toDataURL()

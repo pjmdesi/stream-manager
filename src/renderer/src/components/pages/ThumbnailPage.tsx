@@ -2000,7 +2000,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // undefined, the picker is in its initial-thumbnail flow (writes
   // ordinal 1). When set (≥2), it's the "+ New thumbnail" flow that
   // creates an alternative at the next available ordinal.
-  const [templatePickerStream, setTemplatePickerStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number; targetVariant?: number } | null>(null)
+  const [templatePickerStream, setTemplatePickerStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number; targetVariant?: number; knownVariants?: number[] } | null>(null)
 
   // ── Container / zoom / pan ────────────────────────────────────────────────
   const canvasContainerRef = useRef<HTMLDivElement>(null)
@@ -2547,9 +2547,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     ]).then(async ([tmpl, rec, allStreams]) => {
       setTemplates(tmpl)
 
-      // Filter out recents whose canvas file no longer exists on disk
+      // Filter out recents with NO canvas variant left on disk. Checked via
+      // the variant listing, not a hardcoded variant-1 filename — a stream
+      // whose only thumbnail is variant 2+ was being pruned (and persisted
+      // as removed) despite having a perfectly healthy canvas.
       const existsFlags = await Promise.all(
-        rec.map(r => window.api.fileExists(`${r.folderPath}/${r.date}_sm-thumbnail.json`))
+        rec.map(r => window.api.thumbnailListVariants(r.folderPath, r.date)
+          .then(v => v.length > 0)
+          .catch(() => false))
       )
       const stale = rec.filter((_, i) => !existsFlags[i])
 
@@ -2966,7 +2971,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           return { ...l, x, y, width: w, height: h, rotation: rot }
         }
         if (l.type === 'text') {
-          let w = Math.round((l.width ?? 0) * dragScaleX)
+          // Auto-width text (no committed width yet) must scale from the
+          // node's rendered width — `?? 0` collapsed the layer to width 0 on
+          // its first horizontal resize. skipShadow/skipStroke so drop
+          // shadows and outlines don't inflate the committed width.
+          const baseW = l.width
+            ?? node.getClientRect({ skipTransform: true, skipShadow: true, skipStroke: true }).width
+          let w = Math.round(baseW * dragScaleX)
           if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w = snapGrid(w) }
           return { ...l, x, y, width: w, rotation: rot }
         }
@@ -3327,6 +3338,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       setTemplatePickerStream({
         folderPath, date, title, meta, totalEpisodes,
         targetVariant: foundVariants.length > 0 ? initialVariant : undefined,
+        // THIS stream's real variant list — confirmPickTemplate must not
+        // inherit the previously open stream's list.
+        knownVariants: foundVariants,
       })
       setMode('overview')
       return
@@ -3401,7 +3415,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Confirm template picker choice ────────────────────────────────────────
   const confirmPickTemplate = useCallback(async (t: ThumbnailTemplate | null) => {
     if (!templatePickerStream) return
-    const { folderPath, date, title, meta, totalEpisodes, targetVariant } = templatePickerStream
+    const { folderPath, date, title, meta, totalEpisodes, targetVariant, knownVariants } = templatePickerStream
     setTemplatePickerStream(null)
     // Retire whatever session the stage currently shows (the "new
     // alternative" flow arrives here from an OPEN editor session).
@@ -3421,7 +3435,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     // is set to the next-available ordinal; otherwise default to 1.
     const ordinal = targetVariant ?? 1
     setCurrentVariant(ordinal)
-    setVariants(prev => prev.includes(ordinal) ? prev : [...prev, ordinal].sort((a, b) => a - b))
+    // Base the strip on the picker stream's OWN variant list — merging into
+    // whatever `variants` held for the previously open stream carried that
+    // stream's thumbnails into this one's strip as phantoms.
+    const baseVariants = knownVariants ?? []
+    setVariants(baseVariants.includes(ordinal) ? baseVariants : [...baseVariants, ordinal].sort((a, b) => a - b))
     const entry: ThumbnailRecentEntry = { folderPath, date, title, updatedAt: Date.now() }
     window.api.thumbnailAddRecent(entry).then(setRecents).catch(() => {})
     // Eager save: stream items previously only got an on-disk PNG +
@@ -3477,6 +3495,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       meta: currentStream.meta,
       totalEpisodes: currentStream.totalEpisodes,
       targetVariant: nextOrdinal,
+      knownVariants: variants,
     })
   }, [currentStream, variants])
 

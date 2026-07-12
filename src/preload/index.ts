@@ -607,8 +607,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('launcher:launchGroup', groupId),
   launchApp: (filePath: string) =>
     ipcRenderer.invoke('launcher:launchApp', filePath),
-  getFileIcon: (filePath: string) =>
-    ipcRenderer.invoke('launcher:getFileIcon', filePath),
+  getFileIcon: (filePath: string, fresh?: boolean) =>
+    ipcRenderer.invoke('launcher:getFileIcon', filePath, fresh),
   getFavicon: (pageUrl: string) =>
     ipcRenderer.invoke('launcher:getFavicon', pageUrl),
   resolveShortcut: (filePath: string) =>

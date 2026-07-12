@@ -93,11 +93,29 @@ export const isUrlPath = (p: string): boolean => /^[a-z][a-z\d+.-]*:\/\//i.test(
 function AppIcon({ path, size = 20 }: { path: string; size?: number }) {
   const [iconUrl, setIconUrl] = useState<string | null>(null)  // OS file icon (apps)
   const [favicon, setFavicon] = useState<string | null>(null)  // website favicon (data URL)
+  // Bumped by the 'sm:app-icon-refresh' event after a successful launch of
+  // this path. Covers the restored-file case: an icon fetched while the exe
+  // was missing is Windows' generic placeholder, and with the path unchanged
+  // nothing else would ever refetch the real one.
+  const [refreshKey, setRefreshKey] = useState(0)
   const isUrl = isUrlPath(path)
 
   useEffect(() => {
+    const onRefresh = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === path) setRefreshKey(k => k + 1)
+    }
+    window.addEventListener('sm:app-icon-refresh', onRefresh)
+    return () => window.removeEventListener('sm:app-icon-refresh', onRefresh)
+  }, [path])
+
+  // Reset only when the path itself changes — a refresh keeps showing the
+  // old icon until the new fetch lands (no placeholder flash).
+  useEffect(() => {
     setIconUrl(null)
     setFavicon(null)
+  }, [path])
+
+  useEffect(() => {
     if (!path) return
     if (isUrlPath(path)) {
       // Resolved in main from the site's own /favicon.ico (no third party);
@@ -106,9 +124,12 @@ function AppIcon({ path, size = 20 }: { path: string; size?: number }) {
       window.api.getFavicon(path).then(d => { if (!cancelled) setFavicon(d) }).catch(() => {})
       return () => { cancelled = true }
     }
-    window.api.getFileIcon(path).then(setIconUrl).catch(() => setIconUrl(null))
+    // refreshKey > 0 = a post-launch refresh: ask main to bypass Chromium's
+    // session icon cache, which otherwise keeps serving the generic
+    // placeholder fetched while the file was missing.
+    window.api.getFileIcon(path, refreshKey > 0).then(setIconUrl).catch(() => setIconUrl(null))
     return
-  }, [path])
+  }, [path, refreshKey])
 
   if (isUrl) {
     if (favicon) {
@@ -573,9 +594,18 @@ function AppRow({
             />
           ) : (
             <>
-              <span className="text-xs text-gray-400 truncate font-mono">
-                {app.path || <span className="text-gray-400 not-italic">No path set</span>}
-              </span>
+              {app.path ? (
+                <Tooltip content="Open file location" side="top" triggerClassName="min-w-0">
+                  <button
+                    onClick={() => { void window.api.openInExplorer(app.path) }}
+                    className="block max-w-full text-left text-xs text-gray-400 hover:text-gray-300 truncate font-mono transition-colors"
+                  >
+                    {app.path}
+                  </button>
+                </Tooltip>
+              ) : (
+                <span className="text-xs text-gray-400 truncate font-mono">No path set</span>
+              )}
               <Tooltip content="Change executable" side="top">
                 <button
                   onClick={browsePath}
@@ -870,6 +900,13 @@ export function LauncherPage() {
         }
         return next
       })
+      // Successful launches also refresh their icons — a restored exe's icon
+      // was fetched as the generic placeholder while the file was missing.
+      for (const a of groupApps) {
+        if (a.path && !failedById.has(a.id)) {
+          window.dispatchEvent(new CustomEvent('sm:app-icon-refresh', { detail: a.path }))
+        }
+      }
     } finally {
       setLaunching(null)
     }
@@ -888,6 +925,9 @@ export function LauncherPage() {
       else next[app.id] = res.error ?? 'Launch failed'
       return next
     })
+    if (res.launched) {
+      window.dispatchEvent(new CustomEvent('sm:app-icon-refresh', { detail: app.path }))
+    }
     return res.launched
   }
 
