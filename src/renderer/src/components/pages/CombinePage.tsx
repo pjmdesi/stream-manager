@@ -16,12 +16,17 @@ interface CombineFile {
   name: string
   duration: number | null   // seconds, null = not yet probed
   timestamp: Date | null    // parsed from filename
-  // Stream properties from the same probe — drive the compatibility warning
+  // Stream properties from the same probe — drive the compatibility gate
   // (-c copy concat needs matching streams; mismatches glitch at the joins).
   codec: string | null
   width: number | null
   height: number | null
   fps: number | null
+  /** Audio layout (codec/channels/sampleRate per track). null = not yet
+   *  probed. Layout drift between OBS sessions (track count, AAC↔Opus) is
+   *  just as fatal to a copy-concat as a codec change — and used to pass
+   *  the old advisory silently, which only compared video streams. */
+  audioTracks: { codec: string; channels: number; sampleRate?: number }[] | null
 }
 
 interface PendingFiles { paths: string[]; token: number }
@@ -116,7 +121,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
       name: p.split(/[\\/]/).pop() ?? p,
       duration: null,
       timestamp: parseTimestamp(p.split(/[\\/]/).pop() ?? ''),
-      codec: null, width: null, height: null, fps: null,
+      codec: null, width: null, height: null, fps: null, audioTracks: null,
     }))
 
     // Auto-sort by timestamp on initial load
@@ -148,6 +153,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
           width: info.width ?? null,
           height: info.height ?? null,
           fps: info.fps ?? null,
+          audioTracks: (info.audioTracks ?? []).map(t => ({ codec: t.codec, channels: t.channels, sampleRate: t.sampleRate })),
         } : x))
       } catch (_) {}
     })
@@ -197,8 +203,43 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
     if (result && result[0]) setOutputPath(result[0])
   }
 
+  // Compatibility gate. A -c copy concat adapts NOTHING — mismatched video
+  // codec, resolution, or audio layout produces a structurally broken file
+  // (undecodable second half, scrambled track mapping), so those BLOCK the
+  // run with a red explanation. Frame-rate drift alone stays an amber
+  // advisory: the output is just variable-framerate and generally plays.
+  const probed = files.filter(f => f.codec !== null)
+  const audioSig = (f: CombineFile) =>
+    (f.audioTracks ?? []).map(t => `${t.codec} ${t.channels}ch${t.sampleRate ? ' @' + t.sampleRate + 'Hz' : ''}`).join(' + ') || 'no audio'
+  // One line per differing property, grouping files by value so the message
+  // names exactly which files disagree and how.
+  const mismatchLine = (label: string, valOf: (f: CombineFile) => string): string | null => {
+    const groups = new Map<string, string[]>()
+    for (const f of probed) {
+      const v = valOf(f)
+      const names = groups.get(v) ?? []
+      names.push(f.name)
+      groups.set(v, names)
+    }
+    if (groups.size <= 1) return null
+    return `${label}: ` + [...groups.entries()].map(([v, names]) => `${v} (${names.join(', ')})`).join('  vs  ')
+  }
+  const hardBlockers = probed.length >= 2
+    ? [
+        mismatchLine('Video codec', f => f.codec ?? 'unknown'),
+        mismatchLine('Resolution', f => `${f.width ?? '?'}×${f.height ?? '?'}`),
+        mismatchLine('Audio', audioSig),
+      ].filter((l): l is string => l !== null)
+    : []
+  const fpsAdvisory = probed.length >= 2
+    ? mismatchLine('Frame rate', f => f.fps == null ? 'unknown' : `${Math.round(f.fps * 100) / 100} fps`)
+    : null
+
   const combine = useCallback(async () => {
     if (files.length < 2 || !outputPath) return
+    // Belt to the disabled button's suspenders — a copy-concat of
+    // incompatible streams writes a broken file, never run one.
+    if (hardBlockers.length > 0) return
     setProgress(0)
     setDone(false)
     setError(null)
@@ -262,7 +303,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
       setCancelling(false)
       setOpen('combine', [])
     }
-  }, [files, outputPath, deleteAfter, setOpen])
+  }, [files, outputPath, deleteAfter, setOpen, hardBlockers])
 
   // ── Empty state ────────────────────────────────────────────────────────────
 
@@ -284,13 +325,6 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
 
   const totalDur = files.reduce((s, f) => s + (f.duration ?? 0), 0)
   const running = progress !== null
-
-  // Advisory only — some mismatches survive a stream copy, and the
-  // delete-sources path is separately gated on output verification.
-  const streamKey = (f: CombineFile) =>
-    `${f.codec ?? ''}|${f.width ?? ''}x${f.height ?? ''}|${f.fps == null ? '' : Math.round(f.fps * 100) / 100}`
-  const probed = files.filter(f => f.codec !== null)
-  const streamsMismatch = probed.length >= 2 && probed.some(f => streamKey(f) !== streamKey(probed[0]))
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -405,12 +439,25 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
           </div>
         )}
 
-        {/* Stream-compatibility advisory */}
-        {streamsMismatch && !running && !done && (
+        {/* Compatibility gate — red blocks the run (the output would be a
+            broken file), amber warns but allows (VFR output plays fine). */}
+        {hardBlockers.length > 0 && !running && (
+          <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+            <AlertCircle size={13} className="shrink-0 mt-0.5" />
+            <div className="flex flex-col gap-1 min-w-0">
+              <span className="font-medium">These files can't be combined without re-encoding — combining copies the streams as-is, and these differences would produce a broken output:</span>
+              {hardBlockers.map(line => (
+                <span key={line} className="font-mono text-[11px] text-red-200/90 break-words">{line}</span>
+              ))}
+              <span className="text-red-200/80">Convert the odd files out with the Converter first (same preset for all), then combine the results.</span>
+            </div>
+          </div>
+        )}
+        {hardBlockers.length === 0 && fpsAdvisory && !running && !done && (
           <div className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
             <AlertTriangle size={13} className="shrink-0 mt-0.5" />
             <span>
-              These files have different video streams (codec, resolution, or frame rate). Combining copies the streams without re-encoding, so the output may glitch or freeze at the joins. For a reliable result, convert the files to a matching format first.
+              {fpsAdvisory}. The combined file will simply switch frame rate at the joins (variable frame rate) — most players handle this fine, but some editors dislike VFR input. Convert to a matching frame rate first if that matters.
             </span>
           </div>
         )}
@@ -453,7 +500,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
             variant="primary"
             icon={running ? <Loader2 size={14} className="animate-spin" /> : <Combine size={14} />}
             onClick={combine}
-            disabled={files.length < 2 || !outputPath || running}
+            disabled={files.length < 2 || !outputPath || running || hardBlockers.length > 0}
           >
             {running ? 'Combining…' : `Combine ${files.length} files`}
           </Button>
