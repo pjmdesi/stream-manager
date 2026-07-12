@@ -376,7 +376,7 @@ function isPendingStream(folder: import('../../types').StreamFolder, todayStr: s
   })
 }
 
-export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; folderPath: string; cloudSyncActive: boolean; children: React.ReactNode }) {
+export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActive, onVideoClick, children }: { videos: string[]; videoMap?: Record<string, import('../../types').VideoEntry>; folderPath: string; cloudSyncActive: boolean; onVideoClick?: (path: string) => void; children: React.ReactNode }) {
   const [visible, setVisible] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number; maxWidth?: number }>({ top: 0, left: 0 })
   // Per-file hydration, re-checked on every hover (a cached duration says
@@ -518,10 +518,16 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
           className="bg-navy-700 border border-white/10 rounded-lg shadow-xl p-1.5 min-w-[320px] max-w-[460px] flex flex-col gap-0.5"
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
+          // Portals bubble through the REACT tree, not the DOM — without this
+          // stop, a row click inside the tooltip also fired the stream row's
+          // own click handler and toggled the sidebar.
+          onClick={e => e.stopPropagation()}
         >
           {/* Each video is a shared VideoRow (thumbnail + filename + encoding /
-              timecode / size + hydration). Clicking a row reveals the file in
-              the OS file explorer. */}
+              timecode / size + hydration). Clicking a row hands the path to
+              onVideoClick (streams page: open the sidebar + flash the file in
+              the media grid) — direct file access stays behind the sidebar's
+              Open Folder button by design. */}
           {videos.map(v => {
             const name = v.split(/[\\/]/).pop() ?? v
             const relKey = videoMapKey(folderPath, v)
@@ -536,7 +542,7 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
                 entry={videoMap?.[relKey]}
                 isLocal={localStatus[v]}
                 cloudSyncActive={cloudSyncActive}
-                onClick={() => window.api.openInExplorer(v)}
+                onClick={onVideoClick ? () => { setVisible(false); onVideoClick(v) } : undefined}
               />
             )
           })}

@@ -8,7 +8,18 @@ function fixAsarPath(p: string): string {
   return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
 }
 
+// Single-slot active run — the Combine page runs one job at a time. Lets
+// combine:cancel kill the ffmpeg child and lets the close handler tell a
+// cancel apart from a genuine failure.
+let activeCombine: { cancelled: boolean; kill: () => void } | null = null
+
 export function registerCombineIPC(): void {
+  ipcMain.handle('combine:cancel', async () => {
+    if (!activeCombine) return
+    activeCombine.cancelled = true
+    activeCombine.kill()
+  })
+
   ipcMain.handle(
     'combine:run',
     async (
@@ -64,6 +75,11 @@ export function registerCombineIPC(): void {
 
         const proc = spawn(fixAsarPath(ffmpegStatic as string), args)
         proc.stdin?.end()
+        const runState = {
+          cancelled: false,
+          kill: () => { try { proc.kill('SIGKILL') } catch (_) {} },
+        }
+        activeCombine = runState
 
         // A failed run's partial output is garbage — clean it up like the
         // archive error path does its temp. Gated on ffmpeg having actually
@@ -91,8 +107,14 @@ export function registerCombineIPC(): void {
         })
 
         proc.on('close', (code) => {
+          if (activeCombine === runState) activeCombine = null
           try { fs.unlinkSync(listPath) } catch (_) {}
-          if (code === 0) { send(100); resolve() }
+          if (runState.cancelled) {
+            // User cancel — remove the partial and report distinctly so the
+            // renderer shows "cancelled", not an ffmpeg error.
+            cleanupPartialOutput()
+            reject(new Error('cancelled'))
+          } else if (code === 0) { send(100); resolve() }
           else {
             cleanupPartialOutput()
             reject(new Error(`ffmpeg exited with code ${code}`))
@@ -100,6 +122,7 @@ export function registerCombineIPC(): void {
         })
 
         proc.on('error', (err) => {
+          if (activeCombine === runState) activeCombine = null
           try { fs.unlinkSync(listPath) } catch (_) {}
           cleanupPartialOutput()
           reject(err)

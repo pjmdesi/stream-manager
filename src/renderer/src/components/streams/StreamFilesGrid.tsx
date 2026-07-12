@@ -217,7 +217,7 @@ function SelectOverlay({ onDragStart, onDragEnter, onClick }: {
   )
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleted, blockReason }: {
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleted, blockReason }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -230,6 +230,8 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   archived: boolean
   selectMode: boolean
   selected: boolean
+  /** Transient focus ring (streams-list tooltip row click). */
+  highlighted?: boolean
   onSelectToggle: (shiftKey: boolean) => void
   onDragStart: () => void
   onDragEnter: () => void
@@ -261,7 +263,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   const secondary = [entry?.size != null ? formatBytes(entry.size) : null, encoding || null, extOf(name) || null].filter(Boolean).join('  ·  ')
 
   return (
-    <div className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''}`}>
+    <div data-fp={path} className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''} ${highlighted ? 'ring-2 ring-purple-400/80' : ''}`}>
       {selectMode && (<><SelectOverlay onDragStart={onDragStart} onDragEnter={onDragEnter} onClick={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
@@ -435,6 +437,9 @@ interface Props {
   /** Files were trashed by the grid (single or bulk). The parent removes them
    *  from folder state in place — deliberately no full reload/flash. */
   onFilesDeleted: (paths: string[]) => void
+  /** File to flash with a focus ring (streams-list tooltip row click). The
+   *  token re-triggers for repeat clicks on the same file. */
+  highlightFile?: { path: string; token: number } | null
 }
 
 /**
@@ -456,10 +461,30 @@ export interface FilesGridHandle {
 export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function StreamFilesGrid({
   folder, thumbsKey, preferredThumbnail, cloudSyncActive,
   onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onFilesDeleted,
+  highlightFile,
 }, ref) {
   const videoMap = folder.meta?.videoMap ?? {}
   const hasVideos = folder.videos.length > 0
   const hasImages = folder.thumbnails.length > 0
+
+  // Transient focus ring on a file card, driven by clicks in the streams
+  // list's video-count tooltip. Naturally clears on the next mousedown
+  // anywhere — the ring is a pointer, not a selection.
+  const [ringPath, setRingPath] = useState<string | null>(null)
+  useEffect(() => {
+    if (!highlightFile) return
+    setRingPath(highlightFile.path)
+    const raf = requestAnimationFrame(() => {
+      try {
+        document.querySelector(`[data-fp="${CSS.escape(highlightFile.path)}"]`)
+          ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      } catch { /* selector failure — the ring still renders */ }
+    })
+    const clear = () => setRingPath(null)
+    window.addEventListener('mousedown', clear, { once: true })
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('mousedown', clear) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightFile?.token])
 
   const { enqueueOffload, enqueueHydrate, offloadItems, hydrateItems } = useCloudOps()
 
@@ -842,6 +867,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               archived={archivedSet.has(path)}
               selectMode={selectMode}
               selected={selected.has(path)}
+              highlighted={ringPath === path}
               onSelectToggle={(shiftKey) => handleCardClick(path, shiftKey)}
               onDragStart={() => startDrag(path)}
               onDragEnter={() => updateDrag(path)}

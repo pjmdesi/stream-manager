@@ -6,6 +6,7 @@ import {
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
+import { useOpenItems } from '../../context/OpenItemsContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,9 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleteAfter, setDeleteAfter] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelledNotice, setCancelledNotice] = useState(false)
+  const { setOpen } = useOpenItems()
 
   // Drag state
   const dragIndex = useRef<number | null>(null)
@@ -188,10 +192,16 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
     setProgress(0)
     setDone(false)
     setError(null)
+    setCancelling(false)
+    setCancelledNotice(false)
 
     const unsub = window.api.onCombineProgress(({ percent }) => setProgress(percent))
     const totalDur = files.reduce((s, f) => s + (f.duration ?? 0), 0)
     const sourcePaths = files.map(f => f.path)
+    // Claim the sources for the run: the streams page's delete guards
+    // consult open-items, so files being concatenated can't be trashed
+    // out from under ffmpeg.
+    setOpen('combine', sourcePaths)
 
     try {
       await window.api.combineFiles(sourcePaths, outputPath, totalDur)
@@ -231,12 +241,18 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
       }
       setDone(true)
     } catch (e: any) {
-      setError(e.message)
+      if (e?.message?.includes('cancelled')) {
+        setCancelledNotice(true) // partial output already removed by main
+      } else {
+        setError(e.message)
+      }
     } finally {
       unsub()
       setProgress(null)
+      setCancelling(false)
+      setOpen('combine', [])
     }
-  }, [files, outputPath, deleteAfter])
+  }, [files, outputPath, deleteAfter, setOpen])
 
   // ── Empty state ────────────────────────────────────────────────────────────
 
@@ -358,6 +374,24 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
               />
             </div>
             <span className="text-xs text-gray-400 font-mono w-10 text-right">{progress}%</span>
+            <Tooltip content="Cancel — removes the partial output; sources are untouched">
+              <Button
+                variant="danger"
+                size="sm"
+                icon={<X size={12} />}
+                disabled={cancelling}
+                onClick={() => { setCancelling(true); void window.api.cancelCombine() }}
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel'}
+              </Button>
+            </Tooltip>
+          </div>
+        )}
+
+        {cancelledNotice && (
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <X size={14} />
+            Combine cancelled — the partial output file was removed; the source files are untouched.
           </div>
         )}
 

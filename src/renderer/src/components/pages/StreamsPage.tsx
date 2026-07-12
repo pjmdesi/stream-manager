@@ -619,6 +619,15 @@ export function StreamsPage({
   // `config.twitchSkipCategoryRenamePrompt` at the prop callback level
   // so a suppressed prompt is never even staged here.
   const [categoryRenamePrompt, setCategoryRenamePrompt] = useState<{ sent: string; canonical: string } | null>(null)
+  // Video-count-tooltip row click: open that stream's sidebar and flash a
+  // focus ring on the clicked file in the media grid. Direct file access
+  // deliberately stays behind the sidebar's Open Folder button. The token
+  // makes repeat clicks on the same file re-trigger the ring.
+  const [fileHighlight, setFileHighlight] = useState<{ path: string; token: number } | null>(null)
+  const handleVideoFileClick = useCallback((relativePath: string, filePath: string) => {
+    setSelectedStreamKey(relativePath)
+    setFileHighlight(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1 }))
+  }, [])
   const [newStreamOpen, setNewStreamOpen] = useState(false)
   // Cloud-download prompt for send-to-player when the chosen video is a cloud
   // placeholder. `stage` flips confirm → downloading; the file is sent on once
@@ -3550,6 +3559,7 @@ export function StreamsPage({
                         onSendToConverter={handleSendToConverter}
                         onOpenThumbnails={handleOpenThumbnails}
                         onThumbResizeStart={startThumbResize}
+                        onVideoFileClick={handleVideoFileClick}
                       />
                     )
                   })
@@ -3733,6 +3743,7 @@ export function StreamsPage({
               onOpenThumbnails={(variantOrdinal) => handleOpenThumbnails(renderedFolder, variantOrdinal)}
               onDelete={() => setDeleteTargetKey(renderedFolder.relativePath)}
               deleteBlockReason={streamReason(renderedFolder.folderPath, isDumpMode ? [...renderedFolder.videos, ...renderedFolder.thumbnails] : undefined)}
+              fileHighlight={fileHighlight}
               linkedVideoMissing={!!renderedFolder.meta?.ytVideoId && effectiveYtVideoStatusMap[renderedFolder.meta.ytVideoId]?.missing === true}
               netProblem={netProblem}
               onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
@@ -4374,7 +4385,7 @@ const StreamListItem = memo(function StreamListItem({
   isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   isSendingToPlayer, onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
-  animDurationMs, onTagSelect,
+  animDurationMs, onTagSelect, onVideoFileClick,
 }: {
   folder: StreamFolder
   /** Full folder list — needed to render the title template ({total_episodes}
@@ -4398,6 +4409,9 @@ const StreamListItem = memo(function StreamListItem({
   /** Toggle this row in/out of the multi-select set (by visible index);
    *  shift extends a range from the last-clicked anchor row. */
   onToggleMultiSelect: (index: number, shiftKey: boolean) => void
+  /** Click on a video row inside the count tooltip: opens this stream's
+   *  sidebar and flashes a focus ring on the file in the media grid. */
+  onVideoFileClick: (relativePath: string, filePath: string) => void
   /** Mousedown on the row (selectMode only) starts a drag-select at index. */
   onDragStart: (index: number) => void
   /** Mouseenter on the row (selectMode only) extends the drag range to index. */
@@ -4624,7 +4638,7 @@ const StreamListItem = memo(function StreamListItem({
           duration · cloud status). Falls back to the plain videos array
           length when videoMap isn't populated yet. */}
       <td className="px-2 py-2 align-middle w-[44px]">
-        <VideoCountTooltip videos={folder.videos} videoMap={folder.meta?.videoMap ?? undefined} folderPath={folder.folderPath} cloudSyncActive={cloudSyncActive}>
+        <VideoCountTooltip videos={folder.videos} videoMap={folder.meta?.videoMap ?? undefined} folderPath={folder.folderPath} cloudSyncActive={cloudSyncActive} onVideoClick={path => onVideoFileClick(folder.relativePath, path)}>
           {(() => {
             const vm = folder.meta?.videoMap
             const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount
@@ -5378,7 +5392,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, linkedVideoMissing, netProblem,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -5468,6 +5482,8 @@ function SidebarDetail({
   onDelete: () => void
   /** Why this stream can't be deleted right now (in use), or null. */
   deleteBlockReason: string | null
+  /** File to flash in the media grid (tooltip row click). Token re-triggers. */
+  fileHighlight: { path: string; token: number } | null
   /** True when the linked YouTube video was queried and no longer exists —
    *  the link section shows a warning + Unlink instead of privacy/time. */
   linkedVideoMissing: boolean
@@ -6902,6 +6918,7 @@ function SidebarDetail({
                     onEditThumbnail={onOpenThumbnails}
                     onOpenLightbox={i => setLightboxIndex(i)}
                     onFilesDeleted={onFilesDeleted}
+                    highlightFile={fileHighlight}
                   />
                 </MetaRow>
               </div>

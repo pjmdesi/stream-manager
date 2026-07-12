@@ -395,6 +395,9 @@ contextBridge.exposeInMainWorld('api', {
   combineFiles: (files: string[], outputPath: string, totalDurationSec: number) =>
     ipcRenderer.invoke('combine:run', files, outputPath, totalDurationSec),
 
+  cancelCombine: () =>
+    ipcRenderer.invoke('combine:cancel'),
+
   onCombineProgress: (callback: (data: { percent: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('combine:progress', handler)

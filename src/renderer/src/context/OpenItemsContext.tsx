@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 
 /** Which surface currently holds a file open. Used as the reason a delete is
  *  blocked, so the disabled control can explain itself. */
-export type OpenSource = 'player' | 'thumbnail'
+export type OpenSource = 'player' | 'thumbnail' | 'combine'
 
 interface OpenItemsValue {
   /** Register the file(s) a surface currently has open, replacing its prior
@@ -30,7 +30,7 @@ const OpenItemsContext = createContext<OpenItemsValue>({
  * the reads are reactive *and* authoritative (no IPC lag to race).
  */
 export function OpenItemsProvider({ children }: { children: ReactNode }) {
-  const [open, setOpen_] = useState<Record<OpenSource, string[]>>({ player: [], thumbnail: [] })
+  const [open, setOpen_] = useState<Record<OpenSource, string[]>>({ player: [], thumbnail: [], combine: [] })
 
   const setOpen = useCallback((source: OpenSource, paths: string[]) => {
     setOpen_(prev => {
@@ -47,6 +47,7 @@ export function OpenItemsProvider({ children }: { children: ReactNode }) {
     const p = norm(path)
     if (open.player.includes(p)) return 'player'
     if (open.thumbnail.includes(p)) return 'thumbnail'
+    if (open.combine.includes(p)) return 'combine'
     return null
   }, [open])
 
@@ -55,6 +56,7 @@ export function OpenItemsProvider({ children }: { children: ReactNode }) {
     const under = (p: string): boolean => p === f || p.startsWith(f + '/')
     if (open.player.some(under)) return 'player'
     if (open.thumbnail.some(under)) return 'thumbnail'
+    if (open.combine.some(under)) return 'combine'
     return null
   }, [open])
 
@@ -72,5 +74,6 @@ export function blockReasonText(source: OpenSource | 'converter'): string {
     case 'converter': return 'in use by the converter'
     case 'player': return 'open in the player'
     case 'thumbnail': return 'open in the thumbnail editor'
+    case 'combine': return 'being combined'
   }
 }
