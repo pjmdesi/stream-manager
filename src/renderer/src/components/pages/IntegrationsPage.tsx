@@ -10,6 +10,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
 import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { quotaColor } from '../../lib/quotaColor'
+import { cleanIpcError } from '../../lib/ipcError'
 import { YouTubeImportModal } from '../streams/YouTubeImportModal'
 import { YouTubeLinkModal } from '../streams/YouTubeLinkModal'
 
@@ -121,8 +122,17 @@ export function IntegrationsPage() {
       // and the streamId (what liveBroadcasts.bind needs). Saves the
       // orchestrator a pre-flight lookup at stream start.
       await updateConfig({ streamRelayOutboundKey: res.streamName, streamRelayStreamId: res.streamId })
-    } catch (e: any) {
-      setSrFetchError(e?.message ?? String(e))
+    } catch (e: unknown) {
+      const msg = cleanIpcError(e)
+      // YouTube's raw "not enabled for live streaming" leaves the user stuck
+      // with no way forward — spell out both escape routes (enable live
+      // streaming, or reconnect under the right channel). Manual paste from
+      // YT Studio always works as a fallback either way.
+      setSrFetchError(
+        /not enabled for live streaming/i.test(msg)
+          ? `${msg} Enable live streaming for this channel in YouTube Studio — or if you connected the wrong Google account or brand channel, disconnect YouTube above and reconnect, picking the channel you stream on. You can also paste the key manually from YT Studio → Stream → Stream Key.`
+          : msg,
+      )
     } finally {
       setSrFetchingKey(false)
     }
@@ -140,6 +150,9 @@ export function IntegrationsPage() {
 
   const srToggleEnabled = async (next: boolean) => {
     if (next) {
+      // Enabling means setup succeeded — a leftover Auto-fill error from
+      // earlier in the flow would misread as "the relay is broken."
+      setSrFetchError(null)
       // Commit the in-progress port + outbound key values + the enabled flag
       // first so (a) the renderer's local config state reflects the toggle
       // immediately, and (b) the child spawns with current edits, not the
@@ -604,8 +617,14 @@ export function IntegrationsPage() {
                 <Tooltip
                   content={srIsStreaming
                     ? 'Streaming through the relay right now. Stop your encoder first.'
-                    : 'No internet connection.'}
-                  open={srIsStreaming || (!online && !config.streamRelayEnabled) ? undefined : false}
+                    : !online && !config.streamRelayEnabled
+                      ? 'No internet connection.'
+                      : "Fill in your channel's default stream key below first — Auto-fill it or paste it from YT Studio."}
+                  open={
+                    srIsStreaming ||
+                    (!config.streamRelayEnabled && (!online || (ytConnected && !srOutboundKeyLooksValid)))
+                      ? undefined : false
+                  }
                 >
                   <Checkbox
                     size="sm"
@@ -755,7 +774,13 @@ export function IntegrationsPage() {
                     <input
                       type={revealed.has('sr-key') ? 'text' : 'password'}
                       value={srOutboundKey}
-                      onChange={e => setSrOutboundKey(e.target.value)}
+                      onChange={e => {
+                        setSrOutboundKey(e.target.value)
+                        // A fetch error is about a PAST Auto-fill attempt —
+                        // once the user starts entering the key themselves,
+                        // it's stale and just reads as a lingering failure.
+                        if (srFetchError) setSrFetchError(null)
+                      }}
                       onBlur={() => {
                         const trimmed = srOutboundKey.trim()
                         // If the user pasted/edited the key, the cached streamId

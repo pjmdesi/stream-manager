@@ -1,5 +1,5 @@
 import { useRef, useState, useLayoutEffect, useEffect, useCallback } from 'react'
-import { cleanClaudeError } from '../lib/claudeError'
+import { cleanIpcError } from '../lib/ipcError'
 
 type FieldEl = HTMLInputElement | HTMLTextAreaElement
 
@@ -75,7 +75,7 @@ export function useFieldSuggestion(
     } catch (e) {
       // Surface the cause inline (no toast system) so the user knows why
       // nothing appeared — e.g. out of credits, model unavailable, rate limit.
-      setError(cleanClaudeError(e))
+      setError(cleanIpcError(e))
     } finally {
       setLoading(false)
     }

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from
 import { GripHorizontal, Loader2, AlertTriangle } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { TruncatedText } from './TruncatedText'
-import { cleanClaudeError } from '../../lib/claudeError'
+import { cleanIpcError } from '../../lib/ipcError'
 
 // ─── Chip styling (shared between in-editor chips + picker buttons) ─────────
 
@@ -425,7 +425,7 @@ export function TemplateBodyEditor({
         setAiPending({ start: safeOffset, length: result.length })
       }
     } catch (e) {
-      setAiError(cleanClaudeError(e))
+      setAiError(cleanIpcError(e))
     } finally {
       setAiLoading(false)
     }
