@@ -4,8 +4,19 @@ import { thumbnailCacheManager } from '../services/thumbnailCacheManager'
 import { waveformCacheManager } from '../services/waveformCacheManager'
 import { getStore } from './store'
 
-// In-process waveform cache — persists for the lifetime of the app
+// In-process waveform cache. Bounded FIFO (Maps iterate in insertion order):
+// each entry is a full-length PCM envelope, so an unbounded map grew for the
+// whole session on large libraries.
 const waveformCache = new Map<string, Buffer>()
+const WAVEFORM_CACHE_MAX = 40
+function waveformCacheSet(filePath: string, buf: Buffer): void {
+  waveformCache.set(filePath, buf)
+  while (waveformCache.size > WAVEFORM_CACHE_MAX) {
+    const oldest = waveformCache.keys().next().value
+    if (oldest === undefined) break
+    waveformCache.delete(oldest)
+  }
+}
 
 export function registerVideoIPC(): void {
   ipcMain.handle('video:probe', async (_event: IpcMainInvokeEvent, filePath: string) => {
@@ -91,6 +102,9 @@ export function registerVideoIPC(): void {
     audioCacheManager.clearAll()
     thumbnailCacheManager.clearAll()
     waveformCacheManager.clearAll()
+    // The in-process map too — clearing only the disk caches left the whole
+    // session's waveforms resident in main's memory.
+    waveformCache.clear()
   })
 
   ipcMain.handle('video:getAudioCacheSize', async () => {
@@ -122,10 +136,10 @@ export function registerVideoIPC(): void {
   ipcMain.handle('video:getWaveform', async (_event, filePath: string) => {
     if (waveformCache.has(filePath)) return waveformCache.get(filePath)
     const disk = waveformCacheManager.getCached(filePath)
-    if (disk) { waveformCache.set(filePath, disk); return disk }
+    if (disk) { waveformCacheSet(filePath, disk); return disk }
     const { extractWaveformData } = await import('../services/ffmpegService')
     const samples = await extractWaveformData(filePath)
-    waveformCache.set(filePath, samples)
+    waveformCacheSet(filePath, samples)
     waveformCacheManager.save(filePath, samples)
     return samples
   })

@@ -387,6 +387,18 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
   const [localStatus, setLocalStatus] = useState<Record<string, boolean>>(() => getCachedHydration(videos))
   const anchorRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
+  // Grace timer for crossing the 6px anchor→tooltip gap. The old instant
+  // close on mouseleave made the tooltip's click rows nearly unreachable —
+  // leaving the anchor killed it before the pointer arrived.
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelClose = () => {
+    if (closeTimerRef.current) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
+  }
+  const scheduleClose = () => {
+    cancelClose()
+    closeTimerRef.current = setTimeout(() => { setVisible(false); closeTimerRef.current = null }, 150)
+  }
+  useEffect(() => cancelClose, [])
 
   // Mirror shared-cache status changes into this tooltip's state while mounted
   // — the files grid's check (or a completed download) keeps our icons honest
@@ -403,6 +415,7 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
   // Initial position: just below the anchor. useLayoutEffect repositions if it overflows.
   const show = async () => {
     if (!anchorRef.current) return
+    cancelClose()
     const rect = anchorRef.current.getBoundingClientRect()
     setPos({ top: rect.bottom + 6, left: rect.left })
     setVisible(true)
@@ -487,7 +500,7 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
 
   return (
     <>
-      <div ref={anchorRef} onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
+      <div ref={anchorRef} onMouseEnter={show} onMouseLeave={scheduleClose}>
         {children}
       </div>
       {visible && ReactDOM.createPortal(
@@ -503,8 +516,8 @@ export function VideoCountTooltip({ videos, videoMap, folderPath, cloudSyncActiv
             overflowY: pos.maxHeight ? 'auto' : undefined,
           }}
           className="bg-navy-700 border border-white/10 rounded-lg shadow-xl p-1.5 min-w-[320px] max-w-[460px] flex flex-col gap-0.5"
-          onMouseEnter={() => setVisible(true)}
-          onMouseLeave={() => setVisible(false)}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
         >
           {/* Each video is a shared VideoRow (thumbnail + filename + encoding /
               timecode / size + hydration). Clicking a row reveals the file in

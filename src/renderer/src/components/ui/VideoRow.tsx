@@ -23,6 +23,26 @@ function formatTimecode(seconds: number): string {
     : `${m}:${String(s).padStart(2, '0')}`
 }
 
+// Module-level probe memo: the video-count tooltip remounts its rows on every
+// hover, and each remount re-spawned ffprobe for entries with no duration.
+// One probe per path per session — failures cached too, since a file that
+// can't be probed now won't probe better on the next hover.
+const probeCache = new Map<string, VideoInfo | null>()
+const probeInFlight = new Map<string, Promise<VideoInfo | null>>()
+function probeOnce(path: string): Promise<VideoInfo | null> {
+  if (probeCache.has(path)) return Promise.resolve(probeCache.get(path) ?? null)
+  let p = probeInFlight.get(path)
+  if (!p) {
+    p = window.api.probeFile(path).catch(() => null).then(info => {
+      probeCache.set(path, info)
+      probeInFlight.delete(path)
+      return info
+    })
+    probeInFlight.set(path, p)
+  }
+  return p
+}
+
 const CAT_LABEL: Record<string, string> = { full: 'VID', short: 'SHORT', clip: 'CLIP' }
 const CAT_STYLE: Record<string, string> = {
   full: 'text-gray-300 border-gray-500/40',
@@ -69,7 +89,7 @@ export function VideoRow({
   useEffect(() => {
     if (!needsProbe) { setProbed(null); return }
     let cancelled = false
-    window.api.probeFile(path).then(info => { if (!cancelled) setProbed(info) }).catch(() => {})
+    void probeOnce(path).then(info => { if (!cancelled && info) setProbed(info) })
     return () => { cancelled = true }
   }, [path, needsProbe])
 

@@ -11,6 +11,20 @@ function fixAsarPath(p: string): string {
   return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
 }
 
+/** Remove a partially-written extraction output. The just-killed ffmpeg can
+ *  hold its Windows file handle for a moment, so failed unlinks retry. */
+async function removePartialOpus(p: string, attempts = 3): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await fs.promises.unlink(p)
+      return
+    } catch (err: any) {
+      if (err.code === 'ENOENT') return
+      await new Promise(r => setTimeout(r, 300))
+    }
+  }
+}
+
 const ffmpegBin = ffmpegStatic ? fixAsarPath(ffmpegStatic) : null
 const ffprobeBin = fixAsarPath(ffprobeStatic.path)
 
@@ -193,7 +207,7 @@ export async function extractAudioTracks(
       const outputPath = path.join(tempDir, `${safeBase}_track_${i}.opus`)
       outputPaths[i] = outputPath
 
-      await new Promise<void>((resolve, reject) => {
+      const trackPromise = new Promise<void>((resolve, reject) => {
         const duration = info.duration
         const cmd = ffmpeg(filePath)
           .outputOptions([`-map 0:a:${i}`, '-c:a libopus', '-b:a 192k', '-vn'])
@@ -225,6 +239,16 @@ export async function extractAudioTracks(
         }
         cmd.run()
       })
+      try {
+        await trackPromise
+      } catch (err) {
+        // A killed or failed encode leaves a partial .opus in the cache dir
+        // that nothing reclaims (only COMPLETED extractions get indexed, and
+        // the cache's clear/evict walk only indexed files). The dead process
+        // can hold its handle for a beat on Windows — retry briefly.
+        void removePartialOpus(outputPath)
+        throw err
+      }
       currentKill = null
     }
   } finally {

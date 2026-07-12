@@ -117,6 +117,16 @@ class AudioCacheManager {
         try { fs.unlinkSync(t) } catch {}
       }
     }
+    // Sweep stray .opus files the index loop can't see — partials from
+    // cancelled extractions were never indexed, so "clear cache" walked
+    // right past them and they accumulated forever.
+    try {
+      for (const f of fs.readdirSync(this.cacheDir)) {
+        if (f.endsWith('.opus')) {
+          try { fs.unlinkSync(path.join(this.cacheDir, f)) } catch {}
+        }
+      }
+    } catch { /* cache dir missing — nothing to sweep */ }
     this._index = { entries: {} }
     this.saveIndex()
   }

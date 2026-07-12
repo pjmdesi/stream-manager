@@ -2359,6 +2359,10 @@ export function StreamsPage({
   // the date is the unique row key. Folder-per-stream uses folderPath
   // directly. Same convention StreamsPage uses for `selectionKey`.
   const selectionKey = useCallback((f: StreamFolder) => isDumpMode ? f.date : f.folderPath, [isDumpMode])
+  // Missing rows (folder gone on disk) are not selectable: every bulk action
+  // skips them, so letting select-all/tag/drag include them made the header's
+  // "N selected" count a lie against what the actions would actually touch.
+  const selectableVisible = useMemo(() => visibleFolders.filter(f => !f.isMissing), [visibleFolders])
   const toggleSelectMode = useCallback(() => {
     setSelectMode(m => {
       if (m) setSelectedPaths(new Set())
@@ -2372,7 +2376,7 @@ export function StreamsPage({
   const rowAnchorIndexRef = useRef<number | null>(null)
   const toggleSelectedAt = useCallback((index: number, shiftKey: boolean) => {
     const f = visibleFolders[index]
-    if (!f) return
+    if (!f || f.isMissing) return
     const key = selectionKey(f)
     // Capture the anchor BEFORE queueing the update and BEFORE moving the
     // ref — deferred setState updaters run after the reassignment below
@@ -2386,7 +2390,7 @@ export function StreamsPage({
         const [lo, hi] = anchor < index ? [anchor, index] : [index, anchor]
         for (let i = lo; i <= hi; i++) {
           const rf = visibleFolders[i]
-          if (rf) next.add(selectionKey(rf))
+          if (rf && !rf.isMissing) next.add(selectionKey(rf))
         }
       } else {
         next.has(key) ? next.delete(key) : next.add(key)
@@ -2395,8 +2399,8 @@ export function StreamsPage({
     })
   }, [visibleFolders, selectionKey])
   const selectAllVisible = useCallback(() => {
-    setSelectedPaths(new Set(visibleFolders.map(selectionKey)))
-  }, [visibleFolders, selectionKey])
+    setSelectedPaths(new Set(selectableVisible.map(selectionKey)))
+  }, [selectableVisible, selectionKey])
   const clearSelection = useCallback(() => setSelectedPaths(new Set()), [])
   // Tag-based bulk select (select mode only): plain click on a row's type or
   // game chip adds every visible row carrying that tag; ctrl/cmd-click removes
@@ -2405,7 +2409,7 @@ export function StreamsPage({
     setSelectedPaths(prev => {
       const next = new Set(prev)
       for (const f of visibleFolders) {
-        if (!matches(f)) continue
+        if (f.isMissing || !matches(f)) continue
         if (additive) next.add(selectionKey(f)); else next.delete(selectionKey(f))
       }
       return next
@@ -2432,7 +2436,7 @@ export function StreamsPage({
   const dragMoved = useRef(false)
   const startDrag = useCallback((index: number) => {
     const f = visibleFolders[index]
-    if (!f) return
+    if (!f || f.isMissing) return
     const key = selectionKey(f)
     isDragging.current = true
     dragStartIndex.current = index
@@ -2449,7 +2453,7 @@ export function StreamsPage({
       const next = new Set(preDragPaths.current)
       for (let i = start; i <= end; i++) {
         const f = visibleFolders[i]
-        if (!f) continue
+        if (!f || f.isMissing) continue
         dragAction.current === 'add' ? next.add(selectionKey(f)) : next.delete(selectionKey(f))
       }
       return next
@@ -2477,8 +2481,8 @@ export function StreamsPage({
   // sourced from selectedPaths. Each clears the selection after queuing
   // so the user isn't left looking at "still selected" rows.
   const selectedFolderList = useMemo(
-    () => visibleFolders.filter(f => selectedPaths.has(selectionKey(f))),
-    [visibleFolders, selectedPaths, selectionKey],
+    () => selectableVisible.filter(f => selectedPaths.has(selectionKey(f))),
+    [selectableVisible, selectedPaths, selectionKey],
   )
   const clickBulkArchive = useCallback(() => {
     // Already-archived streams are excluded, not re-encoded — archiving
@@ -2777,7 +2781,7 @@ export function StreamsPage({
         if (grid && grid.isSelectMode()) { e.preventDefault(); grid.selectAllOrClear(); return }
         if (!selectMode) return
         e.preventDefault()
-        if (visibleFolders.length > 0 && selectedPaths.size === visibleFolders.length) clearSelection()
+        if (selectableVisible.length > 0 && selectedFolderList.length === selectableVisible.length) clearSelection()
         else selectAllVisible()
         return
       }
@@ -3131,7 +3135,9 @@ export function StreamsPage({
                 {loading
                   ? 'Loading…'
                   : selectMode
-                    ? `${selectedPaths.size} selected`
+                    // Count what bulk actions will actually touch — the raw
+                    // set can hold rows hidden by filters or gone missing.
+                    ? `${selectedFolderList.length} selected`
                     : searchQuery
                       ? `${visibleFolders.length} of ${folders.length} match`
                       : `${folders.length} item${folders.length === 1 ? '' : 's'}`}

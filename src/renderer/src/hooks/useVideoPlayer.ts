@@ -597,10 +597,24 @@ export function useVideoPlayer() {
     })
   }, [releaseAudioElements])
 
+  // In-progress OBS recordings ffprobe with duration 0, which left a dead
+  // timeline and skip-to-0 buttons. Adopt the element's real duration once
+  // its metadata (or a later duration revision) lands — only ever FILLS a
+  // missing/zero duration, so authoritative probe values stay untouched.
+  const handleDurationChange = useCallback(() => {
+    const el = videoRef.current
+    if (!el) return
+    const d = el.duration
+    if (Number.isFinite(d) && d > 0) {
+      setState(prev => prev.duration > 0 ? prev : { ...prev, duration: d })
+    }
+  }, [])
+
   return {
     videoRef,
     state,
     loadFile,
+    handleDurationChange,
     enableMultiTrack,
     disableMultiTrack,
     playTrack,

@@ -80,10 +80,13 @@ export function useWaveform(sources: string[], vStart: number, vEnd: number, dur
   useEffect(() => {
     if (sources.length === 0) { setRawArrays([]); setLoading(false); return }
 
-    // All sources already in cache?
+    // All sources already in cache? Clear `loading` here too — switching to
+    // an already-cached video while the previous one was mid-generation left
+    // the stale spinner stuck on (nothing else ever reset it).
     const cached = sources.map(s => rawCache.get(s))
     if (cached.every(Boolean)) {
       setRawArrays(cached as Float32Array[])
+      setLoading(false)
       return
     }
 
@@ -96,6 +99,9 @@ export function useWaveform(sources: string[], vStart: number, vEnd: number, dur
       const buf = await window.api.getWaveform(s)
       const raw = toFloat32(buf)
       rawCache.set(s, raw)
+      // Bound the session cache (each entry is a full-length PCM envelope) —
+      // Maps iterate in insertion order, so dropping the first key is FIFO.
+      while (rawCache.size > 40) rawCache.delete(rawCache.keys().next().value!)
       return raw
     })).then(arrays => {
       if (cancelled) return

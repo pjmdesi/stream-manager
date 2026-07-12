@@ -1014,7 +1014,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 }) {
   const { config, updateConfig } = useStore()
   const {
-    videoRef, state, loadFile,
+    videoRef, state, loadFile, handleDurationChange,
     enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction, cancelTrackExtraction,
     setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, recomputeAudibility,
     clearError, closeVideo, seek, fastSeek, togglePlay,
@@ -3564,6 +3564,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     className="w-full h-full object-contain cursor-pointer"
                     preload="auto"
                     onClick={effectiveTogglePlay}
+                    onDurationChange={handleDurationChange}
                   />
                   {/* Crop overlay — values come from the active clip region + selected aspect */}
                   {isClipMode && clipState.cropAspect !== 'off' && videoInfo && vcSize.w > 0 && (() => {
