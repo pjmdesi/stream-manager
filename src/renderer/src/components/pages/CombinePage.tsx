@@ -7,6 +7,7 @@ import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
 import { useOpenItems } from '../../context/OpenItemsContext'
+import { usePageActivity } from '../../context/PageActivityContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,15 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
   const [cancelling, setCancelling] = useState(false)
   const [cancelledNotice, setCancelledNotice] = useState(false)
   const { setOpen } = useOpenItems()
+
+  // Publish "combine is running" to the nav rail's activity indicator —
+  // same treatment the player / converter / thumbnails items get. Keyed on
+  // an actual run, not on files merely being listed.
+  const { setCombineRunning } = usePageActivity()
+  useEffect(() => {
+    setCombineRunning(progress !== null)
+    return () => setCombineRunning(false)
+  }, [progress, setCombineRunning])
 
   // Drag state
   const dragIndex = useRef<number | null>(null)
