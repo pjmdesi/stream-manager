@@ -51,7 +51,7 @@ Mark items off like the release checklist: `[x]` fixed or confirmed-not-a-bug, `
 - [x] 🟡 **Bulk-push quota estimate is ~2x low** (reported): `estimatePushUnits` charges 50/stream but a push is broadcast.update + videos.update (100) plus reads (`OutOfSyncPanel.tsx:15-27`); users sizing against remaining quota will hit the lockout mid-run. *(The double-call half was fixed by the C1 endpoint-first push; estimate now also counts the post-push refresh reads.)*
 - [x] 🟡 **Reschedule pull-mode snapshot write is a silent no-op** (reported): the write targets the renamed folder path before `folders` state contains it, and `updateMeta` returns silently on a miss (`StreamsPage.tsx:8709-8718, 1084-1086`); the time dot stays lit right after pulling.
 - [x] 🟡 **Reschedule of nested-layout streams loses the meta association** (verified): reschedule keys meta by `path.basename` while canonical keys are root-relative (`src/main/ipc/streams.ts:1345` vs `:325-331`). Only affects `year/month/stream` style layouts; flat layouts are fine. *(Fixed: both keys go through metaKey; rename decision stays on basenames; newMetaKey now returns the canonical stream key.)*
-- [ ] ⚪ **Panel "All" selects only the rendered 50-row chunk** (`OutOfSyncPanel.tsx:339`). **Bulk-link can't pair cross-midnight streams even manually** (`YouTubeLinkModal.tsx:50-57, 233`). **No single-flight on token refresh** (parallel refresh POSTs, `youtubeAuth.ts:146-157`).
+- [x] ⚪ **Panel "All" selects only the rendered 50-row chunk** (`OutOfSyncPanel.tsx:339`). **Bulk-link can't pair cross-midnight streams even manually** (`YouTubeLinkModal.tsx:50-57, 233`). **No single-flight on token refresh** (parallel refresh POSTs, `youtubeAuth.ts:146-157`). *(All three fixed 2026-07-12: All selects the complete active list, not the infinite-scroll window; bulk-link pairs ±1 day — exact dates claim videos in a first pass so daily streams can't cross-steal, adjacent-day pairs the cross-midnight leftovers, and the per-row dropdown offers near-date candidates with their date shown; YouTube token refresh is single-flight, concurrent callers share one POST.)*
 
 ## 4. Kept-alive page bleed-through (systemic class)
 
@@ -122,9 +122,9 @@ Mark items off like the release checklist: `[x]` fixed or confirmed-not-a-bug, `
 
 ## 12. Low-priority notes
 
-- [ ] ⚪ **Gated tooltips can latch hover state and pop open later with no pointer over them** (`ui/Tooltip.tsx:91, 195` with `open` consumers like TruncatedText).
-- [ ] ⚪ **CloudOps rows stuck at "Pending" forever if the enqueue IPC rejects** (`context/CloudOpsContext.tsx:163, 182`).
-- [ ] ⚪ **Global 3s chokidar suppression can swallow an unrelated external change** (covered by the section-5 suppression item; listed for the main-side half).
+- [x] ⚪ **Gated tooltips can latch hover state and pop open later with no pointer over them** (`ui/Tooltip.tsx:91, 195` with `open` consumers like TruncatedText). *(Fixed 2026-07-12: internal hover state resets on every control-mode switch — a latched `visible` could never receive its mouseleave once `open` took over, and popped the tooltip when control returned to hover.)*
+- [x] ⚪ **CloudOps rows stuck at "Pending" forever if the enqueue IPC rejects** (`context/CloudOpsContext.tsx:163, 182`). *(Fixed 2026-07-12: an enqueue rejection fails that batch's pending rows with a reason and pops the modal — no per-item events were ever coming.)*
+- [x] ⚪ **Global 3s chokidar suppression can swallow an unrelated external change** (covered by the section-5 suppression item; listed for the main-side half). *(Closed 2026-07-12 as bookkeeping: the §5 fix made suppressed fires defer-and-coalesce instead of drop, which covers the main-side half too; the full folder-scoped reload refactor remains todo #43.)*
 
 ## Non-bug notes
 

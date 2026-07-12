@@ -169,7 +169,15 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
       return [...stillActive, ...newRows]
     })
     if (openModal) setModalOpen(true)
-    window.api.cloudSyncOffload(files.map(f => f.path), batchId).catch(() => {})
+    window.api.cloudSyncOffload(files.map(f => f.path), batchId).catch(() => {
+      // The enqueue IPC itself rejected — no per-item events will ever
+      // arrive for this batch, so its rows would sit "Pending" forever.
+      setOffloadItems(prev => prev.map(it =>
+        it.batchId === batchId && it.status === 'pending'
+          ? { ...it, status: 'failed', reason: 'Could not start the offload' }
+          : it))
+      setModalOpen(true)
+    })
   }, [])
 
   const enqueueHydrate = useCallback((files: { path: string; size: number }[], openModal = true) => {
@@ -188,7 +196,13 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
       return [...stillActive, ...newRows]
     })
     if (openModal) setModalOpen(true)
-    window.api.cloudSyncPin(files.map(f => f.path), batchId).catch(() => {})
+    window.api.cloudSyncPin(files.map(f => f.path), batchId).catch(() => {
+      setHydrateItems(prev => prev.map(it =>
+        it.batchId === batchId && it.status === 'pending'
+          ? { ...it, status: 'failed', reason: 'Could not start the download' }
+          : it))
+      setModalOpen(true)
+    })
   }, [])
 
   const cancelOffload = useCallback(() => {

@@ -4172,7 +4172,18 @@ export function StreamsPage({
               if (!m) return Promise.resolve()
               const next: StreamMeta = { ...m }
               if (m.games?.some(matches)) {
-                next.games = m.games.map(g => matches(g) ? canonical : g)
+                // Rename, then MERGE: when the canonical name is already its
+                // own tag on this stream ("Deiity" + "Deiity (Under Ice)"),
+                // a plain map stores duplicate entries — duplicate chips and
+                // duplicate React keys. Keep the first occurrence only.
+                const renamed = m.games.map(g => matches(g) ? canonical : g)
+                const seen = new Set<string>()
+                next.games = renamed.filter(g => {
+                  const k = g.trim().toLowerCase()
+                  if (seen.has(k)) return false
+                  seen.add(k)
+                  return true
+                })
               }
               if (matches(m.ytGameTitle)) next.ytGameTitle = canonical
               if (matches(m.twitchGameName)) next.twitchGameName = canonical
@@ -4185,10 +4196,15 @@ export function StreamsPage({
             // key by case-insensitive match (the user could have typed
             // the tag with different capitalization than is stored).
             // Drop the old key, copy its value to the new key, persist.
+            const canonNorm = canonical.trim().toLowerCase()
             setTagColors(prev => {
               const key = Object.keys(prev).find(k => k.trim().toLowerCase() === oldNorm)
               if (!key) return prev
-              const updated = { ...prev, [canonical]: prev[key] }
+              // Merge case: the canonical tag already has its own styling —
+              // it wins; only a genuinely new name inherits the old styling.
+              const canonKey = Object.keys(prev).find(k => k.trim().toLowerCase() === canonNorm)
+              const updated = { ...prev }
+              if (!canonKey) updated[canonical] = prev[key]
               delete updated[key]
               window.api.setStreamTypeTags(updated)
               return updated
@@ -4196,7 +4212,9 @@ export function StreamsPage({
             setTagTextures(prev => {
               const key = Object.keys(prev).find(k => k.trim().toLowerCase() === oldNorm)
               if (!key) return prev
-              const updated = { ...prev, [canonical]: prev[key] }
+              const canonKey = Object.keys(prev).find(k => k.trim().toLowerCase() === canonNorm)
+              const updated = { ...prev }
+              if (!canonKey) updated[canonical] = prev[key]
               delete updated[key]
               window.api.setStreamTypeTextures(updated)
               return updated
@@ -4467,7 +4485,12 @@ const StreamListItem = memo(function StreamListItem({
   }
 
   const { meta, hasMeta, detectedGames, date, thumbnails, thumbnailLocalFlags, videoCount } = folder
-  const displayGames = meta?.games?.length ? meta.games : detectedGames
+  // Defensive case-insensitive dedupe: metas written before the rename-merge
+  // fix (2026-07-11) can carry duplicate game tags, which render duplicate
+  // chips with duplicate React keys. First occurrence wins.
+  const rawGames = meta?.games?.length ? meta.games : detectedGames
+  const displayGames = rawGames.filter((g, i) =>
+    rawGames.findIndex(x => x.trim().toLowerCase() === g.trim().toLowerCase()) === i)
   // Show the stream's "main" (preferred) thumbnail — the one a YT push uploads —
   // not just the first on disk, so setting a different default updates the row.
   const preferredIdx = (() => {

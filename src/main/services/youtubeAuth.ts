@@ -113,7 +113,23 @@ export async function exchangeCode(
   return tokens
 }
 
+// Single-flight guard: with an expired token, every concurrent API call used
+// to fire its own refresh POST. Google tolerates refresh-token reuse, but the
+// parallel requests are redundant and hostile to any future rotation — all
+// concurrent callers now await the same refresh.
+let refreshInFlight: Promise<string> | null = null
+
 export async function refreshAccessToken(
+  clientId: string,
+  clientSecret: string
+): Promise<string> {
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = doRefreshAccessToken(clientId, clientSecret)
+    .finally(() => { refreshInFlight = null })
+  return refreshInFlight
+}
+
+async function doRefreshAccessToken(
   clientId: string,
   clientSecret: string
 ): Promise<string> {

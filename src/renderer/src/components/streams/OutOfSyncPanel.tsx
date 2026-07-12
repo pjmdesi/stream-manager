@@ -315,7 +315,11 @@ export function OutOfSyncPanel({
   const checkedLabel = checkedAt
     ? `checked ${new Date(checkedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
     : ''
-  const allSelected = flat.length > 0 && flat.every(i => selected.has(i.folder.folderPath))
+  // "All" covers the complete active list, not just the rendered chunk — the
+  // infinite-scroll window (shownCount) is a DOM optimization, not a
+  // selection boundary. Selecting All on a 200-row list must mean 200.
+  const allItems = [...push, ...pull, ...conflict, ...(showIgnored ? ignored : [])]
+  const allSelected = allItems.length > 0 && allItems.every(i => selected.has(i.folder.folderPath))
 
   const renderRow = (it: OutOfSyncItem, opts?: { ignoredRow?: boolean }) => {
     const path = it.folder.folderPath
@@ -351,7 +355,7 @@ export function OutOfSyncPanel({
           <>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-300">{selected.size} selected</span>
             <div className="flex items-center gap-1">
-              <button onClick={() => setSelected(allSelected ? new Set() : new Set(flat.map(i => i.folder.folderPath)))}
+              <button onClick={() => setSelected(allSelected ? new Set() : new Set(allItems.map(i => i.folder.folderPath)))}
                 className="text-[10px] text-gray-400 hover:text-gray-200 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors">
                 {allSelected ? 'None' : 'All'}
               </button>

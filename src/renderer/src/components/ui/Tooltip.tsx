@@ -89,6 +89,10 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
   // When `open` is supplied, externally-controlled visibility wins —
   // internal hover state is ignored. Default to the hover-driven flag.
   const effectiveVisible = open ?? visible
+  // Internal hover handlers are wired only while `open` is uncontrolled —
+  // callers using external control don't want surprise visibility changes
+  // from a stray mouse event on the (typically invisible) trigger wrapper.
+  const wantsInternalHover = open === undefined
 
   const cancelClose = useCallback(() => {
     if (closeTimerRef.current) {
@@ -128,6 +132,12 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
   }, [cancelClose])
 
   useEffect(() => () => cancelClose(), [cancelClose])
+
+  // Reset latched hover state on every control-mode switch: a hover recorded
+  // while uncontrolled can never receive its mouseleave once `open` takes
+  // over (the handlers unbind), so `visible` stayed true and popped the
+  // tooltip — with no pointer near it — the moment control returned to hover.
+  useEffect(() => { hideNow() }, [wantsInternalHover, hideNow])
 
   // When externally opened, re-anchor pos from the trigger ref before
   // the side-priority layout effect runs (no-op when hover-driven —
@@ -187,12 +197,6 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
       if (arrowEl) arrowEl.style.top = `${top - clamped + half}px`
     }
   }, [effectiveVisible, pos, side])
-
-  // Internal hover handlers are wired only when `open` isn't controlled
-  // — callers using external control don't want surprise visibility
-  // changes from a stray mouse event on the (typically invisible)
-  // trigger wrapper.
-  const wantsInternalHover = open === undefined
 
   return (
     <>

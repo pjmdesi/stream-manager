@@ -11,6 +11,17 @@ import { useStore } from '../../hooks/useStore'
 const SELECT_CLS =
   'appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 max-w-[260px] truncate focus:outline-none focus:ring-2 focus:ring-purple-500/50'
 
+// A stream crossing midnight gets a YouTube date one day off its folder date
+// (broadcast start vs. recording date), so pairing treats same-day OR
+// adjacent-day as near. Exact dates always win during auto-match.
+const DAY_MS = 24 * 60 * 60 * 1000
+const dateNear = (a: string, b: string): boolean => {
+  if (a === b) return true
+  const ta = Date.parse(a)
+  const tb = Date.parse(b)
+  return Number.isFinite(ta) && Number.isFinite(tb) && Math.abs(ta - tb) <= DAY_MS
+}
+
 /**
  * Bulk-link existing local stream folders to their YouTube videos (the
  * "folders-first" path). Auto-matches unlinked folders to unlinked videos by
@@ -46,14 +57,25 @@ export function YouTubeLinkModal({ isOpen, onClose }: { isOpen: boolean; onClose
       const unlinkedVideos = allVideos.filter(v => !linked.has(v.videoId))
       setFolders(unlinkedFolders)
       setVideos(unlinkedVideos)
-      // Greedy auto-match by date; each video used at most once (oldest first).
+      // Greedy auto-match by date; each video used at most once (oldest
+      // first). Two passes: exact dates claim their videos FIRST so a daily
+      // streamer's folders can't steal each other's videos across day
+      // boundaries; adjacent-day matching then pairs the cross-midnight
+      // leftovers (a stream started before midnight gets a YouTube date one
+      // day off its folder date).
       const byDate = new Map<string, YouTubeImportVideo[]>()
       for (const v of unlinkedVideos) { const a = byDate.get(v.date) ?? []; a.push(v); byDate.set(v.date, a) }
       const used = new Set<string>()
       const auto: Record<string, string | null> = {}
-      for (const f of [...unlinkedFolders].sort((a, b) => a.date.localeCompare(b.date))) {
+      const oldestFirst = [...unlinkedFolders].sort((a, b) => a.date.localeCompare(b.date))
+      for (const f of oldestFirst) {
         const cand = (byDate.get(f.date) ?? []).find(v => !used.has(v.videoId))
         if (cand) { auto[f.folderPath] = cand.videoId; used.add(cand.videoId) } else auto[f.folderPath] = null
+      }
+      for (const f of oldestFirst) {
+        if (auto[f.folderPath]) continue
+        const cand = unlinkedVideos.find(v => !used.has(v.videoId) && dateNear(v.date, f.date))
+        if (cand) { auto[f.folderPath] = cand.videoId; used.add(cand.videoId) }
       }
       setMatches(auto)
     } catch (e: any) {
@@ -69,9 +91,10 @@ export function YouTubeLinkModal({ isOpen, onClose }: { isOpen: boolean; onClose
   const usedVideoIds = useMemo(() => new Set(Object.values(matches).filter(Boolean) as string[]), [matches])
   const sortedFolders = useMemo(() => [...folders].sort((a, b) => b.date.localeCompare(a.date)), [folders])
   const matchedCount = useMemo(() => sortedFolders.filter(f => matches[f.folderPath]).length, [sortedFolders, matches])
-  // "Matchable" = a video shares this folder's date (regardless of the current
-  // selection) — stable so toggling a row's match doesn't make it vanish.
-  const isMatchable = useCallback((f: StreamFolder) => videos.some(v => v.date === f.date), [videos])
+  // "Matchable" = a video shares this folder's date OR sits one day off it
+  // (cross-midnight streams), regardless of the current selection — stable so
+  // toggling a row's match doesn't make it vanish.
+  const isMatchable = useCallback((f: StreamFolder) => videos.some(v => dateNear(v.date, f.date)), [videos])
   const visibleFolders = useMemo(
     () => (showUnmatched ? sortedFolders : sortedFolders.filter(isMatchable)),
     [showUnmatched, sortedFolders, isMatchable],
@@ -230,7 +253,10 @@ export function YouTubeLinkModal({ isOpen, onClose }: { isOpen: boolean; onClose
           {!loading && visibleFolders.map(f => {
             const matchedId = matches[f.folderPath]
             const matched = matchedId ? videoById.get(matchedId) : null
-            const candidates = videos.filter(v => v.date === f.date && (!usedVideoIds.has(v.videoId) || matchedId === v.videoId))
+            // Same-day candidates first, adjacent-day (cross-midnight) after.
+            const candidates = videos
+              .filter(v => dateNear(v.date, f.date) && (!usedVideoIds.has(v.videoId) || matchedId === v.videoId))
+              .sort((a, b) => Number(b.date === f.date) - Number(a.date === f.date))
             const preferred = f.meta?.preferredThumbnail
             const smThumbPath = preferred
               ? (f.thumbnails.find(t => (t.split(/[\\/]/).pop() ?? '') === preferred) ?? f.thumbnails[0])
@@ -254,7 +280,7 @@ export function YouTubeLinkModal({ isOpen, onClose }: { isOpen: boolean; onClose
                 </div>
                 <div className="flex-1 min-w-0 flex items-center gap-2">
                   {!isMatchable(f) ? (
-                    <span className="text-[11px] text-gray-400 italic">No video on this date</span>
+                    <span className="text-[11px] text-gray-400 italic">No video on or next to this date</span>
                   ) : (
                     <select
                       value={matchedId ?? ''}
@@ -263,7 +289,9 @@ export function YouTubeLinkModal({ isOpen, onClose }: { isOpen: boolean; onClose
                     >
                       <option value="">Don't link</option>
                       {candidates.map(v => (
-                        <option key={v.videoId} value={v.videoId}>{v.title || '(untitled)'}</option>
+                        <option key={v.videoId} value={v.videoId}>
+                          {(v.title || '(untitled)') + (v.date !== f.date ? ` · ${v.date}` : '')}
+                        </option>
                       ))}
                     </select>
                   )}
