@@ -476,6 +476,17 @@ function AppInner() {
     if (page === 'integrations') checkIntegrationAlert()
   }, [page])
 
+  // Re-validate the moment a YouTube connect OR disconnect lands — the
+  // caution triangle on the Integrations nav item used to lag both ways
+  // (lingering after a reconnect, absent after a disconnect) until the
+  // user happened to revisit the page.
+  useEffect(() => {
+    const offConnected = window.api.onYouTubeConnected(() => checkIntegrationAlert())
+    const offDisconnected = window.api.onYouTubeDisconnected(() => checkIntegrationAlert())
+    return () => { offConnected(); offDisconnected() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     return window.api.onConfirmQuit(({ running, queued, fileOps, settingsDirty: dirtyDraft }) => {
       setQuitConfirm({ running, queued, fileOps: fileOps ?? 0, settingsDirty: !!dirtyDraft })

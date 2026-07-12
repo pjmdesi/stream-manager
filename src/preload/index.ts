@@ -437,8 +437,22 @@ contextBridge.exposeInMainWorld('api', {
   youtubeConnect: () =>
     ipcRenderer.invoke('youtube:connect'),
 
+  // Fired by main right after a successful OAuth exchange, so mounted pages
+  // can bootstrap their YouTube data live instead of requiring a restart.
+  onYouTubeConnected: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('youtube:connected', handler)
+    return () => ipcRenderer.removeListener('youtube:connected', handler)
+  },
+
   youtubeDisconnect: () =>
     ipcRenderer.invoke('youtube:disconnect'),
+
+  onYouTubeDisconnected: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('youtube:disconnected', handler)
+    return () => ipcRenderer.removeListener('youtube:disconnected', handler)
+  },
 
   youtubeGetVideoStatuses: (videoIds: string[]) =>
     ipcRenderer.invoke('youtube:getVideoStatuses', videoIds),

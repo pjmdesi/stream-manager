@@ -120,9 +120,19 @@ export function registerStreamRelayIPC(): void {
   // ─── Auto-start on registration ────────────────────────────────────────
   // If the user had the relay enabled when SM last quit, bring it back up.
   // No-op if config is incomplete (no outbound key yet).
+  startRelayIfEnabled()
+}
+
+/** Start the relay when config says enabled and it isn't already up.
+ *  Called at registration, and again when YouTube (re)connects — a relay
+ *  that couldn't come up while disconnected gets its second chance without
+ *  waiting for an app restart or a manual toggle. Never bounces a relay
+ *  that's already listening/streaming. */
+export function startRelayIfEnabled(): void {
   const cfg = getStore().get('config') as any
-  if (cfg?.streamRelayEnabled) {
-    const built = buildConfigFromStore()
-    if (built) relayManager.start(built)
-  }
+  if (!cfg?.streamRelayEnabled) return
+  const state = relayManager.getStatus().state
+  if (state !== 'idle' && state !== 'error') return
+  const built = buildConfigFromStore()
+  if (built) relayManager.start(built)
 }

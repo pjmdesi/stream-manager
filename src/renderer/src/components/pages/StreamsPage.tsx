@@ -838,6 +838,16 @@ export function StreamsPage({
   }, [classifyNetFailure])
   const loadYtBootstrapRef = useRef(loadYtBootstrap)
   useEffect(() => { loadYtBootstrapRef.current = loadYtBootstrap })
+  // A first-time YouTube connect used to need an app restart before any
+  // YT data appeared: everything here bootstraps on mount only. Main now
+  // announces a successful OAuth, and flipping ytConnected cascades the
+  // dependent status/broadcast effects naturally.
+  useEffect(() => {
+    return window.api.onYouTubeConnected(() => {
+      setYtConnected(true)
+      loadYtBootstrapRef.current()
+    })
+  }, [])
   useEffect(() => {
     window.api.getStreamTypeTags().then(setTagColors)
     window.api.getStreamTypeTextures().then(setTagTextures)
@@ -887,7 +897,7 @@ export function StreamsPage({
   // Refreshed whenever the set of linked ids changes. Drives the row's
   // status badge in the date column (privacy icon + Radio/Clapperboard
   // distinguishing live broadcasts from regular video uploads).
-  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus?: string; missing?: boolean }>>({})
+  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus?: string; hasEnded?: boolean; missing?: boolean }>>({})
   // Stable string key — depending on `folders` directly would re-fire the
   // batch on every loadFolders refresh, even when the linked-id set is
   // unchanged. Costly on large libraries.
@@ -3501,11 +3511,14 @@ export function StreamsPage({
                     const status = ytId ? effectiveYtVideoStatusMap[ytId] : undefined
                     const isLiveNow = !!(ytId && ytLiveMap[ytId])
                     // Show the "processing" spinner only once a stream could
-                    // actually have a VOD cooking: not live right now, and
-                    // dated today-or-earlier (a future-dated broadcast's
-                    // placeholder video can read 'uploaded' without anything
-                    // to process).
-                    const isProcessing = status?.uploadStatus === 'uploaded' && !isLiveNow && f.date <= today
+                    // actually have a VOD cooking. Livestreams gate on the
+                    // broadcast having ENDED (actualEndTime) — an upcoming
+                    // broadcast's placeholder also reads 'uploaded', which
+                    // put the spinner on today's stream before it started.
+                    // Plain uploads keep the date guard (they process right
+                    // after upload; there's no "not started yet" state).
+                    const isProcessing = status?.uploadStatus === 'uploaded' && !isLiveNow
+                      && (status?.isLivestream ? status?.hasEnded === true : f.date <= today)
                     const key = selectionKey(f)
                     return (
                       <StreamListItem

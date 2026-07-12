@@ -210,9 +210,11 @@ declare global {
       youtubeDownloadThumbnail(targetDir: string, url: string): Promise<{ filename: string; hash: string } | null>
       streamsGetLinkedYouTubeIds(): Promise<string[]>
       youtubeConnect(): Promise<void>
+      onYouTubeConnected(cb: () => void): () => void
+      onYouTubeDisconnected(cb: () => void): () => void
       youtubeDisconnect(): Promise<void>
-      youtubeGetVideoStatuses(videoIds: string[]): Promise<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; missing?: boolean }> | null>
-      youtubeGetVideoStatusCache(): Promise<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string }>>
+      youtubeGetVideoStatuses(videoIds: string[]): Promise<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean; missing?: boolean }> | null>
+      youtubeGetVideoStatusCache(): Promise<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean }>>
       netCheckInternet(): Promise<boolean>
       youtubeCheckBroadcastsAreLive(broadcastIds: string[]): Promise<Record<string, { isLive: boolean; privacyStatus: string | null }>>
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>

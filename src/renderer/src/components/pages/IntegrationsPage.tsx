@@ -286,6 +286,18 @@ export function IntegrationsPage() {
     if (!was && online && ytConnected) checkYtToken()
   }, [online, ytConnected, checkYtToken])
 
+  // A successful OAuth exchange (this page's Connect button or anywhere
+  // else) refreshes the card AND the relay section live — the relay status
+  // used to stay stale until the page was remounted, so a just-restarted
+  // relay still read as down right after reconnecting YouTube.
+  useEffect(() => {
+    return window.api.onYouTubeConnected(() => {
+      setYtConnected(true)
+      checkYtToken()
+      window.api.streamRelayGetStatus().then(setSrStatus).catch(() => {})
+    })
+  }, [checkYtToken])
+
   // Live YouTube quota usage — fetch once, then update on every API call
   // (main pushes 'youtube:quota-changed' as usage accrues / resets at PT midnight).
   useEffect(() => {

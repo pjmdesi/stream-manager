@@ -57,7 +57,10 @@ function buildInstruction(
   return inline[field] ?? `Insert text at the cursor in the ${field} field. Text before: "${prefix}". Text after: "${suffix}". Return ONLY the inserted text.`
 }
 
-async function callAnthropic(apiKey: string, model: string, system: string, userMessage: string, maxTokens = 512): Promise<Response> {
+// 1024 rather than 512: on models where thinking is on by default (e.g.
+// Sonnet 5), thinking tokens count against max_tokens — too small a budget
+// can starve the visible text entirely and come back empty.
+async function callAnthropic(apiKey: string, model: string, system: string, userMessage: string, maxTokens = 1024): Promise<Response> {
   return fetch(ANTHROPIC_API, {
     method: 'POST',
     headers: {
@@ -104,8 +107,28 @@ export function registerClaudeIPC() {
       throw new Error(err.error?.message ?? `Anthropic API error ${res.status}`)
     }
 
-    const data = await res.json() as { content?: Array<{ text?: string }> }
-    return data.content?.[0]?.text?.trim() ?? null
+    const data = await res.json() as {
+      content?: Array<{ type?: string; text?: string }>
+      stop_reason?: string
+    }
+
+    // A refusal is a successful HTTP response with no usable text — surface
+    // it instead of letting it read as "nothing happened."
+    if (data.stop_reason === 'refusal') {
+      throw new Error('Claude declined this request (safety filter). Try again or switch models in Integrations.')
+    }
+
+    // Some models emit a thinking block before the text block, so take the
+    // first non-empty text block rather than content[0].
+    const text = data.content?.find(b => b.type === 'text' && b.text?.trim())?.text?.trim()
+    if (!text) {
+      throw new Error(
+        data.stop_reason === 'max_tokens'
+          ? 'Claude hit the token limit before producing any text. Try again or switch models in Integrations.'
+          : 'Claude returned an empty response. Try again or switch models in Integrations.'
+      )
+    }
+    return text
   })
 
   ipcMain.handle('claude:testKey', async (_, apiKey: string) => {

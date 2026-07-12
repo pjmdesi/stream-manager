@@ -4,6 +4,7 @@ import { TrendingUpDown, Calendar, RotateCcw, ChevronDown, X, Loader2 } from 'lu
 import { useStore } from '../hooks/useStore'
 import { useAdaptivePoll } from '../hooks/useAdaptivePoll'
 import { Tooltip } from './ui/Tooltip'
+import { TruncatedText } from './ui/TruncatedText'
 import type { RelayStatus, RelayStats, ActivePickResult, OrchestratorEvent, LiveBroadcast, Page } from '../types'
 
 /**
@@ -299,30 +300,26 @@ export function StreamRelayWidget({
           </Tooltip>
         )}
 
-        {/* Stale-pick warning */}
+        {/* Stale-pick warning. Message lines all render via TruncatedText:
+            the widget is narrow and whitespace-nowrap, so long text (often
+            carrying a broadcast title or an ffmpeg error) was cut off with
+            no ellipsis and no way to read the rest. Truncation now shows
+            an ellipsis and the full text in a hover tooltip. */}
         {active.manualPickStale && (
-          <p className="px-2 text-[10px] text-amber-400/80 leading-tight">
-            Picked broadcast no longer upcoming. Showing soonest instead.
-          </p>
+          <TruncatedText text="Picked broadcast no longer upcoming. Showing soonest instead." className="truncate text-[10px] text-amber-400/80 leading-tight" triggerClassName="block min-w-0 px-2" />
         )}
 
         {/* Lifecycle stage strip — shown for transitional states only. The
             stable 'live' state isn't surfaced separately because the status
             pill at the top already says "Streaming". */}
         {lifecycle && lifecycle.stage === 'binding' && (
-          <p className="px-2 text-[10px] text-amber-400 leading-tight">
-            Connecting broadcast{lifecycle.broadcastTitle ? `: ${lifecycle.broadcastTitle}` : '…'}
-          </p>
+          <TruncatedText text={`Connecting broadcast${lifecycle.broadcastTitle ? `: ${lifecycle.broadcastTitle}` : '…'}`} className="truncate text-[10px] text-amber-400 leading-tight" triggerClassName="block min-w-0 px-2" />
         )}
         {lifecycle && lifecycle.stage === 'waiting-for-ingest' && (
-          <p className="px-2 text-[10px] text-amber-400 leading-tight">
-            Waiting for YouTube to receive stream…
-          </p>
+          <TruncatedText text="Waiting for YouTube to receive stream…" className="truncate text-[10px] text-amber-400 leading-tight" triggerClassName="block min-w-0 px-2" />
         )}
         {lifecycle && lifecycle.stage === 'going-live' && (
-          <p className="px-2 text-[10px] text-amber-400 leading-tight">
-            Going live{lifecycle.broadcastTitle ? ` as ${lifecycle.broadcastTitle}` : '…'}
-          </p>
+          <TruncatedText text={`Going live${lifecycle.broadcastTitle ? ` as ${lifecycle.broadcastTitle}` : '…'}`} className="truncate text-[10px] text-amber-400 leading-tight" triggerClassName="block min-w-0 px-2" />
         )}
         {lifecycle && lifecycle.stage === 'grace' && (
           <p className="px-2 text-[10px] text-amber-400 leading-tight tabular-nums">
@@ -335,9 +332,7 @@ export function StreamRelayWidget({
           </p>
         )}
         {lifecycle && lifecycle.stage === 'no-broadcast' && isStreaming && (
-          <p className="px-2 text-[10px] text-gray-400 leading-tight">
-            Streaming without a bound broadcast (YouTube will auto-create one).
-          </p>
+          <TruncatedText text="Streaming without a bound broadcast (YouTube will auto-create one)." className="truncate text-[10px] text-gray-400 leading-tight" triggerClassName="block min-w-0 px-2" />
         )}
 
         {/* Live stats while streaming */}
@@ -356,14 +351,10 @@ export function StreamRelayWidget({
             present (it's about the YT-side lifecycle), else show the relay's
             own connection error. */}
         {lifecycle?.stage === 'error' && lifecycle.error && (
-          <p className="px-2 text-[10px] text-red-400 leading-tight">
-            {lifecycle.error}
-          </p>
+          <TruncatedText text={lifecycle.error} className="truncate text-[10px] text-red-400 leading-tight" triggerClassName="block min-w-0 px-2" />
         )}
         {isError && status.error && lifecycle?.stage !== 'error' && (
-          <p className="px-2 text-[10px] text-red-400 leading-tight">
-            {status.error}
-          </p>
+          <TruncatedText text={status.error} className="truncate text-[10px] text-red-400 leading-tight" triggerClassName="block min-w-0 px-2" />
         )}
 
         {/* Post-stream Twitch push prompt now lives in PostStreamTwitchModal

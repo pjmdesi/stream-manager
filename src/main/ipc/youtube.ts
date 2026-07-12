@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
@@ -22,7 +22,7 @@ function getCreds() {
 // file is synced, backed up user data). `missing` is never cached so a
 // stale "video deleted" warning can't resurrect from disk; a genuinely
 // missing id is also evicted, for the same reason.
-const ytStatusCache = new Store<{ statuses: Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string }> }>({
+const ytStatusCache = new Store<{ statuses: Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean }> }>({
   name: 'yt-status-cache',
   defaults: { statuses: {} },
 })
@@ -63,11 +63,32 @@ export function registerYouTubeIPC(): void {
     if (!clientId || !clientSecret) throw new Error('Client ID and Secret must be saved in settings first.')
     const code = await startOAuthFlow(clientId)
     await exchangeCode(code, clientId, clientSecret)
+    // Tell every window the connection is live — pages bootstrap their
+    // YouTube data on mount only, so without this a first-time connect
+    // needed an app restart before statuses/broadcasts appeared.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('youtube:connected')
+    }
+    // An enabled-but-down relay gets restarted now that YouTube is back
+    // (it may have failed its boot auto-start while disconnected).
+    try {
+      const { startRelayIfEnabled } = await import('./streamRelay')
+      startRelayIfEnabled()
+    } catch { /* relay module not registered yet — its own boot path covers it */ }
   })
 
   ipcMain.handle('youtube:disconnect', () => {
     clearTokens()
     clearChannelIdCache()
+    // Cached badges belong to the connection that fetched them — keeping
+    // them made a disconnect look half-connected (privacy icons still
+    // showing after a restart), and a different account could connect next.
+    try { ytStatusCache.set('statuses', {}) } catch { /* best-effort */ }
+    // Mirror of youtube:connected — lets the nav alert (and anything else
+    // watching) react immediately instead of on the next page visit.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('youtube:disconnected')
+    }
   })
 
   ipcMain.handle('youtube:getChannelId', async () => {
@@ -134,7 +155,7 @@ export function registerYouTubeIPC(): void {
         const merged: typeof prev = { ...prev }
         for (const [id, st] of Object.entries(obj)) {
           if (st.missing) { delete merged[id]; continue }
-          merged[id] = { privacyStatus: st.privacyStatus, isLivestream: st.isLivestream, uploadStatus: st.uploadStatus ?? 'processed' }
+          merged[id] = { privacyStatus: st.privacyStatus, isLivestream: st.isLivestream, uploadStatus: st.uploadStatus ?? 'processed', hasEnded: st.hasEnded }
         }
         // Soft cap — once unlinked videos have accumulated past this,
         // keep only the ids from the current fetch.
@@ -153,6 +174,10 @@ export function registerYouTubeIPC(): void {
   })
 
   ipcMain.handle('youtube:getVideoStatusCache', () => {
+    // No connection, no badges — the cache belongs to the connection that
+    // fetched it. Belt to the disconnect-time clear's suspenders: covers a
+    // cache left behind by any older build or an externally-dead token.
+    if (!isConnected()) return {}
     try { return ytStatusCache.get('statuses', {}) } catch { return {} }
   })
 

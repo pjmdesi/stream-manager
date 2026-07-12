@@ -626,6 +626,11 @@ export interface VideoStatus {
    *  video (a just-ended stream's VOD isn't editable in Studio yet),
    *  'processed' once it's ready, 'failed'/'rejected' on error. */
   uploadStatus: string
+  /** Livestreams only: the broadcast has actually ENDED (actualEndTime is
+   *  set). An UPCOMING broadcast's placeholder video also reads
+   *  uploadStatus 'uploaded', so "processing" UI must gate on this — a
+   *  stream can't be processing before it has happened. */
+  hasEnded?: boolean
   /** True when the video ID was queried but absent from the videos.list
    *  response — i.e. the video no longer exists on YouTube (deleted, or not
    *  visible to this account). Lets the UI flag dead links explicitly rather
@@ -663,6 +668,7 @@ export async function fetchVideoStatuses(
         privacyStatus: item.status.privacyStatus,
         isLivestream: !!item.liveStreamingDetails,
         uploadStatus: item.status.uploadStatus ?? 'processed',
+        hasEnded: !!item.liveStreamingDetails?.actualEndTime,
       })
     }
     for (const id of chunk) {

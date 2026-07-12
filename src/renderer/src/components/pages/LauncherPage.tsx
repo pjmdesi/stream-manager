@@ -1085,13 +1085,15 @@ export function LauncherPage() {
                 >
                   {launchFeedback[sidebarGroup.id] ?? 'Launch All'}
                 </Button>
+                {/* Matches the streams detail sidebar's close control. */}
                 <Tooltip content="Close" side="left">
-                  <button
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    icon={<X size={14} />}
                     onClick={() => setSelectedId(null)}
-                    className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
-                  >
-                    <X size={16} />
-                  </button>
+                    aria-label="Close"
+                  />
                 </Tooltip>
               </div>
             </div>
