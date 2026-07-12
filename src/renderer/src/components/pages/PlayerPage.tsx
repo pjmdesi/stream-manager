@@ -1338,7 +1338,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     const alive = list.filter((_, i) => flags[i])
     const dead = list.filter((_, i) => !flags[i])
     setRecents(alive)
-    if (dead.length) window.api.playerRemoveRecent(dead.map(r => r.folderPath ?? r.filePath)).catch(() => {})
+    // Group key order matters: relativePath is per-stream in both modes;
+    // folderPath is the shared dump root in dump mode, where passing it
+    // wiped EVERY dump recent when pruning one dead entry.
+    if (dead.length) window.api.playerRemoveRecent(dead.map(r => r.relativePath ?? r.folderPath ?? r.filePath)).catch(() => {})
   }, [])
   useEffect(() => {
     window.api.playerGetRecents().then(list => void pruneMissingRecents(list)).catch(() => {})
@@ -1372,6 +1375,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       filePath: fp,
       fileName: fp.split(/[\\/]/).pop() ?? fp,
       folderPath: currentStreamFolder?.folderPath,
+      relativePath: currentStreamFolder?.relativePath,
       streamTitle: currentStreamFolder
         ? renderStreamTitle(currentStreamFolder, sortedStreamFolders) || undefined
         : undefined,
@@ -1390,9 +1394,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     const keyOf = (r: PlayerRecentEntry): string => {
       const { metaKey } = resolveStreamContext(r.filePath, config.streamsDir)
       const folder = sortedStreamFolders.find(f => f.relativePath === metaKey)
-      return folder?.relativePath ?? r.folderPath ?? r.filePath
+      return folder?.relativePath ?? r.relativePath ?? r.folderPath ?? r.filePath
     }
-    const targetKey = entry.folder?.relativePath ?? entry.folderPath ?? entry.filePath
+    const targetKey = entry.folder?.relativePath ?? entry.relativePath ?? entry.folderPath ?? entry.filePath
     const paths = recents.filter(r => keyOf(r) === targetKey).map(r => r.filePath)
     window.api.playerRemoveRecent(paths.length ? paths : [entry.filePath]).then(setRecents).catch(() => {})
   }, [recents, sortedStreamFolders, config.streamsDir])
@@ -1405,7 +1409,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   const openRecent = useCallback(async (entry: PlayerRecentEntry) => {
     const ok = await window.api.fileExists(entry.filePath).catch(() => true)
     if (!ok) {
-      window.api.playerRemoveRecent(entry.folderPath ?? entry.filePath).then(setRecents).catch(() => {})
+      window.api.playerRemoveRecent(entry.relativePath ?? entry.folderPath ?? entry.filePath).then(setRecents).catch(() => {})
       setRecentsNotice('That video is no longer available, so it was removed from recents.')
       return
     }
@@ -1431,7 +1435,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       // fall back to the stored folderPath, then the file path for videos
       // outside any stream (those stay distinct). recents is newest-first, so
       // the first hit per key is the most-recent one we keep.
-      const key = folder?.relativePath ?? r.folderPath ?? r.filePath
+      const key = folder?.relativePath ?? r.relativePath ?? r.folderPath ?? r.filePath
       // Also dedupe on the raw filePath (the row's React key): two store
       // entries for the same file can key differently here when the folder
       // doesn't resolve (folders still loading, or the stream was deleted),

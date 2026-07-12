@@ -9639,6 +9639,9 @@ function DeleteModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filesInFolder, setFilesInFolder] = useState<string[] | null>(null)
+  // Dump-mode listing failure: the date-scoped file list IS the delete's
+  // scope and its in-use check, so without it we must block, not guess.
+  const [listFailed, setListFailed] = useState(false)
   const [blockReason, setBlockReason] = useState<string | null>(null)
   const { openReason, folderOpenReason } = useOpenItems()
   const linkedVideoId = target.meta?.ytVideoId
@@ -9682,21 +9685,30 @@ function DeleteModal({
     return null
   }, [isDumpMode, filesInFolder, target.folderPath, openReason, folderOpenReason])
 
-  useEffect(() => {
+  const loadFiles = useCallback(() => {
+    setFilesInFolder(null)
+    setListFailed(false)
     if (isDumpMode) {
-      window.api.listFilesForDate(target.folderPath, target.date).then(setFilesInFolder).catch(() => setFilesInFolder([]))
+      window.api.listFilesForDate(target.folderPath, target.date)
+        .then(setFilesInFolder)
+        // A failed listing must NOT read as "no files": the delete is scoped
+        // by this list, and the in-use checks run against it. Block + retry.
+        .catch(() => { setFilesInFolder([]); setListFailed(true) })
     } else {
       // Walk the entire folder so the user sees thumbnails, project
       // files, exported clips, etc. — not just the source recordings.
       // Depth 6 matches the cloud-ops helper used elsewhere on this
-      // page; recordings rarely nest deeper than that.
+      // page; recordings rarely nest deeper than that. A failed walk is
+      // non-blocking here — folder mode deletes the whole folder and its
+      // in-use checks are folder-scoped, so the list is display-only.
       window.api.listFilesRecursive(target.folderPath, 6)
         .then(entries => setFilesInFolder(
           entries.filter(e => !e.isDirectory).map(e => e.path)
         ))
         .catch(() => setFilesInFolder(target.videos))
     }
-  }, [target.folderPath, target.date, isDumpMode, target.videos])
+  }, [isDumpMode, target.folderPath, target.date, target.videos])
+  useEffect(() => { loadFiles() }, [loadFiles])
 
   // Keep the disabled state in sync as files open/close or jobs start/finish.
   useEffect(() => {
@@ -9716,6 +9728,9 @@ function DeleteModal({
     else onClose()
   }
   const confirm = async () => {
+    // Dump mode: no confirmed file list, no delete — the button is disabled
+    // in these states, this is the belt to its suspenders.
+    if (isDumpMode && (filesInFolder === null || listFailed)) return
     setBusy(true)
     setError(null)
     // Authoritative re-check: a file may have been opened, or a conversion
@@ -9772,7 +9787,16 @@ function DeleteModal({
             {error ? 'Close' : 'Cancel'}
           </Button>
           {!error && (
-            <Button variant="primary" size="sm" loading={busy} disabled={!!blockReason} onClick={confirm}>
+            <Button
+              variant="primary"
+              size="sm"
+              loading={busy}
+              // Dump mode can't safely confirm until the date-scoped list is
+              // in: the in-use checks run against it, and confirming during
+              // the load skipped them entirely.
+              disabled={!!blockReason || (isDumpMode && (filesInFolder === null || listFailed))}
+              onClick={confirm}
+            >
               {alsoDeleteYt && linkedVideoId && !videoMissing ? 'Move to Recycle Bin & Delete from YouTube' : 'Move to Recycle Bin'}
             </Button>
           )}
@@ -9791,6 +9815,13 @@ function DeleteModal({
         )}
         {filesInFolder === null ? (
           <span className="text-gray-400 italic text-xs">Loading…</span>
+        ) : listFailed ? (
+          <span className="text-xs text-red-400">
+            Couldn't read this stream's file list — deletion is disabled.{' '}
+            <button type="button" onClick={loadFiles} className="font-medium text-red-300 hover:text-red-200 transition-colors">
+              Retry
+            </button>
+          </span>
         ) : filesInFolder.length === 0 ? (
           <span className="text-gray-400 italic text-xs">{isDumpMode ? 'No files found for this date.' : '(empty)'}</span>
         ) : (

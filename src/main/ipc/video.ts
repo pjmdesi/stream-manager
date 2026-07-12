@@ -139,32 +139,39 @@ export function registerVideoIPC(): void {
   })
 
   ipcMain.handle('player:addRecent', (_e, entry: PlayerRecentEntry) => {
-    // Collapse to one entry per stream item: a stream-scoped entry (has a
-    // folderPath) replaces any prior entry for the same stream folder, no
-    // matter which video inside it was opened — so opening several files in
-    // one stream doesn't stack up duplicate rows. Standalone files (no
-    // folderPath) fall back to exact-path dedupe and never collapse together.
-    // Same-filePath entries are ALWAYS replaced regardless of folderPath: the
+    // Collapse to one entry per stream item. Stream identity is relativePath
+    // when both entries carry it — unique per stream in BOTH layout modes —
+    // falling back to folderPath for legacy entries, which is only unique in
+    // folder mode (in dump mode every stream shares the dump root, and keying
+    // on it collapsed ALL dump recents into a single entry). Standalone files
+    // (no stream fields) dedupe by exact path only.
+    // Same-filePath entries are ALWAYS replaced regardless of stream: the
     // renderer's add effect re-fires once its folder list resolves, so the
-    // same open can arrive first without a folderPath and again with one —
+    // same open can arrive first without stream fields and again with them —
     // without this, that pair persists as a same-key duplicate.
+    const sameStream = (a: PlayerRecentEntry, b: PlayerRecentEntry): boolean =>
+      a.relativePath && b.relativePath
+        ? a.relativePath === b.relativePath
+        : !!a.folderPath && !!b.folderPath && a.folderPath === b.folderPath
     const recents = ((getStore() as any).get('playerRecents', []) as PlayerRecentEntry[])
-      .filter(r =>
-        r.filePath !== entry.filePath &&
-        (!entry.folderPath || r.folderPath !== entry.folderPath))
+      .filter(r => r.filePath !== entry.filePath && !sameStream(r, entry))
     const updated = [entry, ...recents].slice(0, 20)
     ;(getStore() as any).set('playerRecents', updated)
     return updated
   })
 
   ipcMain.handle('player:removeRecent', (_e, filePath: string | string[]) => {
-    // Accept one path or many; each may be a file path OR a stream folderPath.
-    // Matching entries on either drops a whole stream's group when its folder
-    // is passed (callers like the prune and the stale-click guard identify a
-    // stream recent by folderPath, not by which file happened to be stored).
+    // Accept one key or many; each may be a file path, a stream
+    // relativePath, or a stream folderPath. relativePath is the safe
+    // per-stream group key in both modes; folderPath matching remains for
+    // legacy folder-mode callers — in dump mode it's the shared root, so
+    // renderer callers pass relativePath/filePaths there instead.
     const drop = new Set(Array.isArray(filePath) ? filePath : [filePath])
     const updated = ((getStore() as any).get('playerRecents', []) as PlayerRecentEntry[])
-      .filter(r => !drop.has(r.filePath) && !(r.folderPath && drop.has(r.folderPath)))
+      .filter(r =>
+        !drop.has(r.filePath) &&
+        !(r.relativePath && drop.has(r.relativePath)) &&
+        !(r.folderPath && drop.has(r.folderPath)))
     ;(getStore() as any).set('playerRecents', updated)
     return updated
   })
@@ -181,8 +188,12 @@ export interface PlayerRecentEntry {
   /** Bare file name for display. */
   fileName: string
   /** Stream folder this video belongs to, when it's part of a stream item.
-   *  Used to dedupe recents to one entry per stream rather than per file. */
+   *  NOT unique per stream in dump mode (every stream shares the dump root) —
+   *  prefer relativePath for stream identity. */
   folderPath?: string
+  /** Canonical stream key (StreamFolder.relativePath) — unique per stream in
+   *  both layout modes. Absent on legacy entries and standalone files. */
+  relativePath?: string
   /** Resolved stream title (if the file belongs to a stream folder). */
   streamTitle?: string
   /** Resolved stream date (YYYY-MM-DD) when derivable. */

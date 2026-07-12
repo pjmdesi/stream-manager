@@ -808,8 +808,11 @@ export interface PlayerRecentEntry {
   filePath: string
   fileName: string
   /** Stream folder this video belongs to, when it's part of a stream item.
-   *  Used to dedupe recents to one entry per stream rather than per file. */
+   *  NOT unique per stream in dump mode — prefer relativePath for identity. */
   folderPath?: string
+  /** Canonical stream key (StreamFolder.relativePath) — unique per stream in
+   *  both layout modes. Absent on legacy entries and standalone files. */
+  relativePath?: string
   streamTitle?: string
   streamDate?: string
   openedAt: number

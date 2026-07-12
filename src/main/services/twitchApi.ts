@@ -34,22 +34,41 @@ async function getBroadcasterId(clientId: string, clientSecret: string): Promise
   return id
 }
 
-/** Search for a game/category and return its ID, or empty string if not found. */
+/** Search for a game/category and return its ID, or '' when there is no
+ *  CONFIDENT match. Confident = case-insensitive exact name match, tried
+ *  first on the full query and then with any parenthetical stripped
+ *  ("Deiity (Under Ice)" → "Deiity") — local game names often carry a
+ *  subtitle the Twitch catalog doesn't.
+ *
+ *  Deliberately NEVER falls back to the first search hit: unattended pushes
+ *  applied whatever Twitch's fuzzy search ranked first, silently setting a
+ *  WRONG category. Decision 2026-07-11: skip the category instead ('' →
+ *  categoryApplied=false) and let every push surface report it. */
 async function findGameId(
   gameName: string,
   clientId: string,
   clientSecret: string
 ): Promise<string> {
-  if (!gameName.trim()) return ''
-  const data = await twitchRequest(
-    `/search/categories?${new URLSearchParams({ query: gameName, first: '5' })}`,
-    { method: 'GET' },
-    clientId, clientSecret
-  )
-  const results: { id: string; name: string }[] = data?.data ?? []
-  // Prefer exact match (case-insensitive), fall back to first result
-  const exact = results.find(r => r.name.toLowerCase() === gameName.toLowerCase())
-  return (exact ?? results[0])?.id ?? ''
+  const searchExact = async (query: string): Promise<string> => {
+    const data = await twitchRequest(
+      `/search/categories?${new URLSearchParams({ query, first: '10' })}`,
+      { method: 'GET' },
+      clientId, clientSecret
+    )
+    const results: { id: string; name: string }[] = data?.data ?? []
+    return results.find(r => r.name.toLowerCase() === query.toLowerCase())?.id ?? ''
+  }
+
+  const full = gameName.trim()
+  if (!full) return ''
+  const exact = await searchExact(full)
+  if (exact) return exact
+
+  const stripped = full.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s{2,}/g, ' ').trim()
+  if (stripped && stripped.toLowerCase() !== full.toLowerCase()) {
+    return searchExact(stripped)
+  }
+  return ''
 }
 
 /** Fetch the authenticated user's current channel info: title,
