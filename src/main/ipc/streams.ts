@@ -232,6 +232,12 @@ function collectStreamFiles(folderPath: string, maxDepth = 4): {
       if (e.name.startsWith('.') || e.name.startsWith('_')) continue
       const full = path.join(dir, e.name)
       if (e.isDirectory()) { walk(full, depth + 1); continue }
+      // Skip encoder outputs still being written (clip exports, conversions):
+      // listing them makes a half-written file look like a normal video —
+      // thumbnail probes fire against it and every action button operates on
+      // garbage. The converter's completion event rescans and reveals the
+      // finished file with its clip provenance in place.
+      if (isInFlightWrite(full)) continue
       const ext = path.extname(e.name).toLowerCase()
       if (VIDEO_EXTS.has(ext)) videos.push(full)
       else if (IMAGE_EXTS.has(ext)) thumbnails.push(full)
@@ -938,6 +944,8 @@ export function registerStreamsIPC(): void {
         if (!groups.has(date)) groups.set(date, { videos: [], thumbnails: [] })
         const ext = path.extname(entry.name).toLowerCase()
         const filePath = path.join(dir, entry.name)
+        // Same in-flight-output skip as collectStreamFiles (folder mode).
+        if (isInFlightWrite(filePath)) continue
         if (VIDEO_EXTS.has(ext)) groups.get(date)!.videos.push(filePath)
         else if (IMAGE_EXTS.has(ext)) groups.get(date)!.thumbnails.push(filePath)
       }

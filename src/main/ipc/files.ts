@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { spawnSync, spawn, ChildProcess } from 'child_process'
 import { fileWatcher, WatchRule, WatchEvent } from '../services/fileWatcher'
+import { isInFlightWrite } from '../services/inFlightWrites'
 
 // Windows attribute flags that indicate the file's data is not resident locally:
 //   0x1000   = FILE_ATTRIBUTE_OFFLINE              (data physically offline)
@@ -216,6 +217,11 @@ export function registerFilesIPC(): void {
         if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue
         const entryPath = path.join(current, entry.name)
         if (entry.isDirectory()) { walk(entryPath, depth + 1); continue }
+        // Skip encoder outputs still being written (clip exports,
+        // conversions) — the Session Videos panel would list the
+        // half-written file as a normal, clickable video. The converter's
+        // completion event triggers a reload that reveals the finished file.
+        if (isInFlightWrite(entryPath)) continue
         let size = 0, mtime = 0
         try { const stat = fs.statSync(entryPath); size = stat.size; mtime = stat.mtimeMs } catch {}
         out.push({
