@@ -143,9 +143,24 @@ export function VideoRow({
     </div>
   )
 
-  // Tooltip surfaces the full filename when the inline label truncates (and the
-  // full info string in compact mode, where there's no inline metadata).
-  const tip = compact ? `${name}  ·  ${metaLine}` : name
+  // Tooltip carries the FULL metadata set (name, category, duration, dims,
+  // codec/fps, size, cloud status) — the inline line truncates in a narrow
+  // panel, so hover must be the complete surface, matching what the streams
+  // page files grid shows for the same file.
+  const cloudText = !cloudSyncActive || isLocal === undefined
+    ? null
+    : isLocal ? 'Available on this device' : 'Offloaded to the cloud'
+  const tipMeta = [
+    category ? (CAT_LABEL[category] ?? category) : null,
+    metaLine,
+    cloudText,
+  ].filter(Boolean).join('  ·  ')
+  const tip = (
+    <span className="block">
+      <span className="block font-medium break-all">{name}</span>
+      {tipMeta && <span className="block text-gray-400 tabular-nums mt-0.5">{tipMeta}</span>}
+    </span>
+  )
   return (
     <Tooltip content={tip} side={compact ? 'right' : 'left'} triggerClassName="block">
       {row}

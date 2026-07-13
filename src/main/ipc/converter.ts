@@ -558,15 +558,16 @@ function scheduleNext(): void {
  *  Strategy: ~30s window with a slowly-escalating retry. If after that the
  *  file is still locked, log a warning so the user knows (we can't cleanly
  *  recover — they'll need to remove it manually). */
-function deleteWithRetry(filePath: string, label: string): void {
+function deleteWithRetry(filePath: string, label: string, onDeleted?: () => void): void {
   if (!filePath) return
   // Delays in ms — about 30s total before giving up.
   const delays = [250, 500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 5000, 5000]
   let attempt = 0
   const tryOnce = () => {
-    if (!fs.existsSync(filePath)) return
+    if (!fs.existsSync(filePath)) { onDeleted?.(); return }
     try {
       fs.unlinkSync(filePath)
+      onDeleted?.()
     } catch (err: any) {
       attempt++
       if (attempt < delays.length) {
@@ -953,7 +954,13 @@ export function getConverterStatus(): { active: boolean; percent: number; label:
 export function isConverterWritingPath(filePath: string): boolean {
   const target = filePath.replace(/\\/g, '/').toLowerCase()
   for (const j of jobs.values()) {
-    if (j.status !== 'running' && j.status !== 'replacing') continue
+    // 'paused' counts: the ffmpeg child is suspended but its partial output
+    // sits on disk mid-write — listing it surfaced the half-written clip
+    // the moment a job was paused. 'downloading' counts for completeness
+    // (output usually doesn't exist yet, but the job owns the path).
+    const writing = j.status === 'running' || j.status === 'replacing' ||
+      j.status === 'paused' || j.status === 'downloading'
+    if (!writing) continue
     if (j.outputFile && j.outputFile.replace(/\\/g, '/').toLowerCase() === target) return true
   }
   return false
@@ -1469,12 +1476,26 @@ export function registerConverterIPC(): void {
       jobs.set(jobId, { ...j, status: 'cancelled' })
       if (wasQueued) persistPendingJobs()
       const config = getStore().get('config')
+      // The renderer surfaces (session videos, files grid) hide the output
+      // while the job is writing — on cancel the job leaves that state, so
+      // tell them to reconcile. When the partial is being auto-deleted,
+      // notify AFTER the unlink lands (ffmpeg's handle release can take a
+      // few retries) so the rescan sees the file gone rather than briefly
+      // listing the dead partial.
+      const notifyStreamsChanged = () => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          if (!w.isDestroyed()) w.webContents.send('streams:changed')
+        }
+      }
       // For replaceInput jobs the temp output is internal — clean it up
       // unconditionally so we don't leave __arc_tmp.* files behind.
       if (j.replaceInput && j.outputFile) {
         deleteWithRetry(j.outputFile, 'archive temp file (cancel)')
       } else if (config.autoDeletePartialOnCancel && j.outputFile) {
-        deleteWithRetry(j.outputFile, 'cancelled output')
+        deleteWithRetry(j.outputFile, 'cancelled output', notifyStreamsChanged)
+      } else {
+        // Partial kept (by config) — it's a real file now; show it.
+        notifyStreamsChanged()
       }
       maybeFireGroupHook(jobId)
       // Cancellation frees a slot — let the scheduler fill it from any group.

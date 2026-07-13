@@ -822,9 +822,23 @@ function DraftSessionItem({
   }
   const cancel = () => { setDraftName(displayName); setError(false); setEditing(false) }
 
-  // Compact mode condenses the row to icon + tooltip only — rename and
-  // delete are out of reach until the user expands the sidebar.
-  const tooltipContent = `${displayName} · ${isExporting ? 'exporting…' : 'draft'} · ${segmentCount} seg${segmentCount === 1 ? '' : 's'}${totalDuration > 0 ? ` · ${formatTime(totalDuration, sourceFps)}` : ''}`
+  // Full draft info for the hover tooltip (both modes) — the inline
+  // seg/timecode line truncates in a narrow panel, so hover is the
+  // complete surface.
+  const tooltipContent = (
+    <span className="block">
+      <span className="block font-medium">{displayName}</span>
+      <span className="block text-gray-400 tabular-nums mt-0.5">
+        {isExporting ? 'exporting' : 'draft'} · {segmentCount} seg{segmentCount === 1 ? '' : 's'}
+        {totalDuration > 0 ? ` · ${formatTime(totalDuration, sourceFps)}` : ''}
+      </span>
+      <span className="block text-gray-400 mt-0.5">
+        {isExporting
+          ? 'Exporting — wait for the conversion to finish (or cancel it) before editing.'
+          : `Open clip draft for ${draft.sourceName}`}
+      </span>
+    </span>
+  )
 
   const body = (
     <div
@@ -877,14 +891,16 @@ function DraftSessionItem({
                 </Tooltip>
               </div>
             )}
-            <div className="flex items-center gap-1.5 mt-0.5">
-              {/* Neutral gray while exporting (blue read as "actionable");
-                  no ellipsis — the row is tight and the extra chars made
-                  the seg count + timecode wrap. */}
-              <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${isExporting ? 'text-gray-300 border-gray-400/50' : 'text-amber-400 border-amber-400/50'}`}>
+            {/* min-w-0 + nowrap/truncate: this line must never wrap — with
+                the wider exporting chip the seg count + timecode used to
+                break onto a second line. The full values are in the row
+                tooltip, so truncation loses nothing. */}
+            <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+              {/* Neutral gray while exporting (blue read as "actionable"). */}
+              <span className={`shrink-0 inline-block text-[9px] font-mono border rounded px-1 leading-tight ${isExporting ? 'text-gray-300 border-gray-400/50' : 'text-amber-400 border-amber-400/50'}`}>
                 {isExporting ? 'exporting' : 'draft'}
               </span>
-              <span className="text-[10px] text-gray-400 tabular-nums">
+              <span className="text-[10px] text-gray-400 tabular-nums whitespace-nowrap truncate min-w-0">
                 {segmentCount} seg{segmentCount === 1 ? '' : 's'}
                 {totalDuration > 0 && ` · ${formatTime(totalDuration, sourceFps)}`}
               </span>
@@ -905,18 +921,12 @@ function DraftSessionItem({
     </div>
   )
 
-  // Non-compact rows explain themselves on hover (open / exporting-blocked);
-  // no tooltip while editing so it doesn't hover over the rename input.
-  const rowTitle = editing
-    ? null
-    : isExporting
-      ? 'This clip is currently exporting. Wait for the conversion to finish (or cancel it) before editing.'
-      : `Open clip draft for ${draft.sourceName}`
+  // Same full-info tooltip in both modes; suppressed while renaming so it
+  // doesn't hover over the input.
+  if (editing) return body
   return compact
     ? <Tooltip content={tooltipContent} side="right" triggerClassName="block">{body}</Tooltip>
-    : rowTitle
-      ? <Tooltip content={rowTitle} triggerClassName="block w-full">{body}</Tooltip>
-      : body
+    : <Tooltip content={tooltipContent} triggerClassName="block w-full">{body}</Tooltip>
 }
 
 // Crop aspect dropdown: Off + Original (when video doesn't match a preset) + 16:9 / 1:1 / 9:16
