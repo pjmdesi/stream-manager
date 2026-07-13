@@ -101,7 +101,13 @@ function getSnapResult(
   node: Konva.Node,
   stage: Konva.Stage,
   smartSnap: boolean,
-  gridSnap: boolean
+  gridSnap: boolean,
+  // Layers that must NOT act as snap stops — the rest of a multi-selection
+  // during a group drag. They move WITH the dragged node, so snapping
+  // against them is self-referential: the target gets yanked to a
+  // companion's edge, the companions follow, and the group creeps/sticks
+  // (the resize path's boundBoxFunc already excludes the whole selection).
+  excludeIds?: ReadonlySet<string>,
 ): { x?: number; y?: number; guides: SnapGuide[] } {
   const result: { x?: number; y?: number; guides: SnapGuide[] } = { guides: [] }
   if (!smartSnap && !gridSnap) return result
@@ -115,6 +121,7 @@ function getSnapResult(
 
     stage.find('.snap-target').forEach((other: Konva.Node) => {
       if (other === node) return
+      if (excludeIds?.has(other.id())) return
       const b = other.getClientRect({ relativeTo: stage })
       vStops.push(b.x, b.x + b.width / 2, b.x + b.width)
       hStops.push(b.y, b.y + b.height / 2, b.y + b.height)
@@ -877,6 +884,17 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
 // ── Undo/redo ─────────────────────────────────────────────────────────────────
 
 function useUndoRedo(initial: ThumbnailLayer[], onApply?: (next: ThumbnailLayer[]) => void) {
+  // History lives in refs; state mirrors it for rendering (canUndo/canRedo
+  // and the layers themselves). The old closure-based version captured
+  // `present` at render time, so two commits landing in the same tick (or
+  // inside a flushSync, e.g. a transform commit racing another interaction)
+  // both pushed the SAME stale snapshot — one edit silently vanished from
+  // history and undo restored a state older than the user expected. Refs
+  // make every commit/undo/redo read the true latest values regardless of
+  // render timing.
+  const pastRef = useRef<ThumbnailLayer[][]>([])
+  const presentRef = useRef<ThumbnailLayer[]>(initial)
+  const futureRef = useRef<ThumbnailLayer[][]>([])
   const [past, setPast] = useState<ThumbnailLayer[][]>([])
   const [present, setPresent] = useState<ThumbnailLayer[]>(initial)
   const [future, setFuture] = useState<ThumbnailLayer[][]>([])
@@ -886,35 +904,49 @@ function useUndoRedo(initial: ThumbnailLayer[], onApply?: (next: ThumbnailLayer[
   useEffect(() => { onApplyRef.current = onApply }, [onApply])
 
   const commit = useCallback((next: ThumbnailLayer[]) => {
-    setPast(p => [...p.slice(-49), present])
+    pastRef.current = [...pastRef.current.slice(-49), presentRef.current]
+    presentRef.current = next
+    futureRef.current = []
+    setPast(pastRef.current)
     setPresent(next)
     setFuture([])
-  }, [present])
+  }, [])
 
   const set = useCallback((next: ThumbnailLayer[]) => {
+    presentRef.current = next
+    futureRef.current = []
     setPresent(next)
     setFuture([])
   }, [])
 
   const undo = useCallback(() => {
-    if (past.length === 0) return
-    const prev = past[past.length - 1]
-    setPast(p => p.slice(0, -1))
-    setFuture(f => [present, ...f])
+    if (pastRef.current.length === 0) return
+    const prev = pastRef.current[pastRef.current.length - 1]
+    futureRef.current = [presentRef.current, ...futureRef.current]
+    pastRef.current = pastRef.current.slice(0, -1)
+    presentRef.current = prev
+    setPast(pastRef.current)
+    setFuture(futureRef.current)
     setPresent(prev)
     onApplyRef.current?.(prev)
-  }, [past, present])
+  }, [])
 
   const redo = useCallback(() => {
-    if (future.length === 0) return
-    const next = future[0]
-    setFuture(f => f.slice(1))
-    setPast(p => [...p, present])
+    if (futureRef.current.length === 0) return
+    const next = futureRef.current[0]
+    pastRef.current = [...pastRef.current, presentRef.current]
+    futureRef.current = futureRef.current.slice(1)
+    presentRef.current = next
+    setPast(pastRef.current)
+    setFuture(futureRef.current)
     setPresent(next)
     onApplyRef.current?.(next)
-  }, [future, present])
+  }, [])
 
   const reset = useCallback((layers: ThumbnailLayer[]) => {
+    pastRef.current = []
+    presentRef.current = layers
+    futureRef.current = []
     setPast([])
     setPresent(layers)
     setFuture([])
@@ -1971,7 +2003,32 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const triggerAutoSaveRef = useRef<((layers: ThumbnailLayer[]) => void) | null>(null)
   const { layers, commit, set: setLayersDirect, undo, redo, reset: resetLayers, canUndo, canRedo } = useUndoRedo(
     [],
-    useCallback((next: ThumbnailLayer[]) => triggerAutoSaveRef.current?.(next), []),
+    useCallback((next: ThumbnailLayer[]) => {
+      // Undo/redo must repaint TRUTH. Imperative Konva mutations (drag-move
+      // repositioning of multi-drag companions, transform scale/skew) live
+      // on the nodes, not in React — when a restored layer's props equal
+      // whatever react-konva last rendered, its diff applies nothing and
+      // the node stays wherever the interrupted gesture left it (stuck at
+      // the wrong position, seemingly un-flippable, until a session
+      // reopen rebuilt it). Stamp every Group's transform from the
+      // restored state so the canvas always matches history.
+      const stage = stageRef.current
+      if (stage) {
+        for (const l of next) {
+          const node = stage.findOne(`#${l.id}`)
+          if (!node) continue
+          node.x(l.x)
+          node.y(l.y)
+          node.rotation(l.rotation)
+          node.scaleX(1)
+          node.scaleY(1)
+          node.skewX(0)
+          node.skewY(0)
+        }
+        stage.batchDraw()
+      }
+      triggerAutoSaveRef.current?.(next)
+    }, []),
   )
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
@@ -2287,7 +2344,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
 
     if (smartSnapEnabled || gridSnapEnabled) {
-      const snap = getSnapResult(node, stageRef.current, smartSnapEnabled, gridSnapEnabled)
+      // Exclude the whole selection from snap stops, not just the dragged
+      // node — its companions are moving with it (see getSnapResult).
+      const exclude = new Set(selectedIdsRef.current)
+      exclude.add(node.id())
+      const snap = getSnapResult(node, stageRef.current, smartSnapEnabled, gridSnapEnabled, exclude)
       if (snap.x !== undefined) node.x(snap.x)
       if (snap.y !== undefined) node.y(snap.y)
       renderSnapGuides(snap.guides, guideLayerRef.current, viewZoomRef.current)
@@ -3361,6 +3422,26 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       return [id]
     })
   }, [])
+
+  // Layers-panel row click: plain = solo select, Ctrl/Cmd = toggle in/out of
+  // the selection, Shift = select the contiguous display-order range from
+  // the last non-shift click (Photoshop/Explorer convention). The anchor
+  // survives shift-clicks so successive ranges re-extend from the same row.
+  const panelAnchorIdRef = useRef<string | null>(null)
+  const handleLayerRowClick = useCallback((id: string, e: React.MouseEvent) => {
+    if (e.shiftKey && panelAnchorIdRef.current && panelAnchorIdRef.current !== id) {
+      const display = [...layersRef.current].reverse()
+      const a = display.findIndex(l => l.id === panelAnchorIdRef.current)
+      const b = display.findIndex(l => l.id === id)
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a < b ? [a, b] : [b, a]
+        setSelectedIds(display.slice(lo, hi + 1).map(l => l.id))
+        return
+      }
+    }
+    panelAnchorIdRef.current = id
+    handleLayerSelect(id, e.ctrlKey || e.metaKey)
+  }, [handleLayerSelect])
 
   // ── Open editor for a stream ───────────────────────────────────────────────
   // Pull the ordinal out of a thumbnail basename, e.g.
@@ -4694,7 +4775,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                               setDraggingLayerId(null)
                               setDropTargetDisplayIdx(null)
                             }}
-                            onClick={() => { if (!isRenaming) handleLayerSelect(layer.id, false) }}
+                            onClick={e => { if (!isRenaming) handleLayerRowClick(layer.id, e) }}
                             className={`flex items-center gap-1.5 px-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-purple-600/20' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
                           >
                             <button
