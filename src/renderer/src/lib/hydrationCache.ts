@@ -85,3 +85,15 @@ export function subscribeHydration(listener: Listener): () => void {
 if (typeof window !== 'undefined' && window.api?.onCloudDownloadDone) {
   window.api.onCloudDownloadDone((filePath: string) => set(filePath, true))
 }
+
+// Batch cloud ops (Offload / Pin local) are the other hydration pipeline.
+// This used to be bridged only inside StreamFilesGrid, so a pin finishing
+// while the sidebar grid wasn't mounted never reached the cache — the
+// stream list rows kept their cloud icon until a manual refresh.
+if (typeof window !== 'undefined' && window.api?.onCloudSyncProgress) {
+  window.api.onCloudSyncProgress(ev => {
+    if (ev.type !== 'item') return
+    if (ev.direction === 'hydrate' && (ev.status === 'done' || ev.status === 'already-local')) set(ev.path, true)
+    if (ev.direction === 'offload' && (ev.status === 'done' || ev.status === 'already-offline')) set(ev.path, false)
+  })
+}

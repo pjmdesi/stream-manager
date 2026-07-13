@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, Cloud, AlertTriangle } from 'lucide-react'
 import { Tooltip } from '../ui/Tooltip'
+import { getCachedHydration, subscribeHydration } from '../../lib/hydrationCache'
 
 export function friendlyDate(iso: string): string {
   const [year, month, day] = iso.split('-')
@@ -39,20 +40,33 @@ export function ThumbImage({
   iconSize?: number
   onLoad?: (dims?: { width: number; height: number }) => void
 }) {
+  // The `isLocal` prop carries the folder's SCAN-TIME flag. The shared
+  // hydration cache is the live truth: a pin/offload completing anywhere
+  // (batch cloud op, player hydration, another surface's check) lands there
+  // immediately, while the scan flag stays stale until the next folder
+  // reload. Cache wins when it has an entry — that's what flips a stream
+  // row's cloud icon into the real image the moment its pin finishes.
+  const [liveLocal, setLiveLocal] = useState<boolean | undefined>(() => getCachedHydration([path])[path])
+  useEffect(() => {
+    setLiveLocal(getCachedHydration([path])[path])
+    return subscribeHydration((p, isL) => { if (p === path) setLiveLocal(isL) })
+  }, [path])
+  const effectiveIsLocal = liveLocal ?? isLocal
+
   const [status, setStatus] = useState<'loading' | 'loaded' | 'syncing' | 'cloud' | 'error'>(
-    isLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud')
+    effectiveIsLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud')
   )
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
-    setStatus(isLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud'))
+    setStatus(effectiveIsLocal ? 'loading' : (hydrate ? 'syncing' : 'cloud'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, thumbsKey, isLocal])
+  }, [path, thumbsKey, effectiveIsLocal])
 
   useEffect(() => {
-    if (isLocal) return
+    if (effectiveIsLocal) return
     setStatus(prev => prev === 'loaded' || prev === 'loading' ? prev : (hydrate ? 'syncing' : 'cloud'))
-  }, [hydrate, isLocal])
+  }, [hydrate, effectiveIsLocal])
 
   useEffect(() => {
     if (status === 'loaded' || status === 'loading') return
