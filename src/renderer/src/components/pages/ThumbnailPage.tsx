@@ -4820,12 +4820,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             onClick={e => { if (!isRenaming) handleLayerRowClick(layer.id, e) }}
                             className={`flex items-center gap-1.5 px-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-purple-600/20' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
                           >
-                            <button
-                              onClick={e => { e.stopPropagation(); updateLayer({ ...layer, visible: !layer.visible }) }}
-                              className="text-gray-400 hover:text-gray-300 shrink-0"
-                            >
-                              {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-400" />}
-                            </button>
+                            <Tooltip content={layer.visible ? 'Hide layer' : 'Show layer'} side="top">
+                              <button
+                                onClick={e => { e.stopPropagation(); updateLayer({ ...layer, visible: !layer.visible }) }}
+                                className="text-gray-400 hover:text-gray-300 shrink-0"
+                              >
+                                {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-400" />}
+                              </button>
+                            </Tooltip>
                             {isRenaming ? (
                               <input
                                 autoFocus
@@ -4857,12 +4859,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                               </Tooltip>
                             )}
                             <div className={`flex gap-0.5 opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''} transition-opacity`}>
-                              <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300">
-                                <Copy size={10} />
-                              </button>
-                              <button onClick={e => { e.stopPropagation(); commitLayers(layers.filter(l => l.id !== layer.id)); setSelectedIds([]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400">
-                                <Trash2 size={10} />
-                              </button>
+                              <Tooltip content="Duplicate layer" side="top">
+                                <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300">
+                                  <Copy size={10} />
+                                </button>
+                              </Tooltip>
+                              <Tooltip content="Delete layer" side="top">
+                                <button onClick={e => { e.stopPropagation(); commitLayers(layers.filter(l => l.id !== layer.id)); setSelectedIds([]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400">
+                                  <Trash2 size={10} />
+                                </button>
+                              </Tooltip>
                             </div>
                           </div>
                           {displayIdx === displayLayers.length - 1 && dropTargetDisplayIdx === displayLayers.length && (
