@@ -907,10 +907,15 @@ function DraftSessionItem({
             </div>
           </div>
           {!editing && (
-            <Tooltip content="Delete draft" side="left" triggerClassName="shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+            <Tooltip
+              content={isExporting ? 'Exporting — the draft is removed automatically when the export finishes.' : 'Delete draft'}
+              side="left"
+              triggerClassName="shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity"
+            >
               <button
-                onClick={e => { e.stopPropagation(); onDelete() }}
-                className="p-1 text-gray-400 hover:text-red-400 transition-colors"
+                onClick={isExporting ? undefined : e => { e.stopPropagation(); onDelete() }}
+                disabled={isExporting}
+                className="p-1 text-gray-400 hover:text-red-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-gray-400"
               >
                 <Trash2 size={12} />
               </button>
