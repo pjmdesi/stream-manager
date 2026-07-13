@@ -4160,11 +4160,12 @@ export function StreamsPage({
   const [archivePresetWarning, setArchivePresetWarning] = useState(false)
 
   // Cloud-sync offload feature: only enabled when streamsDir is inside a CFAPI
-  // sync root (Synology Drive Client / OneDrive / etc.). Probed once at mount.
+  // sync root (Synology Drive Client / OneDrive / etc.). Re-probed whenever
+  // streamsDir changes (first-run setup picks the library after mount).
   const [cloudSyncActive, setCloudSyncActive] = useState(false)
   useEffect(() => {
-    window.api.cloudSyncIsActive().then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
-  }, [])
+    window.api.cloudSyncIsActive(config.streamsDir).then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
+  }, [config.streamsDir])
   const { enqueueOffload, enqueueHydrate } = useCloudOps()
   // Folders with an active archive group in flight. Used to disable any
   // action that would conflict with an archive-in-progress (offload, send

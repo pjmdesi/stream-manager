@@ -120,8 +120,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('files:cancelCloudDownload', filePath),
 
   // ── Cloud sync (offload to NAS / OneDrive / etc.) ──────────────────────────
-  cloudSyncIsActive: (): Promise<boolean> =>
-    ipcRenderer.invoke('cloud-sync:is-active'),
+  cloudSyncIsActive: (dir?: string): Promise<boolean> =>
+    ipcRenderer.invoke('cloud-sync:is-active', dir),
 
   // ── Update check ───────────────────────────────────────────────────────────
   checkForUpdate: (force?: boolean): Promise<{

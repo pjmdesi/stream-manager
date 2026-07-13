@@ -1160,11 +1160,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   // Session Videos: sibling video files + clip drafts in the same folder
   const [siblingFiles, setSiblingFiles] = useState<SiblingFile[]>([])
   // Whether the OS cloud-sync provider is active — gates the hydration icon in
-  // the session-video rows (VideoRow). Fetched once.
+  // the session-video rows (VideoRow). Re-probed whenever streamsDir changes
+  // (first-run setup picks the library after mount).
   const [cloudSyncActive, setCloudSyncActive] = useState(false)
   useEffect(() => {
-    window.api.cloudSyncIsActive().then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
-  }, [])
+    window.api.cloudSyncIsActive(config.streamsDir).then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
+  }, [config.streamsDir])
   const [folderDrafts, setFolderDrafts] = useState<import('../../types').ClipDraft[]>([])
   const [folderPath, setFolderPath] = useState<string | null>(null)
   // Full list of stream folders in the streams root, sorted by date.

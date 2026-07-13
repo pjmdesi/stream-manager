@@ -79,7 +79,7 @@ declare global {
       onCloudDownloadDone(cb: (filePath: string) => void): () => void
 
       // ── Cloud sync (offload) ─────────────────────────────────────────────────
-      cloudSyncIsActive(): Promise<boolean>
+      cloudSyncIsActive(dir?: string): Promise<boolean>
       checkForUpdate(force?: boolean): Promise<{
         current: string
         latest: string | null

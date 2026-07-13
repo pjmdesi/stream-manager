@@ -13,8 +13,13 @@ function getStreamsDir(): string {
   return config?.streamsDir ?? ''
 }
 
-function getActive(): boolean {
-  const dir = getStreamsDir()
+// `dirOverride` lets the renderer probe the directory it is CURRENTLY
+// showing rather than whatever the store holds. During first-run setup the
+// renderer updates its local config optimistically before the store write
+// lands, so a store-read here could probe the old (empty) dir — that's how
+// the cloud action buttons stayed hidden until an app restart.
+function getActive(dirOverride?: string): boolean {
+  const dir = (typeof dirOverride === 'string' && dirOverride.trim()) || getStreamsDir()
   if (!dir) return false
   if (cachedActive && cachedActive.dir === dir) return cachedActive.active
   const active = isCfApiSyncRoot(dir)
@@ -172,7 +177,7 @@ async function drainHydrate(): Promise<void> {
 }
 
 export function registerCloudSyncIPC(): void {
-  ipcMain.handle('cloud-sync:is-active', () => getActive())
+  ipcMain.handle('cloud-sync:is-active', (_e, dir?: string) => getActive(dir))
 
   ipcMain.handle('cloud-sync:offload', (event, paths: string[], batchId: string) => {
     if (!Array.isArray(paths) || paths.length === 0 || !batchId) return

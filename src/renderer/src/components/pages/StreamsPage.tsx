@@ -1317,10 +1317,14 @@ export function StreamsPage({
   // True when streamsDir lives inside a CFAPI-aware cloud sync root
   // (Synology Drive Client, OneDrive, Dropbox). Offload + Pin-Local
   // buttons are gated on this — same convention StreamsPage uses.
+  // Re-probed whenever streamsDir changes (first-run setup picks the
+  // library after mount — a one-shot probe left the buttons hidden until
+  // restart), passing the dir explicitly so the probe can't race the
+  // store write.
   const [cloudSyncActive, setCloudSyncActive] = useState(false)
   useEffect(() => {
-    window.api.cloudSyncIsActive().then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
-  }, [])
+    window.api.cloudSyncIsActive(config.streamsDir).then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
+  }, [config.streamsDir])
   const { enqueueOffload, enqueueHydrate } = useCloudOps()
 
   // Conversion-jobs context — used to detect when an archive is in
