@@ -882,9 +882,13 @@ function DraftSessionItem({
                   {displayName}
                 </div>
                 <Tooltip content="Rename draft" side="top" triggerClassName="ml-auto shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                  {/* -my-0.5 cancels the vertical padding so the button can't
+                      grow the title line — with p-0.5 the row sat a couple px
+                      taller than the plain-text filename rows of the other
+                      session-video item types. */}
                   <button
                     onClick={e => { e.stopPropagation(); setEditing(true) }}
-                    className="p-0.5 text-gray-400 hover:text-gray-300 transition-colors"
+                    className="block p-0.5 -my-0.5 text-gray-400 hover:text-gray-300 transition-colors"
                   >
                     <PencilLine size={11} />
                   </button>
