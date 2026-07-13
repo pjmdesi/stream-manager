@@ -776,10 +776,16 @@ function classifyVideo(
  * either — see pruneStaleVideoMapEntries (applied synchronously at scan
  * time).
  */
+// Returns the set of stream keys whose videoMap actually changed — NOT a
+// blanket "something changed" boolean. The scoped streams:changed pipeline
+// forwards these keys to the renderer, and over-reporting is expensive:
+// claiming every scanned stream as touched made the renderer fetch
+// listOne for the whole library after launch (a PowerShell hydration
+// check per stream, all timing out in parallel).
 async function refreshVideoMaps(
   entries: Array<{ key: string; folderPath: string; date: string; videos: string[] }>,
   allMeta: Record<string, StreamMeta>,
-): Promise<boolean> {
+): Promise<Set<string>> {
   const allPaths: string[] = []
   const pathKey: Map<string, string> = new Map()
   const pathDate: Map<string, string> = new Map()
@@ -796,14 +802,14 @@ async function refreshVideoMaps(
       pathRelKey.set(v, videoRelKey(folderPath, v))
     }
   }
-  if (allPaths.length === 0) return false
+  if (allPaths.length === 0) return new Set()
 
   const localFlags = await checkLocalFiles(allPaths)
 
   // Stat all files for size + mtime
   const stats = allPaths.map(p => { try { return fs.statSync(p) } catch { return null } })
 
-  let changed = false
+  const changedKeys = new Set<string>()
   const toProbe: Array<{ p: string; idx: number }> = []
 
   for (let i = 0; i < allPaths.length; i++) {
@@ -832,7 +838,7 @@ async function refreshVideoMaps(
       const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
       if (!meta.videoMap) meta.videoMap = {}
       meta.videoMap[relKey] = entry
-      changed = true
+      changedKeys.add(key)
     }
   }
 
@@ -880,7 +886,7 @@ async function refreshVideoMaps(
         const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
         if (!meta.videoMap) meta.videoMap = {}
         meta.videoMap[relKey] = entry
-        changed = true
+        changedKeys.add(key)
       } catch (err) {
         // Probe failed (corrupt file, locked by another process, ffprobe timeout, etc.).
         // Record a stat-only entry so the file isn't invisible to the count and tooltip;
@@ -895,7 +901,7 @@ async function refreshVideoMaps(
           const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
           if (!meta.videoMap) meta.videoMap = {}
           meta.videoMap[relKey] = entry
-          changed = true
+          changedKeys.add(key)
         }
       }
     }
@@ -905,7 +911,7 @@ async function refreshVideoMaps(
     }
   }
 
-  return changed
+  return changedKeys
 }
 
 /**
@@ -1191,18 +1197,21 @@ export function registerStreamsIPC(): void {
     })
     if (videoSetChanged) {
       refreshVideoMaps(videoEntries, allMeta)
-        .then(changed => {
-          if (!changed) return
+        .then(changedKeys => {
+          if (changedKeys.size === 0) return
           // The probe can run for minutes (first scan, big import), so by
           // now `allMeta` is a stale scan-time snapshot. Never write it
           // back: re-read the CURRENT file and merge in only what the probe
           // computed (per-file videoMap entries). The read-merge-write is
           // synchronous, so nothing can interleave — metadata edits,
           // deletions, and clip exports made while probing all survive.
+          // Only streams the probe actually CHANGED are merged/announced —
+          // over-reporting made the renderer refetch the entire library.
           const touchedKeys: string[] = []
           try {
             const fresh = readAllMeta(dir)
             for (const { key, folderPath, date } of videoEntries) {
+              if (!changedKeys.has(key)) continue
               const computed = allMeta[key]?.videoMap
               if (!computed || Object.keys(computed).length === 0) continue
               let target = fresh[key]
@@ -1330,8 +1339,8 @@ export function registerStreamsIPC(): void {
           })()
       if (videoSetChanged) {
         refreshVideoMaps([entry], allMeta)
-          .then(changed => {
-            if (!changed) return
+          .then(changedKeys => {
+            if (changedKeys.size === 0) return
             try {
               const fresh = readAllMeta(dir)
               const computed = allMeta[entry.key]?.videoMap

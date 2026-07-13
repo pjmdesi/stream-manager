@@ -666,6 +666,23 @@ export function StreamsPage({
   // fires so renamed/swapped thumbnail files refetch instead of serving the
   // stale cached image.
   const [thumbsKey, setThumbsKey] = useState(() => Date.now())
+  // Per-stream cache-busting keys — bumped by SCOPED streams:changed events
+  // so one stream's file change re-fetches only that row's thumbnail
+  // instead of flashing every thumbnail on the page (todo #43). A row's
+  // effective key is the max of the global key and its own.
+  const [streamThumbsKeys, setStreamThumbsKeys] = useState<Record<string, number>>({})
+  const thumbsKeyFor = useCallback(
+    (f: StreamFolder) => Math.max(thumbsKey, streamThumbsKeys[f.relativePath] ?? 0),
+    [thumbsKey, streamThumbsKeys],
+  )
+  // Cross-stream surfaces (the out-of-sync panel mixes rows from many
+  // streams behind a single key prop) take the max of everything — a
+  // scoped bump re-busts that small panel rather than leaving one of its
+  // rows stale after an in-place thumbnail overwrite.
+  const anyStreamThumbsKey = useMemo(
+    () => Object.values(streamThumbsKeys).reduce((a, b) => Math.max(a, b), thumbsKey),
+    [thumbsKey, streamThumbsKeys],
+  )
 
   // ── Thumbnail resize (drag the handle on the right of any thumbnail cell)
   // The width is persisted to config.listThumbWidth on mouseup. While dragging,
@@ -2085,6 +2102,68 @@ export function StreamsPage({
     if (seq === listReqSeqRef.current) setLoading(false)
   }, [streamsDir, streamMode])
 
+  // Scoped reload: re-fetch just the streams named by a targeted
+  // streams:changed event and splice them into state — replace in place,
+  // insert new (sorted), remove when main reports the stream gone. The
+  // captured sequence token drops the splice if a FULL reload started
+  // while we were fetching (its data supersedes ours). `bumpThumbs`
+  // refreshes only the spliced streams' thumbnail cache keys — the whole
+  // point of the scoped pipeline: nobody else's thumbnails flash.
+  const spliceStreams = useCallback(async (keys: string[], opts: { bumpThumbs: boolean }) => {
+    if (!streamsDir || keys.length === 0) return
+    // Beyond a handful of streams, ONE full scan is cheaper than N
+    // per-stream fetches — each listOne spawns its own PowerShell
+    // hydration check, and a large parallel burst made them all time out.
+    if (keys.length > 6) {
+      void loadFolders()
+      if (opts.bumpThumbs) setThumbsKey(Date.now())
+      return
+    }
+    const seq = listReqSeqRef.current
+    // Sequential on purpose: bounds concurrent PowerShell spawns from a
+    // multi-stream burst, and lets a superseding full reload abort early.
+    const results: Array<{ key: string; folder: StreamFolder | null | undefined }> = []
+    for (const key of keys) {
+      // undefined = fetch failed (leave the row as-is); null = stream gone.
+      results.push({ key, folder: await window.api.listStreamOne(streamsDir, key).catch(() => undefined) })
+      if (seq !== listReqSeqRef.current) return
+    }
+    setFolders(prev => {
+      const next = [...prev]
+      let changed = false
+      for (const { key, folder } of results) {
+        if (folder === undefined) continue
+        const idx = next.findIndex(f => f.relativePath === key)
+        if (folder === null) {
+          if (idx !== -1) { next.splice(idx, 1); changed = true }
+        } else if (idx !== -1) {
+          next[idx] = folder
+          changed = true
+        } else {
+          next.push(folder)
+          changed = true
+        }
+      }
+      if (!changed) return prev
+      // Same ordering as main's streams:list: date desc, same-day by
+      // -N suffix desc.
+      const idxOf = (name: string) => {
+        const m = name.match(/^\d{4}-\d{2}-\d{2}-(\d+)$/)
+        return m ? parseInt(m[1], 10) : 1
+      }
+      next.sort((a, b) => b.date.localeCompare(a.date) || idxOf(b.folderName) - idxOf(a.folderName))
+      return next
+    })
+    if (opts.bumpThumbs) {
+      const now = Date.now()
+      setStreamThumbsKeys(prev => {
+        const merged = { ...prev }
+        for (const k of keys) merged[k] = now
+        return merged
+      })
+    }
+  }, [streamsDir, loadFolders])
+
   // _meta.json health — pushed by main whenever the metadata store enters or
   // leaves a failed-read state (locked or corrupt). While failed, main also
   // refuses all meta writes, so the banner explains why edits don't stick.
@@ -2135,9 +2214,16 @@ export function StreamsPage({
     let timer: ReturnType<typeof setTimeout> | null = null
     let deferred = false
     let burstQuiet = true
+    // Stream keys accumulated across the burst. null = at least one event
+    // was unscoped (structural) → the burst escalates to a full reload.
+    // Dump mode never takes the scoped path (keys are folder-mode
+    // relativePaths).
+    let burstKeys: Set<string> | null = new Set()
     const off = window.api.onStreamsChanged(info => {
       if (timer) clearTimeout(timer)
       if (!info?.quiet) burstQuiet = false
+      if (!info?.streamKeys || streamMode === 'dump-folder') burstKeys = null
+      else if (burstKeys) for (const k of info.streamKeys) burstKeys.add(k)
       deferred = false
       timer = setTimeout(function fire() {
         const waitMs = selfDeleteUntilRef.current - Date.now()
@@ -2146,10 +2232,19 @@ export function StreamsPage({
           timer = setTimeout(fire, waitMs + 100)
           return
         }
-        loadFolders()
-        if (!deferred && !burstQuiet) setThumbsKey(Date.now())
+        const keys = burstKeys
+        const quiet = deferred || burstQuiet
         deferred = false
         burstQuiet = true
+        burstKeys = new Set()
+        if (keys && keys.size > 0) {
+          // Every change in the burst mapped to specific streams — splice
+          // just those. Quiet (echo/deferred) splices skip the thumb bump.
+          void spliceStreams([...keys], { bumpThumbs: !quiet })
+        } else {
+          loadFolders()
+          if (!quiet) setThumbsKey(Date.now())
+        }
       }, 400)
     })
     return () => {
@@ -2157,7 +2252,7 @@ export function StreamsPage({
       off()
       void window.api.unwatchStreamsDir()
     }
-  }, [streamsDir, streamMode, loadFolders])
+  }, [streamsDir, streamMode, loadFolders, spliceStreams])
 
   // Timestamp until which this page's streams:changed listener stands down.
   // Set whenever the page itself deletes files: the grid is updated
@@ -3565,7 +3660,7 @@ export function StreamsPage({
                         linkMissing={status?.missing === true}
                         onTagSelect={handleTagSelect}
                         sameDayIndex={sameDayIndexMap.get(f.folderPath)}
-                        thumbsKey={thumbsKey}
+                        thumbsKey={thumbsKeyFor(f)}
                         thumbWidth={thumbWidth}
                         tagColors={tagColors}
                         tagTextures={tagTextures}
@@ -3667,7 +3762,7 @@ export function StreamsPage({
                   <OutOfSyncPanel
                     items={outOfSyncItems}
                     folders={folders}
-                    thumbsKey={thumbsKey}
+                    thumbsKey={anyStreamThumbsKey}
                     loading={outOfSyncLoading}
                     checkedAt={outOfSyncCheckedAt}
                     quotaExceeded={ytQuota.exceeded}
@@ -3730,7 +3825,7 @@ export function StreamsPage({
               onPinLocal={() => handlePinLocal(renderedFolder)}
               onArchive={() => handleArchive(renderedFolder)}
               isArchiving={isFolderArchiving(renderedFolder)}
-              thumbsKey={thumbsKey}
+              thumbsKey={thumbsKeyFor(renderedFolder)}
               onDeleteThumbnail={(filePath) => handleDeleteThumbnail(renderedFolder, filePath)}
               ytBroadcasts={ytBroadcasts}
               ytVods={ytVods}
