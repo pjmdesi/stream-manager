@@ -1372,19 +1372,28 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   useEffect(() => {
     if (!state.filePath) return
     const fp = state.filePath
+    // Resolve the stream identity from the FILE PATH alone — the same
+    // resolution displayRecents/removeRecent use. currentStreamFolder is
+    // deliberately NOT used here: its folderPath-state fallback is stale for
+    // a render when switching to a file opened from elsewhere, so an
+    // external video's entry briefly carried the PREVIOUS stream's identity
+    // — and main's one-entry-per-stream dedupe then deleted the previous
+    // stream's recent (only the external video survived in the list).
+    const { metaKey } = resolveStreamContext(fp, config.streamsDir)
+    const folder = sortedStreamFolders.find(f => f.relativePath === metaKey) ?? null
     const entry: PlayerRecentEntry = {
       filePath: fp,
       fileName: fp.split(/[\\/]/).pop() ?? fp,
-      folderPath: currentStreamFolder?.folderPath,
-      relativePath: currentStreamFolder?.relativePath,
-      streamTitle: currentStreamFolder
-        ? renderStreamTitle(currentStreamFolder, sortedStreamFolders) || undefined
+      folderPath: folder?.folderPath,
+      relativePath: folder?.relativePath,
+      streamTitle: folder
+        ? renderStreamTitle(folder, sortedStreamFolders) || undefined
         : undefined,
-      streamDate: currentStreamFolder?.date,
+      streamDate: folder?.date,
       openedAt: Date.now(),
     }
     window.api.playerAddRecent(entry).then(setRecents).catch(() => {})
-  }, [state.filePath, currentStreamFolder, sortedStreamFolders])
+  }, [state.filePath, config.streamsDir, sortedStreamFolders])
   const removeRecent = useCallback((entry: PlayerRecentEntry & { folder?: StreamFolder }) => {
     // A stream-item recent stands for the whole stream — its individual files
     // live in the session videos panel, not as separate recents — so removing
