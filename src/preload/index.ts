@@ -310,6 +310,11 @@ contextBridge.exposeInMainWorld('api', {
   listStreams: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
     ipcRenderer.invoke('streams:list', dir, mode),
 
+  /** Scoped single-stream fetch for targeted streams:changed events.
+   *  Folder-per-stream mode only; null = stream gone (splice it out). */
+  listStreamOne: (dir: string, streamKey: string) =>
+    ipcRenderer.invoke('streams:listOne', dir, streamKey),
+
   streamsGetLinkedYouTubeIds: (): Promise<string[]> =>
     ipcRenderer.invoke('streams:getLinkedYouTubeIds'),
 
@@ -353,10 +358,13 @@ contextBridge.exposeInMainWorld('api', {
   unwatchStreamsDir: () =>
     ipcRenderer.invoke('streams:unwatchDir'),
 
-  onStreamsChanged: (callback: (info?: { quiet?: boolean }) => void) => {
+  onStreamsChanged: (callback: (info?: { quiet?: boolean; streamKeys?: string[] }) => void) => {
     // `quiet` marks main's deferred echo fires — reload data, skip the
-    // thumbnail cache-bust flash. Absent on normal events.
-    const handler = (_e: unknown, info?: { quiet?: boolean }) => callback(info)
+    // thumbnail cache-bust flash. `streamKeys` scopes the change to
+    // specific streams (relativePath keys) — consumers may reload just
+    // those; absent = structural change, full reload. Both absent on
+    // plain events.
+    const handler = (_e: unknown, info?: { quiet?: boolean; streamKeys?: string[] }) => callback(info)
     ipcRenderer.on('streams:changed', handler)
     return () => ipcRenderer.removeListener('streams:changed', handler)
   },

@@ -163,6 +163,9 @@ declare global {
 
       // ── Streams ──────────────────────────────────────────────────────────────
       listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
+      /** Scoped single-stream fetch for targeted streams:changed events.
+       *  Folder-per-stream mode only; null = stream gone (splice it out). */
+      listStreamOne(dir: string, streamKey: string): Promise<StreamFolder | null>
       detectStreamStructure(dir: string): Promise<DetectedStructure>
       writeStreamMeta(folderPath: string, meta: StreamMeta, metaKey?: string): Promise<void>
       updateStreamMeta(folderPath: string, partial: Partial<StreamMeta>, metaKey?: string): Promise<void>
@@ -177,7 +180,7 @@ declare global {
       deleteStreamFiles(dir: string, date: string): Promise<void>
       watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
       unwatchStreamsDir(): Promise<void>
-      onStreamsChanged(cb: (info?: { quiet?: boolean }) => void): () => void
+      onStreamsChanged(cb: (info?: { quiet?: boolean; streamKeys?: string[] }) => void): () => void
       getMetaHealth(): Promise<{ ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string; note?: { kind: 'restored'; from: string; at: string } }>
       onMetaHealth(cb: (health: { ok: boolean; kind?: 'locked' | 'corrupt'; detail?: string; note?: { kind: 'restored'; from: string; at: string } }) => void): () => void
       dismissMetaNote(): Promise<void>

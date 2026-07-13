@@ -10,6 +10,7 @@ import type { ConversionPreset } from './converter'
 import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './files'
 import { probeFile, parseClipProvenance } from '../services/ffmpegService'
 import { isInFlightWrite } from '../services/inFlightWrites'
+import { consumeSelfWrite } from '../services/selfWrites'
 
 export type VideoCategory = 'full' | 'short' | 'clip'
 
@@ -337,13 +338,37 @@ function isMeaningfulMeta(m: StreamMeta | null | undefined): boolean {
 
 /** Canonical _meta.json key for a stream folder: forward-slash relative path
  *  from the streams root. Falls back to the basename if the path isn't actually
- *  inside streamsDir (defensive). */
-function metaKey(streamsDir: string, folderPath: string): string {
+ *  inside streamsDir (defensive). Exported for the other write sites
+ *  (thumbnail saves) that emit stream-scoped `streams:changed` events. */
+export function metaKey(streamsDir: string, folderPath: string): string {
   const rel = path.relative(streamsDir, folderPath)
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
     return path.basename(folderPath)
   }
   return rel.split(path.sep).join('/')
+}
+
+/** Resolve a changed filesystem path to the stream folder that owns it —
+ *  the key of the FIRST date-named directory level under the streams root,
+ *  matching findStreamFolders' stop-at-first-date-match walk. Returns null
+ *  when the path isn't inside any stream folder (root-level files, the
+ *  stream folder itself, template/asset dirs) — callers treat that as a
+ *  structural change and fall back to a full reload. Folder-per-stream
+ *  mode only; dump mode always full-scans. */
+export function streamKeyForPath(streamsDir: string, p: string): string | null {
+  const rel = path.relative(path.resolve(streamsDir), path.resolve(p))
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
+  const segs = rel.split(path.sep)
+  // The matched segment must not be the final one: the event path has to
+  // live INSIDE the stream folder. An event for the date-named entry
+  // itself is a create/delete of the whole stream (structural), and a
+  // date-patterned FILE at the root must not masquerade as a folder key.
+  const parts: string[] = []
+  for (let i = 0; i < segs.length - 1; i++) {
+    parts.push(segs[i])
+    if (DATE_FOLDER_RE.test(segs[i])) return parts.join('/')
+  }
+  return null
 }
 
 /** Resolve the streams root from app config — used by IPC handlers that only
@@ -909,6 +934,34 @@ function pruneStaleVideoMapEntries(
   return changed
 }
 
+/** Assemble one folder-mode StreamFolder from disk + the meta store.
+ *  Shared by the full streams:list scan and the scoped streams:listOne
+ *  fetch so the two can never drift. (Dump mode has its own grouping
+ *  logic and never goes through here.) */
+function buildStreamFolder(folderPath: string, relativePath: string, allMeta: Record<string, StreamMeta>): StreamFolder {
+  const folderName = path.basename(folderPath)
+  const meta = allMeta[relativePath] ?? null
+  // Filename game-detection removed — see the dump-mode scan.
+  const thumbnails = detectThumbnails(folderPath)
+  if (meta?.preferredThumbnail) {
+    const idx = thumbnails.findIndex(t => path.basename(t) === meta.preferredThumbnail)
+    if (idx > 0) { const [item] = thumbnails.splice(idx, 1); thumbnails.unshift(item) }
+  }
+  const videos = collectStreamFiles(folderPath).videos
+  return {
+    folderName,
+    folderPath,
+    relativePath,
+    date: calendarDate(folderName),
+    meta,
+    hasMeta: isMeaningfulMeta(meta),
+    detectedGames: [],
+    thumbnails,
+    videoCount: videos.length,
+    videos,
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerStreamsIPC(): void {
@@ -1011,33 +1064,9 @@ export function registerStreamsIPC(): void {
       const seenKeys = new Set<string>()
 
       for (const folderPath of streamFolderPaths) {
-        const folderName = path.basename(folderPath)
         const relativePath = metaKey(dir, folderPath)
         seenKeys.add(relativePath)
-
-        const meta = allMeta[relativePath] ?? null
-        // Filename game-detection removed — see the dump-mode branch above.
-        const detectedGames: string[] = []
-        const thumbnails = detectThumbnails(folderPath)
-        if (meta?.preferredThumbnail) {
-          const idx = thumbnails.findIndex(t => path.basename(t) === meta.preferredThumbnail)
-          if (idx > 0) { const [item] = thumbnails.splice(idx, 1); thumbnails.unshift(item) }
-        }
-
-        const videos = collectStreamFiles(folderPath).videos
-
-        folders.push({
-          folderName,
-          folderPath,
-          relativePath,
-          date: calendarDate(folderName),
-          meta,
-          hasMeta: isMeaningfulMeta(meta),
-          detectedGames,
-          thumbnails,
-          videoCount: videos.length,
-          videos,
-        })
+        folders.push(buildStreamFolder(folderPath, relativePath, allMeta))
       }
 
       // Orphaned meta entries (folder gone) — always isMissing in folder mode.
@@ -1170,9 +1199,9 @@ export function registerStreamsIPC(): void {
           // computed (per-file videoMap entries). The read-merge-write is
           // synchronous, so nothing can interleave — metadata edits,
           // deletions, and clip exports made while probing all survive.
+          const touchedKeys: string[] = []
           try {
             const fresh = readAllMeta(dir)
-            let touched = false
             for (const { key, folderPath, date } of videoEntries) {
               const computed = allMeta[key]?.videoMap
               if (!computed || Object.keys(computed).length === 0) continue
@@ -1190,9 +1219,9 @@ export function registerStreamsIPC(): void {
               // scan (absent from `computed`) keep whatever entry a
               // concurrent writer gave them.
               target.videoMap = { ...(target.videoMap ?? {}), ...computed }
-              touched = true
+              touchedKeys.push(key)
             }
-            if (!touched) return
+            if (touchedKeys.length === 0) return
             writeAllMeta(dir, fresh)
           } catch (err) {
             // Meta locked/corrupt right now — drop the merge. The probed
@@ -1204,14 +1233,130 @@ export function registerStreamsIPC(): void {
           // Notify the renderer so it re-fetches with the freshly-written
           // videoMap entries (e.g. categories for newly-arrived files). The
           // chokidar self-loop guard means our own _meta.json write doesn't
-          // trigger a streams:changed event automatically.
+          // trigger a streams:changed event automatically. Scoped to the
+          // touched streams (folder mode) and quiet in either mode — new
+          // files have new paths, so nothing needs a thumbnail cache-bust.
           const win = BrowserWindow.fromWebContents(event.sender)
-          if (win && !win.isDestroyed()) win.webContents.send('streams:changed')
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('streams:changed',
+              mode === 'folder-per-stream'
+                ? { quiet: true, streamKeys: touchedKeys }
+                : { quiet: true })
+          }
         })
         .catch(err => console.error('[streams:list] refreshVideoMaps failed:', err))
     }
 
     return folders
+  })
+
+  // Scoped single-stream fetch — the data source for targeted
+  // `streams:changed { streamKeys }` events (todo #43). Folder-per-stream
+  // mode only; dump mode always full-scans. Returns:
+  //   - the assembled StreamFolder when the folder exists
+  //   - an isMissing entry when the folder is gone but meaningful meta
+  //     remains (mirrors the full scan's orphan handling)
+  //   - null when nothing remains (the renderer splices the row out)
+  ipcMain.handle('streams:listOne', async (event, dir: string, streamKey: string): Promise<StreamFolder | null> => {
+    if (!dir || !streamKey || !fs.existsSync(dir)) return null
+    const allMeta = readAllMeta(dir)
+    const folderPath = path.join(dir, ...streamKey.split('/'))
+
+    if (!fs.existsSync(folderPath)) {
+      const meta = allMeta[streamKey]
+      if (!meta || !isMeaningfulMeta(meta)) return null
+      const folderName = streamKey.includes('/') ? streamKey.slice(streamKey.lastIndexOf('/') + 1) : streamKey
+      if (!DATE_FOLDER_RE.test(folderName)) return null
+      return {
+        folderName,
+        folderPath,
+        relativePath: streamKey,
+        date: calendarDate(folderName),
+        meta,
+        hasMeta: true,
+        detectedGames: [],
+        videoCount: 0,
+        videos: [],
+        thumbnails: [],
+        isMissing: true,
+      }
+    }
+
+    const folder = buildStreamFolder(folderPath, streamKey, allMeta)
+
+    // Thumbnail cloud classification for just this folder — same safety net
+    // as the full scan: on failure mark everything non-local so the renderer
+    // shows cloud icons instead of risking a hung file:// load.
+    if (folder.thumbnails.length > 0) {
+      try {
+        const flags = await Promise.race([
+          checkLocalFiles(folder.thumbnails),
+          new Promise<boolean[]>((_, reject) =>
+            setTimeout(() => reject(new Error('thumbnail localFiles check timeout')), 15000)
+          ),
+        ])
+        folder.thumbnailLocalFlags = flags
+      } catch (err) {
+        console.warn('[streams:listOne] thumbnail localFiles check failed:', err)
+        folder.thumbnailLocalFlags = folder.thumbnails.map(() => false)
+      }
+    }
+
+    // Folder-scoped videoMap maintenance — the same prune / probe / merge
+    // pipeline streams:list runs, restricted to this one stream. The merge
+    // notify is scoped and quiet for the same reasons as the full scan's.
+    if (!folder.isMissing && folder.videos.length > 0) {
+      const entry = { key: folder.relativePath, folderPath: folder.folderPath, date: folder.date, videos: folder.videos }
+      if (pruneStaleVideoMapEntries([entry], allMeta)) {
+        try { writeAllMeta(dir, allMeta) }
+        catch (err) { console.error('[streams:listOne] prune write failed:', err) }
+      }
+      const cached = allMeta[entry.key]?.videoMap
+      const currentNames = entry.videos.map(v => videoRelKey(entry.folderPath, v))
+      const videoSetChanged = !cached
+        ? entry.videos.length > 0
+        : (() => {
+            const cachedNames = new Set(Object.keys(cached))
+            if (cachedNames.size !== currentNames.length) return true
+            for (const name of currentNames) if (!cachedNames.has(name)) return true
+            for (let i = 0; i < entry.videos.length; i++) {
+              const e = cached[currentNames[i]]
+              if (!e) continue
+              try {
+                if (fs.statSync(entry.videos[i]).mtimeMs !== e.mtime) return true
+              } catch { /* unreadable right now — the prune/placeholder paths own it */ }
+            }
+            return false
+          })()
+      if (videoSetChanged) {
+        refreshVideoMaps([entry], allMeta)
+          .then(changed => {
+            if (!changed) return
+            try {
+              const fresh = readAllMeta(dir)
+              const computed = allMeta[entry.key]?.videoMap
+              if (!computed || Object.keys(computed).length === 0) return
+              let target = fresh[entry.key]
+              if (!target) {
+                if (!fs.existsSync(entry.folderPath)) return
+                target = ensureMetaEntry(fresh, entry.key, entry.date)
+              }
+              target.videoMap = { ...(target.videoMap ?? {}), ...computed }
+              writeAllMeta(dir, fresh)
+            } catch (err) {
+              console.error('[streams:listOne] videoMap merge failed:', err)
+              return
+            }
+            const win = BrowserWindow.fromWebContents(event.sender)
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('streams:changed', { quiet: true, streamKeys: [entry.key] })
+            }
+          })
+          .catch(err => console.error('[streams:listOne] refreshVideoMaps failed:', err))
+      }
+    }
+
+    return folder
   })
 
   // For each meta-touching IPC: an explicit `metaKeyOverride` lets the renderer
@@ -1907,7 +2052,17 @@ export function registerStreamsIPC(): void {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   const DEBOUNCE_MS = 800
 
-  function notifyChange(win: BrowserWindow) {
+  // Stream keys accumulated during the current debounce window. `null`
+  // means at least one event in the burst was structural (date-folder
+  // add/remove, root-level file, unresolvable path) — the whole burst
+  // escalates to a full reload. Reset to a fresh Set on every fire.
+  let pendingScopedKeys: Set<string> | null = new Set()
+
+  function notifyChange(win: BrowserWindow, scope: string | null) {
+    // scope: the stream key the event resolved to, or null for
+    // structural/unresolvable changes (and everything in dump mode).
+    if (scope === null) pendingScopedKeys = null
+    else if (pendingScopedKeys) pendingScopedKeys.add(scope)
     if (debounceTimer) clearTimeout(debounceTimer)
     debounceTimer = setTimeout(function fire(isDeferred?: boolean) {
       // Suppression check is at FIRE time (inside the debounce callback)
@@ -1933,8 +2088,13 @@ export function registerStreamsIPC(): void {
         debounceTimer = setTimeout(() => fire(true), waitMs + 50)
         return
       }
+      const keys = pendingScopedKeys
+      pendingScopedKeys = new Set()
       if (!win.isDestroyed()) {
-        win.webContents.send('streams:changed', isDeferred ? { quiet: true } : undefined)
+        const payload: { quiet?: boolean; streamKeys?: string[] } = {}
+        if (isDeferred) payload.quiet = true
+        if (keys && keys.size > 0) payload.streamKeys = [...keys]
+        win.webContents.send('streams:changed', Object.keys(payload).length > 0 ? payload : undefined)
       }
     }, DEBOUNCE_MS)
   }
@@ -1994,9 +2154,21 @@ export function registerStreamsIPC(): void {
       },
     })
 
-    const onChange = () => notifyChange(win)
-    dirWatcher.on('add', onChange)
-    dirWatcher.on('unlink', onChange)
+    // File events resolve to the owning stream folder so the renderer can
+    // reload just that stream; anything else (dump mode, root-level files,
+    // paths outside a stream folder) escalates the burst to a full reload.
+    // Echoes of the app's own writes (thumbnail saves, converter outputs —
+    // announced via expectSelfWrite) are dropped outright.
+    const isDump = mode === 'dump-folder'
+    const onFileEvent = (p: string) => {
+      if (consumeSelfWrite(p)) return
+      notifyChange(win, isDump ? null : streamKeyForPath(dir, p))
+    }
+    dirWatcher.on('add', onFileEvent)
+    dirWatcher.on('unlink', onFileEvent)
+    dirWatcher.on('change', onFileEvent)
+    // Directory events are structural (a date-named dir appearing or
+    // vanishing is a stream create/delete/reschedule) → full reload.
     dirWatcher.on('addDir', (p: string) => {
       // Diagnostic: surface every date-named folder appearing in the
       // streams root, with timestamp. Helps pin down the phantom
@@ -2006,15 +2178,14 @@ export function registerStreamsIPC(): void {
       if (DATE_FOLDER_RE.test(path.basename(p))) {
         console.warn(`[streams-watcher addDir] ${new Date().toISOString()} ${p}`)
       }
-      onChange()
+      notifyChange(win, null)
     })
     dirWatcher.on('unlinkDir', (p: string) => {
       if (DATE_FOLDER_RE.test(path.basename(p))) {
         console.warn(`[streams-watcher unlinkDir] ${new Date().toISOString()} ${p}`)
       }
-      onChange()
+      notifyChange(win, null)
     })
-    dirWatcher.on('change', onChange)
     dirWatcher.on('error', err => console.warn('[streams:watchDir] watcher error:', err))
   }
 

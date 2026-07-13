@@ -4,8 +4,9 @@ import path from 'path'
 import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import { getStore } from './store'
-import { suppressNextStreamsChokidarFire, readAllMeta, writeAllMeta } from './streams'
+import { suppressNextStreamsChokidarFire, readAllMeta, writeAllMeta, streamKeyForPath } from './streams'
 import { registerInFlightWritePredicate } from '../services/inFlightWrites'
+import { expectSelfWrite } from '../services/selfWrites'
 
 /** Form state for the simplified custom-preset editor. Stored on the preset so
  *  the user can re-open and edit it in form mode later, and so exports preserve
@@ -736,6 +737,9 @@ export async function startConversionJob(
       resumers.delete(id)
       downloadCancelFlags.delete(id)
       notifyAll('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
+      // Replace-in-place jobs land on the ORIGINAL path; everything else on
+      // the output path.
+      notifyStreamOutput(job.replaceInput ? job.inputFile : job.outputFile)
       // Group bookkeeping — fire completion hook if this is the last successful
       // job in the group (and no group siblings have failed/cancelled).
       maybeFireGroupHook(id)
@@ -927,11 +931,38 @@ async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void>
     // Tell the renderer to refresh the streams page. Suppress the
     // chokidar echo for the final output file (chokidar fires on the
     // tmp→final rename ~1.8s later — the explicit send below already
-    // covers it).
+    // covers it). Scoped to the archived stream in folder mode — the
+    // hook's metaKey IS the stream key.
     suppressNextStreamsChokidarFire()
+    const cfg = getStore().get('config') as { streamMode?: string }
+    const scoped = cfg.streamMode !== 'dump-folder' && hook.metaKey
+      ? { streamKeys: [hook.metaKey] }
+      : undefined
     for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('streams:changed')
+      if (!w.isDestroyed()) w.webContents.send('streams:changed', scoped)
     }
+  }
+}
+
+/** Reveal a finished output to the streams UI. While a job runs, its
+ *  output is hidden everywhere (inFlightWrites) and its chokidar events are
+ *  ignored — which also means the file-close settle events can't be relied
+ *  on to announce the finished file. This is the deterministic reveal:
+ *  swallow the close echo (expectSelfWrite) and send a streams:changed
+ *  scoped to the owning stream (full event for root-level outputs; no-op
+ *  for outputs outside the streams dir, which the watcher never covered).
+ */
+function notifyStreamOutput(finalPath: string): void {
+  if (!finalPath) return
+  const config = getStore().get('config') as { streamsDir?: string; streamMode?: string }
+  const dir = config.streamsDir
+  if (!dir) return
+  const rel = path.relative(path.resolve(dir), path.resolve(finalPath))
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return
+  expectSelfWrite(finalPath)
+  const key = config.streamMode !== 'dump-folder' ? streamKeyForPath(dir, finalPath) : null
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('streams:changed', key ? { streamKeys: [key] } : undefined)
   }
 }
 
@@ -1281,6 +1312,7 @@ export function registerConverterIPC(): void {
       jobs.set(id, { ...jobs.get(id)!, status: 'done', progress: 100 })
       cancellers.delete(id); pausers.delete(id); resumers.delete(id)
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
+      notifyStreamOutput(job.outputFile)
     }
     const onError = (err: Error) => {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
@@ -1481,10 +1513,15 @@ export function registerConverterIPC(): void {
       // tell them to reconcile. When the partial is being auto-deleted,
       // notify AFTER the unlink lands (ffmpeg's handle release can take a
       // few retries) so the rescan sees the file gone rather than briefly
-      // listing the dead partial.
+      // listing the dead partial. Scoped to the owning stream when the
+      // output lives inside one.
       const notifyStreamsChanged = () => {
+        const cfg = getStore().get('config') as { streamsDir?: string; streamMode?: string }
+        const key = cfg.streamsDir && cfg.streamMode !== 'dump-folder' && j.outputFile
+          ? streamKeyForPath(cfg.streamsDir, j.outputFile)
+          : null
         for (const w of BrowserWindow.getAllWindows()) {
-          if (!w.isDestroyed()) w.webContents.send('streams:changed')
+          if (!w.isDestroyed()) w.webContents.send('streams:changed', key ? { streamKeys: [key] } : undefined)
         }
       }
       // For replaceInput jobs the temp output is internal — clean it up
@@ -1492,6 +1529,8 @@ export function registerConverterIPC(): void {
       if (j.replaceInput && j.outputFile) {
         deleteWithRetry(j.outputFile, 'archive temp file (cancel)')
       } else if (config.autoDeletePartialOnCancel && j.outputFile) {
+        // Swallow the unlink echo — the callback below is the notify.
+        expectSelfWrite(j.outputFile)
         deleteWithRetry(j.outputFile, 'cancelled output', notifyStreamsChanged)
       } else {
         // Partial kept (by config) — it's a real file now; show it.

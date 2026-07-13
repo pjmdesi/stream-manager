@@ -3,7 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { getStore } from './store'
-import { suppressNextStreamsChokidarFire } from './streams'
+import { suppressNextStreamsChokidarFire, metaKey } from './streams'
+import { expectSelfWrite } from '../services/selfWrites'
 
 // ── Types (mirrored from renderer) ───────────────────────────────────────────
 
@@ -190,25 +191,36 @@ export function registerThumbnailIPC(): void {
       console.warn(`[thumbnail:saveCanvas] folder gone — skipping save: ${folderPath}`)
       return
     }
-    // Suppress the chokidar echo for the PNG we're about to write.
-    // We send `streams:changed` explicitly below for instant feedback;
-    // without this guard, chokidar would also fire ~1.8s later on the
-    // same write and the renderer would reload twice per save.
+    // Suppress the chokidar echo for the PNG we're about to write: the
+    // per-path registry drops the echo events outright, and the global
+    // window stays as a belt-and-suspenders during the scoped-events
+    // rollout (retiring it is a later cleanup).
+    const jsonPath = canvasJsonPath(folderPath, date, ordinal)
+    const pngPath = canvasPngPath(folderPath, date, ordinal)
+    expectSelfWrite(jsonPath)
+    expectSelfWrite(pngPath)
     suppressNextStreamsChokidarFire()
     // Save JSON
-    await fs.promises.writeFile(canvasJsonPath(folderPath, date, ordinal), JSON.stringify(canvasFile, null, 2), 'utf-8')
+    await fs.promises.writeFile(jsonPath, JSON.stringify(canvasFile, null, 2), 'utf-8')
     // Save PNG (skipped when the renderer withheld it — missing font)
     if (pngDataUrl != null) {
       const base64 = pngDataUrl.replace(/^data:image\/png;base64,/, '')
-      await fs.promises.writeFile(canvasPngPath(folderPath, date, ordinal), Buffer.from(base64, 'base64'))
+      await fs.promises.writeFile(pngPath, Buffer.from(base64, 'base64'))
     }
     // Explicit notify so the streams page refreshes immediately. The
     // chokidar watcher would also catch this PNG write, but only after
     // ~1.8s (awaitWriteFinish + debounce) and it can miss the event on
     // some setups (cloud-sync'd folders, ReadDirectoryChangesW handle
-    // churn). Firing here is deterministic.
+    // churn). Firing here is deterministic. Scoped to this stream in
+    // folder mode so only its row reloads.
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (win && !win.isDestroyed()) win.webContents.send('streams:changed')
+    if (win && !win.isDestroyed()) {
+      const config = getStore().get('config') as { streamsDir?: string; streamMode?: string }
+      const scoped = config.streamMode !== 'dump-folder' && config.streamsDir
+        ? { streamKeys: [metaKey(config.streamsDir, folderPath)] }
+        : undefined
+      win.webContents.send('streams:changed', scoped)
+    }
   })
 
   ipcMain.handle('thumbnail:listVariants', async (_e, folderPath: string, date: string): Promise<number[]> => {
