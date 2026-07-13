@@ -2316,9 +2316,23 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // of layer type — for centered shapes that's the center, but the delta
   // we apply on drag-move is the same in either coordinate space.
   const multiDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  // The node the user actually grabbed. Since Konva 8.3, a Transformer with
+  // multiple nodes attached MIRRORS a drag onto every attached node — and
+  // each mirrored node fires its own dragstart/dragmove/dragend. A 4-layer
+  // group drag therefore arrives as 4 interleaved event streams; handling
+  // each as its own gesture was the root of every undo corruption here
+  // (N commits per drag, N-1 of them half-states from a stale base). All
+  // drag handlers act only on the primary's events. First dragstart wins:
+  // the grabbed node's handlers were registered at mount, before the
+  // Transformer attached its mirror listeners, so its dragstart is always
+  // delivered first.
+  const primaryDragIdRef = useRef<string | null>(null)
+  const dragEndFlushScheduledRef = useRef(false)
 
   const handleDragStart = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
+    if (primaryDragIdRef.current !== null) return // Transformer mirror — not a new gesture
     const target = e.target
+    primaryDragIdRef.current = target.id()
     dragStartPosRef.current = { x: target.x(), y: target.y() }
     multiDragStartRef.current.clear()
     const sel = selectedIdsRef.current
@@ -2334,6 +2348,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const handleSnapDragMove = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
     if (!stageRef.current || !guideLayerRef.current) return
     const node = e.target
+    // Mirrored drag events do nothing — the primary's handler positions the
+    // whole group rigidly, and per-node handling would snap each layer
+    // individually (the old "some layers stick to snap points" bug).
+    if (primaryDragIdRef.current !== null && node.id() !== primaryDragIdRef.current) return
 
     // Axis constraint: Shift locks movement to the dominant axis from drag start
     if (e.evt.shiftKey && dragStartPosRef.current) {
@@ -3028,36 +3046,60 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   }, [layers, setLayersDirect, triggerAutoSave])
 
   /** Commits the drag's final position(s). One commit = one undo entry,
-   *  whether single-drag or multi-drag. Layer-type-specific conversion
-   *  (centered shapes' center→top-left) lives here so the per-node
-   *  onDragEnd handlers can stay trivial. */
+   *  whether single-drag or multi-drag. The Transformer mirrors dragend to
+   *  every attached node, so this fires N times per group drag — mirrored
+   *  events are ignored and the real work runs ONCE via microtask (same
+   *  pattern as handleTransformEnd). */
   const handleDragEnd = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
-    const stage = stageRef.current
-    if (!stage) return
-    const draggedId = e.target.id()
-    const sel = selectedIdsRef.current
-    const movedIds = multiDragStartRef.current.size > 0 && sel.includes(draggedId)
-      ? sel
-      : [draggedId]
+    if (primaryDragIdRef.current !== null && e.target.id() !== primaryDragIdRef.current) return
+    if (dragEndFlushScheduledRef.current) return
+    dragEndFlushScheduledRef.current = true
+    queueMicrotask(() => {
+      dragEndFlushScheduledRef.current = false
+      const stage = stageRef.current
+      const primaryId = primaryDragIdRef.current
+      const startPos = dragStartPosRef.current
+      const companions = multiDragStartRef.current
+      primaryDragIdRef.current = null
+      dragStartPosRef.current = null
+      multiDragStartRef.current = new Map()
+      if (!stage || !primaryId) return
+      const primaryNode = stage.findOne(`#${primaryId}`)
+      if (!primaryNode) return
 
-    const positions = new Map<string, { x: number; y: number }>()
-    for (const id of movedIds) {
-      const node = stage.findOne(`#${id}`)
-      if (node) positions.set(id, { x: node.x(), y: node.y() })
-    }
+      // Rigid-group math: the primary's live position is authoritative
+      // (it carries the snap), and companions commit at their snapshot
+      // plus the primary's total delta — NOT their live node positions,
+      // which the Transformer's native mirroring may have left at the
+      // UNSNAPPED delta (a few px off the snapped group).
+      const px = primaryNode.x(), py = primaryNode.y()
+      const dx = startPos ? px - startPos.x : 0
+      const dy = startPos ? py - startPos.y : 0
+      const positions = new Map<string, { x: number; y: number }>()
+      positions.set(primaryId, { x: px, y: py })
+      companions.forEach((start, id) => positions.set(id, { x: start.x + dx, y: start.y + dy }))
 
-    // Group wrappers around every layer mean node.x/y is now the
-    // layer's top-left in every case — including centered shapes
-    // (the center offset lives on the inner Konva element, inside
-    // the Group). No center→top-left conversion needed here anymore.
-    const next = layers.map(l => {
-      const np = positions.get(l.id)
-      if (!np) return l
-      return { ...l, x: np.x, y: np.y }
+      // Group wrappers around every layer mean node.x/y is the layer's
+      // top-left in every case — including centered shapes (the center
+      // offset lives on the inner Konva element, inside the Group).
+      // layersRef (not the render closure) so the base can never be stale
+      // relative to a commit that landed earlier in this same tick.
+      const next = layersRef.current.map(l => {
+        const np = positions.get(l.id)
+        if (!np) return l
+        return { ...l, x: np.x, y: np.y }
+      })
+      commitLayers(next)
+      // Stamp the nodes to the committed values: react-konva's diff won't
+      // reapply a prop that didn't change, and the mirrored drag may have
+      // left a node at a not-quite-committed position.
+      positions.forEach((p, id) => {
+        const n = stage.findOne(`#${id}`)
+        if (n) { n.x(p.x); n.y(p.y) }
+      })
+      stage.batchDraw()
     })
-    commitLayers(next)
-    multiDragStartRef.current.clear()
-  }, [layers, commitLayers])
+  }, [commitLayers])
 
   // Arrow-key nudge of the selection — 1px per press, 10px with Shift. A burst
   // of presses collapses into a single undo entry via useCommitOnRelease; the
