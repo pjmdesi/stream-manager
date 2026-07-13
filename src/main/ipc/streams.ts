@@ -9,6 +9,7 @@ import { getStore } from './store'
 import type { ConversionPreset } from './converter'
 import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './files'
 import { probeFile, parseClipProvenance } from '../services/ffmpegService'
+import { isInFlightWrite } from '../services/inFlightWrites'
 
 export type VideoCategory = 'full' | 'short' | 'clip'
 
@@ -1973,14 +1974,15 @@ export function registerStreamsIPC(): void {
       //     is churn, and chokidar's write-stability stat-polling can race
       //     a cancelled job's file-handle release into an EPERM. The
       //     completion/cancel paths fire their own explicit events, so
-      //     nothing is missed. (Lazy import — converter registers later.)
+      //     nothing is missed. (Via the inFlightWrites registry — a lazy
+      //     `require('./converter')` used to sit here to dodge the import
+      //     cycle, but the bundled main process has no ./converter module
+      //     at runtime, so it always threw and the catch silently disabled
+      //     this ignore. That was the thumbnail-refresh thrash during
+      //     long conversions.)
       ignored: (p: string) => {
         if (path.basename(p).startsWith('_meta.') || /__arc_tmp\.[^.]+$/.test(p)) return true
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const { isConverterWritingPath } = require('./converter') as typeof import('./converter')
-          return isConverterWritingPath(p)
-        } catch { return false }
+        return isInFlightWrite(p)
       },
     })
 

@@ -6,6 +6,7 @@ import { pipeline } from 'stream/promises'
 import { createReadStream, createWriteStream } from 'fs'
 import { Transform } from 'stream'
 import { getStore } from '../ipc/store'
+import { isInFlightWrite } from './inFlightWrites'
 
 const PROGRESS_THROTTLE_MS = 250
 
@@ -169,14 +170,10 @@ class FileWatcher {
       // Never track a file the converter is actively writing: a rule
       // acting on a half-encoded output would move/copy garbage, and the
       // write-stability stat-polling can race a cancelled job's handle
-      // release into EPERM errors. (Lazy import avoids a load cycle.)
-      ignored: (p: string) => {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const { isConverterWritingPath } = require('../ipc/converter') as typeof import('../ipc/converter')
-          return isConverterWritingPath(p)
-        } catch { return false }
-      },
+      // release into EPERM errors. (Via the inFlightWrites registry — the
+      // old lazy `require('../ipc/converter')` here always threw in the
+      // bundled main process, so this guard was silently dead.)
+      ignored: (p: string) => isInFlightWrite(p),
     })
 
     this.watcher.on('add', (filePath) => {

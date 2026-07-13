@@ -5,6 +5,7 @@ import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import { getStore } from './store'
 import { suppressNextStreamsChokidarFire, readAllMeta, writeAllMeta } from './streams'
+import { registerInFlightWritePredicate } from '../services/inFlightWrites'
 
 /** Form state for the simplified custom-preset editor. Stored on the preset so
  *  the user can re-open and edit it in form mode later, and so exports preserve
@@ -945,9 +946,10 @@ export function getConverterStatus(): { active: boolean; percent: number; label:
 
 /** True when `filePath` is the OUTPUT of a conversion that is currently
  *  writing (running or mid archive-swap). Both file watchers consult this
- *  in their ignore functions: watching a growing ffmpeg output is pure
- *  churn, and the write-stability stat-polling can race a cancelled job's
- *  file-handle release into EPERM errors. */
+ *  (via the inFlightWrites registry) in their ignore functions: watching a
+ *  growing ffmpeg output is pure churn, and the write-stability
+ *  stat-polling can race a cancelled job's file-handle release into EPERM
+ *  errors. */
 export function isConverterWritingPath(filePath: string): boolean {
   const target = filePath.replace(/\\/g, '/').toLowerCase()
   for (const j of jobs.values()) {
@@ -956,6 +958,7 @@ export function isConverterWritingPath(filePath: string): boolean {
   }
   return false
 }
+registerInFlightWritePredicate(isConverterWritingPath)
 
 export function getActiveConversionCounts(): { running: number; queued: number } {
   let running = 0, queued = 0
