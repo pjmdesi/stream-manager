@@ -45,7 +45,7 @@ import { releaseThumbDecodes } from '../ui/VideoThumb'
 import { StreamFilesGrid, type FilesGridHandle } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
-import { renderStreamTitle } from '../../lib/streamTitle'
+import { renderStreamTitle, isPrimaryGameOf } from '../../lib/streamTitle'
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import type { StreamFolder, StreamMeta } from '../../types'
@@ -234,13 +234,15 @@ function hasYtTitleMergeFields(text: string): boolean {
  *  caller is expected to exclude the current folder from `allFolders`. */
 function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, season: string, beforeDate?: string): number {
   if (!gameName) return 1
-  const lower = gameName.toLowerCase()
   const s = season || '1'
+  // Primary-game membership only (isPrimaryGameOf): a stream carrying the
+  // game as a SECONDARY tag belongs to a different series — counting it
+  // here handed out duplicate episode numbers (the 2-game "Alters pt 1 +
+  // Beat Saber pt 10" stream registered as Alters episode 10).
   return allFolders.filter(f =>
     !f.isMissing &&
     !isStandalone(f.meta) &&
-    ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
-     (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
+    isPrimaryGameOf(f, gameName) &&
     (f.meta?.ytSeason || '1') === s &&
     (!beforeDate || f.date < beforeDate)
   ).length + 1
@@ -252,13 +254,11 @@ function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, seaso
  *  renders as 0 in a template. */
 function detectTotalEpisodes(allFolders: StreamFolder[], gameName: string, season: string): number {
   if (!gameName) return 1
-  const lower = gameName.toLowerCase()
   const s = season || '1'
   const count = allFolders.filter(f =>
     !f.isMissing &&
     !isStandalone(f.meta) &&
-    ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
-     (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
+    isPrimaryGameOf(f, gameName) &&
     (f.meta?.ytSeason || '1') === s
   ).length
   return count || 1
@@ -277,13 +277,11 @@ async function computeSeasonLinks(
   currentDate: string,
 ): Promise<string> {
   if (!game) return ''
-  const lower = game.toLowerCase()
   const s = season || '1'
   const previous = allFolders.filter(f =>
     !f.isMissing &&
     !isStandalone(f.meta) &&
-    ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
-     (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
+    isPrimaryGameOf(f, game) &&
     (f.meta?.ytSeason || '1') === s &&
     f.date < currentDate &&
     !!f.meta?.ytVideoId
@@ -2725,19 +2723,20 @@ export function StreamsPage({
     // sidebar header renders its empty state (no prev/next arrows, no
     // picker, New Episode button disabled).
     if (isStandalone(selectedFolder.meta)) return empty
-    const primaryGame = selectedFolder.meta?.games?.[0] ?? selectedFolder.detectedGames?.[0]
+    // The user-selected primary (drag-reorder / tag-field selection), not
+    // blindly games[0] — and membership is primary-only so a stream that
+    // carries this game as a secondary tag doesn't appear as an episode.
+    const primaryGame = resolvePrimaryGame(selectedFolder.meta) || selectedFolder.detectedGames?.[0]
     if (!primaryGame) return empty
     // `|| '1'` (not `?? '1'`) so empty strings also collapse to the first
     // season — clearing the field via the input should still associate
     // with siblings that have season undefined OR ''.
     const season = selectedFolder.meta?.ytSeason || '1'
-    const lowerGame = primaryGame.toLowerCase()
     const list = folders
       .filter(f =>
         !f.isMissing &&
         !isStandalone(f.meta) &&
-        ((f.meta?.games?.some(g => g.toLowerCase() === lowerGame)) ||
-         (f.detectedGames?.some(g => g.toLowerCase() === lowerGame))) &&
+        isPrimaryGameOf(f, primaryGame) &&
         (f.meta?.ytSeason || '1') === season
       )
       .sort((a, b) => {
@@ -5874,13 +5873,15 @@ function SidebarDetail({
   // the most-recently-dated sibling (the series being continued); episode is
   // the next number for that game+season strictly before this stream's date.
   const computeSeriesNumbers = useCallback((primaryGame: string): { ytSeason: string; ytEpisode: string } | null => {
-    const lower = primaryGame.trim().toLowerCase()
-    if (!lower) return null
+    const trimmed = primaryGame.trim()
+    if (!trimmed) return null
+    // Primary-only match: a stream where this game is a secondary tag is a
+    // different series — it must neither promote this stream to series nor
+    // feed the episode count.
     const siblings = folders.filter(f =>
       f.folderPath !== folder.folderPath &&
       !f.isMissing &&
-      ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
-       (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
+      isPrimaryGameOf(f, trimmed) &&
       (f.meta?.isSeries === true || (f.meta?.isSeries === undefined && !!f.meta?.ytEpisode))
     )
     if (siblings.length === 0) return null
@@ -10075,7 +10076,10 @@ function NewStreamModal({
     const games = m.games?.length ? m.games : source.detectedGames
     const streamTypes = normalizeStreamTypes(m.streamType)
     const season = m.ytSeason || '1'
-    const game = m.ytGameTitle?.trim() || games?.[0] || ''
+    // Series subject = the source's PRIMARY topic/game (the tag-field
+    // selection), not games[0] — on a multi-game source those can differ
+    // and the episode count would key to the wrong series.
+    const game = resolvePrimaryGame(m) || games?.[0] || m.ytGameTitle?.trim() || ''
 
     // Compute next episode using detectEpisodeNumber. Exclude the source
     // folder itself from the pool when needed — detectEpisodeNumber
@@ -10099,6 +10103,10 @@ function NewStreamModal({
     }
     // Only attach optional fields when the source actually has them, so
     // we don't write a bunch of '' / undefined keys for nothing.
+    // Carry the primary selection forward: without it, a multi-game
+    // episode inherits the full games list but its primary silently
+    // falls back to games[0], which may not be the series subject.
+    if (game && (games ?? []).includes(game)) meta.primaryGame = game
     if (m.ytGameTitle) meta.ytGameTitle = m.ytGameTitle
     if (m.ytTags?.length) {
       meta.ytTags = m.ytTags

@@ -34,17 +34,28 @@ export function resolvePrimaryGame(meta: StreamMeta | null | undefined): string 
   return games[0] ?? ''
 }
 
+/** True when `gameName` is the folder's PRIMARY topic/game (case-insensitive).
+ *  Series membership is primary-only: a stream that merely carries the game
+ *  as a secondary tag must not count toward that series' episode numbering —
+ *  a 2-game stream (Alters part 1 + Beat Saber part 10) would otherwise
+ *  inflate BOTH series' counters. Falls back to detectedGames[0] for
+ *  folders with no tagged games. */
+export function isPrimaryGameOf(folder: StreamFolder, gameName: string): boolean {
+  if (!gameName) return false
+  const primary = resolvePrimaryGame(folder.meta) || folder.detectedGames?.[0] || ''
+  return primary.toLowerCase() === gameName.toLowerCase()
+}
+
 /** Total streams in (game, season). Counts the current folder too; falls
- *  back to 1 so `{total_episodes}` never renders as 0. */
+ *  back to 1 so `{total_episodes}` never renders as 0. Primary-game
+ *  membership only (see isPrimaryGameOf). */
 export function detectTotalEpisodes(allFolders: StreamFolder[], gameName: string, season: string): number {
   if (!gameName) return 1
-  const lower = gameName.toLowerCase()
   const s = season || '1'
   const count = allFolders.filter(f =>
     !f.isMissing &&
     !isStandalone(f.meta) &&
-    ((f.meta?.games?.some(g => g.toLowerCase() === lower)) ||
-     (f.detectedGames?.some(g => g.toLowerCase() === lower))) &&
+    isPrimaryGameOf(f, gameName) &&
     (f.meta?.ytSeason || '1') === s
   ).length
   return count || 1
