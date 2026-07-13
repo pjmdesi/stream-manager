@@ -218,6 +218,21 @@ function cssToWeight(css: string): number {
   return 400
 }
 
+/** Font families referenced by text layers that aren't installed on this
+ *  machine. Family-level on purpose — a missing family renders in a
+ *  substitute font (visually destructive), while a missing variant just
+ *  gets synthesized weight/slant. Only meaningful once the real
+ *  queryLocalFonts list has loaded. */
+function collectMissingFonts(layers: ThumbnailLayer[], installed: Set<string>): string[] {
+  const missing = new Set<string>()
+  for (const l of layers) {
+    if (l.type !== 'text') continue
+    const fam = l.fontFamily ?? 'Arial'
+    if (!installed.has(fam)) missing.add(fam)
+  }
+  return [...missing]
+}
+
 // ── Konva node rendering ──────────────────────────────────────────────────────
 
 interface KonvaLayerNodeProps {
@@ -1095,6 +1110,9 @@ interface PropsPanelProps {
   onLiveChange: (updated: ThumbnailLayer) => void
   systemFonts: string[]
   fontVariantMap: Record<string, { name: string; css: string }[]>
+  /** True once the real queryLocalFonts list loaded — gates the
+   *  missing-font treatment so the seed list can't cause false alarms. */
+  fontsLoaded: boolean
   /** True when the active stream is explicitly standalone (not a series).
    *  Flags the season/episode/total_episodes merge chips as inapplicable —
    *  mirrors the YouTube-title chip editor on the Streams page. False in
@@ -1147,7 +1165,7 @@ function FilterToggle({ label, checked, onChange }: {
   )
 }
 
-function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, standalone }: PropsPanelProps) {
+function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, fontsLoaded, standalone }: PropsPanelProps) {
   // Chip-editor wiring for the text-layer body. Hooks must run
   // unconditionally (the editor only renders for text layers), so they
   // live above the early return. Stable sets keep TemplateBodyEditor from
@@ -1409,27 +1427,44 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           <section>
             <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Font</p>
             <div className="flex flex-col gap-1.5">
-              <select
-                value={layer.fontFamily ?? 'Arial'}
-                onChange={e => {
-                  const fam = e.target.value
-                  const variants = fontVariantMap[fam]
-                  if (variants && variants.length > 0) {
-                    // Try to preserve current weight; fall back to first variant
-                    const cur = layer.fontStyle ?? 'normal'
-                    const match = variants.find(v => v.css === cur) ?? variants.find(v => v.css === 'normal') ?? variants[0]
-                    update({ fontFamily: fam, fontStyle: match.css })
-                  } else {
-                    update({ fontFamily: fam })
-                  }
-                }}
-                className="bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200 w-full"
-                style={{ fontFamily: layer.fontFamily ?? 'Arial' }}
-              >
-                {systemFonts.map(f => (
-                  <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
-                ))}
-              </select>
+              {(() => {
+                const fam = layer.fontFamily ?? 'Arial'
+                const famMissing = fontsLoaded && !systemFonts.includes(fam)
+                return (
+                  <>
+                    <select
+                      value={fam}
+                      onChange={e => {
+                        const next = e.target.value
+                        const variants = fontVariantMap[next]
+                        if (variants && variants.length > 0) {
+                          // Try to preserve current weight; fall back to first variant
+                          const cur = layer.fontStyle ?? 'normal'
+                          const match = variants.find(v => v.css === cur) ?? variants.find(v => v.css === 'normal') ?? variants[0]
+                          update({ fontFamily: next, fontStyle: match.css })
+                        } else {
+                          update({ fontFamily: next })
+                        }
+                      }}
+                      className={`bg-navy-900 border rounded-lg px-2 py-1 text-xs w-full ${famMissing ? 'border-amber-500/60 text-amber-300' : 'border-white/10 text-gray-200'}`}
+                      style={{ fontFamily: fam }}
+                    >
+                      {/* Keep the missing family selectable/displayed instead of
+                          the select silently showing nothing. */}
+                      {famMissing && <option value={fam}>{fam} (missing)</option>}
+                      {systemFonts.map(f => (
+                        <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
+                      ))}
+                    </select>
+                    {famMissing && (
+                      <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                        <AlertTriangle size={10} className="shrink-0" />
+                        Not installed — pick a replacement to resume image updates
+                      </p>
+                    )}
+                  </>
+                )
+              })()}
               <div className="grid grid-cols-2 gap-1.5">
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] text-gray-400">Size</span>
@@ -2480,6 +2515,20 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── System fonts ─────────────────────────────────────────────────────────
   const [systemFonts, setSystemFonts] = useState<string[]>(['Arial', 'Georgia', 'Impact', 'Times New Roman', 'Verdana'])
   const [fontVariantMap, setFontVariantMap] = useState<Record<string, { name: string; css: string }[]>>({})
+  // True once queryLocalFonts returned a real list. Missing-font detection is
+  // OFF until then — checking against the 5-name seed list above would flag
+  // nearly every font as missing during startup (or forever, when the local
+  // font access API is unavailable/denied — in that case we can't tell, so
+  // we don't warn).
+  const [fontsLoaded, setFontsLoaded] = useState(false)
+  const installedFontSet = useMemo(() => new Set(systemFonts), [systemFonts])
+  // Families used by text layers that aren't installed. While non-empty, the
+  // autosave keeps writing canvas.json (edits stay safe) but WITHHOLDS the
+  // PNG — rendering would bake a substitute font into the exported image.
+  const missingFonts = useMemo(
+    () => (fontsLoaded ? collectMissingFonts(layers, installedFontSet) : []),
+    [fontsLoaded, layers, installedFontSet],
+  )
 
   // ── Auto-save timer ───────────────────────────────────────────────────────
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2501,7 +2550,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (!(window as any).queryLocalFonts) return
     ;(window as any).queryLocalFonts().then((fonts: any[]) => {
       const names = Array.from(new Set(fonts.map((f: any) => f.family as string))).sort()
-      if (names.length > 0) setSystemFonts(names)
+      if (names.length > 0) {
+        setSystemFonts(names)
+        setFontsLoaded(true)
+      }
 
       // Build per-family variant list
       const variantMap: Record<string, { name: string; css: string }[]> = {}
@@ -2819,26 +2871,37 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         updatedAt: Date.now(),
         layers: saveLayers,
       }
-      await preloadLayerImages(saveLayers)
-      await waitForStageImages()
+      // Missing font → save the layer JSON only and leave the last good PNG
+      // on disk. Rendering now would silently bake a substitute font into
+      // the image (the banner in the editor tells the user this is paused).
+      const withholdPng = fontsLoaded && collectMissingFonts(saveLayers, installedFontSet).length > 0
+      if (!withholdPng) {
+        await preloadLayerImages(saveLayers)
+        await waitForStageImages()
+      }
       // The stage is shared. If another stream/variant mounted while the
       // image waits ran (up to 5s with a broken asset), its pixels are on
       // the stage now — abort instead of writing them under OUR json.
       // Whoever replaced the session flushed us first, so nothing is lost.
       if (saveEpochRef.current !== epoch || !stageRef.current) return
-      const pngDataUrl = getCanvasDataUrl()
+      const pngDataUrl = withholdPng ? null : getCanvasDataUrl()
       try {
         await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl, ordinal)
         // Merge only the thumbnail flags — prevents closure-stale `currentStream.meta` from
         // clobbering fields edited concurrently in other UI (e.g. MetaModal).
-        await window.api.updateStreamMeta(folderPath, {
-          smThumbnail: true,
-          smThumbnailTemplate: templateId,
-        }, streamMetaKey(folderPath, date, config.streamsDir))
+        // When the PNG was withheld, only refresh the flag if it was already
+        // set — a brand-new session with a missing font has no image yet,
+        // and claiming one would break the stream list's preview.
+        if (pngDataUrl != null || currentStream?.meta?.smThumbnail) {
+          await window.api.updateStreamMeta(folderPath, {
+            smThumbnail: true,
+            smThumbnailTemplate: templateId,
+          }, streamMetaKey(folderPath, date, config.streamsDir))
+        }
         if (saveEpochRef.current === epoch) setIsDirty(false)
         // Bump the variant-preview cache buster so the switcher dropdown
         // shows the fresh PNG for whichever variant we just wrote.
-        setVariantPreviewKey(k => k + 1)
+        if (pngDataUrl != null) setVariantPreviewKey(k => k + 1)
       } catch (err) {
         console.error('Auto-save failed:', err)
       }
@@ -2849,7 +2912,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     } finally {
       if (pendingSaveRef.current === run) pendingSaveRef.current = null
     }
-  }, [getCanvasDataUrl, waitForStageImages, preloadLayerImages, currentStream])
+  }, [getCanvasDataUrl, waitForStageImages, preloadLayerImages, currentStream, fontsLoaded, installedFontSet])
 
   // Flush everything the autosave owes: turn a pending debounce into an
   // immediate save, then await whatever save is in flight. Session-retiring
@@ -4140,10 +4203,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   </button>
                 </Tooltip>
               )}
-              <Tooltip content="Export PNG" side="bottom">
+              <Tooltip
+                content={missingFonts.length > 0
+                  ? `Export paused — missing font${missingFonts.length > 1 ? 's' : ''}: ${missingFonts.join(', ')}`
+                  : 'Export PNG'}
+                side="bottom"
+              >
                 <button
                   onClick={exportPng}
-                  className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
+                  disabled={missingFonts.length > 0}
+                  className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   <Download size={14} />
                 </button>
@@ -4176,6 +4245,22 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               </Tooltip>
             </div>
           </div>
+
+          {/* Missing-font warning — while any text layer references a font
+              that isn't installed, thumbnail image writes are paused (layer
+              data keeps saving). Resolves itself the moment every text
+              layer uses an installed family. */}
+          {missingFonts.length > 0 && (
+            <div className="flex items-start gap-2 px-4 py-2 border-b border-amber-500/30 bg-amber-500/10 text-xs text-amber-300 shrink-0">
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+              <span>
+                {missingFonts.length === 1
+                  ? <>The font <span className="font-semibold">{missingFonts[0]}</span> isn't installed on this machine — its text is showing in a substitute font.</>
+                  : <>The fonts <span className="font-semibold">{missingFonts.join(', ')}</span> aren't installed on this machine — their text is showing in substitute fonts.</>}
+                {' '}Thumbnail image updates are paused so the saved image isn't overwritten with the wrong font (your layer edits are still being saved). Pick a replacement font to resume.
+              </span>
+            </div>
+          )}
 
           {/* Editor body */}
           <div className="flex flex-1 overflow-hidden min-h-0">
@@ -4611,6 +4696,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                 {layer.name}
                               </span>
                             )}
+                            {layer.type === 'text' && fontsLoaded && !installedFontSet.has(layer.fontFamily ?? 'Arial') && (
+                              <Tooltip content={`Font "${layer.fontFamily ?? 'Arial'}" is not installed`}>
+                                <AlertTriangle size={11} className="text-amber-400 shrink-0" />
+                              </Tooltip>
+                            )}
                             <div className={`flex gap-0.5 opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''} transition-opacity`}>
                               <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300">
                                 <Copy size={10} />
@@ -4639,7 +4729,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Sliders size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
                 </div>
-                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} standalone={currentStream?.meta?.isSeries === false} />
+                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} standalone={currentStream?.meta?.isSeries === false} />
               </div>
 
               {/* Divider */}

@@ -655,7 +655,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:deleteTemplate', streamsDir, templateId),
   thumbnailLoadCanvas: (folderPath: string, date: string, ordinal: number = 1) =>
     ipcRenderer.invoke('thumbnail:loadCanvas', folderPath, date, ordinal),
-  thumbnailSaveCanvas: (folderPath: string, date: string, canvasFile: any, pngDataUrl: string, ordinal: number = 1) =>
+  thumbnailSaveCanvas: (folderPath: string, date: string, canvasFile: any, pngDataUrl: string | null, ordinal: number = 1) =>
     ipcRenderer.invoke('thumbnail:saveCanvas', folderPath, date, canvasFile, pngDataUrl, ordinal),
   /** List the ordinals of every SM-thumbnail variant present in the
    *  stream's folder. `[1]` for a legacy single-thumbnail stream, `[]`

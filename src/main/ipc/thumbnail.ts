@@ -174,7 +174,10 @@ export function registerThumbnailIPC(): void {
     folderPath: string,
     date: string,
     canvasFile: ThumbnailCanvasFile,
-    pngDataUrl: string,
+    // null → save the layer data only. Used while a text layer references a
+    // font that isn't installed: rendering would bake a substitute font into
+    // the PNG, so the last good image is left untouched until it's resolved.
+    pngDataUrl: string | null,
     ordinal: number = 1,
   ) => {
     // Bail if the stream's folder no longer exists. The previous behavior
@@ -194,9 +197,11 @@ export function registerThumbnailIPC(): void {
     suppressNextStreamsChokidarFire()
     // Save JSON
     await fs.promises.writeFile(canvasJsonPath(folderPath, date, ordinal), JSON.stringify(canvasFile, null, 2), 'utf-8')
-    // Save PNG
-    const base64 = pngDataUrl.replace(/^data:image\/png;base64,/, '')
-    await fs.promises.writeFile(canvasPngPath(folderPath, date, ordinal), Buffer.from(base64, 'base64'))
+    // Save PNG (skipped when the renderer withheld it — missing font)
+    if (pngDataUrl != null) {
+      const base64 = pngDataUrl.replace(/^data:image\/png;base64,/, '')
+      await fs.promises.writeFile(canvasPngPath(folderPath, date, ordinal), Buffer.from(base64, 'base64'))
+    }
     // Explicit notify so the streams page refreshes immediately. The
     // chokidar watcher would also catch this PNG write, but only after
     // ~1.8s (awaitWriteFinish + debounce) and it can miss the event on

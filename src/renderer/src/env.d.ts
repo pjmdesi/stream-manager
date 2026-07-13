@@ -268,7 +268,7 @@ declare global {
       thumbnailSaveTemplate(streamsDir: string, template: ThumbnailTemplate, pngDataUrl?: string): Promise<ThumbnailTemplate>
       thumbnailDeleteTemplate(streamsDir: string, templateId: string): Promise<void>
       thumbnailLoadCanvas(folderPath: string, date: string, ordinal?: number): Promise<ThumbnailCanvasFile | null>
-      thumbnailSaveCanvas(folderPath: string, date: string, canvasFile: ThumbnailCanvasFile, pngDataUrl: string, ordinal?: number): Promise<void>
+      thumbnailSaveCanvas(folderPath: string, date: string, canvasFile: ThumbnailCanvasFile, pngDataUrl: string | null, ordinal?: number): Promise<void>
       thumbnailListVariants(folderPath: string, date: string): Promise<number[]>
       thumbnailCacheAsset(streamsDir: string, srcPath: string): Promise<string>
       thumbnailHashFile(filePath: string): Promise<string | null>
