@@ -1819,9 +1819,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   // its videos is open here) drops out of the list instead of lingering.
   // Debounced: streams:changed fires in bursts, and each reload runs a
   // recursive listing + a PowerShell hydration check, so coalesce them.
+  // Scoped events (streamKeys) that don't name the open session's stream are
+  // ignored entirely — another stream's file churn shouldn't re-list this
+  // folder. Full events (no keys) keep the always-reload behavior.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
-    const off = window.api.onStreamsChanged(() => {
+    const off = window.api.onStreamsChanged(info => {
+      if (info?.streamKeys && folderMetaKeyRef.current && !info.streamKeys.includes(folderMetaKeyRef.current)) return
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => reloadSessionPanel(state.filePath), 500)
     })

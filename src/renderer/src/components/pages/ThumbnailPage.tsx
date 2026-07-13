@@ -3934,7 +3934,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (mode !== 'editor' || !currentStream) return
     const { folderPath, date } = currentStream
     const variant = currentVariant
-    const unsub = window.api.onStreamsChanged(async () => {
+    // This stream's key (main's metaKey semantics: forward-slash path
+    // relative to the streams root, basename fallback) — scoped events
+    // that don't name it are other streams' churn and can't have touched
+    // our variants, so skip the listVariants round-trip entirely.
+    const root = (config.streamsDir ?? '').replace(/\\/g, '/').replace(/\/$/, '')
+    const fp = folderPath.replace(/\\/g, '/')
+    const streamKey = root && fp.startsWith(root + '/') ? fp.slice(root.length + 1) : (fp.split('/').pop() ?? fp)
+    const unsub = window.api.onStreamsChanged(async info => {
+      if (info?.streamKeys && !info.streamKeys.includes(streamKey)) return
       const remaining = await window.api.thumbnailListVariants(folderPath, date).catch(() => null)
       if (!remaining) return
       // The currently-open variant was deleted → switch to a survivor or return
@@ -3954,7 +3962,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       setVariantPreviewKey(k => k + 1)
     })
     return unsub
-  }, [mode, currentStream, currentVariant, reconcileVariantGone])
+  }, [mode, currentStream, currentVariant, reconcileVariantGone, config.streamsDir])
 
   // ── Export PNG ────────────────────────────────────────────────────────────
   const exportPng = useCallback(async () => {
