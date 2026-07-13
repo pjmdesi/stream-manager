@@ -1450,10 +1450,13 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                       style={{ fontFamily: fam }}
                     >
                       {/* Keep the missing family selectable/displayed instead of
-                          the select silently showing nothing. */}
-                      {famMissing && <option value={fam}>{fam} (missing)</option>}
+                          the select silently showing nothing. Options inherit the
+                          select's text color, so when it's amber (missing state)
+                          each installed option pins itself back to the normal
+                          text color — only the missing entry reads amber. */}
+                      {famMissing && <option value={fam} style={{ color: '#fbbf24' }}>{fam} (missing)</option>}
                       {systemFonts.map(f => (
-                        <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
+                        <option key={f} value={f} style={{ fontFamily: f, color: '#e5e7eb' }}>{f}</option>
                       ))}
                     </select>
                     {famMissing && (
@@ -2861,6 +2864,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     date: string,
     templateId: string | undefined,
     ordinal: number,
+    // One-shot bypass of the missing-font PNG pause — the banner's
+    // "Manually export anyway" button. The user has seen the warning and
+    // explicitly chose to bake the substitute font into the image.
+    forcePng = false,
   ) => {
     if (!stageRef.current) return
     const epoch = saveEpochRef.current
@@ -2874,7 +2881,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       // Missing font → save the layer JSON only and leave the last good PNG
       // on disk. Rendering now would silently bake a substitute font into
       // the image (the banner in the editor tells the user this is paused).
-      const withholdPng = fontsLoaded && collectMissingFonts(saveLayers, installedFontSet).length > 0
+      const withholdPng = !forcePng && fontsLoaded && collectMissingFonts(saveLayers, installedFontSet).length > 0
       if (!withholdPng) {
         await preloadLayerImages(saveLayers)
         await waitForStageImages()
@@ -2924,6 +2931,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     await pendingSaveRef.current
   }, [currentStream, isDirty, layers, currentTemplateId, currentVariant, doSave])
+
+  // Banner escape hatch: write the thumbnail PNG once despite missing fonts
+  // (substitute font and all). Autosave stays paused for later edits.
+  const [forceExporting, setForceExporting] = useState(false)
+  const forcePngExportOnce = useCallback(async () => {
+    if (!currentStream) return
+    setForceExporting(true)
+    try {
+      await doSave(layers, currentStream.folderPath, currentStream.date, currentTemplateId, currentVariant, true)
+    } finally {
+      setForceExporting(false)
+    }
+  }, [currentStream, layers, currentTemplateId, currentVariant, doSave])
 
   // ── Layer mutations ────────────────────────────────────────────────────────
   const commitLayers = useCallback((next: ThumbnailLayer[]) => {
@@ -4253,12 +4273,24 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           {missingFonts.length > 0 && (
             <div className="flex items-start gap-2 px-4 py-2 border-b border-amber-500/30 bg-amber-500/10 text-xs text-amber-300 shrink-0">
               <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-              <span>
+              <span className="flex-1 min-w-0">
                 {missingFonts.length === 1
                   ? <>The font <span className="font-semibold">{missingFonts[0]}</span> isn't installed on this machine — its text is showing in a substitute font.</>
                   : <>The fonts <span className="font-semibold">{missingFonts.join(', ')}</span> aren't installed on this machine — their text is showing in substitute fonts.</>}
                 {' '}Thumbnail image updates are paused so the saved image isn't overwritten with the wrong font (your layer edits are still being saved). Pick a replacement font to resume.
               </span>
+              {currentStream && (
+                <Tooltip content="Write the thumbnail image once with the substitute font. Automatic updates stay paused." side="bottom">
+                  <button
+                    onClick={() => void forcePngExportOnce()}
+                    disabled={forceExporting}
+                    className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded border border-amber-500/40 text-amber-300 hover:bg-amber-500/15 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[11px] font-medium"
+                  >
+                    {forceExporting && <Loader2 size={11} className="animate-spin" />}
+                    {forceExporting ? 'Exporting…' : 'Manually export anyway'}
+                  </button>
+                </Tooltip>
+              )}
             </div>
           )}
 
