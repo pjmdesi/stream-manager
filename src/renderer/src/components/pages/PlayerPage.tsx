@@ -878,8 +878,11 @@ function DraftSessionItem({
               </div>
             )}
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${isExporting ? 'text-blue-300 border-blue-400/50' : 'text-amber-400 border-amber-400/50'}`}>
-                {isExporting ? 'exporting…' : 'draft'}
+              {/* Neutral gray while exporting (blue read as "actionable");
+                  no ellipsis — the row is tight and the extra chars made
+                  the seg count + timecode wrap. */}
+              <span className={`inline-block text-[9px] font-mono border rounded px-1 leading-tight ${isExporting ? 'text-gray-300 border-gray-400/50' : 'text-amber-400 border-amber-400/50'}`}>
+                {isExporting ? 'exporting' : 'draft'}
               </span>
               <span className="text-[10px] text-gray-400 tabular-nums">
                 {segmentCount} seg{segmentCount === 1 ? '' : 's'}
@@ -1159,6 +1162,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
   // Session Videos: sibling video files + clip drafts in the same folder
   const [siblingFiles, setSiblingFiles] = useState<SiblingFile[]>([])
+  // Ref mirror for callbacks that need the current list without re-creating
+  // (draft numbering reads exported clips from here).
+  const siblingFilesRef = useRef<SiblingFile[]>([])
+  useEffect(() => { siblingFilesRef.current = siblingFiles }, [siblingFiles])
   // Whether the OS cloud-sync provider is active — gates the hydration icon in
   // the session-video rows (VideoRow). Re-probed whenever streamsDir changes
   // (first-run setup picks the library after mount).
@@ -1837,9 +1844,25 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
   const nextDraftIdFor = useCallback((sourceName: string, existing: import('../../types').ClipDraft[]) => {
     const prefix = `${sourceName}-clip-`
+    const taken = new Set<number>()
+    for (const d of existing) {
+      if (!d.id.startsWith(prefix)) continue
+      const n = Number(d.id.slice(prefix.length))
+      if (Number.isFinite(n)) taken.add(n)
+    }
+    // Clips already EXPORTED from this source count too: the draft is
+    // deleted on export, but its number lives on in the exported file
+    // (default export suffix "-Clip N"). Without this, the next draft
+    // became "Clip 1" again and its default export path collided with —
+    // and could overwrite — the finished clip. Numbers are parsed from
+    // the exported filenames, so exports from before this fix count too.
+    for (const s of siblingFilesRef.current) {
+      if (s.clipOf !== sourceName) continue
+      const m = s.name.match(/clip[ _-]*(\d+)/i)
+      if (m) taken.add(Number(m[1]))
+    }
     let n = 1
-    const taken = new Set(existing.filter(d => d.id.startsWith(prefix)).map(d => d.id))
-    while (taken.has(`${prefix}${n}`)) n++
+    while (taken.has(n)) n++
     return `${prefix}${n}`
   }, [])
 
