@@ -4,7 +4,7 @@ import path from 'path'
 import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import { getStore } from './store'
-import { suppressNextStreamsChokidarFire, readAllMeta, writeAllMeta, streamKeyForPath } from './streams'
+import { readAllMeta, writeAllMeta, streamKeyForPath } from './streams'
 import { registerInFlightWritePredicate } from '../services/inFlightWrites'
 import { expectSelfWrite } from '../services/selfWrites'
 
@@ -928,12 +928,11 @@ async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void>
       console.error('[archiveMarkAsArchived] meta write failed:', err)
       return
     }
-    // Tell the renderer to refresh the streams page. Suppress the
-    // chokidar echo for the final output file (chokidar fires on the
-    // tmp→final rename ~1.8s later — the explicit send below already
-    // covers it). Scoped to the archived stream in folder mode — the
+    // Tell the renderer to refresh the streams page. The tmp→final
+    // rename's chokidar echo is dropped per-path — notifyStreamOutput
+    // announced the final file via expectSelfWrite when the job
+    // completed. Scoped to the archived stream in folder mode — the
     // hook's metaKey IS the stream key.
-    suppressNextStreamsChokidarFire()
     const cfg = getStore().get('config') as { streamMode?: string }
     const scoped = cfg.streamMode !== 'dump-folder' && hook.metaKey
       ? { streamKeys: [hook.metaKey] }

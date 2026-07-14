@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { getStore } from './store'
-import { suppressNextStreamsChokidarFire, metaKey } from './streams'
+import { metaKey } from './streams'
 import { expectSelfWrite } from '../services/selfWrites'
 
 // ── Types (mirrored from renderer) ───────────────────────────────────────────
@@ -191,15 +191,12 @@ export function registerThumbnailIPC(): void {
       console.warn(`[thumbnail:saveCanvas] folder gone — skipping save: ${folderPath}`)
       return
     }
-    // Suppress the chokidar echo for the PNG we're about to write: the
-    // per-path registry drops the echo events outright, and the global
-    // window stays as a belt-and-suspenders during the scoped-events
-    // rollout (retiring it is a later cleanup).
+    // Announce the writes so the watcher drops their chokidar echoes —
+    // the explicit scoped send below is the one and only notification.
     const jsonPath = canvasJsonPath(folderPath, date, ordinal)
     const pngPath = canvasPngPath(folderPath, date, ordinal)
     expectSelfWrite(jsonPath)
     expectSelfWrite(pngPath)
-    suppressNextStreamsChokidarFire()
     // Save JSON
     await fs.promises.writeFile(jsonPath, JSON.stringify(canvasFile, null, 2), 'utf-8')
     // Save PNG (skipped when the renderer withheld it — missing font)

@@ -58,7 +58,7 @@ async function removePartialWithRetry(p: string, attempts = 3): Promise<void> {
  *  name doesn't itself look like a stream folder.
  *  Prefers the base folder (e.g. `2026-04-01`) over suffixed variants
  *  (`2026-04-01-2`, …) so new files land with the day's primary stream. */
-function findDatedFolderRecursive(streamsDir: string, date: string, maxDepth = 5): string | null {
+function findDatedFolderRecursive(streamsDir: string, date: string, maxDepth = 5, pick: 'base' | 'latest' = 'base'): string | null {
   const matches: { path: string; idx: number }[] = []
   const walk = (dir: string, depth: number) => {
     if (depth > maxDepth) return
@@ -81,8 +81,50 @@ function findDatedFolderRecursive(streamsDir: string, date: string, maxDepth = 5
   }
   walk(streamsDir, 0)
   if (matches.length === 0) return null
-  matches.sort((a, b) => a.idx - b.idx)
+  // 'base' picks the day's primary stream (2026-04-01 over 2026-04-01-2);
+  // 'latest' picks the day's LAST stream — the cross-midnight fallback
+  // wants the session that was still running when the day rolled over.
+  matches.sort((a, b) => pick === 'latest' ? b.idx - a.idx : a.idx - b.idx)
   return matches[0].path
+}
+
+// ── Cross-midnight overflow ──────────────────────────────────────────────────
+// A session that runs past 00:00 produces a second recording stamped with
+// the NEW date (OBS names files by recording start). Auto-date matching
+// used to look for a stream item on that new date, find nothing, and fail
+// — the file belongs to the PREVIOUS day's session. Recordings that start
+// in the small hours fall back to the previous day's stream item when
+// their own date has none. An existing item for the new date always wins
+// (a deliberate small-hours stream keeps its own item).
+
+/** Local-time hour before which a recording start counts as overflow of
+ *  the previous day's session rather than a new day's stream. */
+const OVERNIGHT_CUTOFF_HOUR = 6
+
+/** ISO date minus one calendar day. */
+function prevIsoDay(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() - 1)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+}
+
+/** True when the recording STARTED before the overnight cutoff. The start
+ *  time is parsed from the filename right after the date (OBS-style
+ *  "2026-07-14 00-05-12" and similar), falling back to the file's creation
+ *  time when the name carries no time — and only trusting that when it
+ *  lands on the file's own named date. */
+function startedBeforeCutoff(filePath: string, isoDate: string): boolean {
+  const name = path.basename(filePath)
+  const m = name.match(/\d{4}-\d{2}-\d{2}[ _T-]+(\d{2})[-_.:](\d{2})/)
+  if (m) return parseInt(m[1], 10) < OVERNIGHT_CUTOFF_HOUR
+  try {
+    const bt = fs.statSync(filePath).birthtime
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const btIso = `${bt.getFullYear()}-${pad(bt.getMonth() + 1)}-${pad(bt.getDate())}`
+    return btIso === isoDate && bt.getHours() < OVERNIGHT_CUTOFF_HOUR
+  } catch { return false }
 }
 
 export interface WatchRule {
@@ -393,7 +435,13 @@ class FileWatcher {
     // Dump mode: the streams root IS the destination — no per-date folders exist.
     if (this.streamMode === 'dump-folder') return this.streamsDir
     // Folder-per-stream: walk recursively so nested layouts (year, year/month, …) work too.
-    return findDatedFolderRecursive(this.streamsDir, date)
+    const exact = findDatedFolderRecursive(this.streamsDir, date)
+    if (exact) return exact
+    // Cross-midnight overflow → the previous day's LAST session.
+    if (startedBeforeCutoff(filePath, date)) {
+      return findDatedFolderRecursive(this.streamsDir, prevIsoDay(date), 5, 'latest')
+    }
+    return null
   }
 
   /**
@@ -411,7 +459,14 @@ class FileWatcher {
     const fileName = path.basename(filePath)
     const match = fileName.match(/(\d{4}-\d{2}-\d{2})/)
     if (!match) return destination
-    return findDatedFolderRecursive(this.streamsDir, match[1]) ?? destination
+    const exact = findDatedFolderRecursive(this.streamsDir, match[1])
+    if (exact) return exact
+    // Cross-midnight overflow → the previous day's LAST session.
+    if (startedBeforeCutoff(filePath, match[1])) {
+      const prev = findDatedFolderRecursive(this.streamsDir, prevIsoDay(match[1]), 5, 'latest')
+      if (prev) return prev
+    }
+    return destination
   }
 
   /** Copy with abort support and dirty-failure cleanup: registers dest as

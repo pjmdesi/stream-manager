@@ -2070,48 +2070,25 @@ export function registerStreamsIPC(): void {
   function notifyChange(win: BrowserWindow, scope: string | null) {
     // scope: the stream key the event resolved to, or null for
     // structural/unresolvable changes (and everything in dump mode).
+    //
+    // Echo handling note: this used to consult a GLOBAL suppression
+    // window (suppressChokidarFireFor) that deferred EVERY fire — echo
+    // or genuine external change alike — for ~3s after any app-side
+    // write. That role moved to the per-path selfWrites registry: the
+    // watcher's event handlers drop announced echoes outright before
+    // ever reaching here, so real events fire promptly and nothing
+    // unrelated is held hostage by someone else's write.
     if (scope === null) pendingScopedKeys = null
     else if (pendingScopedKeys) pendingScopedKeys.add(scope)
     if (debounceTimer) clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(function fire(isDeferred?: boolean) {
-      // Suppression check is at FIRE time (inside the debounce callback)
-      // rather than at notifyChange entry — that handles the converter
-      // case where chokidar's `add` event can arrive *before* the
-      // completion handler sets the suppression window, since the
-      // encoding finished a while before the handler runs.
-      //
-      // A known local write just fired its own explicit streams:changed
-      // (thumbnail save, converter completion, etc.), so a fire inside
-      // the window is usually that write's chokidar echo — reloading for
-      // it would double every such action. But the window is GLOBAL: the
-      // fire can just as well be a genuinely external change (OBS
-      // delivering a recording, a user dropping in files) that has
-      // nothing to do with the write that armed it. So DEFER to just
-      // past the window instead of dropping — dropped fires left the
-      // list stale until an unrelated event. Deferred fires are sent
-      // with `quiet: true` so the renderer reconciles data without the
-      // full thumbnail cache-bust flash: an echo-only defer reloads
-      // invisibly, a real change still appears (a few seconds late).
-      const waitMs = suppressChokidarUntil - Date.now()
-      if (waitMs > 0) {
-        debounceTimer = setTimeout(() => fire(true), waitMs + 50)
-        return
-      }
+    debounceTimer = setTimeout(() => {
       const keys = pendingScopedKeys
       pendingScopedKeys = new Set()
       if (!win.isDestroyed()) {
-        const payload: { quiet?: boolean; streamKeys?: string[] } = {}
-        if (isDeferred) payload.quiet = true
-        if (keys && keys.size > 0) payload.streamKeys = [...keys]
-        win.webContents.send('streams:changed', Object.keys(payload).length > 0 ? payload : undefined)
+        win.webContents.send('streams:changed',
+          keys && keys.size > 0 ? { streamKeys: [...keys] } : undefined)
       }
     }, DEBOUNCE_MS)
-  }
-
-  suppressChokidarFireFor = (durationMs: number) => {
-    // `max` so overlapping calls (e.g. a thumbnail save midway through
-    // a converter completion) extend the window rather than shorten it.
-    suppressChokidarUntil = Math.max(suppressChokidarUntil, Date.now() + durationMs)
   }
 
   // Generation counter guarding the pause/restart dance: a restart closure
@@ -2255,22 +2232,8 @@ let pauseDirWatcher: () => Promise<() => void> = async () => () => {}
  *  import this wrapper rather than the variable directly. */
 export const pauseStreamsWatcher = (): Promise<() => void> => pauseDirWatcher()
 
-// Suppression-window state — checked by the chokidar `notifyChange` to skip
-// echoes after a known local write. Set via the exported
-// `suppressChokidarFireFor` from handlers that do their own explicit
-// `streams:changed` send (thumbnail save, converter completion). The closure
-// inside registerStreamsIPC reassigns `suppressChokidarFireFor` to the real
-// implementation; the default noop covers the very brief window before
-// registration runs.
-let suppressChokidarUntil = 0
-let suppressChokidarFireFor: (durationMs: number) => void = () => {}
-
-/** Suppress the chokidar `streams:changed` echo for the next `durationMs`.
- *  Call this BEFORE a local file write that you're going to explicitly
- *  follow with `webContents.send('streams:changed')` — chokidar will see
- *  the same write ~1-2s later and would otherwise fire a redundant
- *  reload. 3000ms is the safe default (covers awaitWriteFinish 1000ms +
- *  debounce 800ms + slack). */
-export const suppressNextStreamsChokidarFire = (durationMs: number = 3000): void => {
-  suppressChokidarFireFor(durationMs)
-}
+// The global chokidar suppression window that used to live here
+// (suppressNextStreamsChokidarFire) is retired: writers announce their
+// exact paths via services/selfWrites.expectSelfWrite and the watcher
+// drops those echoes per-path, instead of deferring every event —
+// including genuinely external ones — behind a shared timer.
