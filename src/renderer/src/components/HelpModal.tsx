@@ -434,6 +434,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     body: (
       <>
         <p>Auto-Rules watch a folder and automatically move, copy, rename, or convert new files matching a glob pattern. Common setup: watch your OBS recordings folder and route files {isDumpMode ? 'into your dump folder' : 'into the matching dated stream folder'}.</p>
+        <p>Sessions that run past midnight are handled automatically: a recording started in the small hours (before 6&nbsp;AM) whose date has no stream item of its own is routed into the previous day's stream — the session it actually belongs to.</p>
         <p>Rules can also queue up conversions automatically (e.g. archive every new recording with an AV1 preset).</p>
       </>
     ),

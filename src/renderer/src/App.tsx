@@ -907,7 +907,7 @@ function AppInner() {
             <ThumbnailPage isVisible={page === 'thumbnails'} />
           </div>
           <div className={`h-full ${page === 'streams' ? '' : 'hidden'}`}>
-            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} onAutoPushCategoryMiss={setAutoPushError} />
+            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} onAutoPushCategoryMiss={setAutoPushError} onOpenIntegrations={() => setPage('integrations')} />
           </div>
           {/* Combine is persistent too: switch-mounting it meant every
               navigation away unmounted the page, and the remount re-ran the

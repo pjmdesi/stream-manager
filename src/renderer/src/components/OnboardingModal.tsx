@@ -91,8 +91,8 @@ function describeDetection(d: DetectedStructure): { tone: DetectionTone; headlin
   }
   if (d.layoutKind === 'dump') {
     return {
-      tone: 'info',
-      headline: `${d.sessionCount} stream${d.sessionCount === 1 ? '' : 's'} detected — dump folder`,
+      tone: 'warn',
+      headline: `${d.sessionCount} stream${d.sessionCount === 1 ? '' : 's'} detected — dump folder (not recommended)`,
       detail: 'Files for multiple streams share a single folder, distinguished by the date in the filename.',
     }
   }
@@ -196,8 +196,10 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
             </p>
           )}
           {detection.layoutKind === 'dump' && (
-            <p className="rounded-lg border border-purple-400/30 bg-purple-500/10 px-4 py-3 text-sm text-purple-100 leading-relaxed">
-              Some features are reduced in dump-folder mode. The next step can convert your dump folder into folder-per-stream for the full experience.
+            <p className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100 leading-relaxed">
+              App functionality is <span className="font-semibold">significantly reduced</span> in dump-folder
+              mode — importing from YouTube, bulk-linking, and several newer features require folder-per-stream.
+              The next step can convert your folder into folder-per-stream in one click (with undo).
             </p>
           )}
 
@@ -239,7 +241,7 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
                   suggested={suggested === 'dump-folder'}
                   onSelect={() => onModeChange('dump-folder')}
                   title="Dump folder"
-                  flavor="All streams and related items are all together in a single folder"
+                  flavor="All streams and related items are all together in a single folder. Significantly reduced functionality — not recommended."
                   image={imgDumpFolder}
                 />
               </div>
@@ -329,7 +331,7 @@ function StepConvert({ dir, result, onResult, onConverted }: StepConvertProps) {
           <CheckCircle size={16} className="shrink-0 mt-0.5" />
           <span>
             Done — {result.manifest.createdFolders.length} folder{result.manifest.createdFolders.length !== 1 ? 's' : ''} created, {result.moved} file{result.moved !== 1 ? 's' : ''} organized.
-            {result.skipped > 0 && ` ${result.skipped} file${result.skipped !== 1 ? 's' : ''} with no date in the filename were left in place.`}
+            {result.skipped > 0 && ` ${result.skipped} file${result.skipped !== 1 ? 's' : ''} with no date in the filename ${result.skipped === 1 ? 'was' : 'were'} left in place.`}
           </span>
         </div>
       )}
@@ -484,8 +486,41 @@ function StepDone({ mode, streamsDir, convertResult, autoRule }: StepDoneProps) 
         </div>
       </div>
 
+      <div className="flex flex-col gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Suggested next steps</h3>
+        <div className="flex flex-col divide-y divide-white/5 rounded-xl border border-white/10 overflow-hidden">
+          <div className="flex items-start gap-3 px-4 py-3">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-purple-600/30 text-purple-200 text-xs font-semibold flex items-center justify-center mt-0.5">1</span>
+            <p className="text-sm text-gray-300 leading-relaxed">
+              <span className="font-semibold text-gray-200">Connect your accounts</span> on the{' '}
+              <span className="font-semibold text-gray-200">Integrations</span> page. Connecting YouTube and
+              Twitch unlocks detail syncing and publishing, the built-in stream relay, and importing — setup is
+              guided in-app.
+            </p>
+          </div>
+          <div className="flex items-start gap-3 px-4 py-3">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-purple-600/30 text-purple-200 text-xs font-semibold flex items-center justify-center mt-0.5">2</span>
+            <p className="text-sm text-gray-300 leading-relaxed">
+              <span className="font-semibold text-gray-200">Import your channel.</span> Once YouTube is
+              connected, <span className="font-semibold text-gray-200">Import from YouTube</span> brings your
+              existing videos in as stream items — details and thumbnails included.
+            </p>
+          </div>
+          <div className="flex items-start gap-3 px-4 py-3">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-purple-600/30 text-purple-200 text-xs font-semibold flex items-center justify-center mt-0.5">3</span>
+            <p className="text-sm text-gray-300 leading-relaxed">
+              <span className="font-semibold text-gray-200">Learn the ropes</span> with{' '}
+              <span className="font-semibold text-gray-200">How to use</span> at the bottom of the sidebar —
+              every page and feature is covered there.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <p className="text-sm text-gray-400 leading-relaxed">
-        You're all set up! The app will scan your directory and show the detected sessions on the <span className="font-bold text-gray-200">Streams</span> page. You can then begin exploring, tagging, converting, and much more!
+        You're all set up! The app will scan your directory and show the detected sessions on the{' '}
+        <span className="font-bold text-gray-200">Streams</span> page. For a large library, the first scan can
+        take a minute or two while video details are read.
       </p>
     </div>
   )

@@ -24,6 +24,7 @@ import { useOpenItems, blockReasonText, type OpenSource } from '../../context/Op
 import { useInUse } from '../../hooks/useInUse'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
 import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal, ClampedComment } from '../streams/legacyStreamsShared'
+import { YouTubeImportModal } from '../streams/YouTubeImportModal'
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
@@ -395,6 +396,7 @@ export function StreamsPage({
   onSendToCombine,
   pendingSelect,
   onAutoPushCategoryMiss,
+  onOpenIntegrations,
 }: {
   isVisible: boolean
   onSendToPlayer: (file: string) => void
@@ -409,10 +411,18 @@ export function StreamsPage({
    *  unreachable for an unattended push (they render only in the affected
    *  stream's open sidebar and clear on selection). */
   onAutoPushCategoryMiss?: (info: { streamKey: string; title: string; game: string }) => void
+  /** Navigate to the Integrations page — the empty-library state points
+   *  fresh users there to connect their accounts. */
+  onOpenIntegrations?: () => void
 }) {
   const { config, updateConfig } = useStore()
   const { openEditor: openThumbnailEditor } = useThumbnailEditor()
   const [folders, setFolders] = useState<StreamFolder[]>([])
+  // Empty-library onboarding nudges: the YouTube import prompt can be
+  // dismissed permanently ("Start fresh") — localStorage, matching the
+  // other UI-only prefs.
+  const [importPromptDismissed, setImportPromptDismissed] = useState(() => localStorage.getItem('importPromptDismissed') === 'true')
+  const [emptyImportOpen, setEmptyImportOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   // ID-based selection so a refresh of `folders` (e.g. streams:changed) never
   // accidentally drops the user's current selection just because the
@@ -3452,11 +3462,52 @@ export function StreamsPage({
               <Loader2 size={14} className="animate-spin" /> Loading…
             </div>
           ) : visibleFolders.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
-              {searchQuery || filterTypes.size > 0 || filterGames.size > 0
-                ? 'No streams match the current filters.'
-                : 'No stream items.'}
-            </div>
+            searchQuery || filterTypes.size > 0 || filterGames.size > 0 ? (
+              <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+                No streams match the current filters.
+              </div>
+            ) : !ytConnected && !twConnected ? (
+              /* Fresh library, nothing connected — the highest-value next
+                 step is the Integrations page. (Twitch-only users get the
+                 plain empty state below: no accounts to connect, nothing
+                 to import.) */
+              <div className="flex flex-col items-center justify-center gap-3 py-16 px-6 text-center">
+                <p className="text-sm font-semibold text-gray-200">Connect your accounts</p>
+                <p className="text-xs text-gray-400 leading-relaxed max-w-md">
+                  Connect YouTube and Twitch on the Integrations page to sync your stream details,
+                  import your existing videos, and stream through the built-in relay.
+                </p>
+                <Button variant="primary" size="sm" onClick={() => onOpenIntegrations?.()}>
+                  Open Integrations
+                </Button>
+              </div>
+            ) : ytConnected && !importPromptDismissed && streamMode === 'folder-per-stream' ? (
+              /* YouTube connected but the library is empty — importing the
+                 channel is almost certainly what a new user wants. */
+              <div className="flex flex-col items-center justify-center gap-3 py-16 px-6 text-center">
+                <p className="text-sm font-semibold text-gray-200">Import videos from YouTube</p>
+                <p className="text-xs text-gray-400 leading-relaxed max-w-md">
+                  Bring your channel's videos in as stream items — details and thumbnails included.
+                  You can also import any time from the YouTube section of the Integrations page.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button variant="primary" size="sm" onClick={() => setEmptyImportOpen(true)}>
+                    Import from YouTube
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setImportPromptDismissed(true); localStorage.setItem('importPromptDismissed', 'true') }}
+                  >
+                    Start fresh
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+                No stream items.
+              </div>
+            )
           ) : (
             <table className="w-full text-sm border-collapse table-fixed">
               <thead className="sticky top-0 bg-navy-800/80 backdrop-blur-sm z-10 border-b border-white/50">
@@ -4468,6 +4519,11 @@ export function StreamsPage({
           }}
         />
       )}
+
+      {/* YouTube import launched from the empty-library prompt. The list
+          refreshes via the structural streams:changed events the import's
+          folder creation fires — no explicit reload needed on close. */}
+      <YouTubeImportModal isOpen={emptyImportOpen} onClose={() => setEmptyImportOpen(false)} />
     </div>
   )
 }

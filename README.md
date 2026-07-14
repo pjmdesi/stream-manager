@@ -170,6 +170,8 @@ Queue video files for conversion using ffmpeg presets.
 
 File watcher rules that can automatically **move, copy, rename, or convert** files. The watcher can be configured to start automatically on launch and is always accessible via the sidebar widget.
 
+Date-matched rules route recordings into the stream item matching the date in the filename — and sessions that run past midnight are handled automatically: a recording started in the small hours lands with the previous day's stream, not a phantom new one.
+
 ### Launcher
 
 ![Stream Manager screenshot - Launcher](resources/sm-launcher.png)
