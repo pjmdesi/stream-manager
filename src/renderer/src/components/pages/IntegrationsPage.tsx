@@ -527,6 +527,14 @@ export function IntegrationsPage() {
                       <span className="font-mono text-gray-300 select-all">http://localhost:42813/oauth2callback</span>
                     </li>
                     <li>Copy the generated Client ID and Client Secret into the fields below.</li>
+                    <li>
+                      Click Connect below. If Google shows a <span className="text-gray-300">"Choose an account"</span> step listing
+                      both your personal Google account and your channel (brand account), pick the entry with your{' '}
+                      <span className="text-gray-300">channel's name and avatar</span> — not the bare Google account.
+                      Picking the wrong one connects a channel that has never streamed, so scheduled broadcasts and
+                      the Stream Relay won't work even though your videos appear fine. If that happens, disconnect
+                      and reconnect with the right entry.
+                    </li>
                   </ol>
                 )}
                 {ytConnected && ytTokenValid && (
