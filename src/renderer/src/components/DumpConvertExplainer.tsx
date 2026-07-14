@@ -1,5 +1,6 @@
 import React from 'react'
-import { Radio, Film, Image as ImageIcon, Shuffle } from 'lucide-react'
+import { Radio, Film, Image as ImageIcon, Shuffle, Link2 } from 'lucide-react'
+import { Youtube } from './ui/BrandIcons'
 
 function FeatureCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
@@ -22,7 +23,7 @@ export function DumpConvertExplainer() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <p className="text-sm text-gray-400 leading-relaxed">
-          Most of the app works the same either way, but a few features are cleaner with folder-per-stream. The app can convert your dump folder into that layout in one click.
+          Some features only work with folder-per-stream, and several others are cleaner with it. The app can convert your dump folder into that layout in one click.
         </p>
         <p className="text-xs text-gray-400 italic leading-relaxed">
           Recording files need <span className="font-mono">YYYY-MM-DD</span> in the name (OBS's default). Subfolders won't be touched.
@@ -32,8 +33,14 @@ export function DumpConvertExplainer() {
       <div className="flex flex-col gap-2">
         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">What changes with folder-per-stream</h3>
         <div className="grid grid-cols-2 gap-2">
+          <FeatureCard icon={<Youtube size={14} />} title="YouTube Import">
+            Import your channel's videos as stream items — details and thumbnails included. Not available in dump-folder mode.
+          </FeatureCard>
+          <FeatureCard icon={<Link2 size={14} />} title="Bulk-Link">
+            Match your existing streams to their YouTube videos by date, in one pass. Not available in dump-folder mode.
+          </FeatureCard>
           <FeatureCard icon={<Radio size={14} />} title="Streams">
-            Get a real per-stream folder you can open and browse on disk.
+            Get a real per-stream folder you can open and browse on disk, with faster targeted refreshes when files change.
           </FeatureCard>
           <FeatureCard icon={<Film size={14} />} title="Player & Clipping">
             Session Videos panel shows every file in the stream's folder, not just files matching the date.
@@ -42,7 +49,7 @@ export function DumpConvertExplainer() {
             Thumbnails save into the stream's own folder instead of alongside other dated files.
           </FeatureCard>
           <FeatureCard icon={<Shuffle size={14} />} title="Auto-Rules">
-            New files auto-land in the matching dated folder instead of the dump root.
+            New files auto-land in the matching dated folder instead of the dump root — including recordings from sessions that run past midnight.
           </FeatureCard>
         </div>
       </div>
