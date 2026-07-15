@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Recursive variable font, bundled so the app needs no network to render.
+   Axes: wght 300–1000, slnt 0…-15 (declared as oblique so `italic` uses the
+   designed slant), plus MONO/CASL/CRSV set via font-variation-settings. */
+@font-face {
+  font-family: 'Recursive';
+  src: url('./fonts/Recursive_VF_1.078.woff2') format('woff2-variations');
+  font-weight: 300 1000;
+  font-style: oblique 0deg 15deg;
+  font-display: swap;
+}
+
 :root {
   --color-bg:           #0a0f1a; /* navy-900 */
   --color-bg-elevated:  #131825; /* navy-800 */

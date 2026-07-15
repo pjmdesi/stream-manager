@@ -89,6 +89,7 @@ Bring an existing channel into Stream Manager in minutes.
 
 - **Your metadata is safe**: `_meta.json` writes are atomic and crash-safe, with rolling backups, automatic restore, and a hard refusal to write over a failed read.
 - Offline detection with honest connection banners and cached status badges; integrations reflect real connectivity, live.
+- The app's font (Recursive) now ships inside the app instead of loading from Google Fonts — the UI renders identically with no internet connection.
 - Auto-rules: verified single-writer file operations, cancellable in-flight operations, quit protection — and recordings that cross midnight now land in the previous day's stream item.
 - Sessions that span midnight are also handled in bulk-link date matching.
 - Consistent custom tooltips everywhere (with keyboard shortcuts surfaced), edge-aware positioning.
