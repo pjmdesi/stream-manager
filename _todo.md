@@ -105,6 +105,10 @@
 
 *No new bugs*
 
+## GitHub
+
+1. Set up a GitHub Actions release workflow (post-v2-settle). Trigger on version tag push (`v*`): runner checks out, `npm ci`, typecheck + lint (gate — no artifact if either fails), `electron-vite build`, `electron-builder`, then uploads the portable exe to a **draft** GitHub release for that tag (publish stays manual, PJ pastes release notes). Start with `windows-latest` only; the `matrix.os` line is where `ubuntu-latest` gets added when the Linux port happens (see `_cross-platform-analysis.md` — CI matrix is Phase L1's first item, and ffmpeg-static/mac-signing are why local cross-builds don't work). Benefits even Windows-only: clean-room builds (no stray env vars / local state in shipped artifacts), release = one tag push, auditable public build provenance. First-time setup usually needs a few iterations to go green (line endings, path quirks) — do it in a calm window, not near a release deadline.
+
 ## Other ideas (small)
 
 1. Stream stats surface (location TBD — probably NOT the streams page sidebar; that's high-visibility real estate better used for workflow surfaces). Stream count, total hours streamed, top games/topics per month/year, longest stream, most-streamed game of all time, etc. Could live in its own page, a stats modal accessible from the streams page header, or a small "year in review" type card on the dashboard/launcher page.
