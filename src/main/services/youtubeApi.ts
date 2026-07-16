@@ -811,6 +811,22 @@ export async function bindBroadcast(
   )
 }
 
+/** Remove a broadcast's stream binding. Per the API contract, calling
+ *  liveBroadcasts.bind WITHOUT a streamId removes any existing association.
+ *  Used by the relay's pre-bind when the picked broadcast changes, so only
+ *  one upcoming broadcast is attached to the stream when ingest starts. */
+export async function unbindBroadcast(
+  broadcastId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<void> {
+  await ytRequest(
+    `/liveBroadcasts/bind?${new URLSearchParams({ id: broadcastId, part: 'id,status' })}`,
+    { method: 'POST' },
+    clientId, clientSecret,
+  )
+}
+
 /** Transition a broadcast's lifecycle status. Valid targets:
  *    'testing'   — receive on monitor stream only (we don't use this)
  *    'live'      — broadcast is visible to viewers

@@ -4,6 +4,13 @@
  * liveBroadcasts.bind + transition('live') / transition('complete') against
  * the active broadcast.
  *
+ *   relay listening / pick changes → PRE-BIND the picked broadcast to the
+ *     channel's stream, so the moment bytes hit the key YouTube routes them
+ *     to the scheduled broadcast instead of auto-starting the channel's
+ *     default ("always on") broadcast. Without this there's a race: the
+ *     relay forwards bytes the instant OBS connects, but the stream-started
+ *     bind below takes several API round-trips — YouTube saw an unbound key
+ *     receiving data and started the default broadcast alongside ours.
  *   stream-started → bind broadcast to channel's stream → transition 'live'
  *   stream-stopped → start 30s grace timer
  *     ↳ stream-started fires during grace → cancel timer, keep live
@@ -22,7 +29,7 @@
 import { EventEmitter } from 'events'
 import { relayManager } from './relayManager'
 import { activeBroadcastService } from './activeBroadcast'
-import { bindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus, getBroadcastContentDetails, getBroadcastLifeCycleStatus } from '../youtubeApi'
+import { bindBroadcast, unbindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus, getBroadcastContentDetails, getBroadcastLifeCycleStatus } from '../youtubeApi'
 import { getStore, setConfigPartial } from '../../ipc/store'
 
 /** Stages the renderer can observe via the lifecycle event. Pure information —
@@ -87,10 +94,75 @@ class RelayOrchestrator extends EventEmitter {
   // after an encoder reconnect.
   private startSeq = 0
 
+  // Broadcast currently pre-bound to the relay's stream (claimed while the
+  // relay is idle-listening). Dedupes rebinds of the same pick and tells us
+  // what to unbind when the pick changes.
+  private preBoundId: string | null = null
+  private preBindInFlight = false
+  private preBindQueued = false
+
   constructor() {
     super()
     relayManager.on('stream-started', () => this.handleStreamStarted())
     relayManager.on('stream-stopped', () => this.handleStreamStopped())
+    // Pre-bind triggers: the relay coming up to 'listening' (boot auto-start,
+    // manual enable, respawn after OBS disconnects) and any change of the
+    // picked broadcast (manual pick, auto-pick refresh, post-stream unlock).
+    relayManager.on('status-change', (s: { state: string }) => {
+      if (s.state === 'listening') void this.preBindActive()
+    })
+    activeBroadcastService.on('active-changed', () => void this.preBindActive())
+  }
+
+  // ─── Pre-bind ───────────────────────────────────────────────────────────
+
+  /** Bind the picked broadcast to the stream while the relay is idle, so
+   *  first bytes on the key start OUR broadcast — never the default one.
+   *  Only runs in the 'listening' state: binding while bytes are flowing
+   *  could pull a second broadcast live on the active ingest, and binding
+   *  while stopped is wasted quota. Failures are logged, not surfaced —
+   *  the stream-started bind remains the authoritative one with real error
+   *  reporting. */
+  private async preBindActive(): Promise<void> {
+    // Serialize: a pick change landing mid-bind re-queues one pass.
+    if (this.preBindInFlight) { this.preBindQueued = true; return }
+    this.preBindInFlight = true
+    try {
+      if (relayManager.getStatus().state !== 'listening') return
+      const active = activeBroadcastService.getActive()
+      if (active.isLiveSession) return
+      const id = active.broadcast?.id ?? null
+      if (id === this.preBoundId) return
+      const { clientId, clientSecret } = this.getCreds()
+      if (!clientId || !clientSecret) return
+      const streamId = await this.getStreamId()
+      if (!streamId) return
+      if (relayManager.getStatus().state !== 'listening') return
+      // Pick changed — release the previous claim first so only one
+      // upcoming broadcast is attached to the stream when bytes arrive.
+      if (this.preBoundId && this.preBoundId !== id) {
+        try {
+          await unbindBroadcast(this.preBoundId, clientId, clientSecret)
+        } catch { /* deleted/completed since — nothing left to unbind */ }
+        this.preBoundId = null
+      }
+      // No pick (or the pick is gone): leave the key unbound — streaming
+      // with nothing selected intentionally targets the default broadcast.
+      if (!id) return
+      try {
+        await bindBroadcast(id, streamId, clientId, clientSecret)
+        this.preBoundId = id
+        console.log(`[relay] pre-bound broadcast ${id} to stream ${streamId}`)
+      } catch (e: any) {
+        console.warn(`[relay] pre-bind failed (stream-start bind will retry): ${e?.message ?? e}`)
+      }
+    } finally {
+      this.preBindInFlight = false
+      if (this.preBindQueued) {
+        this.preBindQueued = false
+        void this.preBindActive()
+      }
+    }
   }
 
   // ─── Stream-started ─────────────────────────────────────────────────────
@@ -164,6 +236,9 @@ class RelayOrchestrator extends EventEmitter {
     try {
       const { clientId, clientSecret } = this.getCreds()
       await bindBroadcast(broadcastId, streamId, clientId, clientSecret)
+      // This is now the stream's bound broadcast — keep the pre-bind
+      // bookkeeping in sync so post-session pre-binds dedupe correctly.
+      this.preBoundId = broadcastId
     } catch (e: any) {
       if (cancelled()) return
       this.emit('lifecycle', {
@@ -379,6 +454,10 @@ class RelayOrchestrator extends EventEmitter {
       this.liveBroadcastTitle = null
       this.boundBroadcastId = null
       this.boundBroadcastTitle = null
+      // The completed broadcast's binding died with it — clear so the next
+      // active-changed pre-binds the fresh pick instead of skipping (or
+      // trying to unbind a completed broadcast).
+      this.preBoundId = null
       // Refresh the upcoming list first (still pinned, so the widget doesn't
       // flicker), then release the pin — getActive() then reports the fresh
       // next-soonest auto-pick. Order matters: unlocking before the refresh
@@ -402,7 +481,12 @@ class RelayOrchestrator extends EventEmitter {
       try {
         await transitionBroadcast(broadcastId, 'live', clientId, clientSecret)
         return true
-      } catch {
+      } catch (e: any) {
+        // Already live — happens when an externally-created broadcast has
+        // Auto-start enabled: pre-binding means YouTube starts it itself the
+        // moment ingest begins, and our transition comes back redundant.
+        // That's success, not failure.
+        if (/redundant/i.test(String(e?.message ?? e))) return true
         // Retry on any failure until the whole window is exhausted. Previously
         // we early-exited on errors that didn't match a "stream not active"
         // pattern, but YouTube's error wording varies enough that legitimate
