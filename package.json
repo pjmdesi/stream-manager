@@ -1,6 +1,6 @@
 {
     "name": "stream-manager",
-    "version": "2.0.10",
+    "version": "2.0.11",
     "description": "A streaming file management app for Twitch/YouTube streamers",
     "main": "./out/main/index.js",
     "author": "PJ Mullen <contact@pjm.design>",
