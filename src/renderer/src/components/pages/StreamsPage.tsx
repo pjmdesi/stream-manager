@@ -874,6 +874,24 @@ export function StreamsPage({
     })
   }, [])
   useEffect(() => {
+    return window.api.onYouTubeDisconnected(() => setYtConnected(false))
+  }, [])
+  // Twitch mirror of the pair above: this page stays mounted while the
+  // user reconnects on the Integrations page, so without these events the
+  // Push to Twitch button stayed "Twitch not connected" until a restart.
+  useEffect(() => {
+    const offConnected = window.api.onTwitchConnected(() => {
+      setTwConnected(true)
+      // Same cache priming as the mount-time status fetch — the push
+      // button needs a channel snapshot to compute its in-sync state.
+      window.api.twitchGetChannel?.()
+        .then(info => { if (info) setTwitchChannel(info) })
+        .catch(() => {})
+    })
+    const offDisconnected = window.api.onTwitchDisconnected(() => setTwConnected(false))
+    return () => { offConnected(); offDisconnected() }
+  }, [])
+  useEffect(() => {
     window.api.getStreamTypeTags().then(setTagColors)
     window.api.getStreamTypeTextures().then(setTagTextures)
     window.api.getGameTagsLinks().then(setGameTagsLinks)

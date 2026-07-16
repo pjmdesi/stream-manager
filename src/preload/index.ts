@@ -560,6 +560,21 @@ contextBridge.exposeInMainWorld('api', {
   twitchDisconnect: () =>
     ipcRenderer.invoke('twitch:disconnect'),
 
+  // Fired by main after a successful OAuth exchange / a disconnect, so
+  // mounted pages track connection state live — same pattern as the
+  // onYouTubeConnected/onYouTubeDisconnected pair.
+  onTwitchConnected: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('twitch:connected', handler)
+    return () => ipcRenderer.removeListener('twitch:connected', handler)
+  },
+
+  onTwitchDisconnected: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('twitch:disconnected', handler)
+    return () => ipcRenderer.removeListener('twitch:disconnected', handler)
+  },
+
   twitchUpdateChannel: (title: string, gameName?: string, tags?: string[]) =>
     ipcRenderer.invoke('twitch:updateChannel', title, gameName, tags),
 

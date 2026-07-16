@@ -250,6 +250,8 @@ declare global {
       twitchGetStatus(): Promise<{ connected: boolean; channelName?: string }>
       twitchConnect(): Promise<void>
       twitchDisconnect(): Promise<void>
+      onTwitchConnected(cb: () => void): () => void
+      onTwitchDisconnected(cb: () => void): () => void
       twitchUpdateChannel(title: string, gameName?: string, tags?: string[]): Promise<{ categoryApplied: boolean }>
       twitchGetChannel(): Promise<{ title: string; gameName: string; tags: string[] } | null>
 
