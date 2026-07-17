@@ -1473,6 +1473,18 @@ export function StreamsPage({
       setSendingPlayerPath(prev => (prev === folder.folderPath ? null : prev))
     }
   }, [onSendToPlayer])
+  // Single-file variant for the files grid's per-card Send to Player button.
+  // Same cloud gate as the folder-level send above: a placeholder file used
+  // to slip through to the player, which silently kicked off the hydration
+  // with no feedback beyond the Windows notification.
+  const handleSendFileToPlayer = useCallback(async (filePath: string) => {
+    const [isLocal] = await window.api.checkLocalFiles([filePath])
+    if (!isLocal) {
+      setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'player', stage: 'confirm' })
+      return
+    }
+    onSendToPlayer(filePath)
+  }, [onSendToPlayer])
 
   const handleSendToConverter = useCallback((folder: StreamFolder) => {
     // More than one video → let the user pick which file(s) to send. A single
@@ -3912,7 +3924,7 @@ export function StreamsPage({
               onSendToPlayer={() => handleSendToPlayer(renderedFolder)}
               onSendToConverter={() => handleSendToConverter(renderedFolder)}
               onSendToCombine={() => handleSendToCombine(renderedFolder)}
-              onSendFileToPlayer={(path) => onSendToPlayer(path)}
+              onSendFileToPlayer={handleSendFileToPlayer}
               onSendFileToConverter={(path) => onSendToConverter([path], {
                 folderPath: renderedFolder.folderPath,
                 label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
