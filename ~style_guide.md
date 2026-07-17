@@ -101,6 +101,8 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 ### Tooltip (`Tooltip.tsx`)
 
 - **ALWAYS use `<Tooltip>` instead of native `title=`** (native is slow + unstyleable). Exception: `Modal`'s `title` prop is a header, not a tooltip — leave those.
+- **Every button gets a tooltip (rule).** Default assumption: a button without a `<Tooltip>` is a bug, even when its label seems self-evident. The rare exception is a button where no extra text could improve understanding (e.g. the Settings **Save** button) — but err on the side of adding one. Toggle-style buttons should describe the action the click will take *now* ("Hide video files" / "Show video files"), not a static label.
+- **Shortcut chips:** if a keyboard shortcut triggers the button, pass `shortcut`. When one key toggles between two buttons' actions (Ctrl+A = select-all ↔ clear-when-complete), the chip sits on whichever button the key would *currently* trigger — a shown shortcut must never be wrong.
 - `side` (`top` default) with automatic fallback to a side that fits; `w-max` capped at `max-w-xs` (override via `maxWidth`); `interactive` (hoverable body, click-to-dismiss); `open`+`triggerStyle` for anchoring over non-React visuals (e.g. contenteditable chips). Portal at `z-[10001]`, `bg-navy-800`.
 
 ### Chips / badges (rule)

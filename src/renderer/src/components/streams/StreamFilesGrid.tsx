@@ -801,8 +801,12 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
       <div className="flex items-center gap-1.5 flex-wrap">
         {hasVideos && hasImages && (
           <>
-            <FilterToggle active={showVideo} onClick={() => setShowVideo(v => !v)} icon={<Film size={12} />} label={`Video ${folder.videos.length}`} />
-            <FilterToggle active={showImage} onClick={() => setShowImage(v => !v)} icon={<ImageIcon size={12} />} label={`Images ${folder.thumbnails.length}`} />
+            <Tooltip content={showVideo ? 'Hide video files' : 'Show video files'} side="top">
+              <FilterToggle active={showVideo} onClick={() => setShowVideo(v => !v)} icon={<Film size={12} />} label={`Video ${folder.videos.length}`} />
+            </Tooltip>
+            <Tooltip content={showImage ? 'Hide image files' : 'Show image files'} side="top">
+              <FilterToggle active={showImage} onClick={() => setShowImage(v => !v)} icon={<ImageIcon size={12} />} label={`Images ${folder.thumbnails.length}`} />
+            </Tooltip>
           </>
         )}
         <div className="ml-auto flex items-center gap-0.5 flex-wrap">
