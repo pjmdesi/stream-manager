@@ -3873,6 +3873,11 @@ export function CloudDownloadModal({
           <p className="text-sm text-gray-400">
             Download it now? The file will be sent to the player automatically once it's ready.
           </p>
+          <p className="text-xs text-gray-400">
+            Tip: this dialog stays open while the file downloads. To keep using the app in the
+            meantime, dismiss it and pin the file local from the stream's files grid instead —
+            then send it to the player once it's downloaded.
+          </p>
           <p className="text-xs text-gray-400 font-mono break-all">{filePath}</p>
         </div>
       ) : (
