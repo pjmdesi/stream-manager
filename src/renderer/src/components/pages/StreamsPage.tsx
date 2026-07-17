@@ -3403,7 +3403,7 @@ export function StreamsPage({
                     </Button>
                   </Tooltip>
                   <div className="w-px h-5 bg-white/10 mx-1 self-center" />
-                  <Tooltip content="Exit selection mode" side="bottom">
+                  <Tooltip content="Exit selection mode" side="bottom" shortcut="Ctrl+Shift+A">
                     <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={toggleSelectMode} collapsibleLabel="@2xl:grid-cols-[1fr] @2xl:ms-0"
                       labelCollapsed={selectedStreamKey ? true : undefined}>
                       Stop

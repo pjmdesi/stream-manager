@@ -43,7 +43,7 @@
 (Sorted easiest → hardest, 2026-07-15.)
 
 1. The "Stop" button in multiselect mode also needs the keyboard shortcut listed in the tooltip, it's the same as the one for the "Select" button that engages multiselect mode.
-2. Add an additional note in the modal which appears for the hydration check when sending a video to the player that says "Pin the file local before sending to player to continue using the app while the file is being downloaded from the cloud."
+2. Add an additional note in the modal which appears for the hydration check when sending a video to the player that says "To continue using the app while the file is being downloaded from the cloud, use the available "pin local" button for the file or stream item to download the file to your local machine before sending it to the player."
 3. In the convert-to-folder-per-stream modal, on the final step (showing the changed files), the close and undo changes buttons need to swap positions. The close button should be the one on the right in the primary location since that's the most likely next step for the user. This UX rule should be written into the style guide.
 4. Add subtle border and drop shadow to the video player canvas so it's easier to make out the boundaries of the video when it matches the background color of the container at the edges.
 5. Add the stream item title to the converter page items so it's more clear which stream item the file belongs to. This is especially important for bulk conversion tasks where there are multiple items in the queue.
