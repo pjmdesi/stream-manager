@@ -37,6 +37,10 @@ interface CloudOpsContextValue {
    *  surface via the widget/icons without popping the full modal. */
   enqueueOffload: (files: { path: string; size: number }[], openModal?: boolean) => void
   enqueueHydrate: (files: { path: string; size: number }[], openModal?: boolean) => void
+  /** Re-run a single failed row (same direction), resetting it in place so
+   *  it keeps its list position. Most failures are transient sync-client
+   *  moods (Synology mid-index etc.) — an immediate retry usually lands. */
+  retryItem: (item: CloudOpItem) => void
   cancelOffload: () => void
   cancelHydrate: () => void
   openModal: () => void
@@ -205,6 +209,25 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  const retryItem = useCallback((item: CloudOpItem) => {
+    if (item.status !== 'failed') return
+    const batchId = makeBatchId(item.direction)
+    const setter = item.direction === 'offload' ? setOffloadItems : setHydrateItems
+    // Reset the row under a fresh batch id so incoming events route to it —
+    // in place, not re-enqueued, so it doesn't jump to the bottom of the list.
+    setter(prev => prev.map(it =>
+      it.batchId === item.batchId && it.path === item.path && it.status === 'failed'
+        ? { ...it, status: 'pending' as CloudOpItemStatus, reason: undefined, batchId }
+        : it))
+    const call = item.direction === 'offload' ? window.api.cloudSyncOffload : window.api.cloudSyncPin
+    call([item.path], batchId).catch(() => {
+      setter(prev => prev.map(it =>
+        it.batchId === batchId && it.status === 'pending'
+          ? { ...it, status: 'failed' as CloudOpItemStatus, reason: item.direction === 'offload' ? 'Could not start the offload' : 'Could not start the download' }
+          : it))
+    })
+  }, [])
+
   const cancelOffload = useCallback(() => {
     if (!offloadActive || offloadCancelling) return
     setOffloadCancelling(true)
@@ -239,6 +262,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
     modalOpen,
     enqueueOffload,
     enqueueHydrate,
+    retryItem,
     cancelOffload,
     cancelHydrate,
     openModal,
@@ -248,7 +272,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
     offloadActive, hydrateActive,
     offloadCancelling, hydrateCancelling,
     hasActivity, modalOpen,
-    enqueueOffload, enqueueHydrate,
+    enqueueOffload, enqueueHydrate, retryItem,
     cancelOffload, cancelHydrate,
     openModal, closeModal,
   ])

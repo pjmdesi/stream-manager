@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import { Tooltip } from './ui/Tooltip'
-import { Loader2, CheckCircle2, XCircle, Cloud, CloudCheck, CloudDownload, Pin, Ban, Info } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Cloud, CloudCheck, CloudDownload, Pin, Ban, Info, RotateCw } from 'lucide-react'
 import { useCloudOps, type CloudOpItem, type CloudOpItemStatus, type CloudOpDirection } from '../context/CloudOpsContext'
 
 function formatBytes(bytes: number): string {
@@ -123,6 +123,7 @@ interface SectionProps {
 }
 
 function CloudOpsSection({ direction, items, active, cancelling, onCancel }: SectionProps) {
+  const { retryItem } = useCloudOps()
   const totals = useMemo(() => computeTotals(items), [items])
   const isOffload = direction === 'offload'
   const title = isOffload ? 'Offload to cloud' : 'Download from cloud'
@@ -216,7 +217,19 @@ function CloudOpsSection({ direction, items, active, cancelling, onCancel }: Sec
                   <span className="block truncate text-gray-300">{it.name}</span>
                 </Tooltip>
                 <span className="text-right tabular-nums text-gray-400">{formatBytes(it.size)}</span>
-                <span className="text-right w-32"><StatusBadge status={it.status} reason={it.reason} /></span>
+                <span className="w-32 inline-flex items-center justify-end gap-1.5">
+                  {it.status === 'failed' && (
+                    <Tooltip content={isOffload ? 'Retry offload' : 'Retry download'}>
+                      <button
+                        onClick={() => retryItem(it)}
+                        className="text-gray-400 hover:text-gray-200 transition-colors"
+                      >
+                        <RotateCw size={11} />
+                      </button>
+                    </Tooltip>
+                  )}
+                  <StatusBadge status={it.status} reason={it.reason} />
+                </span>
               </div>
             ))}
           </div>
