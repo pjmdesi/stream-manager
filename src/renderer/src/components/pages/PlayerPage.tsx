@@ -3622,6 +3622,22 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     onClick={effectiveTogglePlay}
                     onDurationChange={handleDurationChange}
                   />
+                  {/* Video-bounds outline — object-contain letterboxes the image
+                      inside the element, so this is sized to the ACTUAL displayed
+                      frame, not the stage. Border + faint glow keep dark footage
+                      readable against the black stage (a dark drop shadow would
+                      vanish on it). Inside the zoom/pan wrapper so it tracks both. */}
+                  {videoInfo && videoInfo.width > 0 && videoInfo.height > 0 && vcSize.w > 0 && (() => {
+                    const fit = Math.min(vcSize.w / videoInfo.width, vcSize.h / videoInfo.height)
+                    const w = videoInfo.width * fit
+                    const h = videoInfo.height * fit
+                    return (
+                      <div
+                        className="absolute pointer-events-none border border-white/10 shadow-[0_0_14px_rgba(255,255,255,0.07)]"
+                        style={{ left: (vcSize.w - w) / 2, top: (vcSize.h - h) / 2, width: w, height: h }}
+                      />
+                    )
+                  })()}
                   {/* Crop overlay — values come from the active clip region + selected aspect */}
                   {isClipMode && clipState.cropAspect !== 'off' && videoInfo && vcSize.w > 0 && (() => {
                     const rCropX = activeCropRegion?.cropX ?? DEFAULT_CROP_X
