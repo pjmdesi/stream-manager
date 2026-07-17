@@ -411,6 +411,13 @@ function AppInner() {
   // Alt+F4) lives there and would otherwise discard the draft silently.
   useEffect(() => { window.api.setSettingsDirty(settingsDirty) }, [settingsDirty])
   const [aboutOpen, setAboutOpen] = useState(false)
+  // Git branch of a dev run (null in packaged builds and on master) — badges
+  // the sidebar version so a dev-branch app can't be mistaken for the RC.
+  const [gitBranch, setGitBranch] = useState<string | null>(null)
+  useEffect(() => {
+    window.api.getGitBranch?.().then(b => setGitBranch(b)).catch(() => {})
+  }, [])
+  const branchBadge = gitBranch && gitBranch !== 'master' ? gitBranch : null
   // Update detection — fires once on mount, results cached for 6h in the
   // store. Honors the `checkForUpdates` config opt-out. Failures are silent.
   const [updateInfo, setUpdateInfo] = useState<{ latest: string; releaseUrl: string; releaseNotes: string } | null>(null)
@@ -881,13 +888,18 @@ function AppInner() {
               </button>
             </Tooltip>
             {!sidebarCollapsed && <span className="text-[10px] text-gray-400">·</span>}
-            <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}`} side="top">
+            <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}${branchBadge ? ` — ${branchBadge} branch` : ''}`} side="top">
               <button
                 onClick={() => setAboutOpen(true)}
-                className={`text-[10px] transition-colors flex items-center gap-1 ${updateInfo ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-gray-300'}`}
+                className={`text-[10px] transition-colors flex items-center gap-1 ${sidebarCollapsed ? 'flex-col gap-0.5' : ''} ${updateInfo ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-gray-300'}`}
               >
                 {updateInfo && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-label="update available" />}
                 v{appVersion}
+                {branchBadge && (
+                  <span className="px-1 rounded bg-purple-500/20 text-purple-300 font-semibold leading-tight">
+                    {branchBadge}
+                  </span>
+                )}
               </button>
             </Tooltip>
           </div>
@@ -1037,7 +1049,7 @@ function AppInner() {
             <p className="text-sm text-gray-300 leading-relaxed">
               A desktop app for streamers to manage, review, and process local recording files.
             </p>
-            <p className="text-xs text-gray-400 mt-1">Version {appVersion}</p>
+            <p className="text-xs text-gray-400 mt-1">Version {appVersion}{branchBadge ? ` — ${branchBadge} branch` : ''}</p>
           </div>
           {updateInfo && (
             <div className="w-full flex flex-col gap-2 p-3 rounded-lg bg-amber-400/10 border border-amber-400/30">

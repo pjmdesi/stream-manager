@@ -132,6 +132,11 @@ contextBridge.exposeInMainWorld('api', {
     releaseNotes: string | null
   }> => ipcRenderer.invoke('update:check', force ?? false),
 
+  // Non-null only in dev runs from a git checkout — packaged builds have no
+  // .git, so the renderer's branch badge is impossible in a release build.
+  getGitBranch: (): Promise<string | null> =>
+    ipcRenderer.invoke('app:getGitBranch'),
+
   cloudSyncOffload: (paths: string[], batchId: string): Promise<void> =>
     ipcRenderer.invoke('cloud-sync:offload', paths, batchId),
 

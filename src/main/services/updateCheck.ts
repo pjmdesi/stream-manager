@@ -1,4 +1,6 @@
 import { app, ipcMain } from 'electron'
+import fs from 'fs'
+import { join } from 'path'
 import { getStore } from '../ipc/store'
 
 const REPO_OWNER = 'pjmdesi'
@@ -97,7 +99,22 @@ export async function checkForUpdate(force = false): Promise<UpdateCheckResult> 
   }
 }
 
+/** Branch label for dev runs, so the sidebar can flag a non-master checkout.
+ *  Reads .git/HEAD from the project root — packaged builds carry no .git, so
+ *  this is always null there and the badge can never appear in a release. */
+function getGitBranch(): string | null {
+  if (app.isPackaged) return null
+  try {
+    const head = fs.readFileSync(join(app.getAppPath(), '.git', 'HEAD'), 'utf8').trim()
+    const m = head.match(/^ref: refs\/heads\/(.+)$/)
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+}
+
 export function registerUpdateCheckIPC(): void {
   // Renderer-triggered manual check (e.g., a "check now" button).
   ipcMain.handle('update:check', (_e, force?: boolean) => checkForUpdate(!!force))
+  ipcMain.handle('app:getGitBranch', () => getGitBranch())
 }
