@@ -88,6 +88,7 @@ declare global {
         releaseNotes: string | null
       }>
       getGitBranch(): Promise<string | null>
+      onSecondInstanceBlocked(cb: () => void): () => void
       cloudSyncOffload(paths: string[], batchId: string): Promise<void>
       cloudSyncCancelOffload(): Promise<void>
       cloudSyncPin(paths: string[], batchId: string): Promise<void>

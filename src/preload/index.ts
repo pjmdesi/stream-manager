@@ -137,6 +137,14 @@ contextBridge.exposeInMainWorld('api', {
   getGitBranch: (): Promise<string | null> =>
     ipcRenderer.invoke('app:getGitBranch'),
 
+  // Fired at the EXISTING instance when a second dev launch was blocked by
+  // the single-instance lock, so it can explain why no new window appeared.
+  onSecondInstanceBlocked: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('app:secondInstanceBlocked', handler)
+    return () => ipcRenderer.removeListener('app:secondInstanceBlocked', handler)
+  },
+
   cloudSyncOffload: (paths: string[], batchId: string): Promise<void> =>
     ipcRenderer.invoke('cloud-sync:offload', paths, batchId),
 

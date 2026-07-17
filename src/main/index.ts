@@ -79,6 +79,28 @@ const optimizer = { watchWindowShortcuts: (_win: BrowserWindow) => {} }
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.streammanager')
 }
+
+// Dev-only single-instance guard. Forgetting a tray-hidden dev instance and
+// running `npm run dev` again left two apps fighting over the vite port,
+// watcher, and relay — with the stale one still on screen looking like the
+// new code. The lock only binds instances that REQUEST it, so a packaged
+// build (which never asks) still runs alongside the dev app — deliberate:
+// streaming on the dist build while developing is a normal workflow here.
+if (!app.isPackaged) {
+  if (!app.requestSingleInstanceLock()) {
+    console.log('[main] Stream Manager is already running — focusing the existing instance instead. Close it first if you meant to launch fresh code.')
+    app.quit()
+  } else {
+    app.on('second-instance', () => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (!win || win.isDestroyed()) return
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+      win.webContents.send('app:secondInstanceBlocked')
+    })
+  }
+}
 import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'

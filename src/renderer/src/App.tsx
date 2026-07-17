@@ -418,6 +418,12 @@ function AppInner() {
     window.api.getGitBranch?.().then(b => setGitBranch(b)).catch(() => {})
   }, [])
   const branchBadge = gitBranch && gitBranch !== 'master' ? gitBranch : null
+  // A second dev launch was blocked by the single-instance lock — main
+  // focused THIS (already-running) window; explain why nothing new opened.
+  const [secondInstanceOpen, setSecondInstanceOpen] = useState(false)
+  useEffect(() => {
+    return window.api.onSecondInstanceBlocked?.(() => setSecondInstanceOpen(true))
+  }, [])
   // Update detection — fires once on mount, results cached for 6h in the
   // store. Honors the `checkForUpdates` config opt-out. Failures are silent.
   const [updateInfo, setUpdateInfo] = useState<{ latest: string; releaseUrl: string; releaseNotes: string } | null>(null)
@@ -1037,6 +1043,24 @@ function AppInner() {
       </Modal>
 
       <HelpModal isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      <Modal
+        isOpen={secondInstanceOpen}
+        onClose={() => setSecondInstanceOpen(false)}
+        title="Stream Manager is already running"
+        width="md"
+        footer={
+          <Button variant="primary" size="sm" onClick={() => setSecondInstanceOpen(false)}>
+            Got it
+          </Button>
+        }
+      >
+        <p className="text-sm text-gray-300 leading-relaxed">
+          You launched Stream Manager again, but this instance was already open — it may have
+          been sitting in the system tray. If you meant to start a newer version (for example
+          after switching branches or pulling changes), close this one first, then launch again.
+        </p>
+      </Modal>
 
       <CloudOpsModal />
 
