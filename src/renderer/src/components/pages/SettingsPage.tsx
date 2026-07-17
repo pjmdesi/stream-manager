@@ -907,50 +907,60 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
           width="2xl"
           footer={
             <div className="flex items-center justify-end gap-2 w-full">
-              <Button variant="ghost" onClick={() => setConvertModalOpen(false)}>
-                {convertStatus === 'done' ? 'Close' : 'Cancel'}
-              </Button>
               {convertStatus === 'done' ? (
-                <Button
-                  variant="secondary"
-                  onClick={async () => {
-                    if (!convertResult) return
-                    setConvertStatus('undoing')
-                    setConvertError(null)
-                    try {
-                      await window.api.undoConvertDumpFolder(convertResult.manifest)
-                      await window.api.setConfig({ streamMode: 'dump-folder' })
-                      setConvertResult(null)
-                      setConvertStatus('undone')
-                    } catch (err: any) {
-                      setConvertError(err?.message ?? String(err))
-                      setConvertStatus('done')
-                    }
-                  }}
-                >
-                  Undo conversion
-                </Button>
+                /* Done: Close is the most-likely-next action, so it takes the
+                   right/primary slot (style guide → Modal button order); the
+                   rarely-used Undo sits to its left. */
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      if (!convertResult) return
+                      setConvertStatus('undoing')
+                      setConvertError(null)
+                      try {
+                        await window.api.undoConvertDumpFolder(convertResult.manifest)
+                        await window.api.setConfig({ streamMode: 'dump-folder' })
+                        setConvertResult(null)
+                        setConvertStatus('undone')
+                      } catch (err: any) {
+                        setConvertError(err?.message ?? String(err))
+                        setConvertStatus('done')
+                      }
+                    }}
+                  >
+                    Undo conversion
+                  </Button>
+                  <Button variant="primary" onClick={() => setConvertModalOpen(false)}>
+                    Close
+                  </Button>
+                </>
               ) : (
-                <Button
-                  variant="primary"
-                  onClick={async () => {
-                    if (!local.streamsDir) return
-                    setConvertStatus('converting')
-                    setConvertError(null)
-                    try {
-                      const res = await window.api.convertDumpFolder(local.streamsDir)
-                      setConvertResult(res)
-                      await window.api.setConfig({ streamMode: 'folder-per-stream' })
-                      setConvertStatus('done')
-                    } catch (err: any) {
-                      setConvertError(err?.message ?? String(err))
-                      setConvertStatus('idle')
-                    }
-                  }}
-                  disabled={convertStatus === 'converting' || convertStatus === 'undoing'}
-                >
-                  {convertStatus === 'converting' ? 'Converting…' : convertStatus === 'undoing' ? 'Undoing…' : 'Update structure'}
-                </Button>
+                <>
+                  <Button variant="ghost" onClick={() => setConvertModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={async () => {
+                      if (!local.streamsDir) return
+                      setConvertStatus('converting')
+                      setConvertError(null)
+                      try {
+                        const res = await window.api.convertDumpFolder(local.streamsDir)
+                        setConvertResult(res)
+                        await window.api.setConfig({ streamMode: 'folder-per-stream' })
+                        setConvertStatus('done')
+                      } catch (err: any) {
+                        setConvertError(err?.message ?? String(err))
+                        setConvertStatus('idle')
+                      }
+                    }}
+                    disabled={convertStatus === 'converting' || convertStatus === 'undoing'}
+                  >
+                    {convertStatus === 'converting' ? 'Converting…' : convertStatus === 'undoing' ? 'Undoing…' : 'Update structure'}
+                  </Button>
+                </>
               )}
             </div>
           }
