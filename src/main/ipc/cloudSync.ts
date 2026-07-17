@@ -1,5 +1,5 @@
 import { ipcMain, WebContents } from 'electron'
-import { dehydratePaths, hydratePathsWithProgress, isCfApiSyncRoot } from '../services/cfapi'
+import { dehydrateOnePath, hydrateOnePath, isCfApiSyncRoot, DEHYDRATE_CONCURRENCY, HYDRATE_CONCURRENCY } from '../services/cfapi'
 import { getProtectedPaths, pauseStreamsWatcher } from './streams'
 import { getStore } from './store'
 
@@ -32,35 +32,45 @@ export function invalidateCloudSyncCache(): void {
   cachedActive = null
 }
 
-// ─── Concurrent-batch worker model ───────────────────────────────────────────
+// ─── Shared-pool worker model ────────────────────────────────────────────────
 //
-// Each direction (offload | hydrate) owns its own queue + serial worker. New
-// batches append; the worker drains them one batch at a time, never running
-// two batches in parallel against the same provider. The two directions DO
-// run in parallel with each other (an offload and a hydrate can be in flight
-// at the same time).
+// Each direction (offload | hydrate) owns a persistent unit queue drained by
+// up to N concurrent workers (one PowerShell/CFAPI call per unit). Batches
+// are bookkeeping only: every enqueued path becomes a unit tagged with its
+// batch, so a batch enqueued mid-drain — e.g. the cloud modal's per-file
+// retry — takes the NEXT FREE WORKER SLOT instead of waiting behind the
+// whole in-flight batch (the old model drained strictly batch-at-a-time). A
+// batch's 'complete' event fires when its last unit settles. The two
+// directions still run in parallel with each other.
 //
-// Cancel is per-batch (stamped on every batch in the cancel-target direction
-// at click time — both the in-flight batch and any queued batches). Batches
-// enqueued AFTER the cancel click are NOT cancelled, so the user can keep
-// queueing new work while a previous cohort is still tearing down.
+// Cancel is per-direction: it stamps every live batch at click time; their
+// queued units are skipped (settled without running), in-flight units are
+// allowed to finish — CfDehydrate/CfHydrate are never interrupted mid-call.
+// Batches enqueued AFTER the cancel click are unaffected.
 
 type Direction = 'offload' | 'hydrate'
 
-interface Batch {
+interface BatchState {
   direction: Direction
   batchId: string
-  paths: string[]
   sender: WebContents
   cancelled: boolean
+  /** Units not yet settled (queued or in flight). 0 → emit 'complete'. */
+  remaining: number
+  ok: number
+  failed: number
+  /** already-offline (offload) / already-local (hydrate) count. */
+  alreadySkipped: number
 }
 
-const offloadQueue: Batch[] = []
-const hydrateQueue: Batch[] = []
-let offloadInFlight: Batch | null = null
-let hydrateInFlight: Batch | null = null
-let offloadRunning = false
-let hydrateRunning = false
+interface Unit {
+  batch: BatchState
+  path: string
+}
+
+const unitQueue: Record<Direction, Unit[]> = { offload: [], hydrate: [] }
+const activeWorkers: Record<Direction, number> = { offload: 0, hydrate: 0 }
+const liveBatches: Record<Direction, Set<BatchState>> = { offload: new Set(), hydrate: new Set() }
 
 function safeSend(sender: WebContents, channel: string, payload: unknown): void {
   // The sender's window may have closed between events. Guard so a stale
@@ -69,111 +79,126 @@ function safeSend(sender: WebContents, channel: string, payload: unknown): void 
   sender.send(channel, payload)
 }
 
-async function drainOffload(): Promise<void> {
-  if (offloadRunning) return
-  offloadRunning = true
-  // Pause the chokidar watcher around offload work — its
-  // ReadDirectoryChangesW handles cause Synology Drive to reject
-  // CfDehydratePlaceholder with HRESULT 0x80070187 (file in use).
-  // Hydrate doesn't have the same constraint, so its worker doesn't pause.
-  let restartWatcher: (() => void) | null = null
+function sendComplete(b: BatchState): void {
+  liveBatches[b.direction].delete(b)
+  safeSend(b.sender, 'cloud-sync:progress', b.direction === 'offload'
+    ? { type: 'complete', direction: 'offload', batchId: b.batchId, ok: b.ok, failed: b.failed, alreadyOffline: b.alreadySkipped, cancelled: b.cancelled }
+    : { type: 'complete', direction: 'hydrate', batchId: b.batchId, ok: b.ok, failed: b.failed, alreadyLocal: b.alreadySkipped, cancelled: b.cancelled })
+}
+
+function settleUnit(b: BatchState): void {
+  b.remaining -= 1
+  if (b.remaining === 0) sendComplete(b)
+}
+
+// ─── Offload watcher pause ──────────────────────────────────────────────────
+// The chokidar streams watcher must be down while ANY offload unit runs —
+// its ReadDirectoryChangesW handles cause Synology Drive to reject
+// CfDehydratePlaceholder with HRESULT 0x80070187 (file in use). The pause is
+// held for the lifetime of the offload pool, not per batch. State machine:
+// exactly one of {pause in flight, restart fn held, fully resumed} at a time.
+// pauseStreamsWatcher is NOT refcounted (pausing while already paused hands
+// back a no-op restart), so ensureOffloadPaused never double-pauses.
+let offloadPauseP: Promise<void> | null = null
+let offloadRestartFn: (() => void) | null = null
+
+function ensureOffloadPaused(): Promise<void> {
+  if (offloadRestartFn) return Promise.resolve() // already paused by us
+  if (!offloadPauseP) {
+    offloadPauseP = pauseStreamsWatcher().then(restart => {
+      offloadRestartFn = restart
+      offloadPauseP = null
+      // The pool may have drained while the pause settled (e.g. every queued
+      // unit belonged to a batch cancelled in the meantime) — resume now
+      // rather than holding the watcher down forever.
+      maybeResumeOffloadWatcher()
+    })
+  }
+  return offloadPauseP
+}
+
+function maybeResumeOffloadWatcher(): void {
+  if (!offloadRestartFn) return
+  if (activeWorkers.offload > 0 || unitQueue.offload.length > 0) return
+  const restart = offloadRestartFn
+  offloadRestartFn = null
+  restart()
+}
+
+// ─── Workers ────────────────────────────────────────────────────────────────
+
+async function worker(direction: Direction): Promise<void> {
   try {
-    while (offloadQueue.length > 0) {
-      const batch = offloadQueue.shift()!
-      offloadInFlight = batch
-      try {
-        if (batch.cancelled) {
-          safeSend(batch.sender, 'cloud-sync:progress', {
-            type: 'init', direction: 'offload', batchId: batch.batchId,
-            eligible: [], skippedProtected: [],
-          })
-          safeSend(batch.sender, 'cloud-sync:progress', {
-            type: 'complete', direction: 'offload', batchId: batch.batchId,
-            ok: 0, failed: 0, alreadyOffline: 0, cancelled: true,
-          })
-          continue
-        }
-        const protectedSet = getProtectedPaths(getStreamsDir())
-        const skipped: string[] = []
-        const eligible: string[] = []
-        for (const p of batch.paths) {
-          if (protectedSet.has(p)) skipped.push(p)
-          else eligible.push(p)
-        }
-        safeSend(batch.sender, 'cloud-sync:progress', {
-          type: 'init', direction: 'offload', batchId: batch.batchId,
-          eligible, skippedProtected: skipped,
-        })
-        if (!restartWatcher) restartWatcher = await pauseStreamsWatcher()
-        const result = await dehydratePaths(
-          eligible,
-          ev => safeSend(batch.sender, 'cloud-sync:progress', {
-            type: 'item', direction: 'offload', batchId: batch.batchId, ...ev,
-          }),
-          () => batch.cancelled,
-        )
-        safeSend(batch.sender, 'cloud-sync:progress', {
-          type: 'complete', direction: 'offload', batchId: batch.batchId,
-          ok: result.ok.length,
-          failed: result.failed.length,
-          alreadyOffline: result.skippedAlreadyOffline.length,
-          cancelled: result.cancelled,
-        })
-      } finally {
-        offloadInFlight = null
+    while (true) {
+      const unit = unitQueue[direction].shift()
+      if (!unit) return
+      const b = unit.batch
+      if (b.cancelled) { settleUnit(b); continue }
+      if (direction === 'offload') {
+        await ensureOffloadPaused()
+        if (b.cancelled) { settleUnit(b); continue } // re-check across the await
       }
+      safeSend(b.sender, 'cloud-sync:progress', {
+        type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'running',
+      })
+      const res = direction === 'offload'
+        ? await dehydrateOnePath(unit.path)
+        : await hydrateOnePath(unit.path)
+      if (res.outcome === 'ok') {
+        b.ok += 1
+        safeSend(b.sender, 'cloud-sync:progress', {
+          type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'done',
+        })
+      } else if (res.outcome === 'already-offline' || res.outcome === 'already-local') {
+        b.alreadySkipped += 1
+        safeSend(b.sender, 'cloud-sync:progress', {
+          type: 'item', direction, batchId: b.batchId, path: unit.path, status: res.outcome,
+        })
+      } else {
+        b.failed += 1
+        safeSend(b.sender, 'cloud-sync:progress', {
+          type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'failed', reason: res.reason,
+        })
+      }
+      settleUnit(b)
     }
   } finally {
-    if (restartWatcher) restartWatcher()
-    offloadRunning = false
+    activeWorkers[direction] -= 1
+    if (direction === 'offload') maybeResumeOffloadWatcher()
   }
 }
 
-async function drainHydrate(): Promise<void> {
-  if (hydrateRunning) return
-  hydrateRunning = true
-  try {
-    while (hydrateQueue.length > 0) {
-      const batch = hydrateQueue.shift()!
-      hydrateInFlight = batch
-      try {
-        if (batch.cancelled) {
-          safeSend(batch.sender, 'cloud-sync:progress', {
-            type: 'init', direction: 'hydrate', batchId: batch.batchId,
-            eligible: [], skippedProtected: [],
-          })
-          safeSend(batch.sender, 'cloud-sync:progress', {
-            type: 'complete', direction: 'hydrate', batchId: batch.batchId,
-            ok: 0, failed: 0, alreadyLocal: 0, cancelled: true,
-          })
-          continue
-        }
-        // Hydrate has no concept of "protected" — every path is eligible.
-        safeSend(batch.sender, 'cloud-sync:progress', {
-          type: 'init', direction: 'hydrate', batchId: batch.batchId,
-          eligible: batch.paths, skippedProtected: [],
-        })
-        const result = await hydratePathsWithProgress(
-          batch.paths,
-          ev => safeSend(batch.sender, 'cloud-sync:progress', {
-            type: 'item', direction: 'hydrate', batchId: batch.batchId, ...ev,
-          }),
-          () => batch.cancelled,
-        )
-        safeSend(batch.sender, 'cloud-sync:progress', {
-          type: 'complete', direction: 'hydrate', batchId: batch.batchId,
-          ok: result.ok.length,
-          failed: result.failed.length,
-          alreadyLocal: result.skippedAlreadyLocal.length,
-          cancelled: result.cancelled,
-        })
-      } finally {
-        hydrateInFlight = null
-      }
-    }
-  } finally {
-    hydrateRunning = false
+function spinUp(direction: Direction): void {
+  const max = direction === 'offload' ? DEHYDRATE_CONCURRENCY : HYDRATE_CONCURRENCY
+  const want = Math.min(max, activeWorkers[direction] + unitQueue[direction].length)
+  while (activeWorkers[direction] < want) {
+    activeWorkers[direction] += 1
+    void worker(direction)
   }
+}
+
+function enqueue(direction: Direction, sender: WebContents, paths: string[], batchId: string): void {
+  // Protected paths (a stream's primary thumbnail) are offload-only skips.
+  let eligible = paths
+  let skipped: string[] = []
+  if (direction === 'offload') {
+    const protectedSet = getProtectedPaths(getStreamsDir())
+    skipped = paths.filter(p => protectedSet.has(p))
+    eligible = paths.filter(p => !protectedSet.has(p))
+  }
+  const b: BatchState = {
+    direction, batchId, sender,
+    cancelled: false,
+    remaining: eligible.length,
+    ok: 0, failed: 0, alreadySkipped: 0,
+  }
+  safeSend(sender, 'cloud-sync:progress', {
+    type: 'init', direction, batchId, eligible, skippedProtected: skipped,
+  })
+  if (eligible.length === 0) { sendComplete(b); return }
+  liveBatches[direction].add(b)
+  for (const p of eligible) unitQueue[direction].push({ batch: b, path: p })
+  spinUp(direction)
 }
 
 export function registerCloudSyncIPC(): void {
@@ -181,24 +206,20 @@ export function registerCloudSyncIPC(): void {
 
   ipcMain.handle('cloud-sync:offload', (event, paths: string[], batchId: string) => {
     if (!Array.isArray(paths) || paths.length === 0 || !batchId) return
-    offloadQueue.push({ direction: 'offload', batchId, paths, sender: event.sender, cancelled: false })
-    drainOffload()
+    enqueue('offload', event.sender, paths, batchId)
   })
 
   ipcMain.handle('cloud-sync:pin', (event, paths: string[], batchId: string) => {
     if (!Array.isArray(paths) || paths.length === 0 || !batchId) return
-    hydrateQueue.push({ direction: 'hydrate', batchId, paths, sender: event.sender, cancelled: false })
-    drainHydrate()
+    enqueue('hydrate', event.sender, paths, batchId)
   })
 
-  // Per-direction cancels stamp every batch in flight + in queue. Subsequent
-  // enqueues are NOT auto-cancelled (their cancelled flag stays false).
+  // Per-direction cancels stamp every live batch. Subsequent enqueues are
+  // NOT auto-cancelled (their cancelled flag stays false).
   ipcMain.handle('cloud-sync:cancel-offload', () => {
-    if (offloadInFlight) offloadInFlight.cancelled = true
-    for (const b of offloadQueue) b.cancelled = true
+    for (const b of liveBatches.offload) b.cancelled = true
   })
   ipcMain.handle('cloud-sync:cancel-pin', () => {
-    if (hydrateInFlight) hydrateInFlight.cancelled = true
-    for (const b of hydrateQueue) b.cancelled = true
+    for (const b of liveBatches.hydrate) b.cancelled = true
   })
 }

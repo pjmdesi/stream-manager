@@ -26,8 +26,8 @@ const OFFLINE_MASK = 0x1000 | 0x40000 | 0x400000
 // the useful number well before host CPU/RAM matters. 4 strikes a balance:
 // large enough to amortize PowerShell startup overhead and overlap network
 // transfers, small enough to stay below typical provider rate limits.
-const DEHYDRATE_CONCURRENCY = 4
-const HYDRATE_CONCURRENCY = 4
+export const DEHYDRATE_CONCURRENCY = 4
+export const HYDRATE_CONCURRENCY = 4
 
 export interface CloudOpResult {
   ok: string[]
@@ -140,6 +140,14 @@ function runOnePath(scriptPath: string, filePath: string): Promise<{ outcome: De
     })
     proc.on('error', err => resolve({ outcome: 'failed', reason: err.message }))
   })
+}
+
+/** Dehydrate a single file. Building block for callers that own their own
+ *  worker pool (cloudSync's shared per-direction queue); dehydratePaths
+ *  below remains for one-shot batch callers (converter archive hook). */
+export function dehydrateOnePath(filePath: string): Promise<{ outcome: DehydrateOutcome; reason?: string }> {
+  if (process.platform !== 'win32') return Promise.resolve({ outcome: 'failed', reason: 'not-windows' })
+  return runOnePath(getDehydrateScriptPath(), filePath)
 }
 
 export interface DehydrateProgressEvent {
@@ -291,58 +299,12 @@ function runOneHydrate(scriptPath: string, filePath: string): Promise<{ outcome:
   })
 }
 
-export interface HydrateProgressEvent {
-  path: string
-  status: 'running' | 'done' | 'already-local' | 'failed'
-  reason?: string
-}
-
-/**
- * Pin + hydrate files with up to HYDRATE_CONCURRENCY in flight at a time,
- * emitting per-file progress callbacks. Workers pull from a shared cursor
- * so a slow file doesn't block faster ones.
- *
- * Cancel via `shouldCancel()` is checked at the start of each file. Files
- * already in flight finish — we never interrupt CfHydratePlaceholder
- * mid-call.
- */
-export async function hydratePathsWithProgress(
-  paths: string[],
-  onProgress?: (event: HydrateProgressEvent) => void,
-  shouldCancel?: () => boolean
-): Promise<CloudOpResult & { skippedAlreadyLocal: string[]; cancelled: boolean }> {
-  if (process.platform !== 'win32' || paths.length === 0) {
-    return { ok: [], failed: paths.map(p => ({ path: p, reason: 'not-windows' })), skippedAlreadyLocal: [], cancelled: false }
-  }
-  const scriptPath = getHydrateScriptPath()
-  const ok: string[] = []
-  const failed: { path: string; reason: string }[] = []
-  const skippedAlreadyLocal: string[] = []
-  let cancelled = false
-  let next = 0
-  const worker = async (): Promise<void> => {
-    while (true) {
-      if (shouldCancel?.()) { cancelled = true; return }
-      const i = next++
-      if (i >= paths.length) return
-      const p = paths[i]
-      onProgress?.({ path: p, status: 'running' })
-      const result = await runOneHydrate(scriptPath, p)
-      if (result.outcome === 'ok') {
-        ok.push(p)
-        onProgress?.({ path: p, status: 'done' })
-      } else if (result.outcome === 'already-local') {
-        skippedAlreadyLocal.push(p)
-        onProgress?.({ path: p, status: 'already-local' })
-      } else {
-        failed.push({ path: p, reason: result.reason ?? 'unknown' })
-        onProgress?.({ path: p, status: 'failed', reason: result.reason })
-      }
-    }
-  }
-  const workerCount = Math.min(HYDRATE_CONCURRENCY, paths.length)
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
-  return { ok, failed, skippedAlreadyLocal, cancelled }
+/** Pin + hydrate a single file. Building block for cloudSync's shared
+ *  per-direction worker pool — the old batch-level helper
+ *  (hydratePathsWithProgress) is gone; the pool owns concurrency now. */
+export function hydrateOnePath(filePath: string): Promise<{ outcome: HydrateOutcome; reason?: string }> {
+  if (process.platform !== 'win32') return Promise.resolve({ outcome: 'failed', reason: 'not-windows' })
+  return runOneHydrate(getHydrateScriptPath(), filePath)
 }
 
 /**
