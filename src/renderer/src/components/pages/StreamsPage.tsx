@@ -3933,6 +3933,7 @@ export function StreamsPage({
                 folderPath: renderedFolder.folderPath,
                 label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
               })}
+              onSendFilesToCombine={(paths) => onSendToCombine(paths)}
               filesGridRef={filesGridRef}
               onFilesDeleted={handleFilesDeleted}
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
@@ -5593,7 +5594,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -5671,6 +5672,7 @@ function SidebarDetail({
   onSendFileToPlayer: (path: string) => void
   onSendFileToConverter: (path: string) => void
   onSendFilesToConverter: (paths: string[]) => void
+  onSendFilesToCombine: (paths: string[]) => void
   filesGridRef: React.Ref<FilesGridHandle>
   /** Grid files were trashed — parent drops them from folder state in place. */
   onFilesDeleted: (paths: string[]) => void
@@ -7115,6 +7117,7 @@ function SidebarDetail({
                     onSendToPlayer={onSendFileToPlayer}
                     onSendToConverter={onSendFileToConverter}
                     onSendFilesToConverter={onSendFilesToConverter}
+                    onSendFilesToCombine={onSendFilesToCombine}
                     ref={filesGridRef}
                     onSetThumbnail={(filePath) => onUpdateMeta({ preferredThumbnail: filePath.split(/[\\/]/).pop() ?? '' })}
                     onDeleteThumbnail={onDeleteThumbnail}

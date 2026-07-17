@@ -1,5 +1,5 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X } from 'lucide-react'
+import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X, Combine } from 'lucide-react'
 import { VideoThumb, CHECKER, releaseThumbDecodes } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
@@ -430,6 +430,9 @@ interface Props {
   onSendToConverter: (path: string) => void
   /** Bulk send the selected videos to the converter (one batch). */
   onSendFilesToConverter: (paths: string[]) => void
+  /** Bulk send the selected videos to the combine page — lets the user pick
+   *  specific files instead of sending the whole stream and pruning there. */
+  onSendFilesToCombine: (paths: string[]) => void
   onSetThumbnail: (path: string) => void
   onDeleteThumbnail: (path: string) => void
   onEditThumbnail: (variantOrdinal?: number) => void
@@ -460,7 +463,7 @@ export interface FilesGridHandle {
 
 export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function StreamFilesGrid({
   folder, thumbsKey, preferredThumbnail, cloudSyncActive,
-  onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onFilesDeleted,
+  onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSendFilesToCombine, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onFilesDeleted,
   highlightFile,
 }, ref) {
   const videoMap = folder.meta?.videoMap ?? {}
@@ -772,6 +775,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const allVisibleSelected = visiblePaths.length > 0 && selectedPaths.length === visiblePaths.length
   const selectedVideos = useMemo(() => selectedPaths.filter(p => folder.videos.includes(p)), [selectedPaths, folder.videos])
   const bulkConvert = () => { if (selectedVideos.length) { onSendFilesToConverter(selectedVideos); clearSelection() } }
+  const bulkCombine = () => { if (selectedVideos.length) { onSendFilesToCombine(selectedVideos); clearSelection() } }
   const bulkOffload = () => { enqueueOffload(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
   const bulkPin = () => { enqueueHydrate(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
   const selectedHasBlocked = useMemo(() => selectedPaths.some(p => fileReason(p)), [selectedPaths, fileReason])
@@ -818,9 +822,14 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             <>
               <span className="text-[11px] text-gray-400 mr-1">{selectedPaths.length} selected</span>
               {selectedVideos.length > 0 && (
-                <Tooltip content="Send selected to converter" side="top">
-                  <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /> Convert</button>
-                </Tooltip>
+                <>
+                  <Tooltip content="Send selected to converter" side="top">
+                    <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /> Convert</button>
+                  </Tooltip>
+                  <Tooltip content="Send selected to combine" side="top">
+                    <button onClick={bulkCombine} className={ACTION_PURPLE}><Combine size={12} /> Combine</button>
+                  </Tooltip>
+                </>
               )}
               {cloudSyncActive && selectedPaths.length > 0 && (
                 <>
