@@ -766,6 +766,10 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   }), [selectMode, visiblePaths]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedPaths = useMemo(() => visiblePaths.filter(p => selected.has(p)), [visiblePaths, selected])
+  // Ctrl+A toggles (select all ↔ clear when complete) via selectAllOrClear
+  // above — the chip sits on whichever button the key would trigger, same
+  // as the stream-row toolbar. Must mirror selectAllOrClear's predicate.
+  const allVisibleSelected = visiblePaths.length > 0 && selectedPaths.length === visiblePaths.length
   const selectedVideos = useMemo(() => selectedPaths.filter(p => folder.videos.includes(p)), [selectedPaths, folder.videos])
   const bulkConvert = () => { if (selectedVideos.length) { onSendFilesToConverter(selectedVideos); clearSelection() } }
   const bulkOffload = () => { enqueueOffload(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
@@ -803,7 +807,9 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
         )}
         <div className="ml-auto flex items-center gap-0.5 flex-wrap">
           {!selectMode ? (
-            <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /> Select</button>
+            <Tooltip content="Select multiple files for bulk actions" side="top" shortcut="Ctrl+Shift+A">
+              <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /> Select</button>
+            </Tooltip>
           ) : (
             <>
               <span className="text-[11px] text-gray-400 mr-1">{selectedPaths.length} selected</span>
@@ -831,22 +837,28 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                   wrap together, mirroring the stream-row toolbar. */}
               <div className="flex items-center gap-0.5">
                 <div className="w-px h-5 bg-white/10 mx-1 self-center" />
-                <button
-                  onClick={() => setSelected(new Set(visiblePaths))}
-                  disabled={selectedPaths.length === visiblePaths.length}
-                  className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
-                >
-                  <CheckCheck size={12} /> Select all
-                </button>
-                <button
-                  onClick={clearSelection}
-                  disabled={selectedPaths.length === 0}
-                  className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
-                >
-                  <Square size={12} /> Clear
-                </button>
+                <Tooltip content="Select all visible files" side="top" shortcut={allVisibleSelected ? undefined : 'Ctrl+A'}>
+                  <button
+                    onClick={() => setSelected(new Set(visiblePaths))}
+                    disabled={selectedPaths.length === visiblePaths.length}
+                    className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                  >
+                    <CheckCheck size={12} /> Select all
+                  </button>
+                </Tooltip>
+                <Tooltip content="Clear current selection" side="top" shortcut={allVisibleSelected ? 'Ctrl+A' : undefined}>
+                  <button
+                    onClick={clearSelection}
+                    disabled={selectedPaths.length === 0}
+                    className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                  >
+                    <Square size={12} /> Clear
+                  </button>
+                </Tooltip>
                 <div className="w-px h-5 bg-white/10 mx-1 self-center" />
-                <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /> Stop</button>
+                <Tooltip content="Exit selection mode" side="top" shortcut="Ctrl+Shift+A">
+                  <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /> Stop</button>
+                </Tooltip>
               </div>
             </>
           )}

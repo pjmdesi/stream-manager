@@ -2628,6 +2628,10 @@ export function StreamsPage({
     () => selectableVisible.filter(f => selectedPaths.has(selectionKey(f))),
     [selectableVisible, selectedPaths, selectionKey],
   )
+  // Ctrl+A is a toggle (select all ↔ clear when complete) — the toolbar
+  // shows its shortcut chip on whichever button the key would trigger, so
+  // the chip is never wrong. Must mirror the keydown handler's predicate.
+  const allVisibleSelected = selectableVisible.length > 0 && selectedFolderList.length === selectableVisible.length
   const clickBulkArchive = useCallback(() => {
     // Already-archived streams are excluded, not re-encoded — archiving
     // is lossy, so a second pass through the preset only costs quality.
@@ -3376,7 +3380,7 @@ export function StreamsPage({
                     bulk actions stay on the first row until labels collapse. */}
                 <div className="flex items-center gap-1">
                   <div className="w-px h-5 bg-white/10 mx-1 self-center" />
-                  <Tooltip content="Select all visible streams" side="bottom" shortcut="Ctrl+A">
+                  <Tooltip content="Select all visible streams" side="bottom" shortcut={allVisibleSelected ? undefined : 'Ctrl+A'}>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -3389,7 +3393,7 @@ export function StreamsPage({
                       Select All
                     </Button>
                   </Tooltip>
-                  <Tooltip content="Clear current selection" side="bottom">
+                  <Tooltip content="Clear current selection" side="bottom" shortcut={allVisibleSelected ? 'Ctrl+A' : undefined}>
                     <Button
                       variant="ghost"
                       size="sm"
