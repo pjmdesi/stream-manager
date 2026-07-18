@@ -2096,6 +2096,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ordinal 1). When set (≥2), it's the "+ New thumbnail" flow that
   // creates an alternative at the next available ordinal.
   const [templatePickerStream, setTemplatePickerStream] = useState<{ folderPath: string; date: string; title?: string; meta?: StreamMeta; totalEpisodes?: number; targetVariant?: number; knownVariants?: number[] } | null>(null)
+  // Picker selection — 'blank' | 'duplicate' | a template id. Cards select;
+  // the footer's Create button (disabled until a pick) commits. Reset per open.
+  const [pickerChoice, setPickerChoice] = useState<'blank' | 'duplicate' | string | null>(null)
+  useEffect(() => { setPickerChoice(null) }, [templatePickerStream])
 
   // ── Container / zoom / pan ────────────────────────────────────────────────
   const canvasContainerRef = useRef<HTMLDivElement>(null)
@@ -5323,6 +5327,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               </button>
             </div>
             <div className="overflow-y-auto p-5 flex flex-col gap-4">
+              {/* Cards SELECT (ring highlight); the footer's Create commits.
+                  Selection ring is uniform across card types so the picked
+                  option always reads the same way. */}
               <div className="grid grid-cols-3 gap-3">
                 {/* "Duplicate current thumbnail" card — only available
                     in the new-alternative flow (targetVariant set)
@@ -5335,8 +5342,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   && currentStream
                   && layers.length > 0 && (
                   <div
-                    className="group bg-navy-900 border border-purple-500/50 rounded-lg overflow-hidden cursor-pointer hover:border-purple-400 transition-colors"
-                    onClick={duplicateCurrentToNewVariant}
+                    className={`group bg-navy-900 border rounded-lg overflow-hidden cursor-pointer transition-colors ${
+                      pickerChoice === 'duplicate' ? 'border-purple-400 ring-1 ring-purple-400/60' : 'border-purple-500/50 hover:border-purple-400'
+                    }`}
+                    onClick={() => setPickerChoice('duplicate')}
                   >
                     <div className="relative aspect-video bg-black">
                       <img
@@ -5357,8 +5366,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 {templates.map(t => (
                   <div
                     key={t.id}
-                    className="group bg-navy-900 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-purple-500/60 transition-colors"
-                    onClick={() => confirmPickTemplate(t)}
+                    className={`group bg-navy-900 border rounded-lg overflow-hidden cursor-pointer transition-colors ${
+                      pickerChoice === t.id ? 'border-purple-400 ring-1 ring-purple-400/60' : 'border-white/10 hover:border-purple-500/60'
+                    }`}
+                    onClick={() => setPickerChoice(t.id)}
                   >
                     <TemplatePreview streamsDir={config.streamsDir} templateId={t.id} name={t.name} cacheKey={t.updatedAt} />
                     <div className="px-2 py-1.5">
@@ -5366,11 +5377,46 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     </div>
                   </div>
                 ))}
+                {/* "Start blank" — same grid as the real options. Preview is
+                    the editor canvas's checkerboard (colors/tile match
+                    makeCheckerPattern) so it reads as "empty canvas". */}
+                <div
+                  className={`group bg-navy-900 border rounded-lg overflow-hidden cursor-pointer transition-colors ${
+                    pickerChoice === 'blank' ? 'border-purple-400 ring-1 ring-purple-400/60' : 'border-white/10 hover:border-purple-500/60'
+                  }`}
+                  onClick={() => setPickerChoice('blank')}
+                >
+                  <div
+                    className="aspect-video"
+                    style={{
+                      backgroundImage: 'repeating-conic-gradient(#1c1c28 0% 25%, #13131f 0% 50%)',
+                      backgroundSize: '16px 16px',
+                    }}
+                  />
+                  <div className="px-2 py-1.5">
+                    <span className="text-xs text-gray-300 truncate block">Start blank</span>
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-white/10 shrink-0 flex justify-end">
-              <Button variant="ghost" size="sm" onClick={() => confirmPickTemplate(null)}>
-                Start blank
+            <div className="px-5 py-3 border-t border-white/10 shrink-0 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setTemplatePickerStream(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!pickerChoice}
+                onClick={() => {
+                  if (pickerChoice === 'duplicate') duplicateCurrentToNewVariant()
+                  else if (pickerChoice === 'blank') confirmPickTemplate(null)
+                  else {
+                    const t = templates.find(tt => tt.id === pickerChoice)
+                    if (t) confirmPickTemplate(t)
+                  }
+                }}
+              >
+                Create
               </Button>
             </div>
           </div>
