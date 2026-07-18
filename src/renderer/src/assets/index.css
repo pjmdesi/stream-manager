@@ -138,6 +138,19 @@ input.volume-slider-mt::-webkit-slider-runnable-track {
   --pulse-color: rgba(255, 255, 255, 0.45);
   animation: outline-pulse 1.8s linear infinite;
 }
+/* Keyboard-shortcut ring (player transport/speed buttons). The base rule
+   reserves a transparent outline + color transition on every target, so
+   toggling .kbd-ring-on fades the ring in and out — no keyframes. Single
+   presses hold the class for a ~300ms beat; held gestures keep it on
+   (solid, not pulsing) until release. */
+[data-kbd-flash] {
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  transition: outline-color 120ms ease;
+}
+.kbd-ring-on {
+  outline-color: rgba(224, 231, 240, 0.8);
+}
 
 /* Smaller-ring variant tuned for the 6px direction-aware mismatch dots.
    Same outline-not-box-shadow choice as the keyframes above so the ring

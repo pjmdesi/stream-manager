@@ -2873,6 +2873,37 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     if (next !== idx) applyPlaybackRate(SPEED_STEPS[next])
   }, [applyPlaybackRate])
 
+  // Ring the on-screen button a keyboard shortcut just drove (data-kbd-flash
+  // ids on the transport buttons). CSS handles the fades via a transition;
+  // JS only toggles .kbd-ring-on: a single press holds it for a ~300ms beat,
+  // a held gesture keeps it on until release. Honors disable-animations.
+  const flashTimeoutsRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const flashShortcutTarget = useCallback((id: string) => {
+    if (config.disableAnimations) return
+    const el = document.querySelector<HTMLElement>(`[data-kbd-flash="${id}"]`)
+    if (!el) return
+    const timers = flashTimeoutsRef.current
+    const existing = timers.get(id)
+    if (existing) clearTimeout(existing)
+    el.classList.add('kbd-ring-on')
+    timers.set(id, setTimeout(() => {
+      timers.delete(id)
+      el.classList.remove('kbd-ring-on')
+    }, 300))
+  }, [config.disableAnimations])
+  // Held-gesture variant: ring stays SOLID for the gesture's duration.
+  // Returns the release fn the caller invokes when the hold ends.
+  const holdFlashTarget = useCallback((id: string): (() => void) => {
+    if (config.disableAnimations) return () => {}
+    const el = document.querySelector<HTMLElement>(`[data-kbd-flash="${id}"]`)
+    if (!el) return () => {}
+    const existing = flashTimeoutsRef.current.get(id)
+    if (existing) { clearTimeout(existing); flashTimeoutsRef.current.delete(id) }
+    el.classList.add('kbd-ring-on')
+    return () => el.classList.remove('kbd-ring-on')
+  }, [config.disableAnimations])
+
+
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false)
   const speedOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const speedCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2940,6 +2971,46 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     // repeat re-targeted the same stale base, restarting the seek forever).
     fastSeekRef.current(Math.max(lo, Math.min(hi, getSeekTarget() + seconds)))
   }, [duration, getSeekTarget])
+
+  // Held-skip gesture state lives OUTSIDE the keyboard effect (refs +
+  // stable callbacks): that effect's deps churn during playback, and its
+  // cleanup used to kill an in-flight hold on every re-run — the next
+  // native key-repeat re-latched it, so skipping kept working but the
+  // held ring restarted constantly and the 100ms cadence stuttered.
+  const skipRepeatRef = useRef<{ key: string; timer: ReturnType<typeof setInterval>; releaseFlash: () => void } | null>(null)
+  const stopSkipRepeat = useCallback(() => {
+    const r = skipRepeatRef.current
+    if (r) { clearInterval(r.timer); r.releaseFlash(); skipRepeatRef.current = null }
+  }, [])
+  const startSkipRepeat = useCallback((key: string, amount: number) => {
+    // Native auto-repeat of the held combo lands here too — the interval
+    // already owns the cadence, so repeats are ignored.
+    if (skipRepeatRef.current) return
+    // Ring the matching skip button for the WHOLE hold (looping variant);
+    // released together with the gesture in stopSkipRepeat.
+    const releaseFlash = holdFlashTarget(`skip${amount}`)
+    skip(amount)
+    skipRepeatRef.current = {
+      key: key.toLowerCase(),
+      releaseFlash,
+      timer: setInterval(() => {
+        // A modal opening mid-hold can swallow the keyup — bail out.
+        if (isAnyModalOpen()) { stopSkipRepeat(); return }
+        skip(amount)
+      }, 100),
+    }
+  }, [skip, holdFlashTarget, stopSkipRepeat])
+  // Held frame-stepping ring — plain arrows step via native auto-repeat
+  // (not the interval gesture), so their solid-while-held ring needs its
+  // own tracker: started on the first physical press, released on keyup.
+  const frameRingRef = useRef<{ key: string; release: () => void } | null>(null)
+  const stopFrameRing = useCallback(() => {
+    const r = frameRingRef.current
+    if (r) { r.release(); frameRingRef.current = null }
+  }, [])
+  // Page hidden or unmounted: end any in-flight gesture.
+  useEffect(() => { if (!isVisible) { stopSkipRepeat(); stopFrameRing() } }, [isVisible, stopSkipRepeat, stopFrameRing])
+  useEffect(() => () => { stopSkipRepeat(); stopFrameRing() }, [stopSkipRepeat, stopFrameRing])
 
   // Jump to the closest clip-region in/out marker in the given direction.
   // Shared by the [ / ] keyboard shortcuts and the clip-mode prev/next
@@ -3404,35 +3475,21 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     // held; keyup (or a modifier change, window blur, a modal opening)
     // stops it. Plain-arrow frame stepping keeps native repeat — that
     // cadence is right for frames.
-    let skipRepeat: { key: string; timer: ReturnType<typeof setInterval> } | null = null
-    const stopSkipRepeat = () => {
-      if (skipRepeat) { clearInterval(skipRepeat.timer); skipRepeat = null }
-    }
-    const startSkipRepeat = (key: string, amount: number) => {
-      // Native auto-repeat of the held combo lands here too — the interval
-      // already owns the cadence, so repeats are ignored.
-      if (skipRepeat) return
-      skip(amount)
-      skipRepeat = {
-        key: key.toLowerCase(),
-        timer: setInterval(() => {
-          // A modal opening mid-hold can swallow the keyup — bail out.
-          if (isAnyModalOpen()) { stopSkipRepeat(); return }
-          skip(amount)
-        }, 100),
-      }
-    }
     const onKeyUp = (e: KeyboardEvent) => {
-      if (!skipRepeat) return
+      // Held frame-step ring ends with its arrow's release.
+      const fr = frameRingRef.current
+      if (fr && e.key.toLowerCase() === fr.key) stopFrameRing()
+      const r = skipRepeatRef.current
+      if (!r) return
       const k = e.key
       // Stop on the skip key itself OR any modifier: releasing a modifier
       // changes the combo, and the arrow's next native repeat re-latches
       // the loop with the new amount.
-      if (k.toLowerCase() === skipRepeat.key || k === 'Shift' || k === 'Control' || k === 'Meta' || k === 'Alt') {
+      if (k.toLowerCase() === r.key || k === 'Shift' || k === 'Control' || k === 'Meta' || k === 'Alt') {
         stopSkipRepeat()
       }
     }
-    const onBlur = () => stopSkipRepeat()
+    const onBlur = () => { stopSkipRepeat(); stopFrameRing() }
     const handler = (e: KeyboardEvent) => {
       // Don't fire while user is typing
       const target = e.target as HTMLElement | null
@@ -3448,9 +3505,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       const alt = e.altKey
       const k = e.key
 
-      // Space — Play/Pause
+      // Space — Play/Pause. Auto-repeat deliberately ignored: holding Space
+      // a beat too long shouldn't machine-gun play/pause toggles.
       if (e.code === 'Space' && !ctrl && !alt && !shift) {
-        e.preventDefault(); effectiveTogglePlay(); return
+        e.preventDefault()
+        if (e.repeat) return
+        flashShortcutTarget('play')
+        effectiveTogglePlay()
+        return
       }
 
       // Arrow keys — frame step / skip (skips repeat at 100ms while held)
@@ -3459,14 +3521,24 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
         const dir = k === 'ArrowRight' ? 1 : -1
         e.preventDefault()
         const amount = ctrl && shift ? dir * 10 : ctrl ? dir * 5 : shift ? dir * 1 : 0
-        if (amount === 0) stepFrame(dir as 1 | -1)
-        else startSkipRepeat(k, amount)
+        if (amount === 0) {
+          // Solid ring while the arrow is held (native auto-repeat drives
+          // the stepping, so the ring has its own press/keyup tracker).
+          if (!e.repeat && frameRingRef.current?.key !== k.toLowerCase()) {
+            stopFrameRing()
+            frameRingRef.current = {
+              key: k.toLowerCase(),
+              release: holdFlashTarget(dir === 1 ? 'frame-next' : 'frame-prev'),
+            }
+          }
+          stepFrame(dir as 1 | -1)
+        } else startSkipRepeat(k, amount)
         return
       }
 
       // Home / End
-      if (k === 'Home' && !ctrl && !alt && !shift) { e.preventDefault(); seekRef.current(0); return }
-      if (k === 'End'  && !ctrl && !alt && !shift) { e.preventDefault(); seekRef.current(durationRef.current); return }
+      if (k === 'Home' && !ctrl && !alt && !shift) { e.preventDefault(); flashShortcutTarget('skip-start'); seekRef.current(0); return }
+      if (k === 'End'  && !ctrl && !alt && !shift) { e.preventDefault(); flashShortcutTarget('skip-end'); seekRef.current(durationRef.current); return }
 
       // Ctrl+Alt+Up/Down — navigate session videos
       if (ctrl && alt && !shift && (k === 'ArrowUp' || k === 'ArrowDown')) {
@@ -3544,9 +3616,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
         // K resets to 1×. One step per PHYSICAL press (e.repeat ignored —
         // auto-repeat would fly across the range). Play/pause lives on
         // Space / clicking the video; ±10s skips on Ctrl+Shift+arrows.
-        if (k === 'j' || k === 'J') { e.preventDefault(); if (!e.repeat) stepPlaybackRate(-1); return }
-        if (k === 'k' || k === 'K') { e.preventDefault(); if (!e.repeat) applyPlaybackRate(1); return }
-        if (k === 'l' || k === 'L') { e.preventDefault(); if (!e.repeat) stepPlaybackRate(1); return }
+        if (k === 'j' || k === 'J') { e.preventDefault(); if (!e.repeat) { flashShortcutTarget('play'); stepPlaybackRate(-1) } return }
+        if (k === 'k' || k === 'K') { e.preventDefault(); if (!e.repeat) { flashShortcutTarget('play'); applyPlaybackRate(1) } return }
+        if (k === 'l' || k === 'L') { e.preventDefault(); if (!e.repeat) { flashShortcutTarget('play'); stepPlaybackRate(1) } return }
 
         // C — toggle clip mode (mirror the toolbar button's logic). Show
         // the merge-warning modal only when a merge is genuinely needed
@@ -3624,6 +3696,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
         // [ / ] — jump to prev/next clip region marker (in/out points, chronological)
         if (k === '[' || k === ']') {
           e.preventDefault()
+          flashShortcutTarget(k === ']' ? 'marker-next' : 'marker-prev')
           jumpToMarker(k === ']' ? 'next' : 'prev')
           return
         }
@@ -3644,12 +3717,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       document.removeEventListener('keydown', handler)
       document.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
-      stopSkipRepeat()
+      // Deliberately NOT stopping the skip gesture here — this cleanup runs
+      // on every dep churn (playback state), and killing the hold restarted
+      // its ring + cadence. Unmount/visibility have dedicated effects.
     }
   }, [
     isVisible,
     clipModeModal, draftPendingDelete, showExportDialog,
-    effectiveTogglePlay, skip, stepFrame, stepPlaybackRate, applyPlaybackRate, multiTrack, multiTrackEnabled, isExtracting,
+    effectiveTogglePlay, skip, stepFrame, stepPlaybackRate, applyPlaybackRate, flashShortcutTarget, holdFlashTarget, startSkipRepeat, stopSkipRepeat, stopFrameRing, multiTrack, multiTrackEnabled, isExtracting,
     config.skipClipMergeWarning, exitClipMode,
     setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
     state.filePath, addSegment, splitSegment, jumpToMarker,
@@ -5239,7 +5314,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     className="w-24 shrink-0 text-xs text-purple-300 tabular-nums bg-transparent border-b border-purple-500 focus:outline-none"
                   />
                 ) : (
-                  <Tooltip content="Click to enter timecode">
+                  <Tooltip content="Click to enter timecode" shortcut="T">
                     <span
                       className="text-xs text-gray-400 tabular-nums w-20 shrink-0 cursor-text hover:text-gray-200 transition-colors"
                       onClick={() => {
@@ -5268,6 +5343,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     const abs = Math.abs(s)
                     const unit = abs >= 60 ? `${abs / 60}m` : `${abs}s`
                     return `${unit} ${s < 0 ? 'back' : 'forward'}`
+                  }
+                  // Keyboard chip for the skips that have shortcuts (±1/5/10s).
+                  const skipShortcut = (s: number): string | undefined => {
+                    const arrow = s < 0 ? '←' : '→'
+                    const abs = Math.abs(s)
+                    return abs === 1 ? `Shift+${arrow}` : abs === 5 ? `Ctrl+${arrow}` : abs === 10 ? `Ctrl+Shift+${arrow}` : undefined
                   }
                   // Prev/next clip-region marker — disabled state is computed
                   // by peeking at clipState.clipRegions vs. currentTime. eps
@@ -5306,8 +5387,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     <>
                       <div className={`flex items-center transition-opacity ${fadeCls}`} style={{ gap: `${controlsGap}px` }}>
                       {/* Skip to start */}
-                      <Tooltip content="Skip to start">
-                        <button onClick={() => seekRef.current(0)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                      <Tooltip content="Skip to start" shortcut="Home">
+                        <button data-kbd-flash="skip-start" onClick={() => seekRef.current(0)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
                           <ChevronsLeft size={15} />
                         </button>
                       </Tooltip>
@@ -5316,8 +5397,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           Disabled (and dimmed) when there's no marker before
                           the playhead, matching the [ keyboard shortcut. */}
                       {isClipMode && (
-                        <Tooltip content="Previous clip marker">
+                        <Tooltip content="Previous clip marker" shortcut="[">
                           <button
+                            data-kbd-flash="marker-prev"
                             onClick={() => jumpToMarker('prev')}
                             disabled={!hasPrevMarker}
                             className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
@@ -5329,16 +5411,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
                       {/* Skip back: -5m, -1m, -10s, -5s, -1s */}
                       {[-300, -60, -10, -5, -1].map(s => (
-                        <Tooltip key={s} content={skipTip(s)}>
-                          <button onClick={() => skip(s)} className="px-1 py-1 rounded text-xs text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
+                        <Tooltip key={s} content={skipTip(s)} shortcut={skipShortcut(s)}>
+                          <button data-kbd-flash={`skip${s}`} onClick={() => skip(s)} className="px-1 py-1 rounded text-xs text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
                             {skipLabel(s)}
                           </button>
                         </Tooltip>
                       ))}
 
                       {/* Prev frame */}
-                      <Tooltip content="Previous frame">
-                        <button onClick={() => stepFrame(-1)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                      <Tooltip content="Previous frame" shortcut="←">
+                        <button data-kbd-flash="frame-prev" onClick={() => stepFrame(-1)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
                           <ChevronLeft size={16} />
                         </button>
                       </Tooltip>
@@ -5365,8 +5447,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                             {SPEED_STEPS.filter(s => s <= 1).map(speedBtn)}
                           </div>
                         )}
-                        <Tooltip content={isPlaying ? 'Pause' : 'Play'}>
+                        <Tooltip content={isPlaying ? 'Pause' : 'Play'} shortcut="Space">
                           <button
+                            data-kbd-flash="play"
                             onClick={effectiveTogglePlay}
                             className="pl-2 pr-2.5 py-2 mx-1 rounded-full bg-purple-800 hover:bg-purple-700 text-white transition-colors flex items-center gap-1"
                           >
@@ -5383,16 +5466,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
                       <div className={`flex items-center transition-opacity ${fadeCls}`} style={{ gap: `${controlsGap}px` }}>
                       {/* Next frame */}
-                      <Tooltip content="Next frame">
-                        <button onClick={() => stepFrame(1)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                      <Tooltip content="Next frame" shortcut="→">
+                        <button data-kbd-flash="frame-next" onClick={() => stepFrame(1)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
                           <ChevronRight size={16} />
                         </button>
                       </Tooltip>
 
                       {/* Skip forward: +1s, +5s, +10s, +1m, +5m */}
                       {[1, 5, 10, 60, 300].map(s => (
-                        <Tooltip key={s} content={skipTip(s)}>
-                          <button onClick={() => skip(s)} className="px-1 py-1 rounded text-xs text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
+                        <Tooltip key={s} content={skipTip(s)} shortcut={skipShortcut(s)}>
+                          <button data-kbd-flash={`skip${s}`} onClick={() => skip(s)} className="px-1 py-1 rounded text-xs text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
                             {skipLabel(s)}
                           </button>
                         </Tooltip>
@@ -5400,8 +5483,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
                       {/* Next clip-region marker — clip mode only */}
                       {isClipMode && (
-                        <Tooltip content="Next clip marker">
+                        <Tooltip content="Next clip marker" shortcut="]">
                           <button
+                            data-kbd-flash="marker-next"
                             onClick={() => jumpToMarker('next')}
                             disabled={!hasNextMarker}
                             className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
@@ -5412,8 +5496,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       )}
 
                       {/* Skip to end */}
-                      <Tooltip content="Skip to end">
-                        <button onClick={() => seekRef.current(duration)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
+                      <Tooltip content="Skip to end" shortcut="End">
+                        <button data-kbd-flash="skip-end" onClick={() => seekRef.current(duration)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
                           <ChevronsRight size={15} />
                         </button>
                       </Tooltip>
