@@ -1489,6 +1489,25 @@ export function registerStreamsIPC(): void {
 
   // Insert or update a single clip draft in the folder's meta, preserving other drafts.
   // Server-side merge avoids races between concurrent draft edits on different videos in the folder.
+  // Coalesce clip-draft notifications per stream key. The player AUTOSAVES
+  // drafts on a debounce while the user adjusts clip regions — announcing
+  // every save would fire a renderer refetch (listOne + hydration check)
+  // per tweak. One trailing event per key once the edits settle is enough
+  // for the files grid's draft badge to feel immediate.
+  const clipDraftNotifyTimers = new Map<string, NodeJS.Timeout>()
+  const notifyClipDraftChange = (key: string): void => {
+    const existing = clipDraftNotifyTimers.get(key)
+    if (existing) clearTimeout(existing)
+    clipDraftNotifyTimers.set(key, setTimeout(() => {
+      clipDraftNotifyTimers.delete(key)
+      // Meta self-writes are invisible to the watcher (expectSelfWrite),
+      // so out-of-watcher writers announce their own scoped change.
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('streams:changed', { streamKeys: [key] })
+      }
+    }, 1000))
+  }
+
   ipcMain.handle('clipDraft:save', async (_event, folderPath: string, draft: ClipDraft, metaKeyOverride?: string) => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
     const key = metaKeyOverride || metaKey(streamsDir, folderPath)
@@ -1497,6 +1516,7 @@ export function registerStreamsIPC(): void {
     const drafts = { ...(existing.clipDrafts ?? {}), [draft.id]: draft }
     allMeta[key] = { ...existing, clipDrafts: drafts }
     writeAllMeta(streamsDir, allMeta)
+    notifyClipDraftChange(key)
   })
 
   ipcMain.handle('clipDraft:delete', async (_event, folderPath: string, draftId: string, metaKeyOverride?: string) => {
@@ -1509,6 +1529,9 @@ export function registerStreamsIPC(): void {
     delete drafts[draftId]
     allMeta[key] = { ...existing, clipDrafts: drafts }
     writeAllMeta(streamsDir, allMeta)
+    // Mirror of clipDraft:save — the badge also clears promptly on delete.
+    // (Drafts consumed by an export clear via the converter's scoped send.)
+    notifyClipDraftChange(key)
   })
 
   // Tag an exported clip's videoMap entry with clipOf + clipState so the user can reopen it

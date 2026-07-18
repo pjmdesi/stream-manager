@@ -9,7 +9,7 @@ import { useInUse } from '../../hooks/useInUse'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { getCachedHydration, rememberHydration, rememberHydrationOne, stalePaths, subscribeHydration } from '../../lib/hydrationCache'
 import { videoMapKey } from '../../lib/videoMapKey'
-import type { StreamFolder, VideoEntry, VideoInfo } from '../../types'
+import type { ClipDraft, StreamFolder, VideoEntry, VideoInfo } from '../../types'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -217,7 +217,23 @@ function SelectOverlay({ onDragStart, onDragEnter, onClick }: {
   )
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleted, blockReason }: {
+/** Draft display name: user-chosen, else "Clip N" derived from the stable
+ *  "{sourceFilename}-clip-{N}" id (same default the player's panel shows). */
+function draftLabel(d: ClipDraft): string {
+  if (d.name?.trim()) return d.name.trim()
+  const m = d.id.match(/-clip-(\d+)$/)
+  return m ? `Clip ${m[1]}` : 'Clip'
+}
+
+function timeAgo(ms: number): string {
+  const s = Math.max(0, Date.now() - ms) / 1000
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return `${Math.floor(s / 86400)}d ago`
+}
+
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleted, blockReason, drafts }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -245,6 +261,8 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   /** Why this file can't be deleted right now (converter / open elsewhere), or
    *  null when it's deletable. */
   blockReason: string | null
+  /** Unexported clip drafts whose source is this video (newest first). */
+  drafts?: ClipDraft[]
 }) {
   const name = path.split(/[\\/]/).pop() ?? path
   const isShort = entry?.category === 'short'
@@ -283,6 +301,28 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
         <div className={META_LINE}>
           {isShort || isClip ? <Scissors size={11} className={TYPE_ICON} /> : <Film size={11} className={TYPE_ICON} />}
           <span className="flex-1 truncate min-w-0">{primary || '—'}</span>
+          {drafts && drafts.length > 0 && (
+            <Tooltip
+              side="top"
+              content={
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium text-gray-200">
+                    Unexported clip draft{drafts.length !== 1 ? 's' : ''} — click to open in player
+                  </span>
+                  {drafts.map(d => (
+                    <span key={d.id} className="text-gray-300">{draftLabel(d)} · {timeAgo(d.updatedAt)}</span>
+                  ))}
+                </div>
+              }
+            >
+              <button
+                onClick={() => onSendToPlayer(path)}
+                className="shrink-0 inline-flex items-center gap-0.5 px-1 py-px rounded text-[10px] text-pink-300 border border-pink-300/40 hover:bg-pink-500/10 transition-colors"
+              >
+                <Scissors size={9} /> {drafts.length}
+              </button>
+            </Tooltip>
+          )}
           <CloudStatus isLocal={isLocal} active={cloudSyncActive} busy={busy} />
         </div>
         {secondary && <p className={META_SECONDARY}>{secondary}</p>}
@@ -774,6 +814,19 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   // as the stream-row toolbar. Must mirror selectAllOrClear's predicate.
   const allVisibleSelected = visiblePaths.length > 0 && selectedPaths.length === visiblePaths.length
   const selectedVideos = useMemo(() => selectedPaths.filter(p => folder.videos.includes(p)), [selectedPaths, folder.videos])
+  // Unexported clip drafts grouped by their source video's filename, newest
+  // first — drives the per-card scissors badge. Data is already in meta;
+  // drafts whose source file is gone simply have no card to badge.
+  const draftsByVideo = useMemo(() => {
+    const map = new Map<string, ClipDraft[]>()
+    for (const d of Object.values(folder.meta?.clipDrafts ?? {})) {
+      const list = map.get(d.sourceName) ?? []
+      list.push(d)
+      map.set(d.sourceName, list)
+    }
+    for (const list of map.values()) list.sort((a, b) => b.updatedAt - a.updatedAt)
+    return map
+  }, [folder.meta?.clipDrafts])
   const bulkConvert = () => { if (selectedVideos.length) { onSendFilesToConverter(selectedVideos); clearSelection() } }
   const bulkCombine = () => { if (selectedVideos.length) { onSendFilesToCombine(selectedVideos); clearSelection() } }
   const bulkOffload = () => { enqueueOffload(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
@@ -902,6 +955,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onPin={pinFile}
               onDeleted={() => onFilesDeleted([path])}
               blockReason={fileReason(path)}
+              drafts={draftsByVideo.get(path.split(/[\\/]/).pop() ?? '')}
             />
           )
         })}
