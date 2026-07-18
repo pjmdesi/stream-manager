@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain, screen, Tray, Menu, MenuItem, nativeImage, Notification } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, screen, Tray, Menu, MenuItem, nativeImage } from 'electron'
 import { join } from 'path'
 import fs from 'fs'
 import Store from 'electron-store'
@@ -275,17 +275,18 @@ app.on('second-instance', () => {
   }
 })
 
-/** Tray-initiated group launch. Failures can't surface in the renderer (the
- *  window may be hidden — that's the point of the tray), so partial failures
- *  get a SYSTEM notification. This is not an in-app toast: the no-toast rule
- *  governs in-app UI; silence here would just be a dishonest "Launched". */
-async function launchGroupFromTray(groupId: string, groupName: string): Promise<void> {
+/** Tray-initiated group launch. Failures surface IN-APP (rule: no OS
+ *  notifications, ever): bring the window up and let the renderer show the
+ *  error modal — same pattern as the post-stream Twitch auto-update problem
+ *  modal. Silence would just be a dishonest "Launched". */
+async function launchGroupFromTray(mainWindow: BrowserWindow, groupId: string, groupName: string): Promise<void> {
   const { launched, failed } = await launchGroupById(groupId)
   if (failed.length === 0) return
-  new Notification({
-    title: `Launched ${launched} of ${launched + failed.length} — ${groupName}`,
-    body: failed.map(f => `${f.name}: ${f.error}`).join('\n'),
-  }).show()
+  if (mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+  mainWindow.webContents.send('launcher:groupLaunchFailed', { groupName, launched, failed })
 }
 
 function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
@@ -346,7 +347,7 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
           ...launcherGroups.map(g => ({
             label: `Launch "${g.name}"`,
             enabled: g.apps.some(a => !!a.path),
-            click: () => { void launchGroupFromTray(g.id, g.name) },
+            click: () => { void launchGroupFromTray(mainWindow, g.id, g.name) },
           })),
         ]
       : []),

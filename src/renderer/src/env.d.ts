@@ -335,6 +335,7 @@ declare global {
       getFavicon(pageUrl: string): Promise<string | null>
       resolveShortcut(filePath: string): Promise<string>
       getStartMenuPath(): Promise<string>
+      onGroupLaunchFailed(cb: (result: { groupName: string; launched: number; failed: { id: string; name: string; error: string }[] }) => void): () => void
     }
   }
 }

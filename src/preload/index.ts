@@ -669,6 +669,15 @@ contextBridge.exposeInMainWorld('api', {
   getStartMenuPath: () =>
     ipcRenderer.invoke('launcher:getStartMenuPath'),
 
+  // Fired by main when a TRAY-initiated group launch had failures — main
+  // focuses the window and the renderer shows the error modal (rule: no OS
+  // notifications; background failures surface in-app).
+  onGroupLaunchFailed: (callback: (result: { groupName: string; launched: number; failed: { id: string; name: string; error: string }[] }) => void) => {
+    const handler = (_e: unknown, result: { groupName: string; launched: number; failed: { id: string; name: string; error: string }[] }) => callback(result)
+    ipcRenderer.on('launcher:groupLaunchFailed', handler)
+    return () => ipcRenderer.removeListener('launcher:groupLaunchFailed', handler)
+  },
+
   // ── Dev tools ─────────────────────────────────────────────────────────────
   resetOnboarding: () => ipcRenderer.invoke('store:resetOnboarding'),
 

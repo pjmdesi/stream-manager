@@ -424,6 +424,12 @@ function AppInner() {
   useEffect(() => {
     return window.api.onSecondInstanceBlocked?.(() => setSecondInstanceOpen(true))
   }, [])
+  // Tray-initiated launch group failures — main focuses the window; this
+  // modal is the in-app surface for what didn't open.
+  const [trayLaunchError, setTrayLaunchError] = useState<{ groupName: string; launched: number; failed: { id: string; name: string; error: string }[] } | null>(null)
+  useEffect(() => {
+    return window.api.onGroupLaunchFailed?.(result => setTrayLaunchError(result))
+  }, [])
   // Update detection — fires once on mount, results cached for 6h in the
   // store. Honors the `checkForUpdates` config opt-out. Failures are silent.
   const [updateInfo, setUpdateInfo] = useState<{ latest: string; releaseUrl: string; releaseNotes: string } | null>(null)
@@ -991,6 +997,37 @@ function AppInner() {
             left unchanged. Open the stream and pick a category in its Twitch section (it searches real
             Twitch categories).
           </p>
+        </Modal>
+      )}
+
+      {/* Tray-initiated launch group failures — main focuses the window and
+          this modal reports what didn't open (no OS notifications, ever). */}
+      {trayLaunchError && (
+        <Modal
+          isOpen
+          onClose={() => setTrayLaunchError(null)}
+          title="Launch group problem"
+          width="md"
+          footer={
+            <Button variant="primary" size="sm" onClick={() => setTrayLaunchError(null)}>
+              Close
+            </Button>
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-gray-300 leading-relaxed">
+              Launched {trayLaunchError.launched} of {trayLaunchError.launched + trayLaunchError.failed.length} from{' '}
+              <span className="text-gray-100">"{trayLaunchError.groupName}"</span> — the rest failed:
+            </p>
+            <ul className="flex flex-col gap-1.5">
+              {trayLaunchError.failed.map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span className="min-w-0"><span className="font-medium">{f.name}</span> — {f.error}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </Modal>
       )}
 
