@@ -4920,27 +4920,42 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               {/* Assets — images from the current stream's folder + same-season
                   episodes. Drag a thumbnail onto the canvas to add it as an
                   image layer. */}
-              <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '35%' }}>
-                <div className="relative flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
+              {/* While assets are still being detected the list has no content
+                  to size against — without the explicit height the panel
+                  collapsed to zero and the header sat at the sidebar's bottom.
+                  Reserve the default height and show a spinner instead. */}
+              <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '35%', ...(!assetsCollapsed && !seasonAssets ? { height: '35%' } : {}) }}>
+                {/* Fixed h-8 (not padding-derived): the options button's box is
+                    1px taller than the text line, so a padded row grew when it
+                    rendered and shrank when collapse hid it. */}
+                <div className="relative flex items-center gap-1.5 px-3 h-8 border-b border-white/5 shrink-0">
                   {/* Collapse chevron — LEFT of the panel title, per the
-                      style guide's panel-collapse convention. */}
-                  <Tooltip content={assetsCollapsed ? 'Expand asset panel' : 'Collapse asset panel'}>
+                      style guide's panel-collapse convention. Panel-header
+                      variant: fills the row's full height, flush to the left
+                      edge, square, unrounded. */}
+                  <Tooltip
+                    content={assetsCollapsed ? 'Expand asset panel' : 'Collapse asset panel'}
+                    triggerClassName="self-stretch -ml-3 flex"
+                  >
                     <button
                       type="button"
                       onClick={toggleAssetsCollapsed}
-                      className="p-0.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                      className="h-full aspect-square flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
                     >
-                      {assetsCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                      {assetsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                     </button>
                   </Tooltip>
                   <ImageIcon size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Assets</span>
-                  <div ref={assetOptionsRef} className={`ml-auto relative${assetsCollapsed ? ' hidden' : ''}`}>
+                  {/* flex wrapper + flex button: the SVG is inline by default,
+                      so a block wrapper reserved baseline/descender space and
+                      shoved the icon above center. */}
+                  <div ref={assetOptionsRef} className={`ml-auto relative flex items-center${assetsCollapsed ? ' hidden' : ''}`}>
                     <Tooltip content="Asset sources">
                     <button
                       type="button"
                       onClick={() => setAssetOptionsOpen(o => !o)}
-                      className={`p-0.5 rounded transition-colors ${assetOptionsOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                      className={`p-0.5 rounded flex items-center justify-center transition-colors ${assetOptionsOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
                     >
                       <Sliders size={12} />
                     </button>
@@ -4990,7 +5005,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <div className={`overflow-y-auto flex-1${assetsCollapsed ? ' hidden' : ''}`}>
                   {(() => {
                     if (!seasonAssets) {
-                      return <div className="px-3 py-3 text-[11px] text-gray-400">Loading…</div>
+                      return (
+                        <div className="h-full flex items-center justify-center gap-2 text-[11px] text-gray-400">
+                          <Loader2 size={14} className="animate-spin" /> Loading assets…
+                        </div>
+                      )
                     }
                     const groups: Array<{ key: string; label: string; sublabel?: string; date?: string; images: string[] }> = []
                     if (seasonAssets.current && seasonAssets.current.images.length > 0) {
