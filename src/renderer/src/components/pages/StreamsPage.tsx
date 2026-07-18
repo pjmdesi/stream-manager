@@ -7103,12 +7103,12 @@ function SidebarDetail({
           extra vertical space alone signals the boundary. */}
       <div className="flex-1 overflow-y-auto px-5 flex text-xs [scrollbar-gutter:stable]">
         <div className="flex flex-col gap-8 w-full max-w-[80rem] mx-auto pt-4">
-            {/* — Media — every file in the folder (videos + thumbnail images).
+            {/* — Files — every file in the folder (videos + thumbnail images).
                 Leads the sidebar so past streams open straight onto their
                 recordings; absent only for an empty folder. */}
             {(folder.videos.length > 0 || folder.thumbnails.length > 0) && (
               <div className="flex flex-col gap-3">
-                <MetaRow label="Media">
+                <MetaRow label="Files">
                   <StreamFilesGrid
                     folder={folder}
                     thumbsKey={thumbsKey}

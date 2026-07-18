@@ -105,7 +105,8 @@
 
 ## Bugs
 
-*No new bugs*
+1. The blue mismatch indicator for the thumbnail in the stream item detail sidebar shows briefly when opening the stream items, and its especially visible when switching between stream items (since the sidebar is already opened). It should only show when the thumbnail is actually mismatched. It seems like the app is defaulting to a mismatch until the check runs.
+2. When using the keyboard shortcuts to switch between stream items, going to the very first stream in the list does not fully scroll it into view. It seems to not be accounting for the column headers in the streams page list. The first stream item is partially hidden behind the column headers.
 
 ## GitHub
 

@@ -1,5 +1,5 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X, Combine } from 'lucide-react'
+import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X, Combine, ChevronDown, ChevronRight } from 'lucide-react'
 import { VideoThumb, CHECKER, releaseThumbDecodes } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
@@ -95,6 +95,15 @@ const TAG_TRAY_BG: Record<TagColor, string> = {
   neutral: 'bg-navy-800 text-gray-200',
 }
 const TRAY_CLS = 'flex w-full items-center justify-center gap-1 px-1.5 rounded-b-md border border-t-0 text-[9px] uppercase tracking-wide leading-[15px] whitespace-nowrap'
+
+// Files-grid collapse chevron — the ROW-HEIGHT ANCHOR. Exact FilterToggle
+// box recipe (py-1 + 1px border + text-[11px] line metrics via the ZWSP
+// child below) so the header row keeps the same height whether the filter
+// buttons render or not, expanded or collapsed — nothing below ever shifts.
+const COLLAPSE_BTN = 'inline-flex items-center px-1.5 py-1 rounded-md border border-transparent text-[11px] text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors'
+// Zero-width space: gives the icon-only button a real text line box, so its
+// content height matches the text-bearing FilterToggles exactly.
+const ZWSP = <span className="w-0 overflow-hidden select-none">&#8203;</span>
 
 /** Hydration indicator at the end of the metadata line (only when cloud sync is
  *  active). Mirrors the video-counter tooltip: CloudCheck = on disk, Cloud =
@@ -731,6 +740,15 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const pinFile = (path: string) => enqueueHydrate([{ path, size: sizeOf(path) }], false)
 
   // ── Multi-select ──────────────────────────────────────────────────────────
+  // Collapsed = just the header line with a file-count summary. One GLOBAL
+  // mode (not per-stream), persisted: the point is stable field positions
+  // while rapid-navigating items — the grid's variable height pushed the
+  // fields below up and down. localStorage per the UI-pref pattern.
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('filesGridCollapsed') === 'true')
+  const setCollapsedPersist = (next: boolean) => {
+    setCollapsed(next)
+    localStorage.setItem('filesGridCollapsed', String(next))
+  }
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const lastClickedRef = useRef<string | null>(null)
@@ -833,13 +851,19 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   // files-grid selection when the detail sidebar is open: Ctrl+Shift+A toggles
   // mode, Ctrl+A selects-all / clears.
   useImperativeHandle(ref, () => ({
-    toggleSelectMode: () => { if (selectMode) exitSelectMode(); else setSelectMode(true) },
+    toggleSelectMode: () => {
+      // Ctrl+Shift+A on a collapsed grid: expand INTO select mode rather
+      // than toggling selection on a grid the user can't see.
+      if (collapsed) { setCollapsedPersist(false); setSelectMode(true); return }
+      if (selectMode) exitSelectMode()
+      else setSelectMode(true)
+    },
     selectAllOrClear: () => setSelected(prev => {
       const allSelected = visiblePaths.length > 0 && visiblePaths.every(p => prev.has(p))
       return allSelected ? new Set() : new Set(visiblePaths)
     }),
     isSelectMode: () => selectMode,
-  }), [selectMode, visiblePaths]) // eslint-disable-line react-hooks/exhaustive-deps
+  }), [selectMode, visiblePaths, collapsed]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedPaths = useMemo(() => visiblePaths.filter(p => selected.has(p)), [visiblePaths, selected])
   // Ctrl+A toggles (select all ↔ clear when complete) via selectAllOrClear
@@ -886,9 +910,56 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
 
   if (!hasVideos && !hasImages) return null
 
+  // Collapsed: a single constant-height line — chevron + file-count summary —
+  // so the fields below sit in the same place on every stream item. Counts
+  // mirror the tag-border classes: recordings ('full'), clips, shorts, SM
+  // thumbnails vs other images, plus unexported clip drafts.
+  const plural = (n: number, word: string) => `${n} ${word}${n !== 1 ? 's' : ''}`
+  const draftCount = Object.keys(folder.meta?.clipDrafts ?? {}).length
+  let recordings = 0, clips = 0, shorts = 0, unknownVideos = 0
+  for (const p of folder.videos) {
+    const entry = videoMap[videoMapKey(folder.folderPath, p)]
+    if (entry?.category === 'short') shorts++
+    else if (entry?.category === 'clip' || entry?.clipOf) clips++
+    else if (entry?.category === 'full') recordings++
+    else unknownVideos++
+  }
+  const smThumbs = folder.thumbnails.filter(p => parseSmThumbnailOrdinal(p) != null).length
+  const otherImages = folder.thumbnails.length - smThumbs
+  const collapsedSummary = [
+    recordings > 0 ? plural(recordings, 'recording') : null,
+    clips > 0 ? plural(clips, 'clip') : null,
+    shorts > 0 ? plural(shorts, 'short') : null,
+    unknownVideos > 0 ? plural(unknownVideos, 'video') : null,
+    smThumbs > 0 ? plural(smThumbs, 'thumbnail') : null,
+    otherImages > 0 ? plural(otherImages, 'image') : null,
+    draftCount > 0 ? plural(draftCount, 'clip draft') : null,
+  ].filter(Boolean).join(' · ')
+
+  if (collapsed) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <Tooltip content="Expand the files grid" side="top">
+          <button onClick={() => setCollapsedPersist(false)} className={COLLAPSE_BTN}>
+            <ChevronRight size={14} />{ZWSP}
+          </button>
+        </Tooltip>
+        <span className="text-[11px] text-gray-400">{collapsedSummary}</span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-1.5 flex-wrap">
+        <Tooltip content="Collapse the files grid" side="top">
+          <button
+            onClick={() => { if (selectMode) exitSelectMode(); setCollapsedPersist(true) }}
+            className={COLLAPSE_BTN}
+          >
+            <ChevronDown size={14} />{ZWSP}
+          </button>
+        </Tooltip>
         {hasVideos && hasImages && (
           <>
             <Tooltip content={showVideo ? 'Hide video files' : 'Show video files'} side="top">
