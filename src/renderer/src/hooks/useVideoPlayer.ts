@@ -504,6 +504,11 @@ export function useVideoPlayer() {
     if (!video.paused && !video.ended) resumeAfterSeek.current = true
     if (isSeeking.current) {
       pendingSeekTime.current = time
+      // Keep the UI playhead/timecode advancing while the decoder lags —
+      // held skips must stay responsive even when frame-accurate seeks
+      // can't keep up; the frame renders when the chained seek lands
+      // (possibly after the key is released).
+      setState(prev => ({ ...prev, currentTime: time }))
     } else {
       isSeeking.current = true
       video.currentTime = time
@@ -511,6 +516,16 @@ export function useVideoPlayer() {
         if (t.audioEl) t.audioEl.currentTime = time
       }
     }
+  }, [])
+
+  /** The LOGICAL playhead: the newest requested target while a seek chain is
+   *  in flight, else the element's current time. Repeated relative seeks
+   *  (held skip keys) accumulate on this — basing them on the rendered time
+   *  stalled the gesture whenever one seek outlived the repeat interval. */
+  const getSeekTarget = useCallback((): number => {
+    const video = videoRef.current
+    if (!video) return 0
+    return pendingSeekTime.current ?? video.currentTime
   }, [])
 
   const togglePlay = useCallback(() => {
@@ -627,6 +642,7 @@ export function useVideoPlayer() {
     recomputeAudibility,
     seek,
     fastSeek,
+    getSeekTarget,
     togglePlay,
     clearError,
     closeVideo,

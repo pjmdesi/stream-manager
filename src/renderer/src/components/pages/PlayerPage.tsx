@@ -1039,7 +1039,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     videoRef, state, loadFile, handleDurationChange,
     enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction, cancelTrackExtraction,
     setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, recomputeAudibility,
-    clearError, closeVideo, seek, fastSeek, togglePlay,
+    clearError, closeVideo, seek, fastSeek, getSeekTarget, togglePlay,
   } = useVideoPlayer()
 
   // Mark the open video as in-use so the Streams page blocks deleting it (and
@@ -2844,8 +2844,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     const regions = clipStateRef.current.clipRegions
     const lo = clipFocusRef.current && regions.length > 0 ? regions[0].inPoint : 0
     const hi = clipFocusRef.current && regions.length > 0 ? regions[regions.length - 1].outPoint : duration
-    seekRef.current(Math.max(lo, Math.min(hi, currentTimeRef.current + seconds)))
-  }, [duration])
+    // Accumulate on the LOGICAL playhead via the coalescing seek: repeated
+    // skips (held keys, rapid clicks) advance the target and the UI every
+    // time, while the decoder renders whichever frames it can keep up with.
+    // The old rendered-time base + plain seek stalled the whole gesture the
+    // moment one frame-accurate seek outlived the repeat interval (each
+    // repeat re-targeted the same stale base, restarting the seek forever).
+    fastSeekRef.current(Math.max(lo, Math.min(hi, getSeekTarget() + seconds)))
+  }, [duration, getSeekTarget])
 
   // Jump to the closest clip-region in/out marker in the given direction.
   // Shared by the [ / ] keyboard shortcuts and the clip-mode prev/next
