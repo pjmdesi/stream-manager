@@ -3476,12 +3476,12 @@ export function StreamsPage({
               triggerClassName="flex-1"
               content={
                 <div className="flex flex-col gap-1">
-                  <span className="text-gray-200 font-medium">Search titles, games, types, dates, and notes</span>
+                  <span className="text-gray-200 font-medium">Search titles, topics, types, dates, and notes</span>
                   <span className="text-gray-300">Comma: every term must match. Semicolon: any group matches.</span>
                   <div className="flex flex-col gap-0.5 text-gray-400">
-                    <span><span className="font-mono text-gray-300">rimworld, s2</span> — RimWorld AND s2</span>
-                    <span><span className="font-mono text-gray-300">rimworld; alters</span> — either one</span>
-                    <span><span className="font-mono text-gray-300">rimworld, s2; alters</span> — combine both</span>
+                    <span><span className="font-mono text-gray-300">topic1, topic2</span> — both must match</span>
+                    <span><span className="font-mono text-gray-300">topic1; topic2</span> — either one matches</span>
+                    <span><span className="font-mono text-gray-300">topic1, type1; topic2, type2</span> — combine both</span>
                   </div>
                 </div>
               }
@@ -3498,7 +3498,7 @@ export function StreamsPage({
                   onChange={e => setSearchQuery(e.target.value)}
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setSearchFocused(false)}
-                  placeholder="Search title, games, notes…  /"
+                  placeholder="Search title, topics, notes…  /"
                   className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
                 />
                 {searchQuery && (
