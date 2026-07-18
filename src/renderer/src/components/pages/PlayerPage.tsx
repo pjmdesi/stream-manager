@@ -299,6 +299,11 @@ function clampVideoPan(x: number, y: number, zoom: number, w: number, h: number)
 
 const TRACK_LABELS = ['Game', 'Mic', 'Discord', 'Music', 'SFX']
 
+// Playback-speed options for the play-button speed menu. ≤1 fans out left of
+// the play button, >1 right — near-center = near-normal, edges = extremes.
+const SPEED_STEPS = [0.25, 0.5, 1, 2, 4, 8]
+const speedLabel = (r: number): string => (r === 0.25 ? '¼×' : r === 0.5 ? '½×' : `${r}×`)
+
 // ── Per-track waveform strip (used inside the multi-track rows).
 // Receives a precomputed SVG path so the parent can call useWaveform
 // once with every extracted track and have all of them share a single
@@ -1039,7 +1044,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     videoRef, state, loadFile, handleDurationChange,
     enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction, cancelTrackExtraction,
     setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, recomputeAudibility,
-    clearError, closeVideo, seek, fastSeek, getSeekTarget, togglePlay,
+    clearError, closeVideo, seek, fastSeek, getSeekTarget, setPlaybackRate, togglePlay,
   } = useVideoPlayer()
 
   // Mark the open video as in-use so the Streams page blocks deleting it (and
@@ -2840,6 +2845,89 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     seekRef.current(Math.max(lo, Math.min(hi, currentTimeRef.current + dir / fps)))
   }, [videoRef, videoInfo, duration])
 
+  // ── Playback speed ─────────────────────────────────────────────────────
+  // The play/pause button doubles as the speed control: dwell-hover fans the
+  // speed options out where the skip buttons sit (skips fade in place — no
+  // reflow), scroll (horizontal / shift+wheel) steps the selection, and the
+  // current speed shows as a label inside the button. Persisted UI pref.
+  const [playbackRate, setPlaybackRateState] = useState<number>(() => {
+    const v = parseFloat(localStorage.getItem('playerPlaybackRate') ?? '1')
+    return SPEED_STEPS.includes(v) ? v : 1
+  })
+  const playbackRateStateRef = useRef(playbackRate)
+  const applyPlaybackRate = useCallback((rate: number) => {
+    playbackRateStateRef.current = rate
+    setPlaybackRateState(rate)
+    localStorage.setItem('playerPlaybackRate', String(rate))
+    setPlaybackRate(rate)
+  }, [setPlaybackRate])
+  // Re-assert per load — a new src resets the element toward its default
+  // (the hook also sets defaultPlaybackRate; this is belt-and-suspenders).
+  useEffect(() => { setPlaybackRate(playbackRate) }, [setPlaybackRate, playbackRate, videoUrl])
+  // One SPEED_STEPS step in either direction, clamped — shared by the wheel
+  // gesture and the J/L keys.
+  const stepPlaybackRate = useCallback((dir: 1 | -1) => {
+    let idx = SPEED_STEPS.indexOf(playbackRateStateRef.current)
+    if (idx === -1) idx = SPEED_STEPS.indexOf(1)
+    const next = Math.max(0, Math.min(SPEED_STEPS.length - 1, idx + dir))
+    if (next !== idx) applyPlaybackRate(SPEED_STEPS[next])
+  }, [applyPlaybackRate])
+
+  const [speedMenuOpen, setSpeedMenuOpen] = useState(false)
+  const speedOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const speedCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const speedWheelAccRef = useRef(0)
+  const speedWheelLastStepRef = useRef(0)
+  const speedHoverEnter = useCallback(() => {
+    if (speedCloseTimerRef.current) { clearTimeout(speedCloseTimerRef.current); speedCloseTimerRef.current = null }
+    if (speedOpenTimerRef.current) return
+    // Dwell delay: a cursor passing through on its way to a skip button
+    // never expands the menu — only a deliberate hover does.
+    speedOpenTimerRef.current = setTimeout(() => {
+      speedOpenTimerRef.current = null
+      speedWheelAccRef.current = 0
+      setSpeedMenuOpen(true)
+    }, 180)
+  }, [])
+  const speedHoverLeave = useCallback(() => {
+    if (speedOpenTimerRef.current) { clearTimeout(speedOpenTimerRef.current); speedOpenTimerRef.current = null }
+    if (speedCloseTimerRef.current) return
+    // Short grace so travelling between the button and an option can't
+    // collapse the menu mid-flight.
+    speedCloseTimerRef.current = setTimeout(() => {
+      speedCloseTimerRef.current = null
+      setSpeedMenuOpen(false)
+    }, 120)
+  }, [])
+  useEffect(() => () => {
+    if (speedOpenTimerRef.current) clearTimeout(speedOpenTimerRef.current)
+    if (speedCloseTimerRef.current) clearTimeout(speedCloseTimerRef.current)
+  }, [])
+  const handleSpeedWheel = useCallback((e: React.WheelEvent) => {
+    if (!speedMenuOpen) return
+    // Horizontal scroll only (right = faster), no wrap at the ends.
+    // Shift+vertical is the standard mouse horizontal-scroll gesture, so it
+    // counts; plain vertical wheel is ignored (too easy to nudge).
+    const dx = e.deltaX !== 0 ? e.deltaX : e.shiftKey ? e.deltaY : 0
+    if (dx === 0) return
+    // Cooldown between steps: a held tilt-wheel / notch burst fires events
+    // continuously, and even one-step-per-event walked the range too fast.
+    const now = Date.now()
+    if (now - speedWheelLastStepRef.current < 180) { speedWheelAccRef.current = 0; return }
+    speedWheelAccRef.current += dx
+    const STEP = 50 // trackpad micro-deltas accumulate up to one step
+    if (Math.abs(speedWheelAccRef.current) < STEP) return
+    speedWheelLastStepRef.current = now
+    // ONE step per firing, however large the delta — notched wheels report
+    // 100+ per tick and the old loop shot across the whole range. The
+    // accumulator resets fully so leftover momentum can't queue extra steps.
+    // Sign: wheel/tilt RIGHT reports negative deltaX here, so negative =
+    // faster (verified against the real device — right means faster).
+    const dir = speedWheelAccRef.current < 0 ? 1 : -1
+    speedWheelAccRef.current = 0
+    stepPlaybackRate(dir)
+  }, [speedMenuOpen, stepPlaybackRate])
+
   const skip = useCallback((seconds: number) => {
     const regions = clipStateRef.current.clipRegions
     const lo = clipFocusRef.current && regions.length > 0 ? regions[0].inPoint : 0
@@ -3452,10 +3540,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
       // No-modifier letter shortcuts
       if (!ctrl && !alt && !shift) {
-        // YouTube JKL — J/L = ±10s (repeat while held), K = play/pause
-        if (k === 'j' || k === 'J') { e.preventDefault(); startSkipRepeat('j', -10); return }
-        if (k === 'k' || k === 'K') { e.preventDefault(); effectiveTogglePlay(); return }
-        if (k === 'l' || k === 'L') { e.preventDefault(); startSkipRepeat('l', 10); return }
+        // DaVinci-style JKL — J/L step the playback speed down/up one notch,
+        // K resets to 1×. One step per PHYSICAL press (e.repeat ignored —
+        // auto-repeat would fly across the range). Play/pause lives on
+        // Space / clicking the video; ±10s skips on Ctrl+Shift+arrows.
+        if (k === 'j' || k === 'J') { e.preventDefault(); if (!e.repeat) stepPlaybackRate(-1); return }
+        if (k === 'k' || k === 'K') { e.preventDefault(); if (!e.repeat) applyPlaybackRate(1); return }
+        if (k === 'l' || k === 'L') { e.preventDefault(); if (!e.repeat) stepPlaybackRate(1); return }
 
         // C — toggle clip mode (mirror the toolbar button's logic). Show
         // the merge-warning modal only when a merge is genuinely needed
@@ -3558,7 +3649,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   }, [
     isVisible,
     clipModeModal, draftPendingDelete, showExportDialog,
-    effectiveTogglePlay, skip, stepFrame, multiTrack, multiTrackEnabled, isExtracting,
+    effectiveTogglePlay, skip, stepFrame, stepPlaybackRate, applyPlaybackRate, multiTrack, multiTrackEnabled, isExtracting,
     config.skipClipMergeWarning, exitClipMode,
     setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
     state.filePath, addSegment, splitSegment, jumpToMarker,
@@ -5188,8 +5279,32 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   const hasNextMarker = isClipMode && clipState.clipRegions.some(r =>
                     r.inPoint > currentTime + eps || r.outPoint > currentTime + eps,
                   )
+                  // Speed option button — options are self-labeling ("½×"),
+                  // so no tooltips except the 8× performance warning.
+                  const speedBtn = (s: number) => {
+                    const sel = playbackRate === s
+                    const btn = (
+                      <button
+                        key={s}
+                        onClick={() => applyPlaybackRate(s)}
+                        className={`px-1.5 py-1 rounded text-xs tabular-nums transition-colors ${
+                          sel ? 'text-purple-300 bg-white/10'
+                          : s === 8 ? 'text-amber-300/90 hover:text-amber-200 hover:bg-white/10'
+                          : 'text-gray-400 hover:text-gray-100 hover:bg-white/10'
+                        }`}
+                      >
+                        {speedLabel(s)}
+                      </button>
+                    )
+                    return s === 8 ? <Tooltip key={s} content="8× may stutter or drop frames on large files">{btn}</Tooltip> : btn
+                  }
+                  // While the speed menu is open the transport buttons FADE IN
+                  // PLACE (opacity, not unmount) so the row's layout is
+                  // untouched and everything is exactly where it was on leave.
+                  const fadeCls = speedMenuOpen ? 'opacity-0 pointer-events-none' : ''
                   return (
                     <>
+                      <div className={`flex items-center transition-opacity ${fadeCls}`} style={{ gap: `${controlsGap}px` }}>
                       {/* Skip to start */}
                       <Tooltip content="Skip to start">
                         <button onClick={() => seekRef.current(0)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
@@ -5227,17 +5342,46 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           <ChevronLeft size={16} />
                         </button>
                       </Tooltip>
+                      </div>
 
-                      {/* Play / Pause */}
-                      <Tooltip content={isPlaying ? 'Pause' : 'Play'}>
-                        <button
-                          onClick={effectiveTogglePlay}
-                          className="p-2 mx-1 rounded-full bg-purple-800 hover:bg-purple-700 text-white transition-colors"
-                        >
-                          {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-                        </button>
-                      </Tooltip>
+                      {/* Play / Pause — doubles as the playback-speed control.
+                          Dwell-hover fans the speed options out to the sides
+                          (≤1× left, >1× right, near-normal innermost); scroll
+                          steps the selection while open. The button itself
+                          stays a plain play/pause click throughout. */}
+                      <span
+                        className="relative flex items-center"
+                        onMouseEnter={speedHoverEnter}
+                        onMouseLeave={speedHoverLeave}
+                        onWheel={handleSpeedWheel}
+                      >
+                        {/* Overlay gaps are PADDING (not margin) so the entire
+                            strip from button to outermost option is contiguous
+                            hover area — dwelling between options can't close
+                            the menu. The outer pl-3/pr-3 + py-2 are invisible
+                            overshoot forgiveness. */}
+                        {speedMenuOpen && (
+                          <div className="absolute right-full top-1/2 -translate-y-1/2 flex items-center gap-1 z-10 pr-1.5 pl-3 py-2">
+                            {SPEED_STEPS.filter(s => s <= 1).map(speedBtn)}
+                          </div>
+                        )}
+                        <Tooltip content={isPlaying ? 'Pause' : 'Play'}>
+                          <button
+                            onClick={effectiveTogglePlay}
+                            className="pl-2 pr-2.5 py-2 mx-1 rounded-full bg-purple-800 hover:bg-purple-700 text-white transition-colors flex items-center gap-1"
+                          >
+                            {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                            <span className="text-[10px] font-semibold tabular-nums leading-none">{speedLabel(playbackRate)}</span>
+                          </button>
+                        </Tooltip>
+                        {speedMenuOpen && (
+                          <div className="absolute left-full top-1/2 -translate-y-1/2 flex items-center gap-1 z-10 pl-1.5 pr-3 py-2">
+                            {SPEED_STEPS.filter(s => s > 1).map(speedBtn)}
+                          </div>
+                        )}
+                      </span>
 
+                      <div className={`flex items-center transition-opacity ${fadeCls}`} style={{ gap: `${controlsGap}px` }}>
                       {/* Next frame */}
                       <Tooltip content="Next frame">
                         <button onClick={() => stepFrame(1)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
@@ -5273,6 +5417,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           <ChevronsRight size={15} />
                         </button>
                       </Tooltip>
+                      </div>
                     </>
                   )
                 })()}

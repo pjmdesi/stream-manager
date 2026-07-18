@@ -121,6 +121,10 @@ export function useVideoPlayer() {
 
   const isSeeking = useRef(false)
   const pendingSeekTime = useRef<number | null>(null)
+  // Current playback rate — remembered so audio-track elements created
+  // later (extraction finishing mid-session) and files loaded later
+  // inherit it. See setPlaybackRate below.
+  const playbackRateRef = useRef(1)
   // True when the video was playing as a seek started — re-asserted once the
   // seek settles, so a pause sneaking in mid-seek (an aborted play() promise,
   // engine hiccups on rapid successive seeks) can't leave the video stuck
@@ -225,6 +229,8 @@ export function useVideoPlayer() {
         el.preload = 'auto'
         el.volume = t.volume
         el.muted = t.muted
+        el.playbackRate = playbackRateRef.current
+        el.defaultPlaybackRate = playbackRateRef.current
         const video = videoRef.current
         if (video) el.currentTime = video.currentTime
         return { ...t, status: 'extracted' as TrackStatus, cachedPath: path, audioEl: el }
@@ -305,6 +311,8 @@ export function useVideoPlayer() {
       const trackBefore = tracksRef.current.find(t => t.index === index)
       el.volume = trackBefore?.volume ?? 1
       el.muted = trackBefore?.muted ?? false
+      el.playbackRate = playbackRateRef.current
+      el.defaultPlaybackRate = playbackRateRef.current
       const video = videoRef.current
       if (video) el.currentTime = video.currentTime
 
@@ -518,6 +526,19 @@ export function useVideoPlayer() {
     }
   }, [])
 
+  /** Apply a playback rate to the video AND every extracted audio track —
+   *  rate-mismatched track elements drift instantly and the 500ms drift
+   *  snapper would fight them forever. defaultPlaybackRate is set too so
+   *  later loads (new src resets the element to its default) inherit it. */
+  const setPlaybackRate = useCallback((rate: number) => {
+    playbackRateRef.current = rate
+    const video = videoRef.current
+    if (video) { video.playbackRate = rate; video.defaultPlaybackRate = rate }
+    for (const t of tracksRef.current) {
+      if (t.audioEl) { t.audioEl.playbackRate = rate; t.audioEl.defaultPlaybackRate = rate }
+    }
+  }, [])
+
   /** The LOGICAL playhead: the newest requested target while a seek chain is
    *  in flight, else the element's current time. Repeated relative seeks
    *  (held skip keys) accumulate on this — basing them on the rendered time
@@ -643,6 +664,7 @@ export function useVideoPlayer() {
     seek,
     fastSeek,
     getSeekTarget,
+    setPlaybackRate,
     togglePlay,
     clearError,
     closeVideo,

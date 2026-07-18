@@ -224,9 +224,9 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           <p className="text-[11px] text-gray-400">Active anywhere on the Player page (except while typing in a text field).</p>
           <ShortcutGroup title="Playback" rows={[
             { keys: ['Space'], label: 'Play / pause' },
-            { keys: ['K'], label: 'Play / pause (alt)' },
-            { keys: ['J'], label: 'Skip back 10s' },
-            { keys: ['L'], label: 'Skip forward 10s' },
+            { keys: ['J'], label: 'Playback speed down one step' },
+            { keys: ['K'], label: 'Reset playback speed to 1×' },
+            { keys: ['L'], label: 'Playback speed up one step' },
             { keys: ['←'], label: 'Previous frame' },
             { keys: ['→'], label: 'Next frame' },
             { keys: ['Shift', '←/→'], label: 'Skip ±1s' },
