@@ -15,7 +15,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   FlipHorizontal2, FlipVertical2,
-  ChevronDown, Loader2,
+  ChevronDown, ChevronRight, Loader2,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -1884,6 +1884,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // Assets-panel options dropdown (show-from-season / show-from-topic-game).
   const [assetOptionsOpen, setAssetOptionsOpen] = useState(false)
   const assetOptionsRef = useRef<HTMLDivElement>(null)
+  // Assets-panel collapse — just the header when collapsed (options button
+  // and list hidden). Persisted UI pref, same pattern as the files grid.
+  const [assetsCollapsed, setAssetsCollapsed] = useState(() => localStorage.getItem('thumbAssetsCollapsed') === 'true')
+  const toggleAssetsCollapsed = () => {
+    const next = !assetsCollapsed
+    setAssetsCollapsed(next)
+    localStorage.setItem('thumbAssetsCollapsed', String(next))
+    if (next) setAssetOptionsOpen(false)
+  }
   useEffect(() => {
     if (!assetOptionsOpen) return
     const onDown = (e: MouseEvent) => {
@@ -4913,9 +4922,20 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   image layer. */}
               <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '35%' }}>
                 <div className="relative flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
+                  {/* Collapse chevron — LEFT of the panel title, per the
+                      style guide's panel-collapse convention. */}
+                  <Tooltip content={assetsCollapsed ? 'Expand asset panel' : 'Collapse asset panel'}>
+                    <button
+                      type="button"
+                      onClick={toggleAssetsCollapsed}
+                      className="p-0.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                    >
+                      {assetsCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                    </button>
+                  </Tooltip>
                   <ImageIcon size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Assets</span>
-                  <div ref={assetOptionsRef} className="ml-auto relative">
+                  <div ref={assetOptionsRef} className={`ml-auto relative${assetsCollapsed ? ' hidden' : ''}`}>
                     <Tooltip content="Asset sources">
                     <button
                       type="button"
@@ -4965,7 +4985,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     )}
                   </div>
                 </div>
-                <div className="overflow-y-auto flex-1">
+                {/* `hidden` (not unmount) so loaded asset thumbnails survive
+                    a collapse/expand round-trip without refetching. */}
+                <div className={`overflow-y-auto flex-1${assetsCollapsed ? ' hidden' : ''}`}>
                   {(() => {
                     if (!seasonAssets) {
                       return <div className="px-3 py-3 text-[11px] text-gray-400">Loading…</div>
