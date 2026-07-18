@@ -2826,6 +2826,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     // design — a modifier slipping off a skip shortcut kept landing here and
     // pausing playback by surprise). While playing, a one-frame nudge is
     // simply washed out by playback; while paused, it steps as always.
+    //
+    // Drop steps while a seek is in flight: held-key auto-repeat (~30Hz)
+    // outpaces frame-accurate seeks, and re-assigning currentTime mid-seek
+    // RESTARTS the seek — each repeat re-targeted the same stale base and
+    // the video never settled ("stuck on one frame" while holding). Gated,
+    // held stepping advances at the video's real seek throughput.
+    if (vid.seeking) return
     const fps = videoInfo?.fps ?? 30
     const regions = clipStateRef.current.clipRegions
     const lo = clipFocusRef.current && regions.length > 0 ? regions[0].inPoint : 0
