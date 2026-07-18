@@ -61,21 +61,36 @@ const META_SECONDARY = 'text-[11px] text-gray-500 truncate'
 // A tag "wraps" its thumbnail: a colored ring around the frame plus a label
 // tray that pops out of the bottom edge. (Class strings are full literals so
 // Tailwind's JIT picks them up — don't build them dynamically.)
-type TagColor = 'pink' | 'blue' | 'neutral'
+// File-class tag palette: the VIDEO class is the warm family — red
+// (Recording), pink (Clip), violet (Short) — while IMAGES are cool: teal
+// (selected thumbnail) + neutral gray (alternates). Blue is deliberately
+// unassigned (reserved for a future marker). Shorts use Tailwind's real
+// `violet-*`, NOT the app's `purple-*` tokens — those are remapped to the
+// slate accent and would collide with selection rings.
+type TagColor = 'red' | 'pink' | 'violet' | 'teal' | 'blue' | 'neutral'
 // 1px border in the tag color: top + sides on the thumbnail, sides + bottom on
 // the tray, so together they form one outline around the grouped pair.
 const TAG_BORDER_STATIC: Record<TagColor, string> = {
+  red: 'border-red-400/70',
   pink: 'border-pink-400/70',
+  violet: 'border-violet-400/70',
+  teal: 'border-teal-400/70',
   blue: 'border-blue-400/70',
   neutral: 'border-white/40',
 }
 const TAG_BORDER_HOVER: Record<TagColor, string> = {
+  red: 'border-transparent group-hover/file:border-red-400/70',
   pink: 'border-transparent group-hover/file:border-pink-400/70',
+  violet: 'border-transparent group-hover/file:border-violet-400/70',
+  teal: 'border-transparent group-hover/file:border-teal-400/70',
   blue: 'border-transparent group-hover/file:border-blue-400/70',
   neutral: 'border-transparent group-hover/file:border-white/40',
 }
 const TAG_TRAY_BG: Record<TagColor, string> = {
+  red: 'bg-red-500/20 text-red-100',
   pink: 'bg-pink-500/20 text-pink-100',
+  violet: 'bg-violet-500/20 text-violet-100',
+  teal: 'bg-teal-500/20 text-teal-100',
   blue: 'bg-blue-500/20 text-blue-100',
   neutral: 'bg-navy-800 text-gray-200',
 }
@@ -267,6 +282,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   const name = path.split(/[\\/]/).pop() ?? path
   const isShort = entry?.category === 'short'
   const isClip = !isShort && (entry?.category === 'clip' || !!entry?.clipOf)
+  // 'full' is what the stream row's video counter counts — the keystone
+  // recording file(s) of the stream item.
+  const isRecording = !isShort && !isClip && entry?.category === 'full'
   // Prefer the scanned entry, fall back to a fresh probe (offloaded files had
   // no duration/resolution/codec until they were hydrated).
   const width = entry?.width ?? probed?.width
@@ -285,14 +303,26 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
       {selectMode && (<><SelectOverlay onDragStart={onDragStart} onDragEnter={onDragEnter} onClick={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
-          thumb={<VideoThumb path={path} width={104} height={58} checker rounded={isShort || isClip ? 'rounded-t-md' : 'rounded-md'} />}
-          tag={isShort ? { color: 'blue', label: 'Short' } : isClip ? { color: 'pink', label: 'Clip' } : null}
+          thumb={<VideoThumb path={path} width={104} height={58} checker rounded={isShort || isClip || isRecording ? 'rounded-t-md' : 'rounded-md'} />}
+          tag={isShort ? { color: 'violet', label: 'Short' }
+            : isClip ? { color: 'pink', label: 'Clip' }
+            : isRecording ? {
+                color: 'red',
+                label: 'Recording',
+                // Archived marker lives in the tray (same layout as the
+                // thumbnail tag's bookmark), not next to the filename.
+                icon: archived ? <Archive size={9} className="text-emerald-400" /> : undefined,
+                tooltip: archived ? 'Archived by Stream Manager' : undefined,
+              }
+            : null}
         />
       </div>
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex items-center gap-1.5 min-w-0">
           <TruncatedText text={name} className="text-xs text-gray-200 truncate" />
-          {archived && (
+          {/* Archived marker for NON-recording videos (e.g. an archived file
+              whose category shifted) — recordings carry it in their tag tray. */}
+          {archived && !isRecording && (
             <Tooltip content="Archived by Stream Manager" side="top">
               <Archive size={11} className="shrink-0 text-emerald-400" />
             </Tooltip>
@@ -397,7 +427,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
         <TaggedThumb
           thumb={
             <div
-              className={`group/thumb relative w-[104px] h-[58px] overflow-hidden cursor-pointer ${isPreferred ? 'rounded-t-md' : 'rounded-md group-hover/file:rounded-b-none'}`}
+              className={`group/thumb relative w-[104px] h-[58px] overflow-hidden cursor-pointer ${isPreferred || isSm ? 'rounded-t-md' : 'rounded-md group-hover/file:rounded-b-none'}`}
               style={CHECKER}
               onClick={() => onOpenLightbox(thumbIndex)}
             >
@@ -418,8 +448,11 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
             </div>
           }
           tag={isPreferred
-            ? { color: 'blue', label: 'Thumbnail', icon: <Bookmark size={9} className="text-amber-300" fill="currentColor" />, tooltip: 'Stream item thumbnail' }
-            : { color: 'neutral', label: 'Thumbnail', icon: <Bookmark size={9} />, hoverOnly: true, tooltip: 'Set as stream item thumbnail', onClick: () => onSetThumbnail(path) }
+            ? { color: 'teal', label: 'Thumbnail', icon: <Bookmark size={9} className="text-amber-300" fill="currentColor" />, tooltip: 'Stream item thumbnail' }
+            // SM-made alternates keep their tag ALWAYS visible so they read
+            // as app files, not stray images; non-SM images keep the
+            // hover-only set-as-thumbnail affordance.
+            : { color: 'neutral', label: 'Thumbnail', icon: <Bookmark size={9} />, hoverOnly: !isSm, tooltip: 'Set as stream item thumbnail', onClick: () => onSetThumbnail(path) }
           }
           suppressHover={selectMode}
         />

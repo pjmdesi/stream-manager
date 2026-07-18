@@ -110,6 +110,7 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 
 - **Chip border color matches its text color** (e.g. `text-purple-300` → `border-purple-300/40`). Don't pair a colored text with a neutral border.
 - Tag chips: `text-[10px] px-1.5 py-0.5 rounded`. Merge-field chips: see `TemplateBodyEditor` exports (`MERGE_FIELD_CHIP_CLASS`).
+- **File-class tag-border palette** (files grid `TaggedThumb`): the video class is the warm family — **red** Recording · **pink** Clip · **violet** Short — images are cool — **teal** selected thumbnail · **gray** alternates. **Blue is reserved** (unassigned; save it for a future marker). Shorts use Tailwind's literal `violet-*`, never the app's `purple-*` tokens (those are the remapped slate accent and would collide with selection rings). SM-made files always show their tag statically; hover-only tags are for affordances on non-SM files (e.g. set-as-thumbnail).
 
 ---
 
