@@ -667,6 +667,10 @@ export function StreamsPage({
   // for quick post-stream tasks).
   const [searchQuery, setSearchQuery] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
+  // Search-syntax hint tooltip: shown while the input is hovered OR focused
+  // but only until the user starts typing (controlled `open`).
+  const [searchHovered, setSearchHovered] = useState(false)
+  const [searchFocused, setSearchFocused] = useState(false)
   // Imperative handle to the open stream's files grid, so the keyboard handler
   // can drive its select mode (Ctrl+Shift+A) / select-all (Ctrl+A) when the
   // detail sidebar is open. Null when no sidebar / the stream has no files.
@@ -2463,12 +2467,20 @@ export function StreamsPage({
   // shown so the user can see broken state).
   const visibleFolders = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
+    // Multi-term search — OR-groups of AND-terms, no parentheses needed:
+    // semicolons split alternatives, commas split requirements within one
+    // ("rimworld, s2; alters" = (rimworld AND s2) OR alters). Terms match
+    // independently anywhere across the fields. Stray/empty separators are
+    // ignored; a query of only separators matches everything.
+    const searchGroups = q
+      ? q.split(';').map(g => g.split(',').map(t => t.trim()).filter(Boolean)).filter(g => g.length > 0)
+      : []
     // Resolved display title per folder — used for both search and the
     // title sort so users match/order by what they see, not the raw
     // `{game} … {tagline}` template body stored in meta.
     const titleByPath = new Map(folders.map(f => [f.folderPath, renderStreamTitle(f, folders)]))
     const matches = (f: StreamFolder) => {
-      if (!q) return true
+      if (searchGroups.length === 0) return true
       const fields = [
         f.date,
         f.folderName,
@@ -2480,7 +2492,7 @@ export function StreamsPage({
         (f.detectedGames ?? []).join(' '),
         normalizeStreamTypes(f.meta?.streamType).join(' '),
       ].join(' ').toLowerCase()
-      return fields.includes(q)
+      return searchGroups.some(group => group.every(term => fields.includes(term)))
     }
     const list = folders.filter(f => {
       if (f.isMissing) return true
@@ -3457,26 +3469,50 @@ export function StreamsPage({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search title, games, notes…  /"
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-white/5"
-                  aria-label="Clear search"
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
+            <Tooltip
+              side="bottom"
+              open={(searchHovered || searchFocused) && searchQuery === ''}
+              maxWidth="max-w-sm"
+              triggerClassName="flex-1"
+              content={
+                <div className="flex flex-col gap-1">
+                  <span className="text-gray-200 font-medium">Search titles, games, types, dates, and notes</span>
+                  <span className="text-gray-300">Comma: every term must match. Semicolon: any group matches.</span>
+                  <div className="flex flex-col gap-0.5 text-gray-400">
+                    <span><span className="font-mono text-gray-300">rimworld, s2</span> — RimWorld AND s2</span>
+                    <span><span className="font-mono text-gray-300">rimworld; alters</span> — either one</span>
+                    <span><span className="font-mono text-gray-300">rimworld, s2; alters</span> — combine both</span>
+                  </div>
+                </div>
+              }
+            >
+              <div
+                className="relative"
+                onMouseEnter={() => setSearchHovered(true)}
+                onMouseLeave={() => setSearchHovered(false)}
+              >
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
+                  placeholder="Search title, games, notes…  /"
+                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-white/5"
+                    aria-label="Clear search"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </Tooltip>
             <Tooltip content="Sort">
             <select
               value={sortMode}
