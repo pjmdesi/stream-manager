@@ -92,9 +92,42 @@ async function fetchFaviconDataUrl(url: string, timeoutMs = 8000): Promise<strin
   }
 }
 
+export function getLauncherGroups(): LauncherGroup[] {
+  return (getStore() as any).get('launcherGroups', []) as LauncherGroup[]
+}
+
+export interface GroupLaunchResult {
+  launched: number
+  failed: { id: string; name: string; error: string }[]
+}
+
+/** Launch every app/URL in a group. Shared by the renderer IPC handler and
+ *  the tray menu's launch items — same semantics from both entry points. */
+export async function launchGroupById(groupId: string): Promise<GroupLaunchResult> {
+  const group = getLauncherGroups().find(g => g.id === groupId)
+  if (!group) return { launched: 0, failed: [] }
+
+  let launched = 0
+  const failed: { id: string; name: string; error: string }[] = []
+  for (const entry of group.apps) {
+    if (!entry.path) continue
+    try {
+      await openTarget(entry.path)
+      launched++
+    } catch (err: any) {
+      // Keep launching the remaining apps, but report the failure — a
+      // "Launched 3" with nothing opened right before going live is the
+      // worst possible lie. The id lets the renderer pin the error to the
+      // exact app item (error chip + red launch button).
+      failed.push({ id: entry.id, name: entry.name || path.basename(entry.path), error: err?.message ?? 'Unknown error' })
+    }
+  }
+  return { launched, failed }
+}
+
 export function registerLauncherIPC(): void {
   ipcMain.handle('launcher:getGroups', () => {
-    return (getStore() as any).get('launcherGroups', []) as LauncherGroup[]
+    return getLauncherGroups()
   })
 
   ipcMain.handle('launcher:setGroups', (_event, groups: LauncherGroup[]) => {
@@ -102,26 +135,7 @@ export function registerLauncherIPC(): void {
   })
 
   ipcMain.handle('launcher:launchGroup', async (_event, groupId: string) => {
-    const groups: LauncherGroup[] = (getStore() as any).get('launcherGroups', [])
-    const group = groups.find(g => g.id === groupId)
-    if (!group) return { launched: 0, failed: [] }
-
-    let launched = 0
-    const failed: { id: string; name: string; error: string }[] = []
-    for (const entry of group.apps) {
-      if (!entry.path) continue
-      try {
-        await openTarget(entry.path)
-        launched++
-      } catch (err: any) {
-        // Keep launching the remaining apps, but report the failure — a
-        // "Launched 3" with nothing opened right before going live is the
-        // worst possible lie. The id lets the renderer pin the error to the
-        // exact app item (error chip + red launch button).
-        failed.push({ id: entry.id, name: entry.name || path.basename(entry.path), error: err?.message ?? 'Unknown error' })
-      }
-    }
-    return { launched, failed }
+    return launchGroupById(groupId)
   })
 
   ipcMain.handle('launcher:launchApp', async (_event, filePath: string) => {

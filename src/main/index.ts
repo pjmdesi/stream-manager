@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain, screen, Tray, Menu, MenuItem, nativeImage } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, screen, Tray, Menu, MenuItem, nativeImage, Notification } from 'electron'
 import { join } from 'path'
 import fs from 'fs'
 import Store from 'electron-store'
@@ -111,7 +111,7 @@ import { registerCombineIPC } from './ipc/combine'
 import { registerYouTubeIPC } from './ipc/youtube'
 import { registerTwitchIPC } from './ipc/twitch'
 import { registerVideoPopupIPC } from './ipc/videoPopup'
-import { registerLauncherIPC } from './ipc/launcher'
+import { registerLauncherIPC, getLauncherGroups, launchGroupById } from './ipc/launcher'
 import { registerClaudeIPC } from './ipc/claude'
 import { registerNetIPC } from './ipc/net'
 import { registerThumbnailIPC } from './ipc/thumbnail'
@@ -275,10 +275,24 @@ app.on('second-instance', () => {
   }
 })
 
+/** Tray-initiated group launch. Failures can't surface in the renderer (the
+ *  window may be hidden — that's the point of the tray), so partial failures
+ *  get a SYSTEM notification. This is not an in-app toast: the no-toast rule
+ *  governs in-app UI; silence here would just be a dishonest "Launched". */
+async function launchGroupFromTray(groupId: string, groupName: string): Promise<void> {
+  const { launched, failed } = await launchGroupById(groupId)
+  if (failed.length === 0) return
+  new Notification({
+    title: `Launched ${launched} of ${launched + failed.length} — ${groupName}`,
+    body: failed.map(f => `${f.name}: ${f.error}`).join('\n'),
+  }).show()
+}
+
 function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
   const watcherStatus = fileWatcher.getStatus()
   const converterStatus = getConverterStatus()
   const config = getStore().get('config') as any
+  const launcherGroups = getLauncherGroups()
 
   const watcherLabel = watcherStatus.active
     ? `Watcher: Active · ${watcherStatus.ruleCount} rule${watcherStatus.ruleCount !== 1 ? 's' : ''}`
@@ -322,6 +336,20 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
     { type: 'separator' },
     { label: watcherLabel, enabled: false },
     { label: converterLabel, enabled: false },
+    // Launch groups — same action as the sidebar launcher widget, reachable
+    // without opening the window. Menu is rebuilt per right-click, so the
+    // list always reflects the current groups. (No per-group icons — native
+    // menus can't render the launcher's fetched app icons.)
+    ...(launcherGroups.length > 0
+      ? [
+          { type: 'separator' as const },
+          ...launcherGroups.map(g => ({
+            label: `Launch "${g.name}"`,
+            enabled: g.apps.some(a => !!a.path),
+            click: () => { void launchGroupFromTray(g.id, g.name) },
+          })),
+        ]
+      : []),
     { type: 'separator' },
     {
       label: 'Open', click: () => {
