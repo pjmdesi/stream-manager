@@ -257,7 +257,7 @@ function timeAgo(ms: number): string {
   return `${Math.floor(s / 86400)}d ago`
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleted, blockReason, drafts }: {
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleted, blockReason, drafts, onModifierSelect }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -287,6 +287,8 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   blockReason: string | null
   /** Unexported clip drafts whose source is this video (newest first). */
   drafts?: ClipDraft[]
+  /** Shift/Ctrl-click outside select mode: enter select mode with this file. */
+  onModifierSelect: () => void
 }) {
   const name = path.split(/[\\/]/).pop() ?? path
   const isShort = entry?.category === 'short'
@@ -308,7 +310,17 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   const secondary = [entry?.size != null ? formatBytes(entry.size) : null, encoding || null, extOf(name) || null].filter(Boolean).join('  ·  ')
 
   return (
-    <div data-fp={path} className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''} ${highlighted ? 'ring-2 ring-purple-400/80' : ''}`}>
+    <div
+      data-fp={path}
+      className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''} ${highlighted ? 'ring-2 ring-purple-400/80' : ''}`}
+      onClick={selectMode ? undefined : (e) => {
+        // Shift/Ctrl-click = quick entry into select mode with this file.
+        // Buttons keep their own actions (their clicks bubble here).
+        if (!(e.shiftKey || e.ctrlKey || e.metaKey)) return
+        if ((e.target as HTMLElement).closest('button')) return
+        onModifierSelect()
+      }}
+    >
       {selectMode && (<><SelectOverlay onDragStart={onDragStart} onDragEnter={onDragEnter} onClick={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
@@ -396,7 +408,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   )
 }
 
-function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin, blockReason }: {
+function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin, blockReason, onModifierSelect }: {
   path: string
   thumbIndex: number
   /** Scan-flag-based local hint for rendering the image (immediate). */
@@ -422,6 +434,8 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
   /** Why this image can't be deleted (open in the thumbnail editor, etc.), or
    *  null when it's deletable. */
   blockReason: string | null
+  /** Shift/Ctrl-click outside select mode: enter select mode with this file. */
+  onModifierSelect: () => void
 }) {
   const name = path.split(/[\\/]/).pop() ?? path
   const [dims, setDims] = useState<{ width: number; height: number } | null>(null)
@@ -430,7 +444,15 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
   const secondary = [size != null ? formatBytes(size) : null, extOf(name) || null].filter(Boolean).join('  ·  ')
 
   return (
-    <div className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''}`}>
+    <div
+      className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''}`}
+      onClick={selectMode ? undefined : (e) => {
+        // Shift/Ctrl-click = quick entry into select mode with this file.
+        if (!(e.shiftKey || e.ctrlKey || e.metaKey)) return
+        if ((e.target as HTMLElement).closest('button')) return
+        onModifierSelect()
+      }}
+    >
       {selectMode && (<><SelectOverlay onDragStart={onDragStart} onDragEnter={onDragEnter} onClick={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
@@ -438,7 +460,9 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
             <div
               className={`group/thumb relative w-[104px] h-[58px] overflow-hidden cursor-pointer ${isPreferred || isSm ? 'rounded-t-md' : 'rounded-md group-hover/file:rounded-b-none'}`}
               style={CHECKER}
-              onClick={() => onOpenLightbox(thumbIndex)}
+              // Modifier-clicks bubble to the card's select-mode entry
+              // instead of opening the lightbox.
+              onClick={(e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) return; onOpenLightbox(thumbIndex) }}
             >
               <ThumbImage
                 path={path}
@@ -783,6 +807,13 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   }
   const clearSelection = () => { setSelected(new Set()); lastClickedRef.current = null }
   const exitSelectMode = () => { setSelectMode(false); clearSelection() }
+  // Shift/Ctrl-click on a card outside select mode: quick entry — enter
+  // select mode with that file selected and anchored for shift-ranges.
+  const enterSelectWith = (path: string) => {
+    setSelectMode(true)
+    setSelected(new Set([path]))
+    lastClickedRef.current = path
+  }
 
   // Drag-select (mirrors the stream rows): mousedown seeds the anchor + a
   // snapshot of the selection and whether we're adding or removing; mouseenter
@@ -1060,6 +1091,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onDeleted={() => onFilesDeleted([path])}
               blockReason={fileReason(path)}
               drafts={draftsByVideo.get(path.split(/[\\/]/).pop() ?? '')}
+              onModifierSelect={() => enterSelectWith(path)}
             />
           )
         })}
@@ -1095,6 +1127,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onOffload={offloadFile}
               onPin={pinFile}
               blockReason={fileReason(path)}
+              onModifierSelect={() => enterSelectWith(path)}
             />
           )
         })}

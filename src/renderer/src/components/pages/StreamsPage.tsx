@@ -2566,6 +2566,17 @@ export function StreamsPage({
       return next
     })
   }, [visibleFolders, selectionKey])
+  // Shift/Ctrl-click on a row OUTSIDE select mode: quick entry — enter
+  // select mode with that row selected and anchored, so a follow-up
+  // shift-click immediately extends a range.
+  const enterSelectModeWith = useCallback((index: number) => {
+    const f = visibleFolders[index]
+    if (!f || f.isMissing) return
+    setSelectedStreamKey(null) // entering select mode closes the sidebar
+    setSelectMode(true)
+    rowAnchorIndexRef.current = index
+    setSelectedPaths(new Set([selectionKey(f)]))
+  }, [visibleFolders, selectionKey])
   const selectAllVisible = useCallback(() => {
     setSelectedPaths(new Set(selectableVisible.map(selectionKey)))
   }, [selectableVisible, selectionKey])
@@ -3764,6 +3775,7 @@ export function StreamsPage({
                         multiSelected={selectedPaths.has(key)}
                         index={i}
                         onToggleMultiSelect={toggleSelectedAt}
+                        onModifierEnterSelect={enterSelectModeWith}
                         onDragStart={startDrag}
                         onDragEnter={updateDrag}
                         dragMovedRef={dragMoved}
@@ -4618,7 +4630,7 @@ export function StreamsPage({
  * present, and an unlinked icon when it isn't.
  */
 const StreamListItem = memo(function StreamListItem({
-  folder, folders, selected, compact, selectMode, multiSelected, index, onToggleMultiSelect,
+  folder, folders, selected, compact, selectMode, multiSelected, index, onToggleMultiSelect, onModifierEnterSelect,
   onDragStart, onDragEnter, dragMovedRef,
   isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
@@ -4647,6 +4659,9 @@ const StreamListItem = memo(function StreamListItem({
   /** Toggle this row in/out of the multi-select set (by visible index);
    *  shift extends a range from the last-clicked anchor row. */
   onToggleMultiSelect: (index: number, shiftKey: boolean) => void
+  /** Shift/Ctrl-click outside select mode: enter select mode with this
+   *  row selected (quick entry for power users). */
+  onModifierEnterSelect: (index: number) => void
   /** Click on a video row inside the count tooltip: opens this stream's
    *  sidebar and flashes a focus ring on the file in the media grid. */
   onVideoFileClick: (relativePath: string, filePath: string) => void
@@ -4780,6 +4795,9 @@ const StreamListItem = memo(function StreamListItem({
     // of opening the sidebar — matches the StreamsPage convention so the
     // bulk-action flow doesn't require precise checkbox aim.
     if (selectMode) onToggleMultiSelect(index, e.shiftKey)
+    // Shift/Ctrl-click outside select mode = quick entry into it with this
+    // row selected — modifier-clicks have no other meaning on a row.
+    else if (e.shiftKey || e.ctrlKey || e.metaKey) onModifierEnterSelect(index)
     else onClick(folder.relativePath)
   }
 
