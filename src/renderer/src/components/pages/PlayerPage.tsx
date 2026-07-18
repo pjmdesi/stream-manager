@@ -3296,6 +3296,42 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     // stepping the hidden video while nudging thumbnail layers, Ctrl+O
     // opening a file dialog anywhere, C opening an invisible modal).
     if (!isVisible) return
+    // Held skip shortcuts repeat on OUR 100ms interval, not native key
+    // auto-repeat: seeks are async, and the OS repeat rate (~30Hz after its
+    // initial delay) piles up seek requests faster than the video can honor
+    // them. First press skips immediately; the interval takes over while
+    // held; keyup (or a modifier change, window blur, a modal opening)
+    // stops it. Plain-arrow frame stepping keeps native repeat — that
+    // cadence is right for frames.
+    let skipRepeat: { key: string; timer: ReturnType<typeof setInterval> } | null = null
+    const stopSkipRepeat = () => {
+      if (skipRepeat) { clearInterval(skipRepeat.timer); skipRepeat = null }
+    }
+    const startSkipRepeat = (key: string, amount: number) => {
+      // Native auto-repeat of the held combo lands here too — the interval
+      // already owns the cadence, so repeats are ignored.
+      if (skipRepeat) return
+      skip(amount)
+      skipRepeat = {
+        key: key.toLowerCase(),
+        timer: setInterval(() => {
+          // A modal opening mid-hold can swallow the keyup — bail out.
+          if (isAnyModalOpen()) { stopSkipRepeat(); return }
+          skip(amount)
+        }, 100),
+      }
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!skipRepeat) return
+      const k = e.key
+      // Stop on the skip key itself OR any modifier: releasing a modifier
+      // changes the combo, and the arrow's next native repeat re-latches
+      // the loop with the new amount.
+      if (k.toLowerCase() === skipRepeat.key || k === 'Shift' || k === 'Control' || k === 'Meta' || k === 'Alt') {
+        stopSkipRepeat()
+      }
+    }
+    const onBlur = () => stopSkipRepeat()
     const handler = (e: KeyboardEvent) => {
       // Don't fire while user is typing
       const target = e.target as HTMLElement | null
@@ -3316,15 +3352,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
         e.preventDefault(); effectiveTogglePlay(); return
       }
 
-      // Arrow keys — frame step / skip
+      // Arrow keys — frame step / skip (skips repeat at 100ms while held)
       if (k === 'ArrowLeft' || k === 'ArrowRight') {
         if (ctrl && alt) return // reserve Ctrl+Alt for other future combos
         const dir = k === 'ArrowRight' ? 1 : -1
         e.preventDefault()
-        if (ctrl && shift) skip(dir * 10)
-        else if (ctrl) skip(dir * 5)
-        else if (shift) skip(dir * 1)
-        else stepFrame(dir as 1 | -1)
+        const amount = ctrl && shift ? dir * 10 : ctrl ? dir * 5 : shift ? dir * 1 : 0
+        if (amount === 0) stepFrame(dir as 1 | -1)
+        else startSkipRepeat(k, amount)
         return
       }
 
@@ -3404,10 +3439,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
       // No-modifier letter shortcuts
       if (!ctrl && !alt && !shift) {
-        // YouTube JKL — J/L = ±10s, K = play/pause
-        if (k === 'j' || k === 'J') { e.preventDefault(); skip(-10); return }
+        // YouTube JKL — J/L = ±10s (repeat while held), K = play/pause
+        if (k === 'j' || k === 'J') { e.preventDefault(); startSkipRepeat('j', -10); return }
         if (k === 'k' || k === 'K') { e.preventDefault(); effectiveTogglePlay(); return }
-        if (k === 'l' || k === 'L') { e.preventDefault(); skip(10);  return }
+        if (k === 'l' || k === 'L') { e.preventDefault(); startSkipRepeat('l', 10); return }
 
         // C — toggle clip mode (mirror the toolbar button's logic). Show
         // the merge-warning modal only when a merge is genuinely needed
@@ -3499,7 +3534,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     }
 
     document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
+    document.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      document.removeEventListener('keydown', handler)
+      document.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+      stopSkipRepeat()
+    }
   }, [
     isVisible,
     clipModeModal, draftPendingDelete, showExportDialog,
