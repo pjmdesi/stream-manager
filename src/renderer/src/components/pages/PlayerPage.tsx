@@ -1098,6 +1098,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   const [viewport, setViewport] = useState<TimelineViewport>({ viewStart: 0, viewEnd: 0 })
   const viewportRef = useRef(viewport)
   useEffect(() => { viewportRef.current = viewport }, [viewport])
+  // MANUAL view changes (wheel pan/zoom, drag pan, zoom keys, view-range
+  // inputs) route through this wrapper: while the video is paused they PIN
+  // the view, standing the playhead auto-scroll down until playback resumes
+  // or an explicit seek happens (todo #19 — don't yank a view the user
+  // deliberately scrolled away from).
+  const pausedViewPinRef = useRef(false)
+  const setViewportManual = useCallback((v: React.SetStateAction<TimelineViewport>) => {
+    const vid = videoRef.current
+    if (!vid || vid.paused) pausedViewPinRef.current = true
+    setViewport(v)
+  }, [videoRef])
   const isClipModeRef = useRef(isClipMode)
   useEffect(() => { isClipModeRef.current = isClipMode }, [isClipMode])
   const durationRef = useRef(0)
@@ -2216,7 +2227,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       let ne = viewEnd + dtSec
       if (ns < 0) { ns = 0; ne = Math.min(dur, span) }
       if (ne > dur) { ne = dur; ns = Math.max(0, dur - span) }
-      setViewport({ viewStart: ns, viewEnd: ne })
+      setViewportManual({ viewStart: ns, viewEnd: ne })
     } else {
       // Zoom: vertical scroll, centred on cursor position
       const cursorRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
@@ -2227,7 +2238,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       let newEnd = newStart + newSpan
       if (newStart < 0) { newStart = 0; newEnd = Math.min(dur, newSpan) }
       if (newEnd > dur) { newEnd = dur; newStart = Math.max(0, dur - newSpan) }
-      setViewport({ viewStart: newStart, viewEnd: newEnd })
+      setViewportManual({ viewStart: newStart, viewEnd: newEnd })
     }
   }, [])
 
@@ -2298,8 +2309,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   useEffect(() => {
     if (segmentCount > 0) setClipFocus(true)
   }, [segmentCount > 0]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { seekRef.current     = (t) => seek(t)     }, [seek])
-  useEffect(() => { fastSeekRef.current = (t) => fastSeek(t) }, [fastSeek])
+  // Every explicit playhead action (skips, frame steps, marker jumps,
+  // Home/End, timecode entry, timeline clicks, drags) funnels through these
+  // wrappers — an action releases the paused manual-view pin so the
+  // auto-scroll below re-engages and brings the playhead back into view.
+  useEffect(() => { seekRef.current     = (t) => { pausedViewPinRef.current = false; seek(t) }     }, [seek])
+  useEffect(() => { fastSeekRef.current = (t) => { pausedViewPinRef.current = false; fastSeek(t) } }, [fastSeek])
+  useEffect(() => { if (isPlaying) pausedViewPinRef.current = false }, [isPlaying])
   useEffect(() => {
     if (duration > 0) setViewport({ viewStart: 0, viewEnd: duration })
     // Close popup and tear down WebRTC whenever the loaded file changes or is cleared
@@ -2313,18 +2329,29 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
 
   // Snap viewport to keep playhead visible
+  // Auto-scroll (page) the zoomed timeline so the playhead stays in view,
+  // with 10%-of-span padding so it never sits at the container edge.
+  // Pages rather than continuously follows: timeupdate is ~4Hz, so a
+  // continuous follow would step-jitter the waveforms. Forward motion
+  // lands the playhead near the LEFT pad (upcoming content visible),
+  // backward motion near the RIGHT pad. Stands down while the playhead
+  // is being dragged and while the paused manual-view pin is set (the
+  // seekRef wrappers above release the pin on any explicit action).
   useEffect(() => {
-    if (!isClipMode || duration <= 0) return
+    // Applies whenever the timeline is ZOOMED, clip mode or not — the
+    // viewport drives the tracks in both modes; span < duration is the
+    // real "zoomed" test.
+    if (duration <= 0) return
+    if (isPlayheadDraggingRef.current || pausedViewPinRef.current) return
     const { viewStart, viewEnd } = viewportRef.current
     const span = viewEnd - viewStart
-    if (currentTime < viewStart) {
-      const ns = Math.max(0, currentTime)
-      setViewport({ viewStart: ns, viewEnd: Math.min(duration, ns + span) })
-    } else if (currentTime > viewEnd) {
-      const ne = Math.min(duration, currentTime)
-      setViewport({ viewStart: Math.max(0, ne - span), viewEnd: ne })
-    }
-  }, [currentTime, isClipMode, duration]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (span <= 0 || span >= duration - 0.001) return // not zoomed
+    const pad = span * 0.1
+    if (currentTime >= viewStart + pad && currentTime <= viewEnd - pad) return
+    let ns = currentTime > viewEnd - pad ? currentTime - pad : currentTime + pad - span
+    ns = Math.max(0, Math.min(duration - span, ns))
+    if (ns !== viewStart) setViewport({ viewStart: ns, viewEnd: ns + span })
+  }, [currentTime, duration]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Middle-click drag to pan the zoomed video.
   const startVideoPanDrag = useCallback((e: React.MouseEvent) => {
@@ -2384,7 +2411,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       let ne = sve + dtSec
       if (ns < 0) { ns = 0; ne = span }
       if (ne > dur) { ne = dur; ns = dur - span }
-      setViewport({ viewStart: ns, viewEnd: ne })
+      setViewportManual({ viewStart: ns, viewEnd: ne })
     }
     const onUp = () => {
       window.removeEventListener('mousemove', onMove)
@@ -3696,7 +3723,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       // 0 — reset zoom
       if (!ctrl && !alt && !shift && k === '0') {
         e.preventDefault()
-        setViewport({ viewStart: 0, viewEnd: durationRef.current })
+        setViewportManual({ viewStart: 0, viewEnd: durationRef.current })
         return
       }
 
@@ -3715,7 +3742,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
         let ne = ns + newSpan
         if (ns < 0) { ns = 0; ne = newSpan }
         if (ne > durationRef.current) { ne = durationRef.current; ns = ne - newSpan }
-        setViewport({ viewStart: Math.max(0, ns), viewEnd: Math.min(durationRef.current, ne) })
+        setViewportManual({ viewStart: Math.max(0, ns), viewEnd: Math.min(durationRef.current, ne) })
         return
       }
 
@@ -4282,18 +4309,18 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                               const t = parseTimecode(vStartInput, videoInfo?.fps)
                               if (t !== null) {
                                 const clamped = Math.max(0, Math.min(t, vEnd - 0.001))
-                                setViewport(v => ({ ...v, viewStart: clamped }))
+                                setViewportManual(v => ({ ...v, viewStart: clamped }))
                               }
                               setEditingVStart(false)
                               if (e.key === 'Tab') { e.preventDefault(); setVEndInput(formatViewTime(vEnd, videoInfo?.fps)); setEditingVEnd(true); setTimeout(() => vEndInputRef.current?.select(), 0) }
                             }
                             if (e.key === 'Escape') setEditingVStart(false)
                             const arrow = applyTimecodeArrow(e, vStartInput, vStartInputRef, videoInfo?.fps, 0, viewportRef.current.viewEnd - 0.001)
-                            if (arrow) { setVStartInput(arrow.newValue); setViewport(v => ({ ...v, viewStart: arrow.newTime })) }
+                            if (arrow) { setVStartInput(arrow.newValue); setViewportManual(v => ({ ...v, viewStart: arrow.newTime })) }
                           }}
                           onBlur={() => {
                             const t = parseTimecode(vStartInput, videoInfo?.fps)
-                            if (t !== null) setViewport(v => ({ ...v, viewStart: Math.max(0, Math.min(t, viewportRef.current.viewEnd - 0.001)) }))
+                            if (t !== null) setViewportManual(v => ({ ...v, viewStart: Math.max(0, Math.min(t, viewportRef.current.viewEnd - 0.001)) }))
                             setEditingVStart(false)
                           }}
                           className="w-16 text-[11px] text-blue-300 tabular-nums bg-transparent border-b border-blue-500/60 focus:outline-none text-right"
@@ -4319,17 +4346,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                               const t = parseTimecode(vEndInput, videoInfo?.fps)
                               if (t !== null) {
                                 const clamped = Math.min(duration, Math.max(t, vStart + 0.001))
-                                setViewport(v => ({ ...v, viewEnd: clamped }))
+                                setViewportManual(v => ({ ...v, viewEnd: clamped }))
                               }
                               setEditingVEnd(false)
                             }
                             if (e.key === 'Escape') setEditingVEnd(false)
                             const arrow = applyTimecodeArrow(e, vEndInput, vEndInputRef, videoInfo?.fps, viewportRef.current.viewStart + 0.001, duration)
-                            if (arrow) { setVEndInput(arrow.newValue); setViewport(v => ({ ...v, viewEnd: arrow.newTime })) }
+                            if (arrow) { setVEndInput(arrow.newValue); setViewportManual(v => ({ ...v, viewEnd: arrow.newTime })) }
                           }}
                           onBlur={() => {
                             const t = parseTimecode(vEndInput, videoInfo?.fps)
-                            if (t !== null) setViewport(v => ({ ...v, viewEnd: Math.min(duration, Math.max(t, viewportRef.current.viewStart + 0.001)) }))
+                            if (t !== null) setViewportManual(v => ({ ...v, viewEnd: Math.min(duration, Math.max(t, viewportRef.current.viewStart + 0.001)) }))
                             setEditingVEnd(false)
                           }}
                           className="w-16 text-[11px] text-blue-300 tabular-nums bg-transparent border-b border-blue-500/60 focus:outline-none"
