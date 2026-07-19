@@ -728,7 +728,15 @@ export function StreamsPage({
     // state change triggers its render.
     const id = requestAnimationFrame(() => {
       const row = scrollEl.querySelector<HTMLElement>(`tr[data-stream-key="${CSS.escape(selectedStreamKey)}"]`)
-      row?.scrollIntoView({ block: 'nearest', behavior: anim.scrollBehavior })
+      if (!row) return
+      // The column-header <thead> is sticky inside this same scroll
+      // container, so a plain scrollIntoView parks upward-scrolled rows
+      // underneath it (most visible on the very first row). scroll-margin
+      // is the standards hook scrollIntoView respects for exactly this —
+      // set it to the live header height so the row lands below it.
+      const header = scrollEl.querySelector('thead')
+      row.style.scrollMarginTop = `${header?.getBoundingClientRect().height ?? 0}px`
+      row.scrollIntoView({ block: 'nearest', behavior: anim.scrollBehavior })
     })
     return () => cancelAnimationFrame(id)
   }, [selectedStreamKey])
@@ -6745,15 +6753,24 @@ function SidebarDetail({
   // Re-runs on `thumbsKey` so the thumbnail-editor save flow refreshes
   // it: the editor writes a new PNG, the streams page bumps thumbsKey,
   // this effect fires, and the button updates without a manual reload.
-  const [currentThumbnailHash, setCurrentThumbnailHash] = useState<string | null>(null)
+  // The hash is stored together with the path it was computed FROM: on a
+  // stream switch the state still holds the previous stream's hash until
+  // the new file finishes hashing, and comparing that stale hash against
+  // the new stream's pushed hash flashed a false mismatch indicator.
+  // Keying by path makes the derived hash null (= unknown, indicator
+  // hidden) whenever it doesn't belong to the current thumbnail.
+  const [thumbHashState, setThumbHashState] = useState<{ path: string; hash: string } | null>(null)
   useEffect(() => {
-    if (!effectiveYtThumb) { setCurrentThumbnailHash(null); return }
+    if (!effectiveYtThumb) { setThumbHashState(null); return }
     let cancelled = false
     window.api.thumbnailHashFile(effectiveYtThumb)
-      .then(h => { if (!cancelled) setCurrentThumbnailHash(h) })
-      .catch(() => { if (!cancelled) setCurrentThumbnailHash(null) })
+      .then(h => { if (!cancelled) setThumbHashState(h !== null ? { path: effectiveYtThumb, hash: h } : null) })
+      .catch(() => { if (!cancelled) setThumbHashState(null) })
     return () => { cancelled = true }
   }, [effectiveYtThumb, thumbsKey])
+  const currentThumbnailHash = thumbHashState !== null && thumbHashState.path === effectiveYtThumb
+    ? thumbHashState.hash
+    : null
   const thumbnailNeedsPush =
     !!effectiveYtThumb &&
     currentThumbnailHash !== null &&
