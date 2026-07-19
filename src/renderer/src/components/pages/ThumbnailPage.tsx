@@ -1534,7 +1534,10 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                         max={999}
                         value={entered}
                         onChange={cornerRadius => update({ cornerRadius })}
-                        inlineNote={entered > maxR ? String(Math.round(maxR)) : undefined}
+                        // Odd dimensions give fractional caps (e.g. 201×201
+                        // rect → 100.5) — show the exact value rather than
+                        // rounding up past what actually renders.
+                        inlineNote={entered > maxR ? (maxR % 1 === 0 ? String(maxR) : maxR.toFixed(1)) : undefined}
                         className="w-full"
                       />
                     </label>
