@@ -12,6 +12,7 @@ import { useStore } from '../../hooks/useStore'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry } from '../../types'
 import { ThumbImage } from '../streams/ThumbImage'
 import { CloudDownloadModal } from '../streams/legacyStreamsShared'
+import { useCloudOps } from '../../context/CloudOpsContext'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
 import { useWaveform } from '../../hooks/useWaveform'
@@ -1203,6 +1204,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   // Whether the OS cloud-sync provider is active — gates the hydration icon in
   // the session-video rows (VideoRow). Re-probed whenever streamsDir changes
   // (first-run setup picks the library after mount).
+  const { enqueueHydrate } = useCloudOps()
   const [cloudSyncActive, setCloudSyncActive] = useState(false)
   useEffect(() => {
     window.api.cloudSyncIsActive(config.streamsDir).then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
@@ -1478,19 +1480,35 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   const hydratingSessionRef = useRef(hydratingSessionPaths)
   useEffect(() => { hydratingSessionRef.current = hydratingSessionPaths }, [hydratingSessionPaths])
   const [readySessionPaths, setReadySessionPaths] = useState<Set<string>>(new Set())
+  // Downloads go through the CLOUD-OPS PIN QUEUE (same as the files grid's
+  // Pin Local), so the sidebar cloud widget shows progress if the user
+  // leaves the player, and failures surface in the cloud modal with its
+  // retry button. Completion/failure arrives via the queue's progress
+  // events; a per-direction cancel clears every pending spinner (cancel
+  // stamps all live hydrate batches at once).
   useEffect(() => {
-    return window.api.onCloudDownloadDone((filePath: string) => {
-      if (!hydratingSessionRef.current.has(filePath)) return
-      setHydratingSessionPaths(prev => { const next = new Set(prev); next.delete(filePath); return next })
-      setReadySessionPaths(prev => new Set(prev).add(filePath))
-      setSiblingFiles(prev => prev.map(f => f.path === filePath ? { ...f, isLocal: true } : f))
+    return window.api.onCloudSyncProgress(ev => {
+      if (ev.direction !== 'hydrate') return
+      if (ev.type === 'complete' && ev.cancelled) {
+        setHydratingSessionPaths(prev => (prev.size === 0 ? prev : new Set()))
+        return
+      }
+      if (ev.type !== 'item' || !hydratingSessionRef.current.has(ev.path)) return
+      if (ev.status === 'done' || ev.status === 'already-local') {
+        setHydratingSessionPaths(prev => { const next = new Set(prev); next.delete(ev.path); return next })
+        setReadySessionPaths(prev => new Set(prev).add(ev.path))
+        setSiblingFiles(prev => prev.map(f => f.path === ev.path ? { ...f, isLocal: true } : f))
+      } else if (ev.status === 'failed') {
+        // No ring — the cloud modal owns the failure (reason + retry).
+        setHydratingSessionPaths(prev => { const next = new Set(prev); next.delete(ev.path); return next })
+      }
     })
   }, [])
   const handleSessionVideoClick = useCallback((item: SiblingFile, load: (p: string) => void) => {
     if (cloudSyncActive && !item.isLocal) {
       if (!hydratingSessionRef.current.has(item.path)) {
         setHydratingSessionPaths(prev => new Set(prev).add(item.path))
-        void window.api.startCloudDownload(item.path)
+        enqueueHydrate([{ path: item.path, size: item.entry?.size ?? 0 }], false)
       }
       return
     }
@@ -1499,7 +1517,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       const next = new Set(prev); next.delete(item.path); return next
     })
     load(item.path)
-  }, [cloudSyncActive])
+  }, [cloudSyncActive, enqueueHydrate])
   // Open a recent, guarding against a file deleted since the last prune. If the
   // target is gone, drop the entry (view + store) and show a brief notice
   // instead of pushing an ffprobe error into the player.
