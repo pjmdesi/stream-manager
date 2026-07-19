@@ -11,6 +11,7 @@ import { isAnyModalOpen } from '../../lib/shortcuts'
 import { useStore } from '../../hooks/useStore'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry } from '../../types'
 import { ThumbImage } from '../streams/ThumbImage'
+import { CloudDownloadModal } from '../streams/legacyStreamsShared'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
 import { useWaveform } from '../../hooks/useWaveform'
@@ -1444,6 +1445,22 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   const clearRecents = useCallback(() => {
     window.api.playerClearRecents().then(setRecents).catch(() => setRecents([]))
   }, [])
+  // Cloud-download prompt for recents whose target file is a placeholder —
+  // same modal + auto-open-when-done flow as the streams page's
+  // send-to-player gate. Without it, clicking such a recent silently
+  // kicked off a hydration with no feedback beyond the Windows toast.
+  const [cloudDownload, setCloudDownload] = useState<{ filePath: string; fileName: string; stage: 'confirm' | 'downloading' } | null>(null)
+  const cloudDownloadRef = useRef(cloudDownload)
+  useEffect(() => { cloudDownloadRef.current = cloudDownload }, [cloudDownload])
+  useEffect(() => {
+    const unsub = window.api.onCloudDownloadDone((filePath: string) => {
+      const pending = cloudDownloadRef.current
+      if (!pending || pending.filePath !== filePath) return
+      setCloudDownload(null)
+      guardedLoadFile(filePath)
+    })
+    return () => unsub()
+  }, [guardedLoadFile])
   // Open a recent, guarding against a file deleted since the last prune. If the
   // target is gone, drop the entry (view + store) and show a brief notice
   // instead of pushing an ffprobe error into the player.
@@ -1454,8 +1471,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       setRecentsNotice('That video is no longer available, so it was removed from recents.')
       return
     }
+    // Cloud gate — mirror of the streams page's per-file send-to-player check.
+    if (cloudSyncActive) {
+      const [isLocal] = await window.api.checkLocalFiles([entry.filePath]).catch(() => [true])
+      if (!isLocal) {
+        setCloudDownload({ filePath: entry.filePath, fileName: entry.filePath.split(/[\\/]/).pop() ?? 'video file', stage: 'confirm' })
+        return
+      }
+    }
     guardedLoadFile(entry.filePath)
-  }, [guardedLoadFile])
+  }, [guardedLoadFile, cloudSyncActive])
   // Cache-buster for recent thumbnails — bumps whenever the folder list
   // reloads so an edited thumbnail re-fetches.
   const recentsThumbsKey = useMemo(() => Date.now(), [sortedStreamFolders])
@@ -1492,6 +1517,32 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     }
     return out
   }, [recents, sortedStreamFolders, config.streamsDir])
+
+  // Flag recents whose EVERY video is a cloud placeholder, so the row can
+  // show a cloud icon before the user clicks. One batched check per
+  // overview visit / recents change; keyed by the folder's relativePath.
+  const [offlineRecentKeys, setOfflineRecentKeys] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (!isVisible || state.videoUrl || !cloudSyncActive) return
+    let cancelled = false
+    void (async () => {
+      const folders = displayRecents
+        .map(r => r.folder)
+        .filter((f): f is StreamFolder => !!f && f.videos.length > 0)
+      if (folders.length === 0) { setOfflineRecentKeys(new Set()); return }
+      const flags = await window.api.checkLocalFiles(folders.flatMap(f => f.videos)).catch(() => null)
+      if (cancelled || !flags) return
+      const next = new Set<string>()
+      let i = 0
+      for (const f of folders) {
+        let anyLocal = false
+        for (let n = 0; n < f.videos.length; n++, i++) if (flags[i]) anyLocal = true
+        if (!anyLocal) next.add(f.relativePath)
+      }
+      setOfflineRecentKeys(next)
+    })()
+    return () => { cancelled = true }
+  }, [isVisible, state.videoUrl, cloudSyncActive, displayRecents])
 
   // Prev/next stream items in chronological order. Streams with zero
   // playable video files are skipped over (navigating to an empty
@@ -3787,10 +3838,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         {/* Session items show a video count; a single video
                             opened from outside the streams root shows its path
                             so it's distinguishable from the stream sessions. */}
-                        <p className="text-[10px] text-gray-400 truncate">
-                          {r.folder
-                            ? `${r.folder.videoCount} video${r.folder.videoCount === 1 ? '' : 's'}`
-                            : r.filePath}
+                        <p className="text-[10px] text-gray-400 flex items-center gap-1 min-w-0">
+                          <span className="truncate min-w-0">
+                            {r.folder
+                              ? `${r.folder.videoCount} video${r.folder.videoCount === 1 ? '' : 's'}`
+                              : r.filePath}
+                          </span>
+                          {r.folder && offlineRecentKeys.has(r.folder.relativePath) && (
+                            <Tooltip content="All of this stream's videos are in the cloud — clicking will prompt a download">
+                              <Cloud size={10} className="shrink-0 text-gray-400" />
+                            </Tooltip>
+                          )}
                         </p>
                       </div>
                     </button>
@@ -6083,6 +6141,26 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
           Audio tracks are still being extracted for the current video. Wait for the extraction to finish, or cancel it from the track list, before opening another video.
         </p>
       </Modal>
+
+      {/* Cloud-download prompt for a recent whose file is a placeholder —
+          the file auto-opens here once the download lands. */}
+      {cloudDownload && (
+        <CloudDownloadModal
+          fileName={cloudDownload.fileName}
+          filePath={cloudDownload.filePath}
+          stage={cloudDownload.stage}
+          onConfirm={async () => {
+            setCloudDownload(prev => prev ? { ...prev, stage: 'downloading' } : null)
+            await window.api.startCloudDownload(cloudDownload.filePath)
+          }}
+          onCancel={async () => {
+            if (cloudDownload.stage === 'downloading') {
+              await window.api.cancelCloudDownload(cloudDownload.filePath)
+            }
+            setCloudDownload(null)
+          }}
+        />
+      )}
 
       <Modal
         isOpen={clipModeModal === 'warn'}
