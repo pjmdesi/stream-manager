@@ -2,7 +2,7 @@ import React, {
   useState, useEffect, useRef, useCallback, useMemo
 } from 'react'
 import { flushSync } from 'react-dom'
-import { Stage, Layer, Group as KonvaGroup, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, RegularPolygon as KonvaRegularPolygon, Shape as KonvaShape } from 'react-konva'
+import { Stage, Layer, Group as KonvaGroup, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, Shape as KonvaShape } from 'react-konva'
 import useImage from 'use-image'
 import Konva from 'konva'
 import {
@@ -872,7 +872,48 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
     if (shapeType === 'ellipse') {
       return <KonvaEllipse key={key} {...props} radiusX={w / 2} radiusY={h / 2} />
     }
-    return <KonvaRegularPolygon key={key} {...props} sides={3} radius={Math.min(w, h) / 2} />
+    // Triangle — custom sceneFunc instead of RegularPolygon so corners can
+    // round (arcTo at each vertex). Radius 0 draws the identical sharp
+    // equilateral triangle; the radius clamps to the inradius (R/2), where
+    // the shape degenerates gracefully toward the inscribed circle. The
+    // radius is in PIXELS, independent of width/height, so corners stay
+    // perfectly circular through resizes (todo #23).
+    const R = Math.min(w, h) / 2
+    const cx = w / 2
+    const cy = h / 2
+    const rr = Math.max(0, Math.min(layer.cornerRadius ?? 0, R / 2))
+    const pts = [0, 1, 2].map(i => {
+      // Same vertex placement as Konva's RegularPolygon: first point up.
+      const a = (Math.PI * 2 * i) / 3 - Math.PI / 2
+      return { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) }
+    })
+    return (
+      <KonvaShape
+        key={key}
+        {...props}
+        width={w}
+        height={h}
+        // Center the self-rect so position/flip semantics match the old
+        // centered RegularPolygon (baseInnerProps places x/y at the center).
+        offsetX={w / 2}
+        offsetY={h / 2}
+        sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
+          ctx.beginPath()
+          if (rr <= 0) {
+            ctx.moveTo(pts[0].x, pts[0].y)
+            ctx.lineTo(pts[1].x, pts[1].y)
+            ctx.lineTo(pts[2].x, pts[2].y)
+          } else {
+            ctx.moveTo((pts[2].x + pts[0].x) / 2, (pts[2].y + pts[0].y) / 2)
+            ctx.arcTo(pts[0].x, pts[0].y, pts[1].x, pts[1].y, rr)
+            ctx.arcTo(pts[1].x, pts[1].y, pts[2].x, pts[2].y, rr)
+            ctx.arcTo(pts[2].x, pts[2].y, pts[0].x, pts[0].y, rr)
+          }
+          ctx.closePath()
+          ctx.fillStrokeShape(shape)
+        }}
+      />
+    )
   }
 
   return (
@@ -1474,6 +1515,15 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
               )}
               {/* Rotation + Opacity get their own full-width rows below. */}
               <div className="flex flex-col gap-1.5 mt-1.5">
+                {/* Corner radius — rect + triangle (todo #23). Stored in
+                    pixels, independent of width/height, so corners stay
+                    perfectly circular through resizes. */}
+                {layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'triangle') && (
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>Corner radius</span>
+                    <NumberInput min={0} max={999} value={layer.cornerRadius ?? 0} onChange={cornerRadius => update({ cornerRadius })} className="w-full" />
+                  </label>
+                )}
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Rotation °</span>
                   <NumberInput value={Math.round(layer.rotation)} onChange={rotation => update({ rotation })} className="w-full" />
@@ -1690,14 +1740,8 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 onChange={strokeWidth => update({ strokeWidth })}
                 className="w-full" />
             </label>
-            {layer.shapeType === 'rect' && (
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Corner radius</span>
-                <NumberInput min={0} max={999} value={layer.cornerRadius ?? 0}
-                  onChange={cornerRadius => update({ cornerRadius })}
-                  className="w-full" />
-              </label>
-            )}
+            {/* Corner radius moved to the Transform section (under size/
+                position) — it applies to rect AND triangle now. */}
           </div>
         </section>
       )}
