@@ -65,6 +65,15 @@ export interface VideoRowProps {
   indented?: boolean
   /** Tiny icon-only row for the collapsed sidebar — full info moves to the tooltip. */
   compact?: boolean
+  /** Player session panel: this file's cloud download is in progress —
+   *  the hydration icon becomes a spinner and the tooltip says so. */
+  hydrating?: boolean
+  /** Player session panel: the download just finished — pulsing-ring
+   *  callout (same signifier as the Settings save button) until opened. */
+  justHydrated?: boolean
+  /** Clicking an offloaded row starts its download (player session panel) —
+   *  switches the offloaded tooltip line to an actionable hint. */
+  clickDownloads?: boolean
   onClick?: () => void
 }
 
@@ -77,7 +86,8 @@ export interface VideoRowProps {
  */
 export function VideoRow({
   path, displayName, entry, isLocal, cloudSyncActive,
-  active = false, indented = false, compact = false, onClick,
+  active = false, indented = false, compact = false,
+  hydrating = false, justHydrated = false, clickDownloads = false, onClick,
 }: VideoRowProps) {
   const name = displayName ?? (path.split(/[\\/]/).pop() ?? path)
 
@@ -111,6 +121,7 @@ export function VideoRow({
   const metaLine = metaParts.join('  ·  ') || (isLocal === false ? 'Offloaded' : '…')
 
   const cloudIcon = !cloudSyncActive ? null
+    : hydrating ? <Loader2 size={12} className="shrink-0 text-cyan-300 animate-spin" />
     : isLocal === undefined ? <Loader2 size={12} className="shrink-0 text-gray-400 animate-spin" />
     : isLocal ? <CloudCheck size={12} className="shrink-0 text-gray-400" />
     : <Cloud size={12} className="shrink-0 text-gray-500" />
@@ -121,7 +132,7 @@ export function VideoRow({
       onClick={onClick}
       className={`group/vrow flex items-center gap-2.5 ${indent} py-1.5 rounded-lg transition-colors ${onClick ? 'cursor-pointer' : ''} ${
         active ? 'bg-purple-600/20' : 'hover:bg-white/5'
-      }`}
+      }${justHydrated ? ' save-attention' : ''}`}
     >
       <VideoThumb path={path} height={compact ? 22 : 34} checker={isClipKind} rounded="rounded" />
       {!compact && (
@@ -147,9 +158,11 @@ export function VideoRow({
   // codec/fps, size, cloud status) — the inline line truncates in a narrow
   // panel, so hover must be the complete surface, matching what the streams
   // page files grid shows for the same file.
-  const cloudText = !cloudSyncActive || isLocal === undefined
-    ? null
-    : isLocal ? 'Available on this device' : 'Offloaded to the cloud'
+  const cloudText = !cloudSyncActive ? null
+    : hydrating ? 'Downloading from cloud…'
+    : isLocal === undefined ? null
+    : isLocal ? (justHydrated ? 'Downloaded — click to open' : 'Available on this device')
+    : clickDownloads ? 'Click to download this file' : 'Offloaded to the cloud'
   const tipMeta = [
     category ? (CAT_LABEL[category] ?? category) : null,
     metaLine,

@@ -754,6 +754,8 @@ function SiblingVideoItem({
   cloudSyncActive,
   indented = false,
   compact = false,
+  hydrating = false,
+  justHydrated = false,
 }: {
   item: SiblingFile
   isActive: boolean
@@ -764,6 +766,10 @@ function SiblingVideoItem({
    *  info shown in a hover tooltip instead. */
   compact?: boolean
   indented?: boolean
+  /** Cloud download in progress for this file (row spinner). */
+  hydrating?: boolean
+  /** Download finished, waiting to be opened (pulsing-ring callout). */
+  justHydrated?: boolean
 }) {
   // Shared with the streams video-counter tooltip — VideoRow owns the
   // thumbnail (cached keystone), the encoding/timecode/size line, and the
@@ -778,6 +784,9 @@ function SiblingVideoItem({
       active={isActive}
       indented={indented}
       compact={compact}
+      hydrating={hydrating}
+      justHydrated={justHydrated}
+      clickDownloads
       onClick={onClick}
     />
   )
@@ -1461,6 +1470,36 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     })
     return () => unsub()
   }, [guardedLoadFile])
+  // Session-panel hydration UX: clicking an offloaded row starts its
+  // download (row spinner via `hydrating`); when it lands, the row gets the
+  // pulsing ready-ring and WAITS to be clicked — never auto-switching the
+  // player mid-review. Ring clears when the file is opened.
+  const [hydratingSessionPaths, setHydratingSessionPaths] = useState<Set<string>>(new Set())
+  const hydratingSessionRef = useRef(hydratingSessionPaths)
+  useEffect(() => { hydratingSessionRef.current = hydratingSessionPaths }, [hydratingSessionPaths])
+  const [readySessionPaths, setReadySessionPaths] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    return window.api.onCloudDownloadDone((filePath: string) => {
+      if (!hydratingSessionRef.current.has(filePath)) return
+      setHydratingSessionPaths(prev => { const next = new Set(prev); next.delete(filePath); return next })
+      setReadySessionPaths(prev => new Set(prev).add(filePath))
+      setSiblingFiles(prev => prev.map(f => f.path === filePath ? { ...f, isLocal: true } : f))
+    })
+  }, [])
+  const handleSessionVideoClick = useCallback((item: SiblingFile, load: (p: string) => void) => {
+    if (cloudSyncActive && !item.isLocal) {
+      if (!hydratingSessionRef.current.has(item.path)) {
+        setHydratingSessionPaths(prev => new Set(prev).add(item.path))
+        void window.api.startCloudDownload(item.path)
+      }
+      return
+    }
+    setReadySessionPaths(prev => {
+      if (!prev.has(item.path)) return prev
+      const next = new Set(prev); next.delete(item.path); return next
+    })
+    load(item.path)
+  }, [cloudSyncActive])
   // Open a recent, guarding against a file deleted since the last prune. If the
   // target is gone, drop the entry (view + store) and show a brief notice
   // instead of pushing an ffprobe error into the player.
@@ -5917,7 +5956,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                       item={item}
                                       isActive={item.path === state.filePath}
                                       cloudSyncActive={cloudSyncActive}
-                                      onClick={() => guardedLoadFile(item.path)}
+                                      hydrating={hydratingSessionPaths.has(item.path)}
+                                      justHydrated={readySessionPaths.has(item.path)}
+                                      onClick={() => handleSessionVideoClick(item, p => guardedLoadFile(p))}
                                     />
                                     {(draftsBySource[item.name] ?? []).map(draft => (
                                       <DraftSessionItem
@@ -5939,7 +5980,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                         isActive={child.path === state.filePath}
                                         cloudSyncActive={cloudSyncActive}
                                         indented
-                                        onClick={() => loadFile(child.path)}
+                                        hydrating={hydratingSessionPaths.has(child.path)}
+                                        justHydrated={readySessionPaths.has(child.path)}
+                                        onClick={() => handleSessionVideoClick(child, p => loadFile(p))}
                                       />
                                     ))}
                                   </React.Fragment>
