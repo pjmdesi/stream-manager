@@ -3982,6 +3982,7 @@ export function StreamsPage({
                 label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
               })}
               onSendFilesToCombine={(paths) => onSendToCombine(paths)}
+              allowFileImport={streamMode === 'folder-per-stream'}
               filesGridRef={filesGridRef}
               onFilesDeleted={handleFilesDeleted}
               onOpenFolder={() => handleOpenFolder(renderedFolder)}
@@ -5648,7 +5649,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
+  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, allowFileImport, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -5727,6 +5728,8 @@ function SidebarDetail({
   onSendFileToConverter: (path: string) => void
   onSendFilesToConverter: (paths: string[]) => void
   onSendFilesToCombine: (paths: string[]) => void
+  /** Folder-per-stream only — enables the files grid's import tile/drop. */
+  allowFileImport: boolean
   filesGridRef: React.Ref<FilesGridHandle>
   /** Grid files were trashed — parent drops them from folder state in place. */
   onFilesDeleted: (paths: string[]) => void
@@ -7159,12 +7162,15 @@ function SidebarDetail({
         <div className="flex flex-col gap-8 w-full max-w-[80rem] mx-auto pt-4">
             {/* — Files — every file in the folder (videos + thumbnail images).
                 Leads the sidebar so past streams open straight onto their
-                recordings; absent only for an empty folder. */}
-            {(folder.videos.length > 0 || folder.thumbnails.length > 0) && (
+                recordings. In folder-per-stream mode it renders even for an
+                EMPTY folder (metadata-only YouTube imports) — the add-files
+                tile is the empty state. */}
+            {(folder.videos.length > 0 || folder.thumbnails.length > 0 || allowFileImport) && (
               <div className="flex flex-col gap-3">
                 <MetaRow label="Files">
                   <StreamFilesGrid
                     folder={folder}
+                    allowImport={allowFileImport}
                     thumbsKey={thumbsKey}
                     preferredThumbnail={meta?.preferredThumbnail}
                     cloudSyncActive={cloudSyncActive}

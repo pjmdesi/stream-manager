@@ -64,6 +64,7 @@ declare global {
       readFile(filePath: string): Promise<string>
       saveScreenshot(destPath: string, base64Data: string): Promise<string>
       trashFile(filePath: string): Promise<void>
+      importFilesIntoFolder(paths: string[], destDir: string, mode: 'move' | 'copy'): Promise<{ imported: string[]; failed: { path: string; reason: string }[]; skipped: number }>
       getFileSizes(paths: string[]): Promise<(number | null)[]>
       getNativeThumbnail(filePath: string, size?: number): Promise<string | null>
       checkLocalFiles(filePaths: string[]): Promise<boolean[]>

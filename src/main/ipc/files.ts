@@ -125,6 +125,55 @@ export interface FileInfo {
 }
 
 export function registerFilesIPC(): void {
+  // Move (default) or copy files into a stream folder — the files grid's
+  // drag-drop / add-files tile. Honest per-file failures, no silent
+  // overwrites and no auto-renaming (a name collision usually means the
+  // user is importing a duplicate). The streams watcher sees the new files
+  // like any external write and refreshes the grid — deliberately NOT a
+  // self-write, that event IS the refresh path.
+  ipcMain.handle('files:importIntoFolder', async (_event, paths: string[], destDir: string, mode: 'move' | 'copy') => {
+    const imported: string[] = []
+    const failed: { path: string; reason: string }[] = []
+    let skipped = 0
+    if (!Array.isArray(paths) || paths.length === 0) return { imported, failed, skipped }
+    if (!destDir || !fs.existsSync(destDir)) {
+      return { imported, failed: paths.map(p => ({ path: p, reason: 'Stream folder not found' })), skipped }
+    }
+    // One batched hydration check up front (single PowerShell spawn):
+    // copying a cloud placeholder would silently recall the whole file,
+    // so byte-copy paths require the source to be local.
+    const localFlags = await checkLocalFiles(paths)
+    for (let i = 0; i < paths.length; i++) {
+      const src = paths[i]
+      try {
+        const st = fs.existsSync(src) ? fs.statSync(src) : null
+        if (!st) { failed.push({ path: src, reason: 'Source file not found' }); continue }
+        if (st.isDirectory()) { failed.push({ path: src, reason: 'Folders can\'t be imported — pick the files inside it' }); continue }
+        if (path.resolve(path.dirname(src)) === path.resolve(destDir)) { skipped++; continue }
+        const dest = path.join(destDir, path.basename(src))
+        if (fs.existsSync(dest)) { failed.push({ path: src, reason: 'A file with this name already exists in the stream folder' }); continue }
+        if (mode === 'copy') {
+          if (!localFlags[i]) { failed.push({ path: src, reason: 'This file is in the cloud — download it first' }); continue }
+          await fs.promises.copyFile(src, dest, fs.constants.COPYFILE_EXCL)
+        } else {
+          try {
+            await fs.promises.rename(src, dest)
+          } catch (err: unknown) {
+            if ((err as NodeJS.ErrnoException)?.code !== 'EXDEV') throw err
+            // Cross-volume move = copy + delete, which needs the bytes.
+            if (!localFlags[i]) { failed.push({ path: src, reason: 'This file is in the cloud — download it first (moving across drives copies the data)' }); continue }
+            await fs.promises.copyFile(src, dest, fs.constants.COPYFILE_EXCL)
+            await fs.promises.unlink(src)
+          }
+        }
+        imported.push(dest)
+      } catch (err: unknown) {
+        failed.push({ path: src, reason: (err as Error)?.message ?? String(err) })
+      }
+    }
+    return { imported, failed, skipped }
+  })
+
   ipcMain.handle('files:openFileDialog', async (event, options: Electron.OpenDialogOptions) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const normalizedOptions = options?.defaultPath

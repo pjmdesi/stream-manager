@@ -99,6 +99,9 @@ contextBridge.exposeInMainWorld('api', {
   trashFile: (filePath: string) =>
     ipcRenderer.invoke('files:trashFile', filePath),
 
+  importFilesIntoFolder: (paths: string[], destDir: string, mode: 'move' | 'copy'): Promise<{ imported: string[]; failed: { path: string; reason: string }[]; skipped: number }> =>
+    ipcRenderer.invoke('files:importIntoFolder', paths, destDir, mode),
+
   getFileSizes: (paths: string[]) =>
     ipcRenderer.invoke('files:getFileSizes', paths),
 

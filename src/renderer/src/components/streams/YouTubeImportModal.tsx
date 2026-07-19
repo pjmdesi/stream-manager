@@ -194,6 +194,13 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
               </div>
             ))}
           </div>
+          {okCount > 0 && (
+            <p className="text-[11px] text-gray-400 max-w-md">
+              A folder was created for each imported stream. To add your recording files,
+              open a stream item and drag them onto its Files grid (or click the add-files
+              tile) — they'll be moved into the stream's folder.
+            </p>
+          )}
           <p className="text-[11px] text-gray-400">Open this again to import more.</p>
         </div>
       ) : (

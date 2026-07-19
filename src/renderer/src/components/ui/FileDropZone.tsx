@@ -2,11 +2,15 @@ import React, { useState, useRef } from 'react'
 import { Upload, Film } from 'lucide-react'
 
 interface FileDropZoneProps {
-  onFiles: (paths: string[]) => void
+  /** `opts.ctrlKey` reflects the modifier held at DROP time (false for
+   *  click-to-browse) — the files grid uses it for move-vs-copy. */
+  onFiles: (paths: string[], opts?: { ctrlKey: boolean }) => void
   accept?: string[]
   className?: string
   children?: React.ReactNode
   label?: string
+  /** Overlay text for the children variant (defaults to "Drop files here"). */
+  overlayLabel?: string
   /** Slim single-row variant (icon + short label, no supported-types line) for
    *  embedding inside a list as an inline "add more" affordance. */
   compact?: boolean
@@ -18,6 +22,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   className = '',
   children,
   label = 'Drop files here or click to browse',
+  overlayLabel = 'Drop files here',
   compact = false
 }) => {
   const [isDragging, setIsDragging] = useState(false)
@@ -44,7 +49,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     }
 
     if (paths.length > 0) {
-      onFiles(paths)
+      onFiles(paths, { ctrlKey: e.ctrlKey })
     }
   }
 
@@ -71,7 +76,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       >
         {isDragging && (
           <div className="absolute inset-0 bg-purple-600/20 border-2 border-dashed border-purple-500 rounded-xl z-10 flex items-center justify-center pointer-events-none">
-            <div className="text-purple-300 font-medium">Drop files here</div>
+            <div className="text-purple-300 font-medium text-center px-4">{overlayLabel}</div>
           </div>
         )}
         {children}

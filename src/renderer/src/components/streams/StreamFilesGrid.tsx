@@ -1,9 +1,10 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X, Combine, ChevronDown, ChevronRight } from 'lucide-react'
+import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X, Combine, ChevronDown, ChevronRight, Upload, AlertTriangle } from 'lucide-react'
 import { VideoThumb, CHECKER, releaseThumbDecodes } from '../ui/VideoThumb'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
+import { FileDropZone } from '../ui/FileDropZone'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
@@ -539,6 +540,10 @@ interface Props {
   /** Bulk send the selected videos to the combine page — lets the user pick
    *  specific files instead of sending the whole stream and pruning there. */
   onSendFilesToCombine: (paths: string[]) => void
+  /** Enable the add-files tile + whole-grid drop target (move/Ctrl-copy
+   *  into the stream folder). Folder-per-stream only — dump mode shares
+   *  one physical folder, so per-stream imports make no sense there. */
+  allowImport: boolean
   onSetThumbnail: (path: string) => void
   onDeleteThumbnail: (path: string) => void
   onEditThumbnail: (variantOrdinal?: number) => void
@@ -569,7 +574,7 @@ export interface FilesGridHandle {
 
 export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function StreamFilesGrid({
   folder, thumbsKey, preferredThumbnail, cloudSyncActive,
-  onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSendFilesToCombine, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onFilesDeleted,
+  onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSendFilesToCombine, allowImport, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onFilesDeleted,
   highlightFile,
 }, ref) {
   const videoMap = folder.meta?.videoMap ?? {}
@@ -939,7 +944,36 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     if (deleted.length) onFilesDeleted(deleted)
   }
 
-  if (!hasVideos && !hasImages) return null
+  // ── Import files (drag-drop / add-files tile) ──────────────────────────
+  // MOVE by default (matching OS drag conventions), Ctrl at drop time to
+  // copy; click-to-browse moves too. Failures render inline below the
+  // grid; successes surface via the watcher's normal refresh.
+  const [importBusy, setImportBusy] = useState(false)
+  const [importErrors, setImportErrors] = useState<{ path: string; reason: string }[]>([])
+  const handleImportFiles = async (paths: string[], opts?: { ctrlKey: boolean }) => {
+    if (!allowImport || importBusy || paths.length === 0) return
+    setImportBusy(true)
+    setImportErrors([])
+    try {
+      const res = await window.api.importFilesIntoFolder(paths, folder.folderPath, opts?.ctrlKey ? 'copy' : 'move')
+      setImportErrors(res.failed)
+    } catch (err) {
+      setImportErrors([{ path: '', reason: err instanceof Error ? err.message : String(err) }])
+    } finally {
+      setImportBusy(false)
+    }
+  }
+  const openImportDialog = async () => {
+    const paths = await window.api.openFileDialog({
+      filters: [{ name: 'All Files', extensions: ['*'] }],
+      properties: ['openFile', 'multiSelections'],
+    })
+    if (paths && paths.length > 0) void handleImportFiles(paths)
+  }
+
+  // Folder-per-stream folders render even when EMPTY (metadata-only items
+  // from a YouTube import) — the add-files tile is the empty state.
+  if (!hasVideos && !hasImages && !allowImport) return null
 
   // Collapsed: a single constant-height line — chevron + file-count summary —
   // so the fields below sit in the same place on every stream item. Counts
@@ -965,7 +999,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     smThumbs > 0 ? plural(smThumbs, 'thumbnail') : null,
     otherImages > 0 ? plural(otherImages, 'image') : null,
     draftCount > 0 ? plural(draftCount, 'clip draft') : null,
-  ].filter(Boolean).join(' · ')
+  ].filter(Boolean).join(' · ') || 'No files yet'
 
   if (collapsed) {
     return (
@@ -980,7 +1014,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     )
   }
 
-  return (
+  const gridBody = (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-1.5 flex-wrap">
         <Tooltip content="Collapse the files grid" side="top">
@@ -1001,6 +1035,8 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             </Tooltip>
           </>
         )}
+        {/* Select controls are pointless on an empty (import-only) grid. */}
+        {(hasVideos || hasImages) && (
         <div className="ml-auto flex items-center gap-0.5 flex-wrap">
           {!selectMode ? (
             <Tooltip content="Select multiple files for bulk actions" side="top" shortcut="Ctrl+Shift+A">
@@ -1064,6 +1100,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             </>
           )}
         </div>
+        )}
       </div>
       <div className="grid gap-3 max-h-[318px] overflow-y-auto p-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
         {showVideo && folder.videos.map(path => {
@@ -1131,9 +1168,50 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             />
           )
         })}
+        {/* Add-files tile — a grid cell like the file cards, styled like the
+            converter/player dropzones. The tile is the visible affordance;
+            the WHOLE grid is the actual drop target (wrapper below). Fully
+            self-labeling, so no tooltip (style-guide exception). */}
+        {allowImport && !selectMode && (
+          <button
+            type="button"
+            onClick={() => void openImportDialog()}
+            disabled={importBusy}
+            className={`flex flex-col items-center justify-center gap-1 p-2 min-h-[74px] rounded-lg border-2 border-dashed text-center transition-colors ${
+              importBusy
+                ? 'border-white/10 text-gray-500 cursor-default'
+                : 'border-white/10 text-gray-400 hover:border-purple-500/50 hover:bg-purple-600/5 hover:text-gray-300'
+            }`}
+          >
+            {importBusy ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+            <span className="text-[11px]">{importBusy ? 'Adding files…' : 'Drop files or click to add'}</span>
+            <span className="text-[10px] text-gray-500">Moves into this stream's folder · hold Ctrl while dropping to copy</span>
+          </button>
+        )}
       </div>
+      {/* Per-file import failures — inline and persistent until the next
+          import attempt (no toasts). */}
+      {importErrors.length > 0 && (
+        <div className="flex flex-col gap-1 px-1">
+          {importErrors.map((f, i) => (
+            <p key={i} className="text-[11px] text-red-300 flex items-start gap-1.5">
+              <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+              <span className="min-w-0 break-all">{f.path ? `${f.path.split(/[\\/]/).pop()} — ` : ''}{f.reason}</span>
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
+
+  return allowImport ? (
+    <FileDropZone
+      onFiles={(paths, opts) => void handleImportFiles(paths, opts)}
+      overlayLabel="Drop to move into this stream's folder — hold Ctrl to copy"
+    >
+      {gridBody}
+    </FileDropZone>
+  ) : gridBody
 })
 
 function FilterToggle({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
