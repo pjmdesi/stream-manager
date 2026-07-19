@@ -4476,6 +4476,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             </div>
           </div>
 
+          {/* Template sessions used to feel like a dead end for users who
+              didn't know how templates get USED — one quiet line closes the
+              loop. (Chosen over an "assign to stream" flow: thumbnails are
+              authored per-stream, where merge fields resolve and the
+              stream's assets are available.) */}
+          {currentTemplateId && !currentStream && (
+            <div className="px-4 py-1.5 border-b border-white/5 text-[11px] text-gray-400 shrink-0">
+              You're editing a template. To use it on a stream: open the stream item's thumbnail
+              from the Streams page and pick this template as its starting point.
+            </div>
+          )}
+
           {/* Missing-font warning — while any text layer references a font
               that isn't installed, thumbnail image writes are paused (layer
               data keeps saving). Resolves itself the moment every text
