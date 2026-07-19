@@ -3854,7 +3854,17 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const pngDataUrl = getCanvasDataUrl()
     const saved = await window.api.thumbnailSaveTemplate(config.streamsDir, template, pngDataUrl || undefined)
     setTemplates(prev => [saved, ...prev.filter(t => t.id !== saved.id)])
-  }, [saveTemplateName, layers, config.streamsDir, getCanvasDataUrl, waitForStageImages])
+    // An UNBOUND scratch session (New blank) becomes a session editing the
+    // template it just saved — before, it stayed an "unsaved canvas" dead
+    // end that had to be closed and reopened from the overview. Sessions
+    // bound to a STREAM deliberately stay bound: their autosave targets the
+    // stream, and save-as-template there is a snapshot, not a context
+    // switch (same reasoning that killed todo #21's assign-to-stream flow).
+    if (!currentStream) {
+      setCurrentTemplateId(saved.id)
+      setIsDirty(false)
+    }
+  }, [saveTemplateName, layers, config.streamsDir, getCanvasDataUrl, waitForStageImages, currentStream])
 
   const deleteTemplate = useCallback(async (id: string) => {
     if (!config.streamsDir) return
