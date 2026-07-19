@@ -729,6 +729,7 @@ export interface ThumbnailLayer {
   fontSize?: number
   fontStyle?: string    // 'normal' | 'bold' | 'italic' | 'bold italic'
   align?: 'left' | 'center' | 'right'
+  lineHeight?: number   // multiplier, 1 = normal (Konva Text lineHeight)
   // Shape
   shapeType?: 'rect' | 'ellipse' | 'triangle'
   cornerRadius?: number

@@ -11,6 +11,7 @@ import { isAnyModalOpen } from '../../lib/shortcuts'
 import { useStore } from '../../hooks/useStore'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry } from '../../types'
 import { ThumbImage } from '../streams/ThumbImage'
+import { RecentRow } from '../ui/RecentRow'
 import { CloudDownloadModal } from '../streams/legacyStreamsShared'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
@@ -3877,24 +3878,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                 {displayRecents.map(r => {
                   const thumb = r.folder ? resolveFolderThumb(r.folder) : null
                   return (
-                  <div
-                    key={r.filePath}
-                    className="group flex items-center gap-3 pr-1 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 transition-colors overflow-hidden"
-                  >
-                    <button
-                      onClick={() => openRecent(r)}
-                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                    >
-                      <span className="relative w-16 h-10 flex items-center justify-center bg-navy-900 border-r border-white/5 shrink-0 overflow-hidden">
-                        {thumb
-                          ? <ThumbImage path={thumb.path} thumbsKey={recentsThumbsKey} isLocal={thumb.isLocal} className="w-full h-full object-cover" iconSize={14} />
-                          : <Film size={16} className="text-gray-500" />}
-                      </span>
-                      <div className="flex-1 min-w-0 py-2">
-                        <p className="text-xs text-gray-300 truncate">{r.streamTitle ?? r.fileName}</p>
-                        {/* Session items show a video count; a single video
-                            opened from outside the streams root shows its path
-                            so it's distinguishable from the stream sessions. */}
+                    <RecentRow
+                      key={r.filePath}
+                      thumbSrc={thumb ? `file://${thumb.path.replace(/\\/g, '/')}?t=${recentsThumbsKey}` : null}
+                      thumbIsLocal={thumb?.isLocal}
+                      thumbFallback={<Film size={16} className="text-gray-500" />}
+                      title={r.streamTitle ?? r.fileName}
+                      subtitle={
+                        /* Session items show a video count; a single video
+                           opened from outside the streams root shows its path
+                           so it's distinguishable from the stream sessions. */
                         <p className="text-[10px] text-gray-400 flex items-center gap-1 min-w-0">
                           <span className="truncate min-w-0">
                             {r.folder
@@ -3907,24 +3900,15 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                             </Tooltip>
                           )}
                         </p>
-                      </div>
-                    </button>
-                    {/* Stream items show their date here; videos opened from
-                        outside the streams root get an italic "external" tag in
-                        the same slot so they read as distinct from sessions. */}
-                    {r.folderPath
-                      ? (r.streamDate && <span className="text-[10px] text-gray-400 shrink-0 py-2">{r.streamDate}</span>)
-                      : <span className="text-[10px] text-gray-400 shrink-0 py-2 italic">external</span>}
-                    <Tooltip content="Remove from recents" side="left">
-                      <button
-                        onClick={() => removeRecent(r)}
-                        className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                        aria-label="Remove from recents"
-                      >
-                        <X size={13} />
-                      </button>
-                    </Tooltip>
-                  </div>
+                      }
+                      /* Stream items show their date here; externals get an
+                         italic tag so they read as distinct from sessions. */
+                      trailing={r.folderPath
+                        ? (r.streamDate && <span className="text-[10px] text-gray-400 shrink-0 py-2">{r.streamDate}</span>)
+                        : <span className="text-[10px] text-gray-400 shrink-0 py-2 italic">external</span>}
+                      onOpen={() => openRecent(r)}
+                      onRemove={() => removeRecent(r)}
+                    />
                   )
                 })}
               </div>

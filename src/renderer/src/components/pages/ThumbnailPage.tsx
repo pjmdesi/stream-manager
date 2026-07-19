@@ -15,10 +15,11 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   FlipHorizontal2, FlipVertical2,
-  ChevronDown, ChevronRight, Loader2,
+  ChevronDown, ChevronRight, Loader2, Eraser,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
+import { RecentRow, SmoothThumb } from '../ui/RecentRow'
 import { NumberInput } from '../ui/Input'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
@@ -323,26 +324,43 @@ function shadowPropsFor(shadow: ThumbnailShadow | null) {
   }
 }
 
-/** #rgb / #rrggbb → {r,g,b}. Returns black on parse failure so the
- *  outline filter still produces visible output rather than silently
- *  punching transparent pixels. */
-function parseHexColor(hex: string): { r: number; g: number; b: number } {
+/** Split #rrggbb / #rrggbbaa into the 6-digit part (all the native color
+ *  input can hold) and a 0–1 alpha. Malformed input reads as the fallback
+ *  at full alpha. */
+function splitColorAlpha(v: string | undefined, fallback: string): { rgb: string; alpha: number } {
+  const m = (v ?? '').match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/i)
+  if (!m) return { rgb: fallback, alpha: 1 }
+  return { rgb: `#${m[1]}`, alpha: m[2] ? parseInt(m[2], 16) / 255 : 1 }
+}
+/** Join back to #rrggbb (full alpha) or #rrggbbaa — canvas, Konva, and the
+ *  outline filter all accept both forms. */
+function joinColorAlpha(rgb: string, alpha: number): string {
+  const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255)
+  return a >= 255 ? rgb : `${rgb}${a.toString(16).padStart(2, '0')}`
+}
+
+/** #rgb / #rrggbb / #rrggbbaa → {r,g,b,a}. Returns opaque black on parse
+ *  failure so the outline filter still produces visible output rather than
+ *  silently punching transparent pixels. */
+function parseHexColor(hex: string): { r: number; g: number; b: number; a: number } {
   const clean = (hex || '').replace('#', '')
   if (clean.length === 3) {
     return {
       r: parseInt(clean[0] + clean[0], 16) || 0,
       g: parseInt(clean[1] + clean[1], 16) || 0,
       b: parseInt(clean[2] + clean[2], 16) || 0,
+      a: 255,
     }
   }
-  if (clean.length === 6) {
+  if (clean.length === 6 || clean.length === 8) {
     return {
       r: parseInt(clean.slice(0, 2), 16) || 0,
       g: parseInt(clean.slice(2, 4), 16) || 0,
       b: parseInt(clean.slice(4, 6), 16) || 0,
+      a: clean.length === 8 ? (parseInt(clean.slice(6, 8), 16) || 0) : 255,
     }
   }
-  return { r: 0, g: 0, b: 0 }
+  return { r: 0, g: 0, b: 0, a: 255 }
 }
 
 /** 1D squared Euclidean distance transform — writes `out[q] = min over
@@ -438,7 +456,7 @@ function edt2d(src: Uint8Array, w: number, h: number): Float64Array {
  *  unnatural on rounded silhouettes. EDT is the right middle ground:
  *  exact Euclidean output, linear time. */
 function makeOutlineFilter(radius: number, color: string): (data: ImageData) => void {
-  const { r: cr, g: cg, b: cb } = parseHexColor(color)
+  const { r: cr, g: cg, b: cb, a: ca } = parseHexColor(color)
   const r2 = radius * radius
   return function (imageData: ImageData) {
     if (radius <= 0) return
@@ -458,7 +476,7 @@ function makeOutlineFilter(radius: number, color: string): (data: ImageData) => 
       data[p] = cr
       data[p + 1] = cg
       data[p + 2] = cb
-      data[p + 3] = 255
+      data[p + 3] = ca
     }
   }
 }
@@ -759,6 +777,7 @@ function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, on
     strokeWidth: effectiveStrokeWidth,
     fillAfterStrokeEnabled: true,
     align: (layer.align ?? 'left') as 'left' | 'center' | 'right',
+    lineHeight: layer.lineHeight ?? 1,
     // Flip in place — text has no stored height, so fall back to the
     // measured height from the ref. (offsetY for unflipped text is 0,
     // so the fallback only matters in the flipped branch.) Shadow
@@ -977,19 +996,6 @@ function useCommitOnRelease(idleMs = 400) {
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
-function RecentThumb({ folderPath, date, updatedAt }: { folderPath: string; date: string; updatedAt: number }) {
-  const [err, setErr] = useState(false)
-  const src = `file://${folderPath}/${date}_sm-thumbnail.png?t=${updatedAt}`
-  useEffect(() => { setErr(false) }, [src])
-  return (
-    <div className="w-20 shrink-0 self-stretch bg-navy-900 rounded-l-lg overflow-hidden flex items-center justify-center">
-      {!err
-        ? <img src={src} className="w-full h-full object-cover" onError={() => setErr(true)} />
-        : <ImageIcon size={12} className="text-gray-400" />
-      }
-    </div>
-  )
-}
 
 function TemplatePreview({ streamsDir, templateId, name, cacheKey }: { streamsDir: string; templateId: string; name: string; cacheKey?: number }) {
   const [imgError, setImgError] = useState(false)
@@ -999,11 +1005,10 @@ function TemplatePreview({ streamsDir, templateId, name, cacheKey }: { streamsDi
   return (
     <div className="aspect-video bg-navy-900 flex items-center justify-center overflow-hidden">
       {!imgError ? (
-        <img
+        <SmoothThumb
           key={src}
           src={src}
-          alt={name}
-          className="w-full h-full object-cover"
+          className="w-full h-full"
           onError={() => setImgError(true)}
         />
       ) : (
@@ -1016,7 +1021,7 @@ function TemplatePreview({ streamsDir, templateId, name, cacheKey }: { streamsDi
 interface OverviewProps {
   streamsDir: string
   templates: ThumbnailTemplate[]
-  recents: ThumbnailRecentEntry[]
+  recents: Array<ThumbnailRecentEntry & { variantCount?: number }>
   onNewBlank: () => void
   onOpenTemplate: (t: ThumbnailTemplate) => void
   onOpenRecent: (entry: ThumbnailRecentEntry) => void
@@ -1097,35 +1102,81 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
           </div>
           <div className="flex flex-col gap-1.5">
             {recents.map((entry, i) => (
-              <div
+              <RecentRow
                 key={i}
-                className="group flex items-center gap-3 pr-1 rounded-lg bg-navy-800 border border-white/5 hover:border-white/15 hover:bg-white/5 transition-colors overflow-hidden"
-              >
-                <button
-                  onClick={() => onOpenRecent(entry)}
-                  className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                >
-                  <RecentThumb folderPath={entry.folderPath} date={entry.date} updatedAt={entry.updatedAt} />
-                  <div className="flex-1 min-w-0 py-2">
-                    <p className="text-xs text-gray-300 truncate">{entry.title ?? entry.date}</p>
-                    <p className="text-[10px] text-gray-400 truncate">{entry.folderPath}</p>
-                  </div>
-                </button>
-                <span className="text-[10px] text-gray-400 shrink-0 py-2">{entry.date}</span>
-                <Tooltip content="Remove from recents" triggerClassName="shrink-0">
-                <button
-                  onClick={() => onRemoveRecent(entry)}
-                  className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
-                  aria-label="Remove from recents"
-                >
-                  <X size={13} />
-                </button>
-                </Tooltip>
-              </div>
+                thumbSrc={`file://${entry.folderPath.replace(/\\/g, '/')}/${entry.date}_sm-thumbnail.png?t=${entry.updatedAt}`}
+                thumbFallback={<ImageIcon size={12} className="text-gray-400" />}
+                title={entry.title ?? entry.date}
+                subtitle={
+                  <p className="text-[10px] text-gray-400 truncate">
+                    {`${entry.variantCount ?? 1} thumbnail${(entry.variantCount ?? 1) === 1 ? '' : 's'}`}
+                  </p>
+                }
+                trailing={<span className="text-[10px] text-gray-400 shrink-0 py-2">{entry.date}</span>}
+                onOpen={() => onOpenRecent(entry)}
+                onRemove={() => onRemoveRecent(entry)}
+              />
             ))}
           </div>
         </section>
       )}
+    </div>
+  )
+}
+
+// ── Color + alpha field ───────────────────────────────────────────────────────
+
+/** Color swatch + optional hex text + opacity % + clear-to-transparent.
+ *  Values are #rrggbb or #rrggbbaa strings — canvas, Konva, and the outline
+ *  filter all accept both. The native color input is RGB-only, so alpha
+ *  rides in the % field beside it; Clear sets alpha to 0. */
+function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
+  value: string | undefined
+  fallback: string
+  onChange: (v: string) => void
+  /** Show the free-text hex input (accepts #rrggbb / #rrggbbaa). */
+  showHex?: boolean
+}) {
+  const { rgb, alpha } = splitColorAlpha(value, fallback)
+  return (
+    <div className="flex items-center gap-1.5 min-w-0">
+      <input
+        type="color"
+        value={rgb}
+        onChange={e => onChange(joinColorAlpha(e.target.value, alpha))}
+        // Square swatch, boxed like the neighboring inputs; the webkit
+        // pseudo-element rules make the color chip fill the box with its
+        // own rounding instead of the tiny inset native chip.
+        className="h-7 w-7 shrink-0 rounded-lg border border-white/10 bg-navy-900 p-0.5 cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-md [&::-webkit-color-swatch]:border-none"
+        // Fade the swatch with the alpha so transparency is visible at a glance.
+        style={{ opacity: 0.35 + 0.65 * alpha }}
+      />
+      {showHex && (
+        <input
+          type="text"
+          value={value ?? fallback}
+          onChange={e => onChange(e.target.value)}
+          className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+        />
+      )}
+      <Tooltip content="Opacity %">
+        <NumberInput
+          min={0}
+          max={100}
+          value={Math.round(alpha * 100)}
+          onChange={p => onChange(joinColorAlpha(rgb, p / 100))}
+          className="w-14 shrink-0"
+        />
+      </Tooltip>
+      <Tooltip content="Clear — fully transparent">
+        <button
+          type="button"
+          onClick={() => onChange(joinColorAlpha(rgb, 0))}
+          className="p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors shrink-0"
+        >
+          <Eraser size={12} />
+        </button>
+      </Tooltip>
     </div>
   )
 }
@@ -1424,7 +1475,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
               {/* Rotation + Opacity get their own full-width rows below. */}
               <div className="flex flex-col gap-1.5 mt-1.5">
                 <label className="flex flex-col gap-0.5">
-                  <span className={labelCls}>Rotation</span>
+                  <span className={labelCls}>Rotation °</span>
                   <NumberInput value={Math.round(layer.rotation)} onChange={rotation => update({ rotation })} className="w-full" />
                 </label>
                 <label className="flex flex-col gap-0.5">
@@ -1502,15 +1553,6 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
               })()}
               <div className="grid grid-cols-2 gap-1.5">
                 <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-400">Size</span>
-                  <NumberInput
-                    min={8}
-                    max={500}
-                    value={layer.fontSize ?? 48}
-                    onChange={fontSize => update({ fontSize })}
-                  />
-                </label>
-                <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] text-gray-400">Style</span>
                   {(() => {
                     const variants = fontVariantMap[layer.fontFamily ?? 'Arial'] ?? []
@@ -1543,8 +1585,28 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                     )
                   })()}
                 </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-gray-400">Size</span>
+                  <NumberInput
+                    min={8}
+                    max={500}
+                    value={layer.fontSize ?? 48}
+                    onChange={fontSize => update({ fontSize })}
+                  />
+                </label>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-gray-400">Line height %</span>
+                  {/* Stored as a multiplier (Konva-native); the UI speaks
+                      percent to match the other % fields. */}
+                  <NumberInput
+                    min={50}
+                    max={300}
+                    value={Math.round((layer.lineHeight ?? 1) * 100)}
+                    onChange={p => update({ lineHeight: p / 100 })}
+                  />
+                </label>
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] text-gray-400">Align</span>
                   <select
@@ -1562,43 +1624,38 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           </section>
           <section>
             <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Color</p>
-            <div className="grid grid-cols-2 gap-1.5">
+            {/* Stacked full-width rows (was a 2-col grid) — the alpha% +
+                clear controls need the horizontal room. */}
+            <div className="flex flex-col gap-1.5">
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">Fill</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="color"
-                    value={layer.fill ?? '#ffffff'}
-                    onChange={e => update({ fill: e.target.value })}
-                    className="h-7 w-10 shrink-0 bg-transparent cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={layer.fill ?? '#ffffff'}
-                    onChange={e => update({ fill: e.target.value })}
-                    className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
-                  />
-                </div>
+                <ColorAlphaField
+                  value={layer.fill}
+                  fallback="#ffffff"
+                  showHex
+                  onChange={fill => update({ fill })}
+                />
               </label>
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">Stroke</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="color"
-                    value={layer.stroke ?? '#000000'}
-                    onChange={e => update({ stroke: e.target.value })}
-                    className="h-7 w-10 shrink-0 bg-transparent cursor-pointer"
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    max={50}
-                    placeholder="0"
-                    value={layer.strokeWidth ?? 0}
-                    onChange={e => update({ strokeWidth: Number(e.target.value) })}
-                    className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
-                  />
-                </div>
+                <ColorAlphaField
+                  value={layer.stroke}
+                  fallback="#000000"
+                  showHex
+                  onChange={stroke => update({ stroke })}
+                />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-400">Stroke width</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={50}
+                  placeholder="0"
+                  value={layer.strokeWidth ?? 0}
+                  onChange={e => update({ strokeWidth: Number(e.target.value) })}
+                  className="w-full bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+                />
               </label>
             </div>
           </section>
@@ -1611,22 +1668,27 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           <div className="flex flex-col gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Fill</span>
-              <div className="flex items-center gap-1.5">
-                <input type="color" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
-                  className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
-                <input type="text" value={layer.fill ?? '#6366f1'} onChange={e => update({ fill: e.target.value })}
-                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200" />
-              </div>
+              <ColorAlphaField
+                value={layer.fill}
+                fallback="#6366f1"
+                showHex
+                onChange={fill => update({ fill })}
+              />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Stroke</span>
-              <div className="flex items-center gap-1.5">
-                <input type="color" value={layer.stroke ?? '#000000'} onChange={e => update({ stroke: e.target.value })}
-                  className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
-                <NumberInput min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
-                  onChange={strokeWidth => update({ strokeWidth })}
-                  className="flex-1 min-w-0" />
-              </div>
+              <ColorAlphaField
+                value={layer.stroke}
+                fallback="#000000"
+                showHex
+                onChange={stroke => update({ stroke })}
+              />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-400">Stroke width</span>
+              <NumberInput min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
+                onChange={strokeWidth => update({ strokeWidth })}
+                className="w-full" />
             </label>
             {layer.shapeType === 'rect' && (
               <label className="flex flex-col gap-0.5">
@@ -1712,9 +1774,12 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                     <label className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-gray-400">Color</span>
                       <div className="flex items-center gap-1.5">
+                        {/* Same boxed square swatch as ColorAlphaField — alpha
+                            controls stay off here; shadows have their own
+                            Opacity % field below. */}
                         <input type="color" value={s.color}
                           onChange={e => updateAt(idx, { color: e.target.value })}
-                          className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
+                          className="h-7 w-7 shrink-0 rounded-lg border border-white/10 bg-navy-900 p-0.5 cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-md [&::-webkit-color-swatch]:border-none" />
                         <input type="text" value={s.color}
                           onChange={e => updateAt(idx, { color: e.target.value })}
                           className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200" />
@@ -1775,14 +1840,12 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           <div className="flex flex-col gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Color</span>
-              <div className="flex items-center gap-1.5">
-                <input type="color" value={layer.outlineColor ?? '#000000'}
-                  onChange={e => update({ outlineColor: e.target.value })}
-                  className="h-7 w-10 shrink-0 bg-transparent cursor-pointer" />
-                <input type="text" value={layer.outlineColor ?? '#000000'}
-                  onChange={e => update({ outlineColor: e.target.value })}
-                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200" />
-              </div>
+              <ColorAlphaField
+                value={layer.outlineColor}
+                fallback="#000000"
+                showHex
+                onChange={outlineColor => update({ outlineColor })}
+              />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Width</span>
@@ -1907,7 +1970,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   // ── Overview data ─────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<ThumbnailTemplate[]>([])
-  const [recents, setRecents] = useState<ThumbnailRecentEntry[]>([])
+  const [recents, setRecents] = useState<Array<ThumbnailRecentEntry & { variantCount?: number }>>([])
   const [overviewLoading, setOverviewLoading] = useState(false)
 
   // ── Editor state ──────────────────────────────────────────────────────────
@@ -2698,12 +2761,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       // the variant listing, not a hardcoded variant-1 filename — a stream
       // whose only thumbnail is variant 2+ was being pruned (and persisted
       // as removed) despite having a perfectly healthy canvas.
-      const existsFlags = await Promise.all(
+      // The same listing also yields the variant COUNT, shown in the row's
+      // subtitle ("2 thumbnails") — no extra round-trip.
+      const variantCounts = await Promise.all(
         rec.map(r => window.api.thumbnailListVariants(r.folderPath, r.date)
-          .then(v => v.length > 0)
-          .catch(() => false))
+          .then(v => v.length)
+          .catch(() => 0))
       )
-      const stale = rec.filter((_, i) => !existsFlags[i])
+      const stale = rec.filter((_, i) => variantCounts[i] === 0)
 
       // Persist removals so they don't reappear next time
       await Promise.allSettled(
@@ -2716,10 +2781,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       // sync with renames + renders {merge fields} properly.
       const byPath = new Map(allStreams.map(s => [s.folderPath, s]))
       const valid = rec
-        .filter((_, i) => existsFlags[i])
-        .map(r => {
+        .map((r, i) => ({ r, count: variantCounts[i] }))
+        .filter(({ count }) => count > 0)
+        .map(({ r, count }) => {
           const f = byPath.get(r.folderPath)
-          return f ? { ...r, title: renderStreamTitle(f, allStreams) } : r
+          return { ...(f ? { ...r, title: renderStreamTitle(f, allStreams) } : r), variantCount: count }
         })
 
       setRecents(valid)
