@@ -282,6 +282,10 @@ interface NumberInputProps {
    *  width (e.g. `w-full`, `w-20`). */
   className?: string
   title?: string
+  /** Small gray "(…)" note rendered inside the field's right edge (before
+   *  the spinner buttons) — e.g. the effective value when the entered one
+   *  is clamped by geometry. Display-only, non-interactive. */
+  inlineNote?: string
   'aria-label'?: string
 }
 
@@ -299,6 +303,7 @@ interface NumberInputProps {
  */
 export const NumberInput: React.FC<NumberInputProps> = ({
   value, onChange, min, max, step = 1, placeholder, disabled, className = '', title,
+  inlineNote,
   'aria-label': ariaLabel,
 }) => {
   const clamp = (n: number) => {
@@ -315,7 +320,12 @@ export const NumberInput: React.FC<NumberInputProps> = ({
   const atMax = max !== undefined && value >= max
 
   const field = (
-    <div className={`flex items-stretch ${className}`}>
+    <div className={`relative flex items-stretch ${className}`}>
+      {inlineNote && (
+        <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[10px] text-gray-500 tabular-nums pointer-events-none">
+          ({inlineNote})
+        </span>
+      )}
       <input
         type="number"
         value={Number.isFinite(value) ? value : ''}
@@ -345,7 +355,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         aria-label={ariaLabel}
         // The arbitrary selectors strip Chromium's native spin buttons
         // since we render our own vertical +/- buttons to the right.
-        className={`w-full bg-navy-900 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+        className={`w-full bg-navy-900 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 ${inlineNote ? 'pr-12' : ''} text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
       />
       <div className="flex flex-col shrink-0">
         <Tooltip content="Increment (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">

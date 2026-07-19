@@ -1517,13 +1517,29 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
               <div className="flex flex-col gap-1.5 mt-1.5">
                 {/* Corner radius — rect + triangle (todo #23). Stored in
                     pixels, independent of width/height, so corners stay
-                    perfectly circular through resizes. */}
-                {layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'triangle') && (
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>Corner radius</span>
-                    <NumberInput min={0} max={999} value={layer.cornerRadius ?? 0} onChange={cornerRadius => update({ cornerRadius })} className="w-full" />
-                  </label>
-                )}
+                    perfectly circular through resizes. When the entered
+                    radius exceeds what the shape's geometry can render
+                    (rect: half the short side; triangle: the inradius),
+                    the ACTUAL rendered radius shows in parentheses. */}
+                {layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'triangle') && (() => {
+                  const sw = layer.width ?? 200
+                  const sh = layer.height ?? 200
+                  const maxR = layer.shapeType === 'triangle' ? Math.min(sw, sh) / 4 : Math.min(sw, sh) / 2
+                  const entered = layer.cornerRadius ?? 0
+                  return (
+                    <label className="flex flex-col gap-0.5">
+                      <span className={labelCls}>Corner radius</span>
+                      <NumberInput
+                        min={0}
+                        max={999}
+                        value={entered}
+                        onChange={cornerRadius => update({ cornerRadius })}
+                        inlineNote={entered > maxR ? String(Math.round(maxR)) : undefined}
+                        className="w-full"
+                      />
+                    </label>
+                  )
+                })()}
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Rotation °</span>
                   <NumberInput value={Math.round(layer.rotation)} onChange={rotation => update({ rotation })} className="w-full" />
