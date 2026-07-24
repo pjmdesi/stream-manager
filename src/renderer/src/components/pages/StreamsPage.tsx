@@ -46,7 +46,7 @@ import { releaseThumbDecodes } from '../ui/VideoThumb'
 import { StreamFilesGrid, type FilesGridHandle } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
-import { renderStreamTitle, isPrimaryGameOf } from '../../lib/streamTitle'
+import { renderStreamTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber } from '../../lib/streamTitle'
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import type { StreamFolder, StreamMeta } from '../../types'
@@ -229,10 +229,17 @@ function hasYtTitleMergeFields(text: string): boolean {
 }
 
 
-/** Next-available episode number for (game, season) — counts streams strictly
- *  before `beforeDate` and returns count+1. Treats ytSeason `''` / undefined
- *  as '1' to match every other place that defaults the first season. The
- *  caller is expected to exclude the current folder from `allFolders`. */
+/** Next episode number for (game, season) — one past the highest ytEpisode
+ *  assigned to a stream strictly before `beforeDate` in the series. Reads
+ *  the numbers the user actually assigned rather than counting rows: a
+ *  series' numbering can include episodes streamed as secondary segments
+ *  of OTHER streams (which live in a different series' rows), so counting
+ *  rows undershoots — and manual corrections must win. Streams without a
+ *  numeric ytEpisode still raise the floor via the row count, so an
+ *  unnumbered series keeps the old count+1 behavior. Treats ytSeason `''`
+ *  / undefined as '1' to match every other place that defaults the first
+ *  season. The caller is expected to exclude the current folder from
+ *  `allFolders`. */
 function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, season: string, beforeDate?: string): number {
   if (!gameName) return 1
   const s = season || '1'
@@ -240,29 +247,14 @@ function detectEpisodeNumber(allFolders: StreamFolder[], gameName: string, seaso
   // game as a SECONDARY tag belongs to a different series — counting it
   // here handed out duplicate episode numbers (the 2-game "Alters pt 1 +
   // Beat Saber pt 10" stream registered as Alters episode 10).
-  return allFolders.filter(f =>
+  const series = allFolders.filter(f =>
     !f.isMissing &&
     !isStandalone(f.meta) &&
     isPrimaryGameOf(f, gameName) &&
     (f.meta?.ytSeason || '1') === s &&
     (!beforeDate || f.date < beforeDate)
-  ).length + 1
-}
-
-/** Total streams in (game, season). Caller passes `folders` including the
- *  current folder — counts that one too. Falls back to 1 when no match
- *  (e.g. brand-new game with no streams yet) so `{total_episodes}` never
- *  renders as 0 in a template. */
-function detectTotalEpisodes(allFolders: StreamFolder[], gameName: string, season: string): number {
-  if (!gameName) return 1
-  const s = season || '1'
-  const count = allFolders.filter(f =>
-    !f.isMissing &&
-    !isStandalone(f.meta) &&
-    isPrimaryGameOf(f, gameName) &&
-    (f.meta?.ytSeason || '1') === s
-  ).length
-  return count || 1
+  )
+  return Math.max(highestEpisodeNumber(series), series.length) + 1
 }
 
 /** Multi-line link list for the `{season_links}` description merge field.

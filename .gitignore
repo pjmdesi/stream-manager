@@ -34,3 +34,5 @@ Thumbs.db
 archive-encode.json
 ~commit_rules.md
 _monetization.md
+# Local Netlify folder
+.netlify
