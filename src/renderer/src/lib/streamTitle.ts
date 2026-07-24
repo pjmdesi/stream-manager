@@ -46,19 +46,33 @@ export function isPrimaryGameOf(folder: StreamFolder, gameName: string): boolean
   return primary.toLowerCase() === gameName.toLowerCase()
 }
 
-/** Total streams in (game, season). Counts the current folder too; falls
+/** Highest numeric ytEpisode among `folders` (0 when none is numeric).
+ *  Series numbering is driven by the numbers the user actually assigned,
+ *  not by row counts: a series' numbering can include episodes that were
+ *  streamed as secondary segments of OTHER streams (so the series has
+ *  higher numbers than it has rows), and manual corrections must win. */
+export function highestEpisodeNumber(folders: StreamFolder[]): number {
+  return folders.reduce((max, f) => {
+    const n = Number.parseInt(f.meta?.ytEpisode ?? '', 10)
+    return Number.isFinite(n) && n > max ? n : max
+  }, 0)
+}
+
+/** Total episodes in (game, season). Counts the current folder too; falls
  *  back to 1 so `{total_episodes}` never renders as 0. Primary-game
- *  membership only (see isPrimaryGameOf). */
+ *  membership only (see isPrimaryGameOf). Takes the higher of the row
+ *  count and the highest assigned episode number, so a series whose
+ *  numbering started above 1 can't render "episode 12 of 10". */
 export function detectTotalEpisodes(allFolders: StreamFolder[], gameName: string, season: string): number {
   if (!gameName) return 1
   const s = season || '1'
-  const count = allFolders.filter(f =>
+  const series = allFolders.filter(f =>
     !f.isMissing &&
     !isStandalone(f.meta) &&
     isPrimaryGameOf(f, gameName) &&
     (f.meta?.ytSeason || '1') === s
-  ).length
-  return count || 1
+  )
+  return Math.max(highestEpisodeNumber(series), series.length) || 1
 }
 
 /** Assemble the field map once the primary game + total-episode count are
