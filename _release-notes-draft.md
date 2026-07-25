@@ -50,4 +50,4 @@ Target: 2.1.0 (tentative) · draft started 2026-07-25, seeded with everything on
 
 ## Under the hood
 
-- Dev builds are unmistakable: non-master `npm run dist` builds get a `_DEV` artifact name, a yellow dev icon, and a branch chip in the sidebar; the electron-vite dev server shows an amber `dev server` chip. Release builds ship none of these markers.
+- Dev builds are unmistakable: non-master `npm run dist` builds get a `_DEV` artifact name, a yellow dev icon, and a branch chip in the sidebar; the electron-vite dev server shows an amber `server` chip. Release builds ship none of these markers.

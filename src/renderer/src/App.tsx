@@ -907,27 +907,38 @@ function AppInner() {
               </button>
             </Tooltip>
             {!sidebarCollapsed && <span className="text-[10px] text-gray-400">·</span>}
-            <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}${branchBadge ? ` — built from the ${branchBadge} branch` : ''}${isDevServer ? ' — running on the electron-vite dev server' : ''}`} side="top">
+            <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}`} side="top">
               <button
                 onClick={() => setAboutOpen(true)}
                 className={`text-[10px] transition-colors flex items-center gap-1 ${sidebarCollapsed ? 'flex-col gap-0.5' : ''} ${updateInfo ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-gray-300'}`}
               >
                 {updateInfo && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-label="update available" />}
                 v{appVersion}
-                {isDevServer && (
-                  <span className="px-1 rounded bg-amber-500/20 text-amber-300 font-semibold leading-tight whitespace-nowrap">
-                    dev server
-                  </span>
-                )}
-                {branchBadge && (
-                  <span className="px-1 rounded bg-purple-500/20 text-purple-300 font-semibold leading-tight flex items-center gap-0.5">
-                    <GitBranch size={9} className="shrink-0" />
-                    {branchBadge}
-                  </span>
-                )}
               </button>
             </Tooltip>
           </div>
+          {/* Not-the-release chips get their own row: inline with the version
+              they pushed the footer too wide to scan. Purple = git branch,
+              amber = environment (see ~style_guide.md build/env naming). */}
+          {(isDevServer || branchBadge) && (
+            <div className={`pb-1 flex justify-center items-center w-full ${sidebarCollapsed ? 'flex-col gap-0.5' : 'gap-1'}`}>
+              {isDevServer && (
+                <Tooltip content="Running unpackaged on the electron-vite dev server" side="top">
+                  <span className="px-1 rounded bg-amber-500/20 text-amber-300 text-[10px] font-semibold leading-tight">
+                    server
+                  </span>
+                </Tooltip>
+              )}
+              {branchBadge && (
+                <Tooltip content={`Built from the ${branchBadge} git branch`} side="top">
+                  <span className="px-1 rounded bg-purple-500/20 text-purple-300 text-[10px] font-semibold leading-tight flex items-center gap-0.5">
+                    <GitBranch size={9} className="shrink-0" />
+                    {branchBadge}
+                  </span>
+                </Tooltip>
+              )}
+            </div>
+          )}
         </nav>
 
         {/* Page content */}

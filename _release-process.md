@@ -9,25 +9,25 @@ How code moves from an idea to a published release. Adopted 2026-07-25, after v2
 | Role | Release branch — always shippable, matches (or is about to become) the published release | Integration branch — all feature work lands here |
 | Direction | Receives `dev` at promotion time; receives hotfixes directly | Receives `master` immediately after every hotfix (so dev is always a superset of master) |
 
-Three build types (terms + indicators pinned in `~style_guide.md`):
+Three build types (terms + indicators pinned in [`~style_guide.md`](~style_guide.md)):
 
 - **Release build** — `npm run release:*` on `master`. Clean artifact name, normal icon, **no chips**. The absence of markers is enforced by `scripts/dist.cjs` (only non-master builds get dev markers), so a marker showing up in a release exe means the build ran on the wrong branch.
 - **Dev build** — `npm run dist` on any other branch. `_DEV` artifact name, yellow dev icon, purple branch chip (from the shipped `dev-branch.txt`). This is the dogfooding/testing exe.
-- **Dev server** — `npm run dev`. Amber `dev server` chip; branch chip too when off master.
+- **Dev server** — `npm run dev`. Amber `server` chip; branch chip too when off master.
 
 ## Daily rhythm (on `dev`)
 
 1. Implement the item; verify with the numbered steps; `npm run typecheck` and `npm run lint` (two separate runs).
-2. Commit (PJ commits; Claude drafts the message).
-3. **Append a line to `_release-notes-draft.md` in the same sitting.** This is what makes release notes a ten-minute edit instead of commit archaeology.
+2. Commit (developer commits; Claude drafts the message).
+3. **Append a line to [`_release-notes-draft.md`](./_release-notes-draft.md) in the same sitting.** This is what makes release notes a ten-minute edit instead of commit archaeology.
 
 ## Themed batches
 
-`_todo.md`'s improvement list is grouped by app area. A release batch = one theme (or a small set of related themes) worked to completion. Small themed batches are easier to regression-test, produce coherent release notes ("the thumbnail editor release"), and keep the suspect list short when something breaks. Avoid letting dev drift 40+ commits past master again.
+[`_todo.md`](./_todo.md)'s improvement list is grouped by app area. A release batch = one theme (or a small set of related themes) worked to completion. Small themed batches are easier to regression-test, produce coherent release notes ("the thumbnail editor release"), and keep the suspect list short when something breaks. Avoid letting dev drift too many commits past master.
 
 ## Dogfooding
 
-Between releases, periodically `npm run dist` on dev and use the `_DEV` exe as the daily driver — **especially for real streams**, which are the highest-value test environment (they caught the Twitch status bug and the relay double-live). Packaged builds differ from the dev server (resource paths, PowerShell/cfapi, tray, single-instance), so bugs hide in that gap.
+Between releases, periodically `npm run dist` on dev and use the `_DEV` exe as the daily driver — **especially for real streams**, which are the highest-value test environment. Packaged builds differ from the dev server (resource paths, PowerShell/cfapi, tray, single-instance), so bugs hide in that gap.
 
 ## Stabilization sweep (before promoting)
 

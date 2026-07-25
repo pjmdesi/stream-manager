@@ -125,8 +125,8 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 - **Build/environment naming (rule).** Two independent axes, three terms — never say just "dev":
   - **Release build** — packaged from `master`. Ships NO markers: no `_DEV` name, normal icon, no sidebar chips. This absence is a guarantee, enforced by `scripts/dist.cjs` (only non-master builds get dev markers).
   - **Dev build** — packaged from any non-master branch (`npm run dist` on `dev`). `_DEV` artifact name, yellow dev icon, purple **branch chip** (GitBranch icon + branch name, from the shipped `dev-branch.txt` marker).
-  - **Dev server** — running unpackaged via `npm run dev` (electron-vite), any branch. Amber **`dev server` chip** (`import.meta.env.DEV`); the branch chip also shows when the checkout isn't on master.
-  - Chip colors are reserved: **purple = git branch**, **amber = environment**. The version-button tooltip and About modal spell out both.
+  - **Dev server** — running unpackaged via `npm run dev` (electron-vite), any branch. Amber **`server` chip** (`import.meta.env.DEV`, label kept short for the collapsed sidebar); the branch chip also shows when the checkout isn't on master.
+  - Chip colors are reserved: **purple = git branch**, **amber = environment**. The chips live on their own row under the version line (they made the version row too wide inline); each chip carries its own explanatory tooltip, and the About modal spells out both states.
 
 ---
 
