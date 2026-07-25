@@ -10,8 +10,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": false,
-    "types": ["electron-vite/node", "node"],
-    "baseUrl": ".",
-    "paths": {}
+    "types": ["electron-vite/node", "node"]
   }
 }
