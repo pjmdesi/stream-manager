@@ -1237,6 +1237,9 @@ interface PropsPanelProps {
   /** True once the real queryLocalFonts list loaded — gates the
    *  missing-font treatment so the seed list can't cause false alarms. */
   fontsLoaded: boolean
+  /** True when queryLocalFonts failed (or is unavailable) — the Font
+   *  section says so instead of silently offering the 5-font seed list. */
+  fontQueryFailed: boolean
   /** True when the active stream is explicitly standalone (not a series).
    *  Flags the season/episode/total_episodes merge chips as inapplicable —
    *  mirrors the YouTube-title chip editor on the Streams page. False in
@@ -1289,7 +1292,7 @@ function FilterToggle({ label, checked, onChange }: {
   )
 }
 
-function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, fontsLoaded, standalone }: PropsPanelProps) {
+function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, fontsLoaded, fontQueryFailed, standalone }: PropsPanelProps) {
   // Chip-editor wiring for the text-layer body. Hooks must run
   // unconditionally (the editor only renders for text layers), so they
   // live above the early return. Stable sets keep TemplateBodyEditor from
@@ -1615,6 +1618,12 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                       <p className="text-[10px] text-amber-400 flex items-center gap-1">
                         <AlertTriangle size={10} className="shrink-0" />
                         Not installed — pick a replacement to resume image updates
+                      </p>
+                    )}
+                    {fontQueryFailed && !fontsLoaded && (
+                      <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                        <AlertTriangle size={10} className="shrink-0" />
+                        Couldn’t read installed fonts — showing a minimal list; missing-font checks are off
                       </p>
                     )}
                   </>
@@ -2767,37 +2776,60 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [confirmCloseTemplate, setConfirmCloseTemplate] = useState(false)
 
   // ─── Load system fonts + variants ─────────────────────────────────────────
+  // Deliberately keyed to page VISIBILITY, not mount: ThumbnailPage is
+  // always mounted (App toggles isVisible), and queryLocalFonts rejects
+  // with a SecurityError in an unfocused / never-user-activated document —
+  // which is exactly what the startup background mount is. A mount-time
+  // query therefore failed every session (silently, via an empty catch)
+  // and never retried, stranding the 5-font seed list with missing-font
+  // detection off. Querying on the navigation that made the page visible
+  // succeeds; if it still fails we retry on window focus and say so in
+  // the Font section.
+  const [fontQueryFailed, setFontQueryFailed] = useState(false)
+  const fontQueryInFlight = useRef(false)
   useEffect(() => {
-    if (!(window as any).queryLocalFonts) return
-    ;(window as any).queryLocalFonts().then((fonts: any[]) => {
-      const names = Array.from(new Set(fonts.map((f: any) => f.family as string))).sort()
-      if (names.length > 0) {
-        setSystemFonts(names)
-        setFontsLoaded(true)
-      }
-
-      // Build per-family variant list
-      const variantMap: Record<string, { name: string; css: string }[]> = {}
-      for (const font of fonts) {
-        const family = font.family as string
-        const styleName = font.style as string
-        if (!variantMap[family]) variantMap[family] = []
-        const css = styleNameToCSSFont(styleName)
-        if (!variantMap[family].some(v => v.name === styleName)) {
-          variantMap[family].push({ name: styleName, css })
+    if (!isVisible || fontsLoaded) return
+    const load = (): void => {
+      if (fontQueryInFlight.current) return
+      if (!(window as any).queryLocalFonts) { setFontQueryFailed(true); return }
+      fontQueryInFlight.current = true
+      ;(window as any).queryLocalFonts().then((fonts: any[]) => {
+        const names = Array.from(new Set(fonts.map((f: any) => f.family as string))).sort()
+        if (names.length > 0) {
+          setSystemFonts(names)
+          setFontsLoaded(true)
+          setFontQueryFailed(false)
         }
-      }
-      // Sort each family's variants by weight then italic
-      for (const fam of Object.keys(variantMap)) {
-        variantMap[fam].sort((a, b) => {
-          const wa = cssToWeight(a.css), wb = cssToWeight(b.css)
-          if (wa !== wb) return wa - wb
-          return (a.css.includes('italic') ? 1 : 0) - (b.css.includes('italic') ? 1 : 0)
-        })
-      }
-      setFontVariantMap(variantMap)
-    }).catch(() => {})
-  }, [])
+
+        // Build per-family variant list
+        const variantMap: Record<string, { name: string; css: string }[]> = {}
+        for (const font of fonts) {
+          const family = font.family as string
+          const styleName = font.style as string
+          if (!variantMap[family]) variantMap[family] = []
+          const css = styleNameToCSSFont(styleName)
+          if (!variantMap[family].some(v => v.name === styleName)) {
+            variantMap[family].push({ name: styleName, css })
+          }
+        }
+        // Sort each family's variants by weight then italic
+        for (const fam of Object.keys(variantMap)) {
+          variantMap[fam].sort((a, b) => {
+            const wa = cssToWeight(a.css), wb = cssToWeight(b.css)
+            if (wa !== wb) return wa - wb
+            return (a.css.includes('italic') ? 1 : 0) - (b.css.includes('italic') ? 1 : 0)
+          })
+        }
+        setFontVariantMap(variantMap)
+      }).catch((err: unknown) => {
+        console.error('queryLocalFonts failed:', err)
+        setFontQueryFailed(true)
+      }).finally(() => { fontQueryInFlight.current = false })
+    }
+    load()
+    window.addEventListener('focus', load)
+    return () => window.removeEventListener('focus', load)
+  }, [isVisible, fontsLoaded])
 
   // ── Load overview data once per config ────────────────────────────────────
   // ThumbnailPage stays mounted across navigation (App renders it always,
@@ -5062,7 +5094,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Sliders size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
                 </div>
-                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} standalone={currentStream?.meta?.isSeries === false} />
+                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} />
               </div>
 
               {/* Divider */}
