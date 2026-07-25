@@ -99,12 +99,19 @@ export async function checkForUpdate(force = false): Promise<UpdateCheckResult> 
   }
 }
 
-/** Branch label for dev runs, so the sidebar can flag a non-master checkout.
- *  Reads .git/HEAD from the project root — packaged builds carry no .git, so
- *  this is always null there and the badge can never appear in a release. */
+/** Branch label for non-release runs, so the sidebar can flag a build that
+ *  isn't the RC. Dev runs read .git/HEAD from the project root. Packaged
+ *  builds carry no .git — but _DEV builds ship a dev-branch.txt marker
+ *  (written by scripts/dist.cjs into extraResources) naming the branch they
+ *  were built from. Release builds are packaged from master WITHOUT the
+ *  marker, so the badge remains impossible in a release. */
 function getGitBranch(): string | null {
-  if (app.isPackaged) return null
   try {
+    if (app.isPackaged) {
+      const marker = join(process.resourcesPath, 'dev-branch.txt')
+      if (!fs.existsSync(marker)) return null
+      return fs.readFileSync(marker, 'utf8').trim() || null
+    }
     const head = fs.readFileSync(join(app.getAppPath(), '.git', 'HEAD'), 'utf8').trim()
     const m = head.match(/^ref: refs\/heads\/(.+)$/)
     return m ? m[1] : null

@@ -29,7 +29,15 @@ if (isDevBuild) {
   const config = structuredClone(require('../package.json').build)
   config.artifactName = '${productName} ${version}_DEV.${ext}'
   config.win.icon = 'resources/icon-dev.png'
-  config.extraResources = [{ from: 'resources/icon-dev.png', to: 'icon.png' }]
+  // dev-branch.txt tells the packaged app which branch it was built from,
+  // so the sidebar's branch badge works in _DEV exes (release builds don't
+  // ship the marker, so the badge stays impossible there).
+  const branchMarkerPath = path.join(os.tmpdir(), 'stream-manager-dev-branch.txt')
+  fs.writeFileSync(branchMarkerPath, branch)
+  config.extraResources = [
+    { from: 'resources/icon-dev.png', to: 'icon.png' },
+    { from: branchMarkerPath, to: 'dev-branch.txt' },
+  ]
   const cfgPath = path.join(os.tmpdir(), 'stream-manager-electron-builder-dev.json')
   fs.writeFileSync(cfgPath, JSON.stringify(config, null, 2))
   cmd = `npx electron-builder --config "${cfgPath}"`
