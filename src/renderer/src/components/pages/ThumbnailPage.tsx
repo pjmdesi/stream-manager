@@ -1059,10 +1059,23 @@ function TemplatePreview({ streamsDir, templateId, name, cacheKey }: { streamsDi
   )
 }
 
+/** The stream's selected thumbnail, resolved the same way the streams list
+ *  does it (StreamsPage.resolveStreamThumb): preferredThumbnail basename →
+ *  matching path → first thumbnail. Keep the two in sync. */
+function resolveStreamItemThumb(folder: StreamFolder): string | null {
+  if (folder.thumbnails.length === 0) return null
+  const preferredName = folder.meta?.preferredThumbnail
+  if (preferredName) {
+    const match = folder.thumbnails.find(p => (p.split(/[\\/]/).pop() ?? '') === preferredName)
+    if (match) return match
+  }
+  return folder.thumbnails[0]
+}
+
 interface OverviewProps {
   streamsDir: string
   templates: ThumbnailTemplate[]
-  recents: Array<ThumbnailRecentEntry & { variantCount?: number }>
+  recents: Array<ThumbnailRecentEntry & { variantCount?: number; thumbPath?: string | null }>
   onNewBlank: () => void
   onOpenTemplate: (t: ThumbnailTemplate) => void
   onOpenRecent: (entry: ThumbnailRecentEntry) => void
@@ -1145,7 +1158,12 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
             {recents.map((entry, i) => (
               <RecentRow
                 key={i}
-                thumbSrc={`file://${entry.folderPath.replace(/\\/g, '/')}/${entry.date}_sm-thumbnail.png?t=${entry.updatedAt}`}
+                // Follows the stream's SELECTED thumbnail (thumbPath) — the
+                // hardcoded variant-1 filename is only the fallback for
+                // entries whose stream folder wasn't found at load time.
+                thumbSrc={entry.thumbPath
+                  ? `file://${entry.thumbPath.replace(/\\/g, '/')}?t=${entry.updatedAt}`
+                  : `file://${entry.folderPath.replace(/\\/g, '/')}/${entry.date}_sm-thumbnail.png?t=${entry.updatedAt}`}
                 thumbFallback={<ImageIcon size={12} className="text-gray-400" />}
                 title={entry.title ?? entry.date}
                 subtitle={
@@ -2042,7 +2060,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   // ── Overview data ─────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<ThumbnailTemplate[]>([])
-  const [recents, setRecents] = useState<Array<ThumbnailRecentEntry & { variantCount?: number }>>([])
+  const [recents, setRecents] = useState<Array<ThumbnailRecentEntry & { variantCount?: number; thumbPath?: string | null }>>([])
   const [overviewLoading, setOverviewLoading] = useState(false)
 
   // ── Editor state ──────────────────────────────────────────────────────────
@@ -2831,25 +2849,29 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     return () => window.removeEventListener('focus', load)
   }, [isVisible, fontsLoaded])
 
-  // ── Load overview data once per config ────────────────────────────────────
+  // ── Load overview data ────────────────────────────────────────────────────
   // ThumbnailPage stays mounted across navigation (App renders it always,
-  // toggling `isVisible`), so its templates/recents state persists. Loading on
-  // every visibility flip re-fetched and flashed the loading state each visit.
-  // Templates/recents are kept current in-memory by the save/delete handlers,
-  // so we load once per (streamsDir, streamMode) and skip on subsequent visits;
-  // a config change resets the key and triggers a fresh load.
+  // toggling `isVisible`), so its templates/recents state persists. The
+  // LOADING state shows only on the first load per (streamsDir, streamMode) —
+  // re-showing it every visit flashed the whole overview. But the DATA
+  // refreshes every time the overview comes back into view (page navigation
+  // or closing the editor): recents follow live stream metadata — selected
+  // thumbnail, renamed titles — that can change from the streams page or
+  // from inside the editor, so a load-once snapshot went stale.
   const overviewLoadedKeyRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!isVisible || !config.streamsDir) return
+    if (!isVisible || currentStream || !config.streamsDir) return
     const key = `${config.streamsDir}${config.streamMode || 'folder-per-stream'}`
-    if (overviewLoadedKeyRef.current === key) return
+    const firstLoad = overviewLoadedKeyRef.current !== key
     overviewLoadedKeyRef.current = key
-    setOverviewLoading(true)
+    if (firstLoad) setOverviewLoading(true)
+    let cancelled = false
     Promise.all([
       window.api.thumbnailListTemplates(config.streamsDir),
       window.api.thumbnailGetRecents(),
       window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream'),
     ]).then(async ([tmpl, rec, allStreams]) => {
+      if (cancelled) return
       setTemplates(tmpl)
 
       // Filter out recents with NO canvas variant left on disk. Checked via
@@ -2863,29 +2885,38 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           .then(v => v.length)
           .catch(() => 0))
       )
+      if (cancelled) return
       const stale = rec.filter((_, i) => variantCounts[i] === 0)
 
       // Persist removals so they don't reappear next time
       await Promise.allSettled(
         stale.map(r => window.api.thumbnailRemoveRecent(r.folderPath, r.date))
       )
+      if (cancelled) return
 
       // Re-render each recent's title from live stream metadata. The stored
       // title is just a snapshot (and older entries stored the raw template
       // body), so resolving against the current folder keeps the list in
-      // sync with renames + renders {merge fields} properly.
+      // sync with renames + renders {merge fields} properly. The same live
+      // folder also resolves the row's thumbnail (thumbPath) so the recents
+      // image follows the stream's SELECTED thumbnail.
       const byPath = new Map(allStreams.map(s => [s.folderPath, s]))
       const valid = rec
         .map((r, i) => ({ r, count: variantCounts[i] }))
         .filter(({ count }) => count > 0)
         .map(({ r, count }) => {
           const f = byPath.get(r.folderPath)
-          return { ...(f ? { ...r, title: renderStreamTitle(f, allStreams) } : r), variantCount: count }
+          return {
+            ...(f ? { ...r, title: renderStreamTitle(f, allStreams) } : r),
+            variantCount: count,
+            thumbPath: f ? resolveStreamItemThumb(f) : null,
+          }
         })
 
       setRecents(valid)
-    }).catch(() => {}).finally(() => setOverviewLoading(false))
-  }, [isVisible, config.streamsDir, config.streamMode])
+    }).catch(() => {}).finally(() => { if (!cancelled && firstLoad) setOverviewLoading(false) })
+    return () => { cancelled = true }
+  }, [isVisible, currentStream, config.streamsDir, config.streamMode])
 
   // ── Handle pending stream navigation ─────────────────────────────────────
   useEffect(() => {
