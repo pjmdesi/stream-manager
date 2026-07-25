@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -411,13 +411,20 @@ function AppInner() {
   // Alt+F4) lives there and would otherwise discard the draft silently.
   useEffect(() => { window.api.setSettingsDirty(settingsDirty) }, [settingsDirty])
   const [aboutOpen, setAboutOpen] = useState(false)
-  // Git branch of a dev run (null in packaged builds and on master) — badges
-  // the sidebar version so a dev-branch app can't be mistaken for the RC.
+  // Two independent "not the release" signals badge the sidebar version:
+  // - branchBadge (purple, GitBranch icon): the git BRANCH the code came
+  //   from — .git/HEAD in dev runs, the dev-branch.txt marker in packaged
+  //   _DEV builds. Null on master and in release builds.
+  // - isDevServer (amber): the ENVIRONMENT — true only when running
+  //   unpackaged on the electron-vite dev server (npm run dev), regardless
+  //   of branch. import.meta.env.DEV is false in any packaged build, so a
+  //   _DEV exe shows only the branch chip.
   const [gitBranch, setGitBranch] = useState<string | null>(null)
   useEffect(() => {
     window.api.getGitBranch?.().then(b => setGitBranch(b)).catch(() => {})
   }, [])
   const branchBadge = gitBranch && gitBranch !== 'master' ? gitBranch : null
+  const isDevServer = import.meta.env.DEV
   // A second dev launch was blocked by the single-instance lock — main
   // focused THIS (already-running) window; explain why nothing new opened.
   const [secondInstanceOpen, setSecondInstanceOpen] = useState(false)
@@ -900,15 +907,21 @@ function AppInner() {
               </button>
             </Tooltip>
             {!sidebarCollapsed && <span className="text-[10px] text-gray-400">·</span>}
-            <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}${branchBadge ? ` — ${branchBadge} branch` : ''}`} side="top">
+            <Tooltip content={updateInfo ? `Update available: v${updateInfo.latest.replace(/^v/, '')} — click for details` : `Stream Manager v${appVersion}${branchBadge ? ` — built from the ${branchBadge} branch` : ''}${isDevServer ? ' — running on the electron-vite dev server' : ''}`} side="top">
               <button
                 onClick={() => setAboutOpen(true)}
                 className={`text-[10px] transition-colors flex items-center gap-1 ${sidebarCollapsed ? 'flex-col gap-0.5' : ''} ${updateInfo ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-gray-300'}`}
               >
                 {updateInfo && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-label="update available" />}
                 v{appVersion}
+                {isDevServer && (
+                  <span className="px-1 rounded bg-amber-500/20 text-amber-300 font-semibold leading-tight whitespace-nowrap">
+                    dev server
+                  </span>
+                )}
                 {branchBadge && (
-                  <span className="px-1 rounded bg-purple-500/20 text-purple-300 font-semibold leading-tight">
+                  <span className="px-1 rounded bg-purple-500/20 text-purple-300 font-semibold leading-tight flex items-center gap-0.5">
+                    <GitBranch size={9} className="shrink-0" />
                     {branchBadge}
                   </span>
                 )}
@@ -1110,7 +1123,7 @@ function AppInner() {
             <p className="text-sm text-gray-300 leading-relaxed">
               A desktop app for streamers to manage, review, and process local recording files.
             </p>
-            <p className="text-xs text-gray-400 mt-1">Version {appVersion}{branchBadge ? ` — ${branchBadge} branch` : ''}</p>
+            <p className="text-xs text-gray-400 mt-1">Version {appVersion}{branchBadge ? ` — ${branchBadge} branch` : ''}{isDevServer ? ' — dev server' : ''}</p>
           </div>
           {updateInfo && (
             <div className="w-full flex flex-col gap-2 p-3 rounded-lg bg-amber-400/10 border border-amber-400/30">

@@ -122,6 +122,11 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 - **Frameless titlebar — `top-10` rule (CRITICAL).** The window is `frame:false`; native controls sit in the top ~40px. All fixed overlays/backdrops/drawers MUST use `top-10` (e.g. `fixed inset-x-0 bottom-0 top-10`), **never** `inset-0`/`top-0`, or they cover the min/max/close controls.
 - **Dark theme only.** No light mode.
 - **Errors surface inline**, not via toasts (consistent with no-toast rule) — e.g. the AI hint lines turn red with the message.
+- **Build/environment naming (rule).** Two independent axes, three terms — never say just "dev":
+  - **Release build** — packaged from `master`. Ships NO markers: no `_DEV` name, normal icon, no sidebar chips. This absence is a guarantee, enforced by `scripts/dist.cjs` (only non-master builds get dev markers).
+  - **Dev build** — packaged from any non-master branch (`npm run dist` on `dev`). `_DEV` artifact name, yellow dev icon, purple **branch chip** (GitBranch icon + branch name, from the shipped `dev-branch.txt` marker).
+  - **Dev server** — running unpackaged via `npm run dev` (electron-vite), any branch. Amber **`dev server` chip** (`import.meta.env.DEV`); the branch chip also shows when the checkout isn't on master.
+  - Chip colors are reserved: **purple = git branch**, **amber = environment**. The version-button tooltip and About modal spell out both.
 
 ---
 
