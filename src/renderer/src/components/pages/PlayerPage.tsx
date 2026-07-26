@@ -3914,8 +3914,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       subtitle={
                         /* Session items show a video count; a single video
                            opened from outside the streams root shows its path
-                           so it's distinguishable from the stream sessions. */
-                        <p className="text-[10px] text-gray-400 flex items-center gap-1 min-w-0">
+                           so it's distinguishable from the stream sessions.
+                           div, not p: the Tooltip inside renders a div, and
+                           a div inside a p is invalid DOM nesting. */
+                        <div className="text-[10px] text-gray-400 flex items-center gap-1 min-w-0">
                           <span className="truncate min-w-0">
                             {r.folder
                               ? `${r.folder.videoCount} video${r.folder.videoCount === 1 ? '' : 's'}`
@@ -3926,7 +3928,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                               <Cloud size={10} className="shrink-0 text-gray-400" />
                             </Tooltip>
                           )}
-                        </p>
+                        </div>
                       }
                       /* Stream items show their date here; externals get an
                          italic tag so they read as distinct from sessions. */

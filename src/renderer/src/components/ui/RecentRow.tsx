@@ -13,15 +13,20 @@ export function SmoothThumb({ src, className, onError }: { src: string; classNam
   const canvasRef = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     let cancelled = false
-    const img = new Image()
-    img.onload = () => {
-      if (cancelled) return
+    let loaded: HTMLImageElement | null = null
+    let drawnW = 0
+    let drawnH = 0
+    const draw = () => {
+      const img = loaded
       const wrap = wrapRef.current
       const canvas = canvasRef.current
-      if (!wrap || !canvas || wrap.clientWidth === 0 || wrap.clientHeight === 0) return
+      if (!img || !wrap || !canvas || wrap.clientWidth === 0 || wrap.clientHeight === 0) return
       const dpr = window.devicePixelRatio || 1
       const bw = Math.max(1, Math.round(wrap.clientWidth * dpr))
       const bh = Math.max(1, Math.round(wrap.clientHeight * dpr))
+      if (bw === drawnW && bh === drawnH) return
+      drawnW = bw
+      drawnH = bh
       // Cover-crop region of the source.
       const scale = Math.max(bw / img.width, bh / img.height)
       const sw = bw / scale
@@ -53,9 +58,22 @@ export function SmoothThumb({ src, className, onError }: { src: string; classNam
       ctx.imageSmoothingQuality = 'high'
       ctx.drawImage(cur, 0, 0, cur.width, cur.height, 0, 0, bw, bh)
     }
+    const img = new Image()
+    img.onload = () => {
+      if (cancelled) return
+      loaded = img
+      draw()
+    }
     img.onerror = () => { if (!cancelled) onError?.() }
     img.src = src
-    return () => { cancelled = true }
+    // Pages stay mounted while hidden (display:none), so the image often
+    // loads while the wrapper measures 0×0 — a load-time-only draw then
+    // stays blank forever. The observer fires when the wrapper gains real
+    // dimensions (page shown, layout change) and draw() redoes the resample
+    // at the new size; the drawnW/drawnH guard skips no-op repeats.
+    const ro = new ResizeObserver(() => { if (!cancelled) draw() })
+    if (wrapRef.current) ro.observe(wrapRef.current)
+    return () => { cancelled = true; ro.disconnect() }
   }, [src]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div ref={wrapRef} className={className}>
