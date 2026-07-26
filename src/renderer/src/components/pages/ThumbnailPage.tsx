@@ -1081,7 +1081,7 @@ interface OverviewProps {
   onOpenRecent: (entry: ThumbnailRecentEntry) => void
   onRemoveRecent: (entry: ThumbnailRecentEntry) => void
   onClearRecents: () => void
-  onDeleteTemplate: (id: string) => void
+  onDeleteTemplate: (t: ThumbnailTemplate) => void
   loading: boolean
 }
 
@@ -1128,7 +1128,7 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
                     <Tooltip content="Delete template">
                     <button
                       className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
-                      onClick={e => { e.stopPropagation(); onDeleteTemplate(t.id) }}
+                      onClick={e => { e.stopPropagation(); onDeleteTemplate(t) }}
                     >
                       <Trash2 size={12} />
                     </button>
@@ -2792,6 +2792,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const pendingSaveRef = useRef<Promise<void> | null>(null)
   const [closingSession, setClosingSession] = useState(false)
   const [confirmCloseTemplate, setConfirmCloseTemplate] = useState(false)
+  // Delete-template confirm (overview): holds the template so the modal can
+  // name what's about to be removed. Deletion is irreversible — the template
+  // JSON + preview are files with no undo path.
+  const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState<ThumbnailTemplate | null>(null)
+  const [deletingTemplate, setDeletingTemplate] = useState(false)
+  const [deleteTemplateError, setDeleteTemplateError] = useState<string | null>(null)
 
   // ─── Load system fonts + variants ─────────────────────────────────────────
   // Deliberately keyed to page VISIBILITY, not mount: ThumbnailPage is
@@ -4323,7 +4329,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             onOpenRecent={openFromRecent}
             onRemoveRecent={removeRecent}
             onClearRecents={clearRecents}
-            onDeleteTemplate={deleteTemplate}
+            onDeleteTemplate={t => { setDeleteTemplateError(null); setConfirmDeleteTemplate(t) }}
             loading={overviewLoading}
           />
           {/* Template picker modal was moved out of this branch so
@@ -4331,6 +4337,48 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               thumbnail" alternative flow from the variant switcher
               dropdown. See the lifted copy at the end of this
               component's render. */}
+          {confirmDeleteTemplate && (
+            <Modal
+              isOpen
+              onClose={() => { if (!deletingTemplate) setConfirmDeleteTemplate(null) }}
+              title="Delete template?"
+              width="sm"
+              dismissible={!deletingTemplate}
+              footer={
+                <>
+                  <Button variant="ghost" size="sm" disabled={deletingTemplate} onClick={() => setConfirmDeleteTemplate(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    loading={deletingTemplate}
+                    onClick={async () => {
+                      setDeletingTemplate(true)
+                      try {
+                        await deleteTemplate(confirmDeleteTemplate.id)
+                        setConfirmDeleteTemplate(null)
+                      } catch (err) {
+                        console.error('Failed to delete template', err)
+                        setDeleteTemplateError(err instanceof Error ? err.message : String(err))
+                      } finally {
+                        setDeletingTemplate(false)
+                      }
+                    }}
+                  >
+                    Delete template
+                  </Button>
+                </>
+              }
+            >
+              <p className="text-sm text-gray-300">
+                “{confirmDeleteTemplate.name}” will be permanently deleted. Thumbnails already created from it are not affected.
+              </p>
+              {deleteTemplateError && (
+                <p className="text-xs text-red-400 mt-2">Delete failed: {deleteTemplateError}</p>
+              )}
+            </Modal>
+          )}
         </div>
       ) : (
         <>
