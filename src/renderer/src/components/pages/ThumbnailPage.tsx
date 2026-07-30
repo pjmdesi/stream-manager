@@ -3361,7 +3361,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseup', onMouseUp)
     }
-  }, [mode])
+    // previewMode is in the deps so the listeners actually UNBIND when the
+    // preview overlay opens (the guard above alone only affects fresh runs).
+  }, [mode, previewMode])
 
   // ── Auto-save ─────────────────────────────────────────────────────────────
   const triggerAutoSave = useCallback((newLayers: ThumbnailLayer[]) => {
