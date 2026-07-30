@@ -2985,8 +2985,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   useEffect(() => {
     if (!isVisible || currentStream || !config.streamsDir) return
     const key = `${config.streamsDir}${config.streamMode || 'folder-per-stream'}`
+    // The key is marked loaded only when a load COMPLETES (end of the .then
+    // below) — marking it up front stranded the spinner: navigating straight
+    // into the editor from the streams page cancels the just-started first
+    // load (currentStream arrives a beat after visibility), and the post-
+    // editor re-run then classified itself as a silent refresh, leaving
+    // overviewLoading true forever.
     const firstLoad = overviewLoadedKeyRef.current !== key
-    overviewLoadedKeyRef.current = key
     if (firstLoad) setOverviewLoading(true)
     let cancelled = false
     Promise.all([
@@ -3037,7 +3042,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         })
 
       setRecents(valid)
-    }).catch(() => {}).finally(() => { if (!cancelled && firstLoad) setOverviewLoading(false) })
+      overviewLoadedKeyRef.current = key
+    }).catch(err => {
+      console.error('Failed to load thumbnail overview', err)
+    }).finally(() => { if (!cancelled && firstLoad) setOverviewLoading(false) })
     return () => { cancelled = true }
   }, [isVisible, currentStream, config.streamsDir, config.streamMode])
 
