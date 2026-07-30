@@ -313,9 +313,13 @@ export const NumberInput: React.FC<NumberInputProps> = ({
     return next
   }
   // Step amount honors Shift for a 10× nudge — matches the convention
-  // in Photoshop / Affinity / Figma's number fields.
+  // in Photoshop / Affinity / Figma's number fields. The result snaps to
+  // the step's decimal precision: fractional steps (e.g. the 0.05 filter
+  // nudges) would otherwise accumulate float artifacts in the field
+  // (0.30000000000000004).
+  const stepDecimals = (String(step).split('.')[1] ?? '').length
   const stepBy = (dir: 1 | -1, shift: boolean) =>
-    onChange(clamp(value + dir * step * (shift ? 10 : 1)))
+    onChange(clamp(Number((value + dir * step * (shift ? 10 : 1)).toFixed(stepDecimals))))
   const atMin = min !== undefined && value <= min
   const atMax = max !== undefined && value >= max
 

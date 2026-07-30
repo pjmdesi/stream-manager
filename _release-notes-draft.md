@@ -6,4 +6,4 @@ Target: TBD · emptied 2026-07-26 after the v2.1.0 release.
 
 ## Thumbnail editor
 
-- Stroke width uses the standard +/- number field like the rest of the properties panel.
+- Stroke width and the filter sliders' value boxes use the standard +/- number field like the rest of the properties panel. Filter spinners step finer than their sliders (rough in with the slider, refine with the spinner — e.g. Brightness slides in 0.05s, spins in 0.01s), with no floating-point residue.

@@ -1265,11 +1265,15 @@ interface PropsPanelProps {
   standalone: boolean
 }
 
-function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0 }: {
+function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0, spinnerStep }: {
   label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void
   /** Value the slider resets to on a double-click of the knob. Filters are all
    *  neutral at 0, so that's the default. */
   defaultValue?: number
+  /** Finer step for the +/- spinners: the slider roughs the value in at
+   *  `step`, the spinners refine it (e.g. Brightness slider 0.05 →
+   *  spinner 0.01). Defaults to the slider step. */
+  spinnerStep?: number
 }) {
   return (
     <label className="flex flex-col gap-0.5">
@@ -1286,10 +1290,10 @@ function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0
           className="flex-1 accent-purple-600"
         />
         </Tooltip>
-        <input
-          type="number" min={min} max={max} step={step} value={value}
-          onChange={e => onChange(Number(e.target.value))}
-          className="w-14 bg-navy-900 border border-white/10 rounded-lg px-1 py-0.5 text-[10px] text-gray-200 tabular-nums"
+        <NumberInput
+          min={min} max={max} step={spinnerStep ?? step} value={value}
+          onChange={onChange}
+          className="w-14 shrink-0"
         />
       </div>
     </label>
@@ -1976,23 +1980,23 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           </div>
           {layer.filtersEnabled && (
             <div className="flex flex-col gap-2">
-              <FilterSlider label="Brightness" min={-1} max={1} step={0.05} value={layer.filterBrightness ?? 0}
+              <FilterSlider label="Brightness" min={-1} max={1} step={0.05} spinnerStep={0.01} value={layer.filterBrightness ?? 0}
                 onChange={v => update({ filterBrightness: v })} />
               <FilterSlider label="Contrast" min={-100} max={100} step={1} value={layer.filterContrast ?? 0}
                 onChange={v => update({ filterContrast: v })} />
-              <FilterSlider label="Saturation" min={-2} max={10} step={0.1} value={layer.filterSaturation ?? 0}
+              <FilterSlider label="Saturation" min={-2} max={10} step={0.1} spinnerStep={0.01} value={layer.filterSaturation ?? 0}
                 onChange={v => update({ filterSaturation: v })} />
               <FilterSlider label="Hue" min={-180} max={180} step={1} value={layer.filterHue ?? 0}
                 onChange={v => update({ filterHue: v })} />
-              <FilterSlider label="Luminance" min={-2} max={2} step={0.05} value={layer.filterLuminance ?? 0}
+              <FilterSlider label="Luminance" min={-2} max={2} step={0.05} spinnerStep={0.01} value={layer.filterLuminance ?? 0}
                 onChange={v => update({ filterLuminance: v })} />
               <FilterSlider label="Blur" min={0} max={40} step={1} value={layer.filterBlur ?? 0}
                 onChange={v => update({ filterBlur: v })} />
-              <FilterSlider label="Enhance" min={-1} max={1} step={0.05} value={layer.filterEnhance ?? 0}
+              <FilterSlider label="Enhance" min={-1} max={1} step={0.05} spinnerStep={0.01} value={layer.filterEnhance ?? 0}
                 onChange={v => update({ filterEnhance: v })} />
               <FilterSlider label="Pixelate" min={0} max={50} step={1} value={layer.filterPixelate ?? 0}
                 onChange={v => update({ filterPixelate: v })} />
-              <FilterSlider label="Posterize" min={0} max={1} step={0.05} value={layer.filterPosterize ?? 0}
+              <FilterSlider label="Posterize" min={0} max={1} step={0.05} spinnerStep={0.01} value={layer.filterPosterize ?? 0}
                 onChange={v => update({ filterPosterize: v })} />
               <FilterSlider label="Threshold" min={0} max={1} step={0.01} value={layer.filterThreshold ?? 0}
                 onChange={v => update({ filterThreshold: v })} />
