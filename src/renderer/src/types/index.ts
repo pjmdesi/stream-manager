@@ -730,6 +730,10 @@ export interface ThumbnailLayer {
   fontStyle?: string    // 'normal' | 'bold' | 'italic' | 'bold italic'
   align?: 'left' | 'center' | 'right'
   lineHeight?: number   // multiplier, 1 = normal (Konva Text lineHeight)
+  /** Render-time case transform. The stored text is never modified —
+   *  toggling back to 'none' (or absent, for pre-existing canvases)
+   *  always recovers the text as typed. */
+  textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
   // Shape
   shapeType?: 'rect' | 'ellipse' | 'triangle'
   cornerRadius?: number

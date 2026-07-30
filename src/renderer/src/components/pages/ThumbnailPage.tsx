@@ -748,6 +748,30 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
   )
 }
 
+/** Letter-case control options (thumbnails #7). Labels mirror Figma's
+ *  letter-case buttons. Small caps is deliberately absent: it's an
+ *  OpenType glyph-substitution feature (smcp), not a case transform, and
+ *  Konva's canvas text path can't reach it. */
+const TEXT_TRANSFORM_OPTIONS = [
+  { value: 'none', label: '—', tip: 'As typed' },
+  { value: 'uppercase', label: 'AG', tip: 'Uppercase' },
+  { value: 'lowercase', label: 'ag', tip: 'Lowercase' },
+  { value: 'capitalize', label: 'Ag', tip: 'Title case — uppercase each word’s first letter, rest as typed' },
+] as const
+
+/** Render-time case transform. Applied AFTER merge-field resolution so
+ *  {topic} etc. transform too; the stored text is never modified.
+ *  'capitalize' follows CSS semantics — uppercase each word's first
+ *  letter, leave the rest alone (acronyms survive). */
+function applyTextTransform(text: string, transform: ThumbnailLayer['textTransform']): string {
+  switch (transform) {
+    case 'uppercase': return text.toLocaleUpperCase()
+    case 'lowercase': return text.toLocaleLowerCase()
+    case 'capitalize': return text.replace(/(^|\s)(\S)/g, (_, pre: string, ch: string) => pre + ch.toLocaleUpperCase())
+    default: return text
+  }
+}
+
 function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides, mergeFields }: KonvaLayerNodeProps) {
   void isSelected
   const nodeRef = useRef<Konva.Text>(null)
@@ -767,7 +791,7 @@ function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, on
   // Pulling this out of the JSX avoids drift between clones and keeps
   // the multi-shadow loop trivial.
   const textProps = {
-    text: applyThumbnailMergeFields(layer.text ?? '', mergeFields),
+    text: applyTextTransform(applyThumbnailMergeFields(layer.text ?? '', mergeFields), layer.textTransform),
     width: layer.width ?? undefined,
     fontFamily: layer.fontFamily ?? 'Arial',
     fontSize: layer.fontSize ?? 48,
@@ -1725,6 +1749,31 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                     <option value="right">Right</option>
                   </select>
                 </label>
+              </div>
+              {/* Letter case (thumbnails #7) — radio-style group matching the
+                  settings page's first-day-of-week control, sized to the
+                  panel's input rows. div, not label: a label would forward
+                  clicks on the caption to the first button. */}
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-400">Case</span>
+                <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
+                  {TEXT_TRANSFORM_OPTIONS.map(opt => {
+                    const selected = (layer.textTransform ?? 'none') === opt.value
+                    return (
+                      <Tooltip key={opt.value} content={opt.tip} triggerClassName="flex-1 flex min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => update({ textTransform: opt.value })}
+                          className={`flex-1 py-1 text-xs transition-colors ${
+                            selected ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      </Tooltip>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </section>
