@@ -1083,6 +1083,137 @@ function TemplatePreview({ streamsDir, templateId, name, cacheKey }: { streamsDi
   )
 }
 
+// ── YouTube preview gallery (thumbnails #8) ──────────────────────────────────
+// DOM mockups of real YouTube surfaces, fed by ONE bitmap snapshot of the
+// canvas — no extra Konva stages. Badge and text sizes are intentionally
+// FIXED like YouTube's own chrome (badges don't scale with thumb size), so
+// the small cards honestly answer "is this legible in the suggested rail".
+
+function PreviewThumb({ snapshot, w, h, radius, overlay, watched }: {
+  snapshot: string | null
+  w: number
+  h: number
+  radius: number
+  overlay: 'none' | 'duration' | 'live'
+  watched: boolean
+}) {
+  return (
+    <div className="relative overflow-hidden shrink-0 bg-black/40" style={{ width: w, height: h, borderRadius: radius }}>
+      {snapshot && <img src={snapshot} className="w-full h-full object-cover" alt="" draggable={false} />}
+      {overlay === 'duration' && (
+        <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[11px] leading-none px-1 py-0.5 rounded font-medium tabular-nums">12:34</span>
+      )}
+      {overlay === 'live' && (
+        <span className="absolute bottom-1 right-1 bg-red-600 text-white text-[11px] leading-none px-1 py-0.5 rounded font-semibold tracking-wide">LIVE</span>
+      )}
+      {watched && (
+        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/30">
+          <div className="h-full bg-red-600 w-2/5" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PreviewGallery({ snapshot, title, channelName }: {
+  snapshot: string | null
+  title: string
+  channelName: string
+}) {
+  const [overlay, setOverlay] = useState<'none' | 'duration' | 'live'>('duration')
+  const [watched, setWatched] = useState(false)
+  const [lightBg, setLightBg] = useState(false)
+  // YouTube's own theme colors for the mockups (the cards are "their"
+  // chrome); only the control bar above is app-styled.
+  const titleCls = lightBg ? 'text-[#0f0f0f]' : 'text-white'
+  const metaCls = lightBg ? 'text-[#606060]' : 'text-[#aaaaaa]'
+  const fillCls = lightBg ? 'bg-black/10' : 'bg-white/10'
+  const meta = '1.2K views · 2 hours ago'
+  const segCls = (on: boolean) =>
+    `px-2 py-1 text-xs whitespace-nowrap transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
+  const chipCls = (on: boolean) =>
+    `px-2 py-1 rounded-lg text-xs border transition-colors ${on ? 'bg-purple-600/25 text-purple-200 border-purple-300/40' : 'bg-navy-900 text-gray-400 border-white/10 hover:text-gray-200 hover:bg-white/5'}`
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col">
+      {/* Control bar — app chrome */}
+      <div className="flex items-center gap-2 px-4 py-2 bg-navy-800 border-b border-white/5 shrink-0">
+        <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
+          <Tooltip content="No corner badge"><button className={segCls(overlay === 'none')} onClick={() => setOverlay('none')}>—</button></Tooltip>
+          <Tooltip content="Duration badge — regular uploads"><button className={segCls(overlay === 'duration')} onClick={() => setOverlay('duration')}>12:34</button></Tooltip>
+          <Tooltip content="LIVE badge — active live streams"><button className={segCls(overlay === 'live')} onClick={() => setOverlay('live')}>LIVE</button></Tooltip>
+        </div>
+        <Tooltip content="Watched-progress bar along the bottom edge">
+          <button className={chipCls(watched)} onClick={() => setWatched(v => !v)}>Watched</button>
+        </Tooltip>
+        <Tooltip content="Preview against YouTube’s light theme">
+          <button className={chipCls(lightBg)} onClick={() => setLightBg(v => !v)}>Light</button>
+        </Tooltip>
+        {!snapshot && (
+          <span className="flex items-center gap-1.5 text-[10px] text-gray-400 ml-auto">
+            <Loader2 size={11} className="animate-spin" /> Rendering…
+          </span>
+        )}
+      </div>
+      {/* Mockups — YouTube chrome */}
+      <div className={`flex-1 overflow-y-auto transition-colors ${lightBg ? 'bg-white' : 'bg-[#0f0f0f]'}`}>
+        <div className="p-5 flex flex-col gap-7 items-start">
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Home · 360×202</p>
+            <div className="w-[360px]">
+              <PreviewThumb snapshot={snapshot} w={360} h={202} radius={12} overlay={overlay} watched={watched} />
+              <div className="flex gap-3 mt-3">
+                <div className={`w-9 h-9 rounded-full shrink-0 ${fillCls}`} />
+                <div className="min-w-0">
+                  <p className={`text-sm font-medium leading-snug line-clamp-2 ${titleCls}`}>{title}</p>
+                  <p className={`text-xs mt-1 ${metaCls}`}>{channelName}</p>
+                  <p className={`text-xs ${metaCls}`}>{meta}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Search · 360×202</p>
+            <div className="flex gap-4 max-w-full">
+              <PreviewThumb snapshot={snapshot} w={360} h={202} radius={12} overlay={overlay} watched={watched} />
+              <div className="min-w-0 pt-1 w-64">
+                <p className={`text-base leading-snug line-clamp-2 ${titleCls}`}>{title}</p>
+                <p className={`text-xs mt-1.5 ${metaCls}`}>{meta}</p>
+                <div className="flex items-center gap-2 mt-2.5">
+                  <div className={`w-6 h-6 rounded-full shrink-0 ${fillCls}`} />
+                  <span className={`text-xs truncate ${metaCls}`}>{channelName}</span>
+                </div>
+                <div className={`h-2 rounded mt-3 w-11/12 ${fillCls}`} />
+                <div className={`h-2 rounded mt-1.5 w-2/3 ${fillCls}`} />
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Suggested · 168×94</p>
+            <div className="flex gap-2 w-[400px] max-w-full">
+              <PreviewThumb snapshot={snapshot} w={168} h={94} radius={8} overlay={overlay} watched={watched} />
+              <div className="min-w-0">
+                <p className={`text-sm font-medium leading-snug line-clamp-2 ${titleCls}`}>{title}</p>
+                <p className={`text-xs mt-0.5 ${metaCls}`}>{channelName}</p>
+                <p className={`text-xs ${metaCls}`}>{meta}</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Compact · 120×68</p>
+            <div className="flex gap-2 w-[360px] max-w-full">
+              <PreviewThumb snapshot={snapshot} w={120} h={68} radius={6} overlay={overlay} watched={watched} />
+              <div className="min-w-0">
+                <p className={`text-xs font-medium leading-snug line-clamp-2 ${titleCls}`}>{title}</p>
+                <p className={`text-[11px] mt-0.5 ${metaCls}`}>{channelName} · {meta}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** The stream's selected thumbnail, resolved the same way the streams list
  *  does it (StreamsPage.resolveStreamThumb): preferredThumbnail basename →
  *  matching path → first thumbnail. Keep the two in sync. */
@@ -3255,9 +3386,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     bgLayerRef.current?.hide()
     guideLayerRef.current?.hide()
     matteLayerRef.current?.hide()
-    // Hide selection handles so they don't appear in the saved image
-    const transformers = stage.find('Transformer')
-    transformers.forEach(t => t.hide())
+    // Hide the whole transformer layer — it hosts pure UI chrome (the
+    // Transformer's handles, the align-anchor box, and the hover/member
+    // bounds overlays), none of which belongs in the exported image.
+    // Hiding only the Transformer nodes left the bounds overlay rects
+    // baking into PNGs saved while a group selection was active.
+    transformerLayerRef.current?.hide()
     const prevX = stage.x(), prevY = stage.y()
     const prevSX = stage.scaleX(), prevSY = stage.scaleY()
     const prevW = stage.width(), prevH = stage.height()
@@ -3266,12 +3400,44 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const dataUrl = stage.toDataURL({ pixelRatio: 1 })
     stage.x(prevX); stage.y(prevY); stage.scaleX(prevSX); stage.scaleY(prevSY)
     stage.width(prevW); stage.height(prevH)
-    transformers.forEach(t => t.show())
+    transformerLayerRef.current?.show()
     bgLayerRef.current?.show()
     guideLayerRef.current?.show()
     matteLayerRef.current?.show()
     return dataUrl
   }, [])
+
+  // ── Preview mode (thumbnails #8) ──────────────────────────────────────────
+  // Swaps the canvas viewport for DOM mockups of YouTube surfaces, fed by a
+  // bitmap snapshot of the stage. The stage stays mounted underneath the
+  // overlay, so the properties panel keeps working — edits re-capture
+  // (debounced) and every mockup size updates near-live.
+  const [previewMode, setPreviewMode] = useState(false)
+  const [previewSnapshot, setPreviewSnapshot] = useState<string | null>(null)
+  // A new session (stream/variant/template switch, or leaving the editor)
+  // starts back in Edit mode with no stale snapshot.
+  useEffect(() => {
+    setPreviewMode(false)
+    setPreviewSnapshot(null)
+  }, [mode, currentStream?.folderPath, currentStream?.date, currentVariant, currentTemplateId])
+  useEffect(() => {
+    if (!previewMode) return
+    let cancelled = false
+    // Short debounce: slider drags produce layer-state bursts, and a full
+    // 1280×720 rasterize per change would churn. 250ms after the last edit
+    // (and on entry) is imperceptible for a preview.
+    const t = setTimeout(async () => {
+      try {
+        await waitForStageImages()
+        if (cancelled) return
+        const url = getCanvasDataUrl()
+        if (!cancelled && url) setPreviewSnapshot(url)
+      } catch (err) {
+        console.error('Preview snapshot failed', err)
+      }
+    }, 250)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [previewMode, layers, waitForStageImages, getCanvasDataUrl])
 
   const doSave = useCallback(async (
     saveLayers: ThumbnailLayer[],
@@ -5146,6 +5312,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <Layer ref={guideLayerRef} listening={false} />
               </Stage>
 
+              {/* Preview mode (thumbnails #8): absolute overlay above the
+                  canvas AND the zoom controls (z-20 beats their auto
+                  stacking). The stage underneath stays mounted and live so
+                  property edits keep re-capturing the snapshot. */}
+              {previewMode && (
+                <PreviewGallery
+                  snapshot={previewSnapshot}
+                  title={currentStreamTitle ?? 'Example video title'}
+                  channelName={(config.streamerName || '').trim() || 'Your channel'}
+                />
+              )}
+
               {/* Zoom badge + quick-zoom buttons. Outer container stays
                   pointer-events-none so the badge area doesn't block canvas
                   clicks; the inner button row opts back in. */}
@@ -5196,7 +5374,31 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '30%' }}>
                 <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 shrink-0">
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Layers</span>
-                  <span className="text-[10px] text-gray-400">{layers.length}</span>
+                  <div className="flex items-center gap-2">
+                    {/* Edit/Preview toggle (thumbnails #8) — Preview swaps the
+                        canvas viewport for YouTube-surface mockups; the
+                        sidebar stays live so properties can be tweaked while
+                        watching the mockups update. */}
+                    <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
+                      <Tooltip content="Edit the canvas">
+                        <button
+                          className={`px-1.5 py-0.5 text-[10px] transition-colors ${!previewMode ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                          onClick={() => setPreviewMode(false)}
+                        >
+                          Edit
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Preview how this thumbnail looks on YouTube — real sizes, badges, light/dark theme">
+                        <button
+                          className={`px-1.5 py-0.5 text-[10px] transition-colors ${previewMode ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                          onClick={() => setPreviewMode(true)}
+                        >
+                          Preview
+                        </button>
+                      </Tooltip>
+                    </div>
+                    <span className="text-[10px] text-gray-400">{layers.length}</span>
+                  </div>
                 </div>
                 <div className="overflow-y-auto flex-1">
                   {(() => {
