@@ -61,6 +61,12 @@ input, textarea, select, .selectable {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255,255,255,0.2);
 }
+/* The corner square where horizontal + vertical scrollbars meet defaults
+   to white — invisible chrome everywhere else, a bright dot on our dark
+   surfaces whenever both bars show. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 
 /* Range input reset for custom sliders */
 input[type=range] {

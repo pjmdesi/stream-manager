@@ -1101,7 +1101,10 @@ function PreviewThumb({ snapshot, w, h, radius, overlay, watched }: {
 }) {
   return (
     <div className="relative overflow-hidden shrink-0 bg-black/40" style={{ width: w, height: h, borderRadius: radius }}>
-      {snapshot && <img src={snapshot} className="w-full h-full object-cover" alt="" draggable={false} />}
+      {/* SmoothThumb (shared with the recents lists): stepped-halving canvas
+          downscale — a plain <img> at 168/120px from the 1280px snapshot hits
+          Chromium's fast low-quality resample path and looks crunchy. */}
+      {snapshot && <SmoothThumb src={snapshot} className="w-full h-full" />}
       {overlay === 'duration' && (
         <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[11px] leading-none px-1 py-0.5 rounded font-medium tabular-nums">12:34</span>
       )}
@@ -3257,9 +3260,34 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     return () => ro.disconnect()
   }, [mode])
 
-  // ── Wheel zoom + middle-click pan ─────────────────────────────────────────
+  // ── Preview mode (thumbnails #8) ──────────────────────────────────────────
+  // Swaps the canvas viewport for DOM mockups of YouTube surfaces, fed by a
+  // bitmap snapshot of the stage. The stage stays mounted underneath the
+  // overlay, so the properties panel keeps working — edits re-capture
+  // (debounced) and every mockup size updates near-live. Declared HERE,
+  // before the wheel-zoom effect, whose deps read previewMode; the capture
+  // effect lives after getCanvasDataUrl, which it calls.
+  const [previewMode, setPreviewMode] = useState(false)
+  const [previewSnapshot, setPreviewSnapshot] = useState<string | null>(null)
+  // Gallery settings live here (not in PreviewGallery) so they survive
+  // Edit↔Preview toggles — the gallery unmounts each time. Deliberately NOT
+  // reset on session switch: badge/theme choice is a viewing preference.
+  const [previewOverlay, setPreviewOverlay] = useState<PreviewOverlay>('duration')
+  const [previewWatched, setPreviewWatched] = useState(false)
+  const [previewLightBg, setPreviewLightBg] = useState(false)
+  // A new session (stream/variant/template switch, or leaving the editor)
+  // starts back in Edit mode with no stale snapshot.
   useEffect(() => {
-    if (mode !== 'editor') return
+    setPreviewMode(false)
+    setPreviewSnapshot(null)
+  }, [mode, currentStream?.folderPath, currentStream?.date, currentVariant, currentTemplateId])
+
+  // ── Wheel zoom + middle-click pan ─────────────────────────────────────────
+  // Unbound entirely while the preview overlay is up: the container-level
+  // wheel listener preventDefaults, which blocked scrolling INSIDE the
+  // gallery (its wheel events bubble through the overlay to the container).
+  useEffect(() => {
+    if (mode !== 'editor' || previewMode) return
     const el = canvasContainerRef.current
     if (!el) return
 
@@ -3422,25 +3450,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     return dataUrl
   }, [])
 
-  // ── Preview mode (thumbnails #8) ──────────────────────────────────────────
-  // Swaps the canvas viewport for DOM mockups of YouTube surfaces, fed by a
-  // bitmap snapshot of the stage. The stage stays mounted underneath the
-  // overlay, so the properties panel keeps working — edits re-capture
-  // (debounced) and every mockup size updates near-live.
-  const [previewMode, setPreviewMode] = useState(false)
-  const [previewSnapshot, setPreviewSnapshot] = useState<string | null>(null)
-  // Gallery settings live here (not in PreviewGallery) so they survive
-  // Edit↔Preview toggles — the gallery unmounts each time. Deliberately NOT
-  // reset on session switch: badge/theme choice is a viewing preference.
-  const [previewOverlay, setPreviewOverlay] = useState<PreviewOverlay>('duration')
-  const [previewWatched, setPreviewWatched] = useState(false)
-  const [previewLightBg, setPreviewLightBg] = useState(false)
-  // A new session (stream/variant/template switch, or leaving the editor)
-  // starts back in Edit mode with no stale snapshot.
-  useEffect(() => {
-    setPreviewMode(false)
-    setPreviewSnapshot(null)
-  }, [mode, currentStream?.folderPath, currentStream?.date, currentVariant, currentTemplateId])
+  // Preview snapshot capture (thumbnails #8) — state lives above the
+  // wheel-zoom effect (whose deps read previewMode); this effect sits here
+  // because it needs waitForStageImages + getCanvasDataUrl.
   useEffect(() => {
     if (!previewMode) return
     let cancelled = false
