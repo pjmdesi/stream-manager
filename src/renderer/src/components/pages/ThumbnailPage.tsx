@@ -15,7 +15,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   FlipHorizontal2, FlipVertical2,
-  ChevronDown, ChevronRight, Loader2, Eraser,
+  ChevronDown, ChevronRight, Loader2, Eraser, Radio,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -1089,12 +1089,14 @@ function TemplatePreview({ streamsDir, templateId, name, cacheKey }: { streamsDi
 // FIXED like YouTube's own chrome (badges don't scale with thumb size), so
 // the small cards honestly answer "is this legible in the suggested rail".
 
+type PreviewOverlay = 'none' | 'duration' | 'live' | 'upcoming'
+
 function PreviewThumb({ snapshot, w, h, radius, overlay, watched }: {
   snapshot: string | null
   w: number
   h: number
   radius: number
-  overlay: 'none' | 'duration' | 'live'
+  overlay: PreviewOverlay
   watched: boolean
 }) {
   return (
@@ -1104,7 +1106,14 @@ function PreviewThumb({ snapshot, w, h, radius, overlay, watched }: {
         <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[11px] leading-none px-1 py-0.5 rounded font-medium tabular-nums">12:34</span>
       )}
       {overlay === 'live' && (
-        <span className="absolute bottom-1 right-1 bg-red-600 text-white text-[11px] leading-none px-1 py-0.5 rounded font-semibold tracking-wide">LIVE</span>
+        <span className="absolute bottom-1 right-1 flex items-center gap-1 bg-red-600 text-white text-[11px] leading-none px-1 py-0.5 rounded font-semibold tracking-wide">
+          <Radio size={11} className="shrink-0" /> LIVE
+        </span>
+      )}
+      {overlay === 'upcoming' && (
+        <span className="absolute bottom-1 right-1 flex items-center gap-1 bg-black/80 text-white text-[11px] leading-none px-1 py-0.5 rounded font-medium">
+          <Radio size={11} className="shrink-0" /> Upcoming
+        </span>
       )}
       {watched && (
         <div className="absolute bottom-0 inset-x-0 h-1 bg-white/30">
@@ -1115,14 +1124,19 @@ function PreviewThumb({ snapshot, w, h, radius, overlay, watched }: {
   )
 }
 
-function PreviewGallery({ snapshot, title, channelName }: {
+function PreviewGallery({ snapshot, title, channelName, overlay, setOverlay, watched, setWatched, lightBg, setLightBg }: {
   snapshot: string | null
   title: string
   channelName: string
+  /** Badge/theme settings live in the parent so they survive Edit↔Preview
+   *  toggles instead of resetting with this component's mount. */
+  overlay: PreviewOverlay
+  setOverlay: (v: PreviewOverlay) => void
+  watched: boolean
+  setWatched: (v: boolean) => void
+  lightBg: boolean
+  setLightBg: (v: boolean) => void
 }) {
-  const [overlay, setOverlay] = useState<'none' | 'duration' | 'live'>('duration')
-  const [watched, setWatched] = useState(false)
-  const [lightBg, setLightBg] = useState(false)
   // YouTube's own theme colors for the mockups (the cards are "their"
   // chrome); only the control bar above is app-styled.
   const titleCls = lightBg ? 'text-[#0f0f0f]' : 'text-white'
@@ -1141,12 +1155,13 @@ function PreviewGallery({ snapshot, title, channelName }: {
           <Tooltip content="No corner badge"><button className={segCls(overlay === 'none')} onClick={() => setOverlay('none')}>—</button></Tooltip>
           <Tooltip content="Duration badge — regular uploads"><button className={segCls(overlay === 'duration')} onClick={() => setOverlay('duration')}>12:34</button></Tooltip>
           <Tooltip content="LIVE badge — active live streams"><button className={segCls(overlay === 'live')} onClick={() => setOverlay('live')}>LIVE</button></Tooltip>
+          <Tooltip content="Upcoming badge — scheduled broadcasts"><button className={segCls(overlay === 'upcoming')} onClick={() => setOverlay('upcoming')}>Upcoming</button></Tooltip>
         </div>
         <Tooltip content="Watched-progress bar along the bottom edge">
-          <button className={chipCls(watched)} onClick={() => setWatched(v => !v)}>Watched</button>
+          <button className={chipCls(watched)} onClick={() => setWatched(!watched)}>Watched</button>
         </Tooltip>
         <Tooltip content="Preview against YouTube’s light theme">
-          <button className={chipCls(lightBg)} onClick={() => setLightBg(v => !v)}>Light</button>
+          <button className={chipCls(lightBg)} onClick={() => setLightBg(!lightBg)}>Light</button>
         </Tooltip>
         {!snapshot && (
           <span className="flex items-center gap-1.5 text-[10px] text-gray-400 ml-auto">
@@ -3414,6 +3429,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // (debounced) and every mockup size updates near-live.
   const [previewMode, setPreviewMode] = useState(false)
   const [previewSnapshot, setPreviewSnapshot] = useState<string | null>(null)
+  // Gallery settings live here (not in PreviewGallery) so they survive
+  // Edit↔Preview toggles — the gallery unmounts each time. Deliberately NOT
+  // reset on session switch: badge/theme choice is a viewing preference.
+  const [previewOverlay, setPreviewOverlay] = useState<PreviewOverlay>('duration')
+  const [previewWatched, setPreviewWatched] = useState(false)
+  const [previewLightBg, setPreviewLightBg] = useState(false)
   // A new session (stream/variant/template switch, or leaving the editor)
   // starts back in Edit mode with no stale snapshot.
   useEffect(() => {
@@ -5321,6 +5342,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   snapshot={previewSnapshot}
                   title={currentStreamTitle ?? 'Example video title'}
                   channelName={(config.streamerName || '').trim() || 'Your channel'}
+                  overlay={previewOverlay}
+                  setOverlay={setPreviewOverlay}
+                  watched={previewWatched}
+                  setWatched={setPreviewWatched}
+                  lightBg={previewLightBg}
+                  setLightBg={setPreviewLightBg}
                 />
               )}
 
