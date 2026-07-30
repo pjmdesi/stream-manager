@@ -1265,6 +1265,12 @@ interface PropsPanelProps {
   standalone: boolean
 }
 
+// Konva Transformer's default border color. The hover / group-member
+// bounds (thumbnails #3) derive from it: hover = solid transparent
+// version of the selection lines, group member = full color, dashed.
+const SELECTION_STROKE = 'rgb(0,161,255)'
+const SELECTION_STROKE_SOFT = 'rgba(0,161,255,0.55)'
+
 function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0, spinnerStep }: {
   label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void
   /** Value the slider resets to on a double-click of the knob. Filters are all
@@ -2246,6 +2252,65 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     tr.getLayer()?.batchDraw()
   }, [selectedIds, layers])
 
+  // ── Layer bounds overlays (thumbnails #3) ─────────────────────────────────
+  // Five states, two new styles: hovered layers get a solid transparent
+  // outline (whether unselected or inside a group selection), group-selection
+  // MEMBERS get a dashed full-color outline so each element inside the
+  // Transformer's collective frame stays identifiable. Single selection is
+  // untouched — the Transformer already communicates it, hover included.
+  // hoveredLayerId is shared with the layers panel: canvas hover highlights
+  // the row, row hover outlines the canvas element.
+  const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null)
+  // Overlays hide while a drag/resize gesture is live: the group frame
+  // already shows what's moving, and outlines would obscure the element
+  // edges exactly when precise positioning matters most.
+  const [canvasGestureActive, setCanvasGestureActive] = useState(false)
+  const [boundsOverlays, setBoundsOverlays] = useState<Array<{
+    id: string; x: number; y: number; rotation: number
+    box: { x: number; y: number; width: number; height: number }
+    kind: 'hover' | 'member'
+  }>>([])
+
+  // Computed in an effect (not during render) so the Konva nodes are read
+  // AFTER react-konva commits geometry changes — text heights are measured
+  // by Konva, not modeled, so the node is the only correct source.
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage || canvasGestureActive) {
+      setBoundsOverlays(prev => (prev.length ? [] : prev))
+      return
+    }
+    const wanted = new Map<string, 'hover' | 'member'>()
+    if (selectedIds.length > 1) for (const id of selectedIds) wanted.set(id, 'member')
+    if (hoveredLayerId && !(selectedIds.length === 1 && selectedIds[0] === hoveredLayerId)) {
+      wanted.set(hoveredLayerId, 'hover')
+    }
+    const next: typeof boundsOverlays = []
+    wanted.forEach((kind, id) => {
+      const l = layers.find(x => x.id === id)
+      if (!l || !l.visible) return
+      const node = stage.findOne(`#${id}`)
+      if (!node) return
+      // Self-relative client rect = the node's untransformed content box.
+      // The overlay group re-applies x/y/rotation below, so the outline
+      // hugs rotated elements instead of their axis-aligned bounds.
+      const box = node.getClientRect({ relativeTo: node as Konva.Container, skipShadow: true, skipStroke: true })
+      next.push({ id, kind, x: l.x, y: l.y, rotation: l.rotation ?? 0, box })
+    })
+    setBoundsOverlays(next)
+  }, [hoveredLayerId, selectedIds, layers, canvasGestureActive])
+
+  // Canvas-side hover tracking: one listener pair on the content Layer
+  // (Konva events bubble). The wrapper Group carrying the layer id is found
+  // by walking up until the parent is the content Layer itself — topmost
+  // element under the cursor wins naturally on overlaps.
+  const handleCanvasMouseOver = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+    let n: Konva.Node | null = e.target
+    while (n && n.getParent() !== e.currentTarget) n = n.getParent()
+    setHoveredLayerId(n?.id() || null)
+  }, [])
+  const handleCanvasMouseOut = useCallback(() => setHoveredLayerId(null), [])
+
   const [isDirty, setIsDirty] = useState(false)
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [saveTemplateName, setSaveTemplateName] = useState('')
@@ -2499,6 +2564,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   const handleDragStart = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
     if (primaryDragIdRef.current !== null) return // Transformer mirror — not a new gesture
+    setCanvasGestureActive(true)
     const target = e.target
     primaryDragIdRef.current = target.id()
     dragStartPosRef.current = { x: target.x(), y: target.y() }
@@ -3269,6 +3335,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     dragEndFlushScheduledRef.current = true
     queueMicrotask(() => {
       dragEndFlushScheduledRef.current = false
+      // Before the early returns: the bounds overlays must come back even
+      // when the drag turns out to be a no-op.
+      setCanvasGestureActive(false)
       const stage = stageRef.current
       const primaryId = primaryDragIdRef.current
       const startPos = dragStartPosRef.current
@@ -4792,7 +4861,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   />
                 </Layer>
                 {/* Content layer */}
-                <Layer>
+                <Layer onMouseOver={handleCanvasMouseOver} onMouseOut={handleCanvasMouseOut}>
                   {renderLayers.map(layer => {
                     const props: KonvaLayerNodeProps = {
                       layer,
@@ -4853,6 +4922,24 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     is attached to every selected node — see the sync
                     useEffect that calls transformerRef.current.nodes(...). */}
                 <Layer ref={transformerLayerRef}>
+                  {/* Hover / group-member bounds (thumbnails #3). Rendered
+                      BEFORE the Transformer so the group frame + handles
+                      always stay topmost (state d's stacking requirement). */}
+                  {boundsOverlays.map(o => (
+                    <KonvaGroup key={`bounds-${o.id}`} x={o.x} y={o.y} rotation={o.rotation} listening={false}>
+                      <KonvaRect
+                        x={o.box.x}
+                        y={o.box.y}
+                        width={o.box.width}
+                        height={o.box.height}
+                        stroke={o.kind === 'member' ? SELECTION_STROKE : SELECTION_STROKE_SOFT}
+                        strokeWidth={1.5 / viewZoom}
+                        dash={o.kind === 'member' ? [6 / viewZoom, 4 / viewZoom] : undefined}
+                        listening={false}
+                        perfectDrawEnabled={false}
+                      />
+                    </KonvaGroup>
+                  ))}
                   {alignAnchorBbox && (
                     <KonvaRect
                       x={alignAnchorBbox.x}
@@ -4868,6 +4955,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Transformer
                     ref={transformerRef}
                     rotateEnabled
+                    onTransformStart={() => setCanvasGestureActive(true)}
+                    onTransformEnd={() => setCanvasGestureActive(false)}
                     // Disable Konva's drag-past-the-opposite-handle flip
                     // gesture. We have explicit flip buttons + signed
                     // W/H inputs, so a stray cross-over flip while
@@ -5103,7 +5192,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                               setDropTargetDisplayIdx(null)
                             }}
                             onClick={e => { if (!isRenaming) handleLayerRowClick(layer.id, e) }}
-                            className={`flex items-center gap-1.5 px-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-purple-600/20' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
+                            // Bidirectional hover sync with the canvas
+                            // (thumbnails #3): row hover outlines the canvas
+                            // element; canvas hover highlights this row via
+                            // the same shared hoveredLayerId.
+                            onMouseEnter={() => setHoveredLayerId(layer.id)}
+                            onMouseLeave={() => setHoveredLayerId(null)}
+                            className={`flex items-center gap-1.5 px-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-purple-600/20' : hoveredLayerId === layer.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
                           >
                             <Tooltip content={layer.visible ? 'Hide layer' : 'Show layer'} side="top">
                               <button
