@@ -1743,14 +1743,12 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
               </label>
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">Stroke width</span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   max={50}
-                  placeholder="0"
                   value={layer.strokeWidth ?? 0}
-                  onChange={e => update({ strokeWidth: Number(e.target.value) })}
-                  className="w-full bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+                  onChange={strokeWidth => update({ strokeWidth })}
+                  className="w-full"
                 />
               </label>
             </div>
