@@ -742,6 +742,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:getPalette', streamsDir),
   thumbnailSetPalette: (streamsDir: string, swatches: { name?: string; color: string }[]) =>
     ipcRenderer.invoke('thumbnail:setPalette', streamsDir, swatches),
+  thumbnailExportPalette: (filePath: string, swatches: { name?: string; color: string }[]) =>
+    ipcRenderer.invoke('thumbnail:exportPalette', filePath, swatches),
+  thumbnailImportPalette: (filePath: string) =>
+    ipcRenderer.invoke('thumbnail:importPalette', filePath),
   thumbnailGetColorRecents: () =>
     ipcRenderer.invoke('thumbnail:getColorRecents'),
   thumbnailAddColorRecent: (color: string) =>

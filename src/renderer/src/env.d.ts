@@ -294,6 +294,8 @@ declare global {
       thumbnailSetLastFont(font: string): Promise<void>
       thumbnailGetPalette(streamsDir: string): Promise<PaletteSwatch[] | null>
       thumbnailSetPalette(streamsDir: string, swatches: PaletteSwatch[]): Promise<void>
+      thumbnailExportPalette(filePath: string, swatches: PaletteSwatch[]): Promise<void>
+      thumbnailImportPalette(filePath: string): Promise<PaletteSwatch[]>
       thumbnailGetColorRecents(): Promise<string[]>
       thumbnailAddColorRecent(color: string): Promise<string[]>
 

@@ -15,7 +15,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   FlipHorizontal2, FlipVertical2,
-  ChevronDown, ChevronRight, Loader2, Eraser, Radio, Palette,
+  ChevronDown, ChevronRight, Loader2, Eraser, Radio, Palette, Upload,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -1397,6 +1397,9 @@ const PaletteContext = createContext<{
 
 /** Drag payload type for palette swatches → color fields. */
 const COLOR_DRAG_MIME = 'application/x-sm-color'
+/** Drag payload for edit-mode swatch REORDERING — deliberately a different
+ *  type so color fields never light up (or accept) a reorder drag. */
+const SWATCH_REORDER_MIME = 'application/x-sm-swatch-reorder'
 
 /** Replace the default drag snapshot — which bakes in the dashed frame and
  *  the panel background behind the rounded corners — with a clean rounded
@@ -1416,7 +1419,7 @@ function setColorDragImage(e: React.DragEvent, color: string) {
  *  so the border only ever contrasts against the panel background (a border
  *  drawn over the color itself was invisible on bright swatches). Shared by
  *  the palette panel and the per-field popover so the two can't drift. */
-const RECENT_TILE_CLS = 'w-[22px] h-[22px] rounded-md border border-dashed border-gray-400 hover:border-white/70 transition-colors -m-[1px]'
+const RECENT_TILE_CLS = 'w-[22px] h-[22px] rounded-md border border-dashed border-white/50 -m-[1px]'
 const RECENT_FILL_CLS = 'block w-full h-full rounded-[5px]'
 
 function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
@@ -1480,7 +1483,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
     recordRecent(color)
   }
 
-  const swatchTile = 'w-5 h-5 rounded-md border border-white/15'
+  const swatchTile = 'w-5 h-5 rounded-md border border-white/50'
 
   return (
     <div
@@ -2463,6 +2466,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [palette, setPalette] = useState<PaletteSwatch[] | null>(null)
   const [colorRecents, setColorRecents] = useState<string[]>([])
   const [paletteError, setPaletteError] = useState<string | null>(null)
+  // Neutral feedback line (import/export results) — paletteError stays red
+  // for real failures.
+  const [paletteNotice, setPaletteNotice] = useState<string | null>(null)
+  // Edit-mode selection (phase 3) — indexes into `palette`. Anchor drives
+  // shift-range selection; drop index is the live reorder insertion point.
+  const [selectedSwatches, setSelectedSwatches] = useState<ReadonlySet<number>>(new Set())
+  const swatchAnchorRef = useRef<number | null>(null)
+  const [swatchDropIndex, setSwatchDropIndex] = useState<number | null>(null)
   useEffect(() => {
     if (!config.streamsDir) return
     let cancelled = false
@@ -2483,6 +2494,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const persistPalette = useCallback((next: PaletteSwatch[]) => {
     setPalette(next)
     setPaletteError(null)
+    setPaletteNotice(null)
+    // Any mutation invalidates the index-based edit-mode selection.
+    setSelectedSwatches(new Set())
+    swatchAnchorRef.current = null
     if (!config.streamsDir) return
     window.api.thumbnailSetPalette(config.streamsDir, next).catch(err => {
       console.error('Failed to save palette', err)
@@ -2494,10 +2509,6 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const c = color.toLowerCase()
     if (palette.some(s => s.color.toLowerCase() === c)) return
     persistPalette([...palette, { color: c }])
-  }, [palette, persistPalette])
-  const removePaletteSwatch = useCallback((index: number) => {
-    if (!palette) return
-    persistPalette(palette.filter((_, i) => i !== index))
   }, [palette, persistPalette])
   const recordRecentColor = useCallback((color: string) => {
     // slice(0, 7) truncates the STRING to '#rrggbb' — rgb only, normalized;
@@ -2524,10 +2535,103 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     recordRecent: recordRecentColor,
   }), [palette, visibleRecents, recordRecentColor])
   const paletteAddInputRef = useRef<HTMLInputElement>(null)
-  // Palette edit mode (pencil in the header): click-to-remove replaces the
-  // old per-swatch corner trash, which was tiny and cluttered the resting
-  // UI. Phase 3's multi-select/reorder will live in this mode too.
+  // Palette edit mode (pencil in the header) — phase 3: click selects
+  // (Ctrl toggles, Shift ranges from the anchor), drag reorders (a
+  // multi-selection moves as a block), and the toolbar carries
+  // delete / reset / export / import.
   const [paletteEditMode, setPaletteEditMode] = useState(false)
+  const [confirmPaletteReset, setConfirmPaletteReset] = useState(false)
+  // Leaving edit mode drops the selection and any pending drop indicator.
+  useEffect(() => {
+    if (paletteEditMode) return
+    setSelectedSwatches(new Set())
+    setSwatchDropIndex(null)
+    swatchAnchorRef.current = null
+  }, [paletteEditMode])
+
+  const handleSwatchSelect = useCallback((i: number, e: React.MouseEvent) => {
+    setSelectedSwatches(prev => {
+      const next = new Set(prev)
+      const anchor = swatchAnchorRef.current
+      if (e.shiftKey && anchor !== null) {
+        if (!e.ctrlKey) next.clear()
+        for (let k = Math.min(anchor, i); k <= Math.max(anchor, i); k++) next.add(k)
+      } else if (e.ctrlKey) {
+        if (next.has(i)) next.delete(i)
+        else next.add(i)
+        swatchAnchorRef.current = i
+      } else {
+        // Plain click: select only this one; clicking the sole selected
+        // swatch again deselects.
+        const wasSole = next.size === 1 && next.has(i)
+        next.clear()
+        if (!wasSole) next.add(i)
+        swatchAnchorRef.current = wasSole ? null : i
+      }
+      return next
+    })
+  }, [])
+
+  const deleteSelectedSwatches = useCallback(() => {
+    if (!palette || selectedSwatches.size === 0) return
+    persistPalette(palette.filter((_, i) => !selectedSwatches.has(i)))
+  }, [palette, selectedSwatches, persistPalette])
+
+  // Reorder drop: `insertAt` indexes the CURRENT array; the moved selection
+  // is pulled out (relative order kept) and re-inserted at the equivalent
+  // position among the remaining swatches.
+  const commitSwatchReorder = useCallback((insertAt: number) => {
+    setSwatchDropIndex(null)
+    if (!palette || selectedSwatches.size === 0) return
+    const sel = [...selectedSwatches].sort((a, b) => a - b)
+    const moving = sel.map(i => palette[i])
+    const rest = palette.filter((_, i) => !selectedSwatches.has(i))
+    const at = insertAt - sel.filter(i => i < insertAt).length
+    persistPalette([...rest.slice(0, at), ...moving, ...rest.slice(at)])
+  }, [palette, selectedSwatches, persistPalette])
+
+  const exportPalette = useCallback(async () => {
+    if (!palette) return
+    try {
+      const target = await window.api.saveFileDialog({
+        title: 'Export palette',
+        defaultPath: 'sm-palette.json',
+        filters: [{ name: 'Palette JSON', extensions: ['json'] }],
+      })
+      if (!target) return
+      await window.api.thumbnailExportPalette(target, palette)
+      setPaletteNotice(`Exported ${palette.length} color${palette.length === 1 ? '' : 's'}`)
+    } catch (err) {
+      console.error('Palette export failed', err)
+      setPaletteError('Export failed — see the console for the cause')
+    }
+  }, [palette])
+
+  const importPalette = useCallback(async () => {
+    try {
+      const picked = await window.api.openFileDialog({
+        title: 'Import palette',
+        filters: [{ name: 'Palette JSON', extensions: ['json'] }],
+        properties: ['openFile'],
+      })
+      const file = picked?.[0]
+      if (!file) return
+      const swatches = await window.api.thumbnailImportPalette(file)
+      const cur = palette ?? []
+      const have = new Set(cur.map(s => s.color.toLowerCase()))
+      const added = swatches.filter(s => !have.has(s.color.toLowerCase()))
+      if (added.length === 0) {
+        setPaletteNotice('No new colors — that file’s colors are all in the palette already')
+        return
+      }
+      persistPalette([...cur, ...added])
+      setPaletteNotice(`Added ${added.length} color${added.length === 1 ? '' : 's'}`)
+    } catch (err) {
+      console.error('Palette import failed', err)
+      const msg = err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err)
+      setPaletteError(`Import failed: ${msg}`)
+    }
+  }, [palette, persistPalette])
   const [assetsCollapsed, setAssetsCollapsed] = useState(() => localStorage.getItem('thumbAssetsCollapsed') === 'true')
   const toggleAssetsCollapsed = () => {
     const next = !assetsCollapsed
@@ -5904,6 +6008,41 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 </div>
                 {!paletteCollapsed && (
                   <div className="px-3 py-2 flex flex-col gap-2">
+                    {/* Edit-mode toolbar: selection count + delete, reset,
+                        export, import. Deletion moved here from per-swatch
+                        buttons when multi-select arrived. */}
+                    {paletteEditMode && palette !== null && (
+                      <div className="flex items-center gap-0.5">
+                        <span className="text-[10px] text-gray-400 mr-auto">
+                          {selectedSwatches.size > 0 ? `${selectedSwatches.size} selected` : 'Click to select'}
+                        </span>
+                        <Tooltip content={selectedSwatches.size > 0 ? `Delete ${selectedSwatches.size} selected swatch${selectedSwatches.size === 1 ? '' : 'es'}` : 'Delete selected — select swatches first'}>
+                          <button
+                            type="button"
+                            onClick={deleteSelectedSwatches}
+                            disabled={selectedSwatches.size === 0}
+                            className={`p-1 rounded transition-colors ${selectedSwatches.size > 0 ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/10' : 'text-gray-600 cursor-default'}`}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content="Reset to the default palette">
+                          <button type="button" onClick={() => setConfirmPaletteReset(true)} className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors">
+                            <RotateCcw size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content="Export the palette to a .json file">
+                          <button type="button" onClick={() => void exportPalette()} className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors">
+                            <Download size={12} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content="Import colors from a palette .json — adds missing colors, never removes">
+                          <button type="button" onClick={() => void importPalette()} className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors">
+                            <Upload size={12} />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    )}
                     {palette === null ? (
                       <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
                         <Loader2 size={11} className="animate-spin" /> Loading palette…
@@ -5918,42 +6057,78 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                           // inline-flex trigger added baseline space below
                           // each tile, making wrapped-row gaps look bigger
                           // than in-row gaps.
-                          <Tooltip
-                            key={`${s.color}-${i}`}
-                            content={paletteEditMode
-                              ? `Remove ${s.color.toUpperCase()}`
-                              : (
-                                <>
-                                  <div className="tabular-nums">{s.color.toUpperCase()}</div>
-                                  <div>Drag over color field to apply</div>
-                                </>
+                          <React.Fragment key={`${s.color}-${i}`}>
+                            {/* Reorder insertion marker (edit mode). The
+                                negative margins mostly cancel the flex gap
+                                so the marker reads as a line BETWEEN tiles
+                                rather than a shoved-in element. */}
+                            {paletteEditMode && swatchDropIndex === i && <div className="w-0.5 h-5 -mx-[3px] rounded bg-purple-500" />}
+                            <Tooltip
+                              content={paletteEditMode
+                                ? (
+                                  <>
+                                    <div className="tabular-nums">{s.color.toUpperCase()}</div>
+                                    <div>Click to select · drag to reorder</div>
+                                  </>
+                                )
+                                : (
+                                  <>
+                                    <div className="tabular-nums">{s.color.toUpperCase()}</div>
+                                    <div>Drag over color field to apply</div>
+                                  </>
+                                )}
+                            >
+                              {/* Two personalities: normal mode = drag-to-apply
+                                  tile; edit mode = click to select (Ctrl
+                                  toggles, Shift ranges), drag to reorder —
+                                  a multi-selection moves as a block. */}
+                              {paletteEditMode ? (
+                                <button
+                                  type="button"
+                                  draggable
+                                  onClick={e => handleSwatchSelect(i, e)}
+                                  onDragStart={e => {
+                                    // Dragging an unselected tile selects it first.
+                                    if (!selectedSwatches.has(i)) {
+                                      setSelectedSwatches(new Set([i]))
+                                      swatchAnchorRef.current = i
+                                    }
+                                    e.dataTransfer.setData(SWATCH_REORDER_MIME, '')
+                                    e.dataTransfer.effectAllowed = 'move'
+                                    setColorDragImage(e, s.color)
+                                  }}
+                                  onDragOver={e => {
+                                    if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
+                                    e.preventDefault()
+                                    e.dataTransfer.dropEffect = 'move'
+                                    const r = e.currentTarget.getBoundingClientRect()
+                                    setSwatchDropIndex(e.clientX < r.left + r.width / 2 ? i : i + 1)
+                                  }}
+                                  onDrop={e => {
+                                    if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
+                                    e.preventDefault()
+                                    if (swatchDropIndex !== null) commitSwatchReorder(swatchDropIndex)
+                                  }}
+                                  onDragEnd={() => setSwatchDropIndex(null)}
+                                  className={`w-5 h-5 rounded-md border transition-shadow ${selectedSwatches.has(i) ? 'border-transparent ring-2 ring-purple-400' : 'border-white/50 hover:ring-1 hover:ring-white/70'}`}
+                                  style={{ background: s.color }}
+                                />
+                              ) : (
+                                <div
+                                  draggable
+                                  onDragStart={e => {
+                                    e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
+                                    e.dataTransfer.effectAllowed = 'copy'
+                                    setColorDragImage(e, s.color)
+                                  }}
+                                  className="w-5 h-5 rounded-md border border-white/50 cursor-grab active:cursor-grabbing"
+                                  style={{ background: s.color }}
+                                />
                               )}
-                          >
-                            {/* Two personalities: normal mode = drag-to-apply
-                                tile; edit mode = click-to-remove button with
-                                a red hover treatment (replaces the old tiny
-                                corner trash, which cluttered the resting UI). */}
-                            {paletteEditMode ? (
-                              <button
-                                type="button"
-                                onClick={() => removePaletteSwatch(i)}
-                                className="w-5 h-5 rounded-md border border-white/15 hover:ring-2 hover:ring-red-400 hover:border-transparent transition-shadow"
-                                style={{ background: s.color }}
-                              />
-                            ) : (
-                              <div
-                                draggable
-                                onDragStart={e => {
-                                  e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
-                                  e.dataTransfer.effectAllowed = 'copy'
-                                  setColorDragImage(e, s.color)
-                                }}
-                                className="w-5 h-5 rounded-md border border-white/15 cursor-grab active:cursor-grabbing"
-                                style={{ background: s.color }}
-                              />
-                            )}
-                          </Tooltip>
+                            </Tooltip>
+                          </React.Fragment>
                         ))}
+                        {paletteEditMode && swatchDropIndex === palette.length && <div className="w-0.5 h-5 -mx-[3px] rounded bg-purple-500" />}
                       </div>
                     )}
                     {visibleRecents.length > 0 && (
@@ -5995,10 +6170,42 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                         </div>
                       </>
                     )}
+                    {paletteNotice && <p className="text-[10px] text-gray-400">{paletteNotice}</p>}
                     {paletteError && <p className="text-[10px] text-red-400">{paletteError}</p>}
                   </div>
                 )}
               </div>
+
+              {/* Reset-palette confirm — replaces the saved swatches with the
+                  default set; destructive, so it gets the standard confirm
+                  (Cancel left, danger action right). */}
+              {confirmPaletteReset && (
+                <Modal
+                  isOpen
+                  onClose={() => setConfirmPaletteReset(false)}
+                  title="Reset palette?"
+                  width="sm"
+                  footer={
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => setConfirmPaletteReset(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => {
+                          persistPalette([...DEFAULT_PALETTE])
+                          setConfirmPaletteReset(false)
+                        }}
+                      >
+                        Reset palette
+                      </Button>
+                    </>
+                  }
+                >
+                  <p className="text-sm text-gray-300">Your saved swatches will be replaced with the default set. Exported palette files are not affected.</p>
+                </Modal>
+              )}
 
               {/* Properties */}
               <div className="flex flex-col flex-1 overflow-hidden min-h-0">

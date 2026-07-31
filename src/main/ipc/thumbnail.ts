@@ -298,6 +298,26 @@ export function registerThumbnailIPC(): void {
     fs.renameSync(tmp, file)
   })
 
+  // Export/import use the same {version, swatches} shape as _palette.json,
+  // so an exported file can even be dropped in as _palette.json by hand.
+  // Import tolerates bare arrays and bare hex strings, validates every
+  // color, and throws (honest errors) when nothing usable is found.
+  ipcMain.handle('thumbnail:exportPalette', (_e, filePath: string, swatches: { name?: string; color: string }[]) => {
+    fs.writeFileSync(filePath, JSON.stringify({ version: 1, swatches }, null, 2), 'utf8')
+  })
+
+  ipcMain.handle('thumbnail:importPalette', (_e, filePath: string): { name?: string; color: string }[] => {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+    const arr = Array.isArray(parsed) ? parsed : parsed?.swatches
+    if (!Array.isArray(arr)) throw new Error('not a palette file (no swatches array)')
+    const swatches = arr
+      .map((s: unknown) => (typeof s === 'string' ? { color: s } : s as { name?: unknown; color?: unknown }))
+      .filter((s): s is { name?: unknown; color: string } => typeof s?.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color))
+      .map(s => ({ ...(typeof s.name === 'string' ? { name: s.name } : {}), color: s.color.toLowerCase() }))
+    if (swatches.length === 0) throw new Error('no valid colors found in file')
+    return swatches
+  })
+
   ipcMain.handle('thumbnail:getColorRecents', () => {
     return getStore().get('thumbnailColorRecents', [])
   })
