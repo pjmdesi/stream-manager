@@ -1419,8 +1419,8 @@ function setColorDragImage(e: React.DragEvent, color: string) {
  *  so the border only ever contrasts against the panel background (a border
  *  drawn over the color itself was invisible on bright swatches). Shared by
  *  the palette panel and the per-field popover so the two can't drift. */
-const RECENT_TILE_CLS = 'w-[22px] h-[22px] rounded-md border border-dashed border-white/50 -m-[1px]'
-const RECENT_FILL_CLS = 'block w-full h-full rounded-[5px]'
+const RECENT_TILE_CLS = 'w-5 h-5'
+const RECENT_FILL_CLS = 'block w-full h-full rounded-[5px] border border-dashed border-white/50'
 
 function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
   value: string | undefined
@@ -6031,14 +6031,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             <RotateCcw size={12} />
                           </button>
                         </Tooltip>
+                        {/* Icon semantics (PJ): the tray is the APP — arrow
+                            up/out of it = export, arrow down/into it =
+                            import. (The web convention is the reverse;
+                            deliberate choice for a local desktop app.) */}
                         <Tooltip content="Export the palette to a .json file">
                           <button type="button" onClick={() => void exportPalette()} className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors">
-                            <Download size={12} />
+                            <Upload size={12} />
                           </button>
                         </Tooltip>
                         <Tooltip content="Import colors from a palette .json — adds missing colors, never removes">
                           <button type="button" onClick={() => void importPalette()} className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors">
-                            <Upload size={12} />
+                            <Download size={12} />
                           </button>
                         </Tooltip>
                       </div>
