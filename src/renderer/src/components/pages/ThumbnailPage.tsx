@@ -15,7 +15,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   FlipHorizontal2, FlipVertical2,
-  ChevronDown, ChevronRight, Loader2, Eraser, Radio,
+  ChevronDown, ChevronRight, Loader2, Eraser, Radio, Palette,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -747,6 +747,27 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
     </KonvaGroup>
   )
 }
+
+/** Default palette (thumbnails #1). Black→white run first, then the
+ *  saturated colors in spectrum order, then brown. Plain "typical" hex
+ *  values on purpose — a starting point users will replace, not a
+ *  designed scheme. */
+const DEFAULT_PALETTE: ReadonlyArray<{ name: string; color: string }> = [
+  { name: 'Black', color: '#000000' },
+  { name: 'Dark gray', color: '#404040' },
+  { name: 'Gray', color: '#808080' },
+  { name: 'Light gray', color: '#bfbfbf' },
+  { name: 'White', color: '#ffffff' },
+  { name: 'Red', color: '#ff0000' },
+  { name: 'Orange', color: '#ff8000' },
+  { name: 'Yellow', color: '#ffff00' },
+  { name: 'Green', color: '#00ff00' },
+  { name: 'Cyan', color: '#00ffff' },
+  { name: 'Blue', color: '#0000ff' },
+  { name: 'Purple', color: '#8000ff' },
+  { name: 'Magenta', color: '#ff00ff' },
+  { name: 'Brown', color: '#8b4513' },
+]
 
 /** Letter-case control options (thumbnails #7). Labels mirror Figma's
  *  letter-case buttons. Small caps is deliberately absent: it's an
@@ -2245,6 +2266,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const assetOptionsRef = useRef<HTMLDivElement>(null)
   // Assets-panel collapse — just the header when collapsed (options button
   // and list hidden). Persisted UI pref, same pattern as the files grid.
+  // Palette panel collapse (thumbnails #1) — same persistence pattern as
+  // the assets panel below.
+  const [paletteCollapsed, setPaletteCollapsed] = useState(() => localStorage.getItem('thumbPaletteCollapsed') === 'true')
+  const togglePaletteCollapsed = () => {
+    const next = !paletteCollapsed
+    setPaletteCollapsed(next)
+    localStorage.setItem('thumbPaletteCollapsed', String(next))
+  }
   const [assetsCollapsed, setAssetsCollapsed] = useState(() => localStorage.getItem('thumbAssetsCollapsed') === 'true')
   const toggleAssetsCollapsed = () => {
     const next = !assetsCollapsed
@@ -5576,6 +5605,37 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               {/* Divider */}
               <div className="border-t border-white/10 shrink-0" />
 
+              {/* Palette — global color swatches (thumbnails #1). v1 shows the
+                  default set; recents/apply/management arrive in later
+                  phases, so the swatches are plain tiles for now (no dead
+                  buttons). */}
+              <div className="flex flex-col shrink-0">
+                <div className="flex items-center gap-1.5 px-3 h-8 border-t border-b border-white/5 shrink-0">
+                  <Tooltip
+                    content={paletteCollapsed ? 'Expand palette' : 'Collapse palette'}
+                    triggerClassName="self-stretch -ml-3 flex"
+                  >
+                    <button
+                      type="button"
+                      onClick={togglePaletteCollapsed}
+                      className="h-full aspect-square flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                    >
+                      {paletteCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                  </Tooltip>
+                  <Palette size={11} className="text-gray-400" />
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Palette</span>
+                </div>
+                {!paletteCollapsed && (
+                  <div className="px-3 py-2 flex flex-wrap gap-1.5">
+                    {DEFAULT_PALETTE.map(s => (
+                      <Tooltip key={s.name} content={`${s.name} · ${s.color.toUpperCase()}`}>
+                        <div className="w-5 h-5 rounded-md border border-white/15" style={{ background: s.color }} />
+                      </Tooltip>
+                    ))}
+                  </div>
+                )}
+              </div>
               {/* Assets — images from the current stream's folder + same-season
                   episodes. Drag a thumbnail onto the canvas to add it as an
                   image layer. */}
