@@ -207,6 +207,11 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
         onMouseEnter={wantsInternalHover ? show : undefined}
         onMouseLeave={wantsInternalHover ? close : undefined}
         onClick={wantsInternalHover && !interactive ? hideNow : undefined}
+        // Native drag suppresses mouse events, so a drag started from the
+        // trigger (palette swatches, layer rows) would leave the tooltip
+        // stranded open for the whole gesture — hide it the moment the
+        // drag begins.
+        onDragStart={wantsInternalHover ? hideNow : undefined}
       >
         {children}
       </div>

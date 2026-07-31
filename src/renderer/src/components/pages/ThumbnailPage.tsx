@@ -1398,6 +1398,20 @@ const PaletteContext = createContext<{
 /** Drag payload type for palette swatches → color fields. */
 const COLOR_DRAG_MIME = 'application/x-sm-color'
 
+/** Replace the default drag snapshot — which bakes in the dashed frame and
+ *  the panel background behind the rounded corners — with a clean rounded
+ *  square of the raw color. The square itself is fully opaque; the slight
+ *  ghosting on top of it is the browser's own drag rendering and isn't
+ *  controllable. */
+function setColorDragImage(e: React.DragEvent, color: string) {
+  const el = document.createElement('div')
+  el.style.cssText = `width:20px;height:20px;border-radius:5px;background:${color};position:fixed;top:-100px;left:-100px;pointer-events:none;`
+  document.body.appendChild(el)
+  e.dataTransfer.setDragImage(el, 10, 10)
+  // Chromium snapshots the element during dragstart; safe to drop it after.
+  setTimeout(() => el.remove(), 0)
+}
+
 /** Recents tile — dashed OUTER border with the color fill inset inside it,
  *  so the border only ever contrasts against the panel background (a border
  *  drawn over the color itself was invisible on bright swatches). Shared by
@@ -5892,6 +5906,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                 onDragStart={e => {
                                   e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
                                   e.dataTransfer.effectAllowed = 'copy'
+                                  setColorDragImage(e, s.color)
                                 }}
                                 className="w-5 h-5 rounded-md border border-white/15 cursor-grab active:cursor-grabbing"
                                 style={{ background: s.color }}
@@ -5932,6 +5947,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                 onDragStart={e => {
                                   e.dataTransfer.setData(COLOR_DRAG_MIME, c)
                                   e.dataTransfer.effectAllowed = 'copy'
+                                  setColorDragImage(e, c)
                                 }}
                                 onClick={() => addPaletteSwatch(c)}
                                 className={`${RECENT_TILE_CLS} cursor-grab active:cursor-grabbing`}
