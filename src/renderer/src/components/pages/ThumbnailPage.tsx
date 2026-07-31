@@ -1,7 +1,7 @@
 import React, {
   useState, useEffect, useRef, useCallback, useMemo, useContext, createContext,
 } from 'react'
-import { flushSync } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import { Stage, Layer, Group as KonvaGroup, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, Shape as KonvaShape } from 'react-konva'
 import useImage from 'use-image'
 import Konva from 'konva'
@@ -1398,23 +1398,12 @@ const PaletteContext = createContext<{
 /** Drag payload type for palette swatches → color fields. */
 const COLOR_DRAG_MIME = 'application/x-sm-color'
 
-/** Perceived-luminance check for choosing a contrasting border on tiny
- *  swatches — the recents row's dashed border was invisible on bright
- *  colors with a fixed white border. */
-function isLightColor(hex: string): boolean {
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex)
-  if (!m) return false
-  const [r, g, b] = [m[1], m[2], m[3]].map(h => parseInt(h, 16) / 255)
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6
-}
-
-/** Recents tile — dashed border (distinguishes from saved swatches) with
- *  luminance-aware contrast. Shared by the palette panel and the per-field
- *  popover so the two can't drift. */
-const recentTileCls = (color: string) =>
-  `w-5 h-5 rounded-md border border-dashed transition-colors ${
-    isLightColor(color) ? 'border-black/50 hover:border-black/80' : 'border-white/40 hover:border-white/70'
-  }`
+/** Recents tile — dashed OUTER border with the color fill inset inside it,
+ *  so the border only ever contrasts against the panel background (a border
+ *  drawn over the color itself was invisible on bright swatches). Shared by
+ *  the palette panel and the per-field popover so the two can't drift. */
+const RECENT_TILE_CLS = 'w-[22px] h-[22px] rounded-md border border-dashed border-gray-400 hover:border-white/70 transition-colors -m-[1px]'
+const RECENT_FILL_CLS = 'block w-full h-full rounded-[5px]'
 
 function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
   value: string | undefined
@@ -1429,6 +1418,21 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
   const colorInputRef = useRef<HTMLInputElement>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [dragHover, setDragHover] = useState(false)
+  const popRef = useRef<HTMLDivElement>(null)
+  // Anchor for the PORTALED popover: rendered inline it was clipped by the
+  // sidebar's overflow-hidden (a 246px popover in a 256px sidebar).
+  // Right-aligned to the field, flipping above when the field sits near the
+  // bottom of the window.
+  const [popPos, setPopPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
+  const openPopover = () => {
+    const r = wrapRef.current?.getBoundingClientRect()
+    if (!r) return
+    const estimatedHeight = 220
+    setPopPos(r.bottom + estimatedHeight > window.innerHeight
+      ? { bottom: window.innerHeight - r.top + 4, right: window.innerWidth - r.right }
+      : { top: r.bottom + 4, right: window.innerWidth - r.right })
+    setPaletteOpen(true)
+  }
 
   // Recents feed from the native picker: React's onChange is the `input`
   // event (fires per tick while dragging inside the dialog); the native
@@ -1442,11 +1446,14 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
     return () => el.removeEventListener('change', onCommit)
   }, [recordRecent])
 
-  // Outside-click closes the palette popover.
+  // Outside-click closes the palette popover. The popover is portaled, so
+  // both the field and the popover count as "inside".
   useEffect(() => {
     if (!paletteOpen) return
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setPaletteOpen(false)
+      const t = e.target as Node
+      if (wrapRef.current?.contains(t) || popRef.current?.contains(t)) return
+      setPaletteOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
@@ -1465,6 +1472,12 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
     <div
       ref={wrapRef}
       className={`relative flex items-center gap-1.5 min-w-0 rounded-lg ${dragHover ? 'ring-1 ring-purple-300/60' : ''}`}
+      // The whole field sits inside a <label>: clicks on our custom controls
+      // would otherwise FORWARD to the label's first control — the native
+      // color input — and pop its dialog (the phantom picker seen after
+      // closing the palette popover). Only a direct click on the input
+      // itself may activate it.
+      onClick={e => { if (e.target !== colorInputRef.current) e.preventDefault() }}
       onDragOver={e => {
         if (!e.dataTransfer.types.includes(COLOR_DRAG_MIME)) return
         e.preventDefault()
@@ -1503,6 +1516,8 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
           onChange={e => onChange(e.target.value)}
           onBlur={e => {
             const v = e.target.value
+            // slice(0, 7) truncates the STRING '#rrggbbaa' → '#rrggbb'
+            // (alpha never enters recents) — it is not a list cap.
             if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v)) recordRecent(v.slice(0, 7))
           }}
           className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
@@ -1517,35 +1532,40 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
           className="w-14 shrink-0"
         />
       </Tooltip>
-      <Tooltip content="Apply a palette color">
-        <button
-          type="button"
-          onClick={() => setPaletteOpen(o => !o)}
-          className={`p-1 rounded transition-colors shrink-0 ${paletteOpen ? 'text-gray-200 bg-white/10' : 'text-gray-500 hover:text-gray-200 hover:bg-white/10'}`}
-        >
-          <Palette size={12} />
-        </button>
-      </Tooltip>
-      <Tooltip content="Clear — fully transparent">
-        <button
-          type="button"
-          onClick={() => onChange(joinColorAlpha(rgb, 0))}
-          className="p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors shrink-0"
-        >
-          <Eraser size={12} />
-        </button>
-      </Tooltip>
+      {/* Gapless button pair — the row's gap-1.5 between these two was
+          width the hex input needs for 8-digit values. */}
+      <div className="flex items-center shrink-0">
+        <Tooltip content="Apply a palette color">
+          <button
+            type="button"
+            onClick={() => { if (paletteOpen) setPaletteOpen(false); else openPopover() }}
+            className={`p-1 rounded transition-colors ${paletteOpen ? 'text-gray-200 bg-white/10' : 'text-gray-500 hover:text-gray-200 hover:bg-white/10'}`}
+          >
+            <Palette size={12} />
+          </button>
+        </Tooltip>
+        <Tooltip content="Clear — fully transparent">
+          <button
+            type="button"
+            onClick={() => onChange(joinColorAlpha(rgb, 0))}
+            className="p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
+          >
+            <Eraser size={12} />
+          </button>
+        </Tooltip>
+      </div>
       {/* Keyboard-friendly apply path (thumbnails #1): the popover mirrors
           the palette panel — palette grid first, recents below — at the
           same 9-across width so muscle memory from the panel transfers.
           Picks keep the popover OPEN (try several colors in a row; outside
-          click / Esc / the toggle closes it), and tile clicks preventDefault:
-          the whole field lives inside a <label>, and the label's forwarding
-          would otherwise activate the native color input. Esc stays local
+          click / Esc / the toggle closes it). PORTALED to the body: inline
+          it was clipped by the sidebar's overflow-hidden. Esc stays local
           (stopPropagation) so it can't bubble into editor shortcuts. */}
-      {paletteOpen && (
+      {paletteOpen && popPos && createPortal(
         <div
-          className="absolute right-0 top-full mt-1 z-30 w-[244px] bg-navy-800 border border-white/10 rounded-lg shadow-xl p-2 flex flex-col gap-2"
+          ref={popRef}
+          className="fixed z-50 w-[246px] bg-navy-800 border border-white/10 rounded-lg shadow-xl p-2 flex flex-col gap-2"
+          style={{ top: popPos.top, bottom: popPos.bottom, right: popPos.right }}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setPaletteOpen(false) } }}
         >
           {palette.length === 0 ? (
@@ -1554,7 +1574,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
             <div className="flex flex-wrap gap-1.5">
               {palette.map((s, i) => (
                 <Tooltip key={`${s.color}-${i}`} content={`${s.name ? `${s.name} · ` : ''}${s.color.toUpperCase()}`}>
-                  <button type="button" onClick={e => { e.preventDefault(); applySwatch(s.color) }} className={swatchTile} style={{ background: s.color }} />
+                  <button type="button" onClick={() => applySwatch(s.color)} className={swatchTile} style={{ background: s.color }} />
                 </Tooltip>
               ))}
             </div>
@@ -1562,17 +1582,20 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
           {recents.length > 0 && (
             <>
               <div className="border-t border-white/20" />
-              <p className="text-[9px] uppercase tracking-wider text-gray-500">Recent</p>
+              <p className="text-[9px] uppercase tracking-wider text-gray-400">Recent</p>
               <div className="flex flex-wrap gap-1.5">
                 {recents.map(c => (
                   <Tooltip key={c} content={`Recent · ${c.toUpperCase()}`}>
-                    <button type="button" onClick={e => { e.preventDefault(); applySwatch(c) }} className={recentTileCls(c)} style={{ background: c }} />
+                    <button type="button" onClick={() => applySwatch(c)} className={RECENT_TILE_CLS}>
+                      <span className={RECENT_FILL_CLS} style={{ background: c }} />
+                    </button>
                   </Tooltip>
                 ))}
               </div>
             </>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
@@ -2462,7 +2485,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     persistPalette(palette.filter((_, i) => i !== index))
   }, [palette, persistPalette])
   const recordRecentColor = useCallback((color: string) => {
-    // rgb only, normalized — alpha lives per-field, not in the palette.
+    // slice(0, 7) truncates the STRING to '#rrggbb' — rgb only, normalized;
+    // alpha lives per-field, not in the palette. (Not a list cap: the
+    // stored list caps in main, the visible row in visibleRecents.)
     const c = color.slice(0, 7).toLowerCase()
     if (!/^#[0-9a-f]{6}$/.test(c)) return
     window.api.thumbnailAddColorRecent(c)
@@ -2471,9 +2496,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   }, [])
   // Recents that duplicate a saved swatch add nothing — the color is already
   // one tile away — so displays filter them out (storage keeps the full
-  // list: deleting the swatch resurfaces the recent).
+  // list: deleting the swatch resurfaces the recent). THIS slice is the
+  // one-row cap (9 across at the panel's width); storage keeps more so
+  // filtered-out duplicates can't shrink the visible row.
   const visibleRecents = useMemo(
-    () => colorRecents.filter(c => !(palette ?? []).some(s => s.color.toLowerCase() === c)),
+    () => colorRecents.filter(c => !(palette ?? []).some(s => s.color.toLowerCase() === c)).slice(0, 9),
     [colorRecents, palette],
   )
   const paletteCtx = useMemo(() => ({
@@ -5891,10 +5918,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     {visibleRecents.length > 0 && (
                       <>
                         <div className="border-t border-white/20" />
-                        <p className="text-[9px] uppercase tracking-wider text-gray-500">Recent</p>
-                        {/* Recents — dashed, luminance-aware border. Click
-                            ADDS to the palette; drag applies to a color
-                            field, same as saved swatches. */}
+                        <p className="text-[9px] uppercase tracking-wider text-gray-400">Recent</p>
+                        {/* Recents — dashed outer border, color fill inset
+                            inside it. Click ADDS to the palette; drag
+                            applies to a color field, same as saved
+                            swatches. */}
                         <div className="flex flex-wrap gap-1.5">
                           {visibleRecents.map(c => (
                             <Tooltip key={c} content={`Add to palette · ${c.toUpperCase()} — drag onto a color field to apply`}>
@@ -5906,9 +5934,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                   e.dataTransfer.effectAllowed = 'copy'
                                 }}
                                 onClick={() => addPaletteSwatch(c)}
-                                className={`${recentTileCls(c)} cursor-grab active:cursor-grabbing`}
-                                style={{ background: c }}
-                              />
+                                className={`${RECENT_TILE_CLS} cursor-grab active:cursor-grabbing`}
+                              >
+                                <span className={RECENT_FILL_CLS} style={{ background: c }} />
+                              </button>
                             </Tooltip>
                           ))}
                         </div>

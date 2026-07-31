@@ -214,6 +214,8 @@ type StoreShape = {
   thumbnailRecents: any[]
   playerRecents: any[]
   thumbnailLastFont: string
+  /** Recently-used thumbnail-editor colors (#rrggbb, newest first). */
+  thumbnailColorRecents: string[]
   pendingJobs: any[]
   /** Per-game-tag link to a YT tag template id. When a stream gains its
    *  first game tag and `meta.ytTags` is empty, the linked template's
@@ -241,6 +243,7 @@ export function getStore(): Store<StoreShape> {
         thumbnailRecents: [],
         playerRecents: [],
         thumbnailLastFont: '',
+        thumbnailColorRecents: [],
         pendingJobs: [],
         gameTagsLinks: {},
       }

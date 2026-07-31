@@ -299,15 +299,17 @@ export function registerThumbnailIPC(): void {
   })
 
   ipcMain.handle('thumbnail:getColorRecents', () => {
-    return (getStore() as any).get('thumbnailColorRecents', []) as string[]
+    return getStore().get('thumbnailColorRecents', [])
   })
 
   ipcMain.handle('thumbnail:addColorRecent', (_e, color: string) => {
-    // One row's worth (9 at the palette panel's current width) — the spec
-    // bounds recents by what fits, oldest dropped when a new color lands.
+    // Stored cap is deliberately LARGER than the visible row (9): the
+    // renderer hides recents that duplicate a saved swatch, and if storage
+    // capped at 9 those hidden entries would eat visible slots (the row
+    // showed 8). The renderer slices the filtered list to the row.
     const c = color.toLowerCase()
-    const updated = [c, ...((getStore() as any).get('thumbnailColorRecents', []) as string[]).filter(x => x !== c)].slice(0, 9)
-    ;(getStore() as any).set('thumbnailColorRecents', updated)
+    const updated = [c, ...getStore().get('thumbnailColorRecents', []).filter(x => x !== c)].slice(0, 30)
+    getStore().set('thumbnailColorRecents', updated)
     return updated
   })
 }
