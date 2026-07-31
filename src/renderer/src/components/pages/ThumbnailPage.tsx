@@ -2454,6 +2454,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const next = !paletteCollapsed
     setPaletteCollapsed(next)
     localStorage.setItem('thumbPaletteCollapsed', String(next))
+    if (next) setPaletteEditMode(false)
   }
   // ── Palette data (thumbnails #1, phase 2) ─────────────────────────────────
   // Palette: _palette.json beside _meta.json (travels with the library).
@@ -2523,9 +2524,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     recordRecent: recordRecentColor,
   }), [palette, visibleRecents, recordRecentColor])
   const paletteAddInputRef = useRef<HTMLInputElement>(null)
-  // True while a swatch (saved or recent) is being dragged — the per-swatch
-  // trash buttons hide for the duration so the drag ghost path stays clean.
-  const [swatchDragActive, setSwatchDragActive] = useState(false)
+  // Palette edit mode (pencil in the header): click-to-remove replaces the
+  // old per-swatch corner trash, which was tiny and cluttered the resting
+  // UI. Phase 3's multi-select/reorder will live in this mode too.
+  const [paletteEditMode, setPaletteEditMode] = useState(false)
   const [assetsCollapsed, setAssetsCollapsed] = useState(() => localStorage.getItem('thumbAssetsCollapsed') === 'true')
   const toggleAssetsCollapsed = () => {
     const next = !assetsCollapsed
@@ -5878,7 +5880,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   </Tooltip>
                   <Palette size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Palette</span>
-                  <div className={`ml-auto flex items-center${paletteCollapsed ? ' hidden' : ''}`}>
+                  <div className={`ml-auto flex items-center gap-0.5${paletteCollapsed ? ' hidden' : ''}`}>
+                    <Tooltip content={paletteEditMode ? 'Done editing' : 'Edit palette — click swatches to remove them'}>
+                      <button
+                        type="button"
+                        onClick={() => setPaletteEditMode(m => !m)}
+                        className={`p-0.5 rounded flex items-center justify-center transition-colors ${paletteEditMode ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    </Tooltip>
                     <Tooltip content="Add a color to the palette">
                       <button
                         type="button"
@@ -5904,39 +5915,38 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                         {palette.map((s, i) => (
                           <div key={`${s.color}-${i}`} className="relative group/swatch">
                             <Tooltip
-                              content={(
-                                <>
-                                  <div className="tabular-nums">{s.color.toUpperCase()}</div>
-                                  <div>Drag over color field to apply</div>
-                                </>
-                              )}
+                              content={paletteEditMode
+                                ? `Remove ${s.color.toUpperCase()}`
+                                : (
+                                  <>
+                                    <div className="tabular-nums">{s.color.toUpperCase()}</div>
+                                    <div>Drag over color field to apply</div>
+                                  </>
+                                )}
                             >
-                              <div
-                                draggable
-                                onDragStart={e => {
-                                  e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
-                                  e.dataTransfer.effectAllowed = 'copy'
-                                  setColorDragImage(e, s.color)
-                                  setSwatchDragActive(true)
-                                }}
-                                onDragEnd={() => setSwatchDragActive(false)}
-                                className="w-5 h-5 rounded-md border border-white/15 cursor-grab active:cursor-grabbing"
-                                style={{ background: s.color }}
-                              />
-                            </Tooltip>
-                            {/* Trash, not X — X means close, deletion is the
-                                trash icon (style guide). Positioning lives on
-                                the Tooltip wrapper so the tooltip anchors to
-                                the button's real rect instead of a zero-size
-                                static wrapper (it used to cover the button). */}
-                            <Tooltip content="Remove from palette" triggerClassName={`absolute -top-1 -right-1 ${swatchDragActive ? 'hidden' : 'hidden group-hover/swatch:block'}`}>
-                              <button
-                                type="button"
-                                onClick={() => removePaletteSwatch(i)}
-                                className="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-navy-900 border border-white/20 text-gray-400 hover:text-red-400"
-                              >
-                                <Trash2 size={8} />
-                              </button>
+                              {/* Two personalities: normal mode = drag-to-apply
+                                  tile; edit mode = click-to-remove button with
+                                  a red hover treatment (replaces the old tiny
+                                  corner trash, which cluttered the resting UI). */}
+                              {paletteEditMode ? (
+                                <button
+                                  type="button"
+                                  onClick={() => removePaletteSwatch(i)}
+                                  className="w-5 h-5 rounded-md border border-white/15 hover:ring-2 hover:ring-red-400 hover:border-transparent transition-shadow"
+                                  style={{ background: s.color }}
+                                />
+                              ) : (
+                                <div
+                                  draggable
+                                  onDragStart={e => {
+                                    e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
+                                    e.dataTransfer.effectAllowed = 'copy'
+                                    setColorDragImage(e, s.color)
+                                  }}
+                                  className="w-5 h-5 rounded-md border border-white/15 cursor-grab active:cursor-grabbing"
+                                  style={{ background: s.color }}
+                                />
+                              )}
                             </Tooltip>
                           </div>
                         ))}
@@ -5945,12 +5955,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     {visibleRecents.length > 0 && (
                       <>
                         <div className="border-t border-white/20" />
-                        <p className="text-[9px] uppercase tracking-wider text-gray-400">Recent</p>
+                        <p className={`text-[9px] uppercase tracking-wider text-gray-400 ${paletteEditMode ? 'opacity-40' : ''}`}>Recent</p>
                         {/* Recents — dashed outer border, color fill inset
                             inside it. Click ADDS to the palette; drag
                             applies to a color field, same as saved
-                            swatches. */}
-                        <div className="flex flex-wrap gap-1.5">
+                            swatches. Dimmed + inert in edit mode: that
+                            mode manages the saved palette, not recents. */}
+                        <div className={`flex flex-wrap gap-1.5 ${paletteEditMode ? 'opacity-40 pointer-events-none' : ''}`}>
                           {visibleRecents.map(c => (
                             <Tooltip
                               key={c}
@@ -5969,9 +5980,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                   e.dataTransfer.setData(COLOR_DRAG_MIME, c)
                                   e.dataTransfer.effectAllowed = 'copy'
                                   setColorDragImage(e, c)
-                                  setSwatchDragActive(true)
                                 }}
-                                onDragEnd={() => setSwatchDragActive(false)}
                                 onClick={() => addPaletteSwatch(c)}
                                 className={`${RECENT_TILE_CLS} cursor-grab active:cursor-grabbing`}
                               >
