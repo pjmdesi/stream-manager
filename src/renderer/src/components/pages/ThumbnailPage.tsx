@@ -748,16 +748,11 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
   )
 }
 
-/** Default palette (thumbnails #1). Black→white run first, then the
- *  saturated colors in spectrum order, then brown. Plain "typical" hex
- *  values on purpose — a starting point users will replace, not a
- *  designed scheme. */
+/** Default palette (thumbnails #1). Spectrum-ordered saturated colors +
+ *  brown first (exactly one 9-wide row at the sidebar's width), then the
+ *  black→grays→white run on its own row. Plain "typical" hex values on
+ *  purpose — a starting point users will replace, not a designed scheme. */
 const DEFAULT_PALETTE: ReadonlyArray<{ name: string; color: string }> = [
-  { name: 'Black', color: '#000000' },
-  { name: 'Dark gray', color: '#404040' },
-  { name: 'Gray', color: '#808080' },
-  { name: 'Light gray', color: '#bfbfbf' },
-  { name: 'White', color: '#ffffff' },
   { name: 'Red', color: '#ff0000' },
   { name: 'Orange', color: '#ff8000' },
   { name: 'Yellow', color: '#ffff00' },
@@ -767,6 +762,11 @@ const DEFAULT_PALETTE: ReadonlyArray<{ name: string; color: string }> = [
   { name: 'Purple', color: '#8000ff' },
   { name: 'Magenta', color: '#ff00ff' },
   { name: 'Brown', color: '#8b4513' },
+  { name: 'Black', color: '#000000' },
+  { name: 'Dark gray', color: '#404040' },
+  { name: 'Gray', color: '#808080' },
+  { name: 'Light gray', color: '#bfbfbf' },
+  { name: 'White', color: '#ffffff' },
 ]
 
 /** Letter-case control options (thumbnails #7). Labels mirror Figma's
@@ -5593,24 +5593,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               {/* Divider */}
               <div className="border-t border-white/10 shrink-0" />
 
-              {/* Properties */}
-              <div className="flex flex-col flex-1 overflow-hidden min-h-0">
-                <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
-                  <Sliders size={11} className="text-gray-400" />
-                  <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
-                </div>
-                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} />
-              </div>
-
-              {/* Divider */}
-              <div className="border-t border-white/10 shrink-0" />
-
               {/* Palette — global color swatches (thumbnails #1). v1 shows the
                   default set; recents/apply/management arrive in later
                   phases, so the swatches are plain tiles for now (no dead
-                  buttons). */}
-              <div className="flex flex-col shrink-0">
-                <div className="flex items-center gap-1.5 px-3 h-8 border-t border-b border-white/5 shrink-0">
+                  buttons). Section border-b doubles as the divider between
+                  palette and properties. */}
+              <div className="flex flex-col shrink-0 border-b border-white/10">
+                <div className={`flex items-center gap-1.5 px-3 h-8 shrink-0 ${!paletteCollapsed ? 'border-b border-white/5' : ''}`}>
                   <Tooltip
                     content={paletteCollapsed ? 'Expand palette' : 'Collapse palette'}
                     triggerClassName="self-stretch -ml-3 flex"
@@ -5636,6 +5625,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   </div>
                 )}
               </div>
+
+              {/* Properties */}
+              <div className="flex flex-col flex-1 overflow-hidden min-h-0">
+                <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
+                  <Sliders size={11} className="text-gray-400" />
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
+                </div>
+                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} />
+              </div>
+
+              {/* Divider */}
+              <div className="border-t border-white/10 shrink-0" />
+
               {/* Assets — images from the current stream's folder + same-season
                   episodes. Drag a thumbnail onto the canvas to add it as an
                   image layer. */}
