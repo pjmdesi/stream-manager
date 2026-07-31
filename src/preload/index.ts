@@ -737,6 +737,16 @@ contextBridge.exposeInMainWorld('api', {
   thumbnailSetLastFont: (font: string) =>
     ipcRenderer.invoke('thumbnail:setLastFont', font),
 
+  // Color palette (_palette.json beside _meta.json) + per-machine recent colors
+  thumbnailGetPalette: (streamsDir: string) =>
+    ipcRenderer.invoke('thumbnail:getPalette', streamsDir),
+  thumbnailSetPalette: (streamsDir: string, swatches: { name?: string; color: string }[]) =>
+    ipcRenderer.invoke('thumbnail:setPalette', streamsDir, swatches),
+  thumbnailGetColorRecents: () =>
+    ipcRenderer.invoke('thumbnail:getColorRecents'),
+  thumbnailAddColorRecent: (color: string) =>
+    ipcRenderer.invoke('thumbnail:addColorRecent', color),
+
   // ── Stream Relay ──────────────────────────────────────────────────────────
   // Localhost RTMP relay that forwards OBS/Aitum to YouTube. Subscriptions
   // (onRelayStatus / onRelayStats / etc.) return an unsubscribe function so

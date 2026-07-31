@@ -801,6 +801,15 @@ export interface ThumbnailTemplate {
   layers: ThumbnailLayer[]
 }
 
+/** One palette color (thumbnails #1). Stored in `_palette.json` beside
+ *  `_meta.json` so the palette travels with the library through cloud sync.
+ *  `name` is optional — defaults carry names, user-added swatches usually
+ *  don't. */
+export interface PaletteSwatch {
+  name?: string
+  color: string
+}
+
 export interface ThumbnailRecentEntry {
   folderPath: string
   date: string

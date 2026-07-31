@@ -1,5 +1,5 @@
 import React, {
-  useState, useEffect, useRef, useCallback, useMemo
+  useState, useEffect, useRef, useCallback, useMemo, useContext, createContext,
 } from 'react'
 import { flushSync } from 'react-dom'
 import { Stage, Layer, Group as KonvaGroup, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, Shape as KonvaShape } from 'react-konva'
@@ -29,7 +29,7 @@ import { useStore } from '../../hooks/useStore'
 import { theme, rgba } from '../../theme'
 import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
 import { Modal } from '../ui/Modal'
-import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta, StreamFolder } from '../../types'
+import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta, StreamFolder, PaletteSwatch } from '../../types'
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
 const CANVAS_W = 1280
@@ -1383,6 +1383,21 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
  *  Values are #rrggbb or #rrggbbaa strings — canvas, Konva, and the outline
  *  filter all accept both. The native color input is RGB-only, so alpha
  *  rides in the % field beside it; Clear sets alpha to 0. */
+/** Palette + recent colors, provided by the editor around PropertiesPanel.
+ *  Context (not props): ColorAlphaField has a dozen call sites deep inside
+ *  the panel, and every one of them gets drag-apply, the palette popover,
+ *  and recents recording for free this way. */
+const PaletteContext = createContext<{
+  palette: PaletteSwatch[]
+  recents: string[]
+  /** Record a color the user actually APPLIED (picker close, hex commit,
+   *  swatch apply) — feeds the recents row. */
+  recordRecent: (color: string) => void
+}>({ palette: [], recents: [], recordRecent: () => {} })
+
+/** Drag payload type for palette swatches → color fields. */
+const COLOR_DRAG_MIME = 'application/x-sm-color'
+
 function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
   value: string | undefined
   fallback: string
@@ -1391,9 +1406,68 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
   showHex?: boolean
 }) {
   const { rgb, alpha } = splitColorAlpha(value, fallback)
+  const { palette, recents, recordRecent } = useContext(PaletteContext)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const colorInputRef = useRef<HTMLInputElement>(null)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [dragHover, setDragHover] = useState(false)
+
+  // Recents feed from the native picker: React's onChange is the `input`
+  // event (fires per tick while dragging inside the dialog); the native
+  // `change` event fires once when the dialog closes — THAT color is the
+  // one worth remembering.
+  useEffect(() => {
+    const el = colorInputRef.current
+    if (!el) return
+    const onCommit = () => recordRecent(el.value)
+    el.addEventListener('change', onCommit)
+    return () => el.removeEventListener('change', onCommit)
+  }, [recordRecent])
+
+  // Outside-click closes the palette popover.
+  useEffect(() => {
+    if (!paletteOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setPaletteOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [paletteOpen])
+
+  // Swatch colors are rgb-only; the field's current alpha is preserved,
+  // matching how the native picker composes with the opacity control.
+  const applySwatch = (color: string) => {
+    onChange(joinColorAlpha(color, alpha))
+    recordRecent(color)
+  }
+
+  const swatchTile = 'w-5 h-5 rounded-md border border-white/15'
+
   return (
-    <div className="flex items-center gap-1.5 min-w-0">
+    <div
+      ref={wrapRef}
+      className={`relative flex items-center gap-1.5 min-w-0 rounded-lg ${dragHover ? 'ring-1 ring-purple-300/60' : ''}`}
+      onDragOver={e => {
+        if (!e.dataTransfer.types.includes(COLOR_DRAG_MIME)) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+        setDragHover(true)
+      }}
+      onDragLeave={e => {
+        const related = e.relatedTarget as Node | null
+        if (related && e.currentTarget.contains(related)) return
+        setDragHover(false)
+      }}
+      onDrop={e => {
+        const color = e.dataTransfer.getData(COLOR_DRAG_MIME)
+        setDragHover(false)
+        if (!color) return
+        e.preventDefault()
+        applySwatch(color)
+      }}
+    >
       <input
+        ref={colorInputRef}
         type="color"
         value={rgb}
         onChange={e => onChange(joinColorAlpha(e.target.value, alpha))}
@@ -1409,6 +1483,10 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
           type="text"
           value={value ?? fallback}
           onChange={e => onChange(e.target.value)}
+          onBlur={e => {
+            const v = e.target.value
+            if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v)) recordRecent(v.slice(0, 7))
+          }}
           className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
         />
       )}
@@ -1421,6 +1499,15 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
           className="w-14 shrink-0"
         />
       </Tooltip>
+      <Tooltip content="Apply a palette color">
+        <button
+          type="button"
+          onClick={() => setPaletteOpen(o => !o)}
+          className={`p-1 rounded transition-colors shrink-0 ${paletteOpen ? 'text-gray-200 bg-white/10' : 'text-gray-500 hover:text-gray-200 hover:bg-white/10'}`}
+        >
+          <Palette size={12} />
+        </button>
+      </Tooltip>
       <Tooltip content="Clear — fully transparent">
         <button
           type="button"
@@ -1430,6 +1517,40 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
           <Eraser size={12} />
         </button>
       </Tooltip>
+      {/* Keyboard-friendly apply path (thumbnails #1): the popover mirrors
+          the palette panel — recents row, then palette — every tile a real
+          button. Esc stays local (stopPropagation) so it can't bubble into
+          the editor's global shortcuts. */}
+      {paletteOpen && (
+        <div
+          className="absolute right-0 top-full mt-1 z-30 w-56 bg-navy-800 border border-white/10 rounded-lg shadow-xl p-2 flex flex-col gap-2"
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setPaletteOpen(false) } }}
+        >
+          {recents.length > 0 && (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {recents.map(c => (
+                  <Tooltip key={c} content={`Recent · ${c.toUpperCase()}`}>
+                    <button type="button" onClick={() => { applySwatch(c); setPaletteOpen(false) }} className={swatchTile} style={{ background: c }} />
+                  </Tooltip>
+                ))}
+              </div>
+              <div className="border-t border-white/5" />
+            </>
+          )}
+          {palette.length === 0 ? (
+            <p className="text-[10px] text-gray-400 px-1">Palette is empty — add colors in the Palette panel.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {palette.map((s, i) => (
+                <Tooltip key={`${s.color}-${i}`} content={`${s.name ? `${s.name} · ` : ''}${s.color.toUpperCase()}`}>
+                  <button type="button" onClick={() => { applySwatch(s.color); setPaletteOpen(false) }} className={swatchTile} style={{ background: s.color }} />
+                </Tooltip>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -2274,6 +2395,63 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setPaletteCollapsed(next)
     localStorage.setItem('thumbPaletteCollapsed', String(next))
   }
+  // ── Palette data (thumbnails #1, phase 2) ─────────────────────────────────
+  // Palette: _palette.json beside _meta.json (travels with the library).
+  // null = not loaded yet. Recents: electron-store (per-machine — they churn
+  // on every color use and don't belong in a cloud-synced file).
+  const [palette, setPalette] = useState<PaletteSwatch[] | null>(null)
+  const [colorRecents, setColorRecents] = useState<string[]>([])
+  const [paletteError, setPaletteError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!config.streamsDir) return
+    let cancelled = false
+    window.api.thumbnailGetPalette(config.streamsDir)
+      .then(p => { if (!cancelled) setPalette(p ?? [...DEFAULT_PALETTE]) })
+      .catch(err => {
+        console.error('Failed to load palette', err)
+        if (!cancelled) {
+          setPalette([...DEFAULT_PALETTE])
+          setPaletteError('Couldn’t read _palette.json — showing the defaults')
+        }
+      })
+    window.api.thumbnailGetColorRecents()
+      .then(r => { if (!cancelled) setColorRecents(r) })
+      .catch(err => console.error('Failed to load recent colors', err))
+    return () => { cancelled = true }
+  }, [config.streamsDir])
+  const persistPalette = useCallback((next: PaletteSwatch[]) => {
+    setPalette(next)
+    setPaletteError(null)
+    if (!config.streamsDir) return
+    window.api.thumbnailSetPalette(config.streamsDir, next).catch(err => {
+      console.error('Failed to save palette', err)
+      setPaletteError('Saving _palette.json failed — this change may not persist')
+    })
+  }, [config.streamsDir])
+  const addPaletteSwatch = useCallback((color: string) => {
+    if (!palette) return
+    const c = color.toLowerCase()
+    if (palette.some(s => s.color.toLowerCase() === c)) return
+    persistPalette([...palette, { color: c }])
+  }, [palette, persistPalette])
+  const removePaletteSwatch = useCallback((index: number) => {
+    if (!palette) return
+    persistPalette(palette.filter((_, i) => i !== index))
+  }, [palette, persistPalette])
+  const recordRecentColor = useCallback((color: string) => {
+    // rgb only, normalized — alpha lives per-field, not in the palette.
+    const c = color.slice(0, 7).toLowerCase()
+    if (!/^#[0-9a-f]{6}$/.test(c)) return
+    window.api.thumbnailAddColorRecent(c)
+      .then(setColorRecents)
+      .catch(err => console.error('Failed to record recent color', err))
+  }, [])
+  const paletteCtx = useMemo(() => ({
+    palette: palette ?? [],
+    recents: colorRecents,
+    recordRecent: recordRecentColor,
+  }), [palette, colorRecents, recordRecentColor])
+  const paletteAddInputRef = useRef<HTMLInputElement>(null)
   const [assetsCollapsed, setAssetsCollapsed] = useState(() => localStorage.getItem('thumbAssetsCollapsed') === 'true')
   const toggleAssetsCollapsed = () => {
     const next = !assetsCollapsed
@@ -2292,6 +2470,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   // ── Mode ─────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<'overview' | 'editor'>('overview')
+  // Add-swatch flow (thumbnails #1): the palette header's + button clicks a
+  // hidden color input; the swatch lands on the native `change` event
+  // (dialog close), NOT per input tick — a drag through the picker would
+  // otherwise scatter junk swatches. `mode` in the deps: the input only
+  // exists in editor mode, so the listener must (re)attach when it mounts.
+  useEffect(() => {
+    const el = paletteAddInputRef.current
+    if (!el) return
+    const onPick = () => addPaletteSwatch(el.value)
+    el.addEventListener('change', onPick)
+    return () => el.removeEventListener('change', onPick)
+  }, [addPaletteSwatch, mode])
 
   // ── Overview data ─────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<ThumbnailTemplate[]>([])
@@ -5593,11 +5783,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               {/* Divider */}
               <div className="border-t border-white/10 shrink-0" />
 
-              {/* Palette — global color swatches (thumbnails #1). v1 shows the
-                  default set; recents/apply/management arrive in later
-                  phases, so the swatches are plain tiles for now (no dead
-                  buttons). Section border-b doubles as the divider between
-                  palette and properties. */}
+              {/* Palette — global color swatches (thumbnails #1, phase 2):
+                  recents row (dashed tiles, click = add to palette), palette
+                  tiles (drag onto a color field to apply, hover × removes),
+                  + button adds via the native picker. Section border-b
+                  doubles as the divider between palette and properties. */}
               <div className="flex flex-col shrink-0 border-b border-white/10">
                 <div className={`flex items-center gap-1.5 px-3 h-8 shrink-0 ${!paletteCollapsed ? 'border-b border-white/5' : ''}`}>
                   <Tooltip
@@ -5614,14 +5804,76 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   </Tooltip>
                   <Palette size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Palette</span>
+                  <div className={`ml-auto flex items-center${paletteCollapsed ? ' hidden' : ''}`}>
+                    <Tooltip content="Add a color to the palette">
+                      <button
+                        type="button"
+                        onClick={() => paletteAddInputRef.current?.click()}
+                        className="p-0.5 rounded flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                      >
+                        <Plus size={13} />
+                      </button>
+                    </Tooltip>
+                    <input ref={paletteAddInputRef} type="color" className="sr-only" tabIndex={-1} aria-hidden />
+                  </div>
                 </div>
                 {!paletteCollapsed && (
-                  <div className="px-3 py-2 flex flex-wrap gap-1.5">
-                    {DEFAULT_PALETTE.map(s => (
-                      <Tooltip key={s.name} content={`${s.name} · ${s.color.toUpperCase()}`}>
-                        <div className="w-5 h-5 rounded-md border border-white/15" style={{ background: s.color }} />
-                      </Tooltip>
-                    ))}
+                  <div className="px-3 py-2 flex flex-col gap-2">
+                    {colorRecents.length > 0 && (
+                      <>
+                        {/* Recents — dashed border distinguishes them from
+                            palette swatches; click ADDS to the palette (the
+                            spec's flow), it does not apply. */}
+                        <div className="flex flex-wrap gap-1.5">
+                          {colorRecents.map(c => (
+                            <Tooltip key={c} content={`Add to palette · ${c.toUpperCase()}`}>
+                              <button
+                                type="button"
+                                onClick={() => addPaletteSwatch(c)}
+                                className="w-5 h-5 rounded-md border border-dashed border-white/30 hover:border-white/60 transition-colors"
+                                style={{ background: c }}
+                              />
+                            </Tooltip>
+                          ))}
+                        </div>
+                        <div className="border-t border-white/5" />
+                      </>
+                    )}
+                    {palette === null ? (
+                      <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                        <Loader2 size={11} className="animate-spin" /> Loading palette…
+                      </div>
+                    ) : palette.length === 0 ? (
+                      <p className="text-[10px] text-gray-400">Palette is empty — add colors with + or from the recent colors above.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {palette.map((s, i) => (
+                          <div key={`${s.color}-${i}`} className="relative group/swatch">
+                            <Tooltip content={`${s.name ? `${s.name} · ` : ''}${s.color.toUpperCase()} — drag onto a color field to apply`}>
+                              <div
+                                draggable
+                                onDragStart={e => {
+                                  e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
+                                  e.dataTransfer.effectAllowed = 'copy'
+                                }}
+                                className="w-5 h-5 rounded-md border border-white/15 cursor-grab active:cursor-grabbing"
+                                style={{ background: s.color }}
+                              />
+                            </Tooltip>
+                            <Tooltip content="Remove from palette">
+                              <button
+                                type="button"
+                                onClick={() => removePaletteSwatch(i)}
+                                className="absolute -top-1 -right-1 w-3.5 h-3.5 hidden group-hover/swatch:flex items-center justify-center rounded-full bg-navy-900 border border-white/20 text-gray-400 hover:text-red-400"
+                              >
+                                <X size={9} />
+                              </button>
+                            </Tooltip>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {paletteError && <p className="text-[10px] text-red-400">{paletteError}</p>}
                   </div>
                 )}
               </div>
@@ -5632,7 +5884,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Sliders size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
                 </div>
-                <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} />
+                <PaletteContext.Provider value={paletteCtx}>
+                  <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} />
+                </PaletteContext.Provider>
               </div>
 
               {/* Divider */}

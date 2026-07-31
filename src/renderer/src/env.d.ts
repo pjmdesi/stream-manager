@@ -25,6 +25,7 @@ import type {
   ActivePickResult,
   OrchestratorEvent,
   PlayerRecentEntry,
+  PaletteSwatch,
 } from './types'
 
 declare global {
@@ -291,6 +292,10 @@ declare global {
       playerClearRecents(): Promise<PlayerRecentEntry[]>
       thumbnailGetLastFont(): Promise<string>
       thumbnailSetLastFont(font: string): Promise<void>
+      thumbnailGetPalette(streamsDir: string): Promise<PaletteSwatch[] | null>
+      thumbnailSetPalette(streamsDir: string, swatches: PaletteSwatch[]): Promise<void>
+      thumbnailGetColorRecents(): Promise<string[]>
+      thumbnailAddColorRecent(color: string): Promise<string[]>
 
       // ── Stream Relay ─────────────────────────────────────────────────────────
       streamRelayGetStatus(): Promise<RelayStatus>

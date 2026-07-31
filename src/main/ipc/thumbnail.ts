@@ -263,4 +263,51 @@ export function registerThumbnailIPC(): void {
 
   ipcMain.handle('thumbnail:getLastFont', () => getLastFont())
   ipcMain.handle('thumbnail:setLastFont', (_e, font: string) => setLastFont(font))
+
+  // ── Color palette (thumbnails #1) ─────────────────────────────────────────
+  // The palette lives in _palette.json at the streams root — NOT inside
+  // _meta.json (that file is strictly Record<streamPath, StreamMeta>; a magic
+  // key would leak into every consumer that iterates streams) — but right
+  // beside it, so it travels with the library through cloud sync. Recent
+  // colors are a per-machine preference and live in electron-store instead:
+  // they update on every color use, and _palette.json writes at that rate
+  // would churn cloud sync.
+
+  ipcMain.handle('thumbnail:getPalette', (_e, streamsDir: string): { name?: string; color: string }[] | null => {
+    const file = path.join(streamsDir, '_palette.json')
+    if (!fs.existsSync(file)) return null
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+      if (!Array.isArray(parsed?.swatches)) throw new Error('missing swatches array')
+      return parsed.swatches.filter((s: unknown) => typeof (s as { color?: unknown })?.color === 'string')
+    } catch (err) {
+      // Preserve the unreadable file for recovery (never overwrite it
+      // silently); the renderer falls back to the default palette.
+      console.error('[thumbnail:getPalette] _palette.json unreadable:', err)
+      try { fs.copyFileSync(file, `${file}.corrupt-${Date.now()}`) } catch { /* best effort */ }
+      return null
+    }
+  })
+
+  ipcMain.handle('thumbnail:setPalette', (_e, streamsDir: string, swatches: { name?: string; color: string }[]) => {
+    const file = path.join(streamsDir, '_palette.json')
+    const tmp = `${file}.tmp`
+    expectSelfWrite(file)
+    expectSelfWrite(tmp)
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, swatches }, null, 2), 'utf8')
+    fs.renameSync(tmp, file)
+  })
+
+  ipcMain.handle('thumbnail:getColorRecents', () => {
+    return (getStore() as any).get('thumbnailColorRecents', []) as string[]
+  })
+
+  ipcMain.handle('thumbnail:addColorRecent', (_e, color: string) => {
+    // One row's worth (9 at the palette panel's current width) — the spec
+    // bounds recents by what fits, oldest dropped when a new color lands.
+    const c = color.toLowerCase()
+    const updated = [c, ...((getStore() as any).get('thumbnailColorRecents', []) as string[]).filter(x => x !== c)].slice(0, 9)
+    ;(getStore() as any).set('thumbnailColorRecents', updated)
+    return updated
+  })
 }
