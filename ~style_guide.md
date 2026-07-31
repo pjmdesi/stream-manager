@@ -118,6 +118,7 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 
 - **No toast/snackbar notifications, ever.** For soft outcomes, stay silent or use persistent UI (inline status, icons, modal results). [established preference]
 - **No OS/system notifications either.** Errors from background- or tray-initiated actions bring the main window up (`show()` + `focus()`) and surface IN-APP — a modal, same as the post-stream Twitch auto-update problem and tray launch-group failures. SM never speaks through the Windows notification center. (Cloud-provider download notifications from Synology/OneDrive are theirs, not ours.)
+- **X closes, trash deletes.** The X icon is strictly a close/dismiss affordance; destructive removal always uses the trash icon (`Trash2`), matching the rest of the app. Never use X for deletion. (Codified 2026-07-31 from the palette swatch remove button.)
 - **No secondary modals.** Never open a modal from inside a modal — use inline editing (turn the row into an editable form with Save/Cancel) instead.
 - **Frameless titlebar — `top-10` rule (CRITICAL).** The window is `frame:false`; native controls sit in the top ~40px. All fixed overlays/backdrops/drawers MUST use `top-10` (e.g. `fixed inset-x-0 bottom-0 top-10`), **never** `inset-0`/`top-0`, or they cover the min/max/close controls.
 - **Dark theme only.** No light mode.

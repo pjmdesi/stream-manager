@@ -1398,6 +1398,24 @@ const PaletteContext = createContext<{
 /** Drag payload type for palette swatches → color fields. */
 const COLOR_DRAG_MIME = 'application/x-sm-color'
 
+/** Perceived-luminance check for choosing a contrasting border on tiny
+ *  swatches — the recents row's dashed border was invisible on bright
+ *  colors with a fixed white border. */
+function isLightColor(hex: string): boolean {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex)
+  if (!m) return false
+  const [r, g, b] = [m[1], m[2], m[3]].map(h => parseInt(h, 16) / 255)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6
+}
+
+/** Recents tile — dashed border (distinguishes from saved swatches) with
+ *  luminance-aware contrast. Shared by the palette panel and the per-field
+ *  popover so the two can't drift. */
+const recentTileCls = (color: string) =>
+  `w-5 h-5 rounded-md border border-dashed transition-colors ${
+    isLightColor(color) ? 'border-black/50 hover:border-black/80' : 'border-white/40 hover:border-white/70'
+  }`
+
 function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
   value: string | undefined
   fallback: string
@@ -1518,36 +1536,41 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
         </button>
       </Tooltip>
       {/* Keyboard-friendly apply path (thumbnails #1): the popover mirrors
-          the palette panel — recents row, then palette — every tile a real
-          button. Esc stays local (stopPropagation) so it can't bubble into
-          the editor's global shortcuts. */}
+          the palette panel — palette grid first, recents below — at the
+          same 9-across width so muscle memory from the panel transfers.
+          Picks keep the popover OPEN (try several colors in a row; outside
+          click / Esc / the toggle closes it), and tile clicks preventDefault:
+          the whole field lives inside a <label>, and the label's forwarding
+          would otherwise activate the native color input. Esc stays local
+          (stopPropagation) so it can't bubble into editor shortcuts. */}
       {paletteOpen && (
         <div
-          className="absolute right-0 top-full mt-1 z-30 w-56 bg-navy-800 border border-white/10 rounded-lg shadow-xl p-2 flex flex-col gap-2"
+          className="absolute right-0 top-full mt-1 z-30 w-[244px] bg-navy-800 border border-white/10 rounded-lg shadow-xl p-2 flex flex-col gap-2"
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setPaletteOpen(false) } }}
         >
-          {recents.length > 0 && (
-            <>
-              <div className="flex flex-wrap gap-1.5">
-                {recents.map(c => (
-                  <Tooltip key={c} content={`Recent · ${c.toUpperCase()}`}>
-                    <button type="button" onClick={() => { applySwatch(c); setPaletteOpen(false) }} className={swatchTile} style={{ background: c }} />
-                  </Tooltip>
-                ))}
-              </div>
-              <div className="border-t border-white/5" />
-            </>
-          )}
           {palette.length === 0 ? (
             <p className="text-[10px] text-gray-400 px-1">Palette is empty — add colors in the Palette panel.</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {palette.map((s, i) => (
                 <Tooltip key={`${s.color}-${i}`} content={`${s.name ? `${s.name} · ` : ''}${s.color.toUpperCase()}`}>
-                  <button type="button" onClick={() => { applySwatch(s.color); setPaletteOpen(false) }} className={swatchTile} style={{ background: s.color }} />
+                  <button type="button" onClick={e => { e.preventDefault(); applySwatch(s.color) }} className={swatchTile} style={{ background: s.color }} />
                 </Tooltip>
               ))}
             </div>
+          )}
+          {recents.length > 0 && (
+            <>
+              <div className="border-t border-white/20" />
+              <p className="text-[9px] uppercase tracking-wider text-gray-500">Recent</p>
+              <div className="flex flex-wrap gap-1.5">
+                {recents.map(c => (
+                  <Tooltip key={c} content={`Recent · ${c.toUpperCase()}`}>
+                    <button type="button" onClick={e => { e.preventDefault(); applySwatch(c) }} className={recentTileCls(c)} style={{ background: c }} />
+                  </Tooltip>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -2446,11 +2469,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       .then(setColorRecents)
       .catch(err => console.error('Failed to record recent color', err))
   }, [])
+  // Recents that duplicate a saved swatch add nothing — the color is already
+  // one tile away — so displays filter them out (storage keeps the full
+  // list: deleting the swatch resurfaces the recent).
+  const visibleRecents = useMemo(
+    () => colorRecents.filter(c => !(palette ?? []).some(s => s.color.toLowerCase() === c)),
+    [colorRecents, palette],
+  )
   const paletteCtx = useMemo(() => ({
     palette: palette ?? [],
-    recents: colorRecents,
+    recents: visibleRecents,
     recordRecent: recordRecentColor,
-  }), [palette, colorRecents, recordRecentColor])
+  }), [palette, visibleRecents, recordRecentColor])
   const paletteAddInputRef = useRef<HTMLInputElement>(null)
   const [assetsCollapsed, setAssetsCollapsed] = useState(() => localStorage.getItem('thumbAssetsCollapsed') === 'true')
   const toggleAssetsCollapsed = () => {
@@ -5819,32 +5849,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 </div>
                 {!paletteCollapsed && (
                   <div className="px-3 py-2 flex flex-col gap-2">
-                    {colorRecents.length > 0 && (
-                      <>
-                        {/* Recents — dashed border distinguishes them from
-                            palette swatches; click ADDS to the palette (the
-                            spec's flow), it does not apply. */}
-                        <div className="flex flex-wrap gap-1.5">
-                          {colorRecents.map(c => (
-                            <Tooltip key={c} content={`Add to palette · ${c.toUpperCase()}`}>
-                              <button
-                                type="button"
-                                onClick={() => addPaletteSwatch(c)}
-                                className="w-5 h-5 rounded-md border border-dashed border-white/30 hover:border-white/60 transition-colors"
-                                style={{ background: c }}
-                              />
-                            </Tooltip>
-                          ))}
-                        </div>
-                        <div className="border-t border-white/5" />
-                      </>
-                    )}
                     {palette === null ? (
                       <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
                         <Loader2 size={11} className="animate-spin" /> Loading palette…
                       </div>
                     ) : palette.length === 0 ? (
-                      <p className="text-[10px] text-gray-400">Palette is empty — add colors with + or from the recent colors above.</p>
+                      <p className="text-[10px] text-gray-400">Palette is empty — add colors with + or from the recent colors below.</p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {palette.map((s, i) => (
@@ -5860,18 +5870,49 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                 style={{ background: s.color }}
                               />
                             </Tooltip>
-                            <Tooltip content="Remove from palette">
+                            {/* Trash, not X — X means close, deletion is the
+                                trash icon (style guide). Positioning lives on
+                                the Tooltip wrapper so the tooltip anchors to
+                                the button's real rect instead of a zero-size
+                                static wrapper (it used to cover the button). */}
+                            <Tooltip content="Remove from palette" triggerClassName="absolute -top-1 -right-1 hidden group-hover/swatch:block">
                               <button
                                 type="button"
                                 onClick={() => removePaletteSwatch(i)}
-                                className="absolute -top-1 -right-1 w-3.5 h-3.5 hidden group-hover/swatch:flex items-center justify-center rounded-full bg-navy-900 border border-white/20 text-gray-400 hover:text-red-400"
+                                className="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-navy-900 border border-white/20 text-gray-400 hover:text-red-400"
                               >
-                                <X size={9} />
+                                <Trash2 size={8} />
                               </button>
                             </Tooltip>
                           </div>
                         ))}
                       </div>
+                    )}
+                    {visibleRecents.length > 0 && (
+                      <>
+                        <div className="border-t border-white/20" />
+                        <p className="text-[9px] uppercase tracking-wider text-gray-500">Recent</p>
+                        {/* Recents — dashed, luminance-aware border. Click
+                            ADDS to the palette; drag applies to a color
+                            field, same as saved swatches. */}
+                        <div className="flex flex-wrap gap-1.5">
+                          {visibleRecents.map(c => (
+                            <Tooltip key={c} content={`Add to palette · ${c.toUpperCase()} — drag onto a color field to apply`}>
+                              <button
+                                type="button"
+                                draggable
+                                onDragStart={e => {
+                                  e.dataTransfer.setData(COLOR_DRAG_MIME, c)
+                                  e.dataTransfer.effectAllowed = 'copy'
+                                }}
+                                onClick={() => addPaletteSwatch(c)}
+                                className={`${recentTileCls(c)} cursor-grab active:cursor-grabbing`}
+                                style={{ background: c }}
+                              />
+                            </Tooltip>
+                          ))}
+                        </div>
+                      </>
                     )}
                     {paletteError && <p className="text-[10px] text-red-400">{paletteError}</p>}
                   </div>
