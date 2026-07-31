@@ -2523,6 +2523,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     recordRecent: recordRecentColor,
   }), [palette, visibleRecents, recordRecentColor])
   const paletteAddInputRef = useRef<HTMLInputElement>(null)
+  // True while a swatch (saved or recent) is being dragged — the per-swatch
+  // trash buttons hide for the duration so the drag ghost path stays clean.
+  const [swatchDragActive, setSwatchDragActive] = useState(false)
   const [assetsCollapsed, setAssetsCollapsed] = useState(() => localStorage.getItem('thumbAssetsCollapsed') === 'true')
   const toggleAssetsCollapsed = () => {
     const next = !assetsCollapsed
@@ -5907,7 +5910,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                   e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
                                   e.dataTransfer.effectAllowed = 'copy'
                                   setColorDragImage(e, s.color)
+                                  setSwatchDragActive(true)
                                 }}
+                                onDragEnd={() => setSwatchDragActive(false)}
                                 className="w-5 h-5 rounded-md border border-white/15 cursor-grab active:cursor-grabbing"
                                 style={{ background: s.color }}
                               />
@@ -5917,7 +5922,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                 the Tooltip wrapper so the tooltip anchors to
                                 the button's real rect instead of a zero-size
                                 static wrapper (it used to cover the button). */}
-                            <Tooltip content="Remove from palette" triggerClassName="absolute -top-1 -right-1 hidden group-hover/swatch:block">
+                            <Tooltip content="Remove from palette" triggerClassName={`absolute -top-1 -right-1 ${swatchDragActive ? 'hidden' : 'hidden group-hover/swatch:block'}`}>
                               <button
                                 type="button"
                                 onClick={() => removePaletteSwatch(i)}
@@ -5940,7 +5945,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             swatches. */}
                         <div className="flex flex-wrap gap-1.5">
                           {visibleRecents.map(c => (
-                            <Tooltip key={c} content={`Add to palette · ${c.toUpperCase()} — drag onto a color field to apply`}>
+                            <Tooltip
+                              key={c}
+                              content={(
+                                <>
+                                  <div className="tabular-nums">{c.toUpperCase()}</div>
+                                  <div>Click to save to palette</div>
+                                  <div>Drag over color field to apply</div>
+                                </>
+                              )}
+                            >
                               <button
                                 type="button"
                                 draggable
@@ -5948,7 +5962,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                   e.dataTransfer.setData(COLOR_DRAG_MIME, c)
                                   e.dataTransfer.effectAllowed = 'copy'
                                   setColorDragImage(e, c)
+                                  setSwatchDragActive(true)
                                 }}
+                                onDragEnd={() => setSwatchDragActive(false)}
                                 onClick={() => addPaletteSwatch(c)}
                                 className={`${RECENT_TILE_CLS} cursor-grab active:cursor-grabbing`}
                               >
