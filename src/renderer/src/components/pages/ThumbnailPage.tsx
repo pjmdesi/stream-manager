@@ -5913,42 +5913,46 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {palette.map((s, i) => (
-                          <div key={`${s.color}-${i}`} className="relative group/swatch">
-                            <Tooltip
-                              content={paletteEditMode
-                                ? `Remove ${s.color.toUpperCase()}`
-                                : (
-                                  <>
-                                    <div className="tabular-nums">{s.color.toUpperCase()}</div>
-                                    <div>Drag over color field to apply</div>
-                                  </>
-                                )}
-                            >
-                              {/* Two personalities: normal mode = drag-to-apply
-                                  tile; edit mode = click-to-remove button with
-                                  a red hover treatment (replaces the old tiny
-                                  corner trash, which cluttered the resting UI). */}
-                              {paletteEditMode ? (
-                                <button
-                                  type="button"
-                                  onClick={() => removePaletteSwatch(i)}
-                                  className="w-5 h-5 rounded-md border border-white/15 hover:ring-2 hover:ring-red-400 hover:border-transparent transition-shadow"
-                                  style={{ background: s.color }}
-                                />
-                              ) : (
-                                <div
-                                  draggable
-                                  onDragStart={e => {
-                                    e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
-                                    e.dataTransfer.effectAllowed = 'copy'
-                                    setColorDragImage(e, s.color)
-                                  }}
-                                  className="w-5 h-5 rounded-md border border-white/15 cursor-grab active:cursor-grabbing"
-                                  style={{ background: s.color }}
-                                />
+                          // The Tooltip wrapper IS the flex item (like the
+                          // recents row) — an extra block wrapper around the
+                          // inline-flex trigger added baseline space below
+                          // each tile, making wrapped-row gaps look bigger
+                          // than in-row gaps.
+                          <Tooltip
+                            key={`${s.color}-${i}`}
+                            content={paletteEditMode
+                              ? `Remove ${s.color.toUpperCase()}`
+                              : (
+                                <>
+                                  <div className="tabular-nums">{s.color.toUpperCase()}</div>
+                                  <div>Drag over color field to apply</div>
+                                </>
                               )}
-                            </Tooltip>
-                          </div>
+                          >
+                            {/* Two personalities: normal mode = drag-to-apply
+                                tile; edit mode = click-to-remove button with
+                                a red hover treatment (replaces the old tiny
+                                corner trash, which cluttered the resting UI). */}
+                            {paletteEditMode ? (
+                              <button
+                                type="button"
+                                onClick={() => removePaletteSwatch(i)}
+                                className="w-5 h-5 rounded-md border border-white/15 hover:ring-2 hover:ring-red-400 hover:border-transparent transition-shadow"
+                                style={{ background: s.color }}
+                              />
+                            ) : (
+                              <div
+                                draggable
+                                onDragStart={e => {
+                                  e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
+                                  e.dataTransfer.effectAllowed = 'copy'
+                                  setColorDragImage(e, s.color)
+                                }}
+                                className="w-5 h-5 rounded-md border border-white/15 cursor-grab active:cursor-grabbing"
+                                style={{ background: s.color }}
+                              />
+                            )}
+                          </Tooltip>
                         ))}
                       </div>
                     )}
