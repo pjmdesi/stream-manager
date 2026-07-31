@@ -5903,7 +5903,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       <div className="flex flex-wrap gap-1.5">
                         {palette.map((s, i) => (
                           <div key={`${s.color}-${i}`} className="relative group/swatch">
-                            <Tooltip content={`${s.name ? `${s.name} · ` : ''}${s.color.toUpperCase()} — drag onto a color field to apply`}>
+                            <Tooltip
+                              content={(
+                                <>
+                                  <div className="tabular-nums">{s.color.toUpperCase()}</div>
+                                  <div>Drag over color field to apply</div>
+                                </>
+                              )}
+                            >
                               <div
                                 draggable
                                 onDragStart={e => {
