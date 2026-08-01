@@ -1500,6 +1500,10 @@ const PaletteContext = createContext<{
 
 /** Drag payload type for palette swatches → color fields. */
 const COLOR_DRAG_MIME = 'application/x-sm-color'
+/** Drag payload type for GRADIENT swatches → Fill controls (JSON-encoded
+ *  GradientSwatchData). A separate MIME so solid-only fields (stroke,
+ *  outline, shadows) never light up for a drag they can't accept. */
+const GRADIENT_DRAG_MIME = 'application/x-sm-gradient'
 
 /** Runtime swatch value: a solid (full hex — alpha allowed; swatches are
  *  FULL field snapshots, so applying one applies its opacity too) or a
@@ -1594,7 +1598,65 @@ function setColorDragImage(e: React.DragEvent, value: SwatchValue | string) {
 const RECENT_TILE_CLS = 'w-5 h-5'
 const RECENT_FILL_CLS = 'block w-full h-full rounded-[5px] border border-dashed border-white/50'
 
-function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, onStopPosChange, recentKey, onCommitColor }: {
+/** Popover CONTENT shared by the per-field popover and the gradient
+ *  control's header popover: palette grid first, recents below, mirroring
+ *  the palette panel's order so muscle memory transfers. Which swatches
+ *  appear follows which apply handlers exist — a solid-only field never
+ *  shows gradient tiles it couldn't apply, and the gradient header
+ *  popover never shows solids. Picks keep the popover open (the caller
+ *  closes it where applying reshapes the UI). */
+function SwatchPopoverBody({ onApplySolid, onApplyGradient }: {
+  onApplySolid?: (color: string) => void
+  onApplyGradient?: (g: GradientSwatchData) => void
+}) {
+  const { palette, recents } = useContext(PaletteContext)
+  const keep = (v: SwatchValue) => ('color' in v ? !!onApplySolid : !!onApplyGradient)
+  const pal = palette.flatMap(s => {
+    const v = paletteSwatchValue(s)
+    return v && keep(v) ? [v] : []
+  })
+  const rec = recents.filter(e => keep(e.value))
+  const apply = (v: SwatchValue) => {
+    if ('color' in v) onApplySolid?.(v.color)
+    else onApplyGradient?.(v.gradient)
+  }
+  return (
+    <>
+      {pal.length === 0 ? (
+        <p className="text-[10px] text-gray-400 px-1">
+          {onApplySolid
+            ? 'Palette is empty — add colors in the Palette panel.'
+            : 'No gradients in the palette yet — edit a gradient, then save it from the Recent row.'}
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {pal.map((v, i) => (
+            <Tooltip key={`${swatchKey(v)}-${i}`} content={swatchDescription(v)}>
+              <button type="button" onClick={() => apply(v)} className="w-5 h-5 rounded-md border border-white/50" style={swatchTileStyle(v)} />
+            </Tooltip>
+          ))}
+        </div>
+      )}
+      {rec.length > 0 && (
+        <>
+          <div className="border-t border-white/20" />
+          <p className="text-[9px] uppercase tracking-wider text-gray-400">Recent</p>
+          <div className="flex flex-wrap gap-1.5">
+            {rec.map(e => (
+              <Tooltip key={e.id} content={swatchDescription(e.value)}>
+                <button type="button" onClick={() => apply(e.value)} className={RECENT_TILE_CLS}>
+                  <span className={RECENT_FILL_CLS} style={swatchTileStyle(e.value)} />
+                </button>
+              </Tooltip>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, onStopPosChange, recentKey, onCommitColor, onApplyGradient }: {
   value: string | undefined
   fallback: string
   onChange: (v: string) => void
@@ -1617,9 +1679,14 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
    *  their commits to the gradient control (which records the whole
    *  gradient as one swatch) instead of dropping solids into recents. */
   onCommitColor?: (fullColor: string) => void
+  /** Fill fields only: lets the popover offer gradient swatches too.
+   *  Picking one hands the whole gradient to the fill control (which
+   *  switches to gradient mode) — so the popover closes on pick, since
+   *  this solid-mode field unmounts with the switch. */
+  onApplyGradient?: (g: GradientSwatchData) => void
 }) {
   const { rgb, alpha } = splitColorAlpha(value, fallback)
-  const { palette, recents, recordRecent } = useContext(PaletteContext)
+  const { recordRecent, breakRecentTie } = useContext(PaletteContext)
 
   // A COMMIT — picker close, hex entry, opacity change, Esc-zero, swatch
   // apply/drop — records the FULL field snapshot (color incl. alpha).
@@ -1708,12 +1775,21 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
 
   // Swatches are FULL snapshots — applying one applies its opacity too
   // (the old keep-target-alpha rule died with the rgb-only palette).
+  // ADOPTING a swatch is not this field's own editing session: it records
+  // UNTIED (the value just moves to the front of recents) and breaks the
+  // field's live tie, so a later tweak starts a NEW entry instead of
+  // mutating the swatch that was adopted.
   const applySwatch = (fullColor: string) => {
     onChange(fullColor)
-    commitRecent(fullColor)
+    if (onCommitColor) {
+      // Gradient stop fields: dropping a color on a stop IS gradient
+      // editing — the gradient control records it under its own tie.
+      onCommitColor(fullColor)
+    } else {
+      if (recentKey) breakRecentTie(recentKey)
+      recordRecent({ color: fullColor })
+    }
   }
-
-  const swatchTile = 'w-5 h-5 rounded-md border border-white/50'
 
   return (
     <div
@@ -1885,43 +1961,15 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
           style={{ top: popPos.top, bottom: popPos.bottom, right: popPos.right }}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setPaletteOpen(false) } }}
         >
-          {/* Solids only for now: this popover applies to ONE color field,
-              and a gradient swatch targets the whole fill control — the
-              gradient apply path is the next pass. */}
-          {(() => {
-            const solidPalette = palette.filter(s => typeof s.color === 'string')
-            const solidRecents = recents.filter(e => 'color' in e.value)
-            return (
-              <>
-                {solidPalette.length === 0 ? (
-                  <p className="text-[10px] text-gray-400 px-1">Palette is empty — add colors in the Palette panel.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {solidPalette.map((s, i) => (
-                      <Tooltip key={`${s.color}-${i}`} content={swatchDescription({ color: s.color! })}>
-                        <button type="button" onClick={() => applySwatch(s.color!)} className={swatchTile} style={swatchTileStyle({ color: s.color! })} />
-                      </Tooltip>
-                    ))}
-                  </div>
-                )}
-                {solidRecents.length > 0 && (
-                  <>
-                    <div className="border-t border-white/20" />
-                    <p className="text-[9px] uppercase tracking-wider text-gray-400">Recent</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {solidRecents.map(e => (
-                        <Tooltip key={e.id} content={swatchDescription(e.value)}>
-                          <button type="button" onClick={() => applySwatch((e.value as { color: string }).color)} className={RECENT_TILE_CLS}>
-                            <span className={RECENT_FILL_CLS} style={swatchTileStyle(e.value)} />
-                          </button>
-                        </Tooltip>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
-            )
-          })()}
+          <SwatchPopoverBody
+            onApplySolid={applySwatch}
+            // Fill fields also offer gradient swatches: picking one
+            // switches the fill to gradient mode, which unmounts this
+            // solid-mode field — close the popover with it.
+            onApplyGradient={onApplyGradient
+              ? g => { onApplyGradient(g); setPaletteOpen(false) }
+              : undefined}
+          />
         </div>,
         document.body,
       )}
@@ -1967,6 +2015,64 @@ function GradientFillControl({ layer, update, fallback }: {
     )
   }
 
+  // Applying a gradient SWATCH (drop or popover pick) sets the whole
+  // fill in one go — and switches to gradient mode when needed, so a
+  // gradient dropped on a solid fill "just works". ADOPTING a swatch is
+  // not this layer's own gradient session: it records UNTIED (the value
+  // just moves to the front of recents) and breaks the live tie, so the
+  // next gradient tweak starts a NEW entry instead of mutating the
+  // adopted swatch — and applying a second swatch can't evict the first.
+  const applyGradientSwatch = (g: GradientSwatchData) => {
+    update({
+      fillType: 'linear',
+      gradientStops: g.stops,
+      gradientAngle: g.angle,
+      gradientColorSpace: g.colorSpace,
+      // fill mirrors the first stop (solid-mode / back-compat degrade).
+      fill: g.stops[0]?.color,
+    })
+    breakRecentTie(`${layer.id}:fill-gradient`)
+    recordRecent({ gradient: { stops: g.stops, angle: g.angle, colorSpace: g.colorSpace } })
+  }
+
+  // Header-row gradient popover (gradient mode): same portal treatment as
+  // the field popover — inline it would be clipped by the sidebar.
+  const [gradPopOpen, setGradPopOpen] = useState(false)
+  const [gradPopPos, setGradPopPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
+  const gradPopBtnRef = useRef<HTMLButtonElement>(null)
+  const gradPopRef = useRef<HTMLDivElement>(null)
+  const [gradDragHover, setGradDragHover] = useState(false)
+  const openGradPopover = () => {
+    const r = gradPopBtnRef.current?.getBoundingClientRect()
+    if (!r) return
+    const estimatedHeight = 220
+    setGradPopPos(r.bottom + estimatedHeight > window.innerHeight
+      ? { bottom: window.innerHeight - r.top + 4, right: window.innerWidth - r.right }
+      : { top: r.bottom + 4, right: window.innerWidth - r.right })
+    setGradPopOpen(true)
+  }
+  // Outside click / Escape close. Capture-phase Escape so an open popover
+  // swallows the key before editor-level shortcuts (deselect) see it.
+  useEffect(() => {
+    if (!gradPopOpen) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (gradPopBtnRef.current?.contains(t) || gradPopRef.current?.contains(t)) return
+      setGradPopOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setGradPopOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey, true)
+    }
+  }, [gradPopOpen])
+
   const setStop = (idx: number, color: string) => {
     const next = stops.map((st, k) => (k === idx ? { ...st, color } : st))
     update({ gradientStops: next, ...(idx === 0 ? { fill: color } : {}) })
@@ -1980,10 +2086,60 @@ function GradientFillControl({ layer, update, fallback }: {
   const segCls = (on: boolean) =>
     `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
   return (
-    <div className="flex flex-col gap-0.5">
+    <div
+      className={`flex flex-col gap-0.5 rounded-lg ${gradDragHover ? 'ring-1 ring-purple-300/60' : ''}`}
+      // The WHOLE control is the gradient-swatch drop target, both modes —
+      // a gradient describes the entire fill, not any one sub-field.
+      // Solid-color drags pass through untouched (different MIME): the
+      // fill/stop ColorAlphaFields keep handling those themselves.
+      onDragEnter={e => {
+        if (e.dataTransfer.types.includes(GRADIENT_DRAG_MIME)) e.preventDefault()
+      }}
+      onDragOver={e => {
+        if (!e.dataTransfer.types.includes(GRADIENT_DRAG_MIME)) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+        setGradDragHover(true)
+      }}
+      onDragLeave={e => {
+        const related = e.relatedTarget as Node | null
+        if (related && e.currentTarget.contains(related)) return
+        setGradDragHover(false)
+      }}
+      onDrop={e => {
+        setGradDragHover(false)
+        const raw = e.dataTransfer.getData(GRADIENT_DRAG_MIME)
+        if (!raw) return
+        e.preventDefault()
+        try {
+          const g = JSON.parse(raw) as GradientSwatchData
+          if (Array.isArray(g?.stops) && g.stops.length >= 2) applyGradientSwatch(g)
+        } catch {
+          // Malformed payload — drags only originate from our own tiles,
+          // so nothing to recover; ignore.
+        }
+      }}
+    >
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-gray-400">Fill</span>
-        <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
+        <div className="flex items-center gap-1">
+          {/* Whole-fill apply path lives on the header row with the
+              type toggle — the angle/blend row below is stop-transition
+              parameters, not whole-fill actions. Gradient mode only: in
+              solid mode the fill field's own popover carries gradients. */}
+          {isGradient && (
+            <Tooltip content="Apply a gradient swatch">
+              <button
+                ref={gradPopBtnRef}
+                type="button"
+                onClick={() => { if (gradPopOpen) setGradPopOpen(false); else openGradPopover() }}
+                className={`p-1 rounded shrink-0 transition-colors ${gradPopOpen ? 'text-gray-200 bg-white/10' : 'text-gray-500 hover:text-gray-200 hover:bg-white/10'}`}
+              >
+                <Palette size={12} />
+              </button>
+            </Tooltip>
+          )}
+          <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
           <Tooltip content="Flat color fill">
             <button
               type="button"
@@ -2014,8 +2170,22 @@ function GradientFillControl({ layer, update, fallback }: {
               Gradient
             </button>
           </Tooltip>
+          </div>
         </div>
       </div>
+      {gradPopOpen && gradPopPos && createPortal(
+        <div
+          ref={gradPopRef}
+          className="fixed z-50 w-[246px] bg-navy-800 border border-white/10 rounded-lg shadow-xl p-2 flex flex-col gap-2"
+          style={{ top: gradPopPos.top, bottom: gradPopPos.bottom, right: gradPopPos.right }}
+        >
+          {/* Gradients only: this popover applies whole fills, and in
+              gradient mode a solid pick has no whole-fill meaning. Picks
+              keep it open — try several, close by Esc/outside/toggle. */}
+          <SwatchPopoverBody onApplyGradient={applyGradientSwatch} />
+        </div>,
+        document.body,
+      )}
       {!isGradient ? (
         <ColorAlphaField
           value={layer.fill}
@@ -2023,6 +2193,7 @@ function GradientFillControl({ layer, update, fallback }: {
           showHex
           onChange={fill => update({ fill })}
           recentKey={`${layer.id}:fill`}
+          onApplyGradient={applyGradientSwatch}
         />
       ) : (
         <div className="flex flex-col gap-1.5 mt-0.5">
@@ -6684,8 +6855,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                   : (
                                     <>
                                       {swatchDescription(v)}
-                                      {/* Gradient drag-to-apply is next pass. */}
-                                      {isSolid && <div>Drag over color field to apply</div>}
+                                      <div>{isSolid ? 'Drag over color field to apply' : 'Drag over a Fill control to apply'}</div>
                                     </>
                                   )}
                               >
@@ -6750,15 +6920,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                   </button>
                                 ) : (
                                   <div
-                                    draggable={isSolid}
-                                    onDragStart={isSolid
-                                      ? e => {
-                                        e.dataTransfer.setData(COLOR_DRAG_MIME, v.color)
-                                        e.dataTransfer.effectAllowed = 'copy'
-                                        setColorDragImage(e, v)
-                                      }
-                                      : undefined}
-                                    className={`w-5 h-5 rounded-md border border-white/50 ${isSolid ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                    draggable
+                                    onDragStart={e => {
+                                      if ('color' in v) e.dataTransfer.setData(COLOR_DRAG_MIME, v.color)
+                                      else e.dataTransfer.setData(GRADIENT_DRAG_MIME, JSON.stringify(v.gradient))
+                                      e.dataTransfer.effectAllowed = 'copy'
+                                      setColorDragImage(e, v)
+                                    }}
+                                    className="w-5 h-5 rounded-md border border-white/50 cursor-grab active:cursor-grabbing"
                                     style={swatchTileStyle(v)}
                                   />
                                 )}
@@ -6787,23 +6956,21 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                   <>
                                     {swatchDescription(e.value)}
                                     <div>Click to save to palette</div>
-                                    {/* Gradient drag-to-apply is next pass. */}
-                                    {isSolid && <div>Drag over color field to apply</div>}
+                                    <div>{isSolid ? 'Drag over color field to apply' : 'Drag over a Fill control to apply'}</div>
                                   </>
                                 )}
                               >
                                 <button
                                   type="button"
-                                  draggable={isSolid}
-                                  onDragStart={isSolid
-                                    ? ev => {
-                                      ev.dataTransfer.setData(COLOR_DRAG_MIME, (e.value as { color: string }).color)
-                                      ev.dataTransfer.effectAllowed = 'copy'
-                                      setColorDragImage(ev, e.value)
-                                    }
-                                    : undefined}
+                                  draggable
+                                  onDragStart={ev => {
+                                    if ('color' in e.value) ev.dataTransfer.setData(COLOR_DRAG_MIME, e.value.color)
+                                    else ev.dataTransfer.setData(GRADIENT_DRAG_MIME, JSON.stringify(e.value.gradient))
+                                    ev.dataTransfer.effectAllowed = 'copy'
+                                    setColorDragImage(ev, e.value)
+                                  }}
                                   onClick={() => addPaletteSwatch(e.value)}
-                                  className={`${RECENT_TILE_CLS} ${isSolid ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                  className={`${RECENT_TILE_CLS} cursor-grab active:cursor-grabbing`}
                                 >
                                   <span className={RECENT_FILL_CLS} style={swatchTileStyle(e.value)} />
                                 </button>
