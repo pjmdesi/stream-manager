@@ -1550,14 +1550,26 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
   // track live); blur clears the draft, handing display back to the
   // canonical color.
   const [hexDraft, setHexDraft] = useState<string | null>(null)
-  // Flags only text that can NEVER become a color — a stray non-hex
-  // character. A clean-but-short entry ("#00") is unfinished typing, not a
-  // mistake, so it stays unmarked; over-length is prevented by maxLength
-  // rather than flagged after the fact.
-  const hexInvalid =
-    hexDraft !== null &&
-    hexDraft.trim() !== '' &&
-    !/^#?[0-9a-fA-F]*$/.test(hexDraft.trim())
+  // Resting display drops the leading '#'. It's a constant prefix that
+  // carries no information next to the swatch, costs a character in a
+  // cramped monospace field, and matches how design tools (Figma,
+  // Photoshop) present hex. Input still accepts it — parseHexEntry makes
+  // it optional — and a typed '#' stays visible until blur via the draft.
+  const restingHex = (
+    value && /^#[0-9a-fA-F]{8}$/.test(value) ? value.slice(0, 7) : (value ?? fallback)
+  ).replace(/^#/, '')
+
+  // Flags text that can NEVER become a color: a stray non-hex character,
+  // or more digits than the longest valid form holds. A clean-but-short
+  // entry ("00") is unfinished typing, not a mistake, so it stays
+  // unmarked.
+  const hexInvalid = (() => {
+    if (hexDraft === null) return false
+    const t = hexDraft.trim()
+    if (t === '') return false
+    const m = /^#?([0-9a-fA-F]*)$/.exec(t)
+    return !m || m[1].length > 8
+  })()
   const popRef = useRef<HTMLDivElement>(null)
   // Anchor for the PORTALED popover: rendered inline it was clipped by the
   // sidebar's overflow-hidden (a 246px popover in a 256px sidebar).
@@ -1677,10 +1689,10 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
         {showHex && (
           <input
             type="text"
-            // Resting display is the rgb hex only — opacity lives solely in
-            // the % field (and palette/recents are rgb-only, so what you
+            // Resting display is the rgb digits only — opacity lives solely
+            // in the % field (and palette/recents are rgb-only, so what you
             // see is what saves). While typing, the draft takes over.
-            value={hexDraft ?? (value && /^#[0-9a-fA-F]{8}$/.test(value) ? value.slice(0, 7) : (value ?? fallback))}
+            value={hexDraft ?? restingHex}
             onChange={e => {
               const raw = e.target.value
               setHexDraft(raw)
@@ -1714,9 +1726,13 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
               setHexDraft(null)
               onChange(joinColorAlpha('#000000', alpha))
             }}
-            // 9 = '#' + 8 digits, the longest valid form. Caps typing AND
-            // paste, so an over-long entry can't be composed in the first
-            // place.
+            // 9 = '#' + 8 digits, the longest valid form. Deliberately NOT
+            // narrowed to 8 for the now-bare display: the limit is applied
+            // at paste time, when the draft doesn't yet contain the '#', so
+            // an 8-cap would silently truncate a pasted '#rrggbbaa' to
+            // seven digits. A 9th bare digit is caught by hexInvalid
+            // instead, which shows the user what's wrong rather than
+            // swallowing a keystroke.
             maxLength={9}
             className={`flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6 font-mono ${
               hexInvalid ? 'ring-1 ring-inset ring-red-500' : ''
