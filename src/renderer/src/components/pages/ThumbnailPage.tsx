@@ -328,10 +328,44 @@ function shadowPropsFor(shadow: ThumbnailShadow | null) {
 /** Split #rrggbb / #rrggbbaa into the 6-digit part (all the native color
  *  input can hold) and a 0–1 alpha. Malformed input reads as the fallback
  *  at full alpha. */
+/** Parse any hex form a user might type or paste — `#rgb`, `#rgba`,
+ *  `#rrggbb`, `#rrggbbaa`, with or without the leading `#` — into the
+ *  canonical 6-digit rgb plus an alpha. `alpha: null` means the entry
+ *  didn't specify one, so the caller should keep whatever it already has
+ *  (typing a new color must not reset the opacity). Returns null when the
+ *  text isn't a color, including the incomplete 5- and 7-digit lengths.
+ *
+ *  Shorthand is expanded HERE rather than stored as typed: canvas would
+ *  render `#000` correctly, but the app's own color plumbing (this
+ *  function, lib/gradient's sampler) expects the canonical form, so
+ *  storing shorthand makes the swatch and the canvas disagree. */
+function parseHexEntry(raw: string): { rgb: string; alpha: number | null } | null {
+  const m = /^#?([0-9a-fA-F]+)$/.exec(raw.trim())
+  if (!m) return null
+  const d = m[1].toLowerCase()
+  const dup = (c: string): string => c + c
+  if (d.length === 3 || d.length === 4) {
+    return {
+      rgb: `#${dup(d[0])}${dup(d[1])}${dup(d[2])}`,
+      alpha: d.length === 4 ? parseInt(dup(d[3]), 16) / 255 : null,
+    }
+  }
+  if (d.length === 6 || d.length === 8) {
+    return {
+      rgb: `#${d.slice(0, 6)}`,
+      alpha: d.length === 8 ? parseInt(d.slice(6, 8), 16) / 255 : null,
+    }
+  }
+  return null
+}
+
 function splitColorAlpha(v: string | undefined, fallback: string): { rgb: string; alpha: number } {
-  const m = (v ?? '').match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/i)
-  if (!m) return { rgb: fallback, alpha: 1 }
-  return { rgb: `#${m[1]}`, alpha: m[2] ? parseInt(m[2], 16) / 255 : 1 }
+  // Delegates so anything the fields accept is also readable back —
+  // including shorthand that reached a canvas.json by hand-editing or an
+  // externally-authored template.
+  const parsed = parseHexEntry(v ?? '')
+  if (!parsed) return { rgb: fallback, alpha: 1 }
+  return { rgb: parsed.rgb, alpha: parsed.alpha ?? 1 }
 }
 /** Join back to #rrggbb (full alpha) or #rrggbbaa — canvas, Konva, and the
  *  outline filter all accept both forms. */
@@ -1509,6 +1543,13 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
   const colorInputRef = useRef<HTMLInputElement>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [dragHover, setDragHover] = useState(false)
+  // In-progress hex text. While non-null it OWNS what the field shows, so
+  // the two alpha digits of an 8-digit entry stay on screen and editable
+  // instead of being swallowed into the opacity field the moment they're
+  // typed. Each keystroke still commits when it parses (canvas + opacity
+  // track live); blur clears the draft, handing display back to the
+  // canonical color.
+  const [hexDraft, setHexDraft] = useState<string | null>(null)
   const popRef = useRef<HTMLDivElement>(null)
   // Anchor for the PORTALED popover: rendered inline it was clipped by the
   // sidebar's overflow-hidden (a 246px popover in a 256px sidebar).
@@ -1628,40 +1669,27 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
         {showHex && (
           <input
             type="text"
-            // Displays the rgb hex only — opacity lives solely in the %
-            // field (and palette/recents are rgb-only, so what you see is
-            // what saves). Partials stay raw while typing, and a pasted
-            // 8-digit value is still accepted (its alpha lands in the %
-            // field via the committed color).
-            value={value && /^#[0-9a-fA-F]{8}$/.test(value) ? value.slice(0, 7) : (value ?? fallback)}
+            // Resting display is the rgb hex only — opacity lives solely in
+            // the % field (and palette/recents are rgb-only, so what you
+            // see is what saves). While typing, the draft takes over.
+            value={hexDraft ?? (value && /^#[0-9a-fA-F]{8}$/.test(value) ? value.slice(0, 7) : (value ?? fallback))}
             onChange={e => {
-              const v = e.target.value
-              // A complete 6-digit entry keeps the field's current opacity;
-              // anything else (mid-typing partials, 8-digit pastes) passes
-              // through raw.
-              onChange(/^#[0-9a-fA-F]{6}$/.test(v) ? joinColorAlpha(v, alpha) : v)
+              const raw = e.target.value
+              setHexDraft(raw)
+              // Commit only parseable entries: an in-progress or malformed
+              // string never becomes the layer's color, so the canvas can't
+              // be handed something it won't render. `alpha ?? current`
+              // keeps the field's opacity unless the entry supplied one.
+              const parsed = parseHexEntry(raw)
+              if (parsed) onChange(joinColorAlpha(parsed.rgb, parsed.alpha ?? alpha))
             }}
-            // Normalize once editing ends, so a half-typed or malformed
-            // entry can never persist as the layer's color. Accepts the
-            // shorthand and paste-friendly forms — 3/6/8 digits, with or
-            // without the leading '#' — and snaps back to the committed
-            // color when the text isn't a color at all.
-            onBlur={e => {
-              const m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.exec(e.target.value.trim())
-              if (!m) {
-                onChange(joinColorAlpha(rgb, alpha))
-                return
-              }
-              const digits = m[1].length === 3
-                ? m[1].split('').map(c => c + c).join('') // #f00 → #ff0000
-                : m[1]
-              const rgbPart = `#${digits.slice(0, 6).toLowerCase()}`
-              // An 8-digit entry carries its own alpha (that's the point of
-              // pasting one); anything shorter keeps the field's current
-              // opacity. Recents stay rgb-only either way.
-              const nextAlpha = digits.length === 8 ? parseInt(digits.slice(6, 8), 16) / 255 : alpha
-              onChange(joinColorAlpha(rgbPart, nextAlpha))
-              recordRecent(rgbPart)
+            // Editing ends: drop the draft so the canonical value shows
+            // again. Text that never parsed simply falls away — the last
+            // committed color is already intact, nothing to revert.
+            onBlur={() => {
+              const parsed = hexDraft !== null ? parseHexEntry(hexDraft) : null
+              if (parsed) recordRecent(parsed.rgb)
+              setHexDraft(null)
             }}
             // Escape zeroes the field (#000000 is the zero color, matching
             // the opacity field's Esc → 0) — the keyboard replacement for
@@ -1673,6 +1701,9 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
               e.preventDefault()
               e.stopPropagation()
               if (paletteOpen) { setPaletteOpen(false); return }
+              // Drop the draft too, or the zeroed color would stay hidden
+              // behind whatever text was mid-edit.
+              setHexDraft(null)
               onChange(joinColorAlpha('#000000', alpha))
             }}
             className="flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6 font-mono"
