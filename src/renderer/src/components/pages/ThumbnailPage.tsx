@@ -2031,8 +2031,21 @@ function GradientFillControl({ layer, update, fallback }: {
       // fill mirrors the first stop (solid-mode / back-compat degrade).
       fill: g.stops[0]?.color,
     })
+    // Both fill ties: the solid tie could still be live from before a
+    // mode switch, and post-adoption edits must never mutate old entries.
     breakRecentTie(`${layer.id}:fill-gradient`)
+    breakRecentTie(`${layer.id}:fill`)
     recordRecent({ gradient: { stops: g.stops, angle: g.angle, colorSpace: g.colorSpace } })
+  }
+
+  // The reverse adoption: a SOLID swatch dropped on the control while in
+  // gradient mode replaces the gradient with a flat fill. Same adoption
+  // semantics — record untied, break both fill ties.
+  const applySolidSwatch = (color: string) => {
+    update({ fillType: 'solid', fill: color })
+    breakRecentTie(`${layer.id}:fill-gradient`)
+    breakRecentTie(`${layer.id}:fill`)
+    recordRecent({ color })
   }
 
   // Header-row gradient popover (gradient mode): same portal treatment as
@@ -2089,14 +2102,21 @@ function GradientFillControl({ layer, update, fallback }: {
     <div
       className={`flex flex-col gap-0.5 rounded-lg ${gradDragHover ? 'ring-1 ring-purple-300/60' : ''}`}
       // The WHOLE control is the gradient-swatch drop target, both modes —
-      // a gradient describes the entire fill, not any one sub-field.
-      // Solid-color drags pass through untouched (different MIME): the
-      // fill/stop ColorAlphaFields keep handling those themselves.
+      // a gradient describes the entire fill, not any one sub-field. In
+      // gradient mode it ALSO accepts solid drops, replacing the gradient
+      // with a solid fill (the symmetric move to gradient-onto-solid).
+      // The stop fields keep priority for solids: they preventDefault
+      // first and bubble up, so `defaultPrevented` means "a stop claimed
+      // this drag" — recolor the stop, don't replace the fill. In solid
+      // mode solid drags pass through untouched to the fill field.
       onDragEnter={e => {
         if (e.dataTransfer.types.includes(GRADIENT_DRAG_MIME)) e.preventDefault()
+        else if (isGradient && e.dataTransfer.types.includes(COLOR_DRAG_MIME)) e.preventDefault()
       }}
       onDragOver={e => {
-        if (!e.dataTransfer.types.includes(GRADIENT_DRAG_MIME)) return
+        if (e.defaultPrevented) { setGradDragHover(false); return }
+        const gradPayload = e.dataTransfer.types.includes(GRADIENT_DRAG_MIME)
+        if (!gradPayload && !(isGradient && e.dataTransfer.types.includes(COLOR_DRAG_MIME))) return
         e.preventDefault()
         e.dataTransfer.dropEffect = 'copy'
         setGradDragHover(true)
@@ -2108,16 +2128,24 @@ function GradientFillControl({ layer, update, fallback }: {
       }}
       onDrop={e => {
         setGradDragHover(false)
+        if (e.defaultPrevented) return
         const raw = e.dataTransfer.getData(GRADIENT_DRAG_MIME)
-        if (!raw) return
-        e.preventDefault()
-        try {
-          const g = JSON.parse(raw) as GradientSwatchData
-          if (Array.isArray(g?.stops) && g.stops.length >= 2) applyGradientSwatch(g)
-        } catch {
-          // Malformed payload — drags only originate from our own tiles,
-          // so nothing to recover; ignore.
+        if (raw) {
+          e.preventDefault()
+          try {
+            const g = JSON.parse(raw) as GradientSwatchData
+            if (Array.isArray(g?.stops) && g.stops.length >= 2) applyGradientSwatch(g)
+          } catch {
+            // Malformed payload — drags only originate from our own
+            // tiles, so nothing to recover; ignore.
+          }
+          return
         }
+        if (!isGradient) return
+        const color = e.dataTransfer.getData(COLOR_DRAG_MIME)
+        if (!color) return
+        e.preventDefault()
+        applySolidSwatch(color)
       }}
     >
       <div className="flex items-center justify-between">
