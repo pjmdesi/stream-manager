@@ -6631,11 +6631,6 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             // each tile, making wrapped-row gaps look bigger
                             // than in-row gaps.
                             <React.Fragment key={`${swatchKey(v)}-${i}`}>
-                              {/* Reorder insertion marker (edit mode). The
-                                  negative margins mostly cancel the flex gap
-                                  so the marker reads as a line BETWEEN tiles
-                                  rather than a shoved-in element. */}
-                              {paletteEditMode && swatchDropIndex === i && <div className="w-0.5 h-5 -mx-[3px] rounded bg-purple-500" />}
                               <Tooltip
                                 content={paletteEditMode
                                   ? (
@@ -6684,9 +6679,24 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                       if (swatchDropIndex !== null) commitSwatchReorder(swatchDropIndex)
                                     }}
                                     onDragEnd={() => setSwatchDropIndex(null)}
-                                    className={`w-5 h-5 rounded-md border transition-shadow ${selectedSwatches.has(i) ? 'border-transparent ring-2 ring-purple-400' : 'border-white/50 hover:ring-1 hover:ring-white/70'}`}
+                                    className={`relative w-5 h-5 rounded-md border transition-shadow ${selectedSwatches.has(i) ? 'border-transparent ring-2 ring-purple-400' : 'border-white/50 hover:ring-1 hover:ring-white/70'}`}
                                     style={swatchTileStyle(v)}
-                                  />
+                                  >
+                                    {/* Reorder insertion marker — anchored INSIDE
+                                        the tile it precedes (absolute, sitting in
+                                        the 6px flex gap) rather than rendered as
+                                        its own flex item. An in-flow marker could
+                                        wrap independently of its tile: dropping at
+                                        the start of row 2 drew the line at the end
+                                        of row 1, because the 2px divider still fit
+                                        there while the tile wrapped. */}
+                                    {swatchDropIndex === i && (
+                                      <span className="pointer-events-none absolute -left-[4px] top-0 h-full w-0.5 rounded bg-purple-500" />
+                                    )}
+                                    {swatchDropIndex === palette.length && i === palette.length - 1 && (
+                                      <span className="pointer-events-none absolute -right-[4px] top-0 h-full w-0.5 rounded bg-purple-500" />
+                                    )}
+                                  </button>
                                 ) : (
                                   <div
                                     draggable={isSolid}
@@ -6705,7 +6715,6 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             </React.Fragment>
                           )
                         })}
-                        {paletteEditMode && swatchDropIndex === palette.length && <div className="w-0.5 h-5 -mx-[3px] rounded bg-purple-500" />}
                       </div>
                     )}
                     {visibleRecents.length > 0 && (
