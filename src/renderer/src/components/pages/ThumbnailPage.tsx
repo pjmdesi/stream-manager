@@ -1550,6 +1550,14 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
   // track live); blur clears the draft, handing display back to the
   // canonical color.
   const [hexDraft, setHexDraft] = useState<string | null>(null)
+  // Flags only text that can NEVER become a color — a stray non-hex
+  // character. A clean-but-short entry ("#00") is unfinished typing, not a
+  // mistake, so it stays unmarked; over-length is prevented by maxLength
+  // rather than flagged after the fact.
+  const hexInvalid =
+    hexDraft !== null &&
+    hexDraft.trim() !== '' &&
+    !/^#?[0-9a-fA-F]*$/.test(hexDraft.trim())
   const popRef = useRef<HTMLDivElement>(null)
   // Anchor for the PORTALED popover: rendered inline it was clipped by the
   // sidebar's overflow-hidden (a 246px popover in a 256px sidebar).
@@ -1706,7 +1714,13 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
               setHexDraft(null)
               onChange(joinColorAlpha('#000000', alpha))
             }}
-            className="flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6 font-mono"
+            // 9 = '#' + 8 digits, the longest valid form. Caps typing AND
+            // paste, so an over-long entry can't be composed in the first
+            // place.
+            maxLength={9}
+            className={`flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6 font-mono ${
+              hexInvalid ? 'ring-1 ring-inset ring-red-500' : ''
+            }`}
           />
         )}
         <Tooltip content="Opacity % — Esc clears to 0" triggerClassName="flex w-11 shrink-0 border-l border-white/10">
