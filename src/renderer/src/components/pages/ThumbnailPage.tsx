@@ -1420,6 +1420,12 @@ const PaletteContext = createContext<{
 
 /** Drag payload type for palette swatches → color fields. */
 const COLOR_DRAG_MIME = 'application/x-sm-color'
+
+/** CSS checkerboard used as the transparency backdrop wherever a color
+ *  can be see-through (color-field swatches, the gradient preview bar).
+ *  Pair with a `backgroundSize` — 6px for swatch-sized boxes, 8px for
+ *  larger surfaces. */
+const CHECKER_IMAGE = 'conic-gradient(#3d4257 90deg, #23283c 90deg 180deg, #3d4257 180deg 270deg, #23283c 270deg)'
 /** Drag payload for edit-mode swatch REORDERING — deliberately a different
  *  type so color fields never light up (or accept) a reorder drag. */
 const SWATCH_REORDER_MIME = 'application/x-sm-swatch-reorder'
@@ -1546,17 +1552,25 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
           border/background, thin internal dividers) so the row reads as a
           single control instead of three boxes. */}
       <div className="flex items-stretch flex-1 min-w-0 h-6 bg-navy-900 border border-white/10 rounded-lg overflow-visible focus-within:border-purple-500/50 transition-colors">
-        <input
-          ref={colorInputRef}
-          type="color"
-          value={rgb}
-          onChange={e => onChange(joinColorAlpha(e.target.value, alpha))}
-          // The webkit pseudo-element rules make the color chip fill the
-          // segment with its own rounding instead of the tiny native chip.
-          className="h-6 w-6 -my-[1px] -mx-[1px] shrink-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-s-md [&::-webkit-color-swatch]:border-white/50 z-1"
-          // Fade the swatch with the alpha so transparency is visible at a glance.
-          style={{ opacity: 0.35 + 0.65 * alpha }}
-        />
+        {/* Checker sits BEHIND the swatch (opaque wrapper + alpha-faded
+            input on top), so a transparent color reveals the pattern
+            rather than the panel background. */}
+        <div
+          className="h-6 w-6 -my-[1px] -mx-[1px] shrink-0 rounded-s-md overflow-hidden z-1"
+          style={{ backgroundImage: CHECKER_IMAGE, backgroundSize: '6px 6px' }}
+        >
+          <input
+            ref={colorInputRef}
+            type="color"
+            value={rgb}
+            onChange={e => onChange(joinColorAlpha(e.target.value, alpha))}
+            // The webkit pseudo-element rules make the color chip fill the
+            // segment with its own rounding instead of the tiny native chip.
+            className="block h-full w-full bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-s-md [&::-webkit-color-swatch]:border-white/50"
+            // Fade the swatch with the alpha so transparency is visible at a glance.
+            style={{ opacity: 0.35 + 0.65 * alpha }}
+          />
+        </div>
         {stopPos !== undefined && onStopPosChange && (
           <Tooltip content="Stop position along the gradient (0 = start of the bar, 1 = end)" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
             <NumberInput
@@ -2299,14 +2313,14 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                           preview accurately; direction is on the canvas. */}
                       <div className="flex">
                         <div
-                          className="w-4 -ms-3 border border-white/25 shrink-0 border-s-0 self-stretch"
+                          className="w-3 -ms-3 border border-white/25 shrink-0 border-s-0 self-stretch"
                           // Layered backgrounds: gradient on top (no-repeat —
                           // subpixel sampling at the bottom edge wrapped 1px
                           // of the FIRST stop back in with repeat on), and a
                           // checker underneath so transparent regions read
                           // as transparency.
                           style={{
-                            backgroundImage: `${cssGradientPreview(stops, space, 180)}, conic-gradient(#3d4257 90deg, #23283c 90deg 180deg, #3d4257 180deg 270deg, #23283c 270deg)`,
+                            backgroundImage: `${cssGradientPreview(stops, space, 180)}, ${CHECKER_IMAGE}`,
                             backgroundSize: 'auto, 8px 8px',
                             backgroundRepeat: 'no-repeat, repeat',
                           }}
@@ -2323,7 +2337,9 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                           const ROW = 24
                           const GAP = 6
                           const trackH = stops.length * ROW + (stops.length - 1) * GAP
-                          const TRACK_W = 12
+                          // Triangle occupies 0..6; the link line gets the
+                          // remaining 3px (halved from 6 — PJ).
+                          const TRACK_W = 9
                           return (
                             <svg
                               className="shrink-0 text-white/50"
