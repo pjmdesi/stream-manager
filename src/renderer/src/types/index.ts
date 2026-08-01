@@ -737,6 +737,18 @@ export interface ThumbnailLayer {
   // Shape
   shapeType?: 'rect' | 'ellipse' | 'triangle'
   cornerRadius?: number
+  /** Gradient fill (thumbnails #2). Absent / 'solid' = flat `fill`. The
+   *  `fill` field stays maintained (mirrors the start stop) so older app
+   *  versions and the solid toggle degrade to a sensible flat color. */
+  fillType?: 'solid' | 'linear'
+  /** Two or more stops, pos 0..1; colors #rrggbb or #rrggbbaa (per-stop
+   *  alpha is allowed — transparent fades). */
+  gradientStops?: { color: string; pos: number }[]
+  /** CSS angle convention: 0° = up, 90° = right (clockwise). */
+  gradientAngle?: number
+  /** Interpolation space — oklch (default) keeps saturated blends vivid;
+   *  srgb matches classic CSS blending for brand-guide parity. */
+  gradientColorSpace?: 'oklch' | 'srgb'
   // Shared (text + shape)
   fill?: string
   stroke?: string

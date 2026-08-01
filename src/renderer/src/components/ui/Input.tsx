@@ -286,6 +286,11 @@ interface NumberInputProps {
    *  the spinner buttons) — e.g. the effective value when the entered one
    *  is clamped by geometry. Display-only, non-interactive. */
   inlineNote?: string
+  /** Strip the field's own chrome (background, borders, rounding) so it
+   *  can sit inside a composite input that provides the frame — e.g.
+   *  ColorAlphaField's unified swatch|hex|opacity control. */
+  frameless?: boolean
+  merged?: boolean
   'aria-label'?: string
 }
 
@@ -303,7 +308,7 @@ interface NumberInputProps {
  */
 export const NumberInput: React.FC<NumberInputProps> = ({
   value, onChange, min, max, step = 1, placeholder, disabled, className = '', title,
-  inlineNote,
+  inlineNote, frameless = false, merged = false,
   'aria-label': ariaLabel,
 }) => {
   const clamp = (n: number) => {
@@ -359,7 +364,9 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         aria-label={ariaLabel}
         // The arbitrary selectors strip Chromium's native spin buttons
         // since we render our own vertical +/- buttons to the right.
-        className={`w-full bg-navy-900 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 ${inlineNote ? 'pr-12' : ''} text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+        className={`w-full ${merged ? 'ps-1' : 'ps-2'} py-1 ${inlineNote ? 'pr-12' : ''} text-xs text-gray-200 placeholder-gray-500 focus:outline-none transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
+          frameless ? 'bg-transparent' : 'bg-navy-900 border border-r-0 border-white/10 rounded-l-lg focus:border-purple-500/50'
+        }`}
       />
       <div className="flex flex-col shrink-0">
         <Tooltip content="Increment (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
@@ -368,7 +375,9 @@ export const NumberInput: React.FC<NumberInputProps> = ({
           tabIndex={-1}
           onClick={e => stepBy(1, e.shiftKey)}
           disabled={disabled || atMax}
-          className="flex-1 flex items-center justify-center w-4 bg-navy-900 border border-l-0 border-b-0 border-white/10 rounded-tr-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+          className={`flex-1 flex items-center justify-center w-4 text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400 ${
+            frameless ? '' : 'bg-navy-900 border border-l-0 border-b-0 border-white/10 rounded-tr-lg'
+          }`}
           aria-label="Increment"
         >
           <ChevronUp size={10} strokeWidth={2.5} />
@@ -380,7 +389,9 @@ export const NumberInput: React.FC<NumberInputProps> = ({
           tabIndex={-1}
           onClick={e => stepBy(-1, e.shiftKey)}
           disabled={disabled || atMin}
-          className="flex-1 flex items-center justify-center w-4 bg-navy-900 border border-l-0 border-white/10 rounded-br-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+          className={`flex-1 flex items-center justify-center w-4 text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400 ${
+            frameless ? '' : 'bg-navy-900 border border-l-0 border-white/10 rounded-br-lg'
+          }`}
           aria-label="Decrement"
         >
           <ChevronDown size={10} strokeWidth={2.5} />

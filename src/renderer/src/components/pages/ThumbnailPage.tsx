@@ -21,6 +21,7 @@ import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { RecentRow, SmoothThumb } from '../ui/RecentRow'
 import { NumberInput } from '../ui/Input'
+import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview } from '../../lib/gradient'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useOpenItems } from '../../context/OpenItemsContext'
@@ -890,6 +891,27 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
   const effectiveStroke = outlineActive ? (layer.outlineColor ?? '#000000') : (layer.stroke ?? '#000000')
   const effectiveStrokeWidth = outlineActive ? (layer.outlineWidth ?? 0) : (layer.strokeWidth ?? 0)
 
+  // Gradient fill (thumbnails #2): endpoints from the CSS gradient-line
+  // projection, expressed in each shape's LOCAL drawing space — rect and
+  // the triangle sceneFunc draw in 0..w/0..h, while Konva's Ellipse draws
+  // around its own center, so its points shift by (-w/2, -h/2). The
+  // solid `fill` stays set underneath; fillPriority picks the gradient
+  // (and older app versions that ignore these fields render the flat
+  // fill instead).
+  const gradientActive = layer.fillType === 'linear' && (layer.gradientStops?.length ?? 0) >= 2
+  let gradientFillProps: Record<string, unknown> = {}
+  if (gradientActive) {
+    const { start, end } = gradientLinePoints(layer.gradientAngle ?? 180, w, h)
+    const sx = shapeType === 'ellipse' ? -w / 2 : 0
+    const sy = shapeType === 'ellipse' ? -h / 2 : 0
+    gradientFillProps = {
+      fillPriority: 'linear-gradient',
+      fillLinearGradientStartPoint: { x: start.x + sx, y: start.y + sy },
+      fillLinearGradientEndPoint: { x: end.x + sx, y: end.y + sy },
+      fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch'),
+    }
+  }
+
   // Inner-shape props (without shadow) — no id/name/position/rotation/
   // handlers; those live on the Group. Centered shapes still get their
   // own center offset inside the Group so Konva's ellipse/polygon math
@@ -902,6 +924,7 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
     strokeWidth: effectiveStrokeWidth,
     fillAfterStrokeEnabled: true,
     scaleX, scaleY, offsetX, offsetY,
+    ...gradientFillProps,
   }
 
   const shadows = resolveShadows(layer)
@@ -1422,12 +1445,17 @@ function setColorDragImage(e: React.DragEvent, color: string) {
 const RECENT_TILE_CLS = 'w-5 h-5'
 const RECENT_FILL_CLS = 'block w-full h-full rounded-[5px] border border-dashed border-white/50'
 
-function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
+function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, onStopPosChange }: {
   value: string | undefined
   fallback: string
   onChange: (v: string) => void
   /** Show the free-text hex input (accepts #rrggbb / #rrggbbaa). */
   showHex?: boolean
+  /** Gradient-stop mode: position along the gradient line, rendered as a
+   *  0.0–1.0 field right of the swatch (fractional on purpose — visually
+   *  distinct from the %-based opacity). Provide both or neither. */
+  stopPos?: number
+  onStopPosChange?: (pos: number) => void
 }) {
   const { rgb, alpha } = splitColorAlpha(value, fallback)
   const { palette, recents, recordRecent } = useContext(PaletteContext)
@@ -1488,7 +1516,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
   return (
     <div
       ref={wrapRef}
-      className={`relative flex items-center gap-1.5 min-w-0 rounded-lg ${dragHover ? 'ring-1 ring-purple-300/60' : ''}`}
+      className={`relative flex items-center min-w-0 rounded-lg ${dragHover ? 'ring-1 ring-purple-300/60' : ''}`}
       // The whole field sits inside a <label>: clicks on our custom controls
       // would otherwise FORWARD to the label's first control — the native
       // color input — and pop its dialog (the phantom picker seen after
@@ -1514,41 +1542,72 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false }: {
         applySwatch(color)
       }}
     >
-      <input
-        ref={colorInputRef}
-        type="color"
-        value={rgb}
-        onChange={e => onChange(joinColorAlpha(e.target.value, alpha))}
-        // Square swatch, boxed like the neighboring inputs; the webkit
-        // pseudo-element rules make the color chip fill the box with its
-        // own rounding instead of the tiny inset native chip.
-        className="h-7 w-7 shrink-0 rounded-lg border border-white/10 bg-navy-900 p-0.5 cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-md [&::-webkit-color-swatch]:border-none"
-        // Fade the swatch with the alpha so transparency is visible at a glance.
-        style={{ opacity: 0.35 + 0.65 * alpha }}
-      />
-      {showHex && (
+      {/* Unified input: swatch | hex | opacity share ONE frame (single
+          border/background, thin internal dividers) so the row reads as a
+          single control instead of three boxes. */}
+      <div className="flex items-stretch flex-1 min-w-0 h-6 bg-navy-900 border border-white/10 rounded-lg overflow-visible focus-within:border-purple-500/50 transition-colors">
         <input
-          type="text"
-          value={value ?? fallback}
-          onChange={e => onChange(e.target.value)}
-          onBlur={e => {
-            const v = e.target.value
-            // slice(0, 7) truncates the STRING '#rrggbbaa' → '#rrggbb'
-            // (alpha never enters recents) — it is not a list cap.
-            if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v)) recordRecent(v.slice(0, 7))
-          }}
-          className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+          ref={colorInputRef}
+          type="color"
+          value={rgb}
+          onChange={e => onChange(joinColorAlpha(e.target.value, alpha))}
+          // The webkit pseudo-element rules make the color chip fill the
+          // segment with its own rounding instead of the tiny native chip.
+          className="h-6 w-6 -my-[1px] -mx-[1px] shrink-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-s-md [&::-webkit-color-swatch]:border-white/50 z-1"
+          // Fade the swatch with the alpha so transparency is visible at a glance.
+          style={{ opacity: 0.35 + 0.65 * alpha }}
         />
-      )}
-      <Tooltip content="Opacity %">
-        <NumberInput
-          min={0}
-          max={100}
-          value={Math.round(alpha * 100)}
-          onChange={p => onChange(joinColorAlpha(rgb, p / 100))}
-          className="w-14 shrink-0"
-        />
-      </Tooltip>
+        {stopPos !== undefined && onStopPosChange && (
+          <Tooltip content="Stop position along the gradient (0 = start of the bar, 1 = end)" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
+            <NumberInput
+              min={0}
+              max={1}
+              step={0.01}
+              value={stopPos}
+              onChange={onStopPosChange}
+              className="w-full h-6"
+              frameless
+              merged
+            />
+          </Tooltip>
+        )}
+        {showHex && (
+          <input
+            type="text"
+            // Displays the rgb hex only — opacity lives solely in the %
+            // field (and palette/recents are rgb-only, so what you see is
+            // what saves). Partials stay raw while typing, and a pasted
+            // 8-digit value is still accepted (its alpha lands in the %
+            // field via the committed color).
+            value={value && /^#[0-9a-fA-F]{8}$/.test(value) ? value.slice(0, 7) : (value ?? fallback)}
+            onChange={e => {
+              const v = e.target.value
+              // A complete 6-digit entry keeps the field's current opacity;
+              // anything else (mid-typing partials, 8-digit pastes) passes
+              // through raw.
+              onChange(/^#[0-9a-fA-F]{6}$/.test(v) ? joinColorAlpha(v, alpha) : v)
+            }}
+            onBlur={e => {
+              const v = e.target.value
+              // slice(0, 7) truncates the STRING '#rrggbbaa' → '#rrggbb'
+              // (alpha never enters recents) — it is not a list cap.
+              if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v)) recordRecent(v.slice(0, 7))
+            }}
+            className="flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6"
+          />
+        )}
+        <Tooltip content="Opacity %" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
+          <NumberInput
+            min={0}
+            max={100}
+            value={Math.round(alpha * 100)}
+            onChange={p => onChange(joinColorAlpha(rgb, p / 100))}
+            className="w-full h-6"
+            frameless
+            merged
+          />
+        </Tooltip>
+      </div>
       {/* Gapless button pair — the row's gap-1.5 between these two was
           width the hex input needs for 8-digit values. */}
       <div className="flex items-center shrink-0">
@@ -2173,15 +2232,136 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
         <section>
           <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Fill & Stroke</p>
           <div className="flex flex-col gap-1.5">
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Fill</span>
-              <ColorAlphaField
-                value={layer.fill}
-                fallback="#6366f1"
-                showHex
-                onChange={fill => update({ fill })}
-              />
-            </label>
+            {(() => {
+              // Gradient fill UI (thumbnails #2). `fill` mirrors the start
+              // stop so solid mode / older app versions degrade sensibly.
+              // The whole block is a div, NOT a label: it contains buttons
+              // and nested color fields, and label forwarding would fire
+              // the native picker (the phantom-picker class of bug).
+              const isGradient = layer.fillType === 'linear'
+              const fillSplit = splitColorAlpha(layer.fill, '#6366f1')
+              const defaultStops = [
+                { color: layer.fill ?? '#6366f1', pos: 0 },
+                // Figma convention: fill → same color fully transparent.
+                { color: joinColorAlpha(fillSplit.rgb, 0), pos: 1 },
+              ]
+              const stops = (layer.gradientStops?.length ?? 0) >= 2 ? layer.gradientStops! : defaultStops
+              const space = layer.gradientColorSpace ?? 'oklch'
+              const setStop = (idx: number, color: string) => {
+                const next = stops.map((st, k) => (k === idx ? { ...st, color } : st))
+                update({ gradientStops: next, ...(idx === 0 ? { fill: color } : {}) })
+              }
+              const setStopPos = (idx: number, pos: number) => {
+                const clamped = Math.min(1, Math.max(0, pos))
+                update({ gradientStops: stops.map((st, k) => (k === idx ? { ...st, pos: clamped } : st)) })
+              }
+              const segCls = (on: boolean) =>
+                `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
+              return (
+                <div className="flex flex-col gap-0.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-400">Fill</span>
+                    <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
+                      <Tooltip content="Flat color fill">
+                        <button type="button" onClick={() => update({ fillType: 'solid' })} className={segCls(!isGradient)}>Solid</button>
+                      </Tooltip>
+                      <Tooltip content="Two-color linear gradient fill">
+                        <button
+                          type="button"
+                          onClick={() => update({
+                            fillType: 'linear',
+                            gradientStops: stops,
+                            gradientAngle: layer.gradientAngle ?? 180,
+                            gradientColorSpace: space,
+                          })}
+                          className={segCls(isGradient)}
+                        >
+                          Gradient
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                  {!isGradient ? (
+                    <ColorAlphaField
+                      value={layer.fill}
+                      fallback="#6366f1"
+                      showHex
+                      onChange={fill => update({ fill })}
+                    />
+                  ) : (
+                    <div className="flex flex-col gap-1.5 mt-0.5">
+                      {/* Vertical preview bar is the gradient's spine (top =
+                          first stop); each stop row carries a ◄ pointer at
+                          its spot on the bar. The whole assembly grows
+                          naturally when multi-stop editing arrives. CSS
+                          renders `in oklch` natively, so both blend modes
+                          preview accurately; direction is on the canvas. */}
+                      <div className="flex">
+                        <div
+                          className="w-4 -ms-3 border border-white/25 shrink-0 border-s-0 self-stretch"
+                          // backgroundImage + explicit no-repeat: the
+                          // `background` shorthand left repeat on, and
+                          // subpixel sampling at the bottom rounded edge
+                          // wrapped 1px of the FIRST stop back in.
+                          style={{ backgroundImage: cssGradientPreview(stops, space, 180), backgroundRepeat: 'no-repeat' }}
+                        />
+                        {/* Arrow track: each ◄ rides the bar at its stop's
+                            EXACT position (top = 0, bottom = 1), independent
+                            of the field rows beside it — so start/end pin to
+                            the bar's ends and mid-stops point true. */}
+                        <div className="relative w-[5px] shrink-0 self-stretch">
+                          {stops.map((st, idx) => (
+                            <div
+                              key={idx}
+                              className="absolute left-0 -translate-y-1/2 w-0 h-0 border-y-[5px] border-y-transparent border-r-[6px] border-r-white/50 -ml-[1px]"
+                              style={{ top: `${Math.min(1, Math.max(0, st.pos)) * 100}%` }}
+                            />
+                          ))}
+                        </div>
+                        <div className="flex flex-col gap-1.5 flex-1 min-w-0 justify-between">
+                          {stops.map((st, idx) => (
+                            <ColorAlphaField
+                              key={idx}
+                              value={st.color}
+                              fallback="#6366f1"
+                              showHex
+                              onChange={c => setStop(idx, c)}
+                              stopPos={st.pos}
+                              onStopPosChange={p => setStopPos(idx, p)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-gray-400">Angle °</span>
+                          <NumberInput
+                            min={0}
+                            max={360}
+                            value={Math.round(layer.gradientAngle ?? 180)}
+                            onChange={gradientAngle => update({ gradientAngle })}
+                            className="w-full"
+                          />
+                        </label>
+                        <div className="flex flex-col gap-0.5">
+                          {/* div, not label — a label would forward caption
+                              clicks to the first button. */}
+                          <span className="text-[10px] text-gray-400">Blend</span>
+                          <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
+                            <Tooltip content="oklch — keeps saturated blends vivid (recommended)">
+                              <button type="button" onClick={() => update({ gradientColorSpace: 'oklch' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
+                            </Tooltip>
+                            <Tooltip content="sRGB — classic CSS blending; use when brand colors expect it">
+                              <button type="button" onClick={() => update({ gradientColorSpace: 'srgb' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Stroke</span>
               <ColorAlphaField
