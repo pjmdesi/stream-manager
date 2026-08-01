@@ -291,6 +291,10 @@ interface NumberInputProps {
    *  ColorAlphaField's unified swatch|hex|opacity control. */
   frameless?: boolean
   merged?: boolean
+  /** Escape pressed while the field is focused. Wired by callers that give
+   *  Escape a "zero this field" meaning (e.g. ColorAlphaField's opacity).
+   *  The key event is consumed, so it never reaches page-level handlers. */
+  onEscape?: () => void
   'aria-label'?: string
 }
 
@@ -308,7 +312,7 @@ interface NumberInputProps {
  */
 export const NumberInput: React.FC<NumberInputProps> = ({
   value, onChange, min, max, step = 1, placeholder, disabled, className = '', title,
-  inlineNote, frameless = false, merged = false,
+  inlineNote, frameless = false, merged = false, onEscape,
   'aria-label': ariaLabel,
 }) => {
   const clamp = (n: number) => {
@@ -354,7 +358,22 @@ export const NumberInput: React.FC<NumberInputProps> = ({
           } else if (e.key === 'ArrowDown') {
             e.preventDefault()
             stepBy(-1, e.shiftKey)
+          } else if (e.key === 'Escape' && onEscape) {
+            e.preventDefault()
+            e.stopPropagation()
+            onEscape()
           }
+        }}
+        // Canonicalize what's DISPLAYED once editing ends. React compares a
+        // number input's typed string to the value prop with LOOSE equality,
+        // so when they agree numerically ("0100" == 100, "1.50" == 1.5) it
+        // skips the DOM write and the odd-looking text lingers even though
+        // the committed value is correct. Writing the node directly is the
+        // only way to override that; the value itself is already clamped in
+        // onChange, so this is purely cosmetic.
+        onBlur={e => {
+          const canonical = Number.isFinite(value) ? String(value) : ''
+          if (e.target.value !== canonical) e.target.value = canonical
         }}
         min={min}
         max={max}

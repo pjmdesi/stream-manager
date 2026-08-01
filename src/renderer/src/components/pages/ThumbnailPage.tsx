@@ -15,7 +15,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   FlipHorizontal2, FlipVertical2,
-  ChevronDown, ChevronRight, Loader2, Eraser, Radio, Palette, Upload,
+  ChevronDown, ChevronRight, Loader2, Radio, Palette, Upload,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -1612,7 +1612,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
           />
         </div>
         {stopPos !== undefined && onStopPosChange && (
-          <Tooltip content="Stop position on the bar — 1 = top, 0 = bottom (spinner up moves the marker up)" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
+          <Tooltip content="Stop position on the bar" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
             <NumberInput
               min={0}
               max={1}
@@ -1641,16 +1641,44 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
               // through raw.
               onChange(/^#[0-9a-fA-F]{6}$/.test(v) ? joinColorAlpha(v, alpha) : v)
             }}
+            // Normalize once editing ends, so a half-typed or malformed
+            // entry can never persist as the layer's color. Accepts the
+            // shorthand and paste-friendly forms — 3/6/8 digits, with or
+            // without the leading '#' — and snaps back to the committed
+            // color when the text isn't a color at all.
             onBlur={e => {
-              const v = e.target.value
-              // slice(0, 7) truncates the STRING '#rrggbbaa' → '#rrggbb'
-              // (alpha never enters recents) — it is not a list cap.
-              if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v)) recordRecent(v.slice(0, 7))
+              const m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.exec(e.target.value.trim())
+              if (!m) {
+                onChange(joinColorAlpha(rgb, alpha))
+                return
+              }
+              const digits = m[1].length === 3
+                ? m[1].split('').map(c => c + c).join('') // #f00 → #ff0000
+                : m[1]
+              const rgbPart = `#${digits.slice(0, 6).toLowerCase()}`
+              // An 8-digit entry carries its own alpha (that's the point of
+              // pasting one); anything shorter keeps the field's current
+              // opacity. Recents stay rgb-only either way.
+              const nextAlpha = digits.length === 8 ? parseInt(digits.slice(6, 8), 16) / 255 : alpha
+              onChange(joinColorAlpha(rgbPart, nextAlpha))
+              recordRecent(rgbPart)
+            }}
+            // Escape zeroes the field (#000000 is the zero color, matching
+            // the opacity field's Esc → 0) — the keyboard replacement for
+            // the removed clear button. Alpha is untouched: this segment
+            // owns rgb only. An open palette popover takes Escape first,
+            // innermost-overlay-wins.
+            onKeyDown={e => {
+              if (e.key !== 'Escape') return
+              e.preventDefault()
+              e.stopPropagation()
+              if (paletteOpen) { setPaletteOpen(false); return }
+              onChange(joinColorAlpha('#000000', alpha))
             }}
             className="flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6 font-mono"
           />
         )}
-        <Tooltip content="Opacity %" triggerClassName="flex w-11 shrink-0 border-l border-white/10">
+        <Tooltip content="Opacity % — Esc clears to 0" triggerClassName="flex w-11 shrink-0 border-l border-white/10">
           <NumberInput
             min={0}
             max={100}
@@ -1659,31 +1687,20 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
             className="w-full h-6"
             frameless
             merged
+            // Replaces the old clear button: Esc here = fully transparent.
+            onEscape={() => { if (paletteOpen) setPaletteOpen(false); else onChange(joinColorAlpha(rgb, 0)) }}
           />
         </Tooltip>
       </div>
-      {/* Gapless button pair — the row's gap-1.5 between these two was
-          width the hex input needs for 8-digit values. */}
-      <div className="flex items-center shrink-0">
-        <Tooltip content="Apply a palette color">
-          <button
-            type="button"
-            onClick={() => { if (paletteOpen) setPaletteOpen(false); else openPopover() }}
-            className={`p-1 rounded transition-colors ${paletteOpen ? 'text-gray-200 bg-white/10' : 'text-gray-500 hover:text-gray-200 hover:bg-white/10'}`}
-          >
-            <Palette size={12} />
-          </button>
-        </Tooltip>
-        <Tooltip content="Clear — fully transparent">
-          <button
-            type="button"
-            onClick={() => onChange(joinColorAlpha(rgb, 0))}
-            className="p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-white/10 transition-colors"
-          >
-            <Eraser size={12} />
-          </button>
-        </Tooltip>
-      </div>
+      <Tooltip content="Apply a palette color">
+        <button
+          type="button"
+          onClick={() => { if (paletteOpen) setPaletteOpen(false); else openPopover() }}
+          className={`p-1 rounded shrink-0 transition-colors ${paletteOpen ? 'text-gray-200 bg-white/10' : 'text-gray-500 hover:text-gray-200 hover:bg-white/10'}`}
+        >
+          <Palette size={12} />
+        </button>
+      </Tooltip>
       {/* Keyboard-friendly apply path (thumbnails #1): the popover mirrors
           the palette panel — palette grid first, recents below — at the
           same 9-across width so muscle memory from the panel transfers.
@@ -1864,9 +1881,12 @@ function GradientFillControl({ layer, update, fallback }: {
                   // is what CSS/Konva expect. The FIELD shows its
                   // inverse so the number reads as height on the bar:
                   // 1 = top, 0 = bottom. That way the spinner's up arrow
-                  // walks the marker up the bar instead of down.
-                  stopPos={1 - st.pos}
-                  onStopPosChange={p => setStopPos(idx, 1 - p)}
+                  // walks the marker up the bar instead of down. Rounded
+                  // to the step's 2 decimals because the subtraction is
+                  // lossy in binary floating point (1 - 0.7 renders as
+                  // 0.30000000000000004 otherwise).
+                  stopPos={Math.round((1 - st.pos) * 100) / 100}
+                  onStopPosChange={p => setStopPos(idx, Math.round((1 - p) * 100) / 100)}
                 />
               ))}
             </div>
