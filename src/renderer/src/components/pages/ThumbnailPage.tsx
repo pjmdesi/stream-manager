@@ -1,5 +1,5 @@
 import React, {
-  useState, useEffect, useRef, useCallback, useMemo, useContext, createContext,
+  useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useContext, createContext,
 } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { Stage, Layer, Group as KonvaGroup, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, Shape as KonvaShape } from 'react-konva'
@@ -808,6 +808,44 @@ function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, on
   const effectiveStroke = outlineActive ? (layer.outlineColor ?? '#000000') : (layer.stroke ?? '#000000')
   const effectiveStrokeWidth = outlineActive ? (layer.outlineWidth ?? 0) : (layer.strokeWidth ?? 0)
 
+  // Text dimensions are FONT-DRIVEN — Konva measures them, we never store
+  // a height — so anything geometric (flip offsets, gradient endpoints)
+  // has to read them off the node. Reading `nodeRef.current` straight in
+  // render is stale on the first pass (ref still null) and never
+  // re-renders, so measurements land in state instead: this effect runs
+  // after every render and only sets state when a value actually changed,
+  // so it converges immediately and keeps the gradient correct for the
+  // PNG export too.
+  const [measured, setMeasured] = useState({ w: 0, h: 0 })
+  useLayoutEffect(() => {
+    const n = nodeRef.current
+    if (!n) return
+    const w = n.width()
+    const h = n.height()
+    if (w !== measured.w || h !== measured.h) setMeasured({ w, h })
+  })
+
+  // Gradient fill (thumbnails #2, text). Konva's Text draws from its own
+  // top-left, so the endpoints need no origin shift (unlike the centered
+  // ellipse). The box is the text box: the layer width when set, else the
+  // measured width; height is always measured.
+  const gradW = layer.width ?? measured.w
+  const gradH = measured.h
+  const gradientActive =
+    layer.fillType === 'linear' &&
+    (layer.gradientStops?.length ?? 0) >= 2 &&
+    gradW > 0 && gradH > 0
+  let gradientFillProps: Record<string, unknown> = {}
+  if (gradientActive) {
+    const { start, end } = gradientLinePoints(layer.gradientAngle ?? 0, gradW, gradH)
+    gradientFillProps = {
+      fillPriority: 'linear-gradient',
+      fillLinearGradientStartPoint: start,
+      fillLinearGradientEndPoint: end,
+      fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch'),
+    }
+  }
+
   // Shared text props — every shadow clone + the original render with
   // identical content; only the shadow attachment differs per clone.
   // Pulling this out of the JSX avoids drift between clones and keeps
@@ -824,15 +862,15 @@ function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, on
     fillAfterStrokeEnabled: true,
     align: (layer.align ?? 'left') as 'left' | 'center' | 'right',
     lineHeight: layer.lineHeight ?? 1,
-    // Flip in place — text has no stored height, so fall back to the
-    // measured height from the ref. (offsetY for unflipped text is 0,
-    // so the fallback only matters in the flipped branch.) Shadow
-    // clones reuse the same value: they render the same text at the
-    // same font, so their measured dimensions match the original's.
+    // Flip in place — uses the same measured dimensions. (offsetY for
+    // unflipped text is 0, so the measurement only matters in the flipped
+    // branch.) Shadow clones reuse the same values: they render the same
+    // text at the same font, so their measured dimensions match.
     scaleX: layer.flipX ? -1 : 1,
     scaleY: layer.flipY ? -1 : 1,
-    offsetX: layer.flipX ? (layer.width ?? (nodeRef.current?.width() ?? 0)) : 0,
-    offsetY: layer.flipY ? (nodeRef.current?.height() ?? 0) : 0,
+    offsetX: layer.flipX ? (layer.width ?? measured.w) : 0,
+    offsetY: layer.flipY ? measured.h : 0,
+    ...gradientFillProps,
   }
   const shadows = resolveShadows(layer)
 
@@ -1691,6 +1729,174 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
   )
 }
 
+/** Fill control with the Solid/Gradient toggle and, in gradient mode, the
+ *  vertical-spine editor (thumbnails #2). Shared by the shape and text
+ *  property sections so the two can't drift.
+ *
+ *  `layer.fill` always mirrors the first stop, so solid mode and older app
+ *  versions (which ignore the gradient fields) degrade to a flat color.
+ *  The outer element is a div, NOT a label: it contains buttons and nested
+ *  color fields, and label click-forwarding would fire the native picker. */
+function GradientFillControl({ layer, update, fallback }: {
+  layer: ThumbnailLayer
+  update: (patch: Partial<ThumbnailLayer>) => void
+  fallback: string
+}) {
+  const isGradient = layer.fillType === 'linear'
+  const fillSplit = splitColorAlpha(layer.fill, fallback)
+  const defaultStops = [
+    { color: layer.fill ?? fallback, pos: 0 },
+    // Figma convention: fill → same color fully transparent.
+    { color: joinColorAlpha(fillSplit.rgb, 0), pos: 1 },
+  ]
+  const stops = (layer.gradientStops?.length ?? 0) >= 2 ? layer.gradientStops! : defaultStops
+  const space = layer.gradientColorSpace ?? 'oklch'
+  const setStop = (idx: number, color: string) => {
+    const next = stops.map((st, k) => (k === idx ? { ...st, color } : st))
+    update({ gradientStops: next, ...(idx === 0 ? { fill: color } : {}) })
+  }
+  const setStopPos = (idx: number, pos: number) => {
+    const clamped = Math.min(1, Math.max(0, pos))
+    update({ gradientStops: stops.map((st, k) => (k === idx ? { ...st, pos: clamped } : st)) })
+  }
+  const segCls = (on: boolean) =>
+    `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-gray-400">Fill</span>
+        <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
+          <Tooltip content="Flat color fill">
+            <button type="button" onClick={() => update({ fillType: 'solid' })} className={segCls(!isGradient)}>Solid</button>
+          </Tooltip>
+          <Tooltip content="Two-color linear gradient fill">
+            <button
+              type="button"
+              onClick={() => update({
+                fillType: 'linear',
+                gradientStops: stops,
+                // 0° = top→bottom, matching the preview bar.
+                gradientAngle: layer.gradientAngle ?? 0,
+                gradientColorSpace: space,
+              })}
+              className={segCls(isGradient)}
+            >
+              Gradient
+            </button>
+          </Tooltip>
+        </div>
+      </div>
+      {!isGradient ? (
+        <ColorAlphaField
+          value={layer.fill}
+          fallback={fallback}
+          showHex
+          onChange={fill => update({ fill })}
+        />
+      ) : (
+        <div className="flex flex-col gap-1.5 mt-0.5">
+          {/* Vertical preview bar is the gradient's spine (top = first
+              stop); each stop row carries a ◄ pointer at its spot on the
+              bar. The whole assembly grows naturally when multi-stop
+              editing arrives. CSS renders `in oklch` natively, so both
+              blend modes preview accurately; direction is on the canvas. */}
+          <div className="flex">
+            <div
+              className="w-3 -ms-3 border border-white/25 shrink-0 border-s-0 self-stretch"
+              // Layered backgrounds: gradient on top (no-repeat — subpixel
+              // sampling at the bottom edge wrapped 1px of the FIRST stop
+              // back in with repeat on), and a checker underneath so
+              // transparent regions read as transparency.
+              style={{
+                backgroundImage: `${cssGradientPreview(stops, space, 180)}, ${CHECKER_IMAGE}`,
+                backgroundSize: 'auto, 8px 8px',
+                backgroundPosition: '0 0, -1px 0',
+                backgroundRepeat: 'no-repeat, repeat',
+              }}
+            />
+            {/* Arrow track: each ◄ rides the bar at its stop's EXACT
+                position (top = 0, bottom = 1), and a link line runs from
+                the triangle's right edge to its swatch's left edge —
+                diagonal whenever the stop position and its row don't
+                align. Geometry derives from the fixed row metrics (h-6
+                rows = 24px, gap-1.5 = 6px); update the constants if the
+                row styling changes. */}
+            {(() => {
+              const ROW = 24
+              const GAP = 6
+              const trackH = stops.length * ROW + (stops.length - 1) * GAP
+              // Triangle occupies 0..6; the link line gets the remaining
+              // 3px (halved from 6 — PJ).
+              const TRACK_W = 9
+              return (
+                <svg
+                  className="shrink-0 text-white/50"
+                  width={TRACK_W}
+                  height={trackH}
+                  viewBox={`0 0 ${TRACK_W} ${trackH}`}
+                  style={{ overflow: 'visible' }}
+                >
+                  {stops.map((st, idx) => {
+                    const ay = Math.min(1, Math.max(0, st.pos)) * trackH
+                    const ry = idx * (ROW + GAP) + ROW / 2
+                    return (
+                      <g key={idx}>
+                        <line x1={6} y1={ay} x2={TRACK_W} y2={ry} stroke="currentColor" strokeWidth={1} />
+                        <path d={`M0 ${ay} L6 ${ay - 5} L6 ${ay + 5} Z`} fill="currentColor" />
+                      </g>
+                    )
+                  })}
+                </svg>
+              )
+            })()}
+            <div className="flex flex-col gap-1.5 flex-1 min-w-0 justify-between">
+              {stops.map((st, idx) => (
+                <ColorAlphaField
+                  key={idx}
+                  value={st.color}
+                  fallback={fallback}
+                  showHex
+                  onChange={c => setStop(idx, c)}
+                  stopPos={st.pos}
+                  onStopPosChange={p => setStopPos(idx, p)}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-400">Angle °</span>
+              <NumberInput
+                min={0}
+                max={360}
+                value={Math.round(layer.gradientAngle ?? 0)}
+                onChange={gradientAngle => update({ gradientAngle })}
+                className="w-full"
+              />
+            </label>
+            <div className="flex flex-col gap-0.5">
+              {/* div, not label — a label would forward caption clicks to
+                  the first button. */}
+              <span className="text-[10px] text-gray-400">Blend</span>
+              <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
+                {/* triggerClassName carries flex-1: the Tooltip wrapper is
+                    the actual flex item, so flex-1 on the buttons alone
+                    left the pair unevenly sized. */}
+                <Tooltip content="oklch — keeps saturated blends vivid (recommended)" triggerClassName="flex-1 min-w-0 flex">
+                  <button type="button" onClick={() => update({ gradientColorSpace: 'oklch' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
+                </Tooltip>
+                <Tooltip content="sRGB — classic CSS blending; use when brand colors expect it" triggerClassName="flex-1 min-w-0 flex">
+                  <button type="button" onClick={() => update({ gradientColorSpace: 'srgb' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
+                </Tooltip>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Properties panel ──────────────────────────────────────────────────────────
 
 interface PropsPanelProps {
@@ -2209,15 +2415,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
             {/* Stacked full-width rows (was a 2-col grid) — the alpha% +
                 clear controls need the horizontal room. */}
             <div className="flex flex-col gap-1.5">
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Fill</span>
-                <ColorAlphaField
-                  value={layer.fill}
-                  fallback="#ffffff"
-                  showHex
-                  onChange={fill => update({ fill })}
-                />
-              </label>
+              <GradientFillControl layer={layer} update={update} fallback="#ffffff" />
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">Stroke</span>
                 <ColorAlphaField
@@ -2246,170 +2444,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
         <section>
           <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Fill & Stroke</p>
           <div className="flex flex-col gap-1.5">
-            {(() => {
-              // Gradient fill UI (thumbnails #2). `fill` mirrors the start
-              // stop so solid mode / older app versions degrade sensibly.
-              // The whole block is a div, NOT a label: it contains buttons
-              // and nested color fields, and label forwarding would fire
-              // the native picker (the phantom-picker class of bug).
-              const isGradient = layer.fillType === 'linear'
-              const fillSplit = splitColorAlpha(layer.fill, '#6366f1')
-              const defaultStops = [
-                { color: layer.fill ?? '#6366f1', pos: 0 },
-                // Figma convention: fill → same color fully transparent.
-                { color: joinColorAlpha(fillSplit.rgb, 0), pos: 1 },
-              ]
-              const stops = (layer.gradientStops?.length ?? 0) >= 2 ? layer.gradientStops! : defaultStops
-              const space = layer.gradientColorSpace ?? 'oklch'
-              const setStop = (idx: number, color: string) => {
-                const next = stops.map((st, k) => (k === idx ? { ...st, color } : st))
-                update({ gradientStops: next, ...(idx === 0 ? { fill: color } : {}) })
-              }
-              const setStopPos = (idx: number, pos: number) => {
-                const clamped = Math.min(1, Math.max(0, pos))
-                update({ gradientStops: stops.map((st, k) => (k === idx ? { ...st, pos: clamped } : st)) })
-              }
-              const segCls = (on: boolean) =>
-                `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
-              return (
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-gray-400">Fill</span>
-                    <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
-                      <Tooltip content="Flat color fill">
-                        <button type="button" onClick={() => update({ fillType: 'solid' })} className={segCls(!isGradient)}>Solid</button>
-                      </Tooltip>
-                      <Tooltip content="Two-color linear gradient fill">
-                        <button
-                          type="button"
-                          onClick={() => update({
-                            fillType: 'linear',
-                            gradientStops: stops,
-                            // 0° = top→bottom, matching the preview bar.
-                            gradientAngle: layer.gradientAngle ?? 0,
-                            gradientColorSpace: space,
-                          })}
-                          className={segCls(isGradient)}
-                        >
-                          Gradient
-                        </button>
-                      </Tooltip>
-                    </div>
-                  </div>
-                  {!isGradient ? (
-                    <ColorAlphaField
-                      value={layer.fill}
-                      fallback="#6366f1"
-                      showHex
-                      onChange={fill => update({ fill })}
-                    />
-                  ) : (
-                    <div className="flex flex-col gap-1.5 mt-0.5">
-                      {/* Vertical preview bar is the gradient's spine (top =
-                          first stop); each stop row carries a ◄ pointer at
-                          its spot on the bar. The whole assembly grows
-                          naturally when multi-stop editing arrives. CSS
-                          renders `in oklch` natively, so both blend modes
-                          preview accurately; direction is on the canvas. */}
-                      <div className="flex">
-                        <div
-                          className="w-3 -ms-3 border border-white/25 shrink-0 border-s-0 self-stretch"
-                          // Layered backgrounds: gradient on top (no-repeat —
-                          // subpixel sampling at the bottom edge wrapped 1px
-                          // of the FIRST stop back in with repeat on), and a
-                          // checker underneath so transparent regions read
-                          // as transparency.
-                          style={{
-                            backgroundImage: `${cssGradientPreview(stops, space, 180)}, ${CHECKER_IMAGE}`,
-                            backgroundSize: 'auto, 8px 8px',
-                            backgroundPosition: '0 0, -1px 0',
-                            backgroundRepeat: 'no-repeat, repeat',
-                          }}
-                        />
-                        {/* Arrow track: each ◄ rides the bar at its stop's
-                            EXACT position (top = 0, bottom = 1), and a link
-                            line runs from the triangle's right edge to its
-                            swatch's left edge — diagonal whenever the stop
-                            position and its row don't align. Geometry
-                            derives from the fixed row metrics (h-6 rows =
-                            24px, gap-1.5 = 6px); update the constants if
-                            the row styling changes. */}
-                        {(() => {
-                          const ROW = 24
-                          const GAP = 6
-                          const trackH = stops.length * ROW + (stops.length - 1) * GAP
-                          // Triangle occupies 0..6; the link line gets the
-                          // remaining 3px (halved from 6 — PJ).
-                          const TRACK_W = 9
-                          return (
-                            <svg
-                              className="shrink-0 text-white/50"
-                              width={TRACK_W}
-                              height={trackH}
-                              viewBox={`0 0 ${TRACK_W} ${trackH}`}
-                              style={{ overflow: 'visible' }}
-                            >
-                              {stops.map((st, idx) => {
-                                const ay = Math.min(1, Math.max(0, st.pos)) * trackH
-                                const ry = idx * (ROW + GAP) + ROW / 2
-                                return (
-                                  <g key={idx}>
-                                    <line x1={6} y1={ay} x2={TRACK_W} y2={ry} stroke="currentColor" strokeWidth={1} />
-                                    <path d={`M0 ${ay} L6 ${ay - 5} L6 ${ay + 5} Z`} fill="currentColor" />
-                                  </g>
-                                )
-                              })}
-                            </svg>
-                          )
-                        })()}
-                        <div className="flex flex-col gap-1.5 flex-1 min-w-0 justify-between">
-                          {stops.map((st, idx) => (
-                            <ColorAlphaField
-                              key={idx}
-                              value={st.color}
-                              fallback="#6366f1"
-                              showHex
-                              onChange={c => setStop(idx, c)}
-                              stopPos={st.pos}
-                              onStopPosChange={p => setStopPos(idx, p)}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <label className="flex flex-col gap-0.5">
-                          <span className="text-[10px] text-gray-400">Angle °</span>
-                          <NumberInput
-                            min={0}
-                            max={360}
-                            value={Math.round(layer.gradientAngle ?? 0)}
-                            onChange={gradientAngle => update({ gradientAngle })}
-                            className="w-full"
-                          />
-                        </label>
-                        <div className="flex flex-col gap-0.5">
-                          {/* div, not label — a label would forward caption
-                              clicks to the first button. */}
-                          <span className="text-[10px] text-gray-400">Blend</span>
-                          <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
-                            {/* triggerClassName carries flex-1: the Tooltip
-                                wrapper is the actual flex item, so flex-1 on
-                                the buttons alone left the pair unevenly
-                                sized. */}
-                            <Tooltip content="oklch — keeps saturated blends vivid (recommended)" triggerClassName="flex-1 min-w-0 flex">
-                              <button type="button" onClick={() => update({ gradientColorSpace: 'oklch' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
-                            </Tooltip>
-                            <Tooltip content="sRGB — classic CSS blending; use when brand colors expect it" triggerClassName="flex-1 min-w-0 flex">
-                              <button type="button" onClick={() => update({ gradientColorSpace: 'srgb' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
-                            </Tooltip>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
+            <GradientFillControl layer={layer} update={update} fallback="#6366f1" />
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Stroke</span>
               <ColorAlphaField
