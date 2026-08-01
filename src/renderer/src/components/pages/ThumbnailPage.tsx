@@ -3146,6 +3146,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     persistPalette([...rest.slice(0, at), ...moving, ...rest.slice(at)])
   }, [palette, selectedSwatches, persistPalette])
 
+  // A drop is a no-op when the dragged selection is one contiguous block
+  // and the insertion point falls inside or adjacent to it — releasing
+  // there wouldn't move anything, so no insertion marker is offered. (A
+  // NON-contiguous selection always moves: dropping anywhere pulls it
+  // together into one block.)
+  const reorderIsNoop = useCallback((insertAt: number) => {
+    const sel = [...selectedSwatches].sort((a, b) => a - b)
+    if (sel.length === 0) return false
+    const contiguous = sel[sel.length - 1] - sel[0] === sel.length - 1
+    return contiguous && insertAt >= sel[0] && insertAt <= sel[sel.length - 1] + 1
+  }, [selectedSwatches])
+
   const exportPalette = useCallback(async () => {
     if (!palette) return
     try {
@@ -6619,7 +6631,29 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     ) : palette.length === 0 ? (
                       <p className="text-[10px] text-gray-400">Palette is empty — add colors with + or from the recent colors below.</p>
                     ) : (
-                      <div className="flex flex-wrap gap-1.5">
+                      <div
+                        className="flex flex-wrap gap-1.5"
+                        // The gaps BETWEEN tiles belong to this container, not
+                        // to any tile — without these handlers the browser
+                        // shows the no-drop cursor exactly where the insertion
+                        // marker is drawn. Tiles preventDefault first and
+                        // bubble up, so `defaultPrevented` distinguishes
+                        // "over a tile" (tile already handled it — keep out so
+                        // we don't recompute or double-commit) from "over a
+                        // gap" (accept the drop at the marker's index).
+                        onDragOver={e => {
+                          if (e.defaultPrevented) return
+                          if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                        }}
+                        onDrop={e => {
+                          if (e.defaultPrevented) return
+                          if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
+                          e.preventDefault()
+                          if (swatchDropIndex !== null) commitSwatchReorder(swatchDropIndex)
+                        }}
+                      >
                         {palette.map((s, i) => {
                           const v = paletteSwatchValue(s)
                           if (!v) return null
@@ -6671,7 +6705,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                       e.preventDefault()
                                       e.dataTransfer.dropEffect = 'move'
                                       const r = e.currentTarget.getBoundingClientRect()
-                                      setSwatchDropIndex(e.clientX < r.left + r.width / 2 ? i : i + 1)
+                                      const at = e.clientX < r.left + r.width / 2 ? i : i + 1
+                                      setSwatchDropIndex(reorderIsNoop(at) ? null : at)
                                     }}
                                     onDrop={e => {
                                       if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
@@ -6690,11 +6725,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                         the start of row 2 drew the line at the end
                                         of row 1, because the 2px divider still fit
                                         there while the tile wrapped. */}
+                                    {/* Offsets are measured from the PADDING box,
+                                        1px inside the tile's border — hence 5px
+                                        (not 4) to center the 2px line in the 6px
+                                        gap, and -top-px/h-5 to span the full
+                                        20px tile height. */}
                                     {swatchDropIndex === i && (
-                                      <span className="pointer-events-none absolute -left-[4px] top-0 h-full w-0.5 rounded bg-purple-500" />
+                                      <span className="pointer-events-none absolute -left-[5px] -top-px h-5 w-0.5 rounded bg-purple-500" />
                                     )}
                                     {swatchDropIndex === palette.length && i === palette.length - 1 && (
-                                      <span className="pointer-events-none absolute -right-[4px] top-0 h-full w-0.5 rounded bg-purple-500" />
+                                      <span className="pointer-events-none absolute -right-[5px] -top-px h-5 w-0.5 rounded bg-purple-500" />
                                     )}
                                   </button>
                                 ) : (
