@@ -1495,9 +1495,11 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
   onChange: (v: string) => void
   /** Show the free-text hex input (accepts #rrggbb / #rrggbbaa). */
   showHex?: boolean
-  /** Gradient-stop mode: position along the gradient line, rendered as a
-   *  0.0–1.0 field right of the swatch (fractional on purpose — visually
-   *  distinct from the %-based opacity). Provide both or neither. */
+  /** Gradient-stop mode: the stop's height on the preview bar (1 = top,
+   *  0 = bottom), rendered as a 0.0–1.0 field right of the swatch
+   *  (fractional on purpose — visually distinct from the %-based
+   *  opacity). This is the DISPLAY value; the caller converts to/from the
+   *  stored gradient-line position. Provide both or neither. */
   stopPos?: number
   onStopPosChange?: (pos: number) => void
 }) {
@@ -1610,14 +1612,14 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
           />
         </div>
         {stopPos !== undefined && onStopPosChange && (
-          <Tooltip content="Stop position along the gradient (0 = start of the bar, 1 = end)" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
+          <Tooltip content="Stop position on the bar — 1 = top, 0 = bottom (spinner up moves the marker up)" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
             <NumberInput
               min={0}
               max={1}
               step={0.01}
               value={stopPos}
               onChange={onStopPosChange}
-              className="w-full h-6"
+              className="w-full h-6 min-w-12"
               frameless
               merged
             />
@@ -1648,7 +1650,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
             className="flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6 font-mono"
           />
         )}
-        <Tooltip content="Opacity %" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
+        <Tooltip content="Opacity %" triggerClassName="flex w-11 shrink-0 border-l border-white/10">
           <NumberInput
             min={0}
             max={100}
@@ -1857,8 +1859,14 @@ function GradientFillControl({ layer, update, fallback }: {
                   fallback={fallback}
                   showHex
                   onChange={c => setStop(idx, c)}
-                  stopPos={st.pos}
-                  onStopPosChange={p => setStopPos(idx, p)}
+                  // Stored `pos` is the canonical distance along the
+                  // gradient line (0 = line start = bar TOP at 0°), which
+                  // is what CSS/Konva expect. The FIELD shows its
+                  // inverse so the number reads as height on the bar:
+                  // 1 = top, 0 = bottom. That way the spinner's up arrow
+                  // walks the marker up the bar instead of down.
+                  stopPos={1 - st.pos}
+                  onStopPosChange={p => setStopPos(idx, 1 - p)}
                 />
               ))}
             </div>
