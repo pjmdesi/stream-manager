@@ -30,7 +30,7 @@ import { useStore } from '../../hooks/useStore'
 import { theme, rgba } from '../../theme'
 import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
 import { Modal } from '../ui/Modal'
-import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta, StreamFolder, PaletteSwatch } from '../../types'
+import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta, StreamFolder, PaletteSwatch, GradientSwatchData } from '../../types'
 
 // ── Canvas dimensions ─────────────────────────────────────────────────────────
 const CANVAS_W = 1280
@@ -1484,14 +1484,84 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
  *  and recents recording for free this way. */
 const PaletteContext = createContext<{
   palette: PaletteSwatch[]
-  recents: string[]
-  /** Record a color the user actually APPLIED (picker close, hex commit,
-   *  swatch apply) — feeds the recents row. */
-  recordRecent: (color: string) => void
-}>({ palette: [], recents: [], recordRecent: () => {} })
+  /** Palette-filtered recents, newest first. The id is EPHEMERAL (per app
+   *  session) — it's what a session tie points at so tweaks update one
+   *  entry in place instead of spawning siblings. */
+  recents: { id: number; value: SwatchValue }[]
+  /** Record a committed swatch value (picker close, hex entry, opacity
+   *  change, swatch apply, gradient edit). `tieKey` scopes the session
+   *  tie — same key while the same layer stays selected updates the same
+   *  recents entry. */
+  recordRecent: (value: SwatchValue, tieKey?: string) => void
+  /** Break one session tie early (e.g. toggling a fill back to Solid ends
+   *  the gradient editing session even though the layer stays selected). */
+  breakRecentTie: (tieKey: string) => void
+}>({ palette: [], recents: [], recordRecent: () => {}, breakRecentTie: () => {} })
 
 /** Drag payload type for palette swatches → color fields. */
 const COLOR_DRAG_MIME = 'application/x-sm-color'
+
+/** Runtime swatch value: a solid (full hex — alpha allowed; swatches are
+ *  FULL field snapshots, so applying one applies its opacity too) or a
+ *  gradient snapshot (stops + angle + blend space). */
+type SwatchValue = { color: string } | { gradient: GradientSwatchData }
+
+/** Canonical identity for dedup and session-tie bookkeeping: solids
+ *  normalize to 8 lowercase digits, gradients serialize their sorted
+ *  stops + angle + space. */
+function swatchKey(v: SwatchValue): string {
+  if ('color' in v) {
+    const p = parseHexEntry(v.color)
+    if (!p) return `s:${v.color.toLowerCase()}`
+    const a = Math.round((p.alpha ?? 1) * 255).toString(16).padStart(2, '0')
+    return `s:${p.rgb}${a}`
+  }
+  const g = v.gradient
+  const stops = [...g.stops].sort((x, y) => x.pos - y.pos).map(st => `${st.color.toLowerCase()}@${st.pos}`).join(',')
+  return `g:${g.colorSpace}:${Math.round(g.angle)}:${stops}`
+}
+
+/** Tile background for any swatch: content layered over the transparency
+ *  checker. Gradient tiles render at their TRUE angle — the tile is the
+ *  one surface where a swatch's direction shows (the editor's spine bar
+ *  deliberately does not). */
+function swatchTileStyle(v: SwatchValue): React.CSSProperties {
+  const top = 'color' in v
+    ? `linear-gradient(${v.color}, ${v.color})`
+    : cssGradientPreview(v.gradient.stops, v.gradient.colorSpace, v.gradient.angle)
+  return {
+    backgroundImage: `${top}, ${CHECKER_IMAGE}`,
+    backgroundSize: 'auto, 6px 6px',
+    backgroundRepeat: 'no-repeat, repeat',
+  }
+}
+
+/** Descriptive tooltip line(s) for a swatch — call sites append their own
+ *  interaction hints. Solids show bare hex (+opacity when not 100%);
+ *  gradients show the stop run, angle, and blend space. */
+function swatchDescription(v: SwatchValue): React.ReactNode {
+  if ('color' in v) {
+    const p = parseHexEntry(v.color)
+    const pct = Math.round((p?.alpha ?? 1) * 100)
+    return <div className="tabular-nums">{(p?.rgb ?? v.color).replace('#', '').toUpperCase()}{pct < 100 ? ` · ${pct}%` : ''}</div>
+  }
+  const g = v.gradient
+  const stops = [...g.stops].sort((x, y) => x.pos - y.pos)
+  return (
+    <>
+      <div className="tabular-nums">{stops.map(st => st.color.replace('#', '').toUpperCase()).join(' → ')}</div>
+      <div>{Math.round(g.angle)}° · {g.colorSpace === 'srgb' ? 'sRGB' : 'oklch'}</div>
+    </>
+  )
+}
+
+/** PaletteSwatch (storage shape) → runtime SwatchValue; null for malformed
+ *  entries (neither color nor gradient). */
+function paletteSwatchValue(s: PaletteSwatch): SwatchValue | null {
+  if (s.gradient) return { gradient: s.gradient }
+  if (typeof s.color === 'string') return { color: s.color }
+  return null
+}
 
 /** CSS checkerboard used as the transparency backdrop wherever a color
  *  can be see-through (color-field swatches, the gradient preview bar).
@@ -1507,9 +1577,10 @@ const SWATCH_REORDER_MIME = 'application/x-sm-swatch-reorder'
  *  square of the raw color. The square itself is fully opaque; the slight
  *  ghosting on top of it is the browser's own drag rendering and isn't
  *  controllable. */
-function setColorDragImage(e: React.DragEvent, color: string) {
+function setColorDragImage(e: React.DragEvent, value: SwatchValue | string) {
   const el = document.createElement('div')
-  el.style.cssText = `width:20px;height:20px;border-radius:5px;background:${color};position:fixed;top:-100px;left:-100px;pointer-events:none;`
+  el.style.cssText = 'width:20px;height:20px;border-radius:5px;position:fixed;top:-100px;left:-100px;pointer-events:none;'
+  Object.assign(el.style, swatchTileStyle(typeof value === 'string' ? { color: value } : value))
   document.body.appendChild(el)
   e.dataTransfer.setDragImage(el, 10, 10)
   // Chromium snapshots the element during dragstart; safe to drop it after.
@@ -1523,7 +1594,7 @@ function setColorDragImage(e: React.DragEvent, color: string) {
 const RECENT_TILE_CLS = 'w-5 h-5'
 const RECENT_FILL_CLS = 'block w-full h-full rounded-[5px] border border-dashed border-white/50'
 
-function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, onStopPosChange }: {
+function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, onStopPosChange, recentKey, onCommitColor }: {
   value: string | undefined
   fallback: string
   onChange: (v: string) => void
@@ -1536,9 +1607,32 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
    *  stored gradient-line position. Provide both or neither. */
   stopPos?: number
   onStopPosChange?: (pos: number) => void
+  /** Session-tie key for recents (`layerId:property`). While the same
+   *  layer stays selected, commits from this field UPDATE its recents
+   *  entry in place instead of spawning one per tweak. Omit to record
+   *  untied (old behavior) — or to not record at all when onCommitColor
+   *  redirects commits. */
+  recentKey?: string
+  /** Overrides recents recording entirely: gradient STOP fields report
+   *  their commits to the gradient control (which records the whole
+   *  gradient as one swatch) instead of dropping solids into recents. */
+  onCommitColor?: (fullColor: string) => void
 }) {
   const { rgb, alpha } = splitColorAlpha(value, fallback)
   const { palette, recents, recordRecent } = useContext(PaletteContext)
+
+  // A COMMIT — picker close, hex entry, opacity change, Esc-zero, swatch
+  // apply/drop — records the FULL field snapshot (color incl. alpha).
+  // Ref-routed so the once-mounted native `change` listener always sees
+  // the current handler and alpha.
+  const commitRecent = (fullColor: string) => {
+    if (onCommitColor) onCommitColor(fullColor)
+    else recordRecent({ color: fullColor }, recentKey)
+  }
+  const commitRecentRef = useRef(commitRecent)
+  commitRecentRef.current = commitRecent
+  const alphaRef = useRef(alpha)
+  alphaRef.current = alpha
   const wrapRef = useRef<HTMLDivElement>(null)
   const colorInputRef = useRef<HTMLInputElement>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -1589,14 +1683,15 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
   // Recents feed from the native picker: React's onChange is the `input`
   // event (fires per tick while dragging inside the dialog); the native
   // `change` event fires once when the dialog closes — THAT color is the
-  // one worth remembering.
+  // one worth remembering. Full snapshot: the picker's rgb joined with
+  // the field's current alpha.
   useEffect(() => {
     const el = colorInputRef.current
     if (!el) return
-    const onCommit = () => recordRecent(el.value)
+    const onCommit = () => commitRecentRef.current(joinColorAlpha(el.value, alphaRef.current))
     el.addEventListener('change', onCommit)
     return () => el.removeEventListener('change', onCommit)
-  }, [recordRecent])
+  }, [])
 
   // Outside-click closes the palette popover. The popover is portaled, so
   // both the field and the popover count as "inside".
@@ -1611,11 +1706,11 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
     return () => document.removeEventListener('mousedown', onDown)
   }, [paletteOpen])
 
-  // Swatch colors are rgb-only; the field's current alpha is preserved,
-  // matching how the native picker composes with the opacity control.
-  const applySwatch = (color: string) => {
-    onChange(joinColorAlpha(color, alpha))
-    recordRecent(color)
+  // Swatches are FULL snapshots — applying one applies its opacity too
+  // (the old keep-target-alpha rule died with the rgb-only palette).
+  const applySwatch = (fullColor: string) => {
+    onChange(fullColor)
+    commitRecent(fullColor)
   }
 
   const swatchTile = 'w-5 h-5 rounded-md border border-white/50'
@@ -1689,9 +1784,8 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
         {showHex && (
           <input
             type="text"
-            // Resting display is the rgb digits only — opacity lives solely
-            // in the % field (and palette/recents are rgb-only, so what you
-            // see is what saves). While typing, the draft takes over.
+            // Resting display is the rgb digits only — opacity lives in the
+            // % field beside it. While typing, the draft takes over.
             value={hexDraft ?? restingHex}
             onChange={e => {
               const raw = e.target.value
@@ -1705,10 +1799,12 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
             }}
             // Editing ends: drop the draft so the canonical value shows
             // again. Text that never parsed simply falls away — the last
-            // committed color is already intact, nothing to revert.
+            // committed color is already intact, nothing to revert. A
+            // parsed entry commits the full snapshot (entry's own alpha
+            // when it carried one, the field's otherwise).
             onBlur={() => {
               const parsed = hexDraft !== null ? parseHexEntry(hexDraft) : null
-              if (parsed) recordRecent(parsed.rgb)
+              if (parsed) commitRecent(joinColorAlpha(parsed.rgb, parsed.alpha ?? alpha))
               setHexDraft(null)
             }}
             // Escape zeroes the field (#000000 is the zero color, matching
@@ -1724,7 +1820,9 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
               // Drop the draft too, or the zeroed color would stay hidden
               // behind whatever text was mid-edit.
               setHexDraft(null)
-              onChange(joinColorAlpha('#000000', alpha))
+              const zeroed = joinColorAlpha('#000000', alpha)
+              onChange(zeroed)
+              commitRecent(zeroed)
             }}
             // 9 = '#' + 8 digits, the longest valid form. Deliberately NOT
             // narrowed to 8 for the now-bare display: the limit is applied
@@ -1744,12 +1842,23 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
             min={0}
             max={100}
             value={Math.round(alpha * 100)}
-            onChange={p => onChange(joinColorAlpha(rgb, p / 100))}
+            // Opacity edits are commits too — alpha is part of the swatch
+            // now, so tweaking it updates this field's tied recents entry.
+            onChange={p => {
+              const next = joinColorAlpha(rgb, p / 100)
+              onChange(next)
+              commitRecent(next)
+            }}
             className="w-full h-6"
             frameless
             merged
             // Replaces the old clear button: Esc here = fully transparent.
-            onEscape={() => { if (paletteOpen) setPaletteOpen(false); else onChange(joinColorAlpha(rgb, 0)) }}
+            onEscape={() => {
+              if (paletteOpen) { setPaletteOpen(false); return }
+              const next = joinColorAlpha(rgb, 0)
+              onChange(next)
+              commitRecent(next)
+            }}
           />
         </Tooltip>
       </div>
@@ -1776,32 +1885,43 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
           style={{ top: popPos.top, bottom: popPos.bottom, right: popPos.right }}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setPaletteOpen(false) } }}
         >
-          {palette.length === 0 ? (
-            <p className="text-[10px] text-gray-400 px-1">Palette is empty — add colors in the Palette panel.</p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {palette.map((s, i) => (
-                <Tooltip key={`${s.color}-${i}`} content={`${s.name ? `${s.name} · ` : ''}${s.color.toUpperCase()}`}>
-                  <button type="button" onClick={() => applySwatch(s.color)} className={swatchTile} style={{ background: s.color }} />
-                </Tooltip>
-              ))}
-            </div>
-          )}
-          {recents.length > 0 && (
-            <>
-              <div className="border-t border-white/20" />
-              <p className="text-[9px] uppercase tracking-wider text-gray-400">Recent</p>
-              <div className="flex flex-wrap gap-1.5">
-                {recents.map(c => (
-                  <Tooltip key={c} content={`Recent · ${c.toUpperCase()}`}>
-                    <button type="button" onClick={() => applySwatch(c)} className={RECENT_TILE_CLS}>
-                      <span className={RECENT_FILL_CLS} style={{ background: c }} />
-                    </button>
-                  </Tooltip>
-                ))}
-              </div>
-            </>
-          )}
+          {/* Solids only for now: this popover applies to ONE color field,
+              and a gradient swatch targets the whole fill control — the
+              gradient apply path is the next pass. */}
+          {(() => {
+            const solidPalette = palette.filter(s => typeof s.color === 'string')
+            const solidRecents = recents.filter(e => 'color' in e.value)
+            return (
+              <>
+                {solidPalette.length === 0 ? (
+                  <p className="text-[10px] text-gray-400 px-1">Palette is empty — add colors in the Palette panel.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {solidPalette.map((s, i) => (
+                      <Tooltip key={`${s.color}-${i}`} content={swatchDescription({ color: s.color! })}>
+                        <button type="button" onClick={() => applySwatch(s.color!)} className={swatchTile} style={swatchTileStyle({ color: s.color! })} />
+                      </Tooltip>
+                    ))}
+                  </div>
+                )}
+                {solidRecents.length > 0 && (
+                  <>
+                    <div className="border-t border-white/20" />
+                    <p className="text-[9px] uppercase tracking-wider text-gray-400">Recent</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {solidRecents.map(e => (
+                        <Tooltip key={e.id} content={swatchDescription(e.value)}>
+                          <button type="button" onClick={() => applySwatch((e.value as { color: string }).color)} className={RECENT_TILE_CLS}>
+                            <span className={RECENT_FILL_CLS} style={swatchTileStyle(e.value)} />
+                          </button>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )
+          })()}
         </div>,
         document.body,
       )}
@@ -1831,13 +1951,31 @@ function GradientFillControl({ layer, update, fallback }: {
   ]
   const stops = (layer.gradientStops?.length ?? 0) >= 2 ? layer.gradientStops! : defaultStops
   const space = layer.gradientColorSpace ?? 'oklch'
+  const angle = layer.gradientAngle ?? 0
+
+  // Gradient recents capture: ANY committed gradient edit — stop color,
+  // stop position, angle, blend space — records the whole gradient as one
+  // swatch, tied per layer so a tweaking session updates a single entry.
+  // Merely enabling gradient mode records nothing (the untouched default
+  // isn't the user's gradient yet). Individual stop colors deliberately do
+  // NOT land in recents as solids — the gradient entry represents the work.
+  const { recordRecent, breakRecentTie } = useContext(PaletteContext)
+  const recordGradient = (over: Partial<GradientSwatchData> = {}) => {
+    recordRecent(
+      { gradient: { stops: over.stops ?? stops, angle: over.angle ?? angle, colorSpace: over.colorSpace ?? space } },
+      `${layer.id}:fill-gradient`,
+    )
+  }
+
   const setStop = (idx: number, color: string) => {
     const next = stops.map((st, k) => (k === idx ? { ...st, color } : st))
     update({ gradientStops: next, ...(idx === 0 ? { fill: color } : {}) })
   }
   const setStopPos = (idx: number, pos: number) => {
     const clamped = Math.min(1, Math.max(0, pos))
-    update({ gradientStops: stops.map((st, k) => (k === idx ? { ...st, pos: clamped } : st)) })
+    const next = stops.map((st, k) => (k === idx ? { ...st, pos: clamped } : st))
+    update({ gradientStops: next })
+    recordGradient({ stops: next })
   }
   const segCls = (on: boolean) =>
     `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
@@ -1847,7 +1985,19 @@ function GradientFillControl({ layer, update, fallback }: {
         <span className="text-[10px] text-gray-400">Fill</span>
         <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
           <Tooltip content="Flat color fill">
-            <button type="button" onClick={() => update({ fillType: 'solid' })} className={segCls(!isGradient)}>Solid</button>
+            <button
+              type="button"
+              onClick={() => {
+                update({ fillType: 'solid' })
+                // Leaving gradient mode ends that editing session — the
+                // captured swatch stays as-is; a later return to gradient
+                // mode records a fresh entry.
+                breakRecentTie(`${layer.id}:fill-gradient`)
+              }}
+              className={segCls(!isGradient)}
+            >
+              Solid
+            </button>
           </Tooltip>
           <Tooltip content="Two-color linear gradient fill">
             <button
@@ -1872,6 +2022,7 @@ function GradientFillControl({ layer, update, fallback }: {
           fallback={fallback}
           showHex
           onChange={fill => update({ fill })}
+          recentKey={`${layer.id}:fill`}
         />
       ) : (
         <div className="flex flex-col gap-1.5 mt-0.5">
@@ -1948,6 +2099,10 @@ function GradientFillControl({ layer, update, fallback }: {
                   // 0.30000000000000004 otherwise).
                   stopPos={Math.round((1 - st.pos) * 100) / 100}
                   onStopPosChange={p => setStopPos(idx, Math.round((1 - p) * 100) / 100)}
+                  // Stop commits feed the GRADIENT recents entry (whole
+                  // snapshot), not solid recents. By commit time the tick
+                  // updates have already re-rendered, so `stops` is fresh.
+                  onCommitColor={() => recordGradient()}
                 />
               ))}
             </div>
@@ -1959,7 +2114,13 @@ function GradientFillControl({ layer, update, fallback }: {
                 min={0}
                 max={360}
                 value={Math.round(layer.gradientAngle ?? 0)}
-                onChange={gradientAngle => update({ gradientAngle })}
+                // Angle is part of the swatch (brand gradients carry their
+                // direction), so angle edits create/update the tied entry
+                // like any other gradient edit.
+                onChange={gradientAngle => {
+                  update({ gradientAngle })
+                  recordGradient({ angle: gradientAngle })
+                }}
                 className="w-full"
               />
             </label>
@@ -1972,10 +2133,10 @@ function GradientFillControl({ layer, update, fallback }: {
                     the actual flex item, so flex-1 on the buttons alone
                     left the pair unevenly sized. */}
                 <Tooltip content="oklch — keeps saturated blends vivid (recommended)" triggerClassName="flex-1 min-w-0 flex">
-                  <button type="button" onClick={() => update({ gradientColorSpace: 'oklch' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
+                  <button type="button" onClick={() => { update({ gradientColorSpace: 'oklch' }); recordGradient({ colorSpace: 'oklch' }) }} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
                 </Tooltip>
                 <Tooltip content="sRGB — classic CSS blending; use when brand colors expect it" triggerClassName="flex-1 min-w-0 flex">
-                  <button type="button" onClick={() => update({ gradientColorSpace: 'srgb' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
+                  <button type="button" onClick={() => { update({ gradientColorSpace: 'srgb' }); recordGradient({ colorSpace: 'srgb' }) }} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
                 </Tooltip>
               </div>
             </div>
@@ -2512,6 +2673,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                   fallback="#000000"
                   showHex
                   onChange={stroke => update({ stroke })}
+                  recentKey={`${layer.id}:stroke`}
                 />
               </label>
               <label className="flex flex-col gap-0.5">
@@ -2541,6 +2703,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 fallback="#000000"
                 showHex
                 onChange={stroke => update({ stroke })}
+                recentKey={`${layer.id}:stroke`}
               />
             </label>
             <label className="flex flex-col gap-0.5">
@@ -2698,6 +2861,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 fallback="#000000"
                 showHex
                 onChange={outlineColor => update({ outlineColor })}
+                recentKey={`${layer.id}:outline`}
               />
             </label>
             <label className="flex flex-col gap-0.5">
@@ -2816,7 +2980,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // null = not loaded yet. Recents: electron-store (per-machine — they churn
   // on every color use and don't belong in a cloud-synced file).
   const [palette, setPalette] = useState<PaletteSwatch[] | null>(null)
-  const [colorRecents, setColorRecents] = useState<string[]>([])
+  // Recents carry an EPHEMERAL id (never persisted): it's what a session
+  // tie points at so tweaks update one entry in place. Ties don't survive
+  // the session, so ids don't need to either.
+  const [colorRecents, setColorRecents] = useState<{ id: number; value: SwatchValue }[]>([])
+  const recentIdRef = useRef(1)
   const [paletteError, setPaletteError] = useState<string | null>(null)
   // Neutral feedback line (import/export results) — paletteError stays red
   // for real failures.
@@ -2839,7 +3007,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         }
       })
     window.api.thumbnailGetColorRecents()
-      .then(r => { if (!cancelled) setColorRecents(r) })
+      .then(r => {
+        if (cancelled) return
+        // Stored entries: hex strings (solids) or { gradient } objects.
+        setColorRecents(r.flatMap(en => {
+          const value: SwatchValue | null =
+            typeof en === 'string' ? { color: en } : en?.gradient ? { gradient: en.gradient } : null
+          return value ? [{ id: recentIdRef.current++, value }] : []
+        }))
+      })
       .catch(err => console.error('Failed to load recent colors', err))
     return () => { cancelled = true }
   }, [config.streamsDir])
@@ -2856,36 +3032,64 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       setPaletteError('Saving _palette.json failed — this change may not persist')
     })
   }, [config.streamsDir])
-  const addPaletteSwatch = useCallback((color: string) => {
+  const addPaletteSwatch = useCallback((value: SwatchValue) => {
     if (!palette) return
-    const c = color.toLowerCase()
-    if (palette.some(s => s.color.toLowerCase() === c)) return
-    persistPalette([...palette, { color: c }])
+    const key = swatchKey(value)
+    if (palette.some(s => { const v = paletteSwatchValue(s); return v !== null && swatchKey(v) === key })) return
+    persistPalette([...palette, 'color' in value ? { color: value.color.toLowerCase() } : { gradient: value.gradient }])
   }, [palette, persistPalette])
-  const recordRecentColor = useCallback((color: string) => {
-    // slice(0, 7) truncates the STRING to '#rrggbb' — rgb only, normalized;
-    // alpha lives per-field, not in the palette. (Not a list cap: the
-    // stored list caps in main, the visible row in visibleRecents.)
-    const c = color.slice(0, 7).toLowerCase()
-    if (!/^#[0-9a-f]{6}$/.test(c)) return
-    window.api.thumbnailAddColorRecent(c)
-      .then(setColorRecents)
-      .catch(err => console.error('Failed to record recent color', err))
+
+  // ── Session ties (the "smart recents") ────────────────────────────────────
+  // While the user works one color property, its recents entry updates IN
+  // PLACE instead of spawning a sibling per tweak — tweak a fill's hue
+  // five times and you've used one slot, not five. Key = layerId:property
+  // (so detouring to the stroke and back keeps both ties alive). All ties
+  // break EAGERLY when the selected layer changes — the next edit session
+  // gets a fresh entry, and an old entry can never mutate mysteriously.
+  const recentTiesRef = useRef(new Map<string, number>())
+  // (The tie-breaking effect lives further down, after selectedIds/mode
+  // are declared — deps can't reference bindings that don't exist yet.)
+
+  const recordRecentColor = useCallback((value: SwatchValue, tieKey?: string) => {
+    // Swatches are FULL snapshots — solids keep their alpha (validated
+    // here), gradients arrive pre-shaped from the gradient control.
+    if ('color' in value && !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value.color)) return
+    const normalized: SwatchValue = 'color' in value ? { color: value.color.toLowerCase() } : value
+    setColorRecents(prev => {
+      const key = swatchKey(normalized)
+      const tiedId = tieKey ? recentTiesRef.current.get(tieKey) : undefined
+      // Replace the tied entry (in-place identity) and any value-duplicate.
+      const rest = prev.filter(e => e.id !== tiedId && swatchKey(e.value) !== key)
+      const id = tiedId ?? recentIdRef.current++
+      if (tieKey) recentTiesRef.current.set(tieKey, id)
+      const next = [{ id, value: normalized }, ...rest].slice(0, 30)
+      window.api.thumbnailSetColorRecents(
+        next.map(e => ('color' in e.value ? e.value.color : { gradient: e.value.gradient })),
+      ).catch(err => console.error('Failed to save recent colors', err))
+      return next
+    })
   }, [])
-  // Recents that duplicate a saved swatch add nothing — the color is already
-  // one tile away — so displays filter them out (storage keeps the full
-  // list: deleting the swatch resurfaces the recent). THIS slice is the
-  // one-row cap (9 across at the panel's width); storage keeps more so
+
+  // Recents that duplicate a saved swatch add nothing — the value is
+  // already one tile away — so displays filter them out (storage keeps the
+  // full list: deleting the swatch resurfaces the recent). THIS slice is
+  // the one-row cap (9 across at the panel's width); storage keeps more so
   // filtered-out duplicates can't shrink the visible row.
-  const visibleRecents = useMemo(
-    () => colorRecents.filter(c => !(palette ?? []).some(s => s.color.toLowerCase() === c)).slice(0, 9),
-    [colorRecents, palette],
-  )
+  const visibleRecents = useMemo(() => {
+    const paletteKeys = new Set(
+      (palette ?? []).flatMap(s => { const v = paletteSwatchValue(s); return v ? [swatchKey(v)] : [] }),
+    )
+    return colorRecents.filter(e => !paletteKeys.has(swatchKey(e.value))).slice(0, 9)
+  }, [colorRecents, palette])
+  const breakRecentTie = useCallback((tieKey: string) => {
+    recentTiesRef.current.delete(tieKey)
+  }, [])
   const paletteCtx = useMemo(() => ({
     palette: palette ?? [],
     recents: visibleRecents,
     recordRecent: recordRecentColor,
-  }), [palette, visibleRecents, recordRecentColor])
+    breakRecentTie,
+  }), [palette, visibleRecents, recordRecentColor, breakRecentTie])
   const paletteAddInputRef = useRef<HTMLInputElement>(null)
   // Palette edit mode (pencil in the header) — phase 3: click selects
   // (Ctrl toggles, Shift ranges from the anchor), drag reorders (a
@@ -2952,7 +3156,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       })
       if (!target) return
       await window.api.thumbnailExportPalette(target, palette)
-      setPaletteNotice(`Exported ${palette.length} color${palette.length === 1 ? '' : 's'}`)
+      setPaletteNotice(`Exported ${palette.length} swatch${palette.length === 1 ? '' : 'es'}`)
     } catch (err) {
       console.error('Palette export failed', err)
       setPaletteError('Export failed — see the console for the cause')
@@ -2970,14 +3174,17 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       if (!file) return
       const swatches = await window.api.thumbnailImportPalette(file)
       const cur = palette ?? []
-      const have = new Set(cur.map(s => s.color.toLowerCase()))
-      const added = swatches.filter(s => !have.has(s.color.toLowerCase()))
+      const have = new Set(cur.flatMap(s => { const v = paletteSwatchValue(s); return v ? [swatchKey(v)] : [] }))
+      const added = swatches.filter(s => {
+        const v = paletteSwatchValue(s)
+        return v !== null && !have.has(swatchKey(v))
+      })
       if (added.length === 0) {
-        setPaletteNotice('No new colors — that file’s colors are all in the palette already')
+        setPaletteNotice('No new swatches — that file’s swatches are all in the palette already')
         return
       }
       persistPalette([...cur, ...added])
-      setPaletteNotice(`Added ${added.length} color${added.length === 1 ? '' : 's'}`)
+      setPaletteNotice(`Added ${added.length} swatch${added.length === 1 ? '' : 'es'}`)
     } catch (err) {
       console.error('Palette import failed', err)
       const msg = err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err)
@@ -3010,7 +3217,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   useEffect(() => {
     const el = paletteAddInputRef.current
     if (!el) return
-    const onPick = () => addPaletteSwatch(el.value)
+    const onPick = () => addPaletteSwatch({ color: el.value })
     el.addEventListener('change', onPick)
     return () => el.removeEventListener('change', onPick)
   }, [addPaletteSwatch, mode])
@@ -3152,6 +3359,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
+  // Session-tie breaker: changing the selected layer (or leaving the
+  // editor) is the "focus is obviously lost" signal — every live recents
+  // tie breaks, so the next edit session starts a fresh entry.
+  useEffect(() => {
+    recentTiesRef.current.clear()
+  }, [selectedIds, mode])
   // Live layers for the keyboard handler's relative edits (arrow-key nudge),
   // which can fire on auto-repeat faster than React re-renders the closure.
   const layersRef = useRef(layers)
@@ -6407,83 +6620,91 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       <p className="text-[10px] text-gray-400">Palette is empty — add colors with + or from the recent colors below.</p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
-                        {palette.map((s, i) => (
-                          // The Tooltip wrapper IS the flex item (like the
-                          // recents row) — an extra block wrapper around the
-                          // inline-flex trigger added baseline space below
-                          // each tile, making wrapped-row gaps look bigger
-                          // than in-row gaps.
-                          <React.Fragment key={`${s.color}-${i}`}>
-                            {/* Reorder insertion marker (edit mode). The
-                                negative margins mostly cancel the flex gap
-                                so the marker reads as a line BETWEEN tiles
-                                rather than a shoved-in element. */}
-                            {paletteEditMode && swatchDropIndex === i && <div className="w-0.5 h-5 -mx-[3px] rounded bg-purple-500" />}
-                            <Tooltip
-                              content={paletteEditMode
-                                ? (
-                                  <>
-                                    <div className="tabular-nums">{s.color.toUpperCase()}</div>
-                                    <div>Click to select · drag to reorder</div>
-                                  </>
-                                )
-                                : (
-                                  <>
-                                    <div className="tabular-nums">{s.color.toUpperCase()}</div>
-                                    <div>Drag over color field to apply</div>
-                                  </>
+                        {palette.map((s, i) => {
+                          const v = paletteSwatchValue(s)
+                          if (!v) return null
+                          const isSolid = 'color' in v
+                          return (
+                            // The Tooltip wrapper IS the flex item (like the
+                            // recents row) — an extra block wrapper around the
+                            // inline-flex trigger added baseline space below
+                            // each tile, making wrapped-row gaps look bigger
+                            // than in-row gaps.
+                            <React.Fragment key={`${swatchKey(v)}-${i}`}>
+                              {/* Reorder insertion marker (edit mode). The
+                                  negative margins mostly cancel the flex gap
+                                  so the marker reads as a line BETWEEN tiles
+                                  rather than a shoved-in element. */}
+                              {paletteEditMode && swatchDropIndex === i && <div className="w-0.5 h-5 -mx-[3px] rounded bg-purple-500" />}
+                              <Tooltip
+                                content={paletteEditMode
+                                  ? (
+                                    <>
+                                      {swatchDescription(v)}
+                                      <div>Click to select · drag to reorder</div>
+                                    </>
+                                  )
+                                  : (
+                                    <>
+                                      {swatchDescription(v)}
+                                      {/* Gradient drag-to-apply is next pass. */}
+                                      {isSolid && <div>Drag over color field to apply</div>}
+                                    </>
+                                  )}
+                              >
+                                {/* Two personalities: normal mode = drag-to-apply
+                                    tile; edit mode = click to select (Ctrl
+                                    toggles, Shift ranges), drag to reorder —
+                                    a multi-selection moves as a block. */}
+                                {paletteEditMode ? (
+                                  <button
+                                    type="button"
+                                    draggable
+                                    onClick={e => handleSwatchSelect(i, e)}
+                                    onDragStart={e => {
+                                      // Dragging an unselected tile selects it first.
+                                      if (!selectedSwatches.has(i)) {
+                                        setSelectedSwatches(new Set([i]))
+                                        swatchAnchorRef.current = i
+                                      }
+                                      e.dataTransfer.setData(SWATCH_REORDER_MIME, '')
+                                      e.dataTransfer.effectAllowed = 'move'
+                                      setColorDragImage(e, v)
+                                    }}
+                                    onDragOver={e => {
+                                      if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
+                                      e.preventDefault()
+                                      e.dataTransfer.dropEffect = 'move'
+                                      const r = e.currentTarget.getBoundingClientRect()
+                                      setSwatchDropIndex(e.clientX < r.left + r.width / 2 ? i : i + 1)
+                                    }}
+                                    onDrop={e => {
+                                      if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
+                                      e.preventDefault()
+                                      if (swatchDropIndex !== null) commitSwatchReorder(swatchDropIndex)
+                                    }}
+                                    onDragEnd={() => setSwatchDropIndex(null)}
+                                    className={`w-5 h-5 rounded-md border transition-shadow ${selectedSwatches.has(i) ? 'border-transparent ring-2 ring-purple-400' : 'border-white/50 hover:ring-1 hover:ring-white/70'}`}
+                                    style={swatchTileStyle(v)}
+                                  />
+                                ) : (
+                                  <div
+                                    draggable={isSolid}
+                                    onDragStart={isSolid
+                                      ? e => {
+                                        e.dataTransfer.setData(COLOR_DRAG_MIME, v.color)
+                                        e.dataTransfer.effectAllowed = 'copy'
+                                        setColorDragImage(e, v)
+                                      }
+                                      : undefined}
+                                    className={`w-5 h-5 rounded-md border border-white/50 ${isSolid ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                    style={swatchTileStyle(v)}
+                                  />
                                 )}
-                            >
-                              {/* Two personalities: normal mode = drag-to-apply
-                                  tile; edit mode = click to select (Ctrl
-                                  toggles, Shift ranges), drag to reorder —
-                                  a multi-selection moves as a block. */}
-                              {paletteEditMode ? (
-                                <button
-                                  type="button"
-                                  draggable
-                                  onClick={e => handleSwatchSelect(i, e)}
-                                  onDragStart={e => {
-                                    // Dragging an unselected tile selects it first.
-                                    if (!selectedSwatches.has(i)) {
-                                      setSelectedSwatches(new Set([i]))
-                                      swatchAnchorRef.current = i
-                                    }
-                                    e.dataTransfer.setData(SWATCH_REORDER_MIME, '')
-                                    e.dataTransfer.effectAllowed = 'move'
-                                    setColorDragImage(e, s.color)
-                                  }}
-                                  onDragOver={e => {
-                                    if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
-                                    e.preventDefault()
-                                    e.dataTransfer.dropEffect = 'move'
-                                    const r = e.currentTarget.getBoundingClientRect()
-                                    setSwatchDropIndex(e.clientX < r.left + r.width / 2 ? i : i + 1)
-                                  }}
-                                  onDrop={e => {
-                                    if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
-                                    e.preventDefault()
-                                    if (swatchDropIndex !== null) commitSwatchReorder(swatchDropIndex)
-                                  }}
-                                  onDragEnd={() => setSwatchDropIndex(null)}
-                                  className={`w-5 h-5 rounded-md border transition-shadow ${selectedSwatches.has(i) ? 'border-transparent ring-2 ring-purple-400' : 'border-white/50 hover:ring-1 hover:ring-white/70'}`}
-                                  style={{ background: s.color }}
-                                />
-                              ) : (
-                                <div
-                                  draggable
-                                  onDragStart={e => {
-                                    e.dataTransfer.setData(COLOR_DRAG_MIME, s.color)
-                                    e.dataTransfer.effectAllowed = 'copy'
-                                    setColorDragImage(e, s.color)
-                                  }}
-                                  className="w-5 h-5 rounded-md border border-white/50 cursor-grab active:cursor-grabbing"
-                                  style={{ background: s.color }}
-                                />
-                              )}
-                            </Tooltip>
-                          </React.Fragment>
-                        ))}
+                              </Tooltip>
+                            </React.Fragment>
+                          )
+                        })}
                         {paletteEditMode && swatchDropIndex === palette.length && <div className="w-0.5 h-5 -mx-[3px] rounded bg-purple-500" />}
                       </div>
                     )}
@@ -6497,32 +6718,38 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             swatches. Dimmed + inert in edit mode: that
                             mode manages the saved palette, not recents. */}
                         <div className={`flex flex-wrap gap-1.5 ${paletteEditMode ? 'opacity-40 pointer-events-none' : ''}`}>
-                          {visibleRecents.map(c => (
-                            <Tooltip
-                              key={c}
-                              content={(
-                                <>
-                                  <div className="tabular-nums">{c.toUpperCase()}</div>
-                                  <div>Click to save to palette</div>
-                                  <div>Drag over color field to apply</div>
-                                </>
-                              )}
-                            >
-                              <button
-                                type="button"
-                                draggable
-                                onDragStart={e => {
-                                  e.dataTransfer.setData(COLOR_DRAG_MIME, c)
-                                  e.dataTransfer.effectAllowed = 'copy'
-                                  setColorDragImage(e, c)
-                                }}
-                                onClick={() => addPaletteSwatch(c)}
-                                className={`${RECENT_TILE_CLS} cursor-grab active:cursor-grabbing`}
+                          {visibleRecents.map(e => {
+                            const isSolid = 'color' in e.value
+                            return (
+                              <Tooltip
+                                key={e.id}
+                                content={(
+                                  <>
+                                    {swatchDescription(e.value)}
+                                    <div>Click to save to palette</div>
+                                    {/* Gradient drag-to-apply is next pass. */}
+                                    {isSolid && <div>Drag over color field to apply</div>}
+                                  </>
+                                )}
                               >
-                                <span className={RECENT_FILL_CLS} style={{ background: c }} />
-                              </button>
-                            </Tooltip>
-                          ))}
+                                <button
+                                  type="button"
+                                  draggable={isSolid}
+                                  onDragStart={isSolid
+                                    ? ev => {
+                                      ev.dataTransfer.setData(COLOR_DRAG_MIME, (e.value as { color: string }).color)
+                                      ev.dataTransfer.effectAllowed = 'copy'
+                                      setColorDragImage(ev, e.value)
+                                    }
+                                    : undefined}
+                                  onClick={() => addPaletteSwatch(e.value)}
+                                  className={`${RECENT_TILE_CLS} ${isSolid ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                >
+                                  <span className={RECENT_FILL_CLS} style={swatchTileStyle(e.value)} />
+                                </button>
+                              </Tooltip>
+                            )
+                          })}
                         </div>
                       </>
                     )}

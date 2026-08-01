@@ -214,8 +214,10 @@ type StoreShape = {
   thumbnailRecents: any[]
   playerRecents: any[]
   thumbnailLastFont: string
-  /** Recently-used thumbnail-editor colors (#rrggbb, newest first). */
-  thumbnailColorRecents: string[]
+  /** Recently-used thumbnail-editor swatches, newest first: full hex
+   *  strings for solids (alpha allowed), { gradient } objects for
+   *  gradient swatches. */
+  thumbnailColorRecents: (string | { gradient: { stops: { color: string; pos: number }[]; angle: number; colorSpace: 'oklch' | 'srgb' } })[]
   pendingJobs: any[]
   /** Per-game-tag link to a YT tag template id. When a stream gains its
    *  first game tag and `meta.ytTags` is empty, the linked template's

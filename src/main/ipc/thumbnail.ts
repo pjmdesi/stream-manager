@@ -273,13 +273,53 @@ export function registerThumbnailIPC(): void {
   // they update on every color use, and _palette.json writes at that rate
   // would churn cloud sync.
 
-  ipcMain.handle('thumbnail:getPalette', (_e, streamsDir: string): { name?: string; color: string }[] | null => {
+  // A swatch is a FULL snapshot of a color field: solids are hex strings
+  // that may carry alpha (#rrggbb or #rrggbbaa), gradients carry stops
+  // (with per-stop alpha), angle, and blend space. Shared validator for
+  // everything that reads swatch-shaped data from disk.
+  type GradientSwatchData = {
+    stops: { color: string; pos: number }[]
+    angle: number
+    colorSpace: 'oklch' | 'srgb'
+  }
+  type SwatchLike = { name?: string; color?: string; gradient?: GradientSwatchData }
+  const HEX_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/
+
+  const sanitizeSwatch = (raw: unknown): SwatchLike | null => {
+    if (typeof raw === 'string') return HEX_RE.test(raw) ? { color: raw.toLowerCase() } : null
+    if (!raw || typeof raw !== 'object') return null
+    const s = raw as { name?: unknown; color?: unknown; gradient?: unknown }
+    const name = typeof s.name === 'string' ? { name: s.name } : {}
+    if (typeof s.color === 'string' && HEX_RE.test(s.color)) return { ...name, color: s.color.toLowerCase() }
+    const g = s.gradient as { stops?: unknown; angle?: unknown; colorSpace?: unknown } | undefined
+    if (g && Array.isArray(g.stops)) {
+      const stops = g.stops
+        .filter((st): st is { color: string; pos: number } =>
+          typeof (st as { color?: unknown })?.color === 'string' &&
+          HEX_RE.test((st as { color: string }).color) &&
+          typeof (st as { pos?: unknown })?.pos === 'number')
+        .map(st => ({ color: st.color.toLowerCase(), pos: Math.min(1, Math.max(0, st.pos)) }))
+      if (stops.length >= 2) {
+        return {
+          ...name,
+          gradient: {
+            stops,
+            angle: typeof g.angle === 'number' && Number.isFinite(g.angle) ? g.angle : 0,
+            colorSpace: g.colorSpace === 'srgb' ? 'srgb' : 'oklch',
+          },
+        }
+      }
+    }
+    return null
+  }
+
+  ipcMain.handle('thumbnail:getPalette', (_e, streamsDir: string): SwatchLike[] | null => {
     const file = path.join(streamsDir, '_palette.json')
     if (!fs.existsSync(file)) return null
     try {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
       if (!Array.isArray(parsed?.swatches)) throw new Error('missing swatches array')
-      return parsed.swatches.filter((s: unknown) => typeof (s as { color?: unknown })?.color === 'string')
+      return parsed.swatches.map(sanitizeSwatch).filter((s: SwatchLike | null): s is SwatchLike => s !== null)
     } catch (err) {
       // Preserve the unreadable file for recovery (never overwrite it
       // silently); the renderer falls back to the default palette.
@@ -301,35 +341,42 @@ export function registerThumbnailIPC(): void {
   // Export/import use the same {version, swatches} shape as _palette.json,
   // so an exported file can even be dropped in as _palette.json by hand.
   // Import tolerates bare arrays and bare hex strings, validates every
-  // color, and throws (honest errors) when nothing usable is found.
-  ipcMain.handle('thumbnail:exportPalette', (_e, filePath: string, swatches: { name?: string; color: string }[]) => {
+  // entry (solids with optional alpha, gradient swatches), and throws
+  // (honest errors) when nothing usable is found.
+  ipcMain.handle('thumbnail:exportPalette', (_e, filePath: string, swatches: SwatchLike[]) => {
     fs.writeFileSync(filePath, JSON.stringify({ version: 1, swatches }, null, 2), 'utf8')
   })
 
-  ipcMain.handle('thumbnail:importPalette', (_e, filePath: string): { name?: string; color: string }[] => {
+  ipcMain.handle('thumbnail:importPalette', (_e, filePath: string): SwatchLike[] => {
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'))
     const arr = Array.isArray(parsed) ? parsed : parsed?.swatches
     if (!Array.isArray(arr)) throw new Error('not a palette file (no swatches array)')
-    const swatches = arr
-      .map((s: unknown) => (typeof s === 'string' ? { color: s } : s as { name?: unknown; color?: unknown }))
-      .filter((s): s is { name?: unknown; color: string } => typeof s?.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color))
-      .map(s => ({ ...(typeof s.name === 'string' ? { name: s.name } : {}), color: s.color.toLowerCase() }))
+    const swatches = arr.map(sanitizeSwatch).filter((s: SwatchLike | null): s is SwatchLike => s !== null)
     if (swatches.length === 0) throw new Error('no valid colors found in file')
     return swatches
   })
 
   ipcMain.handle('thumbnail:getColorRecents', () => {
+    // Entries: full hex strings (solids — may carry alpha) or { gradient }
+    // objects. Legacy 6-digit-string lists load unchanged.
     return getStore().get('thumbnailColorRecents', [])
   })
 
-  ipcMain.handle('thumbnail:addColorRecent', (_e, color: string) => {
-    // Stored cap is deliberately LARGER than the visible row (9): the
-    // renderer hides recents that duplicate a saved swatch, and if storage
-    // capped at 9 those hidden entries would eat visible slots (the row
-    // showed 8). The renderer slices the filtered list to the row.
-    const c = color.toLowerCase()
-    const updated = [c, ...getStore().get('thumbnailColorRecents', []).filter(x => x !== c)].slice(0, 30)
-    getStore().set('thumbnailColorRecents', updated)
-    return updated
+  ipcMain.handle('thumbnail:setColorRecents', (_e, entries: unknown[]) => {
+    // The renderer owns recents logic — session ties, dedup, ordering —
+    // because ties are per-editing-session state it alone knows; main
+    // validates and persists. Stored cap (30) is deliberately LARGER than
+    // the visible row (9): the renderer hides recents duplicating saved
+    // swatches, and a tight cap would let hidden entries eat visible slots.
+    const clean = (Array.isArray(entries) ? entries : [])
+      .map(en => {
+        if (typeof en === 'string') return HEX_RE.test(en) ? en.toLowerCase() : null
+        const s = sanitizeSwatch(en)
+        return s?.gradient ? { gradient: s.gradient } : null
+      })
+      .filter((en): en is string | { gradient: GradientSwatchData } => en !== null)
+      .slice(0, 30)
+    getStore().set('thumbnailColorRecents', clean)
+    return clean
   })
 }

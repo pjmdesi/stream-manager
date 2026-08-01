@@ -15,6 +15,7 @@
 7. When hovering over the date button at the top of the stream item detail sidebar, let's show the calendar inside the tooltip (under the "click to reschedule" text). This would allow the user to see the calendar without having to click on the button or close the detail sidebar, for quick reference. It should highlight the current date and highlight (differently) the date of the stream item. The user will not need to be able to enter the tooltip calendar, it's just for reference.
 8. In addition to the day of the week in the tooltip for the date label in the stream item rows. Let's show the full date in the tooltip as well. Format is full day name, month name, day, year (e.g. "Saturday, July 25, 2026"). Just another, more complete, way to show the date for quick reference.
 9. Sometimes when the AI suggestion text is in an input and not yet committed, it will erase while still waiting for the user to accept or dismiss the suggestion. When accepting after the text disappears, the text is still filled in correctly. This seems to correlate with the YouTube API check. I saw it run in the terminal right as the text disappeared.
+10. Add 4 more colors to the tag color options: Purple, brown, black, white. Let's have the gray color be slightly darker so it isn't too close to the white color.
 
 ### Player
 

@@ -748,8 +748,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('thumbnail:importPalette', filePath),
   thumbnailGetColorRecents: () =>
     ipcRenderer.invoke('thumbnail:getColorRecents'),
-  thumbnailAddColorRecent: (color: string) =>
-    ipcRenderer.invoke('thumbnail:addColorRecent', color),
+  thumbnailSetColorRecents: (entries: unknown[]) =>
+    ipcRenderer.invoke('thumbnail:setColorRecents', entries),
 
   // ── Stream Relay ──────────────────────────────────────────────────────────
   // Localhost RTMP relay that forwards OBS/Aitum to YouTube. Subscriptions

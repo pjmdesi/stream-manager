@@ -26,6 +26,7 @@ import type {
   OrchestratorEvent,
   PlayerRecentEntry,
   PaletteSwatch,
+  StoredRecentSwatch,
 } from './types'
 
 declare global {
@@ -296,8 +297,8 @@ declare global {
       thumbnailSetPalette(streamsDir: string, swatches: PaletteSwatch[]): Promise<void>
       thumbnailExportPalette(filePath: string, swatches: PaletteSwatch[]): Promise<void>
       thumbnailImportPalette(filePath: string): Promise<PaletteSwatch[]>
-      thumbnailGetColorRecents(): Promise<string[]>
-      thumbnailAddColorRecent(color: string): Promise<string[]>
+      thumbnailGetColorRecents(): Promise<StoredRecentSwatch[]>
+      thumbnailSetColorRecents(entries: StoredRecentSwatch[]): Promise<StoredRecentSwatch[]>
 
       // ── Stream Relay ─────────────────────────────────────────────────────────
       streamRelayGetStatus(): Promise<RelayStatus>

@@ -814,14 +814,31 @@ export interface ThumbnailTemplate {
   layers: ThumbnailLayer[]
 }
 
-/** One palette color (thumbnails #1). Stored in `_palette.json` beside
+/** Gradient captured as a swatch: the full snapshot of a gradient fill —
+ *  stops (per-stop alpha included), angle, and blend space. Everything the
+ *  gradient editor sets except the layer it came from. */
+export interface GradientSwatchData {
+  stops: { color: string; pos: number }[]
+  /** App convention: 0° = top→bottom, increasing clockwise. */
+  angle: number
+  colorSpace: 'oklch' | 'srgb'
+}
+
+/** One palette swatch (thumbnails #1). Stored in `_palette.json` beside
  *  `_meta.json` so the palette travels with the library through cloud sync.
- *  `name` is optional — defaults carry names, user-added swatches usually
- *  don't. */
+ *  Exactly one of `color` (solid — full hex, may carry alpha: swatches are
+ *  full field snapshots) or `gradient` is set. `name` is optional —
+ *  defaults carry names, user-added swatches usually don't. */
 export interface PaletteSwatch {
   name?: string
-  color: string
+  color?: string
+  gradient?: GradientSwatchData
 }
+
+/** Recents storage entry (electron-store): solids persist as their hex
+ *  string, gradients as a wrapper object. Legacy 6-digit strings remain
+ *  valid solids. */
+export type StoredRecentSwatch = string | { gradient: GradientSwatchData }
 
 export interface ThumbnailRecentEntry {
   folderPath: string
