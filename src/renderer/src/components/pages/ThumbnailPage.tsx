@@ -6641,6 +6641,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                         // "over a tile" (tile already handled it — keep out so
                         // we don't recompute or double-commit) from "over a
                         // gap" (accept the drop at the marker's index).
+                        // dragENTER must be canceled too: it's what formally
+                        // marks an element as a drop target, and without it
+                        // the cursor flashes no-drop each time the pointer
+                        // crosses into a new element, until the first
+                        // dragover lands.
+                        onDragEnter={e => {
+                          if (e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) e.preventDefault()
+                        }}
                         onDragOver={e => {
                           if (e.defaultPrevented) return
                           if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
@@ -6699,6 +6707,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                       e.dataTransfer.setData(SWATCH_REORDER_MIME, '')
                                       e.dataTransfer.effectAllowed = 'move'
                                       setColorDragImage(e, v)
+                                    }}
+                                    onDragEnter={e => {
+                                      if (e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) e.preventDefault()
                                     }}
                                     onDragOver={e => {
                                       if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
