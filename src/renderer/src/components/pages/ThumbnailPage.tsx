@@ -901,7 +901,7 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
   const gradientActive = layer.fillType === 'linear' && (layer.gradientStops?.length ?? 0) >= 2
   let gradientFillProps: Record<string, unknown> = {}
   if (gradientActive) {
-    const { start, end } = gradientLinePoints(layer.gradientAngle ?? 180, w, h)
+    const { start, end } = gradientLinePoints(layer.gradientAngle ?? 0, w, h)
     const sx = shapeType === 'ellipse' ? -w / 2 : 0
     const sy = shapeType === 'ellipse' ? -h / 2 : 0
     gradientFillProps = {
@@ -2271,7 +2271,8 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                           onClick={() => update({
                             fillType: 'linear',
                             gradientStops: stops,
-                            gradientAngle: layer.gradientAngle ?? 180,
+                            // 0° = top→bottom, matching the preview bar.
+                            gradientAngle: layer.gradientAngle ?? 0,
                             gradientColorSpace: space,
                           })}
                           className={segCls(isGradient)}
@@ -2299,25 +2300,51 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                       <div className="flex">
                         <div
                           className="w-4 -ms-3 border border-white/25 shrink-0 border-s-0 self-stretch"
-                          // backgroundImage + explicit no-repeat: the
-                          // `background` shorthand left repeat on, and
-                          // subpixel sampling at the bottom rounded edge
-                          // wrapped 1px of the FIRST stop back in.
-                          style={{ backgroundImage: cssGradientPreview(stops, space, 180), backgroundRepeat: 'no-repeat' }}
+                          // Layered backgrounds: gradient on top (no-repeat —
+                          // subpixel sampling at the bottom edge wrapped 1px
+                          // of the FIRST stop back in with repeat on), and a
+                          // checker underneath so transparent regions read
+                          // as transparency.
+                          style={{
+                            backgroundImage: `${cssGradientPreview(stops, space, 180)}, conic-gradient(#3d4257 90deg, #23283c 90deg 180deg, #3d4257 180deg 270deg, #23283c 270deg)`,
+                            backgroundSize: 'auto, 8px 8px',
+                            backgroundRepeat: 'no-repeat, repeat',
+                          }}
                         />
                         {/* Arrow track: each ◄ rides the bar at its stop's
-                            EXACT position (top = 0, bottom = 1), independent
-                            of the field rows beside it — so start/end pin to
-                            the bar's ends and mid-stops point true. */}
-                        <div className="relative w-[5px] shrink-0 self-stretch">
-                          {stops.map((st, idx) => (
-                            <div
-                              key={idx}
-                              className="absolute left-0 -translate-y-1/2 w-0 h-0 border-y-[5px] border-y-transparent border-r-[6px] border-r-white/50 -ml-[1px]"
-                              style={{ top: `${Math.min(1, Math.max(0, st.pos)) * 100}%` }}
-                            />
-                          ))}
-                        </div>
+                            EXACT position (top = 0, bottom = 1), and a link
+                            line runs from the triangle's right edge to its
+                            swatch's left edge — diagonal whenever the stop
+                            position and its row don't align. Geometry
+                            derives from the fixed row metrics (h-6 rows =
+                            24px, gap-1.5 = 6px); update the constants if
+                            the row styling changes. */}
+                        {(() => {
+                          const ROW = 24
+                          const GAP = 6
+                          const trackH = stops.length * ROW + (stops.length - 1) * GAP
+                          const TRACK_W = 12
+                          return (
+                            <svg
+                              className="shrink-0 text-white/50"
+                              width={TRACK_W}
+                              height={trackH}
+                              viewBox={`0 0 ${TRACK_W} ${trackH}`}
+                              style={{ overflow: 'visible' }}
+                            >
+                              {stops.map((st, idx) => {
+                                const ay = Math.min(1, Math.max(0, st.pos)) * trackH
+                                const ry = idx * (ROW + GAP) + ROW / 2
+                                return (
+                                  <g key={idx}>
+                                    <line x1={6} y1={ay} x2={TRACK_W} y2={ry} stroke="currentColor" strokeWidth={1} />
+                                    <path d={`M0 ${ay} L6 ${ay - 5} L6 ${ay + 5} Z`} fill="currentColor" />
+                                  </g>
+                                )
+                              })}
+                            </svg>
+                          )
+                        })()}
                         <div className="flex flex-col gap-1.5 flex-1 min-w-0 justify-between">
                           {stops.map((st, idx) => (
                             <ColorAlphaField
@@ -2338,7 +2365,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                           <NumberInput
                             min={0}
                             max={360}
-                            value={Math.round(layer.gradientAngle ?? 180)}
+                            value={Math.round(layer.gradientAngle ?? 0)}
                             onChange={gradientAngle => update({ gradientAngle })}
                             className="w-full"
                           />
@@ -2348,10 +2375,14 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                               clicks to the first button. */}
                           <span className="text-[10px] text-gray-400">Blend</span>
                           <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
-                            <Tooltip content="oklch — keeps saturated blends vivid (recommended)">
+                            {/* triggerClassName carries flex-1: the Tooltip
+                                wrapper is the actual flex item, so flex-1 on
+                                the buttons alone left the pair unevenly
+                                sized. */}
+                            <Tooltip content="oklch — keeps saturated blends vivid (recommended)" triggerClassName="flex-1 min-w-0 flex">
                               <button type="button" onClick={() => update({ gradientColorSpace: 'oklch' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
                             </Tooltip>
-                            <Tooltip content="sRGB — classic CSS blending; use when brand colors expect it">
+                            <Tooltip content="sRGB — classic CSS blending; use when brand colors expect it" triggerClassName="flex-1 min-w-0 flex">
                               <button type="button" onClick={() => update({ gradientColorSpace: 'srgb' })} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
                             </Tooltip>
                           </div>

@@ -744,7 +744,8 @@ export interface ThumbnailLayer {
   /** Two or more stops, pos 0..1; colors #rrggbb or #rrggbbaa (per-stop
    *  alpha is allowed — transparent fades). */
   gradientStops?: { color: string; pos: number }[]
-  /** CSS angle convention: 0° = up, 90° = right (clockwise). */
+  /** App convention: 0° = top→bottom (start stop at the top, matching the
+   *  editor's vertical preview bar), increasing clockwise. */
   gradientAngle?: number
   /** Interpolation space — oklch (default) keeps saturated blends vivid;
    *  srgb matches classic CSS blending for brand-guide parity. */

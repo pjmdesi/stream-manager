@@ -123,18 +123,20 @@ export function buildKonvaColorStops(
   return out
 }
 
-/** CSS-style gradient line across a w×h box anchored at (0,0): the angle
- *  follows the CSS convention (0° = up, 90° = right, measured clockwise),
- *  the line passes through the center, and its length is the CSS
- *  projection |w·sin| + |h·cos| so the first/last stops land exactly on
- *  the box corners the way linear-gradient() does. */
+/** Gradient line across a w×h box anchored at (0,0). App convention
+ *  (thumbnails #2): **0° = top→bottom** — the start stop sits at the TOP,
+ *  matching the editor's vertical preview bar — and the angle increases
+ *  clockwise (internally this is the CSS angle + 180°). The line passes
+ *  through the center and its length is the CSS projection
+ *  |w·sin| + |h·cos|, so the first/last stops land exactly on the box
+ *  corners the way linear-gradient() does. */
 export function gradientLinePoints(
   angleDeg: number,
   w: number,
   h: number,
 ): { start: { x: number; y: number }; end: { x: number; y: number } } {
-  const rad = (angleDeg * Math.PI) / 180
-  // Screen coords (y down): CSS 0° points up.
+  const rad = ((angleDeg + 180) * Math.PI) / 180
+  // Screen coords (y down): CSS 0° points up, so ours (+180°) points down.
   const dx = Math.sin(rad)
   const dy = -Math.cos(rad)
   const halfLen = (Math.abs(w * dx) + Math.abs(h * dy)) / 2
