@@ -364,7 +364,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         aria-label={ariaLabel}
         // The arbitrary selectors strip Chromium's native spin buttons
         // since we render our own vertical +/- buttons to the right.
-        className={`w-full ${merged ? 'ps-1' : 'ps-2'} py-1 ${inlineNote ? 'pr-12' : ''} text-xs text-gray-200 placeholder-gray-500 focus:outline-none transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
+        className={`w-full font-mono font-[350] ${merged ? 'ps-1' : 'ps-2'} py-1 ${inlineNote ? 'pr-12' : ''} text-xs text-gray-200 placeholder-gray-500 focus:outline-none transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
           frameless ? 'bg-transparent' : 'bg-navy-900 border border-r-0 border-white/10 rounded-l-lg focus:border-purple-500/50'
         }`}
       />

@@ -1557,7 +1557,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
             rather than the panel background. */}
         <div
           className="h-6 w-6 -my-[1px] -mx-[1px] shrink-0 rounded-s-md overflow-hidden z-1"
-          style={{ backgroundImage: CHECKER_IMAGE, backgroundSize: '6px 6px' }}
+          style={{ backgroundImage: CHECKER_IMAGE, backgroundSize: '8px 8px' }}
         >
           <input
             ref={colorInputRef}
@@ -1607,7 +1607,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
               // (alpha never enters recents) — it is not a list cap.
               if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v)) recordRecent(v.slice(0, 7))
             }}
-            className="flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6"
+            className="flex-1 min-w-0 bg-transparent border-l border-white/10 px-1 text-xs text-gray-200 focus:outline-none h-6 font-mono"
           />
         )}
         <Tooltip content="Opacity %" triggerClassName="flex w-12 shrink-0 border-l border-white/10">
@@ -2322,6 +2322,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                           style={{
                             backgroundImage: `${cssGradientPreview(stops, space, 180)}, ${CHECKER_IMAGE}`,
                             backgroundSize: 'auto, 8px 8px',
+                            backgroundPosition: '0 0, -1px 0',
                             backgroundRepeat: 'no-repeat, repeat',
                           }}
                         />
