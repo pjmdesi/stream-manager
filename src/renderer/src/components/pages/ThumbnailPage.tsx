@@ -1265,7 +1265,19 @@ function PreviewGallery({ snapshot, title, channelName, overlay, setOverlay, wat
   const titleCls = lightBg ? 'text-[#0f0f0f]' : 'text-white'
   const metaCls = lightBg ? 'text-[#606060]' : 'text-[#aaaaaa]'
   const fillCls = lightBg ? 'bg-black/10' : 'bg-white/10'
+  // Surface labels are APP chrome inside the YouTube-styled area: they keep
+  // the app font (font-sans) to read as ours, and get a lightness bump on
+  // the dark backdrop where gray-500 sat too close to #0f0f0f.
+  const labelCls = `text-[10px] uppercase tracking-wider font-sans ${lightBg ? 'text-gray-500' : 'text-gray-400'}`
   const meta = '1.2K views · 2 hours ago'
+  // "|" is a break-after character (UAX #14), so Chromium may wrap BETWEEN
+  // a pipe and the space after it — and a space that starts a line this way
+  // is rendered, not collapsed (collapsing only happens when the break is
+  // at the space itself). A WORD JOINER glued to the pipe forbids exactly
+  // that break point; the wrap then lands after the space, which collapses.
+  // Display-only — the stored title is untouched. (0x2060 = WORD JOINER,
+  // built via fromCharCode so no invisible literal hides in this file.)
+  const displayTitle = title.replace(/\|(?=\s)/g, '|' + String.fromCharCode(0x2060))
   const segCls = (on: boolean) =>
     `px-2 py-1 text-xs whitespace-nowrap transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
   const chipCls = (on: boolean) =>
@@ -1292,17 +1304,19 @@ function PreviewGallery({ snapshot, title, channelName, overlay, setOverlay, wat
           </span>
         )}
       </div>
-      {/* Mockups — YouTube chrome */}
-      <div className={`flex-1 overflow-y-auto transition-colors ${lightBg ? 'bg-white' : 'bg-[#0f0f0f]'}`}>
+      {/* Mockups — YouTube chrome. font-roboto here puts every mockup text
+          element in YouTube's actual UI font; the surface labels opt back
+          out via labelCls (font-sans) since they're ours. */}
+      <div className={`flex-1 overflow-y-auto font-roboto transition-colors ${lightBg ? 'bg-white' : 'bg-[#0f0f0f]'}`}>
         <div className="p-5 flex flex-col gap-7 items-start">
           <div className="flex flex-col gap-1.5">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500">Home · 360×202</p>
+            <p className={labelCls}>Home · 360×202</p>
             <div className="w-[360px]">
               <PreviewThumb snapshot={snapshot} w={360} h={202} radius={12} overlay={overlay} watched={watched} />
               <div className="flex gap-3 mt-3">
                 <div className={`w-9 h-9 rounded-full shrink-0 ${fillCls}`} />
                 <div className="min-w-0">
-                  <p className={`text-sm font-medium leading-snug line-clamp-2 ${titleCls}`}>{title}</p>
+                  <p className={`text-sm font-medium leading-snug line-clamp-2 ${titleCls}`}>{displayTitle}</p>
                   <p className={`text-xs mt-1 ${metaCls}`}>{channelName}</p>
                   <p className={`text-xs ${metaCls}`}>{meta}</p>
                 </div>
@@ -1310,11 +1324,11 @@ function PreviewGallery({ snapshot, title, channelName, overlay, setOverlay, wat
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500">Search · 360×202</p>
+            <p className={labelCls}>Search · 360×202</p>
             <div className="flex gap-4 max-w-full">
               <PreviewThumb snapshot={snapshot} w={360} h={202} radius={12} overlay={overlay} watched={watched} />
               <div className="min-w-0 pt-1 w-64">
-                <p className={`text-base leading-snug line-clamp-2 ${titleCls}`}>{title}</p>
+                <p className={`text-base leading-snug line-clamp-2 ${titleCls}`}>{displayTitle}</p>
                 <p className={`text-xs mt-1.5 ${metaCls}`}>{meta}</p>
                 <div className="flex items-center gap-2 mt-2.5">
                   <div className={`w-6 h-6 rounded-full shrink-0 ${fillCls}`} />
@@ -1326,22 +1340,22 @@ function PreviewGallery({ snapshot, title, channelName, overlay, setOverlay, wat
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500">Suggested · 168×94</p>
+            <p className={labelCls}>Suggested · 168×94</p>
             <div className="flex gap-2 w-[400px] max-w-full">
               <PreviewThumb snapshot={snapshot} w={168} h={94} radius={8} overlay={overlay} watched={watched} />
               <div className="min-w-0">
-                <p className={`text-sm font-medium leading-snug line-clamp-2 ${titleCls}`}>{title}</p>
+                <p className={`text-sm font-medium leading-snug line-clamp-2 ${titleCls}`}>{displayTitle}</p>
                 <p className={`text-xs mt-0.5 ${metaCls}`}>{channelName}</p>
                 <p className={`text-xs ${metaCls}`}>{meta}</p>
               </div>
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500">Compact · 120×68</p>
+            <p className={labelCls}>Compact · 120×68</p>
             <div className="flex gap-2 w-[360px] max-w-full">
               <PreviewThumb snapshot={snapshot} w={120} h={68} radius={6} overlay={overlay} watched={watched} />
               <div className="min-w-0">
-                <p className={`text-xs font-medium leading-snug line-clamp-2 ${titleCls}`}>{title}</p>
+                <p className={`text-xs font-medium leading-snug line-clamp-2 ${titleCls}`}>{displayTitle}</p>
                 <p className={`text-[11px] mt-0.5 ${metaCls}`}>{channelName} · {meta}</p>
               </div>
             </div>
