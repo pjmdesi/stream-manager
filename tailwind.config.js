@@ -51,6 +51,9 @@ module.exports = {
       fontFamily: {
         sans: ['Recursive', 'system-ui', 'sans-serif'],
         mono: ['Recursive', 'monospace'],
+        // YouTube's UI stack — used by the thumbnail editor's preview
+        // mockups so badges/chrome match the real site.
+        roboto: ['Roboto', 'Arial', 'sans-serif'],
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

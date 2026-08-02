@@ -13,6 +13,17 @@
   font-display: swap;
 }
 
+/* Roboto (variable, latin subset) — bundled ONLY for the YouTube preview
+   mockups, so badges and chrome render in YouTube's actual UI font
+   instead of the app font. Apply via the `font-roboto` utility. */
+@font-face {
+  font-family: 'Roboto';
+  src: url('./fonts/Roboto_VF_latin.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --color-bg:           #0a0f1a; /* navy-900 */
   --color-bg-elevated:  #131825; /* navy-800 */
