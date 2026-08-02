@@ -1221,20 +1221,22 @@ function PreviewThumb({ snapshot, w, h, radius, overlay, watched }: {
           downscale — a plain <img> at 168/120px from the 1280px snapshot hits
           Chromium's fast low-quality resample path and looks crunchy. */}
       {snapshot && <SmoothThumb src={snapshot} className="w-full h-full" />}
-      {/* Badge styling measured from youtube.com (2026-08): 16px tall,
-          2px/6px padding, 4px gap + radius, rgba(0,0,0,0.6) background,
-          Roboto 12px/500 — bundled as Roboto_VF_latin so the mockups
-          match the real chrome, not the app font. */}
+      {/* Badge styling measured from youtube.com (2026-08): 20px rendered
+          (16px content-box + 2px/6px padding), 4px gap + radius,
+          rgba(0,0,0,0.6) background, Roboto 12px/500 on an 18px line —
+          bundled as Roboto_VF_latin so the mockups match the real chrome,
+          not the app font. h-5 is the border-box equivalent of their
+          content-box 16px + vertical padding. */}
       {overlay === 'duration' && (
-        <span className="absolute bottom-1 right-1 flex items-center h-4 px-1.5 rounded bg-black/60 font-roboto text-[12px] font-medium leading-none text-white tabular-nums">12:34</span>
+        <span className="absolute bottom-1 right-1 flex items-center h-5 py-0.5 px-1.5 rounded bg-black/60 font-roboto text-[12px] font-medium leading-[18px] text-white tabular-nums">12:34</span>
       )}
       {overlay === 'live' && (
-        <span className="absolute bottom-1 right-1 flex items-center h-4 gap-1 px-1.5 rounded bg-red-600 font-roboto text-[12px] font-medium leading-none text-white">
+        <span className="absolute bottom-1 right-1 flex items-center h-5 gap-1 py-0.5 px-1.5 rounded bg-red-600 font-roboto text-[12px] font-medium leading-[18px] text-white">
           <Radio size={11} className="shrink-0" /> LIVE
         </span>
       )}
       {overlay === 'upcoming' && (
-        <span className="absolute bottom-1 right-1 flex items-center h-4 gap-1 px-1.5 rounded bg-black/60 font-roboto text-[12px] font-medium leading-none text-white">
+        <span className="absolute bottom-1 right-1 flex items-center h-5 gap-1 py-0.5 px-1.5 rounded bg-black/60 font-roboto text-[12px] font-medium leading-[18px] text-white">
           <Radio size={11} className="shrink-0" /> Upcoming
         </span>
       )}
