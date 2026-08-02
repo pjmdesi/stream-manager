@@ -1232,12 +1232,12 @@ function PreviewThumb({ snapshot, w, h, radius, overlay, watched }: {
       )}
       {overlay === 'live' && (
         <span className="absolute bottom-1 right-1 flex items-center h-5 gap-1 py-0.5 px-1.5 rounded bg-red-600 font-roboto text-[12px] font-medium leading-[18px] text-white">
-          <Radio size={11} className="shrink-0" /> LIVE
+          <Radio size={12} className="shrink-0" /> LIVE
         </span>
       )}
       {overlay === 'upcoming' && (
         <span className="absolute bottom-1 right-1 flex items-center h-5 gap-1 py-0.5 px-1.5 rounded bg-black/60 font-roboto text-[12px] font-medium leading-[18px] text-white">
-          <Radio size={11} className="shrink-0" /> Upcoming
+          <Radio size={12} className="shrink-0" /> Upcoming
         </span>
       )}
       {watched && (
