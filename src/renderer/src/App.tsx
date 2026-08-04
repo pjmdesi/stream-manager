@@ -1168,6 +1168,32 @@ function AppInner() {
 }
 
 export default function App() {
+  // Double-click ANYWHERE in a text field selects its content — but only
+  // when the browser's own word-selection came up empty. Chromium selects
+  // the word under the pointer, so double-clicking the empty space beside
+  // short text merely placed the caret (triple-click worked: line
+  // selection ignores the pointer's x). Double-clicking ON a word keeps
+  // the normal word-selection. One document-level listener covers every
+  // input/textarea in the app, portaled modals included.
+  useEffect(() => {
+    const onDblClick = (e: MouseEvent) => {
+      const t = e.target
+      if (!(t instanceof HTMLInputElement) && !(t instanceof HTMLTextAreaElement)) return
+      // Text-editable inputs only — not checkboxes, color wells, range, file.
+      if (t instanceof HTMLInputElement && !['text', 'search', 'url', 'tel', 'password', 'email', 'number'].includes(t.type)) return
+      try {
+        // number/email inputs report null selection bounds in Chromium —
+        // that reads as collapsed, which is exactly right: select all.
+        if (t.selectionStart === t.selectionEnd) t.select()
+      } catch {
+        // Some input types throw on selectionStart per spec; selecting all
+        // is still the wanted outcome.
+        t.select()
+      }
+    }
+    document.addEventListener('dblclick', onDblClick)
+    return () => document.removeEventListener('dblclick', onDblClick)
+  }, [])
   return (
     <ThumbnailEditorProvider>
       <PageActivityProvider>
