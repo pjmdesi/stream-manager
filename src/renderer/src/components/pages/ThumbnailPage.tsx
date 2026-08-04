@@ -2322,9 +2322,17 @@ function GradientFillControl({ layer, update, fallback }: {
                   stopPos={Math.round((1 - st.pos) * 100) / 100}
                   onStopPosChange={p => setStopPos(idx, Math.round((1 - p) * 100) / 100)}
                   // Stop commits feed the GRADIENT recents entry (whole
-                  // snapshot), not solid recents. By commit time the tick
-                  // updates have already re-rendered, so `stops` is fresh.
-                  onCommitColor={() => recordGradient()}
+                  // snapshot), not solid recents. The committed color is
+                  // spliced in HERE rather than read from `stops`: for
+                  // synchronous commits (opacity spinner, hex blur, Esc)
+                  // this closure predates the update that triggered them,
+                  // so the closed-over `stops` is one edit stale — ten
+                  // spinner clicks recorded as nine (the off-by-one PJ
+                  // caught, 2026-08-04). Only the native picker's change
+                  // event fires late enough to see a fresh render.
+                  onCommitColor={c => recordGradient({
+                    stops: stops.map((s2, k) => (k === idx ? { ...s2, color: c } : s2)),
+                  })}
                 />
               ))}
             </div>

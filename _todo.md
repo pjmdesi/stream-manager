@@ -46,6 +46,7 @@
 12. Allow swatches from the recent list to be dragged into the saved palette list. When the user drags, they should be able to drop the swatch in between any two existing swatches in the palette list, and the new swatch should be inserted at that position. The palette list should update immediately to reflect the new order of swatches. It should be removed from the recents list just as clicking the swatch to add does today.
 13. Add a "hard" option to the gradients in the thumbnail editor. This would allow the user to create a gradient where the colors hard transition from one to the next instead of blending together. This is a common way to do certain effects an easier way than having to create multiple objects, especially for text. We'll only have the 2 modes for now: "soft" (the current mode) and "hard".
 14. It needs to be more obvious when the palette panel is in edit mode. I was confused when the recents list was grayed out and I thought it was disabled, but it was actually in edit mode. Not sure what the best option is, but I think the pencil icon button should definitely be highlighted better in edit mode.
+15. Add stroke corner options to all stroke fields that can support them. It should be easy to add as a radio style button group in the properties panel for the layer as a combined input like the color field input groups. We should use icons to represent the different corner options (miter, round, bevel).
 
 ### Converter
 
