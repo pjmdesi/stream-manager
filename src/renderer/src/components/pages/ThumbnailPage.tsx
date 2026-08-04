@@ -1552,7 +1552,10 @@ function swatchKey(v: SwatchValue): string {
 function swatchTileStyle(v: SwatchValue): React.CSSProperties {
   const top = 'color' in v
     ? `linear-gradient(${v.color}, ${v.color})`
-    : cssGradientPreview(v.gradient.stops, v.gradient.colorSpace, v.gradient.angle)
+    // +180: cssGradientPreview takes a CSS angle (0° = bottom→top), but
+    // the swatch stores the APP angle (0° = top→bottom) — same conversion
+    // gradientLinePoints does for the canvas.
+    : cssGradientPreview(v.gradient.stops, v.gradient.colorSpace, v.gradient.angle + 180)
   return {
     backgroundImage: `${top}, ${CHECKER_IMAGE}`,
     backgroundSize: 'auto, 6px 6px',
