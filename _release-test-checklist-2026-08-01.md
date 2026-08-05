@@ -1,6 +1,6 @@
 # Release test checklist — v2.2.0 (2026-08-01)
 
-Build: Stream Manager 2.1.0_DEV.exe from dev @ bd29f05
+Build: Stream Manager 2.1.0_DEV.exe from dev @ 4257d5b
 
 ## This batch (thumbnail editor)
 
@@ -21,8 +21,8 @@ Build: Stream Manager 2.1.0_DEV.exe from dev @ bd29f05
 - [x] Adoption semantics: after applying any swatch, the next tweak creates a NEW recents entry (adopted swatch never mutates); applying swatch B doesn't evict previously applied swatch A
 - [x] Recents persistence: restart the app → recents restored (solids with alpha + gradients), ties not (by design)
 - [x] _palette.json travels: palette changes land in the library folder beside _meta.json
-- [ ] Double-click select (app-wide, 2026-08-04): double-click in the empty space of a wide input with short text → all text selected; double-click ON a word → just that word; spot-check a number field, a hex color field, and a textarea (description)
-- [ ] Shadow unified color field (2026-08-04): shadow color rows use the unified field (swatch | hex | %), the % segment IS the shadow opacity (old separate Opacity box gone); existing shadows load with their opacity intact; drag a swatch with transparency onto a shadow → color + opacity both land; shadow edits create/update a tied recents entry
+- [x] Double-click select (app-wide, 2026-08-04): double-click in the empty space of a wide input with short text → all text selected; double-click ON a word → just that word; spot-check a number field, a hex color field, and a textarea (description)
+- [x] Shadow unified color field (2026-08-04): shadow color rows use the unified field (swatch | hex | %), the % segment IS the shadow opacity (old separate Opacity box gone); existing shadows load with their opacity intact; drag a swatch with transparency onto a shadow → color + opacity both land; shadow edits create/update a tied recents entry
 
 ## Core regression (every release)
 
@@ -30,9 +30,9 @@ Build: Stream Manager 2.1.0_DEV.exe from dev @ bd29f05
 - [x] Watcher/auto-rules: drop a recording into the watch folder → lands in the right stream item
 - [x] New stream + New episode: correct season/episode, templates render
 - [x] YouTube: push + pull a stream's details; thumbnail push; out-of-sync panel clean afterward
-- [ ] Converter: one job start→finish; pause/resume; output plays
-- [ ] Player: open a video, clip draft → export
-- [ ] Thumbnail editor: open, edit, export; variant creation
-- [ ] Cloud: pin local + offload one item; statuses update everywhere
+- [x] Converter: one job start→finish; pause/resume; output plays
+- [x] Player: open a video, clip draft → export
+- [x] Thumbnail editor: open, edit, export; variant creation
+- [x] Cloud: pin local + offload one item; statuses update everywhere
 - [x] Launcher: run a launch group (window + tray)
 - [x] Quit/relaunch: no orphaned processes, state restored
