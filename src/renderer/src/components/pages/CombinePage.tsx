@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   GripVertical, Film, FolderOpen, Wand2, Combine,
-  CheckCircle2, AlertCircle, AlertTriangle, Loader2, X, FolderSearch
+  CheckCircle2, AlertCircle, AlertTriangle, Loader2, X, FolderSearch, Trash2
 } from 'lucide-react'
+import { FileDropZone } from '../ui/FileDropZone'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
@@ -99,6 +100,11 @@ function isCombinedOutput(name: string): boolean {
  *  never react to other drags (OS file drops, palette swatches, …). */
 const ROW_REORDER_MIME = 'application/x-sm-combine-row'
 
+/** Same container set the converter accepts. FileDropZone's browse dialog
+ *  filters by these; dropped paths are re-filtered in addFiles (drops
+ *  bypass the dialog). */
+const VIDEO_EXTS = ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function CombinePage({ initialFiles, onNavigateToStream }: {
@@ -117,19 +123,44 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   const [cancelledNotice, setCancelledNotice] = useState(false)
   const { setOpen } = useOpenItems()
 
-  // Publish "combine is running" to the nav rail's activity indicator —
-  // same treatment the player / converter / thumbnails items get. Keyed on
-  // an actual run, not on files merely being listed.
-  const { setCombineRunning } = usePageActivity()
+  // Publish "combine has files" to the nav rail's activity indicator —
+  // same presence semantics as the player (has video) and thumbnails
+  // (has canvas): the highlight says "there's something on this page".
+  const { setCombineHasFiles } = usePageActivity()
   useEffect(() => {
-    setCombineRunning(progress !== null)
-    return () => setCombineRunning(false)
-  }, [progress, setCombineRunning])
+    setCombineHasFiles(files.length > 0)
+    return () => setCombineHasFiles(false)
+  }, [files.length, setCombineHasFiles])
 
   // Drag-reorder state. `dropIndex` is the INSERTION index (0..files.length)
   // shown by the marker line; null = no valid/actionable target.
   const dragIndex = useRef<number | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
+
+  // Fill in sizes + stream properties for a set of paths, patching rows BY
+  // PATH as results land (the list can be reordered / added-to while
+  // lookups are in flight). Shared by the streams-page intake and the
+  // drop/browse intake.
+  const probeAndMeasure = useCallback((paths: string[]) => {
+    void window.api.getFileSizes(paths).then(sizes => {
+      const byPath = new Map(paths.map((p, i) => [p, sizes[i]]))
+      setFiles(prev => prev.map(f => byPath.has(f.path) ? { ...f, size: byPath.get(f.path) ?? null } : f))
+    }).catch(() => {})
+    paths.forEach(async p => {
+      try {
+        const info = await window.api.probeFile(p)
+        setFiles(prev => prev.map(x => x.path === p ? {
+          ...x,
+          duration: info.duration,
+          codec: info.videoCodec ?? null,
+          width: info.width ?? null,
+          height: info.height ?? null,
+          fps: info.fps ?? null,
+          audioTracks: (info.audioTracks ?? []).map(t => ({ codec: t.codec, channels: t.channels, sampleRate: t.sampleRate })),
+        } : x))
+      } catch (_) { /* unreadable file: row keeps its loaders */ }
+    })
+  }, [])
 
   // Load files when sent from Streams page
   useEffect(() => {
@@ -171,29 +202,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     setDone(false)
     setError(null)
 
-    // Sizes in one batched call (keyed by path — the list may have been
-    // reordered by the time results land).
-    void window.api.getFileSizes(sorted.map(f => f.path)).then(sizes => {
-      const byPath = new Map(sorted.map((f, i) => [f.path, sizes[i]]))
-      setFiles(prev => prev.map(f => byPath.has(f.path) ? { ...f, size: byPath.get(f.path) ?? null } : f))
-    }).catch(() => {})
-
-    // Probe durations + stream properties. Matched by PATH, not index —
-    // the user can reorder rows while probes are still in flight.
-    sorted.forEach(async f => {
-      try {
-        const info = await window.api.probeFile(f.path)
-        setFiles(prev => prev.map(x => x.path === f.path ? {
-          ...x,
-          duration: info.duration,
-          codec: info.videoCodec ?? null,
-          width: info.width ?? null,
-          height: info.height ?? null,
-          fps: info.fps ?? null,
-          audioTracks: (info.audioTracks ?? []).map(t => ({ codec: t.codec, channels: t.channels, sampleRate: t.sampleRate })),
-        } : x))
-      } catch (_) {}
-    })
+    probeAndMeasure(sorted.map(f => f.path))
   }, [initialFiles?.token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const autoSort = () => {
@@ -360,20 +369,65 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     }
   }, [files, outputPath, deleteAfter, setOpen, mismatchedProps])
 
+  // ── Add / clear ────────────────────────────────────────────────────────────
+
+  // Drop/browse intake for EXTERNAL files. Appends (never re-sorts — the
+  // user may have hand-ordered the list); dedups by path; no stream tag.
+  // Unlike the streams-page intake, prior combined outputs are NOT filtered
+  // here: an explicit drop is intentional.
+  const addFiles = useCallback((paths: string[]) => {
+    const have = new Set(files.map(f => f.path))
+    const fresh = paths.filter(p =>
+      VIDEO_EXTS.includes((p.split('.').pop() ?? '').toLowerCase()) && !have.has(p))
+    if (fresh.length === 0) return
+    const added: CombineFile[] = fresh.map(p => ({
+      path: p,
+      name: p.split(/[\\/]/).pop() ?? p,
+      duration: null,
+      timestamp: parseTimestamp(p.split(/[\\/]/).pop() ?? ''),
+      size: null,
+      codec: null, width: null, height: null, fps: null, audioTracks: null,
+    }))
+    const next = [...files, ...added]
+    setFiles(next)
+    // A finished/cancelled banner describes the PREVIOUS list — clear it.
+    setDone(false)
+    setError(null)
+    setCancelledNotice(false)
+    // Adopt/refresh the default output path unless the user typed their own.
+    const oldDef = defaultOutputPath(files)
+    if (!outputPath || outputPath === oldDef) {
+      const def = defaultOutputPath(next)
+      setOutputPath(def)
+      void uniquifyPath(def).then(unique => {
+        if (unique !== def) setOutputPath(prev => (prev === def ? unique : prev))
+      })
+    }
+    probeAndMeasure(fresh)
+  }, [files, outputPath, probeAndMeasure])
+
+  const clearAll = useCallback(() => {
+    setFiles([])
+    setOutputPath('')
+    setDone(false)
+    setError(null)
+    setCancelledNotice(false)
+  }, [])
+
   // ── Empty state ────────────────────────────────────────────────────────────
 
   if (files.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-        <div className="p-4 rounded-full bg-white/5">
-          <Combine size={36} className="text-gray-400" />
-        </div>
-        <div>
-          <p className="text-gray-300 font-medium">No files loaded</p>
-          <p className="text-sm text-gray-400 mt-1">
-            Use the <Film size={12} className="inline mb-0.5" /> button on a stream row with multiple videos.
-          </p>
-        </div>
+      <div className="flex flex-col items-center justify-center h-full gap-4 px-8">
+        <FileDropZone
+          onFiles={addFiles}
+          accept={VIDEO_EXTS}
+          label="Drop video files here to combine"
+          className="w-full max-w-xl min-h-[140px]"
+        />
+        <p className="text-sm text-gray-400 text-center">
+          You can also send a stream's videos here with the <Film size={12} className="inline mb-0.5" /> button on a stream row with multiple videos.
+        </p>
       </div>
     )
   }
@@ -394,6 +448,11 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
         <Tooltip content="Reorder by recording start time (parsed from the filenames), oldest first — files without a timestamp sort by name">
           <Button variant="ghost" size="sm" icon={<Wand2 size={14} />} onClick={autoSort} disabled={running}>
             Auto-sort
+          </Button>
+        </Tooltip>
+        <Tooltip content="Remove all files from the list — the files themselves are untouched">
+          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={clearAll} disabled={running}>
+            Clear all
           </Button>
         </Tooltip>
       </div>
@@ -536,6 +595,17 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
             </div>
           ))}
         </div>
+        {/* Slim add-more zone under the list (the converter's pattern);
+            hidden during a run — the list is locked then anyway. */}
+        {!running && (
+          <FileDropZone
+            compact
+            onFiles={addFiles}
+            accept={VIDEO_EXTS}
+            label="Drop or click to add more files"
+            className="mt-1.5"
+          />
+        )}
       </div></div>
 
       {/* Footer */}

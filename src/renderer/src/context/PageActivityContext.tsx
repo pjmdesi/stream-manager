@@ -14,11 +14,12 @@ import React, { createContext, useCallback, useContext, useState } from 'react'
 interface PageActivityContextValue {
   playerHasVideo: boolean
   thumbnailHasCanvas: boolean
-  /** A combine run is in progress (not merely files listed). */
-  combineRunning: boolean
+  /** Files are listed on the combine page (same presence semantics as the
+   *  player's has-video and the thumbnail editor's has-canvas). */
+  combineHasFiles: boolean
   setPlayerHasVideo: (v: boolean) => void
   setThumbnailHasCanvas: (v: boolean) => void
-  setCombineRunning: (v: boolean) => void
+  setCombineHasFiles: (v: boolean) => void
 }
 
 const PageActivityContext = createContext<PageActivityContextValue | null>(null)
@@ -26,15 +27,15 @@ const PageActivityContext = createContext<PageActivityContextValue | null>(null)
 export function PageActivityProvider({ children }: { children: React.ReactNode }) {
   const [playerHasVideo, setPlayerHasVideoRaw] = useState(false)
   const [thumbnailHasCanvas, setThumbnailHasCanvasRaw] = useState(false)
-  const [combineRunning, setCombineRunningRaw] = useState(false)
+  const [combineHasFiles, setCombineHasFilesRaw] = useState(false)
 
   // Memoize setters so consumer useEffects keyed on them don't loop.
   const setPlayerHasVideo = useCallback((v: boolean) => setPlayerHasVideoRaw(v), [])
   const setThumbnailHasCanvas = useCallback((v: boolean) => setThumbnailHasCanvasRaw(v), [])
-  const setCombineRunning = useCallback((v: boolean) => setCombineRunningRaw(v), [])
+  const setCombineHasFiles = useCallback((v: boolean) => setCombineHasFilesRaw(v), [])
 
   return (
-    <PageActivityContext.Provider value={{ playerHasVideo, thumbnailHasCanvas, combineRunning, setPlayerHasVideo, setThumbnailHasCanvas, setCombineRunning }}>
+    <PageActivityContext.Provider value={{ playerHasVideo, thumbnailHasCanvas, combineHasFiles, setPlayerHasVideo, setThumbnailHasCanvas, setCombineHasFiles }}>
       {children}
     </PageActivityContext.Provider>
   )

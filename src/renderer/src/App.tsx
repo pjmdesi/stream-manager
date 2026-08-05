@@ -481,7 +481,7 @@ function AppInner() {
   // from the existing job context; player + thumbnails publish into
   // PageActivityContext since their working state is local to those
   // pages.
-  const { playerHasVideo, thumbnailHasCanvas, combineRunning } = usePageActivity()
+  const { playerHasVideo, thumbnailHasCanvas, combineHasFiles } = usePageActivity()
   const { jobs: conversionJobs } = useConversionJobs()
   const converterHasJobs = conversionJobs.some(j => j.status !== 'cancelled' && j.status !== 'done')
   // Honor the user's disable / slow-animation prefs for the nav-rail
@@ -493,7 +493,7 @@ function AppInner() {
     player: playerHasVideo,
     converter: converterHasJobs,
     thumbnails: thumbnailHasCanvas,
-    combine: combineRunning,
+    combine: combineHasFiles,
   }
   // Tracks whether we've already routed to the user's chosen startup
   // page after first config load. A ref instead of state so toggling
