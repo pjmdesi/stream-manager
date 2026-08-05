@@ -1,6 +1,6 @@
 # Release test checklist — v2.2.0 (2026-08-01)
 
-Build: Stream Manager 2.1.0_DEV.exe from dev @ 54d717e
+Build: Stream Manager 2.1.0_DEV.exe from dev @ bd29f05
 
 ## This batch (thumbnail editor)
 
@@ -16,12 +16,13 @@ Build: Stream Manager 2.1.0_DEV.exe from dev @ 54d717e
 - [x] Palette reorder polish: insertion marker centered in the gap, wraps with its tile at row boundaries, dropping ON the marker works, no marker beside the dragged swatch itself, no cancel-cursor flicker while sweeping
 - [x] Smart recents ties: tweaking one property repeatedly updates ONE recents entry in place; detour to another property and back keeps both ties; selecting another layer breaks ties (next edit = new entry)
 - [x] Gradient swatches: editing a gradient captures stops+angle+space as one recents tile (true angle rendered); enabling gradient mode alone records nothing; toggling to Solid breaks the gradient tie; click a gradient recent → saved to palette; export/import carries gradients
-- [ ] Gradient swatch apply: drag onto a solid fill → switches to gradient; drag onto a gradient fill → replaces it; stroke/outline fields reject gradient drags; solid-fill popover lists gradients (pick converts); gradient-mode header palette button opens gradients-only popover (picks keep it open, Esc closes without deselecting)
-- [ ] Solid-onto-gradient: drop a solid swatch on a gradient Fill control → flat fill (drop on a stop field → recolors just that stop, ring hands off correctly)
-- [ ] Adoption semantics: after applying any swatch, the next tweak creates a NEW recents entry (adopted swatch never mutates); applying swatch B doesn't evict previously applied swatch A
-- [ ] Recents persistence: restart the app → recents restored (solids with alpha + gradients), ties not (by design)
-- [ ] _palette.json travels: palette changes land in the library folder beside _meta.json
+- [x] Gradient swatch apply: drag onto a solid fill → switches to gradient; drag onto a gradient fill → replaces it; stroke/outline fields reject gradient drags; solid-fill popover lists gradients (pick converts); gradient-mode header palette button opens gradients-only popover (picks keep it open, Esc closes without deselecting)
+- [x] Solid-onto-gradient: drop a solid swatch on a gradient Fill control → flat fill (drop on a stop field → recolors just that stop, ring hands off correctly)
+- [x] Adoption semantics: after applying any swatch, the next tweak creates a NEW recents entry (adopted swatch never mutates); applying swatch B doesn't evict previously applied swatch A
+- [x] Recents persistence: restart the app → recents restored (solids with alpha + gradients), ties not (by design)
+- [x] _palette.json travels: palette changes land in the library folder beside _meta.json
 - [ ] Double-click select (app-wide, 2026-08-04): double-click in the empty space of a wide input with short text → all text selected; double-click ON a word → just that word; spot-check a number field, a hex color field, and a textarea (description)
+- [ ] Shadow unified color field (2026-08-04): shadow color rows use the unified field (swatch | hex | %), the % segment IS the shadow opacity (old separate Opacity box gone); existing shadows load with their opacity intact; drag a swatch with transparency onto a shadow → color + opacity both land; shadow edits create/update a tied recents entry
 
 ## Core regression (every release)
 

@@ -3019,17 +3019,26 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                     </div>
                     <label className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-gray-400">Color</span>
-                      <div className="flex items-center gap-1.5">
-                        {/* Same boxed square swatch as ColorAlphaField — alpha
-                            controls stay off here; shadows have their own
-                            Opacity % field below. */}
-                        <input type="color" value={s.color}
-                          onChange={e => updateAt(idx, { color: e.target.value })}
-                          className="h-7 w-7 shrink-0 rounded-lg border border-white/10 bg-navy-900 p-0.5 cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-md [&::-webkit-color-swatch]:border-none" />
-                        <input type="text" value={s.color}
-                          onChange={e => updateAt(idx, { color: e.target.value })}
-                          className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200" />
-                      </div>
+                      {/* Unified color field like every other color property.
+                          The field's % segment IS the shadow opacity
+                          (stored s.opacity, drives Konva shadowOpacity) —
+                          the color itself stays rgb in the meta. Swatch
+                          drops/popover/recents come with the field; an
+                          applied swatch's alpha lands in the shadow
+                          opacity, full-snapshot style. */}
+                      <ColorAlphaField
+                        // splitColorAlpha first: the OLD raw text input let
+                        // any string into s.color, so normalize to rgb
+                        // before joining with the stored opacity.
+                        value={joinColorAlpha(splitColorAlpha(s.color, '#000000').rgb, (s.opacity ?? 100) / 100)}
+                        fallback="#000000"
+                        showHex
+                        onChange={v => {
+                          const p = splitColorAlpha(v, '#000000')
+                          updateAt(idx, { color: p.rgb, opacity: Math.round(p.alpha * 100) })
+                        }}
+                        recentKey={`${layer.id}:shadow${idx}`}
+                      />
                     </label>
                     <div className="grid grid-cols-2 gap-1.5">
                       <label className="flex flex-col gap-0.5">
@@ -3042,15 +3051,10 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                         <NumberInput value={s.offsetY}
                           onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
                       </label>
-                      <label className="flex flex-col gap-0.5">
+                      <label className="flex flex-col gap-0.5 col-span-2">
                         <span className="text-[10px] text-gray-400">Blur</span>
                         <NumberInput min={0} value={s.blur}
                           onChange={blur => updateAt(idx, { blur })} className="w-full" />
-                      </label>
-                      <label className="flex flex-col gap-0.5">
-                        <span className="text-[10px] text-gray-400">Opacity %</span>
-                        <NumberInput min={0} max={100} value={s.opacity}
-                          onChange={opacity => updateAt(idx, { opacity })} className="w-full" />
                       </label>
                     </div>
                   </div>
