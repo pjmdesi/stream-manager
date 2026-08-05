@@ -7,7 +7,9 @@ Target: TBD · emptied 2026-08-04 after the v2.2.0 release.
 ## App-wide
 
 - The update check now re-runs every 6 hours while the app is open, so an instance that lives in the tray for days learns about new releases without a restart. (Previously it only checked once at launch.)
+- Video thumbnails now appear on their own after a cloud file finishes downloading (converter, combine, and files-grid rows previously kept the placeholder until the page remounted).
 
 ## Combine
 
-- Rich file rows, matching the converter's design: each row now shows a frame thumbnail, the owning stream item's title (click to open its detail sidebar on the streams page) and date, and the file's codec, resolution, frame rate, and size, alongside the existing recording time and duration.
+- Rich file rows, matching the converter's design: each row now shows a frame thumbnail, the owning stream item's title (click to open its detail sidebar on the streams page) and date, and the file's codec, resolution, frame rate, and size. The recording start time and duration are now labeled columns (Started / Duration), and Auto-sort explains itself in a tooltip.
+- Reordering shows a clear insertion line between rows (the same behavior as the thumbnail palette's swatch reorder), and no line is offered where dropping wouldn't move anything.

@@ -95,6 +95,10 @@ function isCombinedOutput(name: string): boolean {
   return /\bcombined(_\d+)?\.[^.]+$/i.test(name)
 }
 
+/** Drag payload type for row reordering — a dedicated MIME so the handlers
+ *  never react to other drags (OS file drops, palette swatches, …). */
+const ROW_REORDER_MIME = 'application/x-sm-combine-row'
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function CombinePage({ initialFiles, onNavigateToStream }: {
@@ -122,9 +126,10 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     return () => setCombineRunning(false)
   }, [progress, setCombineRunning])
 
-  // Drag state
+  // Drag-reorder state. `dropIndex` is the INSERTION index (0..files.length)
+  // shown by the marker line; null = no valid/actionable target.
   const dragIndex = useRef<number | null>(null)
-  const [dragOver, setDragOver] = useState<number | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
 
   // Load files when sent from Streams page
   useEffect(() => {
@@ -207,22 +212,47 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   }
 
   // ── Drag to reorder ────────────────────────────────────────────────────────
+  // Same rules as the thumbnail palette's swatch reorder: an insertion
+  // marker line anchored INSIDE the row it precedes (so it can't drift from
+  // its row), no marker where releasing wouldn't move anything (on/adjacent
+  // to the dragged row), and the list container accepts drops in the gaps
+  // between rows so the marker's own position is always droppable.
 
-  const onDragStart = (i: number) => { dragIndex.current = i }
-  const onDragOver = (e: React.DragEvent, i: number) => { e.preventDefault(); setDragOver(i) }
-  const onDrop = (i: number) => {
+  const onRowDragStart = (e: React.DragEvent, i: number) => {
+    dragIndex.current = i
+    e.dataTransfer.setData(ROW_REORDER_MIME, '')
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const onRowDragOver = (e: React.DragEvent, i: number) => {
+    if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const r = e.currentTarget.getBoundingClientRect()
+    const at = e.clientY < r.top + r.height / 2 ? i : i + 1
     const from = dragIndex.current
-    if (from === null || from === i) { setDragOver(null); return }
+    // Dropping a row back onto its own position (or the slot right after
+    // itself) is a no-op — offer no marker there.
+    setDropIndex(from !== null && (at === from || at === from + 1) ? null : at)
+  }
+  const commitReorder = (at: number) => {
+    const from = dragIndex.current
+    dragIndex.current = null
+    setDropIndex(null)
+    if (from === null) return
     setFiles(prev => {
       const next = [...prev]
       const [moved] = next.splice(from, 1)
-      next.splice(i, 0, moved)
+      next.splice(at - (from < at ? 1 : 0), 0, moved)
       return next
     })
-    dragIndex.current = null
-    setDragOver(null)
   }
-  const onDragEnd = () => { dragIndex.current = null; setDragOver(null) }
+  const onRowDrop = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+    e.preventDefault()
+    if (dropIndex !== null) commitReorder(dropIndex)
+    else { dragIndex.current = null; setDropIndex(null) }
+  }
+  const onDragEnd = () => { dragIndex.current = null; setDropIndex(null) }
 
   // ── Combine ────────────────────────────────────────────────────────────────
 
@@ -368,28 +398,60 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
             {files.length} files · {totalDur > 0 ? formatDur(totalDur) + ' total' : 'probing…'}
           </p>
         </div>
-        <Button variant="ghost" size="sm" icon={<Wand2 size={14} />} onClick={autoSort} disabled={running}>
-          Auto-sort
-        </Button>
+        <Tooltip content="Reorder by recording start time (parsed from the filenames), oldest first — files without a timestamp sort by name">
+          <Button variant="ghost" size="sm" icon={<Wand2 size={14} />} onClick={autoSort} disabled={running}>
+            Auto-sort
+          </Button>
+        </Tooltip>
       </div>
 
       {/* File list */}
       <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto px-6 py-4">
-        <div className="flex flex-col gap-1.5">
+        <div
+          className="flex flex-col gap-1.5"
+          // The gaps BETWEEN rows belong to this container — without these
+          // handlers the browser shows the no-drop cursor exactly where the
+          // insertion marker is drawn. Rows preventDefault first and bubble
+          // up, so defaultPrevented distinguishes "over a row" from "over a
+          // gap". dragENTER must be canceled too or the cursor flashes
+          // no-drop at every element boundary.
+          onDragEnter={e => {
+            if (e.dataTransfer.types.includes(ROW_REORDER_MIME)) e.preventDefault()
+          }}
+          onDragOver={e => {
+            if (e.defaultPrevented) return
+            if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+          }}
+          onDrop={e => {
+            if (e.defaultPrevented) return
+            if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+            e.preventDefault()
+            if (dropIndex !== null) commitReorder(dropIndex)
+          }}
+        >
           {files.map((f, i) => (
             <div
               key={f.path}
-              draggable
-              onDragStart={() => onDragStart(i)}
-              onDragOver={e => onDragOver(e, i)}
-              onDrop={() => onDrop(i)}
+              draggable={!running}
+              onDragStart={e => onRowDragStart(e, i)}
+              onDragOver={e => onRowDragOver(e, i)}
+              onDrop={onRowDrop}
               onDragEnd={onDragEnd}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all select-none ${
-                dragOver === i
-                  ? 'border-purple-500/60 bg-purple-900/20'
-                  : 'border-white/5 bg-white/[0.03] hover:bg-white/[0.06]'
-              } ${running ? 'opacity-50 pointer-events-none' : 'cursor-grab active:cursor-grabbing'}`}
+              className={`relative flex items-center gap-3 px-3 py-2 rounded-lg border border-white/5 bg-white/[0.03] hover:bg-white/[0.06] transition-all select-none ${
+                running ? 'opacity-50 pointer-events-none' : 'cursor-grab active:cursor-grabbing'
+              }`}
             >
+              {/* Insertion marker — anchored INSIDE the row it precedes,
+                  centered in the 6px flex gap (offsets measured from the
+                  padding box, 1px inside the row border — hence 5px). */}
+              {dropIndex === i && (
+                <span className="pointer-events-none absolute -top-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
+              )}
+              {dropIndex === files.length && i === files.length - 1 && (
+                <span className="pointer-events-none absolute -bottom-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
+              )}
               <GripVertical size={14} className="text-gray-400 shrink-0" />
 
               {/* Order number */}
@@ -435,17 +497,24 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                 </span>
               </div>
 
-              {/* Timestamp (recording start, parsed from the filename) */}
+              {/* Labeled time columns — an unlabeled clock next to an
+                  unlabeled duration read as two mystery numbers. */}
               {f.timestamp && (
-                <span className="text-xs text-gray-400 shrink-0 tabular-nums">
-                  {f.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                </span>
+                <Tooltip content="Recording start time, parsed from the filename — this is the order Auto-sort uses" side="top" triggerClassName="shrink-0">
+                  <div className="flex flex-col items-end">
+                    <span className="text-[9px] uppercase tracking-wider text-gray-500">Started</span>
+                    <span className="text-xs text-gray-400 tabular-nums">
+                      {f.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                  </div>
+                </Tooltip>
               )}
-
-              {/* Duration */}
-              <span className="text-xs text-gray-400 font-mono w-16 text-right shrink-0">
-                {f.duration !== null ? formatDur(f.duration) : <Loader2 size={11} className="animate-spin inline" />}
-              </span>
+              <div className="flex flex-col items-end w-16 shrink-0">
+                <span className="text-[9px] uppercase tracking-wider text-gray-500">Duration</span>
+                <span className="text-xs text-gray-400 font-mono">
+                  {f.duration !== null ? formatDur(f.duration) : <Loader2 size={11} className="animate-spin inline" />}
+                </span>
+              </div>
 
               {/* Remove */}
               <button

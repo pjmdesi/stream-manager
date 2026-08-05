@@ -109,12 +109,21 @@ export function VideoThumb({ path, width, height = 56, checker = false, rounded 
       return cleanup
     }
 
-    void (async () => {
+    let unsubHydrate: (() => void) | undefined
+    const load = async () => {
       // Cloud gate: never touch a non-local file — probing/decoding would
-      // hydrate it.
+      // hydrate it. But if something ELSE hydrates it (a combine/converter
+      // add, the files grid's download), pick the frame up the moment it
+      // lands instead of showing the placeholder until a remount.
       let isLocal = false
       try { isLocal = !!(await window.api.checkLocalFiles([path]))[0] } catch { /* assume cloud */ }
-      if (cancelled || !isLocal) return
+      if (cancelled) return
+      if (!isLocal) {
+        unsubHydrate ??= window.api.onCloudDownloadDone(fp => {
+          if (fp === path) void load()
+        })
+        return
+      }
 
       // Disk keystone (L2), or one minted from the player's strip cache.
       let keystone: string | null = null
@@ -127,9 +136,10 @@ export function VideoThumb({ path, width, height = 56, checker = false, rounded 
       }
       // Nothing cached anywhere → generate it ourselves.
       cleanupDecode = decode()
-    })()
+    }
+    void load()
 
-    return () => { cancelled = true; cleanupDecode?.() }
+    return () => { cancelled = true; cleanupDecode?.(); unsubHydrate?.() }
   }, [path]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const H = height
