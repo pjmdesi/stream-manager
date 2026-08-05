@@ -13,3 +13,4 @@ Target: TBD · emptied 2026-08-04 after the v2.2.0 release.
 
 - Rich file rows, matching the converter's design: each row now shows a frame thumbnail, the owning stream item's title (click to open its detail sidebar on the streams page) and date, and the file's codec, resolution, frame rate, and size. The recording start time and duration are now labeled columns (Started / Duration), and Auto-sort explains itself in a tooltip.
 - Reordering shows a clear insertion line between rows (the same behavior as the thumbnail palette's swatch reorder), and no line is offered where dropping wouldn't move anything.
+- The incompatible-files message now lays the conflict out as a table (one row per file, one column per differing property), and the audio layout joins each row's detail line. Mismatched properties are highlighted in red directly on the file rows (amber for frame rate, which is only advisory), so you can see at a glance which file is the odd one out.

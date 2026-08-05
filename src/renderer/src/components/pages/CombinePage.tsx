@@ -273,35 +273,28 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   const probed = files.filter(f => f.codec !== null)
   const audioSig = (f: CombineFile) =>
     (f.audioTracks ?? []).map(t => `${t.codec} ${t.channels}ch${t.sampleRate ? ' @' + t.sampleRate + 'Hz' : ''}`).join(' + ') || 'no audio'
-  // One line per differing property, grouping files by value so the message
-  // names exactly which files disagree and how.
-  const mismatchLine = (label: string, valOf: (f: CombineFile) => string): string | null => {
-    const groups = new Map<string, string[]>()
-    for (const f of probed) {
-      const v = valOf(f)
-      const names = groups.get(v) ?? []
-      names.push(f.name)
-      groups.set(v, names)
-    }
-    if (groups.size <= 1) return null
-    return `${label}: ` + [...groups.entries()].map(([v, names]) => `${v} (${names.join(', ')})`).join('  vs  ')
-  }
-  const hardBlockers = probed.length >= 2
-    ? [
-        mismatchLine('Video codec', f => f.codec ?? 'unknown'),
-        mismatchLine('Resolution', f => `${f.width ?? '?'}×${f.height ?? '?'}`),
-        mismatchLine('Audio', audioSig),
-      ].filter((l): l is string => l !== null)
+  const fpsVal = (f: CombineFile) => f.fps == null ? 'unknown' : `${Math.round(f.fps * 100) / 100} fps`
+  // Hard-blocking properties as DATA (label + per-file value), shared by the
+  // gate's comparison table and the rows' red mismatch highlighting.
+  const HARD_PROPS: { label: string; val: (f: CombineFile) => string }[] = [
+    { label: 'Video codec', val: f => f.codec ?? 'unknown' },
+    { label: 'Resolution', val: f => `${f.width ?? '?'}×${f.height ?? '?'}` },
+    { label: 'Audio', val: audioSig },
+  ]
+  const mismatchedProps = probed.length >= 2
+    ? HARD_PROPS.filter(p => new Set(probed.map(p.val)).size > 1)
     : []
-  const fpsAdvisory = probed.length >= 2
-    ? mismatchLine('Frame rate', f => f.fps == null ? 'unknown' : `${Math.round(f.fps * 100) / 100} fps`)
-    : null
+  const codecMismatch = mismatchedProps.some(p => p.label === 'Video codec')
+  const resMismatch = mismatchedProps.some(p => p.label === 'Resolution')
+  const audioMismatch = mismatchedProps.some(p => p.label === 'Audio')
+  // Frame-rate drift alone stays advisory (VFR output, plays fine).
+  const fpsMismatch = probed.length >= 2 && new Set(probed.map(fpsVal)).size > 1
 
   const combine = useCallback(async () => {
     if (files.length < 2 || !outputPath) return
     // Belt to the disabled button's suspenders — a copy-concat of
     // incompatible streams writes a broken file, never run one.
-    if (hardBlockers.length > 0) return
+    if (mismatchedProps.length > 0) return
     setProgress(0)
     setDone(false)
     setError(null)
@@ -365,7 +358,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
       setCancelling(false)
       setOpen('combine', [])
     }
-  }, [files, outputPath, deleteAfter, setOpen, hardBlockers])
+  }, [files, outputPath, deleteAfter, setOpen, mismatchedProps])
 
   // ── Empty state ────────────────────────────────────────────────────────────
 
@@ -484,17 +477,34 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                   </Tooltip>
                 )}
                 {/* Encoding + file details; individual segments appear as
-                    their probe/size lookups land. */}
-                <span className="text-[11px] text-gray-400 truncate tabular-nums">
-                  {f.codec === null && f.size === null
-                    ? <Loader2 size={10} className="animate-spin inline" />
-                    : [
-                        f.codec ?? undefined,
-                        f.width != null && f.height != null ? `${f.width}×${f.height}` : undefined,
-                        f.fps != null ? `${Math.round(f.fps * 100) / 100} fps` : undefined,
-                        f.size != null ? formatBytes(f.size) : undefined,
-                      ].filter(Boolean).join(' · ')}
-                </span>
+                    their probe/size lookups land. Segments whose property
+                    DIFFERS across the list turn red (amber for frame rate,
+                    which is only advisory) — the row-level view of what the
+                    compatibility gate is complaining about. */}
+                {(() => {
+                  if (f.codec === null && f.size === null) {
+                    return <span className="text-[11px] text-gray-400"><Loader2 size={10} className="animate-spin inline" /></span>
+                  }
+                  const segs: { text: string; cls?: string }[] = []
+                  if (f.codec) segs.push({ text: f.codec, cls: codecMismatch ? 'text-red-400' : undefined })
+                  if (f.width != null && f.height != null) segs.push({ text: `${f.width}×${f.height}`, cls: resMismatch ? 'text-red-400' : undefined })
+                  if (f.fps != null) segs.push({ text: `${Math.round(f.fps * 100) / 100} fps`, cls: fpsMismatch ? 'text-amber-300' : undefined })
+                  if (f.audioTracks !== null) segs.push({ text: audioSig(f), cls: audioMismatch ? 'text-red-400' : undefined })
+                  if (f.size != null) segs.push({ text: formatBytes(f.size) })
+                  const full = segs.map(s => s.text).join(' · ')
+                  return (
+                    <Tooltip content={full} maxWidth="max-w-md" triggerClassName="block w-fit max-w-full min-w-0">
+                      <span className="block text-[11px] text-gray-400 truncate tabular-nums">
+                        {segs.map((s, k) => (
+                          <React.Fragment key={k}>
+                            {k > 0 && ' · '}
+                            <span className={s.cls}>{s.text}</span>
+                          </React.Fragment>
+                        ))}
+                      </span>
+                    </Tooltip>
+                  )
+                })()}
               </div>
 
               {/* Labeled time columns — an unlabeled clock next to an
@@ -502,7 +512,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
               {f.timestamp && (
                 <Tooltip content="Recording start time, parsed from the filename — this is the order Auto-sort uses" side="top" triggerClassName="shrink-0">
                   <div className="flex flex-col items-end">
-                    <span className="text-[9px] uppercase tracking-wider text-gray-500">Started</span>
+                    <span className="text-[9px] uppercase tracking-wider text-gray-400">Started</span>
                     <span className="text-xs text-gray-400 tabular-nums">
                       {f.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
@@ -510,7 +520,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                 </Tooltip>
               )}
               <div className="flex flex-col items-end w-16 shrink-0">
-                <span className="text-[9px] uppercase tracking-wider text-gray-500">Duration</span>
+                <span className="text-[9px] uppercase tracking-wider text-gray-400">Duration</span>
                 <span className="text-xs text-gray-400 font-mono">
                   {f.duration !== null ? formatDur(f.duration) : <Loader2 size={11} className="animate-spin inline" />}
                 </span>
@@ -575,23 +585,48 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
 
         {/* Compatibility gate — red blocks the run (the output would be a
             broken file), amber warns but allows (VFR output plays fine). */}
-        {hardBlockers.length > 0 && !running && (
+        {mismatchedProps.length > 0 && !running && (
           <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
             <AlertCircle size={13} className="shrink-0 mt-0.5" />
-            <div className="flex flex-col gap-1 min-w-0">
-              <span className="font-medium">These files can't be combined without re-encoding — combining copies the streams as-is, and these differences would produce a broken output:</span>
-              {hardBlockers.map(line => (
-                <span key={line} className="font-mono text-[11px] text-red-200/90 break-words">{line}</span>
-              ))}
+            <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+              <span className="font-medium">These files can't be combined without re-encoding: combining copies the streams as-is, and these differences would produce a broken output.</span>
+              {/* One row per file, one column per DIFFERING property — far
+                  easier to scan than prose grouping. */}
+              <div className="overflow-x-auto">
+                <table className="text-[11px] w-full border-collapse">
+                  <thead>
+                    <tr className="text-left text-red-200/70">
+                      <th className="pr-4 py-0.5 font-medium">File</th>
+                      {mismatchedProps.map(p => (
+                        <th key={p.label} className="pr-4 py-0.5 font-medium whitespace-nowrap">{p.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono text-red-200/90">
+                    {probed.map(f => (
+                      <tr key={f.path} className="border-t border-red-500/20">
+                        <td className="pr-4 py-0.5">
+                          <Tooltip content={f.name} maxWidth="max-w-md" triggerClassName="block max-w-[260px] min-w-0">
+                            <span className="block truncate">{f.name}</span>
+                          </Tooltip>
+                        </td>
+                        {mismatchedProps.map(p => (
+                          <td key={p.label} className="pr-4 py-0.5 whitespace-nowrap">{p.val(f)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               <span className="text-red-200/80">Convert the odd files out with the Converter first (same preset for all), then combine the results.</span>
             </div>
           </div>
         )}
-        {hardBlockers.length === 0 && fpsAdvisory && !running && !done && (
+        {mismatchedProps.length === 0 && fpsMismatch && !running && !done && (
           <div className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
             <AlertTriangle size={13} className="shrink-0 mt-0.5" />
             <span>
-              {fpsAdvisory}. The combined file will simply switch frame rate at the joins (variable frame rate) — most players handle this fine, but some editors dislike VFR input. Convert to a matching frame rate first if that matters.
+              The files have different frame rates ({[...new Set(probed.map(fpsVal))].join(', ')}). The combined file will simply switch frame rate at the joins (variable frame rate); most players handle this fine, but some editors dislike VFR input. Convert to a matching frame rate first if that matters.
             </span>
           </div>
         )}
@@ -634,7 +669,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
             variant="primary"
             icon={running ? <Loader2 size={14} className="animate-spin" /> : <Combine size={14} />}
             onClick={combine}
-            disabled={files.length < 2 || !outputPath || running || hardBlockers.length > 0}
+            disabled={files.length < 2 || !outputPath || running || mismatchedProps.length > 0}
           >
             {running ? 'Combining…' : `Combine ${files.length} files`}
           </Button>
