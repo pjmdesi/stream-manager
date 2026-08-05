@@ -393,7 +393,7 @@ export function StreamsPage({
   isVisible: boolean
   onSendToPlayer: (file: string) => void
   onSendToConverter: (files: string[], stream?: { folderPath: string; label: string }) => void
-  onSendToCombine: (files: string[]) => void
+  onSendToCombine: (files: string[], stream?: { folderPath: string; label: string; date?: string }) => void
   /** When the token bumps, select/open this stream's detail sidebar — by
    *  folderPath (converter's "from stream" link) or by exact stream key
    *  (App's auto-push failure modal). */
@@ -1499,8 +1499,12 @@ export function StreamsPage({
   }, [onSendToConverter, folders])
 
   const handleSendToCombine = useCallback((folder: StreamFolder) => {
-    if (folder.videos.length > 0) onSendToCombine(folder.videos)
-  }, [onSendToCombine])
+    if (folder.videos.length > 0) onSendToCombine(folder.videos, {
+      folderPath: folder.folderPath,
+      label: renderStreamTitle(folder, folders) || folder.folderName,
+      date: folder.date,
+    })
+  }, [onSendToCombine, folders])
 
   // When a prompted cloud download finishes, route the now-local file to its
   // pending action and dismiss the modal. The pending download is read from a
@@ -3981,7 +3985,11 @@ export function StreamsPage({
                 folderPath: renderedFolder.folderPath,
                 label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
               })}
-              onSendFilesToCombine={(paths) => onSendToCombine(paths)}
+              onSendFilesToCombine={(paths) => onSendToCombine(paths, {
+                folderPath: renderedFolder.folderPath,
+                label: renderStreamTitle(renderedFolder, folders) || renderedFolder.folderName,
+                date: renderedFolder.date,
+              })}
               allowFileImport={streamMode === 'folder-per-stream'}
               filesGridRef={filesGridRef}
               onFilesDeleted={handleFilesDeleted}

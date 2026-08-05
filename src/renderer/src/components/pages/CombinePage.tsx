@@ -6,6 +6,7 @@ import {
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
+import { VideoThumb } from '../ui/VideoThumb'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 
@@ -16,6 +17,12 @@ interface CombineFile {
   name: string
   duration: number | null   // seconds, null = not yet probed
   timestamp: Date | null    // parsed from filename
+  /** File size in bytes (batched files:getFileSizes). null = still loading. */
+  size: number | null
+  /** Owning stream item when the file was sent from a stream — powers the
+   *  row's title link + date. Tagged PER FILE (not on the list) so future
+   *  multi-stream queues (todo: combine groups) inherit it for free. */
+  stream?: { folderPath: string; label: string; date?: string }
   // Stream properties from the same probe — drive the compatibility gate
   // (-c copy concat needs matching streams; mismatches glitch at the joins).
   codec: string | null
@@ -29,7 +36,11 @@ interface CombineFile {
   audioTracks: { codec: string; channels: number; sampleRate?: number }[] | null
 }
 
-interface PendingFiles { paths: string[]; token: number }
+interface PendingFiles {
+  paths: string[]
+  token: number
+  stream?: { folderPath: string; label: string; date?: string }
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +50,12 @@ function formatDur(sec: number): string {
   const s = Math.floor(sec % 60)
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
 function parseTimestamp(filename: string): Date | null {
@@ -80,7 +97,12 @@ function isCombinedOutput(name: string): boolean {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | null }) {
+export function CombinePage({ initialFiles, onNavigateToStream }: {
+  initialFiles?: PendingFiles | null
+  /** Open a stream's detail sidebar on the streams page — the rows' stream
+   *  title links (same wiring as the converter's "from stream" link). */
+  onNavigateToStream?: (folderPath: string) => void
+}) {
   const [files, setFiles] = useState<CombineFile[]>([])
   const [outputPath, setOutputPath] = useState('')
   const [progress, setProgress] = useState<number | null>(null)
@@ -121,6 +143,8 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
       name: p.split(/[\\/]/).pop() ?? p,
       duration: null,
       timestamp: parseTimestamp(p.split(/[\\/]/).pop() ?? ''),
+      size: null,
+      stream: initialFiles.stream,
       codec: null, width: null, height: null, fps: null, audioTracks: null,
     }))
 
@@ -142,11 +166,19 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
     setDone(false)
     setError(null)
 
-    // Probe durations + stream properties
-    sorted.forEach(async (f, i) => {
+    // Sizes in one batched call (keyed by path — the list may have been
+    // reordered by the time results land).
+    void window.api.getFileSizes(sorted.map(f => f.path)).then(sizes => {
+      const byPath = new Map(sorted.map((f, i) => [f.path, sizes[i]]))
+      setFiles(prev => prev.map(f => byPath.has(f.path) ? { ...f, size: byPath.get(f.path) ?? null } : f))
+    }).catch(() => {})
+
+    // Probe durations + stream properties. Matched by PATH, not index —
+    // the user can reorder rows while probes are still in flight.
+    sorted.forEach(async f => {
       try {
         const info = await window.api.probeFile(f.path)
-        setFiles(prev => prev.map((x, xi) => xi === i ? {
+        setFiles(prev => prev.map(x => x.path === f.path ? {
           ...x,
           duration: info.duration,
           codec: info.videoCodec ?? null,
@@ -352,7 +384,7 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
               onDragOver={e => onDragOver(e, i)}
               onDrop={() => onDrop(i)}
               onDragEnd={onDragEnd}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all select-none ${
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all select-none ${
                 dragOver === i
                   ? 'border-purple-500/60 bg-purple-900/20'
                   : 'border-white/5 bg-white/[0.03] hover:bg-white/[0.06]'
@@ -363,14 +395,47 @@ export function CombinePage({ initialFiles }: { initialFiles?: PendingFiles | nu
               {/* Order number */}
               <span className="text-xs text-gray-400 font-mono w-5 text-right shrink-0">{i + 1}</span>
 
-              {/* Filename */}
-              <Tooltip content={f.path} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
-                <span className="block text-sm text-gray-200 truncate font-mono">
-                  {f.name}
-                </span>
-              </Tooltip>
+              {/* Thumbnail — converter-row treatment (the design reference
+                  for this page): frame preview at the row's left edge. */}
+              <div className="self-center shrink-0">
+                <VideoThumb path={f.path} height={44} />
+              </div>
 
-              {/* Timestamp */}
+              {/* Info column: filename, stream link, encoding/file chips */}
+              <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                <Tooltip content={f.path} maxWidth="max-w-md" triggerClassName="block w-fit max-w-full min-w-0">
+                  <span className="block text-sm text-gray-200 truncate font-mono">
+                    {f.name}
+                  </span>
+                </Tooltip>
+                {/* Owning stream item (only for files sent from a stream).
+                    Opens its detail sidebar on the streams page. */}
+                {f.stream && (
+                  <Tooltip content={`Open “${f.stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToStream?.(f.stream!.folderPath)}
+                      className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                    >
+                      {f.stream.label}{f.stream.date ? ` · ${f.stream.date}` : ''}
+                    </button>
+                  </Tooltip>
+                )}
+                {/* Encoding + file details; individual segments appear as
+                    their probe/size lookups land. */}
+                <span className="text-[11px] text-gray-400 truncate tabular-nums">
+                  {f.codec === null && f.size === null
+                    ? <Loader2 size={10} className="animate-spin inline" />
+                    : [
+                        f.codec ?? undefined,
+                        f.width != null && f.height != null ? `${f.width}×${f.height}` : undefined,
+                        f.fps != null ? `${Math.round(f.fps * 100) / 100} fps` : undefined,
+                        f.size != null ? formatBytes(f.size) : undefined,
+                      ].filter(Boolean).join(' · ')}
+                </span>
+              </div>
+
+              {/* Timestamp (recording start, parsed from the filename) */}
               {f.timestamp && (
                 <span className="text-xs text-gray-400 shrink-0 tabular-nums">
                   {f.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}

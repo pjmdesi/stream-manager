@@ -68,6 +68,9 @@ interface PendingFile {
 interface PendingFiles {
   paths: string[]
   token: number
+  /** Set when the files were sent from a stream — powers the combine rows'
+   *  stream-title link + date (mirrors PendingConverterFile.stream). */
+  stream?: { folderPath: string; label: string; date?: string }
 }
 
 interface PendingConverterFile {
@@ -666,8 +669,8 @@ function AppInner() {
     setPage('streams')
   }
 
-  const sendToCombine = (filePaths: string[]) => {
-    setPendingCombine(prev => ({ paths: filePaths, token: (prev?.token ?? 0) + 1 }))
+  const sendToCombine = (filePaths: string[], stream?: { folderPath: string; label: string; date?: string }) => {
+    setPendingCombine(prev => ({ paths: filePaths, token: (prev?.token ?? 0) + 1, stream }))
     setPage('combine')
   }
 
@@ -971,7 +974,7 @@ function AppInner() {
               initialFiles ingest — resurrecting removed files and resetting
               the sort order, output path, and delete-sources checkbox. */}
           <div className={`h-full ${page === 'combine' ? '' : 'hidden'}`}>
-            <CombinePage initialFiles={pendingCombine} />
+            <CombinePage initialFiles={pendingCombine} onNavigateToStream={navigateToStream} />
           </div>
           {page === 'templates' && <TemplatesPage />}
           {page === 'rules'     && <RulesPage />}
