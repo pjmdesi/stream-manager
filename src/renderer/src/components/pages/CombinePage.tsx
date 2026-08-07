@@ -3,11 +3,11 @@ import {
   GripVertical, Film, FolderOpen, Wand2, Combine,
   CheckCircle2, AlertCircle, AlertTriangle, Loader2, X, Trash2
 } from 'lucide-react'
-import { FileDropZone } from '../ui/FileDropZone'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Tooltip } from '../ui/Tooltip'
 import { VideoThumb } from '../ui/VideoThumb'
+import { FileDropZone } from '../ui/FileDropZone'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 
@@ -21,9 +21,13 @@ interface CombineFile {
   /** File size in bytes (batched files:getFileSizes). null = still loading. */
   size: number | null
   /** Owning stream item when the file was sent from a stream — powers the
-   *  row's title link + date. Tagged PER FILE (not on the list) so future
-   *  multi-stream queues (todo: combine groups) inherit it for free. */
+   *  row's title link and the group's orphan warning. Tagged PER FILE (not
+   *  on the group) so cross-group moves keep their provenance. */
   stream?: { folderPath: string; label: string; date?: string }
+  /** True once "delete source files" trashed THIS file after a successful
+   *  combine — the row stays visible, grayed with a struck filename.
+   *  Per-file (not per-run) so a partial trash failure shows honestly. */
+  deleted?: boolean
   // Stream properties from the same probe — drive the compatibility gate
   // (-c copy concat needs matching streams; mismatches glitch at the joins).
   codec: string | null
@@ -35,6 +39,28 @@ interface CombineFile {
    *  just as fatal to a copy-concat as a codec change — and used to pass
    *  the old advisory silently, which only compared video streams. */
   audioTracks: { codec: string; channels: number; sampleRate?: number }[] | null
+}
+
+/** One combine JOB: its own file set, output, options, and lifecycle.
+ *  Stream sends group by stream item; external drops make their own group.
+ *  Only one group RUNS at a time (the combine IPC is single-run), tracked
+ *  page-level in `runState`. */
+interface CombineGroup {
+  id: number
+  /** Generating stream item; undefined for external-drop groups. The
+   *  "same as source" output default keeps resolving against THIS even
+   *  when foreign files join the group (spec rule). */
+  stream?: { folderPath: string; label: string; date?: string }
+  /** Header label for external groups (the drop's common folder name). */
+  label: string
+  files: CombineFile[]
+  outputPath: string
+  deleteAfter: boolean
+  /** The finished run's output — while set, the group's body shows the
+   *  converter-style done row instead of file rows + options. */
+  completed: { path: string; elapsedMs: number } | null
+  error: string | null
+  cancelledNotice: boolean
 }
 
 interface PendingFiles {
@@ -65,9 +91,20 @@ function parseTimestamp(filename: string): Date | null {
   return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])
 }
 
-function defaultOutputPath(files: CombineFile[]): string {
-  if (files.length === 0) return ''
-  const dir = files[0].path.replace(/[\\/][^\\/]+$/, '')
+function nameOf(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p
+}
+
+function dirOf(p: string): string {
+  return p.replace(/[\\/][^\\/]+$/, '')
+}
+
+/** Default output for a group: "same as source". Stream groups resolve
+ *  against the GENERATING stream's folder (even when foreign files have
+ *  joined — spec rule); external groups against the first file's folder. */
+function defaultGroupOutput(stream: CombineGroup['stream'], files: CombineFile[]): string {
+  const dir = stream ? stream.folderPath.replace(/\\/g, '/') : (files.length > 0 ? dirOf(files[0].path) : '')
+  if (!dir) return ''
   const folderName = dir.split(/[\\/]/).pop() ?? 'combined'
   return `${dir}/${folderName} combined.mkv`.replace(/\\/g, '/')
 }
@@ -90,7 +127,7 @@ async function uniquifyPath(p: string): Promise<string> {
 }
 
 /** An output of a previous combine run (by this page's own naming scheme).
- *  Combine All sends folder.videos verbatim, which includes prior combined
+ *  Stream sends pass folder.videos verbatim, which includes prior combined
  *  files — feeding one back in duplicates its content in the new output. */
 function isCombinedOutput(name: string): boolean {
   return /\bcombined(_\d+)?\.[^.]+$/i.test(name)
@@ -101,62 +138,78 @@ function isCombinedOutput(name: string): boolean {
 const ROW_REORDER_MIME = 'application/x-sm-combine-row'
 
 /** Same container set the converter accepts. FileDropZone's browse dialog
- *  filters by these; dropped paths are re-filtered in addFiles (drops
- *  bypass the dialog). */
+ *  filters by these; dropped paths are re-filtered in the intake handlers
+ *  (drops bypass the dialog). */
 const VIDEO_EXTS = ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+function makeCombineFile(p: string, stream?: CombineFile['stream']): CombineFile {
+  const name = nameOf(p)
+  return {
+    path: p,
+    name,
+    duration: null,
+    timestamp: parseTimestamp(name),
+    size: null,
+    stream,
+    codec: null, width: null, height: null, fps: null, audioTracks: null,
+  }
+}
 
-export function CombinePage({ initialFiles, onNavigateToStream }: {
-  initialFiles?: PendingFiles | null
-  /** Open a stream's detail sidebar on the streams page — the rows' stream
-   *  title links (same wiring as the converter's "from stream" link). */
+// ── Compatibility gate ────────────────────────────────────────────────────────
+// A -c copy concat adapts NOTHING — mismatched video codec, resolution, or
+// audio layout produces a structurally broken file (undecodable second half,
+// scrambled track mapping), so those BLOCK the run. Frame-rate drift alone
+// stays an amber advisory: the output is just variable-framerate and
+// generally plays. Computed per GROUP: compatibility only matters within
+// one combine set.
+
+const audioSig = (f: CombineFile) =>
+  (f.audioTracks ?? []).map(t => `${t.codec} ${t.channels}ch${t.sampleRate ? ' @' + t.sampleRate + 'Hz' : ''}`).join(' + ') || 'no audio'
+const fpsVal = (f: CombineFile) => f.fps == null ? 'unknown' : `${Math.round(f.fps * 100) / 100} fps`
+
+/** Hard-blocking properties as DATA (label + per-file value), shared by the
+ *  gate's comparison table and the rows' red mismatch highlighting. */
+const HARD_PROPS: { label: string; val: (f: CombineFile) => string }[] = [
+  { label: 'Video codec', val: f => f.codec ?? 'unknown' },
+  { label: 'Resolution', val: f => `${f.width ?? '?'}×${f.height ?? '?'}` },
+  { label: 'Audio', val: audioSig },
+]
+
+function computeCompat(files: CombineFile[]) {
+  const probed = files.filter(f => f.codec !== null)
+  const mismatchedProps = probed.length >= 2
+    ? HARD_PROPS.filter(p => new Set(probed.map(p.val)).size > 1)
+    : []
+  return {
+    probed,
+    mismatchedProps,
+    codecMismatch: mismatchedProps.some(p => p.label === 'Video codec'),
+    resMismatch: mismatchedProps.some(p => p.label === 'Resolution'),
+    audioMismatch: mismatchedProps.some(p => p.label === 'Audio'),
+    fpsMismatch: probed.length >= 2 && new Set(probed.map(fpsVal)).size > 1,
+  }
+}
+
+// ─── Completed row ────────────────────────────────────────────────────────────
+
+/** The finished output as ONE done row where the group's source rows were —
+ *  the converter's done-job anatomy (thumb / check + name + metadata /
+ *  stream link / progress bar / stats line / divider / actions); only the
+ *  content differs: a single output name instead of source → output, and
+ *  the output's real metadata where the converter shows its preset. */
+function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
+  path: string
+  elapsedMs: number
+  stream?: { folderPath: string; label: string; date?: string }
   onNavigateToStream?: (folderPath: string) => void
 }) {
-  const [files, setFiles] = useState<CombineFile[]>([])
-  const [outputPath, setOutputPath] = useState('')
-  const [progress, setProgress] = useState<number | null>(null)
-  // A finished combine. While set (and the list is empty), the page shows
-  // ONE done row in place of the source rows — the converter's done-job
-  // treatment, same anatomy — until cleared or a new list starts.
-  // Replaces the old `done` footer banner. `stream` carries over from the
-  // sources when they all belonged to one stream item.
-  const [completed, setCompleted] = useState<{
-    path: string
-    elapsedMs: number
-    stream?: { folderPath: string; label: string; date?: string }
-  } | null>(null)
   const [outInfo, setOutInfo] = useState<{
     duration?: number | null; codec?: string | null; width?: number | null
     height?: number | null; fps?: number | null; size?: number | null
   } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [deleteAfter, setDeleteAfter] = useState(false)
-  const [cancelling, setCancelling] = useState(false)
-  const [cancelledNotice, setCancelledNotice] = useState(false)
-  const { setOpen } = useOpenItems()
-
-  // Publish "combine has files" to the nav rail's activity indicator —
-  // same presence semantics as the player (has video) and thumbnails
-  // (has canvas): the highlight says "there's something on this page".
-  // A finished output card counts: it's content waiting on the page.
-  const { setCombineHasFiles } = usePageActivity()
   useEffect(() => {
-    setCombineHasFiles(files.length > 0 || completed !== null)
-    return () => setCombineHasFiles(false)
-  }, [files.length, completed, setCombineHasFiles])
-
-  // Drag-reorder state. `dropIndex` is the INSERTION index (0..files.length)
-  // shown by the marker line; null = no valid/actionable target.
-  const dragIndex = useRef<number | null>(null)
-  const [dropIndex, setDropIndex] = useState<number | null>(null)
-
-  // Details for the finished output's row, probed once per output.
-  useEffect(() => {
-    const outPath = completed?.path
-    if (!outPath) { setOutInfo(null); return }
     let cancelled = false
-    void window.api.probeFile(outPath).then(info => {
+    void window.api.probeFile(path).then(info => {
       if (cancelled) return
       setOutInfo(prev => ({
         ...(prev ?? {}),
@@ -167,189 +220,350 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
         fps: info.fps ?? null,
       }))
     }).catch(() => {})
-    void window.api.getFileSizes([outPath]).then(([s]) => {
+    void window.api.getFileSizes([path]).then(([s]) => {
       if (!cancelled) setOutInfo(prev => ({ ...(prev ?? {}), size: s ?? null }))
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [completed?.path])
+  }, [path])
+
+  const outDir = dirOf(path)
+  const chips = [
+    outInfo?.codec ?? undefined,
+    outInfo?.width != null && outInfo?.height != null ? `${outInfo.width}×${outInfo.height}` : undefined,
+    outInfo?.fps != null ? `${Math.round(outInfo.fps * 100) / 100} fps` : undefined,
+    outInfo?.duration != null ? formatDur(outInfo.duration) : undefined,
+    outInfo?.size != null ? formatBytes(outInfo.size) : undefined,
+  ].filter(Boolean).join(' · ')
+
+  return (
+    <div className="flex items-stretch gap-3 px-4 py-3">
+      {/* Thumbnail — pulled toward the left/top/bottom edges, keeps the
+          gap to the right content (converter row treatment). */}
+      <div className="self-center shrink-0 -my-1 -ms-2">
+        <VideoThumb path={path} />
+      </div>
+      {/* Left: all content */}
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 size={14} className="text-green-400 shrink-0" />
+          <Tooltip content={path} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
+            <span className="block text-xs text-gray-200 truncate">{nameOf(path)}</span>
+          </Tooltip>
+          {/* Output metadata where the converter shows its preset. */}
+          <span className="text-xs text-gray-400 shrink-0 tabular-nums">
+            {chips || <Loader2 size={11} className="animate-spin inline" />}
+          </span>
+        </div>
+        {stream && (
+          <Tooltip content={`Open “${stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
+            <button
+              type="button"
+              onClick={() => onNavigateToStream?.(stream.folderPath)}
+              className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+            >
+              {stream.label}
+            </button>
+          </Tooltip>
+        )}
+        <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
+          <div className="h-full rounded-full bg-green-500 w-full" />
+        </div>
+        <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
+          <span>100%</span>
+          <span>Elapsed: {formatDur(elapsedMs / 1000)}</span>
+          <Tooltip content="Open output folder" side="top">
+            <button
+              onClick={() => window.api.openInExplorer(outDir)}
+              className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
+            >
+              {outDir}
+            </button>
+          </Tooltip>
+        </div>
+      </div>
+      {/* No per-row actions: there's exactly one output per job, so the
+          job header's Clear job covers it. */}
+    </div>
+  )
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export function CombinePage({ initialFiles, onNavigateToStream }: {
+  initialFiles?: PendingFiles | null
+  /** Open a stream's detail sidebar on the streams page — the rows' stream
+   *  title links (same wiring as the converter's "from stream" link). */
+  onNavigateToStream?: (folderPath: string) => void
+}) {
+  const [groups, setGroups] = useState<CombineGroup[]>([])
+  const groupIdRef = useRef(1)
+  // The single active run (the combine IPC is single-run: one progress
+  // channel, one cancel) — other groups' Combine buttons wait their turn.
+  const [runState, setRunState] = useState<{ groupId: number; progress: number } | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  const { setOpen } = useOpenItems()
+
+  // Publish "combine has content" to the nav rail's activity indicator —
+  // same presence semantics as the player (has video) and thumbnails
+  // (has canvas). Completed groups count: they're content waiting on the
+  // page.
+  const { setCombineHasFiles } = usePageActivity()
+  useEffect(() => {
+    setCombineHasFiles(groups.length > 0)
+    return () => setCombineHasFiles(false)
+  }, [groups.length, setCombineHasFiles])
+
+  // Drag-reorder state, group-aware. `drop` is the INSERTION index within
+  // ONE group (0..files.length); null = no valid/actionable target.
+  // Cross-group moves are a later pass — a drag only offers markers inside
+  // its own group for now.
+  const dragRef = useRef<{ groupId: number; index: number } | null>(null)
+  const [drop, setDrop] = useState<{ groupId: number; at: number } | null>(null)
 
   // Fill in sizes + stream properties for a set of paths, patching rows BY
-  // PATH as results land (the list can be reordered / added-to while
-  // lookups are in flight). Shared by the streams-page intake and the
-  // drop/browse intake.
+  // PATH as results land (lists can be reordered / added-to while lookups
+  // are in flight). Shared by every intake.
   const probeAndMeasure = useCallback((paths: string[]) => {
+    const patchFiles = (patch: (f: CombineFile) => CombineFile) =>
+      setGroups(prev => prev.map(g => ({ ...g, files: g.files.map(patch) })))
     void window.api.getFileSizes(paths).then(sizes => {
       const byPath = new Map(paths.map((p, i) => [p, sizes[i]]))
-      setFiles(prev => prev.map(f => byPath.has(f.path) ? { ...f, size: byPath.get(f.path) ?? null } : f))
+      patchFiles(f => byPath.has(f.path) ? { ...f, size: byPath.get(f.path) ?? null } : f)
     }).catch(() => {})
     paths.forEach(async p => {
       try {
         const info = await window.api.probeFile(p)
-        setFiles(prev => prev.map(x => x.path === p ? {
-          ...x,
+        patchFiles(f => f.path === p ? {
+          ...f,
           duration: info.duration,
           codec: info.videoCodec ?? null,
           width: info.width ?? null,
           height: info.height ?? null,
           fps: info.fps ?? null,
           audioTracks: (info.audioTracks ?? []).map(t => ({ codec: t.codec, channels: t.channels, sampleRate: t.sampleRate })),
-        } : x))
+        } : f)
       } catch (_) { /* unreadable file: row keeps its loaders */ }
     })
   }, [])
 
-  // Load files when sent from Streams page
+  /** Set a group's output to its default, then swap in the uniquified
+   *  variant (…_2.mkv) if the default already exists on disk. */
+  const applyDefaultOutput = useCallback((groupId: number, stream: CombineGroup['stream'], files: CombineFile[]) => {
+    const def = defaultGroupOutput(stream, files)
+    setGroups(prev => prev.map(g => g.id === groupId ? { ...g, outputPath: def } : g))
+    void uniquifyPath(def).then(unique => {
+      if (unique === def) return
+      setGroups(prev => prev.map(g => (g.id === groupId && g.outputPath === def) ? { ...g, outputPath: unique } : g))
+    })
+  }, [])
+
+  /** Create a group from files (stream groups from sends, external groups
+   *  from drops — labeled by the files' common folder name). */
+  const createGroup = useCallback((files: CombineFile[], stream?: CombineGroup['stream']) => {
+    const id = groupIdRef.current++
+    const label = stream?.label ?? (files.length > 0 ? (dirOf(files[0].path).split(/[\\/]/).pop() ?? 'External files') : 'External files')
+    setGroups(prev => [...prev, {
+      id, stream, label, files,
+      outputPath: defaultGroupOutput(stream, files),
+      deleteAfter: false,
+      completed: null, error: null, cancelledNotice: false,
+    }])
+    void uniquifyPath(defaultGroupOutput(stream, files)).then(unique => {
+      const def = defaultGroupOutput(stream, files)
+      if (unique === def) return
+      setGroups(prev => prev.map(g => (g.id === id && g.outputPath === def) ? { ...g, outputPath: unique } : g))
+    })
+    probeAndMeasure(files.map(f => f.path))
+    return id
+  }, [probeAndMeasure])
+
+  // Intake from the Streams page. Same stream item → merge into its
+  // existing group (dedup by path); otherwise a new group.
   useEffect(() => {
     if (!initialFiles || initialFiles.paths.length === 0) return
 
-    // Drop prior combined outputs from the incoming list — Combine All sends
-    // folder.videos verbatim, so after a previous combine the old output
-    // rides along as an input and would duplicate its content in the new
-    // file. Only filters the bulk intake by name pattern; the main process
+    // Drop prior combined outputs from the incoming list — stream sends
+    // pass folder.videos verbatim, so after a previous combine the old
+    // output rides along as an input and would duplicate its content in
+    // the new file. Only filters the bulk intake by name pattern; main
     // separately hard-errors if any input equals the chosen output path.
-    const incoming = initialFiles.paths.filter(p => !isCombinedOutput(p.split(/[\\/]/).pop() ?? ''))
+    const incoming = initialFiles.paths.filter(p => !isCombinedOutput(nameOf(p)))
     if (incoming.length === 0) return
 
-    const initial: CombineFile[] = incoming.map(p => ({
-      path: p,
-      name: p.split(/[\\/]/).pop() ?? p,
-      duration: null,
-      timestamp: parseTimestamp(p.split(/[\\/]/).pop() ?? ''),
-      size: null,
-      stream: initialFiles.stream,
-      codec: null, width: null, height: null, fps: null, audioTracks: null,
-    }))
-
-    // Auto-sort by timestamp on initial load
-    const sorted = [...initial].sort((a, b) => {
+    const stream = initialFiles.stream
+    const sorted = incoming.map(p => makeCombineFile(p, stream)).sort((a, b) => {
       if (a.timestamp && b.timestamp) return a.timestamp.getTime() - b.timestamp.getTime()
       return a.name.localeCompare(b.name)
     })
 
-    setFiles(sorted)
-    // Immediate default so the field is never blank, then swap in the
-    // uniquified variant (…_2.mkv) if the default already exists on disk.
-    const def = defaultOutputPath(sorted)
-    setOutputPath(def)
-    void uniquifyPath(def).then(unique => {
-      if (unique !== def) setOutputPath(prev => (prev === def ? unique : prev))
-    })
-    setProgress(null)
-    setCompleted(null)
-    setError(null)
-
-    probeAndMeasure(sorted.map(f => f.path))
+    const existing = stream ? groupsRef.current.find(g => g.stream?.folderPath === stream.folderPath) : undefined
+    if (existing) {
+      // A COMPLETED job that receives files starts over: its rows were a
+      // finished (possibly trashed) set — mixing new files in would make
+      // a list that never combines together.
+      const base = existing.completed ? [] : existing.files
+      const have = new Set(base.map(f => f.path))
+      const fresh = sorted.filter(f => !have.has(f.path))
+      setGroups(prev => prev.map(g => g.id === existing.id
+        ? {
+            ...g,
+            files: [...base, ...fresh],
+            // A finished output / notice describes the PREVIOUS content.
+            completed: null, error: null, cancelledNotice: false,
+          }
+        : g))
+      // Refresh the default output unless the user typed their own (a
+      // reset job always re-defaults — its old output now exists on disk,
+      // so uniquify steps to the _2 variant).
+      if (existing.completed || !existing.outputPath || existing.outputPath === defaultGroupOutput(existing.stream, base)) {
+        applyDefaultOutput(existing.id, existing.stream, [...base, ...fresh])
+      }
+      probeAndMeasure(fresh.map(f => f.path))
+    } else {
+      createGroup(sorted, stream)
+    }
   }, [initialFiles?.token]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const autoSort = () => {
-    setFiles(prev => [...prev].sort((a, b) => {
-      if (a.timestamp && b.timestamp) return a.timestamp.getTime() - b.timestamp.getTime()
-      return a.name.localeCompare(b.name)
+  // The intake effect reads current groups without depending on them (it
+  // must run only on token bumps).
+  const groupsRef = useRef(groups)
+  groupsRef.current = groups
+
+  // ── Per-group mutations ────────────────────────────────────────────────────
+
+  const patchGroup = useCallback((groupId: number, patch: (g: CombineGroup) => CombineGroup) => {
+    setGroups(prev => prev.map(g => g.id === groupId ? patch(g) : g))
+  }, [])
+
+  /** Drop/browse intake for EXTERNAL files into an existing group. Appends
+   *  (never re-sorts — the user may have hand-ordered the list); dedups by
+   *  path; no stream tag. Prior combined outputs are NOT filtered here:
+   *  an explicit drop is intentional. */
+  const addFilesToGroup = useCallback((groupId: number, paths: string[]) => {
+    const group = groupsRef.current.find(g => g.id === groupId)
+    if (!group) return
+    // Completed job → start over (see the stream-intake note).
+    const base = group.completed ? [] : group.files
+    const have = new Set(base.map(f => f.path))
+    const fresh = paths.filter(p =>
+      VIDEO_EXTS.includes((p.split('.').pop() ?? '').toLowerCase()) && !have.has(p))
+    if (fresh.length === 0) return
+    const added = fresh.map(p => makeCombineFile(p))
+    patchGroup(groupId, g => ({
+      ...g,
+      files: [...base, ...added],
+      completed: null, error: null, cancelledNotice: false,
     }))
-  }
+    if (group.completed || !group.outputPath || group.outputPath === defaultGroupOutput(group.stream, base)) {
+      applyDefaultOutput(groupId, group.stream, [...base, ...added])
+    }
+    probeAndMeasure(fresh)
+  }, [patchGroup, applyDefaultOutput, probeAndMeasure])
 
-  const removeFile = (i: number) => {
-    setFiles(prev => {
-      const next = prev.filter((_, xi) => xi !== i)
-      if (outputPath === defaultOutputPath(prev)) setOutputPath(defaultOutputPath(next))
-      return next
+  /** Page-level intake: every drop starts its own NEW group (a drop is one
+   *  intended combine set — files can be dragged between groups after). */
+  const addFilesAsNewGroup = useCallback((paths: string[]) => {
+    const vids = paths.filter(p => VIDEO_EXTS.includes((p.split('.').pop() ?? '').toLowerCase()))
+    if (vids.length === 0) return
+    createGroup(vids.map(p => makeCombineFile(p)))
+  }, [createGroup])
+
+  const removeFile = useCallback((groupId: number, idx: number) => {
+    const group = groupsRef.current.find(g => g.id === groupId)
+    if (!group) return
+    const next = group.files.filter((_, i) => i !== idx)
+    patchGroup(groupId, g => ({ ...g, files: next }))
+    if (group.outputPath === defaultGroupOutput(group.stream, group.files)) {
+      applyDefaultOutput(groupId, group.stream, next)
+    }
+  }, [patchGroup, applyDefaultOutput])
+
+  const removeGroup = useCallback((groupId: number) => {
+    setGroups(prev => prev.filter(g => g.id !== groupId))
+  }, [])
+
+  const autoSortGroup = useCallback((groupId: number) => {
+    patchGroup(groupId, g => ({
+      ...g,
+      files: [...g.files].sort((a, b) => {
+        if (a.timestamp && b.timestamp) return a.timestamp.getTime() - b.timestamp.getTime()
+        return a.name.localeCompare(b.name)
+      }),
+    }))
+  }, [patchGroup])
+
+  const browseOutput = useCallback(async (groupId: number) => {
+    const group = groupsRef.current.find(g => g.id === groupId)
+    const result = await window.api.openFileDialog({
+      defaultPath: group?.outputPath || undefined,
+      filters: [{ name: 'Video', extensions: ['mkv', 'mp4', 'mov'] }],
+      properties: ['showHiddenFiles'] as any
     })
-  }
+    if (result && result[0]) patchGroup(groupId, g => ({ ...g, outputPath: result[0] }))
+  }, [patchGroup])
 
-  // ── Drag to reorder ────────────────────────────────────────────────────────
+  // ── Drag to reorder (within a group) ───────────────────────────────────────
   // Same rules as the thumbnail palette's swatch reorder: an insertion
-  // marker line anchored INSIDE the row it precedes (so it can't drift from
-  // its row), no marker where releasing wouldn't move anything (on/adjacent
-  // to the dragged row), and the list container accepts drops in the gaps
-  // between rows so the marker's own position is always droppable.
+  // marker line anchored INSIDE the row it precedes, no marker where
+  // releasing wouldn't move anything, and the group's list container
+  // accepts drops in the gaps between rows.
 
-  const onRowDragStart = (e: React.DragEvent, i: number) => {
-    dragIndex.current = i
+  const onRowDragStart = (e: React.DragEvent, groupId: number, i: number) => {
+    dragRef.current = { groupId, index: i }
     e.dataTransfer.setData(ROW_REORDER_MIME, '')
     e.dataTransfer.effectAllowed = 'move'
   }
-  const onRowDragOver = (e: React.DragEvent, i: number) => {
+  const onRowDragOver = (e: React.DragEvent, groupId: number, i: number) => {
     if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+    const from = dragRef.current
+    if (!from || from.groupId !== groupId) return // cross-group: later pass
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     const r = e.currentTarget.getBoundingClientRect()
     const at = e.clientY < r.top + r.height / 2 ? i : i + 1
-    const from = dragIndex.current
     // Dropping a row back onto its own position (or the slot right after
     // itself) is a no-op — offer no marker there.
-    setDropIndex(from !== null && (at === from || at === from + 1) ? null : at)
+    setDrop(at === from.index || at === from.index + 1 ? null : { groupId, at })
   }
-  const commitReorder = (at: number) => {
-    const from = dragIndex.current
-    dragIndex.current = null
-    setDropIndex(null)
-    if (from === null) return
-    setFiles(prev => {
-      const next = [...prev]
-      const [moved] = next.splice(from, 1)
-      next.splice(at - (from < at ? 1 : 0), 0, moved)
-      return next
+  const commitReorder = (groupId: number, at: number) => {
+    const from = dragRef.current
+    dragRef.current = null
+    setDrop(null)
+    if (!from || from.groupId !== groupId) return
+    patchGroup(groupId, g => {
+      const next = [...g.files]
+      const [moved] = next.splice(from.index, 1)
+      next.splice(at - (from.index < at ? 1 : 0), 0, moved)
+      return { ...g, files: next }
     })
   }
-  const onRowDrop = (e: React.DragEvent) => {
+  const onRowDrop = (e: React.DragEvent, groupId: number) => {
     if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
     e.preventDefault()
-    if (dropIndex !== null) commitReorder(dropIndex)
-    else { dragIndex.current = null; setDropIndex(null) }
+    if (drop && drop.groupId === groupId) commitReorder(groupId, drop.at)
+    else { dragRef.current = null; setDrop(null) }
   }
-  const onDragEnd = () => { dragIndex.current = null; setDropIndex(null) }
+  const onDragEnd = () => { dragRef.current = null; setDrop(null) }
 
   // ── Combine ────────────────────────────────────────────────────────────────
 
-  const browseOutput = async () => {
-    const result = await window.api.openFileDialog({
-      defaultPath: outputPath || undefined,
-      filters: [{ name: 'Video', extensions: ['mkv', 'mp4', 'mov'] }],
-      properties: ['showHiddenFiles'] as any
-    })
-    if (result && result[0]) setOutputPath(result[0])
-  }
-
-  // Compatibility gate. A -c copy concat adapts NOTHING — mismatched video
-  // codec, resolution, or audio layout produces a structurally broken file
-  // (undecodable second half, scrambled track mapping), so those BLOCK the
-  // run with a red explanation. Frame-rate drift alone stays an amber
-  // advisory: the output is just variable-framerate and generally plays.
-  const probed = files.filter(f => f.codec !== null)
-  const audioSig = (f: CombineFile) =>
-    (f.audioTracks ?? []).map(t => `${t.codec} ${t.channels}ch${t.sampleRate ? ' @' + t.sampleRate + 'Hz' : ''}`).join(' + ') || 'no audio'
-  const fpsVal = (f: CombineFile) => f.fps == null ? 'unknown' : `${Math.round(f.fps * 100) / 100} fps`
-  // Hard-blocking properties as DATA (label + per-file value), shared by the
-  // gate's comparison table and the rows' red mismatch highlighting.
-  const HARD_PROPS: { label: string; val: (f: CombineFile) => string }[] = [
-    { label: 'Video codec', val: f => f.codec ?? 'unknown' },
-    { label: 'Resolution', val: f => `${f.width ?? '?'}×${f.height ?? '?'}` },
-    { label: 'Audio', val: audioSig },
-  ]
-  const mismatchedProps = probed.length >= 2
-    ? HARD_PROPS.filter(p => new Set(probed.map(p.val)).size > 1)
-    : []
-  const codecMismatch = mismatchedProps.some(p => p.label === 'Video codec')
-  const resMismatch = mismatchedProps.some(p => p.label === 'Resolution')
-  const audioMismatch = mismatchedProps.some(p => p.label === 'Audio')
-  // Frame-rate drift alone stays advisory (VFR output, plays fine).
-  const fpsMismatch = probed.length >= 2 && new Set(probed.map(fpsVal)).size > 1
-
-  const combine = useCallback(async () => {
-    if (files.length < 2 || !outputPath) return
+  const combineGroup = useCallback(async (groupId: number) => {
+    const group = groupsRef.current.find(g => g.id === groupId)
+    if (!group || group.files.length < 2 || !group.outputPath) return
+    if (runState !== null) return
     // Belt to the disabled button's suspenders — a copy-concat of
     // incompatible streams writes a broken file, never run one.
-    if (mismatchedProps.length > 0) return
-    setProgress(0)
-    setCompleted(null)
-    setError(null)
+    if (computeCompat(group.files).mismatchedProps.length > 0) return
+    setRunState({ groupId, progress: 0 })
+    patchGroup(groupId, g => ({ ...g, completed: null, error: null, cancelledNotice: false }))
     setCancelling(false)
-    setCancelledNotice(false)
     const runStart = Date.now()
 
-    const unsub = window.api.onCombineProgress(({ percent }) => setProgress(percent))
-    const totalDur = files.reduce((s, f) => s + (f.duration ?? 0), 0)
-    const sourcePaths = files.map(f => f.path)
+    const unsub = window.api.onCombineProgress(({ percent }) =>
+      setRunState(prev => prev && prev.groupId === groupId ? { ...prev, progress: percent } : prev))
+    const totalDur = group.files.reduce((s, f) => s + (f.duration ?? 0), 0)
+    const sourcePaths = group.files.map(f => f.path)
+    const outputPath = group.outputPath
     // Claim the sources for the run: the streams page's delete guards
     // consult open-items, so files being concatenated can't be trashed
     // out from under ffmpeg.
@@ -357,7 +571,9 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
 
     try {
       await window.api.combineFiles(sourcePaths, outputPath, totalDur)
-      if (deleteAfter) {
+      let deleteError: string | null = null
+      let deletedPaths: string[] = []
+      if (group.deleteAfter) {
         // Sources are only removed once the output PROVES itself: readable,
         // and duration within tolerance of the summed inputs. A -c copy
         // concat can exit 0 with a broken file when streams mismatch, and
@@ -380,202 +596,46 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
           }
         }
         if (verifyProblem) {
-          setError(`Combined, but the source files were NOT deleted: ${verifyProblem}. Check the output before removing them manually.`)
+          deleteError = `Combined, but the source files were NOT deleted: ${verifyProblem}. Check the output before removing them manually.`
         } else {
           const results = await Promise.allSettled(sourcePaths.map(p => window.api.trashFile(p)))
-          const failed = results.filter(r => r.status === 'rejected').length
+          deletedPaths = sourcePaths.filter((_, i) => results[i].status === 'fulfilled')
+          const failed = sourcePaths.length - deletedPaths.length
           if (failed > 0) {
-            setError(`Output verified, but ${failed} of ${sourcePaths.length} source files could not be moved to the recycle bin (probably in use). They are still in the folder.`)
+            deleteError = `Output verified, but ${failed} of ${sourcePaths.length} source files could not be moved to the recycle bin (probably in use). They are still in the folder.`
           }
         }
       }
-      // The finished output replaces the source rows: one done row
-      // (converter done-job treatment) until cleared or a new list
-      // starts. Any deleteAfter problem above rides along as the error
-      // line under it. The stream tag carries over when every source
-      // belonged to the same stream item.
-      const streamSet = new Set(files.map(f => f.stream?.folderPath))
-      setCompleted({
-        path: outputPath,
-        elapsedMs: Date.now() - runStart,
-        stream: streamSet.size === 1 ? files[0]?.stream : undefined,
-      })
-      setFiles([])
+      // The source rows STAY visible (read-only; trashed ones grayed with
+      // struck names) and the done row replaces the job's options footer.
+      // Any deleteAfter problem rides along as the error line under it.
+      patchGroup(groupId, g => ({
+        ...g,
+        files: g.files.map(f => deletedPaths.includes(f.path) ? { ...f, deleted: true } : f),
+        completed: { path: outputPath, elapsedMs: Date.now() - runStart },
+        error: deleteError,
+      }))
     } catch (e: any) {
       if (e?.message?.includes('cancelled')) {
-        setCancelledNotice(true) // partial output already removed by main
+        patchGroup(groupId, g => ({ ...g, cancelledNotice: true })) // partial output already removed by main
       } else {
-        setError(e.message)
+        patchGroup(groupId, g => ({ ...g, error: e.message }))
       }
     } finally {
       unsub()
-      setProgress(null)
+      setRunState(null)
       setCancelling(false)
       setOpen('combine', [])
     }
-  }, [files, outputPath, deleteAfter, setOpen, mismatchedProps])
-
-  // ── Add / clear ────────────────────────────────────────────────────────────
-
-  // Drop/browse intake for EXTERNAL files. Appends (never re-sorts — the
-  // user may have hand-ordered the list); dedups by path; no stream tag.
-  // Unlike the streams-page intake, prior combined outputs are NOT filtered
-  // here: an explicit drop is intentional.
-  const addFiles = useCallback((paths: string[]) => {
-    const have = new Set(files.map(f => f.path))
-    const fresh = paths.filter(p =>
-      VIDEO_EXTS.includes((p.split('.').pop() ?? '').toLowerCase()) && !have.has(p))
-    if (fresh.length === 0) return
-    const added: CombineFile[] = fresh.map(p => ({
-      path: p,
-      name: p.split(/[\\/]/).pop() ?? p,
-      duration: null,
-      timestamp: parseTimestamp(p.split(/[\\/]/).pop() ?? ''),
-      size: null,
-      codec: null, width: null, height: null, fps: null, audioTracks: null,
-    }))
-    const next = [...files, ...added]
-    setFiles(next)
-    // A finished output / cancelled notice describes the PREVIOUS list.
-    setCompleted(null)
-    setError(null)
-    setCancelledNotice(false)
-    // Adopt/refresh the default output path unless the user typed their own.
-    const oldDef = defaultOutputPath(files)
-    if (!outputPath || outputPath === oldDef) {
-      const def = defaultOutputPath(next)
-      setOutputPath(def)
-      void uniquifyPath(def).then(unique => {
-        if (unique !== def) setOutputPath(prev => (prev === def ? unique : prev))
-      })
-    }
-    probeAndMeasure(fresh)
-  }, [files, outputPath, probeAndMeasure])
-
-  const clearAll = useCallback(() => {
-    setFiles([])
-    setOutputPath('')
-    setCompleted(null)
-    setError(null)
-    setCancelledNotice(false)
-  }, [])
-
-  // ── Completed state ────────────────────────────────────────────────────────
-  // The finished output as ONE done row where the source rows were — no
-  // hunting through the file explorer for what the run produced. Same
-  // anatomy as the converter's done jobs (thumb / check + name + metadata /
-  // stream link / progress bar / stats line / divider / actions); only the
-  // content differs: a single output name instead of source → output, and
-  // the output's real metadata where the converter shows its preset.
-
-  if (files.length === 0 && completed) {
-    const outPath = completed.path
-    const outName = outPath.split(/[\\/]/).pop() ?? outPath
-    const outDir = outPath.replace(/[\\/][^\\/]+$/, '')
-    const chips = [
-      outInfo?.codec ?? undefined,
-      outInfo?.width != null && outInfo?.height != null ? `${outInfo.width}×${outInfo.height}` : undefined,
-      outInfo?.fps != null ? `${Math.round(outInfo.fps * 100) / 100} fps` : undefined,
-      outInfo?.duration != null ? formatDur(outInfo.duration) : undefined,
-      outInfo?.size != null ? formatBytes(outInfo.size) : undefined,
-    ].filter(Boolean).join(' · ')
-    return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-semibold">Combine</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Output ready</p>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4">
-          <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
-              <span className="text-xs font-medium text-gray-400">Combined (1)</span>
-              <Button variant="ghost" size="sm" onClick={clearAll}>Clear done</Button>
-            </div>
-            <div className="flex items-stretch gap-3 px-4 py-3">
-              {/* Thumbnail — pulled toward the left/top/bottom edges, keeps
-                  the gap to the right content (converter row treatment). */}
-              <div className="self-center shrink-0 -my-1 -ms-2">
-                <VideoThumb path={outPath} />
-              </div>
-              {/* Left: all content */}
-              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 size={14} className="text-green-400 shrink-0" />
-                  <Tooltip content={outPath} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
-                    <span className="block text-xs text-gray-200 truncate">{outName}</span>
-                  </Tooltip>
-                  {/* Output metadata where the converter shows its preset. */}
-                  <span className="text-xs text-gray-400 shrink-0 tabular-nums">
-                    {chips || <Loader2 size={11} className="animate-spin inline" />}
-                  </span>
-                </div>
-                {completed.stream && (
-                  <Tooltip content={`Open “${completed.stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => onNavigateToStream?.(completed.stream!.folderPath)}
-                      className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
-                    >
-                      {completed.stream.label}
-                    </button>
-                  </Tooltip>
-                )}
-                <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full bg-green-500 w-full" />
-                </div>
-                <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
-                  <span>100%</span>
-                  <span>Elapsed: {formatDur(completed.elapsedMs / 1000)}</span>
-                  <Tooltip content="Open output folder" side="top">
-                    <button
-                      onClick={() => window.api.openInExplorer(outDir)}
-                      className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
-                    >
-                      {outDir}
-                    </button>
-                  </Tooltip>
-                </div>
-              </div>
-              {/* Separator */}
-              <div className="w-px self-stretch bg-white/10 shrink-0" />
-              {/* Right: actions */}
-              <div className="self-center flex flex-row items-center justify-center gap-1 shrink-0">
-                <Tooltip content="Remove from the page — the file stays on disk">
-                  <button onClick={clearAll} className="inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-400 transition-colors hover:text-red-400 hover:bg-red-500/10">
-                    <Trash2 size={13} />
-                    Remove
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-          </div>
-          {/* deleteAfter verification problems land here, under the card. */}
-          {error && (
-            <div className="flex items-center gap-2 text-sm text-red-400">
-              <AlertCircle size={14} />
-              {error}
-            </div>
-          )}
-          <FileDropZone
-            compact
-            onFiles={addFiles}
-            accept={VIDEO_EXTS}
-            label="Drop or click to start a new combine"
-          />
-        </div>
-      </div>
-    )
-  }
+  }, [runState, patchGroup, setOpen])
 
   // ── Empty state ────────────────────────────────────────────────────────────
 
-  if (files.length === 0) {
+  if (groups.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 px-8">
         <FileDropZone
-          onFiles={addFiles}
+          onFiles={addFilesAsNewGroup}
           accept={VIDEO_EXTS}
           label="Drop video files here to combine"
           className="w-full max-w-xl min-h-[140px]"
@@ -587,304 +647,419 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     )
   }
 
-  const totalDur = files.reduce((s, f) => s + (f.duration ?? 0), 0)
-  const running = progress !== null
+  const totalFiles = groups.reduce((s, g) => s + g.files.length, 0)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
+      {/* Header — page chrome; each job carries its own controls. */}
       <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-semibold">Combine</h1>
           <p className="text-xs text-gray-400 mt-0.5">
-            {files.length} files · {totalDur > 0 ? formatDur(totalDur) + ' total' : 'probing…'}
+            {groups.length} job{groups.length === 1 ? '' : 's'}{totalFiles > 0 ? ` · ${totalFiles} file${totalFiles === 1 ? '' : 's'}` : ''}
           </p>
         </div>
-        <Tooltip content="Reorder by recording start time (parsed from the filenames), oldest first — files without a timestamp sort by name">
-          <Button variant="ghost" size="sm" icon={<Wand2 size={14} />} onClick={autoSort} disabled={running}>
-            Auto-sort
-          </Button>
-        </Tooltip>
-        <Tooltip content="Remove all files from the list — the files themselves are untouched">
-          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={clearAll} disabled={running}>
-            Clear all
-          </Button>
-        </Tooltip>
       </div>
 
-      {/* File list */}
-      <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto px-6 py-4">
-        <div
-          className="flex flex-col gap-1.5"
-          // The gaps BETWEEN rows belong to this container — without these
-          // handlers the browser shows the no-drop cursor exactly where the
-          // insertion marker is drawn. Rows preventDefault first and bubble
-          // up, so defaultPrevented distinguishes "over a row" from "over a
-          // gap". dragENTER must be canceled too or the cursor flashes
-          // no-drop at every element boundary.
-          onDragEnter={e => {
-            if (e.dataTransfer.types.includes(ROW_REORDER_MIME)) e.preventDefault()
-          }}
-          onDragOver={e => {
-            if (e.defaultPrevented) return
-            if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
-            e.preventDefault()
-            e.dataTransfer.dropEffect = 'move'
-          }}
-          onDrop={e => {
-            if (e.defaultPrevented) return
-            if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
-            e.preventDefault()
-            if (dropIndex !== null) commitReorder(dropIndex)
-          }}
-        >
-          {files.map((f, i) => (
-            <div
-              key={f.path}
-              draggable={!running}
-              onDragStart={e => onRowDragStart(e, i)}
-              onDragOver={e => onRowDragOver(e, i)}
-              onDrop={onRowDrop}
-              onDragEnd={onDragEnd}
-              className={`relative flex items-center gap-3 px-3 py-2 rounded-lg border border-white/5 bg-white/[0.03] hover:bg-white/[0.06] transition-all select-none ${
-                running ? 'opacity-50 pointer-events-none' : 'cursor-grab active:cursor-grabbing'
-              }`}
-            >
-              {/* Insertion marker — anchored INSIDE the row it precedes,
-                  centered in the 6px flex gap (offsets measured from the
-                  padding box, 1px inside the row border — hence 5px). */}
-              {dropIndex === i && (
-                <span className="pointer-events-none absolute -top-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
-              )}
-              {dropIndex === files.length && i === files.length - 1 && (
-                <span className="pointer-events-none absolute -bottom-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
-              )}
-              <GripVertical size={14} className="text-gray-400 shrink-0" />
+      <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto px-6 py-4 flex flex-col gap-4">
+        {groups.map(g => {
+          const compat = computeCompat(g.files)
+          const isRunning = runState?.groupId === g.id
+          const progress = isRunning ? runState!.progress : null
+          const anyRunning = runState !== null
+          const totalDur = g.files.reduce((s, f) => s + (f.duration ?? 0), 0)
+          // Spec rule: a stream group whose remaining files ALL came from
+          // elsewhere has lost its identity — warn and refuse to combine.
+          const orphaned = !!g.stream && g.files.length > 0 &&
+            !g.files.some(f => f.stream?.folderPath === g.stream!.folderPath)
+          const isEmpty = g.files.length === 0 && !g.completed
 
-              {/* Order number */}
-              <span className="text-xs text-gray-400 font-mono w-5 text-right shrink-0">{i + 1}</span>
-
-              {/* Thumbnail — converter-row treatment (the design reference
-                  for this page): frame preview at the row's left edge. */}
-              <div className="self-center shrink-0">
-                <VideoThumb path={f.path} height={44} />
-              </div>
-
-              {/* Info column: filename, stream link, encoding/file chips */}
-              <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-                <Tooltip content={f.path} maxWidth="max-w-md" triggerClassName="block w-fit max-w-full min-w-0">
-                  <span className="block text-sm text-gray-200 truncate font-mono">
-                    {f.name}
-                  </span>
-                </Tooltip>
-                {/* Owning stream item (only for files sent from a stream).
-                    Opens its detail sidebar on the streams page. */}
-                {f.stream && (
-                  <Tooltip content={`Open “${f.stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
+          return (
+            <div key={g.id} className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden shrink-0">
+              {/* Job header: identity + count + per-job actions. */}
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
+                {g.stream ? (
+                  <Tooltip content={`Open “${g.stream.label}” on the streams page`} side="top" triggerClassName="min-w-0">
                     <button
                       type="button"
-                      onClick={() => onNavigateToStream?.(f.stream!.folderPath)}
-                      className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                      onClick={() => onNavigateToStream?.(g.stream!.folderPath)}
+                      className="block max-w-full truncate text-xs font-medium text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
                     >
-                      {f.stream.label}{f.stream.date ? ` · ${f.stream.date}` : ''}
+                      {g.stream.label}
                     </button>
                   </Tooltip>
+                ) : (
+                  <span className="text-xs font-medium text-gray-200 truncate">{g.label}</span>
                 )}
-                {/* Encoding + file details; individual segments appear as
-                    their probe/size lookups land. Segments whose property
-                    DIFFERS across the list turn red (amber for frame rate,
-                    which is only advisory) — the row-level view of what the
-                    compatibility gate is complaining about. */}
-                {(() => {
-                  if (f.codec === null && f.size === null) {
-                    return <span className="text-[11px] text-gray-400"><Loader2 size={10} className="animate-spin inline" /></span>
-                  }
-                  const segs: { text: string; cls?: string }[] = []
-                  if (f.codec) segs.push({ text: f.codec, cls: codecMismatch ? 'text-red-400' : undefined })
-                  if (f.width != null && f.height != null) segs.push({ text: `${f.width}×${f.height}`, cls: resMismatch ? 'text-red-400' : undefined })
-                  if (f.fps != null) segs.push({ text: `${Math.round(f.fps * 100) / 100} fps`, cls: fpsMismatch ? 'text-amber-300' : undefined })
-                  if (f.audioTracks !== null) segs.push({ text: audioSig(f), cls: audioMismatch ? 'text-red-400' : undefined })
-                  if (f.size != null) segs.push({ text: formatBytes(f.size) })
-                  const full = segs.map(s => s.text).join(' · ')
-                  return (
-                    <Tooltip content={full} maxWidth="max-w-md" triggerClassName="block w-fit max-w-full min-w-0">
-                      <span className="block text-[11px] text-gray-400 truncate tabular-nums">
-                        {segs.map((s, k) => (
-                          <React.Fragment key={k}>
-                            {k > 0 && ' · '}
-                            <span className={s.cls}>{s.text}</span>
-                          </React.Fragment>
-                        ))}
-                      </span>
-                    </Tooltip>
-                  )
-                })()}
-              </div>
-
-              {/* Labeled time columns — an unlabeled clock next to an
-                  unlabeled duration read as two mystery numbers. */}
-              {f.timestamp && (
-                <Tooltip content="Recording start time, parsed from the filename — this is the order Auto-sort uses" side="top" triggerClassName="shrink-0">
-                  <div className="flex flex-col items-end">
-                    <span className="text-[9px] uppercase tracking-wider text-gray-400">Started</span>
-                    <span className="text-xs text-gray-400 tabular-nums">
-                      {f.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </span>
-                  </div>
-                </Tooltip>
-              )}
-              <div className="flex flex-col items-end w-16 shrink-0">
-                <span className="text-[9px] uppercase tracking-wider text-gray-400">Duration</span>
-                <span className="text-xs text-gray-400 font-mono">
-                  {f.duration !== null ? formatDur(f.duration) : <Loader2 size={11} className="animate-spin inline" />}
+                {g.stream?.date && <span className="text-[11px] text-gray-400 shrink-0">· {g.stream.date}</span>}
+                <span className="text-[11px] text-gray-400 shrink-0 tabular-nums">
+                  {`· ${g.files.length} file${g.files.length === 1 ? '' : 's'}${totalDur > 0 ? ` · ${formatDur(totalDur)}` : ''}`}{g.completed ? ' · done' : ''}
                 </span>
+                <div className="ml-auto flex items-center gap-1 shrink-0">
+                  {!g.completed && (
+                    <Tooltip content="Reorder by recording start time (parsed from the filenames), oldest first — files without a timestamp sort by name">
+                      <button
+                        onClick={() => autoSortGroup(g.id)}
+                        disabled={isRunning || g.files.length < 2}
+                        className="inline-flex shrink-0 items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-gray-400 transition-colors hover:text-gray-200 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                      >
+                        <Wand2 size={12} />
+                        Auto-sort
+                      </button>
+                    </Tooltip>
+                  )}
+                  <Tooltip content={g.completed
+                    ? 'Clear this finished job from the list — files on disk are untouched'
+                    : 'Remove this job and all its files from the list — the files themselves are untouched'}
+                  >
+                    <button
+                      onClick={() => removeGroup(g.id)}
+                      disabled={isRunning}
+                      className="inline-flex shrink-0 items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-gray-400 transition-colors hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                    >
+                      <Trash2 size={12} />
+                      {g.completed ? 'Clear job' : 'Remove job'}
+                    </button>
+                  </Tooltip>
+                </div>
               </div>
 
-              {/* Remove */}
-              <button
-                onClick={() => removeFile(i)}
-                className="text-gray-400 hover:text-red-400 transition-colors shrink-0"
-              >
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-        {/* Slim add-more zone under the list (the converter's pattern);
-            hidden during a run — the list is locked then anyway. */}
-        {!running && (
-          <FileDropZone
-            compact
-            onFiles={addFiles}
-            accept={VIDEO_EXTS}
-            label="Drop or click to add more files"
-            className="mt-1.5"
-          />
-        )}
-      </div></div>
+              {isEmpty ? (
+                // Spec rule: an empty group disables everything except its
+                // remove button (kept in the header above).
+                <p className="px-4 py-4 text-[11px] text-gray-500 italic">
+                  No files in this job. Drop files below to fill it, or remove it.
+                </p>
+              ) : (
+                <>
+                  {/* File rows */}
+                  <div
+                    className="flex flex-col gap-1.5 px-4 py-3"
+                    // The gaps BETWEEN rows belong to this container — without
+                    // these handlers the browser shows the no-drop cursor
+                    // exactly where the insertion marker is drawn. Rows
+                    // preventDefault first and bubble up, so defaultPrevented
+                    // distinguishes "over a row" from "over a gap". dragENTER
+                    // must be canceled too or the cursor flashes no-drop at
+                    // every element boundary.
+                    onDragEnter={e => {
+                      if (e.dataTransfer.types.includes(ROW_REORDER_MIME)) e.preventDefault()
+                    }}
+                    onDragOver={e => {
+                      if (e.defaultPrevented) return
+                      if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+                      if (dragRef.current?.groupId !== g.id) return
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                    }}
+                    onDrop={e => {
+                      if (e.defaultPrevented) return
+                      if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+                      e.preventDefault()
+                      if (drop && drop.groupId === g.id) commitReorder(g.id, drop.at)
+                    }}
+                  >
+                    {g.files.map((f, i) => (
+                      <div
+                        key={f.path}
+                        draggable={!isRunning && !g.completed}
+                        onDragStart={e => onRowDragStart(e, g.id, i)}
+                        onDragOver={e => onRowDragOver(e, g.id, i)}
+                        onDrop={e => onRowDrop(e, g.id)}
+                        onDragEnd={onDragEnd}
+                        // Completed jobs keep their rows as a read-only
+                        // record (links/tooltips still live); a file the
+                        // run trashed is grayed with a struck name.
+                        className={`relative flex items-center gap-3 px-3 py-2 rounded-lg border border-white/5 bg-white/[0.03] hover:bg-white/[0.06] transition-all select-none ${
+                          isRunning ? 'opacity-50 pointer-events-none' : g.completed ? '' : 'cursor-grab active:cursor-grabbing'
+                        } ${f.deleted ? 'opacity-50' : ''}`}
+                      >
+                        {/* Insertion marker — anchored INSIDE the row it
+                            precedes, centered in the 6px flex gap (offsets
+                            measured from the padding box, 1px inside the row
+                            border — hence 5px). */}
+                        {drop && drop.groupId === g.id && drop.at === i && (
+                          <span className="pointer-events-none absolute -top-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
+                        )}
+                        {drop && drop.groupId === g.id && drop.at === g.files.length && i === g.files.length - 1 && (
+                          <span className="pointer-events-none absolute -bottom-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
+                        )}
+                        <GripVertical size={14} className="text-gray-400 shrink-0" />
 
-      {/* Footer */}
-      <div className="px-6 py-4 border-t border-white/5 flex flex-col gap-3 shrink-0 bg-navy-800/50">
-        {/* Output path */}
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400 shrink-0">Output</label>
-          <input
-            value={outputPath}
-            onChange={e => setOutputPath(e.target.value)}
-            disabled={running}
-            className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
-          />
-          <Button variant="ghost" size="sm" icon={<FolderOpen size={13} />} onClick={browseOutput} disabled={running} />
-        </div>
+                        {/* Order number */}
+                        <span className="text-xs text-gray-400 font-mono w-5 text-right shrink-0">{i + 1}</span>
 
-        {/* Progress bar */}
-        {running && (
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-purple-500 rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <span className="text-xs text-gray-400 font-mono w-10 text-right">{progress}%</span>
-            <Tooltip content="Cancel — removes the partial output; sources are untouched">
-              <Button
-                variant="danger"
-                size="sm"
-                icon={<X size={12} />}
-                disabled={cancelling}
-                onClick={() => { setCancelling(true); void window.api.cancelCombine() }}
-              >
-                {cancelling ? 'Cancelling…' : 'Cancel'}
-              </Button>
-            </Tooltip>
-          </div>
-        )}
+                        {/* Thumbnail — converter-row treatment. */}
+                        <div className="self-center shrink-0">
+                          <VideoThumb path={f.path} height={44} />
+                        </div>
 
-        {cancelledNotice && (
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <X size={14} />
-            Combine cancelled — the partial output file was removed; the source files are untouched.
-          </div>
-        )}
-
-        {/* Compatibility gate — red blocks the run (the output would be a
-            broken file), amber warns but allows (VFR output plays fine). */}
-        {mismatchedProps.length > 0 && !running && (
-          <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-            <AlertCircle size={13} className="shrink-0 mt-0.5" />
-            <div className="flex flex-col gap-1.5 min-w-0 flex-1">
-              <span className="font-medium">These files can't be combined without re-encoding: combining copies the streams as-is, and these differences would produce a broken output.</span>
-              {/* One row per file, one column per DIFFERING property — far
-                  easier to scan than prose grouping. */}
-              <div className="overflow-x-auto">
-                <table className="text-[11px] w-full border-collapse">
-                  <thead>
-                    <tr className="text-left text-red-200/70">
-                      <th className="pr-4 py-0.5 font-medium">File</th>
-                      {mismatchedProps.map(p => (
-                        <th key={p.label} className="pr-4 py-0.5 font-medium whitespace-nowrap">{p.label}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="font-mono text-red-200/90">
-                    {probed.map(f => (
-                      <tr key={f.path} className="border-t border-red-500/20">
-                        <td className="pr-4 py-0.5">
-                          <Tooltip content={f.name} maxWidth="max-w-md" triggerClassName="block max-w-[260px] min-w-0">
-                            <span className="block truncate">{f.name}</span>
+                        {/* Info column: filename, stream link, detail chips */}
+                        <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                          <Tooltip content={f.deleted ? `${f.path} (moved to the recycle bin)` : f.path} maxWidth="max-w-md" triggerClassName="block w-fit max-w-full min-w-0">
+                            <span className={`block text-sm text-gray-200 truncate font-mono ${f.deleted ? 'line-through' : ''}`}>
+                              {f.name}
+                            </span>
                           </Tooltip>
-                        </td>
-                        {mismatchedProps.map(p => (
-                          <td key={p.label} className="pr-4 py-0.5 whitespace-nowrap">{p.val(f)}</td>
-                        ))}
-                      </tr>
+                          {/* Owning stream item (only for files sent from a
+                              stream). Opens its detail sidebar. */}
+                          {f.stream && (
+                            <Tooltip content={`Open “${f.stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => onNavigateToStream?.(f.stream!.folderPath)}
+                                className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                              >
+                                {f.stream.label}{f.stream.date ? ` · ${f.stream.date}` : ''}
+                              </button>
+                            </Tooltip>
+                          )}
+                          {/* Encoding + file details; segments appear as their
+                              probe/size lookups land. Segments whose property
+                              DIFFERS within the group turn red (amber for
+                              frame rate, which is only advisory) — the
+                              row-level view of the compatibility gate. */}
+                          {(() => {
+                            if (f.codec === null && f.size === null) {
+                              return <span className="text-[11px] text-gray-400"><Loader2 size={10} className="animate-spin inline" /></span>
+                            }
+                            const segs: { text: string; cls?: string }[] = []
+                            if (f.codec) segs.push({ text: f.codec, cls: compat.codecMismatch ? 'text-red-400' : undefined })
+                            if (f.width != null && f.height != null) segs.push({ text: `${f.width}×${f.height}`, cls: compat.resMismatch ? 'text-red-400' : undefined })
+                            if (f.fps != null) segs.push({ text: `${Math.round(f.fps * 100) / 100} fps`, cls: compat.fpsMismatch ? 'text-amber-300' : undefined })
+                            if (f.audioTracks !== null) segs.push({ text: audioSig(f), cls: compat.audioMismatch ? 'text-red-400' : undefined })
+                            if (f.size != null) segs.push({ text: formatBytes(f.size) })
+                            const full = segs.map(s => s.text).join(' · ')
+                            return (
+                              <Tooltip content={full} maxWidth="max-w-md" triggerClassName="block w-fit max-w-full min-w-0">
+                                <span className="block text-[11px] text-gray-400 truncate tabular-nums">
+                                  {segs.map((s, k) => (
+                                    <React.Fragment key={k}>
+                                      {k > 0 && ' · '}
+                                      <span className={s.cls}>{s.text}</span>
+                                    </React.Fragment>
+                                  ))}
+                                </span>
+                              </Tooltip>
+                            )
+                          })()}
+                        </div>
+
+                        {/* Labeled time columns — an unlabeled clock next to
+                            an unlabeled duration read as two mystery numbers. */}
+                        {f.timestamp && (
+                          <Tooltip content="Recording start time, parsed from the filename — this is the order Auto-sort uses" side="top" triggerClassName="shrink-0">
+                            <div className="flex flex-col items-end">
+                              <span className="text-[9px] uppercase tracking-wider text-gray-400">Started</span>
+                              <span className="text-xs text-gray-400 tabular-nums">
+                                {f.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </span>
+                            </div>
+                          </Tooltip>
+                        )}
+                        <div className="flex flex-col items-end w-16 shrink-0">
+                          <span className="text-[9px] uppercase tracking-wider text-gray-400">Duration</span>
+                          <span className="text-xs text-gray-400 font-mono">
+                            {f.duration !== null ? formatDur(f.duration) : <Loader2 size={11} className="animate-spin inline" />}
+                          </span>
+                        </div>
+
+                        {/* Remove (not on a completed job's record rows) */}
+                        {!g.completed && (
+                          <button
+                            onClick={() => removeFile(g.id, i)}
+                            className="text-gray-400 hover:text-red-400 transition-colors shrink-0"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-              <span className="text-red-200/80">Convert the odd files out with the Converter first (same preset for all), then combine the results.</span>
+                  </div>
+
+                  {/* Slim add-more zone for THIS job; hidden during its run
+                      and on the finished record. */}
+                  {!isRunning && !g.completed && (
+                    <div className="px-4 pb-3">
+                      <FileDropZone
+                        compact
+                        onFiles={paths => addFilesToGroup(g.id, paths)}
+                        accept={VIDEO_EXTS}
+                        label="Drop or click to add files to this job"
+                      />
+                    </div>
+                  )}
+
+                  {/* Completed: the done row takes the options footer's
+                      place — the sources above stay as the run's record. */}
+                  {g.completed ? (
+                    <div className="border-t border-white/5 bg-navy-900/30">
+                      <CompletedRow
+                        path={g.completed.path}
+                        elapsedMs={g.completed.elapsedMs}
+                        stream={g.stream}
+                        onNavigateToStream={onNavigateToStream}
+                      />
+                      {g.error && (
+                        <div className="flex items-center gap-2 px-4 pb-3 text-sm text-red-400">
+                          <AlertCircle size={14} />
+                          {g.error}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                  /* Job options — the old page footer, per job now. */
+                  <div className="px-4 py-3 border-t border-white/5 bg-navy-900/30 flex flex-col gap-3">
+                    {/* Output path */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-400 shrink-0">Output</label>
+                      <input
+                        value={g.outputPath}
+                        onChange={e => patchGroup(g.id, gg => ({ ...gg, outputPath: e.target.value }))}
+                        disabled={isRunning}
+                        className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
+                      />
+                      <Button variant="ghost" size="sm" icon={<FolderOpen size={13} />} onClick={() => void browseOutput(g.id)} disabled={isRunning} />
+                    </div>
+
+                    {/* Progress bar */}
+                    {isRunning && (
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-purple-500 rounded-full transition-all duration-300"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-gray-400 font-mono w-10 text-right">{progress}%</span>
+                        <Tooltip content="Cancel — removes the partial output; sources are untouched">
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            icon={<X size={12} />}
+                            disabled={cancelling}
+                            onClick={() => { setCancelling(true); void window.api.cancelCombine() }}
+                          >
+                            {cancelling ? 'Cancelling…' : 'Cancel'}
+                          </Button>
+                        </Tooltip>
+                      </div>
+                    )}
+
+                    {g.cancelledNotice && (
+                      <div className="flex items-center gap-2 text-sm text-gray-400">
+                        <X size={14} />
+                        Combine cancelled — the partial output file was removed; the source files are untouched.
+                      </div>
+                    )}
+
+                    {/* Compatibility gate — red blocks the run (the output
+                        would be a broken file), amber warns but allows (VFR
+                        output plays fine). */}
+                    {compat.mismatchedProps.length > 0 && !isRunning && (
+                      <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                        <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                        <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                          <span className="font-medium">These files can't be combined without re-encoding: combining copies the streams as-is, and these differences would produce a broken output.</span>
+                          {/* One row per file, one column per DIFFERING
+                              property — far easier to scan than prose. */}
+                          <div className="overflow-x-auto">
+                            <table className="text-[11px] w-full border-collapse">
+                              <thead>
+                                <tr className="text-left text-red-200/70">
+                                  <th className="pr-4 py-0.5 font-medium">File</th>
+                                  {compat.mismatchedProps.map(p => (
+                                    <th key={p.label} className="pr-4 py-0.5 font-medium whitespace-nowrap">{p.label}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="font-mono text-red-200/90">
+                                {compat.probed.map(f => (
+                                  <tr key={f.path} className="border-t border-red-500/20">
+                                    <td className="pr-4 py-0.5">
+                                      <Tooltip content={f.name} maxWidth="max-w-md" triggerClassName="block max-w-[260px] min-w-0">
+                                        <span className="block truncate">{f.name}</span>
+                                      </Tooltip>
+                                    </td>
+                                    {compat.mismatchedProps.map(p => (
+                                      <td key={p.label} className="pr-4 py-0.5 whitespace-nowrap">{p.val(f)}</td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <span className="text-red-200/80">Convert the odd files out with the Converter first (same preset for all), then combine the results.</span>
+                        </div>
+                      </div>
+                    )}
+                    {compat.mismatchedProps.length === 0 && compat.fpsMismatch && !isRunning && (
+                      <div className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                        <span>
+                          The files have different frame rates ({[...new Set(compat.probed.map(fpsVal))].join(', ')}). The combined file will simply switch frame rate at the joins (variable frame rate); most players handle this fine, but some editors dislike VFR input. Convert to a matching frame rate first if that matters.
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Spec rule: stream group with no files from its own
+                        stream left — warn, and Combine below disables. */}
+                    {orphaned && !isRunning && (
+                      <div className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                        <span>
+                          No files in this combine job belong to its stream item ({g.stream!.label}). Move one of its files back in, or remove the job and start a new one for these files.
+                        </span>
+                      </div>
+                    )}
+
+                    {g.error && (
+                      <div className="flex items-center gap-2 text-sm text-red-400">
+                        <AlertCircle size={14} />
+                        {g.error}
+                      </div>
+                    )}
+
+                    {/* Delete option + combine button */}
+                    <div className="flex items-center justify-between">
+                      <Checkbox
+                        checked={g.deleteAfter}
+                        onChange={v => patchGroup(g.id, gg => ({ ...gg, deleteAfter: v }))}
+                        disabled={isRunning}
+                        color="red"
+                        size="sm"
+                        label={<span className={g.deleteAfter ? 'text-red-400' : 'text-gray-400'}>Delete source files after combining</span>}
+                      />
+                      {/* Armed only when ANOTHER job's run is the blocker —
+                          otherwise the disabled state explains itself. */}
+                      <Tooltip content="Another combine is already running; one runs at a time" open={anyRunning && !isRunning ? undefined : false}>
+                        <Button
+                          variant="primary"
+                          icon={isRunning ? <Loader2 size={14} className="animate-spin" /> : <Combine size={14} />}
+                          onClick={() => void combineGroup(g.id)}
+                          disabled={g.files.length < 2 || !g.outputPath || anyRunning || compat.mismatchedProps.length > 0 || orphaned}
+                        >
+                          {isRunning ? 'Combining…' : `Combine ${g.files.length} files`}
+                        </Button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                  )}
+                </>
+              )}
             </div>
-          </div>
-        )}
-        {mismatchedProps.length === 0 && fpsMismatch && !running && (
-          <div className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-            <span>
-              The files have different frame rates ({[...new Set(probed.map(fpsVal))].join(', ')}). The combined file will simply switch frame rate at the joins (variable frame rate); most players handle this fine, but some editors dislike VFR input. Convert to a matching frame rate first if that matters.
-            </span>
-          </div>
-        )}
+          )
+        })}
 
-        {/* Status messages (success now renders as the completed-state
-            card in place of the file list, not a footer banner). */}
-        {error && (
-          <div className="flex items-center gap-2 text-sm text-red-400">
-            <AlertCircle size={14} />
-            {error}
-          </div>
-        )}
-
-        {/* Delete source files option + combine button */}
-        <div className="flex items-center justify-between">
-          <Checkbox
-            checked={deleteAfter}
-            onChange={setDeleteAfter}
-            disabled={running}
-            color="red"
-            size="sm"
-            label={<span className={deleteAfter ? 'text-red-400' : 'text-gray-400'}>Delete source files after combining</span>}
-          />
-          <Button
-            variant="primary"
-            icon={running ? <Loader2 size={14} className="animate-spin" /> : <Combine size={14} />}
-            onClick={combine}
-            disabled={files.length < 2 || !outputPath || running || mismatchedProps.length > 0}
-          >
-            {running ? 'Combining…' : `Combine ${files.length} files`}
-          </Button>
-        </div>
-      </div>
+        {/* Page-level intake: a drop here starts its own NEW job. */}
+        <FileDropZone
+          compact
+          onFiles={addFilesAsNewGroup}
+          accept={VIDEO_EXTS}
+          label="Drop or click to start a new combine job"
+          className="shrink-0"
+        />
+      </div></div>
     </div>
   )
 }
