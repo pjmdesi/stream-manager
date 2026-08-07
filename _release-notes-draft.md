@@ -12,6 +12,7 @@ Target: TBD · emptied 2026-08-04 after the v2.2.0 release.
 ## Combine
 
 - Combine jobs: the page now holds multiple combine sets at once, each in its own job card with its own file list, output location, delete-after option, compatibility checks, and Combine button (the old page footer is gone). Files sent from a stream group into that stream's job (sending again merges instead of duplicating), each drop of external files starts a new job, and every job has its own add-files zone. One combine runs at a time; a job whose files no longer include any from its own stream item warns and refuses to run, and an emptied job disables everything except its remove button.
+- Files can be dragged between jobs: the insertion line shows where the file will land in the target job, its stream ownership travels with it (feeding the compatibility checks and the orphan warning), and even an emptied job can be refilled by dropping rows or files into it. Finished and currently-running jobs don't accept drops.
 
 - Rich file rows, matching the converter's design: each row now shows a frame thumbnail, the owning stream item's title (click to open its detail sidebar on the streams page) and date, and the file's codec, resolution, frame rate, and size. The recording start time and duration are now labeled columns (Started / Duration), and Auto-sort explains itself in a tooltip.
 - Reordering shows a clear insertion line between rows (the same behavior as the thumbnail palette's swatch reorder), and no line is offered where dropping wouldn't move anything.

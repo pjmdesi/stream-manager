@@ -527,11 +527,21 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     if (result && result[0]) patchGroup(groupId, g => ({ ...g, outputPath: result[0] }))
   }, [patchGroup])
 
-  // ── Drag to reorder (within a group) ───────────────────────────────────────
+  // ── Drag to reorder / move between jobs ────────────────────────────────────
   // Same rules as the thumbnail palette's swatch reorder: an insertion
   // marker line anchored INSIDE the row it precedes, no marker where
-  // releasing wouldn't move anything, and the group's list container
-  // accepts drops in the gaps between rows.
+  // releasing wouldn't move anything, and each job's list container
+  // accepts drops in the gaps between rows. A drag is welcome in ANY
+  // droppable job — dropping in another job MOVES the file there (its
+  // stream provenance travels with it, which is what drives the orphan
+  // warning when a stream job's own files all leave).
+
+  /** A job accepts dropped rows unless it's a finished record or the one
+   *  currently combining. */
+  const groupDroppable = (groupId: number) => {
+    const g = groupsRef.current.find(x => x.id === groupId)
+    return !!g && !g.completed && runState?.groupId !== groupId
+  }
 
   const onRowDragStart = (e: React.DragEvent, groupId: number, i: number) => {
     dragRef.current = { groupId, index: i }
@@ -541,31 +551,62 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   const onRowDragOver = (e: React.DragEvent, groupId: number, i: number) => {
     if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
     const from = dragRef.current
-    if (!from || from.groupId !== groupId) return // cross-group: later pass
+    if (!from || !groupDroppable(groupId)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     const r = e.currentTarget.getBoundingClientRect()
     const at = e.clientY < r.top + r.height / 2 ? i : i + 1
-    // Dropping a row back onto its own position (or the slot right after
-    // itself) is a no-op — offer no marker there.
-    setDrop(at === from.index || at === from.index + 1 ? null : { groupId, at })
+    // Within the SAME job, dropping a row back onto its own position (or
+    // the slot right after itself) is a no-op — offer no marker there.
+    // Every position in another job is a real move.
+    const noop = from.groupId === groupId && (at === from.index || at === from.index + 1)
+    setDrop(noop ? null : { groupId, at })
   }
-  const commitReorder = (groupId: number, at: number) => {
+  /** Commit a drop at `at` in `targetGroupId` — a reorder when the drag
+   *  started in the same job, a move otherwise. */
+  const commitDrop = (targetGroupId: number, at: number) => {
     const from = dragRef.current
     dragRef.current = null
     setDrop(null)
-    if (!from || from.groupId !== groupId) return
-    patchGroup(groupId, g => {
-      const next = [...g.files]
-      const [moved] = next.splice(from.index, 1)
-      next.splice(at - (from.index < at ? 1 : 0), 0, moved)
-      return { ...g, files: next }
-    })
+    if (!from) return
+    if (from.groupId === targetGroupId) {
+      patchGroup(targetGroupId, g => {
+        const next = [...g.files]
+        const [moved] = next.splice(from.index, 1)
+        next.splice(at - (from.index < at ? 1 : 0), 0, moved)
+        return { ...g, files: next }
+      })
+      return
+    }
+    const source = groupsRef.current.find(g => g.id === from.groupId)
+    const target = groupsRef.current.find(g => g.id === targetGroupId)
+    const moved = source?.files[from.index]
+    if (!source || !target || !moved) return
+    // The same path can sit in two jobs (a stream send + an external
+    // drop) — moving onto its duplicate would create a double entry.
+    if (target.files.some(f => f.path === moved.path)) return
+    const sourceNext = source.files.filter((_, i) => i !== from.index)
+    const targetNext = [...target.files]
+    targetNext.splice(at, 0, moved)
+    setGroups(prev => prev.map(g => {
+      if (g.id === source.id) return { ...g, files: sourceNext }
+      if (g.id === target.id) return { ...g, files: targetNext }
+      return g
+    }))
+    // Both sides' default outputs may derive from their file lists
+    // (external jobs key off their first file) — refresh where the user
+    // hasn't typed a custom path.
+    if (source.outputPath === defaultGroupOutput(source.stream, source.files)) {
+      applyDefaultOutput(source.id, source.stream, sourceNext)
+    }
+    if (!target.outputPath || target.outputPath === defaultGroupOutput(target.stream, target.files)) {
+      applyDefaultOutput(target.id, target.stream, targetNext)
+    }
   }
   const onRowDrop = (e: React.DragEvent, groupId: number) => {
     if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
     e.preventDefault()
-    if (drop && drop.groupId === groupId) commitReorder(groupId, drop.at)
+    if (drop && drop.groupId === groupId) commitDrop(groupId, drop.at)
     else { dragRef.current = null; setDrop(null) }
   }
   const onDragEnd = () => { dragRef.current = null; setDrop(null) }
@@ -752,10 +793,42 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
 
               {isEmpty ? (
                 // Spec rule: an empty group disables everything except its
-                // remove button (kept in the header above).
-                <p className="px-4 py-4 text-[11px] text-gray-500 italic">
-                  No files in this job. Drop files below to fill it, or remove it.
-                </p>
+                // remove button (kept in the header above). It IS a drop
+                // target though — rows dragged from other jobs (and OS
+                // file drops via the zone below) refill it.
+                <div
+                  className={`px-4 py-4 transition-colors ${drop?.groupId === g.id ? 'bg-purple-900/20' : ''}`}
+                  onDragEnter={e => {
+                    if (e.dataTransfer.types.includes(ROW_REORDER_MIME)) e.preventDefault()
+                  }}
+                  onDragOver={e => {
+                    if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+                    if (!dragRef.current) return
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    setDrop({ groupId: g.id, at: 0 })
+                  }}
+                  onDragLeave={e => {
+                    const related = e.relatedTarget as Node | null
+                    if (related && e.currentTarget.contains(related)) return
+                    setDrop(prev => (prev?.groupId === g.id ? null : prev))
+                  }}
+                  onDrop={e => {
+                    if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
+                    e.preventDefault()
+                    commitDrop(g.id, 0)
+                  }}
+                >
+                  <p className="text-[11px] text-gray-500 italic mb-2">
+                    No files in this job. Drop files here to fill it, or remove it.
+                  </p>
+                  <FileDropZone
+                    compact
+                    onFiles={paths => addFilesToGroup(g.id, paths)}
+                    accept={VIDEO_EXTS}
+                    label="Drop or click to add files to this job"
+                  />
+                </div>
               ) : (
                 <>
                   {/* File rows */}
@@ -774,7 +847,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                     onDragOver={e => {
                       if (e.defaultPrevented) return
                       if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
-                      if (dragRef.current?.groupId !== g.id) return
+                      if (!groupDroppable(g.id)) return
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'move'
                     }}
@@ -782,7 +855,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                       if (e.defaultPrevented) return
                       if (!e.dataTransfer.types.includes(ROW_REORDER_MIME)) return
                       e.preventDefault()
-                      if (drop && drop.groupId === g.id) commitReorder(g.id, drop.at)
+                      if (drop && drop.groupId === g.id) commitDrop(g.id, drop.at)
                     }}
                   >
                     {g.files.map((f, i) => (
