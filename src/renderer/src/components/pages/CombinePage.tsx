@@ -116,7 +116,15 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   const [files, setFiles] = useState<CombineFile[]>([])
   const [outputPath, setOutputPath] = useState('')
   const [progress, setProgress] = useState<number | null>(null)
-  const [done, setDone] = useState(false)
+  // A finished combine's output path. While set (and the list is empty),
+  // the page shows ONE green output card in place of the source rows —
+  // the converter's done-item treatment — until cleared or a new list
+  // starts. Replaces the old `done` footer banner.
+  const [completedOutput, setCompletedOutput] = useState<string | null>(null)
+  const [outInfo, setOutInfo] = useState<{
+    duration?: number | null; codec?: string | null; width?: number | null
+    height?: number | null; fps?: number | null; size?: number | null
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deleteAfter, setDeleteAfter] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -126,16 +134,38 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   // Publish "combine has files" to the nav rail's activity indicator —
   // same presence semantics as the player (has video) and thumbnails
   // (has canvas): the highlight says "there's something on this page".
+  // A finished output card counts: it's content waiting on the page.
   const { setCombineHasFiles } = usePageActivity()
   useEffect(() => {
-    setCombineHasFiles(files.length > 0)
+    setCombineHasFiles(files.length > 0 || completedOutput !== null)
     return () => setCombineHasFiles(false)
-  }, [files.length, setCombineHasFiles])
+  }, [files.length, completedOutput, setCombineHasFiles])
 
   // Drag-reorder state. `dropIndex` is the INSERTION index (0..files.length)
   // shown by the marker line; null = no valid/actionable target.
   const dragIndex = useRef<number | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
+
+  // Details for the finished output's card, probed once per output.
+  useEffect(() => {
+    if (!completedOutput) { setOutInfo(null); return }
+    let cancelled = false
+    void window.api.probeFile(completedOutput).then(info => {
+      if (cancelled) return
+      setOutInfo(prev => ({
+        ...(prev ?? {}),
+        duration: info.duration,
+        codec: info.videoCodec ?? null,
+        width: info.width ?? null,
+        height: info.height ?? null,
+        fps: info.fps ?? null,
+      }))
+    }).catch(() => {})
+    void window.api.getFileSizes([completedOutput]).then(([s]) => {
+      if (!cancelled) setOutInfo(prev => ({ ...(prev ?? {}), size: s ?? null }))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [completedOutput])
 
   // Fill in sizes + stream properties for a set of paths, patching rows BY
   // PATH as results land (the list can be reordered / added-to while
@@ -199,7 +229,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
       if (unique !== def) setOutputPath(prev => (prev === def ? unique : prev))
     })
     setProgress(null)
-    setDone(false)
+    setCompletedOutput(null)
     setError(null)
 
     probeAndMeasure(sorted.map(f => f.path))
@@ -305,7 +335,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     // incompatible streams writes a broken file, never run one.
     if (mismatchedProps.length > 0) return
     setProgress(0)
-    setDone(false)
+    setCompletedOutput(null)
     setError(null)
     setCancelling(false)
     setCancelledNotice(false)
@@ -349,12 +379,15 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
           const failed = results.filter(r => r.status === 'rejected').length
           if (failed > 0) {
             setError(`Output verified, but ${failed} of ${sourcePaths.length} source files could not be moved to the recycle bin (probably in use). They are still in the folder.`)
-          } else {
-            setFiles([])
           }
         }
       }
-      setDone(true)
+      // The finished output replaces the source rows: one green card
+      // (converter done-item treatment) until cleared or a new list
+      // starts. Any deleteAfter problem above rides along as the error
+      // line under the card.
+      setCompletedOutput(outputPath)
+      setFiles([])
     } catch (e: any) {
       if (e?.message?.includes('cancelled')) {
         setCancelledNotice(true) // partial output already removed by main
@@ -390,8 +423,8 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     }))
     const next = [...files, ...added]
     setFiles(next)
-    // A finished/cancelled banner describes the PREVIOUS list — clear it.
-    setDone(false)
+    // A finished output / cancelled notice describes the PREVIOUS list.
+    setCompletedOutput(null)
     setError(null)
     setCancelledNotice(false)
     // Adopt/refresh the default output path unless the user typed their own.
@@ -409,10 +442,89 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   const clearAll = useCallback(() => {
     setFiles([])
     setOutputPath('')
-    setDone(false)
+    setCompletedOutput(null)
     setError(null)
     setCancelledNotice(false)
   }, [])
+
+  // ── Completed state ────────────────────────────────────────────────────────
+  // The finished output as ONE card where the source rows were — no
+  // hunting through the file explorer for what the run produced.
+
+  if (files.length === 0 && completedOutput) {
+    const outName = completedOutput.split(/[\\/]/).pop() ?? completedOutput
+    const chips = [
+      outInfo?.codec ?? undefined,
+      outInfo?.width != null && outInfo?.height != null ? `${outInfo.width}×${outInfo.height}` : undefined,
+      outInfo?.fps != null ? `${Math.round(outInfo.fps * 100) / 100} fps` : undefined,
+      outInfo?.duration != null ? formatDur(outInfo.duration) : undefined,
+      outInfo?.size != null ? formatBytes(outInfo.size) : undefined,
+    ].filter(Boolean).join(' · ')
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg font-semibold">Combine</h1>
+            <p className="text-xs text-gray-400 mt-0.5">Output ready</p>
+          </div>
+          <Tooltip content="Clear the finished output from the page — the file stays on disk">
+            <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={clearAll}>
+              Clear
+            </Button>
+          </Tooltip>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-3">
+          <div className="rounded-lg border border-green-500/30 bg-green-500/5 overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-green-500/20 text-xs font-medium text-green-400">
+              <CheckCircle2 size={14} /> Combined successfully
+            </div>
+            <div className="flex items-center gap-3 px-3 py-2">
+              <div className="self-center shrink-0">
+                <VideoThumb path={completedOutput} height={44} />
+              </div>
+              <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                <Tooltip content={completedOutput} maxWidth="max-w-md" triggerClassName="block w-fit max-w-full min-w-0">
+                  <span className="block text-sm text-gray-200 truncate font-mono">{outName}</span>
+                </Tooltip>
+                <span className="text-[11px] text-gray-400 truncate tabular-nums">
+                  {chips || <Loader2 size={10} className="animate-spin inline" />}
+                </span>
+              </div>
+              <Tooltip content="Show in folder">
+                <button
+                  onClick={() => window.api.openInExplorer(completedOutput)}
+                  className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors shrink-0"
+                >
+                  <FolderSearch size={14} />
+                </button>
+              </Tooltip>
+              <Tooltip content="Clear from the page — the file stays on disk">
+                <button
+                  onClick={clearAll}
+                  className="p-1.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-colors shrink-0"
+                >
+                  <X size={14} />
+                </button>
+              </Tooltip>
+            </div>
+          </div>
+          {/* deleteAfter verification problems land here, under the card. */}
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-400">
+              <AlertCircle size={14} />
+              {error}
+            </div>
+          )}
+          <FileDropZone
+            compact
+            onFiles={addFiles}
+            accept={VIDEO_EXTS}
+            label="Drop or click to start a new combine"
+          />
+        </div>
+      </div>
+    )
+  }
 
   // ── Empty state ────────────────────────────────────────────────────────────
 
@@ -692,7 +804,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
             </div>
           </div>
         )}
-        {mismatchedProps.length === 0 && fpsMismatch && !running && !done && (
+        {mismatchedProps.length === 0 && fpsMismatch && !running && (
           <div className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
             <AlertTriangle size={13} className="shrink-0 mt-0.5" />
             <span>
@@ -701,23 +813,8 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
           </div>
         )}
 
-        {/* Status messages */}
-        {done && (
-          <div className="flex items-center gap-2 text-sm text-green-400">
-            <CheckCircle2 size={14} />
-            <span className="flex-1 truncate">
-              Combined successfully — <span className="font-mono text-xs">{outputPath}</span>
-            </span>
-            <Tooltip content="Open folder">
-              <button
-                onClick={() => window.api.openInExplorer(outputPath)}
-                className="shrink-0 p-1 rounded hover:bg-white/10 text-green-400 hover:text-green-300 transition-colors"
-              >
-                <FolderSearch size={14} />
-              </button>
-            </Tooltip>
-          </div>
-        )}
+        {/* Status messages (success now renders as the completed-state
+            card in place of the file list, not a footer banner). */}
         {error && (
           <div className="flex items-center gap-2 text-sm text-red-400">
             <AlertCircle size={14} />
