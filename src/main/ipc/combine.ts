@@ -126,18 +126,32 @@ export function registerCombineIPC(): void {
           }
         })
 
+        // Keep ffmpeg's stderr tail: it's the only witness when a run
+        // fails or stalls (an unexplained sat-at-0% run, 2026-08, had no
+        // evidence because stderr was discarded). Bounded so a chatty run
+        // can't balloon memory; surfaced in the error message and logged
+        // on cancel for post-mortems.
+        let stderrTail = ''
+        proc.stderr?.on('data', (data: Buffer) => {
+          stderrTail = (stderrTail + data.toString()).slice(-4000)
+        })
+
         proc.on('close', (code) => {
           if (activeCombine === runState) activeCombine = null
           try { fs.unlinkSync(listPath) } catch (_) {}
           if (runState.cancelled) {
             // User cancel — remove the partial and report distinctly so the
-            // renderer shows "cancelled", not an ffmpeg error.
+            // renderer shows "cancelled", not an ffmpeg error. Log the tail
+            // anyway: a cancel after a stall is exactly when it matters.
+            console.log('[combine] cancelled; ffmpeg stderr tail:\n' + stderrTail)
             cleanupPartialOutput()
             reject(new Error('cancelled'))
           } else if (code === 0) { send(100); resolve() }
           else {
             cleanupPartialOutput()
-            reject(new Error(`ffmpeg exited with code ${code}`))
+            // Last stderr lines carry ffmpeg's actual complaint.
+            const detail = stderrTail.trim().split('\n').slice(-6).join('\n')
+            reject(new Error(`ffmpeg exited with code ${code}${detail ? `:\n${detail}` : ''}`))
           }
         })
 

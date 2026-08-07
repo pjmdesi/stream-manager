@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   GripVertical, Film, FolderOpen, Wand2, Combine,
   CheckCircle2, AlertCircle, AlertTriangle, Loader2, Trash2,
-  RefreshCw, Pause, Play, Ban, X
+  RefreshCw, Pause, Play, Ban, X, Cloud
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
@@ -11,6 +11,7 @@ import { VideoThumb } from '../ui/VideoThumb'
 import { FileDropZone } from '../ui/FileDropZone'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { usePageActivity } from '../../context/PageActivityContext'
+import { useCloudOps } from '../../context/CloudOpsContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -310,23 +311,30 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   // their turn. Progress lives in ITS OWN state: it ticks ~2×/second, and
   // keeping it out of runState stops those ticks from resetting the
   // elapsed timer's effect below.
-  const [runState, setRunState] = useState<{ groupId: number; paused: boolean } | null>(null)
+  const [runState, setRunState] = useState<{ groupId: number; paused: boolean; downloading: boolean } | null>(null)
   const [runProgress, setRunProgress] = useState(0)
   const [cancelling, setCancelling] = useState(false)
+  // Cancels the pre-run hydration WAIT (the downloads themselves live in
+  // the cloud-ops queue and keep going — hydration has no pause, same as
+  // the converter's downloading state).
+  const cancelHydrateRef = useRef(false)
   // Elapsed CONVERSION time — accumulates only while not paused (matches
   // the converter's clock). The ref mirrors the state so the completion
   // handler can read the final value without a stale closure.
   const [elapsedMs, setElapsedMs] = useState(0)
   const elapsedRef = useRef(0)
   useEffect(() => {
-    if (!runState || runState.paused) return
+    // No ticking while paused OR downloading — this clock measures the
+    // CONVERSION, matching the converter's semantics.
+    if (!runState || runState.paused || runState.downloading) return
     const t = setInterval(() => {
       elapsedRef.current += 1000
       setElapsedMs(elapsedRef.current)
     }, 1000)
     return () => clearInterval(t)
-  }, [runState?.groupId, runState?.paused]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runState?.groupId, runState?.paused, runState?.downloading]) // eslint-disable-line react-hooks/exhaustive-deps
   const { setOpen } = useOpenItems()
+  const { enqueueHydrate } = useCloudOps()
 
   // Publish "combine has content" to the nav rail's activity indicator —
   // same presence semantics as the player (has video) and thumbnails
@@ -620,12 +628,13 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     // Belt to the disabled button's suspenders — a copy-concat of
     // incompatible streams writes a broken file, never run one.
     if (computeCompat(group.files).mismatchedProps.length > 0) return
-    setRunState({ groupId, paused: false })
+    setRunState({ groupId, paused: false, downloading: false })
     setRunProgress(0)
     elapsedRef.current = 0
     setElapsedMs(0)
     patchGroup(groupId, g => ({ ...g, completed: null, error: null, cancelledNotice: false }))
     setCancelling(false)
+    cancelHydrateRef.current = false
 
     const unsub = window.api.onCombineProgress(({ percent }) => setRunProgress(percent))
     const totalDur = group.files.reduce((s, f) => s + (f.duration ?? 0), 0)
@@ -637,6 +646,29 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     setOpen('combine', sourcePaths)
 
     try {
+      // Cloud gate BEFORE spawning ffmpeg: reading a placeholder blocks
+      // ffmpeg on Cloud Files hydration at download speed — a run that
+      // sits at 0% for minutes with zero feedback (a file can be offloaded
+      // any time after it was probed, e.g. before a cross-job drag).
+      // Instead, hydrate through the cloud-ops queue with an explicit
+      // "Downloading from cloud…" phase, converter-style.
+      let localFlags: boolean[] = []
+      try { localFlags = await window.api.checkLocalFiles(sourcePaths) } catch { localFlags = sourcePaths.map(() => true) }
+      const cloudPaths = sourcePaths.filter((_, i) => !localFlags[i])
+      if (cloudPaths.length > 0) {
+        setRunState({ groupId, paused: false, downloading: true })
+        enqueueHydrate(cloudPaths.map(p => ({ path: p, size: group.files.find(f => f.path === p)?.size ?? 0 })), false)
+        // Poll until everything is local; cancel aborts the WAIT (the
+        // queued downloads continue — they're wanted either way).
+        for (;;) {
+          if (cancelHydrateRef.current) throw new Error('cancelled')
+          const flags = await window.api.checkLocalFiles(cloudPaths).catch(() => cloudPaths.map(() => false))
+          if (flags.every(Boolean)) break
+          await new Promise(r => setTimeout(r, 2000))
+        }
+        setRunState({ groupId, paused: false, downloading: false })
+      }
+
       await window.api.combineFiles(sourcePaths, outputPath, totalDur)
       let deleteError: string | null = null
       let deletedPaths: string[] = []
@@ -733,6 +765,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
           const compat = computeCompat(g.files)
           const isRunning = runState?.groupId === g.id
           const paused = isRunning && runState!.paused
+          const downloading = isRunning && runState!.downloading
           const anyRunning = runState !== null
           const totalDur = g.files.reduce((s, f) => s + (f.duration ?? 0), 0)
           // Spec rule: a stream group whose remaining files ALL came from
@@ -1031,9 +1064,11 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                           <div className="flex items-center gap-2">
-                            {paused
-                              ? <Pause size={14} className="text-yellow-400 shrink-0" />
-                              : <RefreshCw size={14} className="text-purple-400 animate-spin shrink-0" />}
+                            {downloading
+                              ? <Cloud size={14} className="text-blue-400 animate-pulse shrink-0" />
+                              : paused
+                                ? <Pause size={14} className="text-yellow-400 shrink-0" />
+                                : <RefreshCw size={14} className="text-purple-400 animate-spin shrink-0" />}
                             <Tooltip content={g.outputPath} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
                               <span className="block text-xs text-gray-200 truncate">{nameOf(g.outputPath)}</span>
                             </Tooltip>
@@ -1054,20 +1089,33 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                           )}
                           <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
                             <div
-                              className={`h-full rounded-full transition-all ${paused ? 'bg-yellow-400' : runProgress === 0 ? 'bg-purple-500 animate-pulse' : 'bg-purple-500'}`}
-                              style={{ width: runProgress === 0 && !paused ? '100%' : `${runProgress}%` }}
+                              className={`h-full rounded-full transition-all ${downloading ? 'bg-blue-500 animate-pulse' : paused ? 'bg-yellow-400' : runProgress === 0 ? 'bg-purple-500 animate-pulse' : 'bg-purple-500'}`}
+                              style={{ width: downloading || (runProgress === 0 && !paused) ? '100%' : `${runProgress}%` }}
                             />
                           </div>
-                          <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
-                            <span>{runProgress}%</span>
-                            {elapsedMs > 0 && <span>Elapsed: {formatDur(elapsedMs / 1000)}</span>}
-                            <span>
-                              {paused
-                                ? 'Paused'
-                                : runProgress === 0
-                                  ? 'Starting…'
-                                  : `ETA: ${elapsedMs > 0 ? formatDur((elapsedMs * (100 - runProgress) / runProgress) / 1000) : 'Estimating…'}`}
-                            </span>
+                          <div className={`flex items-center gap-3 text-xs tabular-nums ${downloading ? 'text-blue-300' : 'text-gray-400'}`}>
+                            {/* No % / elapsed during the download — that
+                                clock measures the combine, and hydration
+                                progress lives in the cloud widget. */}
+                            {downloading
+                              ? <span>Downloading sources from the cloud… (progress in the cloud widget)</span>
+                              : (
+                                <>
+                                  <span>{runProgress}%</span>
+                                  {elapsedMs > 0 && <span>Elapsed: {formatDur(elapsedMs / 1000)}</span>}
+                                  <span className={runProgress === 0 && elapsedMs >= 15000 ? 'text-amber-300' : undefined}>
+                                    {paused
+                                      ? 'Paused'
+                                      : runProgress === 0
+                                        // An honest stall tell: a copy-concat
+                                        // should tick within seconds, so a
+                                        // silent 0% names itself instead of
+                                        // pretending to start forever.
+                                        ? (elapsedMs >= 15000 ? 'No progress from ffmpeg yet — it may be stuck reading an input' : 'Starting…')
+                                        : `ETA: ${elapsedMs > 0 ? formatDur((elapsedMs * (100 - runProgress) / runProgress) / 1000) : 'Estimating…'}`}
+                                  </span>
+                                </>
+                              )}
                             <Tooltip content="Open output folder" side="top">
                               <button
                                 onClick={() => window.api.openInExplorer(dirOf(g.outputPath))}
@@ -1081,23 +1129,34 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         {/* Separator */}
                         <div className="w-px self-stretch bg-white/10 shrink-0" />
                         {/* Actions — converter scheme: pause/resume, then
-                            cancel with Ban (X is strictly close/dismiss). */}
+                            cancel with Ban (X is strictly close/dismiss).
+                            No pause during the cloud download — hydration
+                            has no pause; cancel is its only control. */}
                         <div className="self-center flex flex-row items-center justify-center gap-1 shrink-0">
-                          <Tooltip content={paused ? 'Resume the combine' : 'Pause the combine — ffmpeg is suspended until you resume'}>
+                          {!downloading && (
+                            <Tooltip content={paused ? 'Resume the combine' : 'Pause the combine — ffmpeg is suspended until you resume'}>
+                              <button
+                                onClick={() => {
+                                  if (paused) { void window.api.resumeCombine(); setRunState(prev => prev ? { ...prev, paused: false } : prev) }
+                                  else { void window.api.pauseCombine(); setRunState(prev => prev ? { ...prev, paused: true } : prev) }
+                                }}
+                                className={paused ? ROW_ACTION_BLUE : ROW_ACTION_YELLOW}
+                              >
+                                {paused ? <Play size={13} /> : <Pause size={13} />}
+                                {paused ? 'Resume' : 'Pause'}
+                              </button>
+                            </Tooltip>
+                          )}
+                          <Tooltip content={downloading
+                            ? 'Cancel the combine — already-queued downloads continue in the cloud widget'
+                            : 'Cancel — removes the partial output; sources are untouched'}
+                          >
                             <button
                               onClick={() => {
-                                if (paused) { void window.api.resumeCombine(); setRunState(prev => prev ? { ...prev, paused: false } : prev) }
-                                else { void window.api.pauseCombine(); setRunState(prev => prev ? { ...prev, paused: true } : prev) }
+                                setCancelling(true)
+                                if (downloading) cancelHydrateRef.current = true
+                                else void window.api.cancelCombine()
                               }}
-                              className={paused ? ROW_ACTION_BLUE : ROW_ACTION_YELLOW}
-                            >
-                              {paused ? <Play size={13} /> : <Pause size={13} />}
-                              {paused ? 'Resume' : 'Pause'}
-                            </button>
-                          </Tooltip>
-                          <Tooltip content="Cancel — removes the partial output; sources are untouched">
-                            <button
-                              onClick={() => { setCancelling(true); void window.api.cancelCombine() }}
                               disabled={cancelling}
                               className={ROW_ACTION_RED}
                             >
@@ -1125,7 +1184,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                     {g.cancelledNotice && (
                       <div className="flex items-center gap-2 text-sm text-gray-400">
                         <X size={14} />
-                        Combine cancelled — the partial output file was removed; the source files are untouched.
+                        Combine cancelled — no partial output was left behind; the source files are untouched.
                       </div>
                     )}
 
