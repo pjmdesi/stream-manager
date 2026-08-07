@@ -3,21 +3,38 @@ import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { suspendProcess, resumeProcess } from '../services/ffmpegService'
 
 function fixAsarPath(p: string): string {
   return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
 }
 
 // Single-slot active run — the Combine page runs one job at a time. Lets
-// combine:cancel kill the ffmpeg child and lets the close handler tell a
-// cancel apart from a genuine failure.
-let activeCombine: { cancelled: boolean; kill: () => void } | null = null
+// combine:cancel kill the ffmpeg child, combine:pause/resume suspend it
+// (same NtSuspendProcess mechanism as conversion jobs), and the close
+// handler tell a cancel apart from a genuine failure.
+let activeCombine: { cancelled: boolean; paused: boolean; kill: () => void; pause: () => void; resume: () => void } | null = null
 
 export function registerCombineIPC(): void {
   ipcMain.handle('combine:cancel', async () => {
     if (!activeCombine) return
     activeCombine.cancelled = true
+    // A suspended process still dies to SIGKILL/TerminateProcess, but
+    // resume first so its close handler runs promptly.
+    if (activeCombine.paused) activeCombine.resume()
     activeCombine.kill()
+  })
+
+  ipcMain.handle('combine:pause', async () => {
+    if (!activeCombine || activeCombine.paused) return
+    activeCombine.paused = true
+    activeCombine.pause()
+  })
+
+  ipcMain.handle('combine:resume', async () => {
+    if (!activeCombine?.paused) return
+    activeCombine.paused = false
+    activeCombine.resume()
   })
 
   ipcMain.handle(
@@ -77,7 +94,10 @@ export function registerCombineIPC(): void {
         proc.stdin?.end()
         const runState = {
           cancelled: false,
+          paused: false,
           kill: () => { try { proc.kill('SIGKILL') } catch (_) {} },
+          pause: () => { if (proc.pid) suspendProcess(proc.pid) },
+          resume: () => { if (proc.pid) resumeProcess(proc.pid) },
         }
         activeCombine = runState
 

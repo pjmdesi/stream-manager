@@ -422,6 +422,12 @@ contextBridge.exposeInMainWorld('api', {
   cancelCombine: () =>
     ipcRenderer.invoke('combine:cancel'),
 
+  pauseCombine: () =>
+    ipcRenderer.invoke('combine:pause'),
+
+  resumeCombine: () =>
+    ipcRenderer.invoke('combine:resume'),
+
   onCombineProgress: (callback: (data: { percent: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('combine:progress', handler)

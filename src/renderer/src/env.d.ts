@@ -205,6 +205,8 @@ declare global {
       // ── Combine ──────────────────────────────────────────────────────────────
       combineFiles(files: string[], outputPath: string, totalDurationSec: number): Promise<void>
       cancelCombine(): Promise<void>
+      pauseCombine(): Promise<void>
+      resumeCombine(): Promise<void>
       onCombineProgress(cb: (data: { percent: number }) => void): () => void
 
       // ── YouTube ──────────────────────────────────────────────────────────────

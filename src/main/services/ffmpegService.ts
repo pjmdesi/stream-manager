@@ -538,7 +538,9 @@ function runNtProcCommand(pid: number, fn: 'NtSuspendProcess' | 'NtResumeProcess
   proc.on('error', () => clearTimeout(t))
 }
 
-function suspendProcess(pid: number): void {
+/** Exported: the combine runner suspends its own spawned ffmpeg with these
+ *  (same mechanism as conversion jobs' pause). */
+export function suspendProcess(pid: number): void {
   if (process.platform === 'win32') {
     runNtProcCommand(pid, 'NtSuspendProcess')
   } else {
@@ -546,7 +548,7 @@ function suspendProcess(pid: number): void {
   }
 }
 
-function resumeProcess(pid: number): void {
+export function resumeProcess(pid: number): void {
   if (process.platform === 'win32') {
     runNtProcCommand(pid, 'NtResumeProcess')
   } else {

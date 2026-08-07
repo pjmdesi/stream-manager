@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   GripVertical, Film, FolderOpen, Wand2, Combine,
-  CheckCircle2, AlertCircle, AlertTriangle, Loader2, X, Trash2
+  CheckCircle2, AlertCircle, AlertTriangle, Loader2, Trash2,
+  RefreshCw, Pause, Play, Ban, X
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
@@ -141,6 +142,13 @@ const ROW_REORDER_MIME = 'application/x-sm-combine-row'
  *  filters by these; dropped paths are re-filtered in the intake handlers
  *  (drops bypass the dialog). */
 const VIDEO_EXTS = ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']
+
+// Row action buttons — neutral at rest, colored only on hover. Mirrors the
+// converter's ROW_ACTION_* scheme so the in-progress controls match.
+const ROW_ACTION_BASE = 'inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'
+const ROW_ACTION_RED = `${ROW_ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
+const ROW_ACTION_YELLOW = `${ROW_ACTION_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
+const ROW_ACTION_BLUE = `${ROW_ACTION_BASE} hover:text-blue-400 hover:bg-blue-500/10`
 
 function makeCombineFile(p: string, stream?: CombineFile['stream']): CombineFile {
   const name = nameOf(p)
@@ -298,9 +306,26 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   const [groups, setGroups] = useState<CombineGroup[]>([])
   const groupIdRef = useRef(1)
   // The single active run (the combine IPC is single-run: one progress
-  // channel, one cancel) — other groups' Combine buttons wait their turn.
-  const [runState, setRunState] = useState<{ groupId: number; progress: number } | null>(null)
+  // channel, one pause, one cancel) — other groups' Combine buttons wait
+  // their turn. Progress lives in ITS OWN state: it ticks ~2×/second, and
+  // keeping it out of runState stops those ticks from resetting the
+  // elapsed timer's effect below.
+  const [runState, setRunState] = useState<{ groupId: number; paused: boolean } | null>(null)
+  const [runProgress, setRunProgress] = useState(0)
   const [cancelling, setCancelling] = useState(false)
+  // Elapsed CONVERSION time — accumulates only while not paused (matches
+  // the converter's clock). The ref mirrors the state so the completion
+  // handler can read the final value without a stale closure.
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const elapsedRef = useRef(0)
+  useEffect(() => {
+    if (!runState || runState.paused) return
+    const t = setInterval(() => {
+      elapsedRef.current += 1000
+      setElapsedMs(elapsedRef.current)
+    }, 1000)
+    return () => clearInterval(t)
+  }, [runState?.groupId, runState?.paused]) // eslint-disable-line react-hooks/exhaustive-deps
   const { setOpen } = useOpenItems()
 
   // Publish "combine has content" to the nav rail's activity indicator —
@@ -554,13 +579,14 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     // Belt to the disabled button's suspenders — a copy-concat of
     // incompatible streams writes a broken file, never run one.
     if (computeCompat(group.files).mismatchedProps.length > 0) return
-    setRunState({ groupId, progress: 0 })
+    setRunState({ groupId, paused: false })
+    setRunProgress(0)
+    elapsedRef.current = 0
+    setElapsedMs(0)
     patchGroup(groupId, g => ({ ...g, completed: null, error: null, cancelledNotice: false }))
     setCancelling(false)
-    const runStart = Date.now()
 
-    const unsub = window.api.onCombineProgress(({ percent }) =>
-      setRunState(prev => prev && prev.groupId === groupId ? { ...prev, progress: percent } : prev))
+    const unsub = window.api.onCombineProgress(({ percent }) => setRunProgress(percent))
     const totalDur = group.files.reduce((s, f) => s + (f.duration ?? 0), 0)
     const sourcePaths = group.files.map(f => f.path)
     const outputPath = group.outputPath
@@ -612,7 +638,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
       patchGroup(groupId, g => ({
         ...g,
         files: g.files.map(f => deletedPaths.includes(f.path) ? { ...f, deleted: true } : f),
-        completed: { path: outputPath, elapsedMs: Date.now() - runStart },
+        completed: { path: outputPath, elapsedMs: elapsedRef.current },
         error: deleteError,
       }))
     } catch (e: any) {
@@ -665,7 +691,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
         {groups.map(g => {
           const compat = computeCompat(g.files)
           const isRunning = runState?.groupId === g.id
-          const progress = isRunning ? runState!.progress : null
+          const paused = isRunning && runState!.paused
           const anyRunning = runState !== null
           const totalDur = g.files.reduce((s, f) => s + (f.duration ?? 0), 0)
           // Spec rule: a stream group whose remaining files ALL came from
@@ -913,6 +939,102 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         </div>
                       )}
                     </div>
+                  ) : isRunning ? (
+                    /* In progress: the output file EXISTS from ffmpeg's
+                       first write, so it already shows as a file row in
+                       the footer slot (which becomes the done row on
+                       completion). Converter active-row anatomy: status
+                       icon + name, progress bar, %/elapsed/ETA/output-dir
+                       line, divider, pause + cancel actions. No thumbnail
+                       attempt while the file is mid-write — a partial
+                       decode would cache a bogus frame; the real one
+                       arrives with the done row. */
+                    <div className="border-t border-white/5 bg-navy-900/30">
+                      <div className="flex items-stretch gap-3 px-4 py-3">
+                        <div className="self-center shrink-0 -my-1 -ms-2">
+                          <div className="w-[100px] h-14 rounded-md bg-navy-800 border border-white/5 flex items-center justify-center">
+                            <Film size={13} className="text-gray-500" />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            {paused
+                              ? <Pause size={14} className="text-yellow-400 shrink-0" />
+                              : <RefreshCw size={14} className="text-purple-400 animate-spin shrink-0" />}
+                            <Tooltip content={g.outputPath} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
+                              <span className="block text-xs text-gray-200 truncate">{nameOf(g.outputPath)}</span>
+                            </Tooltip>
+                            <span className="text-xs text-gray-400 shrink-0">
+                              Combining {g.files.length} files
+                            </span>
+                          </div>
+                          {g.stream && (
+                            <Tooltip content={`Open “${g.stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => onNavigateToStream?.(g.stream!.folderPath)}
+                                className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                              >
+                                {g.stream.label}
+                              </button>
+                            </Tooltip>
+                          )}
+                          <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${paused ? 'bg-yellow-400' : runProgress === 0 ? 'bg-purple-500 animate-pulse' : 'bg-purple-500'}`}
+                              style={{ width: runProgress === 0 && !paused ? '100%' : `${runProgress}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
+                            <span>{runProgress}%</span>
+                            {elapsedMs > 0 && <span>Elapsed: {formatDur(elapsedMs / 1000)}</span>}
+                            <span>
+                              {paused
+                                ? 'Paused'
+                                : runProgress === 0
+                                  ? 'Starting…'
+                                  : `ETA: ${elapsedMs > 0 ? formatDur((elapsedMs * (100 - runProgress) / runProgress) / 1000) : 'Estimating…'}`}
+                            </span>
+                            <Tooltip content="Open output folder" side="top">
+                              <button
+                                onClick={() => window.api.openInExplorer(dirOf(g.outputPath))}
+                                className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
+                              >
+                                {dirOf(g.outputPath)}
+                              </button>
+                            </Tooltip>
+                          </div>
+                        </div>
+                        {/* Separator */}
+                        <div className="w-px self-stretch bg-white/10 shrink-0" />
+                        {/* Actions — converter scheme: pause/resume, then
+                            cancel with Ban (X is strictly close/dismiss). */}
+                        <div className="self-center flex flex-row items-center justify-center gap-1 shrink-0">
+                          <Tooltip content={paused ? 'Resume the combine' : 'Pause the combine — ffmpeg is suspended until you resume'}>
+                            <button
+                              onClick={() => {
+                                if (paused) { void window.api.resumeCombine(); setRunState(prev => prev ? { ...prev, paused: false } : prev) }
+                                else { void window.api.pauseCombine(); setRunState(prev => prev ? { ...prev, paused: true } : prev) }
+                              }}
+                              className={paused ? ROW_ACTION_BLUE : ROW_ACTION_YELLOW}
+                            >
+                              {paused ? <Play size={13} /> : <Pause size={13} />}
+                              {paused ? 'Resume' : 'Pause'}
+                            </button>
+                          </Tooltip>
+                          <Tooltip content="Cancel — removes the partial output; sources are untouched">
+                            <button
+                              onClick={() => { setCancelling(true); void window.api.cancelCombine() }}
+                              disabled={cancelling}
+                              className={ROW_ACTION_RED}
+                            >
+                              <Ban size={13} />
+                              {cancelling ? 'Cancelling…' : 'Cancel'}
+                            </button>
+                          </Tooltip>
+                        </div>
+                      </div>
+                    </div>
                   ) : (
                   /* Job options — the old page footer, per job now. */
                   <div className="px-4 py-3 border-t border-white/5 bg-navy-900/30 flex flex-col gap-3">
@@ -922,35 +1044,10 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                       <input
                         value={g.outputPath}
                         onChange={e => patchGroup(g.id, gg => ({ ...gg, outputPath: e.target.value }))}
-                        disabled={isRunning}
-                        className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
+                        className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
                       />
-                      <Button variant="ghost" size="sm" icon={<FolderOpen size={13} />} onClick={() => void browseOutput(g.id)} disabled={isRunning} />
+                      <Button variant="ghost" size="sm" icon={<FolderOpen size={13} />} onClick={() => void browseOutput(g.id)} />
                     </div>
-
-                    {/* Progress bar */}
-                    {isRunning && (
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-purple-500 rounded-full transition-all duration-300"
-                            style={{ width: `${progress}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-gray-400 font-mono w-10 text-right">{progress}%</span>
-                        <Tooltip content="Cancel — removes the partial output; sources are untouched">
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            icon={<X size={12} />}
-                            disabled={cancelling}
-                            onClick={() => { setCancelling(true); void window.api.cancelCombine() }}
-                          >
-                            {cancelling ? 'Cancelling…' : 'Cancel'}
-                          </Button>
-                        </Tooltip>
-                      </div>
-                    )}
 
                     {g.cancelledNotice && (
                       <div className="flex items-center gap-2 text-sm text-gray-400">
@@ -962,7 +1059,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                     {/* Compatibility gate — red blocks the run (the output
                         would be a broken file), amber warns but allows (VFR
                         output plays fine). */}
-                    {compat.mismatchedProps.length > 0 && !isRunning && (
+                    {compat.mismatchedProps.length > 0 && (
                       <div className="flex items-start gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
                         <AlertCircle size={13} className="shrink-0 mt-0.5" />
                         <div className="flex flex-col gap-1.5 min-w-0 flex-1">
@@ -999,7 +1096,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         </div>
                       </div>
                     )}
-                    {compat.mismatchedProps.length === 0 && compat.fpsMismatch && !isRunning && (
+                    {compat.mismatchedProps.length === 0 && compat.fpsMismatch && (
                       <div className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                         <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                         <span>
@@ -1010,7 +1107,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
 
                     {/* Spec rule: stream group with no files from its own
                         stream left — warn, and Combine below disables. */}
-                    {orphaned && !isRunning && (
+                    {orphaned && (
                       <div className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                         <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                         <span>
@@ -1031,21 +1128,20 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                       <Checkbox
                         checked={g.deleteAfter}
                         onChange={v => patchGroup(g.id, gg => ({ ...gg, deleteAfter: v }))}
-                        disabled={isRunning}
                         color="red"
                         size="sm"
                         label={<span className={g.deleteAfter ? 'text-red-400' : 'text-gray-400'}>Delete source files after combining</span>}
                       />
                       {/* Armed only when ANOTHER job's run is the blocker —
                           otherwise the disabled state explains itself. */}
-                      <Tooltip content="Another combine is already running; one runs at a time" open={anyRunning && !isRunning ? undefined : false}>
+                      <Tooltip content="Another combine is already running; one runs at a time" open={anyRunning ? undefined : false}>
                         <Button
                           variant="primary"
-                          icon={isRunning ? <Loader2 size={14} className="animate-spin" /> : <Combine size={14} />}
+                          icon={<Combine size={14} />}
                           onClick={() => void combineGroup(g.id)}
                           disabled={g.files.length < 2 || !g.outputPath || anyRunning || compat.mismatchedProps.length > 0 || orphaned}
                         >
-                          {isRunning ? 'Combining…' : `Combine ${g.files.length} files`}
+                          {`Combine ${g.files.length} files`}
                         </Button>
                       </Tooltip>
                     </div>
