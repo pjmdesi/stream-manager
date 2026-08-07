@@ -784,7 +784,9 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         {drop && drop.groupId === g.id && drop.at === g.files.length && i === g.files.length - 1 && (
                           <span className="pointer-events-none absolute -bottom-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
                         )}
-                        <GripVertical size={14} className="text-gray-400 shrink-0" />
+                        {/* Drag handle — pointless on a finished job's
+                            record rows, so it disappears with the run. */}
+                        {!g.completed && <GripVertical size={14} className="text-gray-400 shrink-0" />}
 
                         {/* Order number */}
                         <span className="text-xs text-gray-400 font-mono w-5 text-right shrink-0">{i + 1}</span>
@@ -864,14 +866,18 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                           </span>
                         </div>
 
-                        {/* Remove (not on a completed job's record rows) */}
+                        {/* Remove (not on a completed job's record rows).
+                            Trash2, not X — X is strictly close/dismiss
+                            (style guide: X closes, trash removes/deletes). */}
                         {!g.completed && (
-                          <button
-                            onClick={() => removeFile(g.id, i)}
-                            className="text-gray-400 hover:text-red-400 transition-colors shrink-0"
-                          >
-                            <X size={13} />
-                          </button>
+                          <Tooltip content="Remove from this job — the file itself is untouched">
+                            <button
+                              onClick={() => removeFile(g.id, i)}
+                              className="text-gray-400 hover:text-red-400 transition-colors shrink-0"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </Tooltip>
                         )}
                       </div>
                     ))}
