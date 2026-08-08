@@ -132,21 +132,24 @@ export async function probeArchiveTag(filePath: string): Promise<string | undefi
 // encoded so 'short' vs 'clip' stays exact (a 16:9 clip and a 9:16 short are
 // otherwise only distinguishable by aspect, which the size/aspect classifier
 // can get wrong).
-const CLIP_PROVENANCE: Record<'clip' | 'short', string> = {
+const CLIP_PROVENANCE: Record<'clip' | 'short' | 'combined', string> = {
   clip: 'Stream Manager Clip',
   short: 'Stream Manager Short',
+  combined: 'Stream Manager Combined',
 }
 
-/** Build the `-metadata comment=` value stamped on an exported clip/short. */
-export function clipProvenanceComment(category: 'clip' | 'short', version: string): string {
+/** Build the `-metadata comment=` value stamped on an exported clip/short
+ *  or a combine output. */
+export function clipProvenanceComment(category: 'clip' | 'short' | 'combined', version: string): string {
   return `${CLIP_PROVENANCE[category]} — v${version}`
 }
 
-/** Read the clip category back from a file's `comment` tag, or null if the file
- *  carries no SM clip marker. Checks 'short' first since its marker is distinct
- *  from 'clip'. */
-export function parseClipProvenance(comment: string | undefined | null): 'clip' | 'short' | null {
+/** Read the category back from a file's `comment` tag, or null if the file
+ *  carries no SM marker. 'combined' and 'short' are checked before 'clip'
+ *  since their markers are distinct strings. */
+export function parseClipProvenance(comment: string | undefined | null): 'clip' | 'short' | 'combined' | null {
   if (!comment) return null
+  if (comment.includes(CLIP_PROVENANCE.combined)) return 'combined'
   if (comment.includes(CLIP_PROVENANCE.short)) return 'short'
   if (comment.includes(CLIP_PROVENANCE.clip)) return 'clip'
   return null

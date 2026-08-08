@@ -372,7 +372,8 @@ function isPendingStream(folder: import('../../types').StreamFolder, todayStr: s
     const name = v.split(/[\\/]/).pop() ?? ''
     if (!name.startsWith(folder.date)) return false
     const key = videoMapKey(folder.folderPath, v)
-    return map?.[key]?.category === 'full'
+    const cat = map?.[key]?.category
+    return cat === 'full' || cat === 'combined'
   })
 }
 
@@ -4469,7 +4470,10 @@ export function StreamsPage({
     // Videos panel if they actually want one.
     if (action === 'player') {
       const map = folder.meta?.videoMap
-      const firstFull = localVideos.find(v => map?.[videoMapKey(folder.folderPath, v)]?.category === 'full')
+      const firstFull = localVideos.find(v => {
+        const cat = map?.[videoMapKey(folder.folderPath, v)]?.category
+        return cat === 'full' || cat === 'combined'
+      })
       onSendToPlayer(firstFull ?? localVideos[0])
       return
     }
@@ -4589,7 +4593,7 @@ export function StreamsPage({
       return f.videos.filter(v => {
         const n = norm(v)
         const relKey = n.startsWith(root + '/') ? n.slice(root.length + 1) : n.split('/').pop() ?? n
-        return map[relKey]?.category === 'full'
+        return map[relKey]?.category === 'full' || map[relKey]?.category === 'combined'
       })
     }
     const allCandidateFiles = selectedFolders.flatMap(f => fullVideos(f))
@@ -4629,7 +4633,7 @@ export function StreamsPage({
       return f.videos.filter(v => {
         const n = norm(v)
         const relKey = n.startsWith(root + '/') ? n.slice(root.length + 1) : n.split('/').pop() ?? n
-        return map[relKey]?.category === 'full'
+        return map[relKey]?.category === 'full' || map[relKey]?.category === 'combined'
       })
     }
 
@@ -7358,7 +7362,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
         <VideoCountTooltip videos={videos} videoMap={meta?.videoMap ?? undefined} folderPath={folder.folderPath} cloudSyncActive={cloudSyncActive}>
           {(() => {
             const vm = meta?.videoMap
-            const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount
+            const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full' || e.category === 'combined').length : videoCount
             const shortClipCount = vm ? Object.values(vm).filter(e => e.category === 'short' || e.category === 'clip').length : 0
             return (
               <div className="flex flex-col items-center gap-0.5 cursor-default">

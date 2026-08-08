@@ -12,7 +12,7 @@ import { probeFile, parseClipProvenance } from '../services/ffmpegService'
 import { isInFlightWrite } from '../services/inFlightWrites'
 import { consumeSelfWrite } from '../services/selfWrites'
 
-export type VideoCategory = 'full' | 'short' | 'clip'
+export type VideoCategory = 'full' | 'short' | 'clip' | 'combined'
 
 export interface VideoEntry {
   size: number

@@ -63,18 +63,19 @@ const META_SECONDARY = 'text-[11px] text-gray-500 truncate'
 // tray that pops out of the bottom edge. (Class strings are full literals so
 // Tailwind's JIT picks them up — don't build them dynamically.)
 // File-class tag palette: the VIDEO class is the warm family — red
-// (Recording), pink (Clip), violet (Short) — while IMAGES are cool: teal
-// (selected thumbnail) + neutral gray (alternates). Blue is deliberately
-// unassigned (reserved for a future marker). Shorts use Tailwind's real
-// `violet-*`, NOT the app's `purple-*` tokens — those are remapped to the
-// slate accent and would collide with selection rings.
-type TagColor = 'red' | 'pink' | 'violet' | 'teal' | 'blue' | 'neutral'
+// (Recording), pink (Clip), violet (Short), orange (Combined) — while
+// IMAGES are cool: teal (selected thumbnail) + neutral gray (alternates).
+// Blue is deliberately unassigned (reserved for a future marker). Shorts
+// use Tailwind's real `violet-*`, NOT the app's `purple-*` tokens — those
+// are remapped to the slate accent and would collide with selection rings.
+type TagColor = 'red' | 'pink' | 'violet' | 'orange' | 'teal' | 'blue' | 'neutral'
 // 1px border in the tag color: top + sides on the thumbnail, sides + bottom on
 // the tray, so together they form one outline around the grouped pair.
 const TAG_BORDER_STATIC: Record<TagColor, string> = {
   red: 'border-red-400/70',
   pink: 'border-pink-400/70',
   violet: 'border-violet-400/70',
+  orange: 'border-orange-400/70',
   teal: 'border-teal-400/70',
   blue: 'border-blue-400/70',
   neutral: 'border-white/40',
@@ -83,6 +84,7 @@ const TAG_BORDER_HOVER: Record<TagColor, string> = {
   red: 'border-transparent group-hover/file:border-red-400/70',
   pink: 'border-transparent group-hover/file:border-pink-400/70',
   violet: 'border-transparent group-hover/file:border-violet-400/70',
+  orange: 'border-transparent group-hover/file:border-orange-400/70',
   teal: 'border-transparent group-hover/file:border-teal-400/70',
   blue: 'border-transparent group-hover/file:border-blue-400/70',
   neutral: 'border-transparent group-hover/file:border-white/40',
@@ -91,6 +93,7 @@ const TAG_TRAY_BG: Record<TagColor, string> = {
   red: 'bg-red-500/20 text-red-100',
   pink: 'bg-pink-500/20 text-pink-100',
   violet: 'bg-violet-500/20 text-violet-100',
+  orange: 'bg-orange-500/20 text-orange-100',
   teal: 'bg-teal-500/20 text-teal-100',
   blue: 'bg-blue-500/20 text-blue-100',
   neutral: 'bg-navy-800 text-gray-200',
@@ -294,9 +297,13 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   const name = path.split(/[\\/]/).pop() ?? path
   const isShort = entry?.category === 'short'
   const isClip = !isShort && (entry?.category === 'clip' || !!entry?.clipOf)
+  // Combine outputs — classified by the provenance stamp the combine run
+  // writes into the file's comment tag (they'd otherwise read as
+  // recordings via the size/aspect heuristic).
+  const isCombined = !isShort && !isClip && entry?.category === 'combined'
   // 'full' is what the stream row's video counter counts — the keystone
   // recording file(s) of the stream item.
-  const isRecording = !isShort && !isClip && entry?.category === 'full'
+  const isRecording = !isShort && !isClip && !isCombined && entry?.category === 'full'
   // Prefer the scanned entry, fall back to a fresh probe (offloaded files had
   // no duration/resolution/codec until they were hydrated).
   const width = entry?.width ?? probed?.width
@@ -325,9 +332,10 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
       {selectMode && (<><SelectOverlay onDragStart={onDragStart} onDragEnter={onDragEnter} onClick={onSelectToggle} /><SelectBox checked={selected} onToggle={onSelectToggle} /></>)}
       <div className="shrink-0">
         <TaggedThumb
-          thumb={<VideoThumb path={path} width={104} height={58} checker rounded={isShort || isClip || isRecording ? 'rounded-t-md' : 'rounded-md'} />}
+          thumb={<VideoThumb path={path} width={104} height={58} checker rounded={isShort || isClip || isCombined || isRecording ? 'rounded-t-md' : 'rounded-md'} />}
           tag={isShort ? { color: 'violet', label: 'Short' }
             : isClip ? { color: 'pink', label: 'Clip' }
+            : isCombined ? { color: 'orange', label: 'Combined' }
             : isRecording ? {
                 color: 'red',
                 label: 'Recording',
@@ -351,7 +359,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
           )}
         </div>
         <div className={META_LINE}>
-          {isShort || isClip ? <Scissors size={11} className={TYPE_ICON} /> : <Film size={11} className={TYPE_ICON} />}
+          {isShort || isClip ? <Scissors size={11} className={TYPE_ICON} /> : isCombined ? <Combine size={11} className={TYPE_ICON} /> : <Film size={11} className={TYPE_ICON} />}
           <span className="flex-1 truncate min-w-0">{primary || '—'}</span>
           {drafts && drafts.length > 0 && (
             <Tooltip
@@ -981,11 +989,12 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   // thumbnails vs other images, plus unexported clip drafts.
   const plural = (n: number, word: string) => `${n} ${word}${n !== 1 ? 's' : ''}`
   const draftCount = Object.keys(folder.meta?.clipDrafts ?? {}).length
-  let recordings = 0, clips = 0, shorts = 0, unknownVideos = 0
+  let recordings = 0, clips = 0, shorts = 0, combinedFiles = 0, unknownVideos = 0
   for (const p of folder.videos) {
     const entry = videoMap[videoMapKey(folder.folderPath, p)]
     if (entry?.category === 'short') shorts++
     else if (entry?.category === 'clip' || entry?.clipOf) clips++
+    else if (entry?.category === 'combined') combinedFiles++
     else if (entry?.category === 'full') recordings++
     else unknownVideos++
   }
@@ -995,6 +1004,8 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     recordings > 0 ? plural(recordings, 'recording') : null,
     clips > 0 ? plural(clips, 'clip') : null,
     shorts > 0 ? plural(shorts, 'short') : null,
+    // "combined" reads as its own plural ("2 combined").
+    combinedFiles > 0 ? `${combinedFiles} combined` : null,
     unknownVideos > 0 ? plural(unknownVideos, 'video') : null,
     smThumbs > 0 ? plural(smThumbs, 'thumbnail') : null,
     otherImages > 0 ? plural(otherImages, 'image') : null,

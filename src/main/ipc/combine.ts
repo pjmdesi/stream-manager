@@ -1,9 +1,9 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, app } from 'electron'
 import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { suspendProcess, resumeProcess } from '../services/ffmpegService'
+import { suspendProcess, resumeProcess, clipProvenanceComment } from '../services/ffmpegService'
 
 function fixAsarPath(p: string): string {
   return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
@@ -86,6 +86,13 @@ export function registerCombineIPC(): void {
           '-safe', '0',
           '-i', listPath,
           '-c', 'copy',
+          // Provenance stamp (same scheme as clip exports): the files grid
+          // classifies combine outputs by this instead of the size/aspect
+          // heuristic, which read them as recordings. Also OVERRIDES any
+          // comment inherited from the first input via map_metadata — a
+          // combine of app-exported clips would otherwise carry a "Stream
+          // Manager Clip" marker into the output.
+          '-metadata', `comment=${clipProvenanceComment('combined', app.getVersion())}`,
           '-progress', 'pipe:1',
           outputPath
         ]

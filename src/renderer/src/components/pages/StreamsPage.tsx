@@ -326,8 +326,10 @@ function isPendingStream(folder: StreamFolder, today: string): boolean {
     if (!name.startsWith(folder.date)) return false
     // Rel-path key, NOT basename — a recording living in a subfolder
     // would otherwise never match and the stream stayed teal "upcoming"
-    // after it landed.
-    return map?.[videoMapKey(folder.folderPath, v)]?.category === 'full'
+    // after it landed. 'combined' counts: after combine-and-delete the
+    // combined file IS the stream's recording.
+    const cat = map?.[videoMapKey(folder.folderPath, v)]?.category
+    return cat === 'full' || cat === 'combined'
   })
 }
 
@@ -1441,12 +1443,16 @@ export function StreamsPage({
   // straight to the target page. Adequate for typical folders; a polish phase
   // can layer the cloud/picker affordances in once we know which actually
   // matter for the new sidebar UX.
-  // Prefer a 'full' recording over exported clips/shorts so sending a stream
-  // lands on the source recording; fall back to the first of the given list.
+  // Prefer a 'full' recording (or a combined output — keystone-equivalent
+  // after combine-and-delete) over exported clips/shorts so sending a
+  // stream lands on the source recording; fall back to the first given.
   const pickPrimaryFrom = (folder: StreamFolder, videos: string[]): string | null => {
     if (videos.length === 0) return null
     const map = folder.meta?.videoMap
-    const firstFull = videos.find(v => map?.[videoMapKey(folder.folderPath, v)]?.category === 'full')
+    const firstFull = videos.find(v => {
+      const cat = map?.[videoMapKey(folder.folderPath, v)]?.category
+      return cat === 'full' || cat === 'combined'
+    })
     return firstFull ?? videos[0]
   }
   const pickPrimaryVideo = (folder: StreamFolder): string | null =>
@@ -1569,7 +1575,12 @@ export function StreamsPage({
   const fullVideos = (f: StreamFolder): string[] => {
     const map = f.meta?.videoMap
     if (!map) return []
-    return f.videos.filter(v => map[videoMapKey(f.folderPath, v)]?.category === 'full')
+    return f.videos.filter(v => {
+      const cat = map[videoMapKey(f.folderPath, v)]?.category
+      // Combined outputs are keystone-equivalent — archiving them is as
+      // valid as archiving the recordings they replaced.
+      return cat === 'full' || cat === 'combined'
+    })
   }
 
   const executeArchive = useCallback(async (
@@ -4906,7 +4917,7 @@ const StreamListItem = memo(function StreamListItem({
         <VideoCountTooltip videos={folder.videos} videoMap={folder.meta?.videoMap ?? undefined} folderPath={folder.folderPath} cloudSyncActive={cloudSyncActive} onVideoClick={path => onVideoFileClick(folder.relativePath, path)}>
           {(() => {
             const vm = folder.meta?.videoMap
-            const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full').length : videoCount
+            const fullCount = vm ? Object.values(vm).filter(e => e.category === 'full' || e.category === 'combined').length : videoCount
             const shortClipCount = vm ? Object.values(vm).filter(e => e.category === 'short' || e.category === 'clip').length : 0
             return (
               <div className="flex flex-col items-center gap-0.5 cursor-default">

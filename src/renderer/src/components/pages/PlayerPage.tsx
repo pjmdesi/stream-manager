@@ -742,7 +742,7 @@ interface SiblingFile {
   path: string
   name: string
   isLocal: boolean
-  category?: 'full' | 'short' | 'clip'
+  category?: 'full' | 'short' | 'clip' | 'combined'
   fps?: number              // frames per second (from videoMap) — used for timecode display
   clipOf?: string           // source filename if this was produced by the clip exporter
   clipState?: ClipState     // saved clip state for reopening in the editor
@@ -1652,7 +1652,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       const p = absPath.replace(/\\/g, '/')
       return p.startsWith(folderNorm + '/') ? p.slice(folderNorm.length + 1) : p.split('/').pop() ?? p
     }
-    const fullVideos = target.videos.filter(v => videoMap?.[relKey(v)]?.category === 'full')
+    const fullVideos = target.videos.filter(v => {
+      const cat = videoMap?.[relKey(v)]?.category
+      // Combined outputs are keystone-equivalent (combine-and-delete can
+      // leave one as the stream's only recording).
+      return cat === 'full' || cat === 'combined'
+    })
     const preferred = fullVideos.length > 0 ? fullVideos : target.videos
     let videoPath = preferred[0]
     try {

@@ -260,7 +260,7 @@ export interface AppConfig {
   devForceYouTubeQuotaExceeded: boolean
 }
 
-export type VideoCategory = 'full' | 'short' | 'clip'
+export type VideoCategory = 'full' | 'short' | 'clip' | 'combined'
 
 /**
  * Per-track audio settings remembered for a single video file. Index 0 is

@@ -1,4 +1,4 @@
-# Release test checklist — v2.3.0 (2026-08-05)
+# Release test checklist — v2.3.0 (2026-08-07)
 
 Build: Stream Manager 2.2.0_DEV.exe from dev @ 02173a9
 
@@ -17,6 +17,7 @@ Build: Stream Manager 2.2.0_DEV.exe from dev @ 02173a9
 - [ ] Nav highlight: Combine nav item lights while jobs exist (including a finished job), clears when the page empties
 - [ ] Update check (app-wide): leave a dev build running past the 6-hour cache expiry → the update bubble can appear without a restart (or at minimum verify the launch check still works)
 - [ ] Hydration thumbnails (app-wide): add a dehydrated file to a combine/converter list → after the download finishes its thumbnail appears without remounting the page
+- [ ] Combined provenance (2026-08-08): run a NEW combine → the output shows in the files grid with the orange Combined border+tag (not Recording) and a Combine icon in its meta line; the grid's collapsed summary counts it as "N combined"; the stream row's video counter includes it; send-to-player prefers it like a recording; NOTE outputs combined before this build keep classifying as recordings (no stamp, cached probe) — expected
 
 ## Core regression (every release)
 
