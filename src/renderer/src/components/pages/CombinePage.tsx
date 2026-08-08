@@ -20,8 +20,13 @@ interface CombineFile {
   name: string
   duration: number | null   // seconds, null = not yet probed
   timestamp: Date | null    // parsed from filename
-  /** File size in bytes (batched files:getFileSizes). null = still loading. */
+  /** File size in bytes (batched files:getFileSizes). null = still loading.
+   *  (A stat, so it's safe on cloud placeholders.) */
   size: number | null
+  /** Cloud state: false = offloaded placeholder (NOT probed — probing
+   *  reads the header, which hydrates the whole file; it downloads when
+   *  the job combines). null = check still in flight. */
+  local: boolean | null
   /** Owning stream item when the file was sent from a stream — powers the
    *  row's title link and the group's orphan warning. Tagged PER FILE (not
    *  on the group) so cross-group moves keep their provenance. */
@@ -159,6 +164,7 @@ function makeCombineFile(p: string, stream?: CombineFile['stream']): CombineFile
     duration: null,
     timestamp: parseTimestamp(name),
     size: null,
+    local: null,
     stream,
     codec: null, width: null, height: null, fps: null, audioTracks: null,
   }
@@ -355,29 +361,55 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
 
   // Fill in sizes + stream properties for a set of paths, patching rows BY
   // PATH as results land (lists can be reordered / added-to while lookups
-  // are in flight). Shared by every intake.
+  // are in flight). Shared by every intake. Cloud gate at INTAKE: probing
+  // reads the file's header, which makes Cloud Files hydrate the WHOLE
+  // file — adding a row must not cost a multi-GB download (same probe
+  // convention as the files grid and the send-to-converter modal).
+  // Placeholders stay unprobed until they become local: the combine run
+  // hydrates + probes them itself, and the onCloudDownloadDone listener
+  // below catches hydrations from anywhere else.
   const probeAndMeasure = useCallback((paths: string[]) => {
     const patchFiles = (patch: (f: CombineFile) => CombineFile) =>
       setGroups(prev => prev.map(g => ({ ...g, files: g.files.map(patch) })))
+    // Sizes are a stat — safe on placeholders.
     void window.api.getFileSizes(paths).then(sizes => {
       const byPath = new Map(paths.map((p, i) => [p, sizes[i]]))
       patchFiles(f => byPath.has(f.path) ? { ...f, size: byPath.get(f.path) ?? null } : f)
     }).catch(() => {})
-    paths.forEach(async p => {
-      try {
-        const info = await window.api.probeFile(p)
-        patchFiles(f => f.path === p ? {
-          ...f,
-          duration: info.duration,
-          codec: info.videoCodec ?? null,
-          width: info.width ?? null,
-          height: info.height ?? null,
-          fps: info.fps ?? null,
-          audioTracks: (info.audioTracks ?? []).map(t => ({ codec: t.codec, channels: t.channels, sampleRate: t.sampleRate })),
-        } : f)
-      } catch (_) { /* unreadable file: row keeps its loaders */ }
-    })
+    void (async () => {
+      let flags: boolean[]
+      try { flags = await window.api.checkLocalFiles(paths) } catch { flags = paths.map(() => true) }
+      const localByPath = new Map(paths.map((p, i) => [p, flags[i]]))
+      patchFiles(f => localByPath.has(f.path) ? { ...f, local: localByPath.get(f.path)! } : f)
+      paths.filter((_, i) => flags[i]).forEach(async p => {
+        try {
+          const info = await window.api.probeFile(p)
+          patchFiles(f => f.path === p ? {
+            ...f,
+            duration: info.duration,
+            codec: info.videoCodec ?? null,
+            width: info.width ?? null,
+            height: info.height ?? null,
+            fps: info.fps ?? null,
+            audioTracks: (info.audioTracks ?? []).map(t => ({ codec: t.codec, channels: t.channels, sampleRate: t.sampleRate })),
+          } : f)
+        } catch (_) { /* unreadable file: row keeps its loaders */ }
+      })
+    })()
   }, [])
+
+  // A file listed here can be hydrated from anywhere (the streams page's
+  // pin, the cloud widget, another surface's download) — fill its row in
+  // the moment it lands instead of leaving it stuck as "in the cloud".
+  useEffect(() => {
+    const unsub = window.api.onCloudDownloadDone(fp => {
+      const listed = groupsRef.current.some(g => g.files.some(f => f.path === fp && (f.local === false || f.codec === null)))
+      if (!listed) return
+      setGroups(prev => prev.map(g => ({ ...g, files: g.files.map(f => f.path === fp ? { ...f, local: true } : f) })))
+      probeAndMeasure([fp])
+    })
+    return unsub
+  }, [probeAndMeasure])
 
   /** Set a group's output to its default, then swap in the uniquified
    *  variant (…_2.mkv) if the default already exists on disk. */
@@ -637,7 +669,6 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     cancelHydrateRef.current = false
 
     const unsub = window.api.onCombineProgress(({ percent }) => setRunProgress(percent))
-    const totalDur = group.files.reduce((s, f) => s + (f.duration ?? 0), 0)
     const sourcePaths = group.files.map(f => f.path)
     const outputPath = group.outputPath
     // Claim the sources for the run: the streams page's delete guards
@@ -652,6 +683,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
       // any time after it was probed, e.g. before a cross-job drag).
       // Instead, hydrate through the cloud-ops queue with an explicit
       // "Downloading from cloud…" phase, converter-style.
+      let effectiveFiles = group.files
       let localFlags: boolean[] = []
       try { localFlags = await window.api.checkLocalFiles(sourcePaths) } catch { localFlags = sourcePaths.map(() => true) }
       const cloudPaths = sourcePaths.filter((_, i) => !localFlags[i])
@@ -666,9 +698,38 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
           if (flags.every(Boolean)) break
           await new Promise(r => setTimeout(r, 2000))
         }
+        // Placeholders were NOT probed at intake (probing hydrates), so
+        // the click-time compatibility check couldn't see them. Probe the
+        // fresh downloads now and re-run the gate before spawning ffmpeg —
+        // a copy-concat of incompatible streams writes a broken file.
+        const probedPairs = await Promise.all(cloudPaths.map(async p => {
+          try { return [p, await window.api.probeFile(p)] as const } catch { return [p, null] as const }
+        }))
+        const infoByPath = new Map(probedPairs)
+        const withInfo = (f: CombineFile): CombineFile => {
+          const info = infoByPath.get(f.path)
+          if (!info) return cloudPaths.includes(f.path) ? { ...f, local: true } : f
+          return {
+            ...f,
+            local: true,
+            duration: info.duration,
+            codec: info.videoCodec ?? null,
+            width: info.width ?? null,
+            height: info.height ?? null,
+            fps: info.fps ?? null,
+            audioTracks: (info.audioTracks ?? []).map(t => ({ codec: t.codec, channels: t.channels, sampleRate: t.sampleRate })),
+          }
+        }
+        effectiveFiles = group.files.map(withInfo)
+        patchGroup(groupId, g => ({ ...g, files: g.files.map(withInfo) }))
+        if (computeCompat(effectiveFiles).mismatchedProps.length > 0) {
+          patchGroup(groupId, g => ({ ...g, error: "The downloaded files can't be combined without re-encoding; the differences are highlighted above." }))
+          return
+        }
         setRunState({ groupId, paused: false, downloading: false })
       }
 
+      const totalDur = effectiveFiles.reduce((s, f) => s + (f.duration ?? 0), 0)
       await window.api.combineFiles(sourcePaths, outputPath, totalDur)
       let deleteError: string | null = null
       let deletedPaths: string[] = []
@@ -772,6 +833,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
           // elsewhere has lost its identity — warn and refuse to combine.
           const orphaned = !!g.stream && g.files.length > 0 &&
             !g.files.some(f => f.stream?.folderPath === g.stream!.folderPath)
+          const cloudCount = g.files.filter(f => f.local === false).length
           const isEmpty = g.files.length === 0 && !g.completed
 
           return (
@@ -954,6 +1016,14 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                               frame rate, which is only advisory) — the
                               row-level view of the compatibility gate. */}
                           {(() => {
+                            if (f.local === false) {
+                              return (
+                                <span className="flex items-center gap-1 text-[11px] text-blue-300">
+                                  <Cloud size={10} className="shrink-0" />
+                                  In the cloud{f.size != null ? ` · ${formatBytes(f.size)}` : ''} (downloads when the job combines)
+                                </span>
+                              )
+                            }
                             if (f.codec === null && f.size === null) {
                               return <span className="text-[11px] text-gray-400"><Loader2 size={10} className="animate-spin inline" /></span>
                             }
@@ -994,7 +1064,11 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         <div className="flex flex-col items-end w-16 shrink-0">
                           <span className="text-[9px] uppercase tracking-wider text-gray-400">Duration</span>
                           <span className="text-xs text-gray-400 font-mono">
-                            {f.duration !== null ? formatDur(f.duration) : <Loader2 size={11} className="animate-spin inline" />}
+                            {f.duration !== null
+                              ? formatDur(f.duration)
+                              : f.local === false
+                                ? <Cloud size={11} className="inline text-blue-300/70" />
+                                : <Loader2 size={11} className="animate-spin inline" />}
                           </span>
                         </div>
 
@@ -1233,6 +1307,18 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                         <span>
                           The files have different frame rates ({[...new Set(compat.probed.map(fpsVal))].join(', ')}). The combined file will simply switch frame rate at the joins (variable frame rate); most players handle this fine, but some editors dislike VFR input. Convert to a matching frame rate first if that matters.
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Offloaded sources: named honestly, since their
+                        compatibility can't be checked until they download
+                        (probing a placeholder would hydrate it). */}
+                    {cloudCount > 0 && !isRunning && (
+                      <div className="flex items-start gap-2 text-xs text-blue-300 bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
+                        <Cloud size={13} className="shrink-0 mt-0.5" />
+                        <span>
+                          {cloudCount === 1 ? 'One file is' : `${cloudCount} files are`} in the cloud. Starting the combine downloads {cloudCount === 1 ? 'it' : 'them'} first, and compatibility is checked once {cloudCount === 1 ? 'it is' : 'they are'} local.
                         </span>
                       </div>
                     )}
