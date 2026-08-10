@@ -2,28 +2,4 @@
 
 > Running draft, maintained ON `dev`. When a feature lands, append a line to the right section in the same sitting. At promotion time this gets edited into the GitHub-release copy (trim, reword, reorder headline-first; see `archive/_release-notes-v2.md` for the format) and the file is emptied for the next cycle. Wording here is working-quality, not final. Fixes that already shipped in a hotfix release do NOT belong here.
 
-Target: TBD · emptied 2026-08-04 after the v2.2.0 release.
-
-## App-wide
-
-- The update check now re-runs every 6 hours while the app is open, so an instance that lives in the tray for days learns about new releases without a restart. (Previously it only checked once at launch.)
-- Video thumbnails now appear on their own after a cloud file finishes downloading (converter, combine, and files-grid rows previously kept the placeholder until the page remounted).
-
-## Streams page
-
-- Fixed: creating a new episode from a stream with a bound title template showed the template selected in the dropdown but left the title field empty until the template was re-picked by hand. The new episode's title (YouTube and Twitch) now fills from the bound template at creation, so merge fields like {episode} resolve against the new episode immediately.
-
-## Combine
-
-- Combine jobs: the page now holds multiple combine sets at once, each in its own job card with its own file list, output location, delete-after option, compatibility checks, and Combine button (the old page footer is gone). Files sent from a stream group into that stream's job (sending again merges instead of duplicating), each drop of external files starts a new job, and every job has its own add-files zone. One combine runs at a time; a job whose files no longer include any from its own stream item warns and refuses to run, and an emptied job disables everything except its remove button.
-- Files can be dragged between jobs: the insertion line shows where the file will land in the target job, its stream ownership travels with it (feeding the compatibility checks and the orphan warning), and even an emptied job can be refilled by dropping rows or files into it. Finished and currently-running jobs don't accept drops.
-- Combined outputs are now first-class citizens in the library: each output is stamped with a provenance marker (same scheme as exported clips), the files grid shows them with their own orange "Combined" border and tag instead of misreading them as recordings, and they count as a stream's main video everywhere recordings do (row video counter, send-to-player and thumbnail source picks, archive processing), which matters after combine-and-delete leaves the combined file as the stream's only video.
-- Cloud-aware combining, without surprise downloads: adding an offloaded file to a job no longer hydrates it (its row says "In the cloud" and shows its size). Starting the combine is what downloads it, through the cloud queue with an explicit "Downloading from cloud" phase on the job (cancellable), after which the fresh files are checked for compatibility before ffmpeg starts. A run that produces no progress for 15 seconds says so instead of sitting at "Starting", and ffmpeg's error output now surfaces in failure messages.
-
-- Rich file rows, matching the converter's design: each row now shows a frame thumbnail, the owning stream item's title (click to open its detail sidebar on the streams page) and date, and the file's codec, resolution, frame rate, and size. The recording start time and duration are now labeled columns (Started / Duration), and Auto-sort explains itself in a tooltip.
-- Reordering shows a clear insertion line between rows (the same behavior as the thumbnail palette's swatch reorder), and no line is offered where dropping wouldn't move anything.
-- The incompatible-files message now lays the conflict out as a table (one row per file, one column per differing property), and the audio layout joins each row's detail line. Mismatched properties are highlighted in red directly on the file rows (amber for frame rate, which is only advisory), so you can see at a glance which file is the odd one out.
-- The page works with external files now: a drop zone fills the empty state (drop or click to browse), and a slim add-more zone sits under the list once files are loaded. Added files never re-sort your hand-ordered list. A Clear all button in the header empties the list (the files themselves are untouched).
-- The Combine item in the main nav lights up while files are loaded on the page, matching how the player, converter, and thumbnails items behave.
-- Combines can be paused and resumed (the ffmpeg process is suspended, same as converter jobs). While running, the job shows its output as an in-progress file item in the converter's active-row style: spinner + output filename, live progress bar, percent / elapsed / ETA line with a click-to-open output location, and pause + cancel actions. The output file really does exist from the first moment of the run, so showing it as a file matches reality.
-- After a combine finishes, the job shows its output as a completed item using the converter's done-job design: thumbnail, green check + output filename with the output's real metadata (codec, resolution, frame rate, duration, size) where the converter shows its preset, the owning stream link, a filled progress bar, and a 100% / elapsed / output-location line (click the location to open the folder). No more copying the path out of a status line to find your file. The source rows stay visible as the run's record, and files removed by "Delete source files" show grayed out with struck-through names (per file, so a partial recycle-bin failure is visible at a glance). The job's Remove button becomes "Clear job" once finished.
+Target: TBD · emptied 2026-08-10 after the v2.3.0 release.
