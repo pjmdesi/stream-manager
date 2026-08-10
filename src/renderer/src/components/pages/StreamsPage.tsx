@@ -4601,6 +4601,7 @@ export function StreamsPage({
             folders={folders}
             ytTagTemplates={ytTagTemplates}
             twitchTagTemplates={twitchTagTemplates}
+            ytTitleTemplates={ytTitleTemplates}
           />
         )
       })()}
@@ -10260,6 +10261,7 @@ function NewStreamModal({
   folders,
   ytTagTemplates,
   twitchTagTemplates,
+  ytTitleTemplates,
 }: {
   existingDates: string[]
   onClose: () => void
@@ -10279,6 +10281,9 @@ function NewStreamModal({
   folders?: StreamFolder[]
   ytTagTemplates: Array<{ id: string; name: string; tags: string[] }>
   twitchTagTemplates: Array<{ id: string; name: string; tags: string[] }>
+  /** Titles template store (shared by YT + Twitch title bindings) — used
+   *  to FILL inherited title fields, not just carry the binding id. */
+  ytTitleTemplates: Array<{ id: string; name: string; template: string }>
 }) {
   const isNewEpisode = !!source
   const { config } = useStore()
@@ -10391,8 +10396,22 @@ function NewStreamModal({
       meta.ytTags = [...defaultYtTags]
       meta.ytTagsTemplateId = config.defaultYouTubeTagsTemplateId
     }
-    if (m.ytTitleTemplateId) meta.ytTitleTemplateId = m.ytTitleTemplateId
-    if (m.twitchTitleTemplateId) meta.twitchTitleTemplateId = m.twitchTitleTemplateId
+    // Inherit the title-template BINDINGS and fill the fields from them
+    // (streams todo #14: carrying only the id left the dropdown selected
+    // over an empty field). Same semantics as a manual pick: the field
+    // stores the RAW template body; merge fields render downstream, so
+    // {episode}/{date} resolve against the NEW episode, not the source's.
+    if (m.ytTitleTemplateId) {
+      meta.ytTitleTemplateId = m.ytTitleTemplateId
+      const tpl = ytTitleTemplates.find(t => t.id === m.ytTitleTemplateId)
+      if (tpl) meta.ytTitle = tpl.template
+    }
+    if (m.twitchTitleTemplateId) {
+      meta.twitchTitleTemplateId = m.twitchTitleTemplateId
+      // Twitch titles bind from the same shared Titles store.
+      const tpl = ytTitleTemplates.find(t => t.id === m.twitchTitleTemplateId)
+      if (tpl) meta.twitchTitle = tpl.template
+    }
     if (m.twitchTags?.length) {
       meta.twitchTags = m.twitchTags
       if (m.twitchTagsTemplateId) meta.twitchTagsTemplateId = m.twitchTagsTemplateId

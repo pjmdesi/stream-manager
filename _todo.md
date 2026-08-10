@@ -21,6 +21,19 @@
 15. Since the date field in the stream item detail sidebar is a button at the very top of the sidebar, it's difficult to remember where to look when the user wants to create a YouTube broadcast and make sure the date is correct before pushing. We should replicate the button in the footer as the first item in the create broadcast row. That way the user can change the date there as well. The button will have the exact same functionality as the one in the sidebar header. In fact, let's discuss moving the button to the footer and removing it from the sidebar header. The footer is more visible and easier to access, and it would be more consistent with the other buttons in the footer. It may be worth just having it twice, because if YouTube is inactive (which means the create broadcast row is not shown), the user still needs to be able to change the date of the stream item.
 16. I recently updated a tags template and it successfully updated the tags for all the stream items that were using that template. However, it did not update the streams sidebar's "Out of sync" panel for those stream items. i had to navigate to them individually to get them to appear there. Clicking the "Re-check" YouTube button in that panel also did not get them to show. This needs to be fixed so that the "Out of sync" panel is updated correctly when a tags template is updated and applied to stream items. It's probably possible to add items to that list when an action such as updating a template is taken, so we don't have to re-check all the stream items individually.
 17. Related to the above, when I got the full list to show in the out of sync panel, as they got pushed, they reappeared as "changed on YouTube" and stayed there for a bit after the push was complete. I'm not sure if they cleared automatically or not because a few of them (hiding the panel) and when I came back all but one was gone, and that one disappeared a few seconds later. They should not show as "changed on YouTube" after a successful push. The check should probably wait to check again until the full bulk-push process is complete.
+18. Add a new step & functionality to the new episode creation modal. This will allow the user to choose which fields will carry over to the newly created episode. For example, the user may want to carry over the title template, tags template, and thumbnail template, but not the description template. We should show checkboxes for all the relevant items that the user may want to copy over. We should have some checked by default and the selection should be remembered in the user's settings so the same selection is auto-checked for future new episode creations. Fields:
+    * Thumbnail
+    * thumbnail template (this would need to apply a blank version of the template that the episode being copied had, this would need to be mutually exclusive with the thumbnail checkbox) [checked by default]
+    * Stream Type [checked by default]
+    * Topics/games [checked by default]
+    * series [checked by default]
+    * YouTube title
+    * title template [checked by default]
+    * Tagline
+    * Description
+    * description template [checked by default]
+    * youtube tag templates
+    * twitch tag templates
 
 ### Player
 

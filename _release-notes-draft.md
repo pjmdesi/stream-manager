@@ -9,6 +9,10 @@ Target: TBD · emptied 2026-08-04 after the v2.2.0 release.
 - The update check now re-runs every 6 hours while the app is open, so an instance that lives in the tray for days learns about new releases without a restart. (Previously it only checked once at launch.)
 - Video thumbnails now appear on their own after a cloud file finishes downloading (converter, combine, and files-grid rows previously kept the placeholder until the page remounted).
 
+## Streams page
+
+- Fixed: creating a new episode from a stream with a bound title template showed the template selected in the dropdown but left the title field empty until the template was re-picked by hand. The new episode's title (YouTube and Twitch) now fills from the bound template at creation, so merge fields like {episode} resolve against the new episode immediately.
+
 ## Combine
 
 - Combine jobs: the page now holds multiple combine sets at once, each in its own job card with its own file list, output location, delete-after option, compatibility checks, and Combine button (the old page footer is gone). Files sent from a stream group into that stream's job (sending again merges instead of duplicating), each drop of external files starts a new job, and every job has its own add-files zone. One combine runs at a time; a job whose files no longer include any from its own stream item warns and refuses to run, and an emptied job disables everything except its remove button.
