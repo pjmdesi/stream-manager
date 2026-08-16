@@ -460,8 +460,9 @@ class RelayOrchestrator extends EventEmitter {
       this.preBoundId = null
       // Refresh the upcoming list first (still pinned, so the widget doesn't
       // flicker), then release the pin — getActive() then reports the fresh
-      // next-soonest auto-pick. Order matters: unlocking before the refresh
-      // would briefly surface the just-completed broadcast.
+      // auto-pick (the next SAME-DAY broadcast, or none: the auto-pick
+      // never reaches into a future day). Order matters: unlocking before
+      // the refresh would briefly surface the just-completed broadcast.
       await activeBroadcastService.getUpcoming(true).catch(() => {})
       activeBroadcastService.unlockSession()
     }, RelayOrchestrator.GRACE_MS)

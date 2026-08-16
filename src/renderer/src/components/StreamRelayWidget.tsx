@@ -146,8 +146,8 @@ export function StreamRelayWidget({
               !active.isManual ? 'bg-purple-600/20 text-purple-200' : 'text-gray-300 hover:bg-white/5'
             }`}
           >
-            <span className="text-[11px] font-medium">Use soonest upcoming (auto)</span>
-            <span className="text-[10px] text-gray-400">SM auto-picks the next-scheduled broadcast</span>
+            <span className="text-[11px] font-medium">Use today's broadcast (auto)</span>
+            <span className="text-[10px] text-gray-400">SM auto-picks the same-day broadcast nearest to now</span>
           </button>
           {upcoming.length === 0 ? (
             <p className="px-3 py-3 text-[11px] text-gray-400 italic">No upcoming broadcasts.</p>
@@ -286,15 +286,25 @@ export function StreamRelayWidget({
           </Tooltip>
         ) : (
           // Render an interactive trigger even with no auto-pick so the user
-          // can open the picker to refresh / manually select.
-          <Tooltip content="Pick a broadcast" triggerClassName="block w-full">
+          // can open the picker to refresh / manually select. Two distinct
+          // empty states: nothing upcoming at all, vs broadcasts existing
+          // only on LATER days (which the auto-pick deliberately ignores —
+          // it never binds a future day; see pickAutoTarget).
+          <Tooltip
+            content={upcoming.length > 0
+              ? 'Auto-pick only binds a broadcast scheduled today. Streaming now would run unmanaged; pick a broadcast manually to bind one on a later day.'
+              : 'Pick a broadcast'}
+            triggerClassName="block w-full"
+          >
           <button
             onClick={() => togglePicker()}
             disabled={isStreaming}
             className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-left hover:bg-white/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           >
             <Calendar size={11} className="text-gray-400 shrink-0" />
-            <span className="text-[10px] text-gray-400 italic flex-1">No upcoming broadcasts.</span>
+            <span className="text-[10px] text-gray-400 italic flex-1 truncate">
+              {upcoming.length > 0 ? 'No broadcast scheduled today.' : 'No upcoming broadcasts.'}
+            </span>
             {!isStreaming && <ChevronDown size={11} className="text-gray-400 shrink-0" />}
           </button>
           </Tooltip>
@@ -306,7 +316,13 @@ export function StreamRelayWidget({
             no ellipsis and no way to read the rest. Truncation now shows
             an ellipsis and the full text in a hover tooltip. */}
         {active.manualPickStale && (
-          <TruncatedText text="Picked broadcast no longer upcoming. Showing soonest instead." className="truncate text-[10px] text-amber-400/80 leading-tight" triggerClassName="block min-w-0 px-2" />
+          <TruncatedText
+            text={broadcast
+              ? "Picked broadcast no longer upcoming. Showing today's broadcast instead."
+              : 'Picked broadcast no longer upcoming, and none is scheduled today.'}
+            className="truncate text-[10px] text-amber-400/80 leading-tight"
+            triggerClassName="block min-w-0 px-2"
+          />
         )}
 
         {/* Lifecycle stage strip — shown for transitional states only. The
