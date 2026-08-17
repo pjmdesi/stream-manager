@@ -8386,6 +8386,18 @@ function SidebarDetail({
           //     and case-fold for the same reason as game name.
           const twNormalize = (s: string) => s.trim().toLowerCase()
           const twTagKey = (arr: string[]) => arr.slice().map(twNormalize).sort().join(',')
+          //   • Title whitespace — Twitch normalizes it server-side: a
+          //     pushed title containing non-breaking spaces (which the
+          //     contenteditable title editor can produce) or stray
+          //     newlines comes back from the channel API with plain
+          //     single spaces. A byte comparison then false-flags the
+          //     stream as mismatched forever (todo streams #12, caught
+          //     by the instrumentation: local had U+00A0 around the
+          //     pipe plus a leading newline; the channel came back
+          //     with plain spaces. Collapse every whitespace run
+          //     to one space on BOTH sides before comparing. Case
+          //     stays significant — Twitch preserves it.
+          const twTitleKey = (s: string) => s.replace(/\s+/g, ' ').trim()
           // Per-field sync checks against the live Twitch channel
           // snapshot. The empty-local short-circuits on game + tags
           // mirror the push handler's actual behavior:
@@ -8397,8 +8409,9 @@ function SidebarDetail({
           //     linked where ytGameTitle was never filled in).
           //   • Empty tags arrays follow the same logic for safety.
           // Title is always pushed verbatim (even ""), so its
-          // comparison stays strict.
-          const titleInSync = twEffectiveTitle.trim() === twitchChannel?.title.trim()
+          // comparison keeps case — only whitespace is normalized
+          // (twTitleKey above).
+          const titleInSync = twitchChannel !== null && twTitleKey(twEffectiveTitle) === twTitleKey(twitchChannel.title)
           const gameInSync = !twEffectiveGame.trim()
             || twNormalize(twEffectiveGame) === twNormalize(twitchChannel?.gameName ?? '')
           const tagsInSync = twEffectiveTags.length === 0
@@ -8429,10 +8442,10 @@ function SidebarDetail({
           // signal) and gate the whole snapshot match on it.
           const hasLastPushedSnapshot = meta?.twitchLastPushedTitle !== undefined
           const snapshotStillReflectsTwitch = twitchChannel !== null
-            && twitchChannel.title.trim() === (meta?.twitchLastPushedTitle ?? '').trim()
+            && twTitleKey(twitchChannel.title) === twTitleKey(meta?.twitchLastPushedTitle ?? '')
           const matchesLastPushed = hasLastPushedSnapshot
             && snapshotStillReflectsTwitch
-            && twEffectiveTitle.trim() === (meta?.twitchLastPushedTitle ?? '').trim()
+            && twTitleKey(twEffectiveTitle) === twTitleKey(meta?.twitchLastPushedTitle ?? '')
             && twEffectiveGame.trim() === (meta?.twitchLastPushedGame ?? '').trim()
             && twTagKey(twEffectiveTags) === twTagKey(meta?.twitchLastPushedTags ?? [])
           const twitchInSync = matchesActualTwitch || matchesLastPushed
@@ -8517,7 +8530,12 @@ function SidebarDetail({
               // game/tags once it has caught up (its title matches what we
               // pushed — the fuzzy game-name canonicalization case).
               const refreshed = await window.api.twitchGetChannel?.()
-              const refetchCaughtUp = !!refreshed && refreshed.title.trim() === twEffectiveTitle.trim()
+              // Whitespace-insensitive (twTitleKey): Twitch normalizes
+              // nbsp/newlines in stored titles, so a byte comparison here
+              // wrongly read a caught-up refetch as stale and seeded the
+              // cache with the local bytes instead of adopting Twitch's
+              // canonical game/tags.
+              const refetchCaughtUp = !!refreshed && twTitleKey(refreshed.title) === twTitleKey(twEffectiveTitle)
               setTwitchChannel({
                 title: twEffectiveTitle,
                 gameName: refetchCaughtUp
