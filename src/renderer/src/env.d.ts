@@ -179,7 +179,7 @@ declare global {
       deleteClipDraft(folderPath: string, draftId: string, metaKey?: string): Promise<void>
       clipTagExport(folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null, metaKey?: string): Promise<void>
       listStreamTemplates(streamsDir: string): Promise<{ name: string; path: string }[]>
-      createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<string>
+      createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder', sourceThumbName?: string): Promise<string>
 
       listFilesForDate(dir: string, date: string): Promise<string[]>
       deleteStreamFiles(dir: string, date: string): Promise<void>

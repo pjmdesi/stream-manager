@@ -38,7 +38,7 @@ function extOf(name: string): string {
 
 /** Variant ordinal from an SM-created thumbnail name (…_sm-thumbnail.png → 1,
  *  …_sm-thumbnail-3.png → 3); null if it isn't an SM thumbnail (not editable). */
-function parseSmThumbnailOrdinal(path: string): number | null {
+export function parseSmThumbnailOrdinal(path: string): number | null {
   const m = path.match(/[_-]sm-thumbnail(?:-(\d+))?\.[a-z0-9]+$/i)
   if (!m) return null
   return m[1] ? parseInt(m[1], 10) : 1
@@ -417,7 +417,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   )
 }
 
-function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin, blockReason, onModifierSelect }: {
+function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin, blockReason, staleReason, onModifierSelect }: {
   path: string
   thumbIndex: number
   /** Scan-flag-based local hint for rendering the image (immediate). */
@@ -443,6 +443,10 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
   /** Why this image can't be deleted (open in the thumbnail editor, etc.), or
    *  null when it's deletable. */
   blockReason: string | null
+  /** Set when a background re-render of this SM thumbnail failed
+   *  (meta.smThumbnailStale) — the PNG shows outdated merge-field values.
+   *  Renders the "Could not load references" overlay. */
+  staleReason?: 'assets' | 'font' | null
   /** Shift/Ctrl-click outside select mode: enter select mode with this file. */
   onModifierSelect: () => void
 }) {
@@ -487,6 +491,25 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
               <div className="absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 group-hover/thumb:opacity-100 transition-opacity pointer-events-none">
                 <Maximize2 size={16} className="text-white/90" />
               </div>
+              {/* Background re-render failed: the PNG shows OUTDATED
+                  merge-field values (e.g. the previous episode's number).
+                  Named on the image itself — an honest overlay beats a
+                  console line nobody sees. */}
+              {staleReason && (
+                <Tooltip
+                  content={staleReason === 'font'
+                    ? 'This thumbnail could not be re-rendered: a font it uses is not installed. The image shows outdated text until it renders again (open it in the editor to fix).'
+                    : 'This thumbnail could not be re-rendered: an image it references is missing or could not be loaded (deleted, or cloud sync unavailable). The image shows outdated content until it renders again (open it in the editor to fix).'}
+                  triggerClassName="absolute inset-0"
+                >
+                  <div className="w-full h-full flex items-center justify-center bg-black/60 px-1 text-center">
+                    <span className="text-[9px] leading-tight text-amber-300 font-medium">
+                      <AlertTriangle size={10} className="inline mb-0.5 mr-1" />
+                      Could not load references
+                    </span>
+                  </div>
+                </Tooltip>
+              )}
             </div>
           }
           tag={isPreferred
@@ -1175,6 +1198,10 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onOffload={offloadFile}
               onPin={pinFile}
               blockReason={fileReason(path)}
+              staleReason={(() => {
+                const ord = parseSmThumbnailOrdinal(path)
+                return ord != null ? folder.meta?.smThumbnailStale?.[String(ord)]?.reason ?? null : null
+              })()}
               onModifierSelect={() => enterSelectWith(path)}
             />
           )

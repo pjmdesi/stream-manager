@@ -358,8 +358,8 @@ contextBridge.exposeInMainWorld('api', {
   listStreamTemplates: (streamsDir: string) =>
     ipcRenderer.invoke('streams:listTemplates', streamsDir),
 
-  createStreamFolder: (parentDir: string, date: string, meta?: any, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder') =>
-    ipcRenderer.invoke('streams:createFolder', parentDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath, mode),
+  createStreamFolder: (parentDir: string, date: string, meta?: any, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder', sourceThumbName?: string) =>
+    ipcRenderer.invoke('streams:createFolder', parentDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath, mode, sourceThumbName),
 
 
   listFilesForDate: (dir: string, date: string) =>

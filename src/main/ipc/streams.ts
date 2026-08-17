@@ -980,6 +980,11 @@ export function registerStreamsIPC(): void {
     if (metaHealth.ok) setMetaHealth({ ok: true })
   })
 
+  // Last successful cloud-locality answer per thumbnail path — the
+  // streams:list failure fallback serves these so a timed-out sweep
+  // degrades to stale-but-real flags instead of an all-cloud library.
+  const lastKnownThumbLocal = new Map<string, boolean>()
+
   ipcMain.handle('streams:list', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'): Promise<StreamFolder[]> => {
     if (!dir || !fs.existsSync(dir)) return []
 
@@ -1137,17 +1142,24 @@ export function registerStreamsIPC(): void {
           f.thumbnailLocalFlags = flags.slice(i, i + f.thumbnails.length)
           i += f.thumbnails.length
         }
+        // Remember per-file results — the failure fallback below serves
+        // these instead of blanket-false when a later sweep times out.
+        allThumbs.forEach((p, k) => lastKnownThumbLocal.set(p, flags[k]))
         const localCount = flags.filter(Boolean).length
         const cloudCount = flags.length - localCount
         console.log(`[streams:list] thumbnails classified in ${Date.now() - t0}ms: ${localCount} local, ${cloudCount} cloud (of ${flags.length} total)`)
       } catch (err) {
         console.warn('[streams:list] thumbnail localFiles check failed:', err)
-        // SAFETY NET: when classification fails (timeout, PowerShell error, etc.),
-        // mark every thumbnail as non-local. The renderer shows cloud icons —
-        // ugly but safe — instead of trying to load file:// URLs that may hang
-        // Chromium's network thread on a stuck cloud provider.
+        // SAFETY NET, degraded honestly: when classification fails (the
+        // 15s timeout under CPU/IO contention — a Blender render or the
+        // stream-day OBS encode is enough — or a PowerShell error), fall
+        // back to each file's LAST KNOWN flag instead of marking the whole
+        // library non-local. The old all-false fallback dumped every row
+        // to a cloud placeholder whenever one sweep ran long. Files never
+        // classified before stay false (cloud icon: ugly but safe — a
+        // file:// load against a stuck provider can hang Chromium).
         for (const f of folders) {
-          f.thumbnailLocalFlags = f.thumbnails.map(() => false)
+          f.thumbnailLocalFlags = f.thumbnails.map(p => lastKnownThumbLocal.get(p) ?? false)
         }
       }
     }
@@ -1685,6 +1697,34 @@ export function registerStreamsIPC(): void {
       .map(e => ({ name: e.name, path: path.join(templatesDir, e.name) }))
   })
 
+  /** Pick which of the previous episode's thumbnail-ish files carry to a
+   *  new episode: ONLY the primary (the stream item's selected thumbnail,
+   *  resolved by the renderer and passed as `sourceThumbName`), plus its
+   *  canvas .json when it's an SM thumbnail. Copying every variant used to
+   *  pile unused alternates through a whole season. Fallback order when no
+   *  name arrives (legacy callers): the base SM thumbnail, else the first
+   *  candidate. Copies rename the date prefix AND normalize an SM variant
+   *  ordinal to the base name — the new episode starts with ONE thumbnail,
+   *  its variant 1. */
+  const pickEpisodeThumbFiles = (files: string[], sourceThumbName?: string): string[] => {
+    const isThumbFile = (f: string) => /thumbnail/i.test(path.basename(f, path.extname(f)))
+    const candidates = files.filter(f => isThumbFile(f) && !f.toLowerCase().endsWith('.json'))
+    const primary =
+      (sourceThumbName && candidates.find(f => f === sourceThumbName)) ||
+      candidates.find(f => /_sm-thumbnail\.[^.]+$/i.test(f)) ||
+      candidates[0]
+    if (!primary) return []
+    const picked = [primary]
+    const sm = primary.match(/^(.*_sm-thumbnail(?:-\d+)?)\.[^.]+$/i)
+    if (sm) {
+      const json = `${sm[1]}.json`
+      if (files.includes(json)) picked.push(json)
+    }
+    return picked
+  }
+  const episodeThumbNewName = (file: string, date: string): string =>
+    file.replace(/^\d{4}-\d{2}-\d{2}/, date).replace(/_sm-thumbnail-\d+\./i, '_sm-thumbnail.')
+
   ipcMain.handle('streams:createFolder', async (
     _event,
     parentDir: string,
@@ -1692,7 +1732,8 @@ export function registerStreamsIPC(): void {
     meta?: StreamMeta,
     thumbnailTemplatePath?: string,
     prevEpisodeFolderPath?: string,
-    mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'
+    mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream',
+    sourceThumbName?: string
   ): Promise<string> => {
     const store = getStore()
     const effectiveMode = mode || (store.get('config').streamMode) || 'folder-per-stream'
@@ -1709,17 +1750,16 @@ export function registerStreamsIPC(): void {
         fs.copyFileSync(thumbnailTemplatePath, path.join(parentDir, `${date} thumbnail${ext}`))
       }
       if (prevEpisodeFolderPath && fs.existsSync(prevEpisodeFolderPath)) {
-        // Copy thumbnail files from prev episode folder (or dump dir if prev episode is in dump mode)
+        // Copy the PRIMARY thumbnail from the prev episode folder (or dump
+        // dir if the prev episode is in dump mode).
         const prevDir = fs.statSync(prevEpisodeFolderPath).isDirectory() ? prevEpisodeFolderPath : parentDir
-        const files = fs.readdirSync(prevDir)
-        for (const file of files) {
-          if (!/thumbnail/i.test(path.basename(file, path.extname(file)))) continue
-          const src = path.join(prevDir, file)
-          if (!fs.statSync(src).isFile()) continue
-          // Only copy files belonging to the prev episode date
-          if (prevDir === parentDir && !file.startsWith(path.basename(prevEpisodeFolderPath))) continue
-          const newName = file.replace(/^\d{4}-\d{2}-\d{2}/, date)
-          fs.copyFileSync(src, path.join(parentDir, newName))
+        // Only files belonging to the prev episode date (dump dir is shared).
+        const files = fs.readdirSync(prevDir).filter(f => {
+          if (prevDir === parentDir && !f.startsWith(path.basename(prevEpisodeFolderPath))) return false
+          try { return fs.statSync(path.join(prevDir, f)).isFile() } catch { return false }
+        })
+        for (const file of pickEpisodeThumbFiles(files, sourceThumbName)) {
+          fs.copyFileSync(path.join(prevDir, file), path.join(parentDir, episodeThumbNewName(file, date)))
         }
       }
       return parentDir
@@ -1739,13 +1779,11 @@ export function registerStreamsIPC(): void {
       fs.copyFileSync(thumbnailTemplatePath, path.join(folderPath, `${date} thumbnail${ext}`))
     }
     if (prevEpisodeFolderPath && fs.existsSync(prevEpisodeFolderPath)) {
-      const files = fs.readdirSync(prevEpisodeFolderPath)
-      for (const file of files) {
-        if (!/thumbnail/i.test(path.basename(file, path.extname(file)))) continue
-        const src = path.join(prevEpisodeFolderPath, file)
-        if (!fs.statSync(src).isFile()) continue
-        const newName = file.replace(/^\d{4}-\d{2}-\d{2}/, date)
-        fs.copyFileSync(src, path.join(folderPath, newName))
+      const files = fs.readdirSync(prevEpisodeFolderPath).filter(f => {
+        try { return fs.statSync(path.join(prevEpisodeFolderPath, f)).isFile() } catch { return false }
+      })
+      for (const file of pickEpisodeThumbFiles(files, sourceThumbName)) {
+        fs.copyFileSync(path.join(prevEpisodeFolderPath, file), path.join(folderPath, episodeThumbNewName(file, date)))
       }
     }
     return folderPath

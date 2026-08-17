@@ -484,6 +484,15 @@ export interface StreamMeta {
   smThumbnail?: boolean
   smThumbnailTemplate?: string
   preferredThumbnail?: string
+  /** Per-variant flag (key = ordinal as a string) set when a BACKGROUND
+   *  re-render of an SM thumbnail failed — its PNG still shows values
+   *  from before the failure (e.g. the source episode's merge fields).
+   *  'assets' = an image layer's file was missing/unreadable (deleted, or
+   *  a cloud placeholder with the sync service unavailable); 'font' = a
+   *  text layer's font isn't installed. Cleared by the next successful
+   *  render (background or an editor save of that variant). Thumbnail
+   *  surfaces overlay "Could not load references" while set. */
+  smThumbnailStale?: Record<string, { reason: 'assets' | 'font'; at: number }>
   /** sha1 of the thumbnail file that was last uploaded to YouTube. Compared
    *  against the current selected thumbnail's hash to detect whether the
    *  thumbnail has changed since the last push (so the push action can offer

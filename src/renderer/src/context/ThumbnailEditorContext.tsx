@@ -27,6 +27,13 @@ interface ThumbnailEditorContextValue {
   navigateToEditor: () => void
   /** Set by App.tsx — navigates to the thumbnails page */
   _setNavigate: (fn: (stream: PendingThumbnailStream | null) => void) => void
+  /** Ask the (always-mounted) thumbnail page to re-render a stream's SM
+   *  thumbnails in the BACKGROUND against the stream's current meta — no
+   *  navigation, no editor takeover. Used after New Episode creation:
+   *  the copied PNGs still show the source episode's merge-field values
+   *  until re-rendered. `token` de-duplicates effect runs. */
+  rerenderRequest: (PendingThumbnailStream & { token: number }) | null
+  requestThumbnailRerender: (stream: PendingThumbnailStream) => void
 }
 
 const ThumbnailEditorContext = createContext<ThumbnailEditorContextValue | null>(null)
@@ -34,6 +41,11 @@ const ThumbnailEditorContext = createContext<ThumbnailEditorContextValue | null>
 export function ThumbnailEditorProvider({ children }: { children: React.ReactNode }) {
   const [pendingStream, setPendingStream] = useState<PendingThumbnailStream | null>(null)
   const [navigateFn, setNavigateFn] = useState<((s: PendingThumbnailStream | null) => void) | null>(null)
+  const [rerenderRequest, setRerenderRequest] = useState<(PendingThumbnailStream & { token: number }) | null>(null)
+
+  const requestThumbnailRerender = useCallback((stream: PendingThumbnailStream) => {
+    setRerenderRequest(prev => ({ ...stream, token: (prev?.token ?? 0) + 1 }))
+  }, [])
 
   const _setNavigate = useCallback((fn: (stream: PendingThumbnailStream | null) => void) => {
     setNavigateFn(() => fn)
@@ -52,7 +64,7 @@ export function ThumbnailEditorProvider({ children }: { children: React.ReactNod
   const clearPendingStream = useCallback(() => setPendingStream(null), [])
 
   return (
-    <ThumbnailEditorContext.Provider value={{ pendingStream, clearPendingStream, openEditor, navigateToEditor, _setNavigate }}>
+    <ThumbnailEditorContext.Provider value={{ pendingStream, clearPendingStream, openEditor, navigateToEditor, _setNavigate, rerenderRequest, requestThumbnailRerender }}>
       {children}
     </ThumbnailEditorContext.Provider>
   )

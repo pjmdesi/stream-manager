@@ -43,7 +43,7 @@ import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { SendToConverterModal } from '../streams/SendToConverterModal'
 import { isAnyModalOpen, isTypingTarget } from '../../lib/shortcuts'
 import { releaseThumbDecodes } from '../ui/VideoThumb'
-import { StreamFilesGrid, type FilesGridHandle } from '../streams/StreamFilesGrid'
+import { StreamFilesGrid, parseSmThumbnailOrdinal, type FilesGridHandle } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { renderStreamTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber } from '../../lib/streamTitle'
@@ -410,7 +410,7 @@ export function StreamsPage({
   onOpenIntegrations?: () => void
 }) {
   const { config, updateConfig } = useStore()
-  const { openEditor: openThumbnailEditor } = useThumbnailEditor()
+  const { openEditor: openThumbnailEditor, requestThumbnailRerender } = useThumbnailEditor()
   const [folders, setFolders] = useState<StreamFolder[]>([])
   // Empty-library onboarding nudges: the YouTube import prompt can be
   // dismissed permanently ("Start fresh") — localStorage, matching the
@@ -1673,27 +1673,32 @@ export function StreamsPage({
     setArchiveTargetKeys([folder.relativePath])
   }, [])
 
+  /** Episodes in this stream's series+season, including the stream itself —
+   *  the {total_episodes} merge-field input. Shared by the editor-open path
+   *  and the new-episode background re-render. */
+  const computeTotalEpisodes = useCallback((folder: StreamFolder, all: StreamFolder[]): number => {
+    if (isStandalone(folder.meta)) return 0
+    const game = folder.meta?.games?.[0] ?? folder.detectedGames?.[0]
+    if (!game) return 0
+    const lower = game.toLowerCase()
+    const season = folder.meta?.ytSeason ?? '1'
+    return all.filter(f =>
+      !isStandalone(f.meta) &&
+      f.meta?.games?.some(g => g.toLowerCase() === lower) &&
+      (f.meta?.ytSeason ?? '1') === season
+    ).length
+  }, [])
+
   const handleOpenThumbnails = useCallback((folder: StreamFolder, variantOrdinal?: number) => {
     openThumbnailEditor({
       folderPath: folder.folderPath,
       date: folder.date,
       title: renderStreamTitle(folder, folders),
       meta: folder.meta ?? undefined,
-      totalEpisodes: (() => {
-        if (isStandalone(folder.meta)) return 0
-        const game = folder.meta?.games?.[0] ?? folder.detectedGames?.[0]
-        if (!game) return 0
-        const lower = game.toLowerCase()
-        const season = folder.meta?.ytSeason ?? '1'
-        return folders.filter(f =>
-          !isStandalone(f.meta) &&
-          f.meta?.games?.some(g => g.toLowerCase() === lower) &&
-          (f.meta?.ytSeason ?? '1') === season
-        ).length
-      })(),
+      totalEpisodes: computeTotalEpisodes(folder, folders),
       variantOrdinal,
     })
-  }, [folders, openThumbnailEditor])
+  }, [folders, openThumbnailEditor, computeTotalEpisodes])
 
   // Minimal push-to-YouTube. Tries the broadcast endpoint first (upcoming /
   // live), falls back to the video endpoint (completed VODs). Thumbnail
@@ -2148,17 +2153,22 @@ export function StreamsPage({
   // AFTER a newer one and overwrite fresher data with staler data. Only the
   // latest request's response is applied; superseded ones are discarded.
   const listReqSeqRef = useRef(0)
-  const loadFolders = useCallback(async () => {
-    if (!streamsDir) return
+  const loadFolders = useCallback(async (): Promise<StreamFolder[]> => {
+    // Returns the freshly-loaded list so same-task callers don't race the
+    // state/ref updates (foldersRef syncs on the NEXT render).
+    if (!streamsDir) return foldersRef.current
     const seq = ++listReqSeqRef.current
     setLoading(true)
+    let loaded: StreamFolder[] | null = null
     try {
       const result = await window.api.listStreams(streamsDir, streamMode as any)
       if (seq === listReqSeqRef.current) setFolders(result)
+      loaded = result
     } catch (err) {
       console.error('Failed to load streams', err)
     }
     if (seq === listReqSeqRef.current) setLoading(false)
+    return loaded ?? foldersRef.current
   }, [streamsDir, streamMode])
 
   // Scoped reload: re-fetch just the streams named by a targeted
@@ -4587,13 +4597,29 @@ export function StreamsPage({
             onCreated={async (newFolderPath, date) => {
               setNewStreamOpen(false)
               setNewEpisodeSourceKey(null)
-              await loadFolders()
+              const fresh = await loadFolders()
               // Dump mode: createStreamFolder returns the dump ROOT (every
               // stream shares it), so a path-based select resolves to the
               // FIRST row — the top stream item, not the new one. The
               // canonical dump key is the date.
               if (isDumpMode) setSelectedStreamKey(date)
               else selectByFolderPath(newFolderPath)
+              // New EPISODE (has a source): the copied SM thumbnail PNGs
+              // still show the SOURCE episode's merge-field values — ask
+              // the thumbnail page to re-render them in the background
+              // against the new episode's meta (streams todo #13 core).
+              if (source) {
+                const created = fresh.find(f => isDumpMode ? f.date === date : f.folderPath === newFolderPath)
+                if (created) {
+                  requestThumbnailRerender({
+                    folderPath: created.folderPath,
+                    date: created.date,
+                    title: renderStreamTitle(created, fresh),
+                    meta: created.meta ?? undefined,
+                    totalEpisodes: computeTotalEpisodes(created, fresh),
+                  })
+                }
+              }
             }}
             streamsDir={streamsDir!}
             streamMode={streamMode}
@@ -4892,6 +4918,22 @@ const StreamListItem = memo(function StreamListItem({
                   +{extraCount}
                 </span>
               )}
+              {/* Background re-render failed for THIS thumbnail: it shows
+                  outdated merge-field values. Corner badge (the row thumb
+                  is too small for the full-text overlay the files grid
+                  uses); the tooltip carries the explanation. */}
+              {(() => {
+                const ord = parseSmThumbnailOrdinal(firstThumb)
+                const stale = ord != null ? meta?.smThumbnailStale?.[String(ord)] : undefined
+                if (!stale) return null
+                return (
+                  <Tooltip content="Could not load references — this thumbnail could not be re-rendered and shows outdated content. Open it in the thumbnail editor to fix.">
+                    <span className="absolute top-0.5 left-0.5 bg-black/70 rounded p-0.5">
+                      <AlertTriangle size={10} className="text-amber-300" />
+                    </span>
+                  </Tooltip>
+                )
+              })()}
             </>
           ) : (
             <div className="w-full h-full bg-white/5 flex flex-col items-center justify-center gap-0.5">
@@ -10436,6 +10478,11 @@ function NewStreamModal({
     setBusy(true)
     setError(null)
     try {
+      // Only the PRIMARY thumbnail (the stream item's selected one) carries
+      // to the new episode — copying every variant piled unused alternates
+      // through a whole season. Resolved here (main doesn't know the
+      // preferred-thumbnail selection) and passed by basename.
+      const sourceThumb = source ? resolveStreamThumb(source) : null
       const newFolderPath = await window.api.createStreamFolder(
         streamsDir,
         date,
@@ -10443,6 +10490,7 @@ function NewStreamModal({
         undefined,
         source?.folderPath,
         streamMode,
+        sourceThumb ? (sourceThumb.split(/[\\/]/).pop() ?? undefined) : undefined,
       )
       await onCreated(newFolderPath, date)
     } catch (err: any) {

@@ -24,6 +24,7 @@ import { NumberInput } from '../ui/Input'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview } from '../../lib/gradient'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
+import type { PendingThumbnailStream } from '../../context/ThumbnailEditorContext'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
@@ -1364,6 +1365,178 @@ function PreviewGallery({ snapshot, title, channelName, overlay, setOverlay, wat
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Background thumbnail re-render ───────────────────────────────────────────
+// Renders a stream's SM thumbnails to PNG against its CURRENT meta without
+// opening the editor. Purpose: New Episode creation copies the previous
+// episode's thumbnail files, and the PNGs arrive baked with the SOURCE
+// episode's merge-field values ({episode}, {title}, …) — they used to stay
+// wrong until the user opened the editor and touched something. The canvas
+// JSON stores merge MARKERS, so re-rendering it against the new stream's
+// fields produces the correct image.
+//
+// Failure model: a render that can't be produced faithfully is SKIPPED and
+// the variant is flagged in meta.smThumbnailStale — assets missing or
+// unreadable (deleted, or a cloud placeholder with the sync service not
+// running), or a text layer's font not installed. Thumbnail surfaces
+// overlay "Could not load references" from that flag; the stale PNG is
+// never silently overwritten with a broken render.
+
+/** Merge-field values from a PendingThumbnailStream — mirrors the editor's
+ *  mergeFieldValues (keep the two in sync). */
+function buildRerenderMergeFields(s: PendingThumbnailStream): Record<string, string> {
+  const m = s.meta
+  return {
+    title: m?.ytCatchyTitle || renderTitleFromMeta(m, {
+      totalEpisodes: s.totalEpisodes,
+      fallback: s.title,
+    }) || '',
+    topic: m?.ytGameTitle || m?.games?.[0] || '',
+    game: m?.ytGameTitle || m?.games?.[0] || '',
+    date: s.date,
+    season: m?.ytSeason || '1',
+    episode: m?.ytEpisode || '1',
+    total_episodes: s.totalEpisodes ? String(s.totalEpisodes) : '',
+  }
+}
+
+function BackgroundRerender({ request }: { request: (PendingThumbnailStream & { token: number }) | null }) {
+  // The variant currently mounted on the hidden stage; null between jobs.
+  const [job, setJob] = useState<{ layers: ThumbnailLayer[]; fields: Record<string, string> } | null>(null)
+  const stageRef = useRef<Konva.Stage | null>(null)
+
+  useEffect(() => {
+    if (!request) return
+    let cancelled = false
+    const nextFrame = () => new Promise<void>(r => requestAnimationFrame(() => r()))
+
+    void (async () => {
+      const { folderPath, date } = request
+      const ordinals = await window.api.thumbnailListVariants(folderPath, date).catch(() => [] as number[])
+      if (cancelled || ordinals.length === 0) return
+      const fields = buildRerenderMergeFields(request)
+      const stale: Record<string, { reason: 'assets' | 'font'; at: number }> = { ...(request.meta?.smThumbnailStale ?? {}) }
+      let staleChanged = false
+
+      for (const ordinal of ordinals) {
+        if (cancelled) return
+        const doc = await window.api.thumbnailLoadCanvas(folderPath, date, ordinal).catch(() => null)
+        const layers: ThumbnailLayer[] = ((doc?.layers ?? []) as ThumbnailLayer[]).filter(l => l.visible !== false)
+        if (!doc || layers.length === 0) continue
+
+        // Preflight fonts: baking a substitute font into the PNG is the
+        // same silent corruption the editor's missing-font guard exists
+        // to prevent. document.fonts.check resolves installed system
+        // fonts as well as loaded webfonts in Chromium.
+        const fontFamilies = [...new Set(layers.filter(l => l.type === 'text' && l.fontFamily).map(l => l.fontFamily!))]
+        const missingFont = fontFamilies.some(f => {
+          try { return !document.fonts.check(`16px "${f.replace(/"/g, '')}"`) } catch { return false }
+        })
+        if (missingFont) {
+          stale[String(ordinal)] = { reason: 'font', at: Date.now() }
+          staleChanged = true
+          continue
+        }
+
+        // Preflight image assets: decode each referenced file directly.
+        // Catches deleted files AND cloud placeholders that can't hydrate
+        // (sync service not running) — with a timeout so a hung
+        // placeholder read can't stall the queue forever. Successful
+        // decodes also warm the browser cache, so the stage's own image
+        // loads below resolve quickly.
+        const srcs = [...new Set(layers.filter(l => l.type === 'image' && l.src).map(l => l.src!))]
+        let assetsOk = true
+        for (const src of srcs) {
+          const ok = await Promise.race([
+            (async () => {
+              const im = new Image()
+              im.src = `file://${src}`
+              try { await im.decode(); return im.naturalWidth > 0 } catch { return false }
+            })(),
+            new Promise<boolean>(r => setTimeout(() => r(false), 10_000)),
+          ])
+          if (!ok) { assetsOk = false; break }
+        }
+        if (cancelled) return
+        if (!assetsOk) {
+          stale[String(ordinal)] = { reason: 'assets', at: Date.now() }
+          staleChanged = true
+          continue
+        }
+
+        // Mount the hidden stage with this variant's layers, wait for its
+        // Konva image nodes to attach their (cache-warm) bitmaps, snapshot.
+        setJob({ layers, fields })
+        await nextFrame()
+        await nextFrame()
+        const stage = stageRef.current
+        if (stage) {
+          const start = Date.now()
+          const pending = () => stage.find('Image').filter(node => {
+            const im = (node as Konva.Image).image()
+            if (!im) return true
+            return im instanceof HTMLImageElement && (!im.complete || im.naturalWidth === 0)
+          })
+          while (pending().length > 0 && Date.now() - start < 5000) {
+            await nextFrame()
+          }
+        }
+        if (cancelled) { setJob(null); return }
+        const url = stageRef.current?.toDataURL({ pixelRatio: 1 }) ?? null
+        setJob(null)
+        if (!url) continue
+        try {
+          // Same doc back + fresh PNG; saveCanvas also fires the scoped
+          // streams:changed so the row's thumbnail refreshes.
+          await window.api.thumbnailSaveCanvas(folderPath, date, doc, url, ordinal)
+          if (stale[String(ordinal)]) {
+            delete stale[String(ordinal)]
+            staleChanged = true
+          }
+        } catch (err) {
+          console.warn(`[thumbnail rerender] save failed for ${date} v${ordinal}:`, err)
+        }
+      }
+
+      if (staleChanged && !cancelled) {
+        await window.api.updateStreamMeta(folderPath, { smThumbnailStale: stale }).catch(() => {})
+      }
+    })()
+
+    return () => { cancelled = true; setJob(null) }
+  }, [request?.token]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!job) return null
+  const noop = () => {}
+  return (
+    // Offscreen but real: Konva needs an actual canvas to rasterize.
+    <div style={{ position: 'fixed', left: -100000, top: 0, width: CANVAS_W, height: CANVAS_H, pointerEvents: 'none' }} aria-hidden>
+      <Stage ref={stageRef} width={CANVAS_W} height={CANVAS_H} listening={false}>
+        <Layer listening={false}>
+          {job.layers.map(layer => {
+            const props: KonvaLayerNodeProps = {
+              layer,
+              isSelected: false,
+              onSelect: noop,
+              onChange: noop,
+              scale: 1,
+              onDragStart: noop,
+              onSnapDragMove: noop,
+              onDragEnd: noop,
+              onTransformEnd: noop,
+              onClearGuides: noop,
+              gridSnapEnabled: false,
+              mergeFields: job.fields,
+            }
+            if (layer.type === 'image') return <ImageNode key={layer.id} {...props} />
+            if (layer.type === 'shape') return <ShapeNode key={layer.id} {...props} />
+            return <TextNode key={layer.id} {...props} />
+          })}
+        </Layer>
+      </Stage>
     </div>
   )
 }
@@ -3192,7 +3365,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
 // ── Main ThumbnailPage ────────────────────────────────────────────────────────
 
 export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
-  const { pendingStream, clearPendingStream } = useThumbnailEditor()
+  const { pendingStream, clearPendingStream, rerenderRequest } = useThumbnailEditor()
   const { config, updateConfig } = useStore()
   const { setThumbnailHasCanvas } = usePageActivity()
   // Assets-panel options dropdown (show-from-season / show-from-topic-game).
@@ -4731,6 +4904,17 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
             smThumbnailTemplate: templateId,
           }, streamMetaKey(folderPath, date, config.streamsDir))
         }
+        // A successful save with a real PNG is a faithful render — clear
+        // this variant's background-rerender stale flag ("Could not load
+        // references") if one was set.
+        const staleMap = currentStream?.meta?.smThumbnailStale
+        if (pngDataUrl != null && staleMap?.[String(ordinal)]) {
+          const next = { ...staleMap }
+          delete next[String(ordinal)]
+          await window.api.updateStreamMeta(folderPath, {
+            smThumbnailStale: next,
+          }, streamMetaKey(folderPath, date, config.streamsDir)).catch(() => {})
+        }
         if (saveEpochRef.current === epoch) setIsDirty(false)
         // Bump the variant-preview cache buster so the switcher dropdown
         // shows the fresh PNG for whichever variant we just wrote.
@@ -5854,6 +6038,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-navy-900">
+      {/* Background re-render service — runs regardless of mode (this page
+          is always mounted). Renders on its OWN hidden stage, so an open
+          editing session is never disturbed. */}
+      <BackgroundRerender request={rerenderRequest} />
       {mode === 'overview' ? (
         <div className="flex flex-col flex-1 min-h-0 relative">
           <div className="px-6 py-4 border-b border-white/5 shrink-0">
