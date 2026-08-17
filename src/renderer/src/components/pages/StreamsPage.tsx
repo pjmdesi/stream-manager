@@ -58,6 +58,16 @@ import type { StreamFolder, StreamMeta } from '../../types'
  *  goes unnoticed — acceptable, the next check after expiry catches it. */
 const PUSH_OVERLAY_TTL_MS = 5 * 60 * 1000
 
+/** Strip line breaks, tabs, and plain spaces from the EDGES of a stored
+ *  title body. Interior whitespace — and exotic spaces like U+00A0 even at
+ *  the edges — is deliberately preserved: creators use unusual spacing in
+ *  titles for visual effect, and platforms only reliably strip ASCII
+ *  whitespace at the edges. Exists because the contenteditable title editor
+ *  can leave a leading newline in the body (found via todo streams #12:
+ *  that newline plus nbsp runs made Twitch's normalized copy byte-differ
+ *  forever). Applied on title save and by the load-time cleanup sweep. */
+const sanitizeTitleBody = (s: string): string => s.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '')
+
 /** Canonical _meta.json key for a stream. Mirrors the helper in
  *  ThumbnailPage; replicated here to avoid cross-page coupling while the
  *  new page is being built. Will consolidate to a shared util once the old
@@ -2095,6 +2105,8 @@ export function StreamsPage({
   // as "every template was deleted" — the sidebar's lazy cleanup keeps that
   // job. A binding that resolves is safe to bake: hand-edits clear the
   // binding at edit time, so drift can only come from a template change.
+  // The walk also piggybacks a one-time edge-whitespace cleanup of stored
+  // title bodies (sanitizeTitleBody).
   const updateMetaRef = useRef(updateMeta)
   useEffect(() => { updateMetaRef.current = updateMeta })
   useEffect(() => {
@@ -2114,6 +2126,15 @@ export function StreamsPage({
         if (yt && !sameTags(m.ytTags ?? [], yt.tags)) patch.ytTags = [...yt.tags]
         const tw = m.twitchTagsTemplateId ? twById.get(m.twitchTagsTemplateId) : undefined
         if (tw && !sameTags(m.twitchTags ?? [], tw.tags)) patch.twitchTags = [...tw.tags]
+        // Piggybacked cleanup: edge-sanitize stored title bodies written
+        // by older builds (the save path sanitizes now, so after one pass
+        // this never fires again — see sanitizeTitleBody).
+        if (typeof m.ytTitle === 'string' && sanitizeTitleBody(m.ytTitle) !== m.ytTitle) {
+          patch.ytTitle = sanitizeTitleBody(m.ytTitle)
+        }
+        if (typeof m.twitchTitle === 'string' && sanitizeTitleBody(m.twitchTitle) !== m.twitchTitle) {
+          patch.twitchTitle = sanitizeTitleBody(m.twitchTitle)
+        }
         if (Object.keys(patch).length > 0) {
           changed = true
           await updateMetaRef.current(f.relativePath, patch)
@@ -6566,9 +6587,10 @@ function SidebarDetail({
     if (tpl) onUpdateMeta({ twitchTags: tpl.tags, twitchTagsTemplateId: id })
     else onUpdateMeta({ twitchTagsTemplateId: id })
   }
-  const handleTwitchTitleSave = (v: string) => {
-    // Mirror handleTitleSave: hand-editing away from the bound
-    // template's body clears the binding.
+  const handleTwitchTitleSave = (raw: string) => {
+    // Mirror handleTitleSave: edge-sanitize, and hand-editing away from
+    // the bound template's body clears the binding.
+    const v = sanitizeTitleBody(raw)
     const partial: Partial<StreamMeta> = { twitchTitle: v }
     if (twitchTitleTplId) {
       const tpl = ytTitleTemplates.find(t => t.id === twitchTitleTplId)
@@ -6576,13 +6598,16 @@ function SidebarDetail({
     }
     onUpdateMeta(partial)
   }
-  const handleTitleSave = (v: string) => {
-    // The title field stores the raw template body. Diverging from the
-    // bound template's body means the user hand-edited the template
-    // for this stream — clear the binding so future template edits
-    // don't surprise them with a remote overwrite via lazy-refresh.
-    // Both writes go through one updateMeta call so the disk write is
-    // atomic.
+  const handleTitleSave = (raw: string) => {
+    // The title field stores the raw template body, edge-sanitized (the
+    // contenteditable editor can leave a leading newline — see
+    // sanitizeTitleBody; interior whitespace is preserved verbatim).
+    // Diverging from the bound template's body means the user
+    // hand-edited the template for this stream — clear the binding so
+    // future template edits don't surprise them with a remote overwrite
+    // via lazy-refresh. Both writes go through one updateMeta call so
+    // the disk write is atomic.
+    const v = sanitizeTitleBody(raw)
     const partial: Partial<StreamMeta> = { ytTitle: v }
     if (titleTplId) {
       const tpl = ytTitleTemplates.find(t => t.id === titleTplId)
