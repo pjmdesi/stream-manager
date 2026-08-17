@@ -51,6 +51,13 @@ import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncS
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import type { StreamFolder, StreamMeta } from '../../types'
 
+/** How long the out-of-sync check trusts just-pushed values over what the
+ *  YouTube API returns (its read-after-write lag is usually seconds, but
+ *  tag reads through videos.list have been observed stale for minutes).
+ *  Within this window a genuine Studio-side edit to a just-pushed video
+ *  goes unnoticed — acceptable, the next check after expiry catches it. */
+const PUSH_OVERLAY_TTL_MS = 5 * 60 * 1000
+
 /** Canonical _meta.json key for a stream. Mirrors the helper in
  *  ThumbnailPage; replicated here to avoid cross-page coupling while the
  *  new page is being built. Will consolidate to a shared util once the old
@@ -554,6 +561,37 @@ export function StreamsPage({
   // Last check failure — drives the panel's "check failed" + Retry state
   // instead of the old infinite "Checking YouTube…" spinner.
   const [outOfSyncError, setOutOfSyncError] = useState<string | null>(null)
+  // Values we KNOW just landed on YouTube, per video id. YouTube's
+  // read-after-write can serve stale snippets for a while after an update
+  // (worst through the videos.list batches used for older videos, which
+  // aren't in the broadcasts/VOD pools where the push path overlays its own
+  // refetch), so for a grace window the out-of-sync check trusts these over
+  // whatever the API returns. Without this a bulk push flipped each item
+  // into "Changed on YouTube": local meta updated instantly while the cached
+  // remote stayed pre-push, and the post-push re-check then read YouTube's
+  // stale values and kept the items there until its index caught up.
+  const recentPushOverlayRef = useRef(new Map<string, {
+    at: number
+    title: string
+    description: string
+    tags: string[]
+    categoryId?: string
+    privacy?: string
+    scheduledStartTime?: string
+  }>())
+  const applyPushOverlay = useCallback((b: LiveBroadcast): LiveBroadcast => {
+    const ov = recentPushOverlayRef.current.get(b.id)
+    if (!ov || Date.now() - ov.at > PUSH_OVERLAY_TTL_MS) return b
+    const next: LiveBroadcast = {
+      ...b,
+      snippet: { ...b.snippet, title: ov.title, description: ov.description, tags: [...ov.tags] },
+      status: { ...b.status },
+    }
+    if (ov.categoryId) next.snippet.categoryId = ov.categoryId
+    if (ov.privacy) next.status.privacyStatus = ov.privacy
+    if (ov.scheduledStartTime) next.snippet.scheduledStartTime = ov.scheduledStartTime
+    return next
+  }, [])
   const [twConnected, setTwConnected] = useState(false)
   // Cached Twitch channel snapshot — the title / category / tags
   // currently set on the channel. Compared against local stream meta
@@ -1809,6 +1847,27 @@ export function StreamsPage({
           await window.api.youtubeUpdateVideoStatus(meta.ytVideoId, privacy)
         }
       }
+      // The metadata (and any staged privacy) is now on YouTube. Record the
+      // pushed values so the out-of-sync check can overlay them over stale
+      // API reads for a grace window, and patch the panel's cached remote
+      // entry immediately — during a bulk push the panel recomputes after
+      // every meta write, and without this each pushed item flipped into
+      // "Changed on YouTube" against the pre-push cache until the final
+      // re-check.
+      const pushedId = meta.ytVideoId
+      recentPushOverlayRef.current.set(pushedId, {
+        at: Date.now(),
+        title,
+        description,
+        tags: [...tags],
+        categoryId,
+        privacy,
+        scheduledStartTime: scheduleApplied && newScheduledStartTime ? newScheduledStartTime : undefined,
+      })
+      setOutOfSyncRemote(prev => {
+        const cur = prev[pushedId]
+        return cur ? { ...prev, [pushedId]: applyPushOverlay(cur) } : prev
+      })
       if (thumbToUpload) {
         try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload) }
         catch (thumbErr: any) {
@@ -1941,7 +2000,7 @@ export function StreamsPage({
     } catch (err: any) {
       showBanner({ streamKey: folder.relativePath, type: 'error', message: `YouTube push failed: ${err?.message ?? String(err)}` })
     }
-  }, [showBanner, setYtBroadcasts, setYtVods, updateMeta, folders, ytBroadcasts])
+  }, [showBanner, setYtBroadcasts, setYtVods, updateMeta, folders, ytBroadcasts, applyPushOverlay])
 
   // ── Out-of-sync panel (sidebar empty state) ───────────────────────────────
   // Compares every linked stream's local meta against YouTube and surfaces the
@@ -1967,10 +2026,16 @@ export function StreamsPage({
       const missing = linkedIds.filter(id => !poolById.has(id))
       const fetched = missing.length > 0 ? await window.api.youtubeGetVideosByIds(missing) : []
       const fetchedById = new Map(fetched.map(b => [b.id, b]))
+      // Drop expired push overlays, then overlay the surviving ones onto
+      // whatever the pools/fetch returned — recently pushed values beat a
+      // possibly-stale API read (see recentPushOverlayRef).
+      for (const [id, ov] of recentPushOverlayRef.current) {
+        if (Date.now() - ov.at > PUSH_OVERLAY_TTL_MS) recentPushOverlayRef.current.delete(id)
+      }
       const map: Record<string, LiveBroadcast> = {}
       for (const id of linkedIds) {
         const b = poolById.get(id) ?? fetchedById.get(id)
-        if (b) map[id] = b
+        if (b) map[id] = applyPushOverlay(b)
       }
       // Hash each linked stream's thumbnail (batched) so the panel can flag
       // "thumbnail changed since last push" — local-only, always a push.
@@ -1995,7 +2060,7 @@ export function StreamsPage({
     } finally {
       setOutOfSyncLoading(false)
     }
-  }, [ytConnected, folders, ytBroadcasts, ytVods, classifyNetFailure])
+  }, [ytConnected, folders, ytBroadcasts, ytVods, classifyNetFailure, applyPushOverlay])
   // Ref to the latest checker so the auto-trigger doesn't depend on `folders`
   // (which would re-fetch on every optimistic meta write during a bulk resolve).
   const refreshOutOfSyncRef = useRef(refreshOutOfSync)
@@ -2017,6 +2082,48 @@ export function StreamsPage({
     if (netProblem === 'offline') return
     refreshOutOfSyncRef.current()
   }, [isVisible, selectedStreamKey, ytConnected, loading, folders.length, ytBroadcasts.length, ytVods.length, netProblem])
+
+  // Eager tag-template propagation. The sidebar's lazy sync only refreshes a
+  // bound stream's tags when THAT stream is opened, so editing a template
+  // reached its streams one visit at a time — the out-of-sync panel missed
+  // every unvisited one, and Re-check couldn't surface them (it refreshes
+  // the REMOTE side; the stale side was local meta). Sweep every bound
+  // stream whenever the template lists change (and once the folder list
+  // loads) and bake drifted tags immediately, then re-run the panel check.
+  // Orphaned bindings are deliberately NOT cleared here: the sweep also
+  // runs against the initial empty template state, which must never be read
+  // as "every template was deleted" — the sidebar's lazy cleanup keeps that
+  // job. A binding that resolves is safe to bake: hand-edits clear the
+  // binding at edit time, so drift can only come from a template change.
+  const updateMetaRef = useRef(updateMeta)
+  useEffect(() => { updateMetaRef.current = updateMeta })
+  useEffect(() => {
+    if (loading) return
+    let cancelled = false
+    const run = async () => {
+      const ytById = new Map(ytTagTemplates.map(t => [t.id, t] as const))
+      const twById = new Map(twitchTagTemplates.map(t => [t.id, t] as const))
+      const sameTags = (a: string[], b: string[]) => a.length === b.length && a.every((t, i) => t === b[i])
+      let changed = false
+      for (const f of foldersRef.current) {
+        if (cancelled) return
+        const m = f.meta
+        if (!m) continue
+        const patch: Partial<StreamMeta> = {}
+        const yt = m.ytTagsTemplateId ? ytById.get(m.ytTagsTemplateId) : undefined
+        if (yt && !sameTags(m.ytTags ?? [], yt.tags)) patch.ytTags = [...yt.tags]
+        const tw = m.twitchTagsTemplateId ? twById.get(m.twitchTagsTemplateId) : undefined
+        if (tw && !sameTags(m.twitchTags ?? [], tw.tags)) patch.twitchTags = [...tw.tags]
+        if (Object.keys(patch).length > 0) {
+          changed = true
+          await updateMetaRef.current(f.relativePath, patch)
+        }
+      }
+      if (changed && !cancelled) await refreshOutOfSyncRef.current()
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [ytTagTemplates, twitchTagTemplates, loading])
 
   const outOfSyncItems = useMemo<OutOfSyncItem[]>(() => {
     const out: OutOfSyncItem[] = []
