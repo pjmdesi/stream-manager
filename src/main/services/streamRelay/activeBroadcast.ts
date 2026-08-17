@@ -8,8 +8,9 @@
  *
  * The "effective active" broadcast is:
  *   - the manual pick, if it's still in the upcoming list
- *   - else the soonest-upcoming broadcast (by scheduledStartTime)
- *   - else null (nothing to bind to)
+ *   - else the SAME-DAY broadcast scheduled closest to now (see
+ *     pickAutoTarget — the auto-pick never reaches into a future day)
+ *   - else null (nothing to bind to; the relay passes through unmanaged)
  *
  * This service is *passive* in Phase 1b — it just holds and exposes the
  * picked broadcast. Phase 1c will subscribe to RelayManager's stream-started
@@ -102,10 +103,10 @@ class ActiveBroadcastService extends EventEmitter {
       if (found) return { broadcast: found, isManual: true, manualPickStale: false }
       // Manual pick no longer in upcoming — fall through to auto-pick but
       // flag the staleness so the UI can prompt the user.
-      const auto = pickSoonest(upcoming)
+      const auto = pickAutoTarget(upcoming)
       return { broadcast: auto, isManual: false, manualPickStale: true }
     }
-    const auto = pickSoonest(upcoming)
+    const auto = pickAutoTarget(upcoming)
     return { broadcast: auto, isManual: false, manualPickStale: false }
   }
 
@@ -155,20 +156,39 @@ class ActiveBroadcastService extends EventEmitter {
   }
 }
 
-/** Prefer the soonest future-scheduled broadcast; if every broadcast is in
- *  the past, fall back to the most-recently-scheduled one (closest to now).
- *  Returns null if the list is empty. */
-function pickSoonest(broadcasts: LiveBroadcast[]): LiveBroadcast | null {
-  if (broadcasts.length === 0) return null
+/** Auto-pick window around "now" that a broadcast on a DIFFERENT calendar
+ *  day may still fall into — the midnight exception: an 11:30 PM stream
+ *  being started at 12:30 AM, or an early setup for a 12:15 AM stream. */
+const CROSS_DAY_WINDOW_MS = 3 * 60 * 60 * 1000
+
+function sameLocalDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+/** Auto-pick target: the ELIGIBLE broadcast scheduled closest to now
+ *  (past or future — a late start stays the closest all evening).
+ *  Eligible = scheduled on the current local calendar day, or within
+ *  CROSS_DAY_WINDOW_MS of now. Returns null when nothing qualifies.
+ *
+ *  The auto-pick must NEVER reach into a future day: the old
+ *  soonest-future rule meant being minutes late for today's stream
+ *  flipped the pick to the next-scheduled broadcast (even one a week
+ *  out) and relayed the live stream onto it. No target → the relay
+ *  passes the stream through unmanaged (YouTube's default ingest
+ *  catches it), which is the safe failure; manual picks can still
+ *  target any day. Broadcasts with no scheduledStartTime (e.g. the
+ *  channel's persistent default) parse to epoch and are never
+ *  auto-picked either. */
+function pickAutoTarget(broadcasts: LiveBroadcast[]): LiveBroadcast | null {
   const now = Date.now()
-  const withTime = broadcasts.map(b => ({
-    b,
-    t: new Date(b.snippet?.scheduledStartTime ?? 0).getTime(),
-  }))
-  const future = withTime.filter(x => x.t >= now).sort((a, b) => a.t - b.t)
-  if (future.length > 0) return future[0].b
-  const past = [...withTime].sort((a, b) => b.t - a.t)
-  return past[0].b
+  const nowDate = new Date(now)
+  const eligible = broadcasts
+    .map(b => ({ b, t: new Date(b.snippet?.scheduledStartTime ?? 0).getTime() }))
+    .filter(x => Number.isFinite(x.t) && x.t > 0)
+    .filter(x => sameLocalDay(new Date(x.t), nowDate) || Math.abs(x.t - now) <= CROSS_DAY_WINDOW_MS)
+  if (eligible.length === 0) return null
+  eligible.sort((a, b) => Math.abs(a.t - now) - Math.abs(b.t - now))
+  return eligible[0].b
 }
 
 export const activeBroadcastService = new ActiveBroadcastService()
