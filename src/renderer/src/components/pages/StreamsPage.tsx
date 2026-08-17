@@ -58,6 +58,29 @@ import type { StreamFolder, StreamMeta } from '../../types'
  *  goes unnoticed — acceptable, the next check after expiry catches it. */
 const PUSH_OVERLAY_TTL_MS = 5 * 60 * 1000
 
+// ── Twitch in-sync instrumentation (todo streams #12) ────────────────────────
+// The Twitch match check has repeatedly flagged streams as mismatched when
+// the user considers them matched, and several blind fixes haven't stuck, so
+// log the exact values each verdict compared. Strings are escaped so
+// invisible differences (nbsp, zero-width characters, CRLF) show up in the
+// log, and consecutive identical payloads are deduped so the render loop
+// produces one line per actual change, not one per render. Logs go to the
+// renderer DevTools console. Remove once the false flag is caught and fixed.
+const twitchSyncDebugLast = new Map<string, string>()
+/** Quote a string, escaping everything outside printable ASCII. */
+function twitchSyncReveal(s: string): string {
+  const escaped = s
+    .replace(/[\\"]/g, ch => `\\${ch}`)
+    .replace(/[^\x20-\x7e]/g, ch => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`)
+  return `"${escaped}"`
+}
+function logTwitchSyncCheck(streamKey: string, payload: Record<string, unknown>): void {
+  const serialized = JSON.stringify(payload)
+  if (twitchSyncDebugLast.get(streamKey) === serialized) return
+  twitchSyncDebugLast.set(streamKey, serialized)
+  console.log(`[twitch-sync] ${streamKey}`, payload)
+}
+
 /** Canonical _meta.json key for a stream. Mirrors the helper in
  *  ThumbnailPage; replicated here to avoid cross-page coupling while the
  *  new page is being built. Will consolidate to a shared util once the old
@@ -8413,6 +8436,25 @@ function SidebarDetail({
             && twEffectiveGame.trim() === (meta?.twitchLastPushedGame ?? '').trim()
             && twTagKey(twEffectiveTags) === twTagKey(meta?.twitchLastPushedTags ?? [])
           const twitchInSync = matchesActualTwitch || matchesLastPushed
+          // Instrumentation for the recurring false "mismatched" flag — see
+          // logTwitchSyncCheck at module scope. Logs once per change of any
+          // compared value, with non-ASCII characters escaped.
+          if (twConnected) {
+            logTwitchSyncCheck(folder.relativePath, {
+              verdict: twitchInSync ? 'in-sync' : 'MISMATCH',
+              titleInSync, gameInSync, tagsInSync,
+              matchesActualTwitch, hasLastPushedSnapshot, snapshotStillReflectsTwitch, matchesLastPushed,
+              localTitle: twitchSyncReveal(twEffectiveTitle),
+              channelTitle: twitchChannel ? twitchSyncReveal(twitchChannel.title) : '<no channel cache>',
+              localGame: twitchSyncReveal(twEffectiveGame),
+              channelGame: twitchChannel ? twitchSyncReveal(twitchChannel.gameName) : '<no channel cache>',
+              localTags: twitchSyncReveal(twTagKey(twEffectiveTags)),
+              channelTags: twitchChannel ? twitchSyncReveal(twTagKey(twitchChannel.tags)) : '<no channel cache>',
+              lastPushedTitle: meta?.twitchLastPushedTitle === undefined ? '<never pushed>' : twitchSyncReveal(meta.twitchLastPushedTitle),
+              lastPushedGame: meta?.twitchLastPushedGame === undefined ? '<unset>' : twitchSyncReveal(meta.twitchLastPushedGame),
+              lastPushedTags: meta?.twitchLastPushedTags === undefined ? '<unset>' : twitchSyncReveal(twTagKey(meta.twitchLastPushedTags)),
+            })
+          }
           // Twitch channel info is one global blob — pushing for a
           // past stream would overwrite whatever's currently set on
           // the channel (for the actual current / next stream) with
