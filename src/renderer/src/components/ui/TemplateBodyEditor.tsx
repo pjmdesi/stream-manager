@@ -25,7 +25,7 @@ export const MERGE_FIELD_CHIP_CLASS_INAPPLICABLE = 'inline-flex items-center box
  *  editor is given a `resolvedValues` map so the user sees what each token
  *  actually renders to, inline. `align-bottom` keeps it sitting on the text
  *  baseline; the column grows to whatever the value needs. */
-export const MERGE_FIELD_VALUE_CHIP_CLASS = 'inline-flex flex-col align-bottom box-border mx-px my-0.5 rounded border border-purple-800 bg-purple-950/60 px-1.5 py-0.5 select-none'
+export const MERGE_FIELD_VALUE_CHIP_CLASS = 'inline-flex flex-col align-bottom box-border mx-px my-0.5 rounded border border-purple-800 bg-purple-950/60 px-1.5 py-0.5'
 
 // ─── Source <-> DOM helpers ─────────────────────────────────────────────────
 
@@ -111,8 +111,12 @@ function render(
         chip.appendChild(nameEl)
         chip.appendChild(valEl)
       } else {
+        // No `select-none` here: chips must participate in text selection so
+        // a drag-select highlights them and copy/cut can include them (the
+        // editor's copy handler serializes selected chips back to their
+        // `{key}` tokens — todo streams #11).
         const baseCls = inapplicable ? MERGE_FIELD_CHIP_CLASS_INAPPLICABLE : MERGE_FIELD_CHIP_CLASS
-        chip.className = baseCls + ' mx-px align-baseline select-none'
+        chip.className = baseCls + ' mx-px align-baseline'
         chip.textContent = key
       }
       el.appendChild(chip)
@@ -139,20 +143,47 @@ function sourceLengthOf(node: Node): number {
   return n
 }
 
-/** Cursor's start position as an offset into the serialized source. */
-function getCursorOffset(root: HTMLElement): number {
-  const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) return -1
-  const range = sel.getRangeAt(0)
-  if (!root.contains(range.startContainer)) return -1
+/** Map an arbitrary DOM point (container + in-container offset, as found on
+ *  a selection Range endpoint) to an offset into the serialized source.
+ *  Chips are atomic: a point that lands INSIDE a chip's subtree snaps to the
+ *  chip's source start (`snap: 'start'`) or past its token (`snap: 'end'`),
+ *  so a mouse selection whose endpoint the browser anchored mid-chip still
+ *  includes or excludes the whole `{key}` token, never a fragment of it. */
+function sourceOffsetAt(
+  root: HTMLElement,
+  container: Node,
+  offsetInContainer: number,
+  snap: 'start' | 'end',
+): number {
   let offset = 0
+  if (container === root) {
+    // Endpoint expressed as a child index of the editor root (select-all,
+    // triple-click).
+    for (let i = 0; i < offsetInContainer; i++) {
+      const child = root.childNodes[i]
+      if (child) offset += sourceLengthOf(child)
+    }
+    return offset
+  }
   const walk = (node: Node): boolean => {
-    if (node === range.startContainer) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement
+      const tok = el.dataset.token
+      if (tok) {
+        if (el === container || el.contains(container)) {
+          if (snap === 'end') offset += tok.length
+          return true
+        }
+        offset += tok.length
+        return false
+      }
+    }
+    if (node === container) {
       if (node.nodeType === Node.TEXT_NODE) {
-        offset += range.startOffset
+        offset += offsetInContainer
         return true
       }
-      for (let i = 0; i < range.startOffset; i++) {
+      for (let i = 0; i < offsetInContainer; i++) {
         const child = node.childNodes[i]
         if (child) offset += sourceLengthOf(child)
       }
@@ -162,8 +193,6 @@ function getCursorOffset(root: HTMLElement): number {
       offset += node.textContent?.length ?? 0
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const el = node as HTMLElement
-      const tok = el.dataset.token
-      if (tok) { offset += tok.length; return false }
       if (el.tagName === 'BR') { offset += 1; return false }
       for (const child of Array.from(node.childNodes)) {
         if (walk(child)) return true
@@ -175,6 +204,41 @@ function getCursorOffset(root: HTMLElement): number {
     if (walk(child)) return offset
   }
   return offset
+}
+
+/** Cursor's start position as an offset into the serialized source. */
+function getCursorOffset(root: HTMLElement): number {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return -1
+  const range = sel.getRangeAt(0)
+  if (!root.contains(range.startContainer)) return -1
+  return sourceOffsetAt(root, range.startContainer, range.startOffset, 'start')
+}
+
+/** The current selection as a source-offset range inside the editor, or null
+ *  when there's no usable selection (collapsed, or reaching outside the
+ *  editor). Drives copy/cut serialization. */
+function getSelectedSourceRange(root: HTMLElement): { start: number; end: number } | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return null
+  const range = sel.getRangeAt(0)
+  if (range.collapsed) return null
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null
+  const start = sourceOffsetAt(root, range.startContainer, range.startOffset, 'start')
+  const end = sourceOffsetAt(root, range.endContainer, range.endOffset, 'end')
+  return end > start ? { start, end } : null
+}
+
+/** Count the known-key `{key}` tokens in a source string — i.e. how many
+ *  chips a canonical render of it would contain. Used to detect a body
+ *  whose DOM reads back identically to the source but shows a token as
+ *  plain text (the just-pasted-token case) and needs a chip rebuild. */
+function countKnownTokens(text: string, knownKeys: ReadonlySet<string>): number {
+  const re = /\{(\w+)\}/g
+  let n = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) if (knownKeys.has(m[1])) n++
+  return n
 }
 
 function setCursorOffset(root: HTMLElement, target: number): void {
@@ -379,7 +443,13 @@ export function TemplateBodyEditor({
     if (!el) return
     const inapplicableChanged = lastInapplicableRef.current !== inapplicableKeys
     const resolvedChanged = lastResolvedRef.current !== resolvedValues
-    if (!inapplicableChanged && !resolvedChanged && serialize(el) === local) return
+    // The serialize comparison alone can't spot a known `{key}` token
+    // sitting in the DOM as plain text (e.g. one just pasted): the text
+    // reads back identical to the source. Also require the DOM's chip
+    // count to match what a canonical render would produce, so pasted
+    // tokens chip-ify immediately (todo streams #11).
+    const domIsCanonical = el.querySelectorAll('[data-token]').length === countKnownTokens(local, knownKeys)
+    if (!inapplicableChanged && !resolvedChanged && domIsCanonical && serialize(el) === local) return
     const owns = document.activeElement === el
     const offset = owns ? getCursorOffset(el) : -1
     render(el, local, knownKeys, inapplicableKeys, resolvedValues)
@@ -573,11 +643,35 @@ export function TemplateBodyEditor({
 
   // Paste as plain text. Single-line: strip newlines to spaces.
   // Multiline: keep newlines so paragraphs survive the paste.
+  // Pasted `{key}` tokens chip-ify via the canonical-DOM check in the
+  // render effect above.
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     e.preventDefault()
     const raw = e.clipboardData.getData('text/plain')
     const text = multiline ? raw.replace(/\r\n/g, '\n') : raw.replace(/\r?\n/g, ' ')
     document.execCommand('insertText', false, text)
+  }
+
+  // Copy/cut serialize the selected range from the SOURCE string, so chips
+  // leave the editor as their `{key}` tokens instead of their display text.
+  // The browser's default copy reads the chip's visible label ("game", or a
+  // resolved value) — pasting that anywhere would lose the merge field.
+  // Slicing the serialized source at the selection's source offsets keeps
+  // tokens intact for any destination: another merge-field editor re-chips
+  // them, a plain text field gets the raw template text (todo streams #11).
+  const handleCopy = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const el = editorRef.current
+    if (!el) return
+    const range = getSelectedSourceRange(el)
+    if (!range) return
+    e.preventDefault()
+    e.clipboardData.setData('text/plain', serialize(el).slice(range.start, range.end))
+  }
+  const handleCut = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    handleCopy(e)
+    // Only delete when our serialization actually claimed the event —
+    // otherwise let the browser's default cut run.
+    if (e.defaultPrevented) document.execCommand('delete')
   }
 
   // Inapplicable-chip hover state. The chip is created imperatively
@@ -619,6 +713,8 @@ export function TemplateBodyEditor({
       onInput={handleInput}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
+      onCopy={handleCopy}
+      onCut={handleCut}
       onBlur={handleBlur}
       onMouseOver={handleEditorMouseOver}
       onMouseOut={handleEditorMouseOut}
