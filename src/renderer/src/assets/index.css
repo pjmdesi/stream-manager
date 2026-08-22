@@ -206,6 +206,22 @@ input.volume-slider-mt::-webkit-slider-runnable-track {
   pointer-events: none;
 }
 
+/* Merge-field chips inside a text selection. Chips have opaque backgrounds,
+   so the native ::selection tint doesn't read on them even though they're
+   part of the range; the editor mirrors the selection onto data-selected
+   (TemplateBodyEditor's selectionchange listener) so inclusion is visible.
+   Purple for normal/value chips, red-flavored for inapplicable chips. */
+.template-body-editor [data-token][data-selected] {
+  background-color: rgb(107 33 168); /* purple-800 */
+  border-color: rgb(192 132 252);    /* purple-400 */
+  color: rgb(243 232 255);           /* purple-100 */
+}
+.template-body-editor [data-token][data-inapplicable][data-selected] {
+  background-color: rgb(153 27 27); /* red-800 */
+  border-color: rgb(248 113 113);   /* red-400 */
+  color: rgb(254 226 226);          /* red-100 */
+}
+
 /* Fade-in utility for elements whose CSS opacity transition should fire
    on the very first paint after mount. CSS transitions only animate
    property CHANGES, so without a "from" value the element pops in at

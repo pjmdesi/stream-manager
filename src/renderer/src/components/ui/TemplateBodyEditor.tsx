@@ -354,6 +354,17 @@ function selectSourceRange(root: HTMLElement, start: number, end: number): boole
   return true
 }
 
+// ─── Source-level undo history ──────────────────────────────────────────────
+// The chip rebuild replaces the editor's DOM imperatively, outside the
+// browser's native undo stack, so native undo is permanently broken here:
+// after a chip-ifying paste, the first Ctrl+Z targeted DOM that no longer
+// existed (nothing happened) and further ones replayed stale states (the
+// paste re-appeared). The editor owns history instead — source snapshots
+// plus caret, coalesced per typing burst — and routes Ctrl+Z / Ctrl+Shift+Z /
+// Ctrl+Y and the native historyUndo/historyRedo beforeinput events to it.
+const HIST_LIMIT = 200
+const HIST_COALESCE_MS = 600
+
 // ─── TemplateBodyEditor ─────────────────────────────────────────────────────
 
 /**
@@ -429,11 +440,80 @@ export function TemplateBodyEditor({
   const aiFetcherRef = useRef(aiFetcher)
   aiFetcherRef.current = aiFetcher
 
+  // ── Undo/redo history (see the module-level comment above HIST_LIMIT) ─────
+  const histRef = useRef<{ text: string; cursor: number }[]>([])
+  const histIdxRef = useRef(-1)
+  // Set while applyHistory writes `local` so the recording effect doesn't
+  // push the restored state as a new entry.
+  const histSuppressRef = useRef(false)
+  // Set when the props-sync below replaces the text wholesale — the history
+  // re-baselines instead of recording the external value as an edit.
+  const histResetRef = useRef(false)
+  const histLastPushRef = useRef(0)
+  /** Force the NEXT change into its own history entry (no coalescing) —
+   *  called before discrete operations: paste, cut, chip insert, AI splice. */
+  const histBreak = () => { histLastPushRef.current = 0 }
+
   // Focus-aware refresh — only sync from props when the user isn't
-  // mid-edit. Same pattern as EditableTextField.
+  // mid-edit. Same pattern as EditableTextField. An external value is a
+  // fresh baseline, not an undoable edit.
   useEffect(() => {
-    if (document.activeElement !== editorRef.current) setLocal(value)
+    if (document.activeElement !== editorRef.current && value !== localRef.current) {
+      histResetRef.current = true
+      setLocal(value)
+    }
   }, [value])
+
+  // Record history on every source change. Runs after the chip-render
+  // layout effect, so the caret read here reflects the restored cursor.
+  useEffect(() => {
+    if (histSuppressRef.current) { histSuppressRef.current = false; return }
+    if (histResetRef.current || histRef.current.length === 0) {
+      histResetRef.current = false
+      histRef.current = [{ text: local, cursor: local.length }]
+      histIdxRef.current = 0
+      histLastPushRef.current = 0
+      return
+    }
+    if (histRef.current[histIdxRef.current]?.text === local) return
+    const el = editorRef.current
+    const caret = el && document.activeElement === el ? getCursorOffset(el) : -1
+    const entry = { text: local, cursor: caret >= 0 ? caret : local.length }
+    const now = Date.now()
+    // A new edit invalidates any redo tail; when the tail was cut, the new
+    // entry must NOT coalesce into the state it branched from.
+    const wasAtEnd = histIdxRef.current === histRef.current.length - 1
+    histRef.current = histRef.current.slice(0, histIdxRef.current + 1)
+    const coalesce = wasAtEnd
+      && now - histLastPushRef.current < HIST_COALESCE_MS
+      && histRef.current.length > 1  // never merge into the baseline entry
+    if (coalesce) histRef.current[histRef.current.length - 1] = entry
+    else histRef.current.push(entry)
+    if (histRef.current.length > HIST_LIMIT) histRef.current.shift()
+    histIdxRef.current = histRef.current.length - 1
+    histLastPushRef.current = now
+  }, [local])
+
+  const applyHistory = useCallback((idx: number) => {
+    const entry = histRef.current[idx]
+    if (!entry) return
+    histIdxRef.current = idx
+    if (aiPendingRef.current) setAiPending(null)
+    if (entry.text !== localRef.current) {
+      histSuppressRef.current = true
+      setLocal(entry.text)
+    }
+    requestAnimationFrame(() => {
+      const el = editorRef.current
+      if (el) { el.focus(); setCursorOffset(el, entry.cursor) }
+    })
+  }, [])
+  const histUndo = useCallback(() => {
+    if (histIdxRef.current > 0) applyHistory(histIdxRef.current - 1)
+  }, [applyHistory])
+  const histRedo = useCallback(() => {
+    if (histIdxRef.current < histRef.current.length - 1) applyHistory(histIdxRef.current + 1)
+  }, [applyHistory])
 
   // Re-render the editor whenever local diverges from what the DOM
   // currently shows OR when the inapplicable set changes (chip colors
@@ -491,6 +571,7 @@ export function TemplateBodyEditor({
       // Bail if the field changed underneath us or a suggestion is already
       // showing — avoids clobbering edits made during the request.
       if (result && localRef.current === base && !aiPendingRef.current) {
+        histBreak()  // the spliced suggestion is its own undo step
         setLocal(base.slice(0, safeOffset) + result + base.slice(safeOffset))
         setAiPending({ start: safeOffset, length: result.length })
       }
@@ -533,6 +614,7 @@ export function TemplateBodyEditor({
       const offset = owns ? getCursorOffset(el) : local.length
       const safeOffset = offset < 0 ? local.length : offset
       const next = local.slice(0, safeOffset) + text + local.slice(safeOffset)
+      histBreak()  // a picker insert is its own undo step
       setLocal(next)
       requestAnimationFrame(() => {
         const e2 = editorRef.current
@@ -597,6 +679,22 @@ export function TemplateBodyEditor({
   //                 default <div>/<br>. Our serializer handles all three
   //                 just in case.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // ── Undo/redo → the editor's own history (native undo can't survive
+    // the imperative chip rebuilds — see the history block). stopPropagation
+    // keeps App.tsx's global Ctrl+Shift+Z handler (native webContents redo)
+    // from double-firing on the same keystroke.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.shiftKey) histRedo(); else histUndo()
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'y') {
+      e.preventDefault()
+      e.stopPropagation()
+      histRedo()
+      return
+    }
     // ── AI suggestion controls ──
     if ((e.ctrlKey || e.metaKey) && e.key === ' ') {
       e.preventDefault()
@@ -620,6 +718,7 @@ export function TemplateBodyEditor({
         e.preventDefault()
         const p = aiPendingRef.current
         const base = localRef.current
+        histBreak()
         setLocal(base.slice(0, p.start) + base.slice(p.start + p.length))
         setAiPending(null)
         requestAnimationFrame(() => {
@@ -647,6 +746,7 @@ export function TemplateBodyEditor({
   // render effect above.
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     e.preventDefault()
+    histBreak()  // a paste is its own undo step
     const raw = e.clipboardData.getData('text/plain')
     const text = multiline ? raw.replace(/\r\n/g, '\n') : raw.replace(/\r?\n/g, ' ')
     document.execCommand('insertText', false, text)
@@ -671,8 +771,43 @@ export function TemplateBodyEditor({
     handleCopy(e)
     // Only delete when our serialization actually claimed the event —
     // otherwise let the browser's default cut run.
-    if (e.defaultPrevented) document.execCommand('delete')
+    if (e.defaultPrevented) {
+      histBreak()  // a cut is its own undo step
+      document.execCommand('delete')
+    }
   }
+
+  // Context-menu / menu-role undo arrives as a beforeinput instead of a
+  // keystroke — route it into the editor's history and block the native
+  // stack (which the chip rebuilds have already invalidated).
+  const handleBeforeInput = (e: React.FormEvent<HTMLDivElement>) => {
+    const inputType = (e.nativeEvent as InputEvent).inputType
+    if (inputType === 'historyUndo') { e.preventDefault(); histUndo() }
+    else if (inputType === 'historyRedo') { e.preventDefault(); histRedo() }
+  }
+
+  // Mirror the live selection onto the chips. Chips paint opaque
+  // backgrounds, so the native selection tint is invisible on them even
+  // though they ARE part of the range — toggle a data-selected attribute
+  // that the .template-body-editor CSS keys off (index.css) so inclusion
+  // is visually obvious.
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const el = editorRef.current
+      if (!el) return
+      const sel = window.getSelection()
+      const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
+      const active = range && !range.collapsed
+        && el.contains(range.startContainer) && el.contains(range.endContainer)
+        ? range : null
+      el.querySelectorAll<HTMLElement>('[data-token]').forEach(chip => {
+        if (active && active.intersectsNode(chip)) chip.setAttribute('data-selected', '')
+        else chip.removeAttribute('data-selected')
+      })
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [])
 
   // Inapplicable-chip hover state. The chip is created imperatively
   // (so the shared Tooltip can't wrap it directly), so we delegate
@@ -712,6 +847,7 @@ export function TemplateBodyEditor({
       suppressContentEditableWarning
       onInput={handleInput}
       onKeyDown={handleKeyDown}
+      onBeforeInput={handleBeforeInput}
       onPaste={handlePaste}
       onCopy={handleCopy}
       onCut={handleCut}

@@ -32,6 +32,7 @@
     * description template [checked by default]
     * youtube tag templates
     * twitch tag templates
+15. Upgrade to AI suggestions for stream titles and descriptions: This might need to be a new setting. When the user requests an AI suggestion and rejects it with escape, the next time they request an AI suggestion for the same field on the same stream item, it should remember the previously rejected suggestions, pass them to the model, and encourage the modal to not suggest the same thing. I get the same suggestion multiple times, and if I've already rejected it, I don't want to see it again. The setting for this should be in the main app setting page under a new AI suggestions section. This whole section should be hidden if the user has not connected an AI service through integrations. The setting should be called "Prevent repeat suggestions per stream item" and should be on by default. When on, the previous suggestions for each stream item should be passed as additional info to the model and the model should be told to avoid the same suggestions.
 
 ### Player
 
