@@ -52,14 +52,25 @@ export function useFieldSuggestion(
 
   // After React renders the controlled value, patch the DOM to show the
   // suggestion inserted at the cursor and selected.
+  //
+  // Deliberately NO dependency array: ReactDOM restores a controlled
+  // input's DOM value to the React value whenever the component commits
+  // any prop change — and the event handlers in `sg.props` get new
+  // identities on every parent-driven re-render, so ANY unrelated state
+  // cascade (the periodic YouTube check was the visible one — todo streams
+  // #9) silently wiped the painted suggestion while the hook still
+  // considered it pending (which is why Tab afterwards still accepted it).
+  // Running after every commit lets the repaint win — layout effects fire
+  // after React's DOM writes — and the value guard keeps it a no-op (no
+  // selection stomping) while the DOM is already showing the suggestion.
   useLayoutEffect(() => {
     const el = ref.current
     if (!el || !suggestion) return
-    const before = value.slice(0, insertAt)
-    const after = value.slice(insertAt)
-    el.value = before + suggestion + after
+    const expected = value.slice(0, insertAt) + suggestion + value.slice(insertAt)
+    if (el.value === expected) return
+    el.value = expected
     el.setSelectionRange(insertAt, insertAt + suggestion.length)
-  }, [suggestion, insertAt, value])
+  })
 
   const dismiss = useCallback(() => {
     if (suggestionRef.current) setSuggestion('')
