@@ -49,7 +49,7 @@ import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { renderStreamTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber } from '../../lib/streamTitle'
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
-import type { StreamFolder, StreamMeta } from '../../types'
+import type { StreamFolder, StreamMeta, AiSuggestField } from '../../types'
 
 /** How long the out-of-sync check trusts just-pushed values over what the
  *  YouTube API returns (its read-after-write lag is usually seconds, but
@@ -57,6 +57,17 @@ import type { StreamFolder, StreamMeta } from '../../types'
  *  Within this window a genuine Studio-side edit to a just-pushed video
  *  goes unnoticed — acceptable, the next check after expiry catches it. */
 const PUSH_OVERLAY_TTL_MS = 5 * 60 * 1000
+
+/** Caps for the per-stream rejected-AI-suggestions memory
+ *  (meta.aiRejectedSuggestions): each field's list drops oldest entries
+ *  past its cap, and a single entry stores at most AI_REJECT_ENTRY_MAX_CHARS
+ *  characters — enough for the model to recognize "that suggestion" (only
+ *  whole rejected descriptions ever hit it) without bloating _meta.json or
+ *  the prompt. */
+const AI_REJECT_LIST_MAX: Record<AiSuggestField, number> = {
+  title: 10, description: 5, tagline: 10, tags: 10, 'twitch-tags': 10,
+}
+const AI_REJECT_ENTRY_MAX_CHARS = 400
 
 /** Strip line breaks, tabs, and plain spaces from the EDGES of a stored
  *  title body. Interior whitespace — and exotic spaces like U+00A0 even at
@@ -6680,33 +6691,56 @@ function SidebarDetail({
     currentTwitchTags: meta?.twitchTags?.length ? meta.twitchTags : undefined,
     previousTaglines: previousTaglines.length ? previousTaglines : undefined,
   }), [folder.date, folder.detectedGames, meta?.streamType, meta?.games, meta?.ytTitle, meta?.ytDescription, meta?.ytTags, meta?.twitchTags, previousTaglines])
+  // Rejected-suggestions memory (todo streams #14). Suggestions the user
+  // Esc-dismissed are stored per field in meta.aiRejectedSuggestions and
+  // sent with each request so the model steers away from repeats. Gated on
+  // the "Prevent repeat suggestions" setting (default on); lists are capped
+  // oldest-off-first and entries truncated (module consts) so _meta.json
+  // and the prompt stay bounded.
+  const { config: appConfig } = useStore()
+  const preventRepeatSuggestions = appConfig.aiPreventRepeatSuggestions !== false
+  const rejectedFor = useCallback((field: AiSuggestField): string[] | undefined => {
+    if (!preventRepeatSuggestions) return undefined
+    const list = meta?.aiRejectedSuggestions?.[field]
+    return list?.length ? list : undefined
+  }, [preventRepeatSuggestions, meta?.aiRejectedSuggestions])
+  const handleAiReject = useCallback((field: AiSuggestField) => (text: string) => {
+    if (!preventRepeatSuggestions) return
+    const entry = text.trim().slice(0, AI_REJECT_ENTRY_MAX_CHARS)
+    if (!entry) return
+    const cur = meta?.aiRejectedSuggestions ?? {}
+    const list = cur[field] ?? []
+    if (list.some(x => x.toLowerCase() === entry.toLowerCase())) return
+    const next = [...list, entry].slice(-AI_REJECT_LIST_MAX[field])
+    onUpdateMeta({ aiRejectedSuggestions: { ...cur, [field]: next } })
+  }, [preventRepeatSuggestions, meta?.aiRejectedSuggestions, onUpdateMeta])
   const aiFetchTitle = useMemo(() => claudeEnabled
-    ? (prefix: string, suffix: string) => window.api.claudeGenerate('title', { ...buildAiContext(), prefix, suffix })
-    : undefined, [claudeEnabled, buildAiContext])
+    ? (prefix: string, suffix: string) => window.api.claudeGenerate('title', { ...buildAiContext(), rejectedSuggestions: rejectedFor('title'), prefix, suffix })
+    : undefined, [claudeEnabled, buildAiContext, rejectedFor])
   // Description fetcher — Ctrl+Space inside the TemplateBodyEditor asks Claude
   // for description text at the caret (full body when the field is empty,
   // mid-field insertion otherwise). `prefix`/`suffix` are the source text on
   // either side of the caret, supplied by the editor.
   const aiFetchDescription = useMemo(() => claudeEnabled
-    ? (prefix: string, suffix: string) => window.api.claudeGenerate('description', { ...buildAiContext(), prefix, suffix })
-    : undefined, [claudeEnabled, buildAiContext])
+    ? (prefix: string, suffix: string) => window.api.claudeGenerate('description', { ...buildAiContext(), rejectedSuggestions: rejectedFor('description'), prefix, suffix })
+    : undefined, [claudeEnabled, buildAiContext, rejectedFor])
   // Tagline fetcher — Ctrl+Space inside the Tagline EditableTextField
   // asks Claude for a catchy 3–8 word phrase grounded in the topic,
   // description, and tags, and explicitly avoiding `previousTaglines`
   // already used in this (game, season) bucket.
   const aiFetchTagline = useMemo(() => claudeEnabled
-    ? (prefix: string, suffix: string) => window.api.claudeGenerate('tagline', { ...buildAiContext(), prefix, suffix })
-    : undefined, [claudeEnabled, buildAiContext])
+    ? (prefix: string, suffix: string) => window.api.claudeGenerate('tagline', { ...buildAiContext(), rejectedSuggestions: rejectedFor('tagline'), prefix, suffix })
+    : undefined, [claudeEnabled, buildAiContext, rejectedFor])
   // Tag fetchers — `prefix`/`suffix` here come from the chip editor's
   // add-tag input, not the chip list. Claude returns either a single tag
   // or a comma-separated batch; the editor's commit logic already splits
   // on commas so a single Tab + Enter accept can produce multiple chips.
   const aiFetchTags = useMemo(() => claudeEnabled
-    ? (prefix: string, suffix: string) => window.api.claudeGenerate('tags', { ...buildAiContext(), prefix, suffix })
-    : undefined, [claudeEnabled, buildAiContext])
+    ? (prefix: string, suffix: string) => window.api.claudeGenerate('tags', { ...buildAiContext(), rejectedSuggestions: rejectedFor('tags'), prefix, suffix })
+    : undefined, [claudeEnabled, buildAiContext, rejectedFor])
   const aiFetchTwitchTags = useMemo(() => claudeEnabled
-    ? (prefix: string, suffix: string) => window.api.claudeGenerate('twitch-tags', { ...buildAiContext(), prefix, suffix })
-    : undefined, [claudeEnabled, buildAiContext])
+    ? (prefix: string, suffix: string) => window.api.claudeGenerate('twitch-tags', { ...buildAiContext(), rejectedSuggestions: rejectedFor('twitch-tags'), prefix, suffix })
+    : undefined, [claudeEnabled, buildAiContext, rejectedFor])
 
   // ── Broadcast picker per-folder logic ─────────────────────────────────
   // Past streams use the VOD pool (lazy-loaded on dropdown open); upcoming
@@ -7533,6 +7567,7 @@ function SidebarDetail({
                 inapplicableKeys={titleInapplicableKeySet}
                 insertRef={titleInsertRef}
                 aiFetcher={aiFetchTitle}
+                onAiReject={handleAiReject('title')}
               />
               <MergeFieldPicker
                 keys={titlePickerKeys}
@@ -7574,6 +7609,7 @@ function SidebarDetail({
                 placeholder="catchy tagline…"
                 onSave={v => onUpdateMeta({ ytCatchyTitle: v })}
                 aiFetcher={aiFetchTagline}
+                onAiReject={handleAiReject('tagline')}
               />
             </MetaRow>
             {/* YouTube thumbnail picker — sits between title and
@@ -7752,6 +7788,7 @@ function SidebarDetail({
                     resolvedValues={descResolvedValues}
                     insertRef={descInsertRef}
                     aiFetcher={aiFetchDescription}
+                  onAiReject={handleAiReject('description')}
                   />
                   <MergeFieldPicker keys={descPickerKeys} onInsert={k => descInsertRef.current?.(`{${k}}`)} />
                 </>
@@ -7819,6 +7856,7 @@ function SidebarDetail({
                   tabAttached
                   tabActive={!!tagsTplId}
                   aiFetcher={aiFetchTags}
+                  onAiReject={handleAiReject('tags')}
                   footerRight={(() => {
                     const tags = meta?.ytTags ?? []
                     const chars = tags.reduce((n, t) => n + t.length + (/\s/.test(t) ? 2 : 0), 0) + Math.max(0, tags.length - 1)
@@ -7996,6 +8034,7 @@ function SidebarDetail({
                   tabAttached
                   tabActive={!!twitchTagsTplId}
                   aiFetcher={aiFetchTwitchTags}
+                  onAiReject={handleAiReject('twitch-tags')}
                   footerRight={(() => {
                     const tags = meta?.twitchTags ?? []
                     const { compat, skipped } = toTwitchCompatibleTags(tags)
@@ -8964,7 +9003,7 @@ function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched
  *  - Empty string blur calls onSave(''); the parent decides whether '' →
  *    delete the field or store an empty literal. */
 function EditableTextField({
-  value, onSave, placeholder, multiline, rows = 3, className, autoGrow, tabAttached, tabActive, aiFetcher,
+  value, onSave, placeholder, multiline, rows = 3, className, autoGrow, tabAttached, tabActive, aiFetcher, onAiReject,
 }: {
   value: string
   onSave: (value: string) => Promise<void> | void
@@ -8991,6 +9030,9 @@ function EditableTextField({
    *  appears below the field so the keystroke is discoverable. Pass
    *  `undefined` to disable (no hint, no key handlers attached). */
   aiFetcher?: (prefix: string, suffix: string) => Promise<string | null>
+  /** Called with the suggestion text when the user dismisses it with Esc
+   *  (and only Esc) — feeds the rejected-suggestions memory. */
+  onAiReject?: (text: string) => void
 }) {
   const [local, setLocal] = useState(value)
   const [saving, setSaving] = useState(false)
@@ -9005,7 +9047,7 @@ function EditableTextField({
   // rule; when no fetcher is provided we use a noop that resolves null
   // so Ctrl+Space is a no-op and the hint line doesn't render.
   const noopFetcher = useCallback((_p: string, _s: string) => Promise.resolve(null), [])
-  const sg = useFieldSuggestion(local, setLocal, aiFetcher ?? noopFetcher)
+  const sg = useFieldSuggestion(local, setLocal, aiFetcher ?? noopFetcher, onAiReject)
   const aiEnabled = !!aiFetcher
   const ref = sg.ref
 

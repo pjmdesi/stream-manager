@@ -21,9 +21,16 @@ function buildInstruction(
   field: string,
   prefix: string,
   suffix: string,
-  ctx: { currentYtTags?: string[]; currentTwitchTags?: string[]; previousTaglines?: string[] },
+  ctx: { currentYtTags?: string[]; currentTwitchTags?: string[]; previousTaglines?: string[]; rejectedSuggestions?: string[] },
 ): string {
   const hasCursor = prefix !== '' || suffix !== ''
+  // Suggestions the user explicitly dismissed for THIS field on THIS stream
+  // (renderer-side memory, gated on the "Prevent repeat suggestions"
+  // setting). Appended to every field's instruction so a re-request stops
+  // serving the same idea back.
+  const rejectedText = ctx.rejectedSuggestions?.length
+    ? ` The user has already REJECTED these earlier suggestions for this exact field — do not repeat or closely paraphrase any of them; offer something meaningfully different: ${ctx.rejectedSuggestions.map(t => `"${t}"`).join(', ')}.`
+    : ''
   const ytExisting = ctx.currentYtTags?.length
     ? `Existing YouTube tags (do NOT suggest any of these): ${ctx.currentYtTags.join(', ')}.`
     : ''
@@ -43,7 +50,7 @@ function buildInstruction(
       tags: `Generate YouTube tags for this stream as a comma-separated list. Include 8–12 relevant tags covering the game, genre, and stream type. ${ytExisting} Return ONLY the comma-separated tags.`.trim(),
       'twitch-tags': `Generate Twitch channel tags for this stream as a comma-separated list. Twitch rules: alphanumeric only (no spaces, no punctuation), up to 25 characters per tag, maximum 10 tags total. Pick the most relevant tags covering the game, genre, and stream type. ${twExisting} Return ONLY the comma-separated tags.`.trim(),
     }
-    return full[field] ?? `Generate the ${field} for this stream. Return ONLY the value.`
+    return (full[field] ?? `Generate the ${field} for this stream. Return ONLY the value.`) + rejectedText
   }
 
   // Cursor is inside existing text — generate what belongs at that position
@@ -54,7 +61,7 @@ function buildInstruction(
     tags: `Suggest 1–4 additional YouTube tags. The user is currently typing: "${prefix}". ${ytExisting} Return ONLY a comma-separated list of new tags — no duplicates of existing tags, no leading comma.`.trim(),
     'twitch-tags': `Suggest 1–4 additional Twitch channel tags. The user is currently typing: "${prefix}". ${twExisting} Twitch rules: alphanumeric only (no spaces, no punctuation), up to 25 characters per tag, maximum 10 tags total — stay within the remaining budget. Return ONLY a comma-separated list of new tags — no duplicates of existing tags, no leading comma.`.trim(),
   }
-  return inline[field] ?? `Insert text at the cursor in the ${field} field. Text before: "${prefix}". Text after: "${suffix}". Return ONLY the inserted text.`
+  return (inline[field] ?? `Insert text at the cursor in the ${field} field. Text before: "${prefix}". Text after: "${suffix}". Return ONLY the inserted text.`) + rejectedText
 }
 
 // 1024 rather than 512: on models where thinking is on by default (e.g.
@@ -88,7 +95,8 @@ export function registerClaudeIPC() {
     const currentYtTags = Array.isArray(context.currentYtTags) ? context.currentYtTags as string[] : undefined
     const currentTwitchTags = Array.isArray(context.currentTwitchTags) ? context.currentTwitchTags as string[] : undefined
     const previousTaglines = Array.isArray(context.previousTaglines) ? context.previousTaglines as string[] : undefined
-    const instruction = buildInstruction(field, prefix, suffix, { currentYtTags, currentTwitchTags, previousTaglines })
+    const rejectedSuggestions = Array.isArray(context.rejectedSuggestions) ? context.rejectedSuggestions as string[] : undefined
+    const instruction = buildInstruction(field, prefix, suffix, { currentYtTags, currentTwitchTags, previousTaglines, rejectedSuggestions })
 
     const system = [
       'You are a streaming metadata assistant. Help create YouTube metadata for stream recordings.',

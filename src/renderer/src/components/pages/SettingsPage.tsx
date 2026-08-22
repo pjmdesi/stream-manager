@@ -131,6 +131,9 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: 'converter', label: 'Converter', icon: <Zap size={14} />, keys: ['maxConcurrentConversions', 'autoDeletePartialOnCancel'] },
   { id: 'appearance', label: 'Appearance', icon: <Palette size={14} />, keys: ['disableAnimations', 'calendarFirstDayOfWeek'] },
   { id: 'autorules', label: 'Auto-rules', icon: <Shuffle size={14} />, keys: ['autoStartWatcher'] },
+  // Only rendered (nav chip + section body) when a Claude API key is
+  // connected via Integrations — see the `sections` filter.
+  { id: 'ai', label: 'AI Suggestions', icon: <Bot size={14} />, keys: ['aiPreventRepeatSuggestions'] },
   { id: 'system', label: 'System', icon: <MonitorCog size={14} />, keys: ['checkForUpdates', 'startWithWindows', 'startMinimized'] },
   { id: 'devtools', label: 'Dev Tools', icon: <FlaskConical size={14} />, keys: ['slowAnimations', 'devForceYouTubeQuotaExceeded'], dev: true },
 ]
@@ -310,7 +313,8 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
 
   // ── Jump-nav ───────────────────────────────────────────────────────────
   const isDev = import.meta.env.DEV
-  const sections = SETTINGS_SECTIONS.filter(s => !s.dev || isDev)
+  const aiConnected = !!(config.claudeApiKey ?? '').trim()
+  const sections = SETTINGS_SECTIONS.filter(s => (!s.dev || isDev) && (s.id !== 'ai' || aiConnected))
   const scrollRef = useRef<HTMLDivElement>(null)
   const sectionEls = useRef<Map<string, HTMLElement>>(new Map())
   const [activeSection, setActiveSection] = useState<string>(sections[0]?.id ?? '')
@@ -827,6 +831,18 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
             label={<div><div className="text-sm font-medium text-gray-200">Auto-start file watcher on launch {dirtyDot('autoStartWatcher')}</div><div className="text-xs text-gray-400">Automatically activate all enabled rules when the app opens.</div></div>}
           />
         </Section>
+
+        {/* AI suggestions — hidden (nav chip included) until an AI service
+            is connected through Integrations. */}
+        {aiConnected && (
+          <Section id="ai" icon={<Bot size={14} />} title="AI Suggestions" registerRef={registerSection}>
+            <Checkbox
+              checked={local.aiPreventRepeatSuggestions !== false}
+              onChange={v => set('aiPreventRepeatSuggestions', v)}
+              label={<div><div className="text-sm font-medium text-gray-200">Prevent repeat suggestions per stream item {dirtyDot('aiPreventRepeatSuggestions')}</div><div className="text-xs text-gray-400">When a suggestion is dismissed with Esc, it’s remembered for that field on that stream item, and future requests tell the AI to avoid suggesting the same thing again.</div></div>}
+            />
+          </Section>
+        )}
 
         {/* System */}
         <Section id="system" icon={<MonitorCog size={14} />} title="System" registerRef={registerSection}>

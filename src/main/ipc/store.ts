@@ -47,6 +47,9 @@ export interface AppConfig {
   claudeApiKey: string
   claudeSystemPrompt: string
   claudeModel: string
+  /** AI suggestions dismissed with Esc are remembered per stream item +
+   *  field and sent to later requests so the model avoids repeats. */
+  aiPreventRepeatSuggestions: boolean
   launcherWidgetGroupId: string
   listThumbWidth: number
   defaultBuiltinThumbnailTemplate: string
@@ -169,6 +172,7 @@ function getDefaultConfig(): AppConfig {
     claudeApiKey: '',
     claudeSystemPrompt: '',
     claudeModel: '',
+    aiPreventRepeatSuggestions: true,
     launcherWidgetGroupId: '',
     listThumbWidth: 85,
     defaultBuiltinThumbnailTemplate: '',

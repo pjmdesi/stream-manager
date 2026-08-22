@@ -4,6 +4,10 @@
 
 Target: TBD · emptied 2026-08-10 after the v2.3.0 release.
 
+## AI assistance
+
+- AI suggestions no longer repeat ideas that were already turned down: dismissing a suggestion with Esc is remembered for that field on that stream item, and later requests tell the model to avoid suggesting the same thing again. Applies to titles, descriptions, taglines, and both tag fields. Controlled by a new "Prevent repeat suggestions per stream item" toggle (on by default) in a new AI Suggestions settings section, which only appears once an AI service is connected in Integrations.
+
 ## Streams page
 
 - Merge-field chips now behave like regular text for selection and clipboard: dragging a selection across a title or description highlights the chips too (with a distinct highlight style on the chip itself), copy and cut include them as their {field} tokens, and pasting text containing tokens into any merge-field input turns them back into chips immediately. Previously chips were skipped by selection entirely, so copied text silently lost every merge field.

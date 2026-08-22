@@ -379,7 +379,7 @@ const HIST_COALESCE_MS = 600
  * cursor via offset helpers.
  */
 export function TemplateBodyEditor({
-  value, onSave, placeholder, knownKeys, inapplicableKeys, resolvedValues, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus, height, onHeightChange, aiFetcher,
+  value, onSave, placeholder, knownKeys, inapplicableKeys, resolvedValues, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus, height, onHeightChange, aiFetcher, onAiReject,
 }: {
   value: string
   onSave: (v: string) => Promise<void> | void
@@ -415,6 +415,10 @@ export function TemplateBodyEditor({
    *  it, and typing replaces it (same UX as the plain-textarea fields).
    *  `prefix`/`suffix` are the source text on either side of the caret. */
   aiFetcher?: (prefix: string, suffix: string) => Promise<string | null>
+  /** Called with the suggestion text when the user dismisses it with Esc
+   *  (and only Esc — blur-accept and typing-over stay silent). Feeds the
+   *  rejected-suggestions memory. */
+  onAiReject?: (text: string) => void
 }) {
   const [local, setLocal] = useState(value)
   const [saving, setSaving] = useState(false)
@@ -439,6 +443,8 @@ export function TemplateBodyEditor({
   aiLoadingRef.current = aiLoading
   const aiFetcherRef = useRef(aiFetcher)
   aiFetcherRef.current = aiFetcher
+  const onAiRejectRef = useRef(onAiReject)
+  onAiRejectRef.current = onAiReject
 
   // ── Undo/redo history (see the module-level comment above HIST_LIMIT) ─────
   const histRef = useRef<{ text: string; cursor: number }[]>([])
@@ -715,9 +721,12 @@ export function TemplateBodyEditor({
       }
       if (e.key === 'Escape') {
         // Dismiss — splice the suggestion back out, caret to where it was.
+        // Esc is the one path that counts as a rejection (feeds the
+        // rejected-suggestions memory); blur-accept and typing-over don't.
         e.preventDefault()
         const p = aiPendingRef.current
         const base = localRef.current
+        onAiRejectRef.current?.(base.slice(p.start, p.start + p.length))
         histBreak()
         setLocal(base.slice(0, p.start) + base.slice(p.start + p.length))
         setAiPending(null)

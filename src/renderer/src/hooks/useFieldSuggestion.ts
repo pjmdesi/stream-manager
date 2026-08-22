@@ -24,6 +24,11 @@ export function useFieldSuggestion(
   value: string,
   onChange: (v: string) => void,
   fetchSuggestion: (prefix: string, suffix: string) => Promise<string | null>,
+  /** Called with the suggestion text when the user EXPLICITLY dismisses it
+   *  with Esc — and only then. Blur-dismiss and typing-over don't count as
+   *  rejections (they can happen for unrelated reasons), so they stay
+   *  silent. Feeds the per-stream rejected-suggestions memory. */
+  onReject?: (text: string) => void,
 ) {
   const [suggestion, setSuggestion] = useState('')
   const [insertAt, setInsertAt] = useState(0)
@@ -42,6 +47,8 @@ export function useFieldSuggestion(
   insertAtRef.current = insertAt
   const loadingRef = useRef(loading)
   loadingRef.current = loading
+  const onRejectRef = useRef(onReject)
+  onRejectRef.current = onReject
 
   // After React renders the controlled value, patch the DOM to show the
   // suggestion inserted at the cursor and selected.
@@ -111,6 +118,7 @@ export function useFieldSuggestion(
       })
     } else if (e.key === 'Escape') {
       e.preventDefault()
+      onRejectRef.current?.(suggestionRef.current)
       dismiss()
     }
     // All other keys fall through — the browser replaces the selection with

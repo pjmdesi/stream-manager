@@ -34,6 +34,7 @@ const defaultConfig: AppConfig = {
   claudeApiKey: '',
   claudeSystemPrompt: '',
   claudeModel: '',
+  aiPreventRepeatSuggestions: true,
   launcherWidgetGroupId: '',
   listThumbWidth: 85,
   checkForUpdates: true,

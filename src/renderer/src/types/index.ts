@@ -195,6 +195,10 @@ export interface AppConfig {
   claudeApiKey: string
   claudeSystemPrompt: string
   claudeModel: string
+  /** When true (default), AI suggestions the user dismissed with Esc are
+   *  remembered per stream item + field and sent to later generation
+   *  requests so the model avoids repeating them. */
+  aiPreventRepeatSuggestions: boolean
   launcherWidgetGroupId: string
   listThumbWidth: number
   checkForUpdates: boolean
@@ -309,6 +313,11 @@ export interface ClipDraft {
   createdAt: number     // ms epoch
   updatedAt: number     // ms epoch
 }
+
+/** The AI-suggestion surfaces in the stream detail sidebar — matches the
+ *  field ids `claudeGenerate` is called with. Keys `aiRejectedSuggestions`
+ *  in StreamMeta. */
+export type AiSuggestField = 'title' | 'description' | 'tagline' | 'tags' | 'twitch-tags'
 
 export interface StreamMeta {
   date: string
@@ -435,6 +444,12 @@ export interface StreamMeta {
    *  the title/description/tags pattern for direction-aware mismatch. */
   ytPrivacyStatus?: 'public' | 'unlisted' | 'private'
   ytLastPushedPrivacy?: 'public' | 'unlisted' | 'private'
+  /** AI suggestions the user explicitly dismissed (Esc), per suggestion
+   *  field, oldest first. Passed to later generation requests for the same
+   *  field so the model steers away from repeats (gated on the
+   *  `aiPreventRepeatSuggestions` setting). Capped per field at write time;
+   *  long entries (descriptions) are stored truncated. */
+  aiRejectedSuggestions?: Partial<Record<AiSuggestField, string[]>>
   // Twitch
   twitchTitle?: string
   /** Id of the Titles template currently bound to the Twitch title.

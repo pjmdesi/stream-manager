@@ -62,6 +62,7 @@ export function TagChipEditor({
   tabAttached,
   tabActive,
   aiFetcher,
+  onAiReject,
   footerRight,
   sortOnBlur,
 }: {
@@ -82,6 +83,9 @@ export function TagChipEditor({
   /** Optional Claude suggestion fetcher — wires Ctrl+Space inside the
    *  trailing input. */
   aiFetcher?: (prefix: string, suffix: string) => Promise<string | null>
+  /** Called with the suggestion text when the user dismisses it with Esc
+   *  (and only Esc) — feeds the rejected-suggestions memory. */
+  onAiReject?: (text: string) => void
   /** Rendered flush-right on the same row as the AI hint. */
   footerRight?: React.ReactNode
 }) {
@@ -102,7 +106,7 @@ export function TagChipEditor({
   }, [justCopied])
 
   const noopFetcher = useCallback((_p: string, _s: string) => Promise.resolve(null), [])
-  const sg = useFieldSuggestion(input, setInput, aiFetcher ?? noopFetcher)
+  const sg = useFieldSuggestion(input, setInput, aiFetcher ?? noopFetcher, onAiReject)
   const aiEnabled = !!aiFetcher
 
   // Merge comma/typed input into the current chip list, deduped
