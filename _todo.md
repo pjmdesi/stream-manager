@@ -75,8 +75,6 @@
 
 ### Converter
 
-1. Very minor bug: for some reason in the output folder link text in a conversion item row, the slash separators between the directories is different for regular video conversion and for clip exports. The regular video items use "\" and the clip export items use "/". I'm not sure which one is *correct*, but we should pick one to use for all. In fact this should be app-wide. I think I would opt for "/" since that's what I would use if I were typing and it's what the web uses,
-
 ### Combine
 
 1. Dimension options for combining mismatched files: give the user choices for how differing files are combined. Whether the videos are cropped or bars are added, whether the final file gets the max framerate, min framerate, or some custom framerate, and explore other options. NEEDS A DESIGN PASS: combine was scoped as "not a converting tool" during the 2026-08 batch, so this likely routes the odd files through the CONVERTER (e.g. a one-click "normalize mismatched files" offer on the compatibility gate) rather than encoding inside combine. Groundwork that now exists from the 2026-08 batch:

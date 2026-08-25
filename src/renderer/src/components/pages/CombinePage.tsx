@@ -10,6 +10,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { VideoThumb } from '../ui/VideoThumb'
 import { FileDropZone } from '../ui/FileDropZone'
 import { useOpenItems } from '../../context/OpenItemsContext'
+import { displayPath } from '../../lib/displayPath'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
 
@@ -291,7 +292,7 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
               onClick={() => window.api.openInExplorer(outDir)}
               className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
             >
-              {outDir}
+              {displayPath(outDir)}
             </button>
           </Tooltip>
         </div>
@@ -1195,7 +1196,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                 onClick={() => window.api.openInExplorer(dirOf(g.outputPath))}
                                 className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
                               >
-                                {dirOf(g.outputPath)}
+                                {displayPath(dirOf(g.outputPath))}
                               </button>
                             </Tooltip>
                           </div>

@@ -11,6 +11,7 @@ import { useStore } from '../../hooks/useStore'
 import { PresetsModal } from '../preset-editor/PresetsModal'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { VideoThumb } from '../ui/VideoThumb'
+import { displayPath } from '../../lib/displayPath'
 
 // Row action buttons — neutral at rest, colored only on hover, with a label
 // that collapses to icon-only as the row narrows. Mirrors the stream detail
@@ -529,6 +530,10 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     const eta = jobEtas.get(job.id) ?? null
     const outputDir = job.outputFile.replace(/[\\/][^\\/]+$/, '')
     const outputName = job.outputFile.split(/[\\/]/).pop()
+    // The raw dir keeps whichever separators built it ("\" from main's
+    // path.join, "/" from clip exports) — display normalizes to "/"
+    // (displayPath); openInExplorer still gets the raw path.
+    const outputDirText = displayPath(outputDir)
     const streamOrigin = streamOrigins[job.inputFile]
 
     return (
@@ -608,7 +613,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                     onClick={() => window.api.openInExplorer(outputDir)}
                     className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
                   >
-                    {outputDir}
+                    {outputDirText}
                   </button>
                 </Tooltip>
               )}
@@ -625,7 +630,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                     onClick={() => window.api.openInExplorer(outputDir)}
                     className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
                   >
-                    {outputDir}
+                    {outputDirText}
                   </button>
                 </Tooltip>
               )}
