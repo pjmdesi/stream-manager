@@ -95,7 +95,17 @@ function formatEta(ms: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
-function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; collapsed: boolean }) {
+/** Live-conversion info block for the hybrid Converter nav item (nav
+ *  redesign Pass B). Renders nothing while the converter is quiet; while
+ *  jobs are active it expands the nav item with the info the old
+ *  bottom-stack ConversionWidget showed — same states (running / paused /
+ *  error / all-downloading) and the same aggregate progress + ETA math.
+ *  Deliberately no background, border, or click handling of its own: it
+ *  renders INSIDE the nav item's button (plain content only — nested
+ *  buttons are invalid HTML), so the item is one interactive surface.
+ *  Unlike the old widget it stays visible while the converter page is
+ *  open — hiding on selection would bounce the nav. */
+function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
   const { jobs, jobEtas } = useConversionJobs()
 
   // Include 'downloading' (cloud-hydrate wait) and 'replacing' (atomic swap)
@@ -154,59 +164,47 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
     'text-purple-400'
 
   if (collapsed) {
+    // Icon-mode: the nav item's own Zap is the primary icon directly
+    // above, so the extra only shows the secondary indicators (percent /
+    // cloud, status icon), centered under it.
     return (
-      <Tooltip content={`Converting · ${label}${allDownloading ? '' : ` · ${totalProgress.toFixed(0)}%`}${etaText ? ` · ${etaText}` : ''}`} side="right" triggerClassName="block w-full">
-        <button
-          onClick={onNavigate}
-          // Two-container layout: primary Zap icon left-aligned at
-          // x=16 (matches nav icon column above), secondary indicators
-          // (percent, status spinner) centered below. Same convention
-          // as the AutoRulesWidget — primary icons follow the nav's
-          // left column, decorative status content stays centered.
-          className="w-full py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors"
-        >
-          <div className="flex items-center px-4 mb-0.5">
-            <Zap size={14} className={statusColor} />
-          </div>
-          <div className="flex flex-col items-center gap-0.5">
-            {allDownloading
-              ? <Cloud size={12} className="text-blue-400" />
-              : <span className={`text-[10px] tabular-nums ${statusColor}`}>{totalProgress.toFixed(0)}%</span>
-            }
-            {hasError
-              ? <AlertCircle size={10} className="text-red-400" />
-              : allPaused
-                ? <Pause size={10} className="text-yellow-400" />
-                : <RefreshCw size={10} className={`${statusColor} animate-spin`} />
-            }
-          </div>
-        </button>
-      </Tooltip>
+      <div className="w-full pt-0.5 pb-2 flex flex-col items-center gap-0.5">
+        {allDownloading
+          ? <Cloud size={12} className="text-blue-400" />
+          : <span className={`text-[10px] tabular-nums ${statusColor}`}>{totalProgress.toFixed(0)}%</span>
+        }
+        {hasError
+          ? <AlertCircle size={10} className="text-red-400" />
+          : allPaused
+            ? <Pause size={10} className="text-yellow-400" />
+            : <RefreshCw size={10} className={`${statusColor} animate-spin`} />
+        }
+      </div>
     )
   }
 
+  // Expanded: the nav item's label is the title, so no "Converting"
+  // header — just the aggregate bar and one status line.
   return (
-    <button
-      onClick={onNavigate}
-      className="w-full p-3 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors text-left whitespace-nowrap"
-    >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Converting</span>
-        <span className={`text-[10px] font-medium ${statusColor}`}>{label}</span>
-      </div>
+    <div className="w-full px-3.5 pt-0.5 pb-2 text-left whitespace-nowrap">
       <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all ${barColor}`}
           style={{ width: `${totalProgress}%` }}
         />
       </div>
-      <div className="mt-1.5 text-[10px] text-gray-400 tabular-nums flex items-center justify-between gap-2">
-        <span>
-          {allDownloading ? `${active.length} downloading` : `${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
+      <div className="mt-1 text-[10px] tabular-nums flex items-center justify-between gap-2">
+        <span className="min-w-0 overflow-hidden">
+          <span className={`font-medium ${statusColor}`}>{label}</span>
+          <span className="text-gray-400">
+            {allDownloading
+              ? ` · ${active.length} downloading`
+              : ` · ${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
+          </span>
         </span>
-        {etaText && <Tooltip content={etaTitle}><span>{etaText}</span></Tooltip>}
+        {etaText && <Tooltip content={etaTitle}><span className="text-gray-400 shrink-0">{etaText}</span></Tooltip>}
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -372,7 +370,19 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
   )
 }
 
-type NavItem = { id: Page; label: string; icon: React.ReactNode }
+type NavItem = {
+  id: Page
+  label: string
+  icon: React.ReactNode
+  /** Hybrid nav/widget items (nav redesign Pass B): a component rendered
+   *  INSIDE the nav item's button, below the icon+label line. It
+   *  self-nulls while its tool is quiet and expands the item with live
+   *  info while work is in progress — the widget behavior, absorbed into
+   *  the item as one interactive surface (one hover, one click, one
+   *  focus target). Must render plain content only, never its own
+   *  button: it lives inside the nav button. */
+  extra?: React.ComponentType<{ collapsed: boolean }>
+}
 
 // Nav groups (nav redesign Pass A). Group names are internal reference
 // only — nothing renders them.
@@ -389,7 +399,7 @@ const NAV_GROUP_CREATE: NavItem[] = [
   { id: 'thumbnails', label: 'Thumbnails', icon: <ImageIcon size={18} /> },
 ]
 const NAV_GROUP_UTILITIES: NavItem[] = [
-  { id: 'converter', label: 'Converter', icon: <Zap size={18} /> },
+  { id: 'converter', label: 'Converter', icon: <Zap size={18} />, extra: ConverterNavExtra },
   { id: 'combine',   label: 'Combine',   icon: <Combine size={18} /> },
   { id: 'launcher',  label: 'Launcher',  icon: <Rocket size={18} /> },
 ]
@@ -799,6 +809,9 @@ function AppInner() {
               // launch routes there.
               const effectiveStartupPage = config.startupPage || 'streams'
               const isStartupPage = isStartupCandidate && effectiveStartupPage === item.id
+              // Hybrid items render their live-info block inside the nav
+              // button (self-nulls while quiet — see NavItem.extra).
+              const Extra = item.extra
 
               const row = (
                 // `group/nav` scopes the hover state to this row so the
@@ -809,18 +822,18 @@ function AppInner() {
                 <div className="relative group/nav">
                   <button
                     onClick={() => setPage(item.id)}
-                    // `h-10` locks the button height (40px = the natural
-                    // expanded height with `py-2.5` + text-sm content)
-                    // so collapse/expand doesn't bounce the row height
-                    // by the 2-3px difference between icon-only and
-                    // icon+text content. `gap-3 px-4` stays constant in
-                    // both modes — `justify-content` doesn't animate,
-                    // and keeping a stable flex layout means the icon's
-                    // x position never jumps. The label, star, and any
-                    // alert at the right get clipped by the nav's
-                    // outer `overflow-hidden` as the width shrinks.
+                    // Single interactive surface for the whole item: the
+                    // icon+label line and (for hybrid items) the live
+                    // info block below it share ONE button — one hover
+                    // highlight, one click target, one focus stop. The
+                    // inner line div carries the old `h-10` height lock
+                    // (so collapse/expand doesn't bounce the row height)
+                    // and the constant `gap-3 px-3.5` flex layout so the
+                    // icon's x position never jumps; labels and
+                    // right-side adornments clip at the nav's outer
+                    // `overflow-hidden` as the width shrinks.
                     className={`
-                      relative w-full flex items-center gap-3 px-3.5 h-10 text-sm font-medium transition-all duration-150 border
+                      relative w-full flex flex-col text-sm font-medium transition-all duration-150 border
                       ${isSelected
                         ? 'bg-purple-600/20 text-purple-300 border-purple-600/30'
                         : hasActivity
@@ -829,6 +842,7 @@ function AppInner() {
                       }
                     `}
                   >
+                    <div className="w-full flex items-center gap-3 px-3.5 h-10">
                     {/* `shrink-0` on the icon wrapper prevents the SVG
                         from being compressed by the flex algorithm when
                         the parent button narrows below its content's
@@ -845,6 +859,10 @@ function AppInner() {
                         the label's diminishing width for a clean crop. */}
                     <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">{item.label}</span>
                     {!sidebarCollapsed && showAlert && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
+                    </div>
+                    {/* Hybrid items: live info inside the same button —
+                        self-nulls while the tool is quiet (NavItem.extra). */}
+                    {Extra && <Extra collapsed={sidebarCollapsed} />}
                     {sidebarCollapsed && showAlert && (
                       <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-amber-400" />
                     )}
@@ -878,7 +896,11 @@ function AppInner() {
                     <Tooltip
                       content={isStartupPage ? 'Startup page' : 'Set as startup page'}
                       side="right"
-                      triggerClassName={`absolute right-2 top-1/2 -translate-y-1/2 ${sidebarCollapsed ? 'hidden' : ''}`}
+                      // `top-5` (20px = the icon line's h-10 center), not
+                      // top-1/2: a hybrid item's expanded info makes the
+                      // wrapper taller, and the star must stay centered
+                      // on the icon+label LINE, not the whole item.
+                      triggerClassName={`absolute right-2 top-5 -translate-y-1/2 ${sidebarCollapsed ? 'hidden' : ''}`}
                     >
                       <button
                         type="button"
@@ -934,12 +956,12 @@ function AppInner() {
           })()}
 
           <div className="border-t border-white/5" />
-          {/* Widget stack. The first three are TEMPORARY here — Pass B of
+          {/* Widget stack. The first two are TEMPORARY here — Pass B of
               the nav redesign absorbs each into its Utilities nav item
-              (Conversion → Converter, Launcher → Launcher, Auto-Rules
-              becomes a new hybrid item). Cloud sync + Stream Relay stay
-              as bottom widgets per the redesign spec. */}
-          {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} collapsed={sidebarCollapsed} />}
+              (Launcher → Launcher, Auto-Rules becomes a new hybrid item;
+              Conversion already moved into the Converter item). Cloud
+              sync + Stream Relay stay as bottom widgets per the redesign
+              spec. */}
           <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
           <CloudOpsWidget collapsed={sidebarCollapsed} />
