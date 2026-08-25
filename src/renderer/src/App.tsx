@@ -315,15 +315,17 @@ function LauncherNavAction({ collapsed }: { collapsed: boolean }) {
   }, [config.launcherWidgetGroupId])
 
   const group = groups.find(g => g.id === config.launcherWidgetGroupId) ?? null
-  // Publish the pinned group's name (and transient launch feedback) as
-  // the Launcher item's subtext line (nav redesign Pass C). Cleared when
-  // nothing is pinned.
+  // Transient launch feedback as the Launcher item's subtext — ONLY for
+  // the feedback window (2-4s), then cleared. The pinned group's NAME is
+  // deliberately not published: subtext pairs with the activity paradigm
+  // ("something is open / just happened"), and static configuration
+  // isn't that — the group's identity already shows via the launch
+  // button's icon and its tooltip (name + app list).
   const { setNavSubtext } = usePageActivity()
   const feedbackText = feedback?.text ?? null
-  const groupName = group?.name ?? null
   useEffect(() => {
-    setNavSubtext('launcher', feedbackText ?? groupName)
-  }, [feedbackText, groupName, setNavSubtext])
+    setNavSubtext('launcher', feedbackText)
+  }, [feedbackText, setNavSubtext])
   if (!group) return null
 
   const launch = async () => {
