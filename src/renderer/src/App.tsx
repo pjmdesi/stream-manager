@@ -565,6 +565,11 @@ function AppInner() {
   const anim = useAnimationConfig()
   const navTransitionDurationMs = anim.duration(200)
   const pageActivity: Partial<Record<Page, boolean>> = {
+    // Streams derives from its subtext: both mean "a stream is open in
+    // the detail sidebar" (the subtext falls back to the date, so it's
+    // never empty while one is selected), and deriving keeps the accent
+    // and the subtitle from ever disagreeing.
+    streams: !!navSubtext['streams'],
     player: playerHasVideo,
     converter: converterHasJobs,
     thumbnails: thumbnailHasCanvas,
