@@ -25,6 +25,14 @@ export interface PostStreamTwitchSuggestion {
     game?: string
     tags: string[]
   }
+  /** Called by the modal after `payload` actually lands on Twitch (title +
+   *  tags at minimum; `categoryApplied` is false when the category search
+   *  found no match and Twitch kept the old one). StreamsPage uses it to
+   *  record the push the same way a manual sidebar push is recorded — the
+   *  channel cache + last-pushed snapshot — so the in-sync check knows the
+   *  channel was just updated. Without it the Push to Twitch button stayed
+   *  enabled on an already-correct channel. */
+  onPushed?: (categoryApplied: boolean) => void
 }
 
 interface RelayPromptContextValue {

@@ -48,6 +48,11 @@ export function PostStreamTwitchModal() {
     try {
       const { title, game, tags } = suggestion.payload
       const result = await window.api.twitchUpdateChannel(title, game, tags)
+      const categoryApplied = !game || result?.categoryApplied !== false
+      // Report the landed push back to StreamsPage so it's recorded like a
+      // manual one (channel cache + last-pushed snapshot) — BEFORE the
+      // category-miss early return below: title/tags DID land in that case.
+      suggestion.onPushed?.(categoryApplied)
       // Title/tags landed, but the category search found no match — Twitch
       // kept the old category. Keep the modal open so the user actually sees
       // it, instead of a silent "success" that leaves the wrong live category.

@@ -1252,6 +1252,14 @@ export function StreamsPage({
   // below). Held in a ref so a new session starting within the window can
   // cancel a now-stale push to the previous "next" broadcast.
   const twitchUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Recorder for post-stream Twitch pushes (auto timer + ask-mode modal).
+  // Declared here so the lifecycle listener below can close over it;
+  // assigned after `updateMeta` exists (it needs meta writes).
+  const recordTwitchPushRef = useRef<(
+    streamKey: string,
+    payload: { title: string; game?: string; tags: string[] },
+    categoryApplied: boolean,
+  ) => void>(() => {})
   useEffect(() => { foldersRef.current = folders }, [folders])
   useEffect(() => { twConnectedRef.current = twConnected }, [twConnected])
   useEffect(() => { autoUpdateTwitchRef.current = config.autoUpdateTwitchAfterStream ?? 'ask' }, [config.autoUpdateTwitchAfterStream])
@@ -1328,7 +1336,11 @@ export function StreamsPage({
           const fresh = (freshFolder && buildPayload(freshFolder)) || payload
           try {
             const result = await window.api.twitchUpdateChannel(fresh.title, fresh.game, fresh.tags)
-            if (fresh.game && result?.categoryApplied === false) {
+            const categoryApplied = !fresh.game || result?.categoryApplied !== false
+            // Record the push so the in-sync check knows the channel now
+            // holds these values (cache seed + last-pushed snapshot).
+            recordTwitchPushRef.current(nextKey, fresh, categoryApplied)
+            if (!categoryApplied && fresh.game) {
               console.warn(`[auto-update Twitch] no category matches "${fresh.game}" — category left unchanged`)
               onAutoPushCategoryMissRef.current?.({ streamKey: nextKey, title: fresh.title, game: fresh.game })
             }
@@ -1337,10 +1349,14 @@ export function StreamsPage({
           }
         }, TWITCH_AUTO_UPDATE_DELAY_MS)
       } else if (mode === 'ask') {
+        const nextKey = next.relativePath
         setPostStreamTwitchSuggestion({
           folderPath: next.folderPath,
           displayTitle: payload.title,
           payload,
+          // The modal reports back after the payload lands so the push gets
+          // recorded (cache + snapshot) like a manual one.
+          onPushed: categoryApplied => recordTwitchPushRef.current(nextKey, payload, categoryApplied),
         })
       }
       // mode === 'never' — skip silently.
@@ -1495,6 +1511,26 @@ export function StreamsPage({
     ))
     await window.api.updateStreamMeta(folder.folderPath, partial, key)
   }, [folders, streamsDir])
+  // Record a post-stream Twitch push the way the sidebar's manual push
+  // records itself: seed the channel cache with what was sent and snapshot
+  // twitchLastPushed* into the target stream's meta. Both auto ('always')
+  // and modal ('ask') pushes previously PATCHed Twitch and recorded
+  // NOTHING, so the in-sync check compared against a stale cache with no
+  // snapshot fallback and kept the Push button enabled on a channel that
+  // was already correct. Render-phase ref assignment (same pattern as the
+  // editors' localRef) keeps the closure's updateMeta fresh.
+  recordTwitchPushRef.current = (streamKey, payload, categoryApplied) => {
+    setTwitchChannel(prev => ({
+      title: payload.title,
+      gameName: categoryApplied && payload.game ? payload.game : (prev?.gameName ?? ''),
+      tags: [...payload.tags],
+    }))
+    void updateMeta(streamKey, {
+      twitchLastPushedTitle: payload.title,
+      ...(categoryApplied ? { twitchLastPushedGame: payload.game ?? '' } : {}),
+      twitchLastPushedTags: [...payload.tags],
+    }).catch(() => {})
+  }
 
   // ── Action handlers ──────────────────────────────────────────────────────
   // Simplified vs StreamsPage: no cloud-download confirmation, no multi-video
@@ -8701,7 +8737,7 @@ function SidebarDetail({
                     <Tooltip content={
                       netProblem === 'offline' ? 'No internet connection.'
                         : !twConnected ? 'Twitch not connected (Settings → Integrations)'
-                        : isPastStream ? 'Past stream — Twitch only reflects the channel’s current state'
+                        : isPastStream ? 'Past stream — VODs can only be edited via your Twitch channel page'
                         : twitchInSync ? 'Twitch channel info already matches this stream'
                         : 'Push title/category/tags to Twitch channel'
                     }>
