@@ -1,6 +1,6 @@
 # Release test checklist — v2.4.0 (2026-08-22)
 
-Build: Stream Manager 2.3.1_DEV.exe from dev @ a41f4e7
+Build: Stream Manager 2.3.1_DEV.exe from dev @ e9abe8d (rebuilt 2026-08-23 with the post-stream Twitch push recording + path-separator fixes; earlier checks ran on a41f4e7)
 
 ## This batch
 

@@ -372,22 +372,43 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
   )
 }
 
-const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
-  { id: 'streams',      label: 'Streams',      icon: <Radio size={18} /> },
-  { id: 'player',       label: 'Player',       icon: <Film size={18} /> },
-  { id: 'converter',    label: 'Converter',    icon: <Zap size={18} /> },
-  { id: 'combine',      label: 'Combine',      icon: <Combine size={18} /> },
-  { id: 'thumbnails',   label: 'Thumbnails',   icon: <ImageIcon size={18} /> },
-  { id: 'launcher',     label: 'Launcher',     icon: <Rocket size={18} /> },
+type NavItem = { id: Page; label: string; icon: React.ReactNode }
+
+// Nav groups (nav redesign Pass A). Group names are internal reference
+// only — nothing renders them.
+//   Create    — the content-producing pages.
+//   Utilities — tools with live activity; these become hybrid nav/widget
+//               items in Pass B, and Auto-Rules joins the group when its
+//               widget converts to one.
+//   System    — settings pages, pinned to the bottom of the nav's
+//               flexible zone by the spacer in the render (they're also
+//               excluded from the startup-page selector).
+const NAV_GROUP_CREATE: NavItem[] = [
+  { id: 'streams',    label: 'Streams',    icon: <Radio size={18} /> },
+  { id: 'player',     label: 'Player',     icon: <Film size={18} /> },
+  { id: 'thumbnails', label: 'Thumbnails', icon: <ImageIcon size={18} /> },
+]
+const NAV_GROUP_UTILITIES: NavItem[] = [
+  { id: 'converter', label: 'Converter', icon: <Zap size={18} /> },
+  { id: 'combine',   label: 'Combine',   icon: <Combine size={18} /> },
+  { id: 'launcher',  label: 'Launcher',  icon: <Rocket size={18} /> },
+]
+const NAV_GROUP_SYSTEM: NavItem[] = [
   { id: 'integrations', label: 'Integrations', icon: <Plug size={18} /> },
   { id: 'settings',     label: 'Settings',     icon: <Settings size={18} /> },
 ]
+/** Flat list in rendered order — feeds startup-page validation and any
+ *  other "is this a nav page" check. */
+const NAV_ITEMS: NavItem[] = [...NAV_GROUP_CREATE, ...NAV_GROUP_UTILITIES, ...NAV_GROUP_SYSTEM]
 
 // Page-jump shortcut labels for the collapsed-nav tooltips (mirror the global
-// handler's Ctrl+1…6 / Ctrl+,).
+// handler's Ctrl+1…6 / Ctrl+,). The number corresponds to the item's VISUAL
+// position in the nav, not the page's identity — reordering the nav
+// renumbers the shortcuts. PAGE_NAV (the handler's array) must stay in sync
+// with this order.
 const NAV_SHORTCUTS: Partial<Record<Page, string>> = {
-  streams: 'Ctrl+1', player: 'Ctrl+2', converter: 'Ctrl+3',
-  combine: 'Ctrl+4', thumbnails: 'Ctrl+5', launcher: 'Ctrl+6', settings: 'Ctrl+,',
+  streams: 'Ctrl+1', player: 'Ctrl+2', thumbnails: 'Ctrl+3',
+  converter: 'Ctrl+4', combine: 'Ctrl+5', launcher: 'Ctrl+6', settings: 'Ctrl+,',
 }
 
 function AppInner() {
@@ -589,7 +610,9 @@ function AppInner() {
   // shortcuts fire even with a field focused (they don't type a character and
   // edits autosave); `?` (help) stands down while the user is typing.
   useEffect(() => {
-    const PAGE_NAV: Page[] = ['streams', 'player', 'converter', 'combine', 'thumbnails', 'launcher']
+    // Ctrl+1…6 targets, in the nav's VISUAL order (Create group then
+    // Utilities group) — keep in sync with NAV_SHORTCUTS above.
+    const PAGE_NAV: Page[] = ['streams', 'player', 'thumbnails', 'converter', 'combine', 'launcher']
     const onKey = (e: KeyboardEvent) => {
       if (isAnyModalOpen()) return
       const mod = e.ctrlKey || e.metaKey
@@ -742,7 +765,10 @@ function AppInner() {
           // `duration-200` so the nav participates in the slow-animation
           // setting (and snaps instantly when animations are disabled).
           style={{ transitionDuration: `${navTransitionDurationMs}ms` }}
-          className={`relative ${sidebarCollapsed ? 'w-12' : 'w-48'} bg-navy-800 flex flex-col shrink-0 transition-[width] overflow-hidden`}
+          // w-52 (208px): the nav-redesign width bump — the todo asked for
+          // "200px or the next default size"; 52 is the next Tailwind step
+          // up from the old w-48 (192px) that clears 200.
+          className={`relative ${sidebarCollapsed ? 'w-12' : 'w-52'} bg-navy-800 flex flex-col shrink-0 transition-[width] overflow-hidden`}
         >
           {/* Right edge — collapse/expand handle */}
           <Tooltip content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right" triggerClassName="group/edge absolute right-0 inset-y-0 w-2 z-20">
@@ -754,16 +780,15 @@ function AppInner() {
             <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-purple-500 transition-all duration-150" />
           </Tooltip>
 
-          <div className="flex-1">
-            {NAV_ITEMS.map(item => {
+          {(() => {
+            const renderNavItem = (item: NavItem) => {
               const showAlert = item.id === 'integrations' && integrationAlert
               const isSelected = page === item.id
               const hasActivity = !!pageActivity[item.id]
               // Settings + integrations are excluded from the startup-
               // page selector: they're settings pages, not workflow
-              // surfaces. The horizontal divider rendered below sits
-              // between launcher (last functional page) and
-              // integrations to make this grouping legible.
+              // surfaces (the System nav group, pinned to the bottom of
+              // the flexible zone by the spacer below).
               const isStartupCandidate = item.id !== 'integrations' && item.id !== 'settings'
               // Fall back to 'streams' when the user hasn't set a
               // startup page yet — covers both brand-new installs
@@ -882,15 +907,6 @@ function AppInner() {
 
               return (
                 <React.Fragment key={item.id}>
-                  {/* Subtle divider between the functional pages
-                      (above) and the settings pages — integrations,
-                      settings — (below). Rendered BEFORE the
-                      integrations item so the line sits visually
-                      between launcher and integrations regardless of
-                      future reordering inside each group. */}
-                  {item.id === 'integrations' && (
-                    <div className="my-1 mx-3 border-t border-white/10" />
-                  )}
                   {sidebarCollapsed ? (
                     <Tooltip content={item.label} side="right" triggerClassName="block w-full" shortcut={NAV_SHORTCUTS[item.id]}>
                       {row}
@@ -900,15 +916,34 @@ function AppInner() {
                   )}
                 </React.Fragment>
               )
-            })}
-          </div>
+            }
+            return (
+              <div className="flex-1 min-h-0 flex flex-col">
+                {NAV_GROUP_CREATE.map(renderNavItem)}
+                {/* Create ↔ Utilities separator. */}
+                <div className="my-1 mx-3 border-t border-white/10" />
+                {NAV_GROUP_UTILITIES.map(renderNavItem)}
+                {/* Flexible gap — floats the System group to the bottom
+                    of the nav's item zone, directly above the widget
+                    stack. The gap itself is the visual separation, so
+                    no divider before Integrations. */}
+                <div className="flex-1" />
+                {NAV_GROUP_SYSTEM.map(renderNavItem)}
+              </div>
+            )
+          })()}
 
           <div className="border-t border-white/5" />
+          {/* Widget stack. The first three are TEMPORARY here — Pass B of
+              the nav redesign absorbs each into its Utilities nav item
+              (Conversion → Converter, Launcher → Launcher, Auto-Rules
+              becomes a new hybrid item). Cloud sync + Stream Relay stay
+              as bottom widgets per the redesign spec. */}
           {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} collapsed={sidebarCollapsed} />}
-          <CloudOpsWidget collapsed={sidebarCollapsed} />
           <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
-          <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} />
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
+          <CloudOpsWidget collapsed={sidebarCollapsed} />
+          <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} />
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
             <Tooltip content="Open help" side="top" shortcut="?">
               <button
