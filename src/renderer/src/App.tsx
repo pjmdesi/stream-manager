@@ -208,73 +208,73 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
   )
 }
 
-function AutoRulesWidget({ active, onNavigate, collapsed }: { active: boolean; onNavigate: () => void; collapsed: boolean }) {
-  const { rules, running, startWatcher, stopWatcher } = useWatcher()
+/** Watcher status for the hybrid Auto-Rules nav item (nav redesign Pass
+ *  B) — passive info, so it renders INSIDE the nav button (plain content
+ *  only). Shows only while the watcher is RUNNING: that's the "work in
+ *  progress" state that earns the item its expansion; stopped is the
+ *  quiet state (the start control stays reachable via the row action). */
+function AutoRulesNavExtra({ collapsed }: { collapsed: boolean }) {
+  const { rules, running } = useWatcher()
   const enabledCount = rules.filter(r => r.enabled).length
-
-  // Main button row uses the exact nav-item pattern — same flex layout
-  // in both modes, icon at x=16 from the left, label always rendered
-  // and cropped by the parent nav's overflow-hidden as the sidebar
-  // shrinks. The Tooltip's content swaps based on `collapsed` so it
-  // doesn't fire in expanded mode where the label is already visible.
-  const mainButton = (
-    <button
-      onClick={onNavigate}
-      className={`relative flex items-center gap-3 w-full px-4 h-10 text-sm font-medium transition-colors ${active ? 'text-purple-300' : 'text-gray-400 hover:text-gray-200'}`}
-    >
-      <span className="shrink-0 inline-flex"><Shuffle size={18} /></span>
-      <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">Auto-Rules</span>
-    </button>
-  )
-  const mainButtonWrapped = collapsed
-    ? <Tooltip content="Auto-Rules" side="right" triggerClassName="block w-full">{mainButton}</Tooltip>
-    : mainButton
-
+  if (!running) return null
+  if (collapsed) {
+    return (
+      <div className="flex items-center justify-center gap-1 pt-0.5 pb-2">
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
+        <span className="text-[10px] text-gray-400">{enabledCount}</span>
+      </div>
+    )
+  }
   return (
-    <div className={`border-y transition-colors whitespace-nowrap ${active ? 'bg-purple-600/20 border-purple-600/30' : 'bg-navy-900 border-white/5'}`}>
-      {mainButtonWrapped}
-      {rules.length > 0 && (
-        <>
-          {/* Start/Stop button: centered in collapsed mode (the button
-              is a control, not a "column" element — visually the
-              square reads better in the middle of the 48px sidebar
-              than left-aligned with the button's left edge butting
-              against the sidebar edge). Full-width with text label
-              when expanded. */}
-          <div className={collapsed ? 'flex justify-center pb-1' : 'px-3 pb-1'}>
-            {running ? (
-              <Button variant="danger" size="sm" icon={<Square size={12} />} className={collapsed ? 'justify-center' : 'w-full whitespace-nowrap'} onClick={stopWatcher}>
-                {collapsed ? null : 'Stop Watcher'}
-              </Button>
-            ) : (
-              <Button variant="success" size="sm" icon={<Play size={12} />} className={collapsed ? 'justify-center' : 'w-full whitespace-nowrap'} onClick={startWatcher} disabled={enabledCount === 0}>
-                {collapsed ? null : 'Start Watcher'}
-              </Button>
-            )}
-          </div>
-          {/* Status row: centered with separate dot/bullet/count
-              elements when collapsed (small content reads better
-              centered in the 48px rail and the count stays visible);
-              left-aligned with prose "Running · N rules active" when
-              expanded. */}
-          {collapsed ? (
-            <div className="flex items-center justify-center gap-1 pb-2">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-              <span className="text-[10px] text-gray-400">•</span>
-              <span className="text-[10px] text-gray-400">{enabledCount}</span>
-            </div>
-          ) : (
-            <div className="px-4 py-2 flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-              <span className="text-[10px] text-gray-400">
-                {running ? 'Running' : 'Stopped'} · {enabledCount} rule{enabledCount !== 1 ? 's' : ''} active
-              </span>
-            </div>
-          )}
-        </>
-      )}
+    <div className="px-3.5 pt-0.5 pb-2 flex items-center gap-1.5 whitespace-nowrap">
+      <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
+      <span className="text-[10px] text-gray-400 overflow-hidden">
+        Running · {enabledCount} rule{enabledCount !== 1 ? 's' : ''} active
+      </span>
     </div>
   )
+}
+
+/** Start/Stop control for the Auto-Rules nav item — an ACTION, so it gets
+ *  its own surface via NavItem.rowAction (same placement rules as the
+ *  Launcher's quick-launch). Self-nulls when no rules exist yet. */
+function AutoRulesNavAction({ collapsed }: { collapsed: boolean }) {
+  const { rules, running, startWatcher, stopWatcher } = useWatcher()
+  const enabledCount = rules.filter(r => r.enabled).length
+  if (rules.length === 0) return null
+  const button = running ? (
+    <Button
+      variant="danger"
+      size="sm"
+      icon={<Square size={collapsed ? 12 : 14} />}
+      className="justify-center"
+      onClick={stopWatcher}
+      aria-label="Stop watcher"
+    />
+  ) : (
+    <Button
+      variant="success"
+      size="sm"
+      icon={<Play size={collapsed ? 12 : 14} />}
+      className="justify-center"
+      onClick={startWatcher}
+      disabled={enabledCount === 0}
+      aria-label="Start watcher"
+    />
+  )
+  const tooltip = running
+    ? 'Stop the file watcher'
+    : enabledCount === 0
+      ? 'No enabled rules — enable one on the Auto-Rules page first'
+      : `Start the file watcher · ${enabledCount} rule${enabledCount !== 1 ? 's' : ''} enabled`
+  if (collapsed) {
+    return (
+      <div className="flex justify-center pb-2 pt-0.5">
+        <Tooltip content={tooltip} side="right">{button}</Tooltip>
+      </div>
+    )
+  }
+  return <Tooltip content={tooltip} side="right">{button}</Tooltip>
 }
 
 /** Resolve a launch group's chosen icon name (kebab-case, as the launcher
@@ -430,8 +430,9 @@ const NAV_GROUP_CREATE: NavItem[] = [
   { id: 'thumbnails', label: 'Thumbnails', icon: <ImageIcon size={18} /> },
 ]
 const NAV_GROUP_UTILITIES: NavItem[] = [
-  { id: 'converter', label: 'Converter', icon: <Zap size={18} />, extra: ConverterNavExtra },
-  { id: 'combine',   label: 'Combine',   icon: <Combine size={18} /> },
+  { id: 'converter', label: 'Converter',  icon: <Zap size={18} />, extra: ConverterNavExtra },
+  { id: 'combine',   label: 'Combine',    icon: <Combine size={18} /> },
+  { id: 'rules',     label: 'Auto-Rules', icon: <Shuffle size={18} />, extra: AutoRulesNavExtra, rowAction: AutoRulesNavAction },
 ]
 const NAV_GROUP_SESSION: NavItem[] = [
   { id: 'launcher', label: 'Launcher', icon: <Rocket size={18} />, rowAction: LauncherNavAction },
@@ -451,7 +452,8 @@ const NAV_ITEMS: NavItem[] = [...NAV_GROUP_CREATE, ...NAV_GROUP_UTILITIES, ...NA
 // with this order.
 const NAV_SHORTCUTS: Partial<Record<Page, string>> = {
   streams: 'Ctrl+1', player: 'Ctrl+2', thumbnails: 'Ctrl+3',
-  converter: 'Ctrl+4', combine: 'Ctrl+5', launcher: 'Ctrl+6', settings: 'Ctrl+,',
+  converter: 'Ctrl+4', combine: 'Ctrl+5', rules: 'Ctrl+6',
+  launcher: 'Ctrl+7', settings: 'Ctrl+,',
 }
 
 function AppInner() {
@@ -653,9 +655,9 @@ function AppInner() {
   // shortcuts fire even with a field focused (they don't type a character and
   // edits autosave); `?` (help) stands down while the user is typing.
   useEffect(() => {
-    // Ctrl+1…6 targets, in the nav's VISUAL order (Create group then
-    // Utilities group) — keep in sync with NAV_SHORTCUTS above.
-    const PAGE_NAV: Page[] = ['streams', 'player', 'thumbnails', 'converter', 'combine', 'launcher']
+    // Ctrl+1…7 targets, in the nav's VISUAL order (Create, then
+    // Utilities, then Session) — keep in sync with NAV_SHORTCUTS above.
+    const PAGE_NAV: Page[] = ['streams', 'player', 'thumbnails', 'converter', 'combine', 'rules', 'launcher']
     const onKey = (e: KeyboardEvent) => {
       if (isAnyModalOpen()) return
       const mod = e.ctrlKey || e.metaKey
@@ -683,8 +685,8 @@ function AppInner() {
         }
         return
       }
-      // Ctrl+1…6 → jump directly to a page
-      if (!e.shiftKey && e.key >= '1' && e.key <= '6') {
+      // Ctrl+1…7 → jump directly to a page
+      if (!e.shiftKey && e.key >= '1' && e.key <= '7') {
         e.preventDefault()
         setPage(PAGE_NAV[Number(e.key) - 1])
         return
@@ -1011,12 +1013,10 @@ function AppInner() {
           })()}
 
           <div className="border-t border-white/5" />
-          {/* Widget stack. Auto-Rules is the last TEMPORARY resident —
-              the final Pass B step converts it into a Utilities nav item
-              (Conversion and Launcher already moved into their items).
-              Cloud sync + Stream Relay stay as bottom widgets per the
-              redesign spec. */}
-          <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
+          {/* Widget stack — the two permanent residents (per the redesign
+              spec: these get their own pages one day, but stay widgets
+              until there's enough content to justify it). Everything else
+              has been absorbed into the hybrid nav items above. */}
           <CloudOpsWidget collapsed={sidebarCollapsed} />
           <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} />
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
