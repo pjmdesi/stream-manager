@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -277,6 +277,9 @@ function AutoRulesWidget({ active, onNavigate, collapsed }: { active: boolean; o
   )
 }
 
+/** Resolve a launch group's chosen icon name (kebab-case, as the launcher
+ *  page stores it) to its Lucide component; falls back to Rocket when the
+ *  group has no icon set or the name doesn't resolve. */
 function GroupIcon({ name, size = 16 }: { name?: string; size?: number }) {
   const pascal = (n: string) => n.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
   const Icon = name
@@ -285,16 +288,27 @@ function GroupIcon({ name, size = 16 }: { name?: string; size?: number }) {
   return <Icon size={size} />
 }
 
-function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; collapsed: boolean }) {
+/** Quick-launch control for the Launcher nav item (nav redesign Pass B).
+ *  Launching is an ACTION, not passive status, so — unlike the converter's
+ *  info block — it gets its own interactive surface instead of living
+ *  inside the nav button:
+ *    expanded  → hover-revealed icon button on the row's right (the
+ *                startup-star pattern; sits left of the star's slot)
+ *    collapsed → compact centered launch row below the item, mirroring
+ *                the old widget's collapsed shape
+ *  Self-nulls when no launch group is pinned to the widget slot. The icon
+ *  doubles as transient feedback: spinner while launching, check on
+ *  success, amber alert when some apps failed (details in the tooltip). */
+function LauncherNavAction({ collapsed }: { collapsed: boolean }) {
   const { config } = useStore()
   const [groups, setGroups] = useState<LauncherGroup[]>([])
   const [launching, setLaunching] = useState(false)
-  const [feedback, setFeedback] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null)
 
   useEffect(() => {
     const refetch = () => { window.api.getLauncherGroups().then(setGroups).catch(() => {}) }
     refetch()
-    // LauncherPage dispatches this on every save so the widget reflects
+    // LauncherPage dispatches this on every save so the control reflects
     // renames / app-list edits live instead of serving a stale snapshot.
     window.addEventListener('sm:launcher-groups-changed', refetch)
     return () => window.removeEventListener('sm:launcher-groups-changed', refetch)
@@ -308,65 +322,70 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
     setLaunching(true)
     try {
       const result = await window.api.launchGroup(group.id)
-      setFeedback(result.failed.length > 0
-        ? `${result.launched} of ${result.launched + result.failed.length} launched`
-        : `Launched ${result.launched}`)
-      setTimeout(() => setFeedback(null), result.failed.length > 0 ? 4000 : 2000)
+      const ok = result.failed.length === 0
+      setFeedback({
+        text: ok
+          ? `Launched ${result.launched}`
+          : `${result.launched} of ${result.launched + result.failed.length} launched`,
+        ok,
+      })
+      setTimeout(() => setFeedback(null), ok ? 2000 : 4000)
     } finally {
       setLaunching(false)
     }
   }
 
   const appCount = group.apps.length
-  const appListContent = (
+  const tooltipContent = (
     <div className="flex flex-col gap-0.5">
-      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">{group.name}</p>
+      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
+        {feedback ? feedback.text : `Launch ${group.name}`}
+      </p>
       {group.apps.map(a => (
         <p key={a.id} className="text-xs text-gray-200">{a.name}</p>
       ))}
     </div>
   )
+  // Resting icon is the GROUP's chosen icon (Rocket only as its fallback),
+  // not a repeat of the nav item's Rocket right next to it — it identifies
+  // WHAT gets launched. Transient states still override.
+  const statusIcon = (size: number) =>
+    launching ? <Loader2 size={size} className="animate-spin" />
+      : feedback ? (feedback.ok ? <CheckCircle size={size} className="text-green-400" /> : <AlertCircle size={size} className="text-amber-400" />)
+        : <GroupIcon name={group.icon} size={size} />
 
-  // Main row uses the nav-item pattern — identical flex layout in both
-  // modes, icon at x=16 from the left, label always rendered + cropped
-  // by the nav's outer overflow-hidden as the sidebar shrinks. The header
-  // always navigates to the Launcher page (both modes); the launch action
-  // lives on the dedicated button below in both modes — matching the
-  // Auto-Rules widget's "header navigates, control acts" convention.
-  const mainButton = (
-    <button
-      onClick={onNavigate}
-      className="flex items-center gap-3 w-full px-4 h-10 text-sm font-medium text-gray-400 hover:text-gray-200 transition-colors"
-    >
-      <span className="shrink-0 inline-flex"><GroupIcon name={group.icon} size={16} /></span>
-      <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">{group.name}</span>
-    </button>
-  )
-  const mainButtonWrapped = collapsed
-    ? <Tooltip content={appListContent} side="right" triggerClassName="block w-full">{mainButton}</Tooltip>
-    : mainButton
-
-  return (
-    <div className="bg-navy-900 border-y border-white/5 hover:border-white/10 transition-colors whitespace-nowrap">
-      {mainButtonWrapped}
-      {/* Launch button — shown in both modes so collapsing the sidebar
-          doesn't hide quick-launch. Collapsed: icon-only, centered (mirrors
-          the Auto-Rules Start/Stop control); expanded: full-width + label. */}
-      <div className={collapsed ? 'flex justify-center pb-2' : 'px-3 pb-2'}>
-        <Tooltip content={appListContent} side="right" triggerClassName={collapsed ? '' : 'block w-full'} shortcut="Ctrl+L">
+  if (collapsed) {
+    return (
+      <div className="flex justify-center pb-2 pt-0.5">
+        <Tooltip content={tooltipContent} side="right" shortcut="Ctrl+L">
           <Button
             variant="primary"
             size="sm"
-            icon={<Rocket size={12} />}
-            className={collapsed ? 'justify-center' : 'w-full whitespace-nowrap'}
+            icon={statusIcon(12)}
+            className="justify-center"
             disabled={launching || appCount === 0}
             onClick={launch}
-          >
-            {collapsed ? null : (feedback ?? `Launch ${appCount} app${appCount === 1 ? '' : 's'}`)}
-          </Button>
+          />
         </Tooltip>
       </div>
-    </div>
+    )
+  }
+
+  // Expanded: proper Button treatment (same primary icon-button as the
+  // collapsed row), always visible — a launch affordance shouldn't need
+  // discovering via hover.
+  return (
+    <Tooltip content={tooltipContent} side="right" shortcut="Ctrl+L">
+      <Button
+        variant="primary"
+        size="sm"
+        icon={statusIcon(14)}
+        className="justify-center"
+        disabled={launching || appCount === 0}
+        onClick={launch}
+        aria-label={`Launch ${group.name}`}
+      />
+    </Tooltip>
   )
 }
 
@@ -382,14 +401,26 @@ type NavItem = {
    *  focus target). Must render plain content only, never its own
    *  button: it lives inside the nav button. */
   extra?: React.ComponentType<{ collapsed: boolean }>
+  /** ACTION control for the item — the counterpart to `extra` for hybrid
+   *  items whose widget behavior is a control rather than status (rule:
+   *  passive status lives inside the nav button, actions get their own
+   *  surface). Expanded: rendered as a hover-revealed overlay at the
+   *  row's right, left of the startup star. Collapsed: rendered as its
+   *  own compact row below the item. May render real buttons — it is
+   *  never nested inside the nav button. */
+  rowAction?: React.ComponentType<{ collapsed: boolean }>
 }
 
-// Nav groups (nav redesign Pass A). Group names are internal reference
-// only — nothing renders them.
+// Nav groups (nav redesign). Group names are internal reference only —
+// nothing renders them.
 //   Create    — the content-producing pages.
-//   Utilities — tools with live activity; these become hybrid nav/widget
-//               items in Pass B, and Auto-Rules joins the group when its
-//               widget converts to one.
+//   Utilities — post-stream processing tools with live activity; hybrid
+//               nav/widget items (Pass B), and Auto-Rules joins the group
+//               when its widget converts to one.
+//   Session   — live-session helpers: pre-stream prep now (Launcher),
+//               and Stream Relay whenever it gets its own page. Split
+//               from Utilities because these are action-oriented, not
+//               passive processing status.
 //   System    — settings pages, pinned to the bottom of the nav's
 //               flexible zone by the spacer in the render (they're also
 //               excluded from the startup-page selector).
@@ -401,7 +432,9 @@ const NAV_GROUP_CREATE: NavItem[] = [
 const NAV_GROUP_UTILITIES: NavItem[] = [
   { id: 'converter', label: 'Converter', icon: <Zap size={18} />, extra: ConverterNavExtra },
   { id: 'combine',   label: 'Combine',   icon: <Combine size={18} /> },
-  { id: 'launcher',  label: 'Launcher',  icon: <Rocket size={18} /> },
+]
+const NAV_GROUP_SESSION: NavItem[] = [
+  { id: 'launcher', label: 'Launcher', icon: <Rocket size={18} />, rowAction: LauncherNavAction },
 ]
 const NAV_GROUP_SYSTEM: NavItem[] = [
   { id: 'integrations', label: 'Integrations', icon: <Plug size={18} /> },
@@ -409,7 +442,7 @@ const NAV_GROUP_SYSTEM: NavItem[] = [
 ]
 /** Flat list in rendered order — feeds startup-page validation and any
  *  other "is this a nav page" check. */
-const NAV_ITEMS: NavItem[] = [...NAV_GROUP_CREATE, ...NAV_GROUP_UTILITIES, ...NAV_GROUP_SYSTEM]
+const NAV_ITEMS: NavItem[] = [...NAV_GROUP_CREATE, ...NAV_GROUP_UTILITIES, ...NAV_GROUP_SESSION, ...NAV_GROUP_SYSTEM]
 
 // Page-jump shortcut labels for the collapsed-nav tooltips (mirror the global
 // handler's Ctrl+1…6 / Ctrl+,). The number corresponds to the item's VISUAL
@@ -810,8 +843,10 @@ function AppInner() {
               const effectiveStartupPage = config.startupPage || 'streams'
               const isStartupPage = isStartupCandidate && effectiveStartupPage === item.id
               // Hybrid items render their live-info block inside the nav
-              // button (self-nulls while quiet — see NavItem.extra).
+              // button (self-nulls while quiet — see NavItem.extra) and/or
+              // an action control with its own surface (NavItem.rowAction).
               const Extra = item.extra
+              const RowAction = item.rowAction
 
               const row = (
                 // `group/nav` scopes the hover state to this row so the
@@ -924,6 +959,18 @@ function AppInner() {
                       </button>
                     </Tooltip>
                   )}
+                  {/* Row action (e.g. Launcher's quick-launch) — always
+                      visible at the row's right, vertically centered on
+                      the icon+label line (top-5 = the line's h-10
+                      center), sitting left of the startup star's
+                      hover-reveal slot. A real sibling button: actions
+                      never nest inside the nav button (invalid HTML), and
+                      they deserve their own hover/focus surface. */}
+                  {RowAction && !sidebarCollapsed && (
+                    <div className="absolute right-8 top-5 -translate-y-1/2">
+                      <RowAction collapsed={false} />
+                    </div>
+                  )}
                 </div>
               )
 
@@ -936,6 +983,11 @@ function AppInner() {
                   ) : (
                     row
                   )}
+                  {/* Collapsed mode has no room for a row overlay — the
+                      action control gets its own compact row below the
+                      item (outside the label tooltip's trigger so its
+                      own tooltip can fire). */}
+                  {RowAction && sidebarCollapsed && <RowAction collapsed />}
                 </React.Fragment>
               )
             }
@@ -945,6 +997,9 @@ function AppInner() {
                 {/* Create ↔ Utilities separator. */}
                 <div className="my-1 mx-3 border-t border-white/10" />
                 {NAV_GROUP_UTILITIES.map(renderNavItem)}
+                {/* Utilities ↔ Session separator. */}
+                <div className="my-1 mx-3 border-t border-white/10" />
+                {NAV_GROUP_SESSION.map(renderNavItem)}
                 {/* Flexible gap — floats the System group to the bottom
                     of the nav's item zone, directly above the widget
                     stack. The gap itself is the visual separation, so
@@ -956,13 +1011,11 @@ function AppInner() {
           })()}
 
           <div className="border-t border-white/5" />
-          {/* Widget stack. The first two are TEMPORARY here — Pass B of
-              the nav redesign absorbs each into its Utilities nav item
-              (Launcher → Launcher, Auto-Rules becomes a new hybrid item;
-              Conversion already moved into the Converter item). Cloud
-              sync + Stream Relay stay as bottom widgets per the redesign
-              spec. */}
-          <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
+          {/* Widget stack. Auto-Rules is the last TEMPORARY resident —
+              the final Pass B step converts it into a Utilities nav item
+              (Conversion and Launcher already moved into their items).
+              Cloud sync + Stream Relay stay as bottom widgets per the
+              redesign spec. */}
           <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
           <CloudOpsWidget collapsed={sidebarCollapsed} />
           <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} />
