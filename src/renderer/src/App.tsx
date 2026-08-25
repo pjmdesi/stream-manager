@@ -315,6 +315,15 @@ function LauncherNavAction({ collapsed }: { collapsed: boolean }) {
   }, [config.launcherWidgetGroupId])
 
   const group = groups.find(g => g.id === config.launcherWidgetGroupId) ?? null
+  // Publish the pinned group's name (and transient launch feedback) as
+  // the Launcher item's subtext line (nav redesign Pass C). Cleared when
+  // nothing is pinned.
+  const { setNavSubtext } = usePageActivity()
+  const feedbackText = feedback?.text ?? null
+  const groupName = group?.name ?? null
+  useEffect(() => {
+    setNavSubtext('launcher', feedbackText ?? groupName)
+  }, [feedbackText, groupName, setNavSubtext])
   if (!group) return null
 
   const launch = async () => {
@@ -547,7 +556,7 @@ function AppInner() {
   // from the existing job context; player + thumbnails publish into
   // PageActivityContext since their working state is local to those
   // pages.
-  const { playerHasVideo, thumbnailHasCanvas, combineHasFiles } = usePageActivity()
+  const { playerHasVideo, thumbnailHasCanvas, combineHasFiles, navSubtext } = usePageActivity()
   const { jobs: conversionJobs } = useConversionJobs()
   const converterHasJobs = conversionJobs.some(j => j.status !== 'cancelled' && j.status !== 'done')
   // Honor the user's disable / slow-animation prefs for the nav-rail
@@ -893,8 +902,18 @@ function AppInner() {
                         `whitespace-nowrap` keeps the text on a single
                         line so it slides out the right edge instead of
                         wrapping; `overflow-hidden` clips the text at
-                        the label's diminishing width for a clean crop. */}
-                    <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">{item.label}</span>
+                        the label's diminishing width for a clean crop.
+                        With a published subtext (nav redesign Pass C:
+                        the open stream / pinned launch group) the label
+                        becomes a tight two-line stack that still fits
+                        the h-10 line, so the icon, star, and row-action
+                        anchors all stay put. */}
+                    <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">
+                      <span className="block truncate leading-tight">{item.label}</span>
+                      {navSubtext[item.id] && (
+                        <span className="block truncate leading-tight text-[10px] font-normal text-gray-400">{navSubtext[item.id]}</span>
+                      )}
+                    </span>
                     {!sidebarCollapsed && showAlert && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
                     </div>
                     {/* Hybrid items: live info inside the same button —

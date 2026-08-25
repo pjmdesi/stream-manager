@@ -1070,7 +1070,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   // App.tsx can drive the nav's activity indicator. filePath is null
   // before load + after closeVideo, so the boolean is always in sync
   // with whether the user has work open in the player.
-  const { setPlayerHasVideo } = usePageActivity()
+  const { setPlayerHasVideo, setNavSubtext } = usePageActivity()
   useEffect(() => {
     setPlayerHasVideo(state.filePath !== null)
   }, [state.filePath, setPlayerHasVideo])
@@ -1369,6 +1369,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       null
     )
   }, [state.filePath, config.streamsDir, sortedStreamFolders, folderPath])
+
+  // Nav subtext (nav redesign Pass C): the open item's stream title (or
+  // its date when the title renders empty); the bare filename when the
+  // open file is external to the library. Cleared when nothing is open.
+  useEffect(() => {
+    if (!state.filePath) { setNavSubtext('player', null); return }
+    setNavSubtext('player', currentStreamFolder
+      ? (renderStreamTitle(currentStreamFolder, sortedStreamFolders).trim() || currentStreamFolder.date)
+      : (state.filePath.split(/[\\/]/).pop() ?? null))
+  }, [state.filePath, currentStreamFolder, sortedStreamFolders, setNavSubtext])
 
   // ── Recent videos ──────────────────────────────────────────────────────
   // Most-recently-opened video files, surfaced in the empty state (mirrors

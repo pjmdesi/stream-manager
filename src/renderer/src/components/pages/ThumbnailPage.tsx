@@ -3367,7 +3367,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
 export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const { pendingStream, clearPendingStream, rerenderRequest } = useThumbnailEditor()
   const { config, updateConfig } = useStore()
-  const { setThumbnailHasCanvas } = usePageActivity()
+  const { setThumbnailHasCanvas, setNavSubtext } = usePageActivity()
   // Assets-panel options dropdown (show-from-season / show-from-topic-game).
   const [assetOptionsOpen, setAssetOptionsOpen] = useState(false)
   const assetOptionsRef = useRef<HTMLDivElement>(null)
@@ -4593,8 +4593,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // bound to the canvas. Overview mode (template gallery) doesn't count —
   // the user isn't actively editing anything specific then.
   useEffect(() => {
-    setThumbnailHasCanvas(mode === 'editor' && currentStream !== null)
-  }, [mode, currentStream, setThumbnailHasCanvas])
+    const open = mode === 'editor' && currentStream !== null
+    setThumbnailHasCanvas(open)
+    // Nav subtext (nav redesign Pass C): the open canvas's stream title,
+    // falling back to its date. Overview mode publishes nothing.
+    setNavSubtext('thumbnails', open ? (currentStream.title?.trim() || currentStream.date) : null)
+  }, [mode, currentStream, setThumbnailHasCanvas, setNavSubtext])
 
   // ── Fit scale + container size ────────────────────────────────────────────
   useEffect(() => {
