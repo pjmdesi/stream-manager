@@ -658,22 +658,15 @@ function AppInner() {
   // against the moving edge, and the collapsed variants (which exist at
   // zero height throughout the width transition) slide open
   // jQuery-slideDown style once the width lands. On EXPAND the collapsed
-  // variants slide shut immediately while the widening rail re-reveals
-  // the expanded ones, then unmount when their slide finishes.
-  //   railCollapsed     — "steady collapsed state reached" (lags the
-  //                        toggle on collapse, leads it on expand)
-  //   collapsedUiMounted — collapsed variants exist in the DOM (covers
-  //                        the slide-shut window during expand)
+  // variants disappear IMMEDIATELY (no exit animation — a slide-up here
+  // read as the content wandering while the rail widened) and the
+  // expanded ones are re-revealed by the moving edge.
+  //   railCollapsed — "steady collapsed state reached" (lags the toggle
+  //                    on collapse, resets instantly on expand)
   const [railCollapsed, setRailCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
-  const [collapsedUiMounted, setCollapsedUiMounted] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
   useEffect(() => {
-    if (sidebarCollapsed) {
-      setCollapsedUiMounted(true)
-      const t = setTimeout(() => setRailCollapsed(true), navTransitionDurationMs)
-      return () => clearTimeout(t)
-    }
-    setRailCollapsed(false)
-    const t = setTimeout(() => setCollapsedUiMounted(false), navTransitionDurationMs)
+    if (!sidebarCollapsed) { setRailCollapsed(false); return }
+    const t = setTimeout(() => setRailCollapsed(true), navTransitionDurationMs)
     return () => clearTimeout(t)
   }, [sidebarCollapsed, navTransitionDurationMs])
   const pageActivity: Partial<Record<Page, boolean>> = {
@@ -1047,14 +1040,17 @@ function AppInner() {
                     // icon's x position never jumps; labels and
                     // right-side adornments clip at the nav's outer
                     // `overflow-hidden` as the width shrinks.
+                    // Selected + steady-collapsed with a control block
+                    // below: the bottom border goes transparent so it
+                    // doesn't draw a hairline through the item. Keyed on
+                    // railCollapsed, not the raw toggle — during the
+                    // collapse transition nothing is below yet, and
+                    // dropping the border early left the box visibly
+                    // open along its bottom edge.
                     className={`
                       relative w-full flex flex-col text-sm font-medium transition-all duration-150 border
                       ${isSelected
-                        // border-b-transparent when a collapsed control
-                        // block continues the column below: the button's
-                        // bottom border otherwise draws a hairline
-                        // through the middle of the selected item.
-                        ? `bg-purple-600/20 text-purple-300 border-purple-600/30${sidebarCollapsed && RowAction ? ' border-b-transparent' : ''}`
+                        ? `bg-purple-600/20 text-purple-300 border-purple-600/30${railCollapsed && RowAction ? ' border-b-transparent' : ''}`
                         : hasActivity
                           ? 'text-gray-100 group-hover/nav:text-white group-hover/nav:bg-white/5 border-transparent'
                           : 'text-gray-400 group-hover/nav:text-gray-200 group-hover/nav:bg-white/5 border-transparent'
@@ -1102,7 +1098,7 @@ function AppInner() {
                         <Extra collapsed={false} />
                       </div>
                     )}
-                    {Extra && collapsedUiMounted && (
+                    {Extra && sidebarCollapsed && (
                       <SlideOpen open={railCollapsed} durationMs={navTransitionDurationMs}>
                         <Extra collapsed />
                       </SlideOpen>
@@ -1209,10 +1205,9 @@ function AppInner() {
                       wrapper so the whole column hovers as one item,
                       while keeping its own tooltip zone (the label
                       tooltip wraps only the icon button above). Slides
-                      open after the collapse lands, slides shut the
-                      moment an expand starts (mounted until that slide
-                      finishes). */}
-                  {RowAction && collapsedUiMounted && (
+                      open after the collapse lands; on expand it
+                      unmounts instantly (no exit slide). */}
+                  {RowAction && sidebarCollapsed && (
                     <SlideOpen open={railCollapsed} durationMs={navTransitionDurationMs}>
                       <RowAction collapsed active={isSelected} onNavigate={() => setPage(item.id)} />
                     </SlideOpen>
