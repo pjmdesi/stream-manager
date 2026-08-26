@@ -214,23 +214,6 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
  *  only). Shows only while the watcher is RUNNING: that's the "work in
  *  progress" state that earns the item its expansion; stopped is the
  *  quiet state (the start control stays reachable via the row action). */
-function AutoRulesNavExtra({ collapsed }: { collapsed: boolean }) {
-  const { rules, running } = useWatcher()
-  const enabledCount = rules.filter(r => r.enabled).length
-  if (!running) return null
-  // Expanded mode renders nothing here — the status moved into the
-  // item's second LINE (AutoRulesSubline) so Auto-Rules matches the
-  // subtitle layout of the other nav items instead of growing a
-  // full-width extra row. Only the collapsed rail keeps this block.
-  if (!collapsed) return null
-  return (
-    <div className="flex items-center justify-center gap-1 pt-0.5 pb-2">
-      <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
-      <span className="text-[10px] text-gray-400">{enabledCount}</span>
-    </div>
-  )
-}
-
 /** Compact watcher status as the Auto-Rules item's second line — the
  *  subtitle layout the other nav items use: "[dot] Running • enabled/total",
  *  only while the watcher runs. */
@@ -303,9 +286,19 @@ function AutoRulesNavAction({ collapsed }: { collapsed: boolean }) {
       ? 'No enabled rules — enable one on the Auto-Rules page first'
       : `Start the file watcher · ${enabledCount} rule${enabledCount !== 1 ? 's' : ''} enabled`
   if (collapsed) {
+    // Control first (directly under the nav icon), status below — and the
+    // status uses the same enabled/total format as the expanded subtitle.
+    // The container carries its own hover wash so the item's hover
+    // styling doesn't dead-zone over the control block.
     return (
-      <div className="flex justify-center pb-2 pt-0.5">
+      <div className="flex flex-col items-center gap-1 pb-2 pt-0.5 hover:bg-white/5 transition-colors">
         <Tooltip content={tooltip} side="right">{button}</Tooltip>
+        {running && (
+          <div className="flex items-center justify-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
+            <span className="text-[10px] text-gray-400 tabular-nums">{enabledCount}/{rules.length}</span>
+          </div>
+        )}
       </div>
     )
   }
@@ -400,15 +393,21 @@ function LauncherNavAction({ collapsed }: { collapsed: boolean }) {
       : feedback ? (feedback.ok ? <CheckCircle size={size} className="text-green-400" /> : <AlertCircle size={size} className="text-amber-400" />)
         : <GroupIcon name={group.icon} size={size} />
 
+  // `border border-transparent` on both buttons: the primary variant has
+  // no border while the Auto-Rules control uses bordered variants
+  // (success/danger) — without the compensation the two boxes differ by
+  // 2px and the column doesn't line up.
   if (collapsed) {
+    // Container carries its own hover wash so the item's hover styling
+    // doesn't dead-zone over the control block.
     return (
-      <div className="flex justify-center pb-2 pt-0.5">
+      <div className="flex justify-center pb-2 pt-0.5 hover:bg-white/5 transition-colors">
         <Tooltip content={tooltipContent} side="right" shortcut="Ctrl+L">
           <Button
             variant="primary"
             size="sm"
             icon={statusIcon(12)}
-            className="justify-center"
+            className="justify-center border border-transparent"
             disabled={launching || appCount === 0}
             onClick={launch}
           />
@@ -426,7 +425,7 @@ function LauncherNavAction({ collapsed }: { collapsed: boolean }) {
         variant="primary"
         size="sm"
         icon={statusIcon(14)}
-        className="justify-center"
+        className="justify-center border border-transparent"
         disabled={launching || appCount === 0}
         onClick={launch}
         aria-label={`Launch ${group.name}`}
@@ -478,7 +477,9 @@ const NAV_GROUP_CREATE: NavItem[] = [
 const NAV_GROUP_UTILITIES: NavItem[] = [
   { id: 'converter', label: 'Converter',  icon: <Zap size={18} />, extra: ConverterNavExtra },
   { id: 'combine',   label: 'Combine',    icon: <Combine size={18} /> },
-  { id: 'rules',     label: 'Auto-Rules', icon: <Shuffle size={18} />, extra: AutoRulesNavExtra, rowAction: AutoRulesNavAction },
+  // Auto-Rules collapsed status lives inside its rowAction (control on
+  // top, dot + enabled/total below); expanded status is the subline.
+  { id: 'rules',     label: 'Auto-Rules', icon: <Shuffle size={18} />, rowAction: AutoRulesNavAction },
 ]
 const NAV_GROUP_SESSION: NavItem[] = [
   { id: 'launcher', label: 'Launcher', icon: <Rocket size={18} />, rowAction: LauncherNavAction },
@@ -986,8 +987,8 @@ function AppInner() {
                       ${isSelected
                         ? 'bg-purple-600/20 text-purple-300 border-purple-600/30'
                         : hasActivity
-                          ? 'text-gray-100 hover:text-white hover:bg-white/5 border-transparent'
-                          : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border-transparent'
+                          ? 'text-gray-100 group-hover/nav:text-white group-hover/nav:bg-white/5 border-transparent'
+                          : 'text-gray-400 group-hover/nav:text-gray-200 group-hover/nav:bg-white/5 border-transparent'
                       }
                     `}
                   >
