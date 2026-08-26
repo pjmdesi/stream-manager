@@ -1186,11 +1186,15 @@ function AppInner() {
                     <Tooltip
                       content={isStartupPage ? 'Startup page' : 'Set as startup page'}
                       side="right"
-                      // `top-5` (20px = the icon line's h-10 center), not
+                      // Lives in the row's LEFT padding strip (the 14px
+                      // before the icon) — the one zone that's empty and
+                      // uniform on every row, unlike the right side where
+                      // action buttons and the accent now live. `top-5`
+                      // (20px = the icon line's h-10 center), not
                       // top-1/2: a hybrid item's expanded info makes the
                       // wrapper taller, and the star must stay centered
                       // on the icon+label LINE, not the whole item.
-                      triggerClassName={`absolute right-2 top-5 -translate-y-1/2 ${sidebarCollapsed ? 'hidden' : ''}`}
+                      triggerClassName={`absolute left-0 top-5 -translate-y-1/2 ${sidebarCollapsed ? 'hidden' : ''}`}
                     >
                       <button
                         type="button"
@@ -1202,23 +1206,26 @@ function AppInner() {
                         // appears on row hover. Trades the launcher's
                         // "always show the pin" pattern for a cleaner
                         // resting state; the user can still discover
-                        // their startup pick by hovering.
-                        className={`shrink-0 p-1 transition-colors opacity-0 group-hover/nav:opacity-100 ${
+                        // their startup pick by hovering. The button
+                        // fills the padding strip's width and the full
+                        // line height so the narrow column still has a
+                        // usable hit target; the 11px star clears the
+                        // 14px strip with a hair of margin.
+                        className={`w-3.5 h-10 flex items-center justify-center transition-colors opacity-0 group-hover/nav:opacity-100 ${
                           isStartupPage
                             ? 'text-yellow-400'
                             : 'text-gray-400 hover:text-gray-200'
                         }`}
                         aria-label={isStartupPage ? 'Startup page' : 'Set as startup page'}
                       >
-                        <Star size={12} className={isStartupPage ? 'fill-yellow-400' : ''} />
+                        <Star size={11} className={isStartupPage ? 'fill-yellow-400' : ''} />
                       </button>
                     </Tooltip>
                   )}
                   {/* Row action (e.g. Launcher's quick-launch) — always
                       visible at the row's right, vertically centered on
                       the icon+label line (top-5 = the line's h-10
-                      center), sitting left of the startup star's
-                      hover-reveal slot. A real sibling button: actions
+                      center). A real sibling button: actions
                       never nest inside the nav button (invalid HTML), and
                       they deserve their own hover/focus surface.
                       The pointer-events-none layer pins the control at
