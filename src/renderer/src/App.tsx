@@ -256,7 +256,7 @@ function IntegrationsSubline({ status }: { status: Record<'youtube' | 'twitch' |
 /** Start/Stop control for the Auto-Rules nav item — an ACTION, so it gets
  *  its own surface via NavItem.rowAction (same placement rules as the
  *  Launcher's quick-launch). Self-nulls when no rules exist yet. */
-function AutoRulesNavAction({ collapsed }: { collapsed: boolean }) {
+function AutoRulesNavAction({ collapsed, active }: { collapsed: boolean; active?: boolean }) {
   const { rules, running, startWatcher, stopWatcher } = useWatcher()
   const enabledCount = rules.filter(r => r.enabled).length
   if (rules.length === 0) return null
@@ -288,10 +288,12 @@ function AutoRulesNavAction({ collapsed }: { collapsed: boolean }) {
   if (collapsed) {
     // Control first (directly under the nav icon), status below — and the
     // status uses the same enabled/total format as the expanded subtitle.
-    // The container carries its own hover wash so the item's hover
-    // styling doesn't dead-zone over the control block.
+    // The block lives inside the item's group/nav wrapper, so the whole
+    // column washes as ONE hover surface; when the page is OPEN it
+    // continues the selected purple + side borders down the column
+    // (transparent borders otherwise, so selection never shifts layout).
     return (
-      <div className="flex flex-col items-center gap-1 pb-2 pt-0.5 hover:bg-white/5 transition-colors">
+      <div className={`flex flex-col items-center gap-1 pb-2 pt-0.5 border border-t-0 transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}>
         <Tooltip content={tooltip} side="right">{button}</Tooltip>
         {running && (
           <div className="flex items-center justify-center gap-1">
@@ -327,7 +329,7 @@ function GroupIcon({ name, size = 16 }: { name?: string; size?: number }) {
  *  Self-nulls when no launch group is pinned to the widget slot. The icon
  *  doubles as transient feedback: spinner while launching, check on
  *  success, amber alert when some apps failed (details in the tooltip). */
-function LauncherNavAction({ collapsed }: { collapsed: boolean }) {
+function LauncherNavAction({ collapsed, active }: { collapsed: boolean; active?: boolean }) {
   const { config } = useStore()
   const [groups, setGroups] = useState<LauncherGroup[]>([])
   const [launching, setLaunching] = useState(false)
@@ -398,10 +400,12 @@ function LauncherNavAction({ collapsed }: { collapsed: boolean }) {
   // (success/danger) — without the compensation the two boxes differ by
   // 2px and the column doesn't line up.
   if (collapsed) {
-    // Container carries its own hover wash so the item's hover styling
-    // doesn't dead-zone over the control block.
+    // The block lives inside the item's group/nav wrapper, so the whole
+    // column washes as ONE hover surface; when the page is OPEN it
+    // continues the selected purple + side borders down the column
+    // (transparent borders otherwise, so selection never shifts layout).
     return (
-      <div className="flex justify-center pb-2 pt-0.5 hover:bg-white/5 transition-colors">
+      <div className={`flex justify-center pb-2 pt-0.5 border border-t-0 transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}>
         <Tooltip content={tooltipContent} side="right" shortcut="Ctrl+L">
           <Button
             variant="primary"
@@ -451,9 +455,10 @@ type NavItem = {
    *  passive status lives inside the nav button, actions get their own
    *  surface). Expanded: rendered as a hover-revealed overlay at the
    *  row's right, left of the startup star. Collapsed: rendered as its
-   *  own compact row below the item. May render real buttons — it is
-   *  never nested inside the nav button. */
-  rowAction?: React.ComponentType<{ collapsed: boolean }>
+   *  own compact row below the item, receiving `active` so it can
+   *  continue the selected-page styling down the column. May render real
+   *  buttons — it is never nested inside the nav button. */
+  rowAction?: React.ComponentType<{ collapsed: boolean; active?: boolean }>
 }
 
 // Nav groups (nav redesign). Group names are internal reference only —
@@ -963,13 +968,12 @@ function AppInner() {
               const Extra = item.extra
               const RowAction = item.rowAction
 
-              const row = (
-                // `group/nav` scopes the hover state to this row so the
-                // star only appears for the row the cursor is over. The
-                // outer wrapper is a div (not a button) so the star can
-                // be a real sibling button — nesting buttons is invalid
-                // HTML.
-                <div className="relative group/nav">
+              // The main nav button, defined separately so collapsed mode
+              // can wrap JUST it in the label tooltip while the row
+              // wrapper below (the group/nav hover scope) also contains
+              // the star and any row action — the whole item hovers as
+              // one surface in both modes, with zone-specific tooltips.
+              const navButton = (
                   <button
                     onClick={() => setPage(item.id)}
                     // Single interactive surface for the whole item: the
@@ -1039,6 +1043,21 @@ function AppInner() {
                       <span className="pointer-events-none absolute right-0 top-2 bottom-2 w-[2px] rounded-full bg-purple-400/50" />
                     )}
                   </button>
+              )
+
+              const row = (
+                // `group/nav` scopes the hover state to this row. The
+                // outer wrapper is a div (not a button) so the star and
+                // row action can be real sibling buttons — nesting
+                // buttons is invalid HTML.
+                <div className="relative group/nav">
+                  {sidebarCollapsed ? (
+                    <Tooltip content={item.label} side="right" triggerClassName="block w-full" shortcut={NAV_SHORTCUTS[item.id]}>
+                      {navButton}
+                    </Tooltip>
+                  ) : (
+                    navButton
+                  )}
                   {/* Startup-page star — hidden in collapsed sidebar
                       mode. Rendered in BOTH modes (just CSS-hidden
                       when collapsed) so collapse/expand doesn't have
@@ -1098,25 +1117,16 @@ function AppInner() {
                       <RowAction collapsed={false} />
                     </div>
                   )}
+                  {/* Collapsed: the action control renders as its own
+                      block below the icon button — INSIDE the group/nav
+                      wrapper so the whole column hovers as one item,
+                      while keeping its own tooltip zone (the label
+                      tooltip wraps only the icon button above). */}
+                  {RowAction && sidebarCollapsed && <RowAction collapsed active={isSelected} />}
                 </div>
               )
 
-              return (
-                <React.Fragment key={item.id}>
-                  {sidebarCollapsed ? (
-                    <Tooltip content={item.label} side="right" triggerClassName="block w-full" shortcut={NAV_SHORTCUTS[item.id]}>
-                      {row}
-                    </Tooltip>
-                  ) : (
-                    row
-                  )}
-                  {/* Collapsed mode has no room for a row overlay — the
-                      action control gets its own compact row below the
-                      item (outside the label tooltip's trigger so its
-                      own tooltip can fire). */}
-                  {RowAction && sidebarCollapsed && <RowAction collapsed />}
-                </React.Fragment>
-              )
+              return <React.Fragment key={item.id}>{row}</React.Fragment>
             }
             return (
               <div className="flex-1 min-h-0 flex flex-col">
