@@ -339,6 +339,46 @@ function SlideOpen({ open, durationMs, children }: { open: boolean; durationMs: 
   )
 }
 
+/** Animated appearance for a nav item's subtitle line (nav redesign): the
+ *  line's height eases open — which floats the title up to its two-line
+ *  position, since the row's flex centering tracks the growing stack —
+ *  while the text fades in and rises into place. Disappearing plays the
+ *  reverse, holding the last text through the exit before unmounting.
+ *  A text CHANGE while visible swaps in place with no animation. */
+function NavSubtextReveal({ text, durationMs }: { text: string | null | undefined; durationMs: number }) {
+  const [shown, setShown] = useState(!!text)
+  // Last non-null text — kept through the exit animation so the line has
+  // something to fade out.
+  const [held, setHeld] = useState<string | null>(text ?? null)
+  useEffect(() => {
+    if (text) {
+      setHeld(text)
+      // Double rAF: let the closed state paint first so a fresh
+      // appearance eases open instead of popping.
+      let raf2 = 0
+      const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setShown(true)) })
+      return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+    }
+    setShown(false)
+    const t = setTimeout(() => setHeld(null), durationMs)
+    return () => clearTimeout(t)
+  }, [text, durationMs])
+  if (!held) return null
+  return (
+    <span
+      className="grid transition-[grid-template-rows] ease-out"
+      style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
+    >
+      <span
+        className={`block truncate leading-tight text-[10px] font-normal text-gray-400 min-h-0 overflow-hidden transition-[opacity,transform] ease-out ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+        style={{ transitionDuration: `${durationMs}ms` }}
+      >
+        {held}
+      </span>
+    </span>
+  )
+}
+
 /** Resolve a launch group's chosen icon name (kebab-case, as the launcher
  *  page stores it) to its Lucide component; falls back to Rocket when the
  *  group has no icon set or the name doesn't resolve. */
@@ -669,6 +709,19 @@ function AppInner() {
     const t = setTimeout(() => setRailCollapsed(true), navTransitionDurationMs)
     return () => clearTimeout(t)
   }, [sidebarCollapsed, navTransitionDurationMs])
+  // The width class lags the toggle by two frames on EXPAND: the
+  // collapsed variants unmount in the toggle's commit, and starting the
+  // width transition in that same frame made it hitch (transition start
+  // competing with the unmount reflow/paint). Two rAFs let the settled
+  // narrow layout paint first; then the widening runs smooth. Collapse
+  // keeps the width change immediate.
+  const [widthCollapsed, setWidthCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
+  useEffect(() => {
+    if (sidebarCollapsed) { setWidthCollapsed(true); return }
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setWidthCollapsed(false)) })
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+  }, [sidebarCollapsed])
   const pageActivity: Partial<Record<Page, boolean>> = {
     // Streams derives from its subtext: both mean "a stream is open in
     // the detail sidebar" (the subtext falls back to the date, so it's
@@ -986,7 +1039,7 @@ function AppInner() {
           // w-52 (208px): the nav-redesign width bump — the todo asked for
           // "200px or the next default size"; 52 is the next Tailwind step
           // up from the old w-48 (192px) that clears 200.
-          className={`relative ${sidebarCollapsed ? 'w-12' : 'w-52'} bg-navy-800 flex flex-col shrink-0 transition-[width] overflow-hidden`}
+          className={`relative ${widthCollapsed ? 'w-12' : 'w-52'} bg-navy-800 flex flex-col shrink-0 transition-[width] overflow-hidden`}
         >
           {/* Right edge — collapse/expand handle */}
           <Tooltip content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right" triggerClassName="group/edge absolute right-0 inset-y-0 w-2 z-20">
@@ -1079,9 +1132,7 @@ function AppInner() {
                         anchors all stay put. */}
                     <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">
                       <span className="block truncate leading-tight">{item.label}</span>
-                      {navSubtext[item.id] && (
-                        <span className="block truncate leading-tight text-[10px] font-normal text-gray-400">{navSubtext[item.id]}</span>
-                      )}
+                      <NavSubtextReveal text={navSubtext[item.id]} durationMs={navTransitionDurationMs} />
                       {navSublines[item.id]}
                     </span>
                     </div>

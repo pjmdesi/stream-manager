@@ -154,6 +154,8 @@
     k. If it won't impact anything important, we should also bump up the width of the expanded sidebar to 200px or whatever the next default size is.
     l. When the sidebar is collapsed, the utility nav items will show the same collapsed versions of the widget info.
     m. The integrations nav item will also get a custom additional indicator showing the status of any connected integrations. These will be small colored dots+icon combinations.
+    n. Polish round: the Stream Relay widget needs an expand/collapse transition cleanup pass.
+    o. Polish round: the Converter & Combine items need a slide-in animation for when their live info blocks become visible (a job starts or finishes), matching the slide-in built for the Auto-Rules/Launcher collapsed extras.
 
 
 ## Bugs
