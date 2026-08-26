@@ -97,10 +97,12 @@ function formatEta(ms: number): string {
 }
 
 /** Live-conversion info block for the hybrid Converter nav item (nav
- *  redesign Pass B). Renders nothing while the converter is quiet; while
- *  jobs are active it expands the nav item with the info the old
- *  bottom-stack ConversionWidget showed — same states (running / paused /
- *  error / all-downloading) and the same aggregate progress + ETA math.
+ *  redesign Pass B). Slides shut while the converter is quiet (SlideBlock
+ *  animates the info's appearance when a job starts and its disappearance
+ *  when the last one finishes); while jobs are active it expands the nav
+ *  item with the info the old bottom-stack ConversionWidget showed — same
+ *  states (running / paused / error / all-downloading) and the same
+ *  aggregate progress + ETA math.
  *  Deliberately no background, border, or click handling of its own: it
  *  renders INSIDE the nav item's button (plain content only — nested
  *  buttons are invalid HTML), so the item is one interactive surface.
@@ -108,6 +110,7 @@ function formatEta(ms: number): string {
  *  open — hiding on selection would bounce the nav. */
 function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
   const { jobs, jobEtas } = useConversionJobs()
+  const anim = useAnimationConfig()
 
   // Include 'downloading' (cloud-hydrate wait) and 'replacing' (atomic swap)
   // as active states so the widget keeps surfacing while files are still
@@ -119,7 +122,9 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
     j.status === 'running' || j.status === 'paused' || j.status === 'error' ||
     j.status === 'downloading' || j.status === 'replacing'
   )
-  if (active.length === 0) return null
+  // No early null — the SlideBlock below animates the appearance and
+  // disappearance of the info, so it must stay mounted while quiet.
+  const hasContent = active.length > 0
 
   const hasError = active.some(j => j.status === 'error')
   const allPaused = !hasError && active.every(j => j.status === 'paused')
@@ -164,11 +169,10 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
     allDownloading ? 'text-blue-400' :
     'text-purple-400'
 
-  if (collapsed) {
-    // Icon-mode: the nav item's own Zap is the primary icon directly
-    // above, so the extra only shows the secondary indicators (percent /
-    // cloud, status icon), centered under it.
-    return (
+  // Icon-mode: the nav item's own Zap is the primary icon directly
+  // above, so the extra only shows the secondary indicators (percent /
+  // cloud, status icon), centered under it.
+  const body = !hasContent ? null : collapsed ? (
       <div className="w-full pt-0.5 pb-2 flex flex-col items-center gap-0.5">
         {allDownloading
           ? <Cloud size={12} className="text-blue-400" />
@@ -181,12 +185,9 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
             : <RefreshCw size={10} className={`${statusColor} animate-spin`} />
         }
       </div>
-    )
-  }
-
-  // Expanded: the nav item's label is the title, so no "Converting"
-  // header — just the aggregate bar and one status line.
-  return (
+  ) : (
+    // Expanded: the nav item's label is the title, so no "Converting"
+    // header — just the aggregate bar and one status line.
     <div className="w-full px-3.5 pt-0.5 pb-2 text-left whitespace-nowrap">
       <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
         <div
@@ -206,6 +207,11 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
         {etaText && <Tooltip content={etaTitle}><span className="text-gray-400 shrink-0">{etaText}</span></Tooltip>}
       </div>
     </div>
+  )
+  return (
+    <SlideBlock show={hasContent} durationMs={anim.duration(200)}>
+      {body}
+    </SlideBlock>
   )
 }
 
@@ -335,6 +341,40 @@ function SlideOpen({ open, durationMs, children }: { open: boolean; durationMs: 
       style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
     >
       <div className="overflow-hidden min-h-0">{children}</div>
+    </div>
+  )
+}
+
+/** Slide-open/slide-shut visibility for a nav item's live info block (nav
+ *  redesign, todo sub-item o): content appearing eases the block open —
+ *  the same feel as the collapsed-rail slide — and content disappearing
+ *  eases it shut, holding the last rendered state through the exit so a
+ *  finishing job closes on its "100%" rather than blanking. Mounting in
+ *  the steady-shown state (app boots with jobs running) renders open
+ *  without an entrance slide. */
+function SlideBlock({ show, durationMs, children }: { show: boolean; durationMs: number; children?: React.ReactNode }) {
+  const [shown, setShown] = useState(show)
+  const [mounted, setMounted] = useState(show)
+  const heldRef = useRef<React.ReactNode>(show ? children : null)
+  if (show) heldRef.current = children
+  useEffect(() => {
+    if (show) {
+      setMounted(true)
+      let raf2 = 0
+      const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setShown(true)) })
+      return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+    }
+    setShown(false)
+    const t = setTimeout(() => { setMounted(false); heldRef.current = null }, durationMs)
+    return () => clearTimeout(t)
+  }, [show, durationMs])
+  if (!mounted) return null
+  return (
+    <div
+      className="grid transition-[grid-template-rows] ease-out"
+      style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
+    >
+      <div className="overflow-hidden min-h-0">{heldRef.current}</div>
     </div>
   )
 }
@@ -1165,10 +1205,12 @@ function AppInner() {
                         the currently-selected one (the user asked for
                         a consistent indicator regardless of selection
                         state). Sits below any alert dot via the inset
-                        top/bottom. */}
-                    {hasActivity && (
-                      <span className="pointer-events-none absolute right-0 top-2 bottom-2 w-[2px] rounded-full bg-purple-400/50" />
-                    )}
+                        top/bottom. Always mounted, fading in/out on the
+                        activity signal (no motion — just opacity). */}
+                    <span
+                      className={`pointer-events-none absolute right-0 top-2 bottom-2 w-[2px] rounded-full bg-purple-400/50 transition-opacity ease-out ${hasActivity ? 'opacity-100' : 'opacity-0'}`}
+                      style={{ transitionDuration: `${navTransitionDurationMs}ms` }}
+                    />
                   </button>
               )
 
