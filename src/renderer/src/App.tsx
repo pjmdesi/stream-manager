@@ -226,13 +226,18 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
  *  only while the watcher runs. */
 function AutoRulesSubline() {
   const { rules, running } = useWatcher()
-  if (!running) return null
+  const anim = useAnimationConfig()
   const enabledCount = rules.filter(r => r.enabled).length
+  // No self-null: NavSublineReveal animates the line in and out the same
+  // way the text subtitles animate (start/stop of the watcher was the one
+  // subtitle that still popped).
   return (
-    <span className="flex items-center gap-1.5 leading-tight text-[10px] font-normal text-gray-400">
-      <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
-      <span className="truncate">Running • {enabledCount}/{rules.length}</span>
-    </span>
+    <NavSublineReveal show={running} durationMs={anim.duration(200)}>
+      <span className="flex items-center gap-1.5 leading-tight text-[10px] font-normal text-gray-400">
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
+        <span className="truncate">Running • {enabledCount}/{rules.length}</span>
+      </span>
+    </NavSublineReveal>
   )
 }
 
@@ -354,6 +359,41 @@ function NavSubtextReveal({ text, durationMs }: { text: string | null | undefine
         style={{ transitionDuration: `${durationMs}ms` }}
       >
         {held}
+      </span>
+    </span>
+  )
+}
+
+/** NavSubtextReveal's component-shaped sibling: the same height + fade +
+ *  rise animation, for subline content that isn't plain text (the
+ *  Auto-Rules status line). Children stay rendered through the exit;
+ *  mounting in the steady-shown state renders open without an entrance
+ *  slide. */
+function NavSublineReveal({ show, durationMs, children }: { show: boolean; durationMs: number; children: React.ReactNode }) {
+  const [shown, setShown] = useState(show)
+  const [mounted, setMounted] = useState(show)
+  useEffect(() => {
+    if (show) {
+      setMounted(true)
+      let raf2 = 0
+      const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setShown(true)) })
+      return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+    }
+    setShown(false)
+    const t = setTimeout(() => setMounted(false), durationMs)
+    return () => clearTimeout(t)
+  }, [show, durationMs])
+  if (!mounted) return null
+  return (
+    <span
+      className="grid transition-[grid-template-rows] ease-out"
+      style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
+    >
+      <span
+        className={`block min-h-0 overflow-hidden transition-[opacity,transform] ease-out ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+        style={{ transitionDuration: `${durationMs}ms` }}
+      >
+        {children}
       </span>
     </span>
   )
@@ -1223,7 +1263,10 @@ function AppInner() {
                     </Tooltip>
                   )}
                   {/* Row action (e.g. Launcher's quick-launch) — always
-                      visible at the row's right, vertically centered on
+                      visible at the row's right edge (right-2, the slot
+                      the startup star vacated when it moved to the left
+                      padding strip; the activity accent at right-0 keeps
+                      a sliver of breathing room), vertically centered on
                       the icon+label line (top-5 = the line's h-10
                       center). A real sibling button: actions
                       never nest inside the nav button (invalid HTML), and
@@ -1235,7 +1278,7 @@ function AppInner() {
                       in place (and reveals it in place on expand). */}
                   {RowAction && !railCollapsed && (
                     <div className="pointer-events-none absolute inset-y-0 left-0 w-52">
-                      <div className="pointer-events-auto absolute right-8 top-5 -translate-y-1/2">
+                      <div className="pointer-events-auto absolute right-2 top-5 -translate-y-1/2">
                         <RowAction collapsed={false} />
                       </div>
                     </div>
