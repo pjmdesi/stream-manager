@@ -256,17 +256,19 @@ function IntegrationsSubline({ status }: { status: Record<'youtube' | 'twitch' |
 /** Start/Stop control for the Auto-Rules nav item — an ACTION, so it gets
  *  its own surface via NavItem.rowAction (same placement rules as the
  *  Launcher's quick-launch). Self-nulls when no rules exist yet. */
-function AutoRulesNavAction({ collapsed, active }: { collapsed: boolean; active?: boolean }) {
+function AutoRulesNavAction({ collapsed, active, onNavigate }: { collapsed: boolean; active?: boolean; onNavigate?: () => void }) {
   const { rules, running, startWatcher, stopWatcher } = useWatcher()
   const enabledCount = rules.filter(r => r.enabled).length
   if (rules.length === 0) return null
+  // stopPropagation: the collapsed container navigates on click, and the
+  // control must not double as a navigation.
   const button = running ? (
     <Button
       variant="danger"
       size="sm"
       icon={<Square size={collapsed ? 12 : 14} />}
       className="justify-center"
-      onClick={stopWatcher}
+      onClick={e => { e.stopPropagation(); stopWatcher() }}
       aria-label="Stop watcher"
     />
   ) : (
@@ -275,7 +277,7 @@ function AutoRulesNavAction({ collapsed, active }: { collapsed: boolean; active?
       size="sm"
       icon={<Play size={collapsed ? 12 : 14} />}
       className="justify-center"
-      onClick={startWatcher}
+      onClick={e => { e.stopPropagation(); startWatcher() }}
       disabled={enabledCount === 0}
       aria-label="Start watcher"
     />
@@ -293,7 +295,10 @@ function AutoRulesNavAction({ collapsed, active }: { collapsed: boolean; active?
     // continues the selected purple + side borders down the column
     // (transparent borders otherwise, so selection never shifts layout).
     return (
-      <div className={`flex flex-col items-center gap-1 pb-2 pt-0.5 border border-t-0 transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}>
+      <div
+        onClick={onNavigate}
+        className={`flex flex-col items-center gap-1 pb-2 pt-0.5 border border-t-0 cursor-pointer transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}
+      >
         <Tooltip content={tooltip} side="right">{button}</Tooltip>
         {running && (
           <div className="flex items-center justify-center gap-1">
@@ -329,7 +334,7 @@ function GroupIcon({ name, size = 16 }: { name?: string; size?: number }) {
  *  Self-nulls when no launch group is pinned to the widget slot. The icon
  *  doubles as transient feedback: spinner while launching, check on
  *  success, amber alert when some apps failed (details in the tooltip). */
-function LauncherNavAction({ collapsed, active }: { collapsed: boolean; active?: boolean }) {
+function LauncherNavAction({ collapsed, active, onNavigate }: { collapsed: boolean; active?: boolean; onNavigate?: () => void }) {
   const { config } = useStore()
   const [groups, setGroups] = useState<LauncherGroup[]>([])
   const [launching, setLaunching] = useState(false)
@@ -405,7 +410,10 @@ function LauncherNavAction({ collapsed, active }: { collapsed: boolean; active?:
     // continues the selected purple + side borders down the column
     // (transparent borders otherwise, so selection never shifts layout).
     return (
-      <div className={`flex justify-center pb-2 pt-0.5 border border-t-0 transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}>
+      <div
+        onClick={onNavigate}
+        className={`flex justify-center pb-2 pt-0.5 border border-t-0 cursor-pointer transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}
+      >
         <Tooltip content={tooltipContent} side="right" shortcut="Ctrl+L">
           <Button
             variant="primary"
@@ -413,7 +421,7 @@ function LauncherNavAction({ collapsed, active }: { collapsed: boolean; active?:
             icon={statusIcon(12)}
             className="justify-center border border-transparent"
             disabled={launching || appCount === 0}
-            onClick={launch}
+            onClick={e => { e.stopPropagation(); launch() }}
           />
         </Tooltip>
       </div>
@@ -457,8 +465,11 @@ type NavItem = {
    *  row's right, left of the startup star. Collapsed: rendered as its
    *  own compact row below the item, receiving `active` so it can
    *  continue the selected-page styling down the column. May render real
-   *  buttons — it is never nested inside the nav button. */
-  rowAction?: React.ComponentType<{ collapsed: boolean; active?: boolean }>
+   *  buttons — it is never nested inside the nav button. Collapsed
+   *  blocks treat any click OUTSIDE their real button as navigation
+   *  (`onNavigate`) so the whole item column stays one navigable
+   *  surface. */
+  rowAction?: React.ComponentType<{ collapsed: boolean; active?: boolean; onNavigate?: () => void }>
 }
 
 // Nav groups (nav redesign). Group names are internal reference only —
@@ -989,7 +1000,11 @@ function AppInner() {
                     className={`
                       relative w-full flex flex-col text-sm font-medium transition-all duration-150 border
                       ${isSelected
-                        ? 'bg-purple-600/20 text-purple-300 border-purple-600/30'
+                        // border-b-transparent when a collapsed control
+                        // block continues the column below: the button's
+                        // bottom border otherwise draws a hairline
+                        // through the middle of the selected item.
+                        ? `bg-purple-600/20 text-purple-300 border-purple-600/30${sidebarCollapsed && RowAction ? ' border-b-transparent' : ''}`
                         : hasActivity
                           ? 'text-gray-100 group-hover/nav:text-white group-hover/nav:bg-white/5 border-transparent'
                           : 'text-gray-400 group-hover/nav:text-gray-200 group-hover/nav:bg-white/5 border-transparent'
@@ -1122,7 +1137,7 @@ function AppInner() {
                       wrapper so the whole column hovers as one item,
                       while keeping its own tooltip zone (the label
                       tooltip wraps only the icon button above). */}
-                  {RowAction && sidebarCollapsed && <RowAction collapsed active={isSelected} />}
+                  {RowAction && sidebarCollapsed && <RowAction collapsed active={isSelected} onNavigate={() => setPage(item.id)} />}
                 </div>
               )
 
