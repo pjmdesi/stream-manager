@@ -312,6 +312,33 @@ function AutoRulesNavAction({ collapsed, active, onNavigate }: { collapsed: bool
   return <Tooltip content={tooltip} side="right">{button}</Tooltip>
 }
 
+/** jQuery slideDown/slideUp-style height reveal for the rail's collapsed
+ *  widgets (nav redesign): mounts closed and eases open when `open` goes
+ *  true (double-rAF so the zero-height frame paints first), eases shut
+ *  when it goes false — the caller keeps it mounted through the close
+ *  animation and unmounts afterward. Grid-rows 0fr↔1fr is the animatable
+ *  height-to-auto trick (same family as CollapsibleLabel's grid-cols). */
+function SlideOpen({ open, durationMs, children }: { open: boolean; durationMs: number; children: React.ReactNode }) {
+  // Seeded from `open` so mounting in the steady-open state (app boots
+  // with the rail already collapsed) renders open without an entrance
+  // slide; a mid-choreography mount starts closed and animates.
+  const [shown, setShown] = useState(open)
+  useEffect(() => {
+    if (!open) { setShown(false); return }
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setShown(true)) })
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+  }, [open])
+  return (
+    <div
+      className="grid transition-[grid-template-rows]"
+      style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
+    >
+      <div className="overflow-hidden min-h-0">{children}</div>
+    </div>
+  )
+}
+
 /** Resolve a launch group's chosen icon name (kebab-case, as the launcher
  *  page stores it) to its Lucide component; falls back to Rocket when the
  *  group has no icon set or the name doesn't resolve. */
@@ -626,6 +653,29 @@ function AppInner() {
   // when the rest of the app was respecting the 5x slow-down.
   const anim = useAnimationConfig()
   const navTransitionDurationMs = anim.duration(200)
+  // Collapse/expand choreography for the rail's per-item widgets (nav
+  // redesign): on COLLAPSE the expanded variants stay mounted and clip
+  // against the moving edge, and the collapsed variants (which exist at
+  // zero height throughout the width transition) slide open
+  // jQuery-slideDown style once the width lands. On EXPAND the collapsed
+  // variants slide shut immediately while the widening rail re-reveals
+  // the expanded ones, then unmount when their slide finishes.
+  //   railCollapsed     — "steady collapsed state reached" (lags the
+  //                        toggle on collapse, leads it on expand)
+  //   collapsedUiMounted — collapsed variants exist in the DOM (covers
+  //                        the slide-shut window during expand)
+  const [railCollapsed, setRailCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
+  const [collapsedUiMounted, setCollapsedUiMounted] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
+  useEffect(() => {
+    if (sidebarCollapsed) {
+      setCollapsedUiMounted(true)
+      const t = setTimeout(() => setRailCollapsed(true), navTransitionDurationMs)
+      return () => clearTimeout(t)
+    }
+    setRailCollapsed(false)
+    const t = setTimeout(() => setCollapsedUiMounted(false), navTransitionDurationMs)
+    return () => clearTimeout(t)
+  }, [sidebarCollapsed, navTransitionDurationMs])
   const pageActivity: Partial<Record<Page, boolean>> = {
     // Streams derives from its subtext: both mean "a stream is open in
     // the detail sidebar" (the subtext falls back to the date, so it's
@@ -1040,9 +1090,24 @@ function AppInner() {
                     </span>
                     </div>
                     {/* Hybrid items: live info inside the same button —
-                        self-nulls while the tool is quiet (NavItem.extra). */}
-                    {Extra && <Extra collapsed={sidebarCollapsed} />}
-                    {sidebarCollapsed && item.id === 'integrations' && integrationsSetUp && (
+                        self-nulls while the tool is quiet (NavItem.extra).
+                        Variant choice follows railCollapsed, not the raw
+                        toggle: during a collapse the expanded block stays
+                        (pinned at the expanded width so the moving edge
+                        CLIPS it instead of squeezing it), and the
+                        collapsed block slides open only once the width
+                        lands / slides shut the moment an expand starts. */}
+                    {Extra && !railCollapsed && (
+                      <div className="w-52">
+                        <Extra collapsed={false} />
+                      </div>
+                    )}
+                    {Extra && collapsedUiMounted && (
+                      <SlideOpen open={railCollapsed} durationMs={navTransitionDurationMs}>
+                        <Extra collapsed />
+                      </SlideOpen>
+                    )}
+                    {railCollapsed && item.id === 'integrations' && integrationsSetUp && (
                       integrationsUnhealthy
                         ? <AlertTriangle size={10} className="absolute top-1 right-1.5 text-amber-400" />
                         : <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-green-400" />
@@ -1126,18 +1191,32 @@ function AppInner() {
                       center), sitting left of the startup star's
                       hover-reveal slot. A real sibling button: actions
                       never nest inside the nav button (invalid HTML), and
-                      they deserve their own hover/focus surface. */}
-                  {RowAction && !sidebarCollapsed && (
-                    <div className="absolute right-8 top-5 -translate-y-1/2">
-                      <RowAction collapsed={false} />
+                      they deserve their own hover/focus surface.
+                      The pointer-events-none layer pins the control at
+                      the EXPANDED rail width, anchored left — a
+                      right-anchored control would ride the moving edge
+                      inward during a collapse; pinned, the edge clips it
+                      in place (and reveals it in place on expand). */}
+                  {RowAction && !railCollapsed && (
+                    <div className="pointer-events-none absolute inset-y-0 left-0 w-52">
+                      <div className="pointer-events-auto absolute right-8 top-5 -translate-y-1/2">
+                        <RowAction collapsed={false} />
+                      </div>
                     </div>
                   )}
                   {/* Collapsed: the action control renders as its own
                       block below the icon button — INSIDE the group/nav
                       wrapper so the whole column hovers as one item,
                       while keeping its own tooltip zone (the label
-                      tooltip wraps only the icon button above). */}
-                  {RowAction && sidebarCollapsed && <RowAction collapsed active={isSelected} onNavigate={() => setPage(item.id)} />}
+                      tooltip wraps only the icon button above). Slides
+                      open after the collapse lands, slides shut the
+                      moment an expand starts (mounted until that slide
+                      finishes). */}
+                  {RowAction && collapsedUiMounted && (
+                    <SlideOpen open={railCollapsed} durationMs={navTransitionDurationMs}>
+                      <RowAction collapsed active={isSelected} onNavigate={() => setPage(item.id)} />
+                    </SlideOpen>
+                  )}
                 </div>
               )
 
