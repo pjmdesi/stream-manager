@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, Bot, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
+import { Youtube as BrandYoutube, Twitch as BrandTwitch } from './components/ui/BrandIcons'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -217,21 +218,55 @@ function AutoRulesNavExtra({ collapsed }: { collapsed: boolean }) {
   const { rules, running } = useWatcher()
   const enabledCount = rules.filter(r => r.enabled).length
   if (!running) return null
-  if (collapsed) {
-    return (
-      <div className="flex items-center justify-center gap-1 pt-0.5 pb-2">
-        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
-        <span className="text-[10px] text-gray-400">{enabledCount}</span>
-      </div>
-    )
-  }
+  // Expanded mode renders nothing here — the status moved into the
+  // item's second LINE (AutoRulesSubline) so Auto-Rules matches the
+  // subtitle layout of the other nav items instead of growing a
+  // full-width extra row. Only the collapsed rail keeps this block.
+  if (!collapsed) return null
   return (
-    <div className="px-3.5 pt-0.5 pb-2 flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center justify-center gap-1 pt-0.5 pb-2">
       <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
-      <span className="text-[10px] text-gray-400 overflow-hidden">
-        Running · {enabledCount} rule{enabledCount !== 1 ? 's' : ''} active
-      </span>
+      <span className="text-[10px] text-gray-400">{enabledCount}</span>
     </div>
+  )
+}
+
+/** Compact watcher status as the Auto-Rules item's second line — the
+ *  subtitle layout the other nav items use: "[dot] Running • enabled/total",
+ *  only while the watcher runs. */
+function AutoRulesSubline() {
+  const { rules, running } = useWatcher()
+  if (!running) return null
+  const enabledCount = rules.filter(r => r.enabled).length
+  return (
+    <span className="flex items-center gap-1.5 leading-tight text-[10px] font-normal text-gray-400">
+      <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
+      <span className="truncate">Running • {enabledCount}/{rules.length}</span>
+    </span>
+  )
+}
+
+/** Dot+icon status row for the Integrations nav item (nav redesign Pass C
+ *  sub-item m), rendered as the item's second line. One pair per SET-UP
+ *  service (green dot healthy, amber dot broken); services the user never
+ *  connected show nothing at all — resting quiet beats a gray dot. */
+function IntegrationsSubline({ status }: { status: Record<'youtube' | 'twitch' | 'claude', { setUp: boolean; healthy: boolean }> }) {
+  const services: Array<{ key: 'youtube' | 'twitch' | 'claude'; icon: React.ReactNode }> = [
+    { key: 'youtube', icon: <BrandYoutube size={11} /> },
+    { key: 'twitch', icon: <BrandTwitch size={11} /> },
+    { key: 'claude', icon: <Bot size={11} /> },
+  ]
+  const shown = services.filter(s => status[s.key].setUp)
+  if (shown.length === 0) return null
+  return (
+    <span className="flex items-center gap-2 leading-tight">
+      {shown.map(s => (
+        <span key={s.key} className="flex items-center gap-1">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status[s.key].healthy ? 'bg-green-400' : 'bg-amber-400'}`} />
+          <span className="text-gray-400 inline-flex">{s.icon}</span>
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -541,7 +576,15 @@ function AppInner() {
   }, [])
   const [helpOpen, setHelpOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const [integrationAlert, setIntegrationAlert] = useState(false)
+  // Per-service integration state for the Integrations nav indicator (nav
+  // redesign Pass C sub-item m). setUp = the user connected it; healthy =
+  // it currently works (token valid / key accepted). Not-set-up services
+  // show nothing at all — resting quiet beats a gray dot.
+  const [integrationStatus, setIntegrationStatus] = useState<Record<'youtube' | 'twitch' | 'claude', { setUp: boolean; healthy: boolean }>>({
+    youtube: { setUp: false, healthy: true },
+    twitch: { setUp: false, healthy: true },
+    claude: { setUp: false, healthy: true },
+  })
   // Persist collapse state across app restarts. localStorage is the right
   // store for UI-only prefs (matches the streams page's viewMode pattern).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
@@ -577,35 +620,89 @@ function AppInner() {
     thumbnails: thumbnailHasCanvas,
     combine: combineHasFiles,
   }
+  // Component-shaped second lines for items whose context isn't plain
+  // text (text sublines ride navSubtext instead). Rendered inside the
+  // label stack; each self-nulls when there's nothing to show.
+  const navSublines: Partial<Record<Page, React.ReactNode>> = {
+    rules: <AutoRulesSubline />,
+    integrations: <IntegrationsSubline status={integrationStatus} />,
+  }
+  // Collapsed-rail aggregate for the Integrations indicator: one green
+  // dot while every SET-UP service is healthy, a warning triangle when
+  // any is broken, nothing when none are connected.
+  const integrationsSetUp = Object.values(integrationStatus).some(s => s.setUp)
+  const integrationsUnhealthy = Object.values(integrationStatus).some(s => s.setUp && !s.healthy)
   // Tracks whether we've already routed to the user's chosen startup
   // page after first config load. A ref instead of state so toggling
   // it doesn't re-render; we only need it to fire once.
   const startupPageAppliedRef = useRef(false)
 
-  const checkIntegrationAlert = () => {
-    window.api.youtubeValidateToken?.().then(r => {
-      setIntegrationAlert(!r.valid)
+  // YouTube + Twitch legs of the integration indicator. On transport
+  // failure each leg keeps its previous state rather than flipping to
+  // "broken" — a dropped connection isn't a broken integration.
+  const checkIntegrationStatus = () => {
+    window.api.youtubeGetStatus?.().then(async (s: { connected: boolean }) => {
+      if (!s.connected) {
+        setIntegrationStatus(prev => ({ ...prev, youtube: { setUp: false, healthy: true } }))
+        return
+      }
+      const v = await window.api.youtubeValidateToken().catch(() => null)
+      setIntegrationStatus(prev => ({
+        ...prev,
+        youtube: { setUp: true, healthy: v ? !!v.valid : prev.youtube.healthy },
+      }))
+    }).catch(() => {})
+    window.api.twitchGetStatus?.().then((s: { connected: boolean }) => {
+      setIntegrationStatus(prev => ({ ...prev, twitch: { setUp: s.connected, healthy: true } }))
     }).catch(() => {})
   }
 
   useEffect(() => {
-    checkIntegrationAlert()
-  }, [])
-
-  useEffect(() => {
-    if (page === 'integrations') checkIntegrationAlert()
-  }, [page])
-
-  // Re-validate the moment a YouTube connect OR disconnect lands — the
-  // caution triangle on the Integrations nav item used to lag both ways
-  // (lingering after a reconnect, absent after a disconnect) until the
-  // user happened to revisit the page.
-  useEffect(() => {
-    const offConnected = window.api.onYouTubeConnected(() => checkIntegrationAlert())
-    const offDisconnected = window.api.onYouTubeDisconnected(() => checkIntegrationAlert())
-    return () => { offConnected(); offDisconnected() }
+    checkIntegrationStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (page === 'integrations') checkIntegrationStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page])
+
+  // Re-validate the moment a connect OR disconnect lands — the indicator
+  // on the Integrations nav item used to lag both ways (lingering after a
+  // reconnect, absent after a disconnect) until the user happened to
+  // revisit the page.
+  useEffect(() => {
+    const offs = [
+      window.api.onYouTubeConnected(() => checkIntegrationStatus()),
+      window.api.onYouTubeDisconnected(() => checkIntegrationStatus()),
+      window.api.onTwitchConnected(() => checkIntegrationStatus()),
+      window.api.onTwitchDisconnected(() => checkIntegrationStatus()),
+    ]
+    return () => offs.forEach(off => off())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Claude leg — keyed on the stored key. A cheap models-list call
+  // doubles as validation; its catch keeps the previous verdict (network
+  // trouble is not a broken key).
+  useEffect(() => {
+    const key = (config.claudeApiKey ?? '').trim()
+    if (!key) {
+      setIntegrationStatus(prev => ({ ...prev, claude: { setUp: false, healthy: true } }))
+      return
+    }
+    let cancelled = false
+    window.api.claudeListModels(key)
+      .then(r => {
+        if (cancelled) return
+        setIntegrationStatus(prev => ({ ...prev, claude: { setUp: true, healthy: !!r.ok } }))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setIntegrationStatus(prev => ({ ...prev, claude: { setUp: true, healthy: prev.claude.healthy } }))
+      })
+    return () => { cancelled = true }
+  }, [config.claudeApiKey])
 
   useEffect(() => {
     return window.api.onConfirmQuit(({ running, queued, fileOps, settingsDirty: dirtyDraft }) => {
@@ -843,7 +940,6 @@ function AppInner() {
 
           {(() => {
             const renderNavItem = (item: NavItem) => {
-              const showAlert = item.id === 'integrations' && integrationAlert
               const isSelected = page === item.id
               const hasActivity = !!pageActivity[item.id]
               // Settings + integrations are excluded from the startup-
@@ -920,14 +1016,16 @@ function AppInner() {
                       {navSubtext[item.id] && (
                         <span className="block truncate leading-tight text-[10px] font-normal text-gray-400">{navSubtext[item.id]}</span>
                       )}
+                      {navSublines[item.id]}
                     </span>
-                    {!sidebarCollapsed && showAlert && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
                     </div>
                     {/* Hybrid items: live info inside the same button —
                         self-nulls while the tool is quiet (NavItem.extra). */}
                     {Extra && <Extra collapsed={sidebarCollapsed} />}
-                    {sidebarCollapsed && showAlert && (
-                      <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    {sidebarCollapsed && item.id === 'integrations' && integrationsSetUp && (
+                      integrationsUnhealthy
+                        ? <AlertTriangle size={10} className="absolute top-1 right-1.5 text-amber-400" />
+                        : <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-green-400" />
                     )}
                     {/* Right-edge activity accent — muted purple bar
                         inside the button's right edge. Shown for any
