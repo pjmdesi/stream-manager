@@ -3,6 +3,7 @@ import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
 import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, Bot, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
 import { Youtube as BrandYoutube, Twitch as BrandTwitch } from './components/ui/BrandIcons'
+import { SlideOpen, SlideBlock } from './components/ui/Slide'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -316,67 +317,6 @@ function AutoRulesNavAction({ collapsed, active, onNavigate }: { collapsed: bool
     )
   }
   return <Tooltip content={tooltip} side="right">{button}</Tooltip>
-}
-
-/** jQuery slideDown/slideUp-style height reveal for the rail's collapsed
- *  widgets (nav redesign): mounts closed and eases open when `open` goes
- *  true (double-rAF so the zero-height frame paints first), eases shut
- *  when it goes false — the caller keeps it mounted through the close
- *  animation and unmounts afterward. Grid-rows 0fr↔1fr is the animatable
- *  height-to-auto trick (same family as CollapsibleLabel's grid-cols). */
-function SlideOpen({ open, durationMs, children }: { open: boolean; durationMs: number; children: React.ReactNode }) {
-  // Seeded from `open` so mounting in the steady-open state (app boots
-  // with the rail already collapsed) renders open without an entrance
-  // slide; a mid-choreography mount starts closed and animates.
-  const [shown, setShown] = useState(open)
-  useEffect(() => {
-    if (!open) { setShown(false); return }
-    let raf2 = 0
-    const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setShown(true)) })
-    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
-  }, [open])
-  return (
-    <div
-      className="grid transition-[grid-template-rows]"
-      style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
-    >
-      <div className="overflow-hidden min-h-0">{children}</div>
-    </div>
-  )
-}
-
-/** Slide-open/slide-shut visibility for a nav item's live info block (nav
- *  redesign, todo sub-item o): content appearing eases the block open —
- *  the same feel as the collapsed-rail slide — and content disappearing
- *  eases it shut, holding the last rendered state through the exit so a
- *  finishing job closes on its "100%" rather than blanking. Mounting in
- *  the steady-shown state (app boots with jobs running) renders open
- *  without an entrance slide. */
-function SlideBlock({ show, durationMs, children }: { show: boolean; durationMs: number; children?: React.ReactNode }) {
-  const [shown, setShown] = useState(show)
-  const [mounted, setMounted] = useState(show)
-  const heldRef = useRef<React.ReactNode>(show ? children : null)
-  if (show) heldRef.current = children
-  useEffect(() => {
-    if (show) {
-      setMounted(true)
-      let raf2 = 0
-      const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setShown(true)) })
-      return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
-    }
-    setShown(false)
-    const t = setTimeout(() => { setMounted(false); heldRef.current = null }, durationMs)
-    return () => clearTimeout(t)
-  }, [show, durationMs])
-  if (!mounted) return null
-  return (
-    <div
-      className="grid transition-[grid-template-rows] ease-out"
-      style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
-    >
-      <div className="overflow-hidden min-h-0">{heldRef.current}</div>
-    </div>
-  )
 }
 
 /** Animated appearance for a nav item's subtitle line (nav redesign): the
@@ -1335,7 +1275,7 @@ function AppInner() {
               until there's enough content to justify it). Everything else
               has been absorbed into the hybrid nav items above. */}
           <CloudOpsWidget collapsed={sidebarCollapsed} />
-          <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} />
+          <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} collapsedSettled={railCollapsed} />
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
             <Tooltip content="Open help" side="top" shortcut="?">
               <button

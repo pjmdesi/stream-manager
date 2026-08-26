@@ -3,7 +3,9 @@ import ReactDOM from 'react-dom'
 import { TrendingUpDown, Calendar, RotateCcw, ChevronDown, X, Loader2 } from 'lucide-react'
 import { useStore } from '../hooks/useStore'
 import { useAdaptivePoll } from '../hooks/useAdaptivePoll'
+import { useAnimationConfig } from '../hooks/useAnimationConfig'
 import { Tooltip } from './ui/Tooltip'
+import { SlideOpen } from './ui/Slide'
 import { TruncatedText } from './ui/TruncatedText'
 import type { RelayStatus, RelayStats, ActivePickResult, OrchestratorEvent, LiveBroadcast, Page } from '../types'
 
@@ -24,19 +26,35 @@ import type { RelayStatus, RelayStats, ActivePickResult, OrchestratorEvent, Live
  */
 export function StreamRelayWidget({
   collapsed,
+  collapsedSettled,
   onNavigate,
 }: {
   collapsed: boolean
+  /** The rail choreography's "steady collapsed state reached" signal
+   *  (App's railCollapsed): lags `collapsed` by the width transition on
+   *  collapse, resets instantly on expand. Drives the widget's variant
+   *  swap so the expanded body clips against the moving edge and the
+   *  compact controls slide in only once the width lands. Defaults to
+   *  `collapsed` (instant swap) when not provided. */
+  collapsedSettled?: boolean
   onNavigate: (page: Page) => void
 }) {
   const { config } = useStore()
+  const anim = useAnimationConfig()
   const [status, setStatus] = useState<RelayStatus>({ state: 'idle' })
   const [stats, setStats] = useState<RelayStats | null>(null)
   const [active, setActive] = useState<ActivePickResult>({ broadcast: null, isManual: false, manualPickStale: false })
   const [upcoming, setUpcoming] = useState<LiveBroadcast[]>([])
   const [lifecycle, setLifecycle] = useState<OrchestratorEvent | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
-  const pickerAnchorRef = useRef<HTMLDivElement>(null)
+  // Two anchors, one per mode: since the choreography keeps BOTH modes'
+  // trigger elements mounted simultaneously (the expanded body persists
+  // at zero height while collapsed), a single shared ref would be left
+  // null after a collapse→expand cycle — the unmounting collapsed
+  // trigger clears it and the still-mounted expanded anchor never
+  // re-attaches. The dropdown picks the current mode's anchor.
+  const expandedAnchorRef = useRef<HTMLDivElement>(null)
+  const collapsedAnchorRef = useRef<HTMLDivElement>(null)
 
   // Initial fetch + live subscriptions. The cleanup functions returned from
   // each on* call are the preload's removeListener wrappers — composed via
@@ -113,8 +131,10 @@ export function StreamRelayWidget({
   // collapsed trigger or the expanded active-broadcast row). Shared by both
   // modes so the broadcast can be picked without expanding the sidebar.
   const renderPickerDropdown = () => {
-    if (!pickerOpen || !pickerAnchorRef.current) return null
-    const rect = pickerAnchorRef.current.getBoundingClientRect()
+    const anchor = (collapsed ? collapsedAnchorRef.current : expandedAnchorRef.current)
+      ?? expandedAnchorRef.current ?? collapsedAnchorRef.current
+    if (!pickerOpen || !anchor) return null
+    const rect = anchor.getBoundingClientRect()
     return ReactDOM.createPortal(
       <>
         <div className="fixed inset-0 z-[60]" onClick={() => setPickerOpen(false)} />
@@ -176,58 +196,15 @@ export function StreamRelayWidget({
     )
   }
 
-  // ── Collapsed mode ──────────────────────────────────────────────────────
-
-  if (collapsed) {
-    return (
-      <div className="border-y border-white/5 bg-navy-900">
-        <Tooltip content="Stream Relay" side="right" triggerClassName="block w-full">
-          <button
-            onClick={() => onNavigate('integrations')}
-            // Nav-item pattern: icon at x=16 from the left, label
-            // always rendered + cropped by the parent nav's
-            // overflow-hidden. Keeps the icon visually anchored to
-            // the same column as the rest of the sidebar.
-            className="relative flex items-center gap-3 w-full px-4 h-10 text-sm font-medium transition-colors text-gray-400 hover:text-gray-200"
-          >
-            <span className="shrink-0 inline-flex"><TrendingUpDown size={18} /></span>
-            <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">Stream Relay</span>
-          </button>
-        </Tooltip>
-        {/* Compact picker trigger — opens the same dropdown as expanded mode
-            so the active broadcast can be picked without expanding the
-            sidebar. Mirrors the Auto-Rules collapsed control (centered icon
-            button below the header). */}
-        <div ref={pickerAnchorRef} className="flex justify-center pb-1">
-          <Tooltip content={broadcast ? broadcastTitle : 'Pick a broadcast'} side="right">
-            <button
-              onClick={togglePicker}
-              disabled={isStreaming}
-              className="p-1.5 rounded text-purple-400 hover:text-purple-300 hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-              aria-label="Pick a broadcast"
-            >
-              <Calendar size={14} />
-            </button>
-          </Tooltip>
-        </div>
-        {/* Status dot stays centered in the 48px rail — it's a small
-            decorative indicator, not a primary icon, so the visual
-            convention here is centered rather than left-aligned. */}
-        <div className="flex items-center justify-center gap-1 pb-2">
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-            isStreaming ? 'bg-green-400 animate-pulse' :
-            status.state === 'listening' ? 'bg-gray-200' :
-            status.state === 'starting' || status.state === 'restarting' ? 'bg-amber-400' :
-            isError ? 'bg-red-400' :
-            'bg-gray-600'
-          }`} />
-        </div>
-        {renderPickerDropdown()}
-      </div>
-    )
-  }
-
-  // ── Expanded mode ──────────────────────────────────────────────────────
+  // ── Choreography (nav redesign, todo sub-item n) ───────────────────────
+  // Mirrors the rail's hybrid items: on COLLAPSE the expanded body stays
+  // mounted and clips against the moving edge; once the width lands
+  // (`settled`) the picker/status body slides shut while the compact
+  // calendar trigger + status dot slide open, simultaneously. On EXPAND
+  // the compact block unmounts instantly and the expanded body reopens
+  // with no transition (0ms), revealed by the widening rail.
+  const settled = collapsed && (collapsedSettled ?? collapsed)
+  const dur = anim.duration(200)
 
   const broadcastTime = broadcast?.snippet?.scheduledStartTime
     ? formatScheduledTime(broadcast.snippet.scheduledStartTime)
@@ -246,24 +223,49 @@ export function StreamRelayWidget({
 
   return (
     <div className="border-y border-white/5 bg-navy-900 whitespace-nowrap">
-      {/* Title row — navigates to Integrations on click. Icon on the left;
-          title + status stacked vertically on the right so the title never
-          wraps when the sidebar is at its narrowest. */}
-      <button
-        onClick={() => onNavigate('integrations')}
-        className="flex items-center gap-3 w-full px-4 py-2.5 text-sm font-medium transition-colors text-gray-400 hover:text-gray-200"
-      >
-        <TrendingUpDown size={18} className="shrink-0" />
-        <div className="flex flex-col items-start min-w-0 leading-tight">
-          <span className="whitespace-nowrap">Stream Relay</span>
-          <span className={`text-[10px] font-medium ${statusColor}`}>
-            {status.state === 'idle' ? '○ ' : '● '}{statusLabel}
-          </span>
-        </div>
-      </button>
+      {/* Title row — navigates to Integrations on click. Swaps between the
+          expanded form (title + status stacked) and the collapsed
+          nav-item form at the choreography's settle point. */}
+      {settled ? (
+        <Tooltip content="Stream Relay" side="right" triggerClassName="block w-full">
+          <button
+            onClick={() => onNavigate('integrations')}
+            // Nav-item pattern: icon at x=16 from the left, label
+            // always rendered + cropped by the parent nav's
+            // overflow-hidden. Keeps the icon visually anchored to
+            // the same column as the rest of the sidebar.
+            className="relative flex items-center gap-3 w-full px-4 h-10 text-sm font-medium transition-colors text-gray-400 hover:text-gray-200"
+          >
+            <span className="shrink-0 inline-flex"><TrendingUpDown size={18} /></span>
+            <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">Stream Relay</span>
+          </button>
+        </Tooltip>
+      ) : (
+        <button
+          onClick={() => onNavigate('integrations')}
+          className="flex items-center gap-3 w-full px-4 py-2.5 text-sm font-medium transition-colors text-gray-400 hover:text-gray-200"
+        >
+          <TrendingUpDown size={18} className="shrink-0" />
+          <div className="flex flex-col items-start min-w-0 leading-tight">
+            <span className="whitespace-nowrap">Stream Relay</span>
+            <span className={`text-[10px] font-medium ${statusColor}`}>
+              {status.state === 'idle' ? '○ ' : '● '}{statusLabel}
+            </span>
+          </div>
+        </button>
+      )}
 
+      {/* Expanded body — exit-only slide: stays open (and clipping against
+          the moving edge) through the collapse transition, slides shut at
+          the settle point, and reopens INSTANTLY (0ms) on expand so the
+          widening rail reveals it in place. */}
+      <div
+        className="grid transition-[grid-template-rows] ease-out"
+        style={{ gridTemplateRows: settled ? '0fr' : '1fr', transitionDuration: settled ? `${dur}ms` : '0ms' }}
+      >
+      <div className="overflow-hidden min-h-0">
       {/* Active broadcast row */}
-      <div ref={pickerAnchorRef} className="px-3 pb-2 flex flex-col gap-1">
+      <div ref={expandedAnchorRef} className="px-3 pb-2 flex flex-col gap-1">
         {broadcast ? (
           <Tooltip content={isStreaming ? 'End the current stream to change the active broadcast' : 'Change active broadcast'} triggerClassName="block w-full">
           <button
@@ -376,6 +378,43 @@ export function StreamRelayWidget({
         {/* Post-stream Twitch push prompt now lives in PostStreamTwitchModal
             (rendered at AppInner level), surfaced over the whole window. */}
       </div>
+      </div>
+      </div>
+
+      {/* Compact controls — mounted through the collapse so they can slide
+          open (calendar trigger + status dot together) at the settle
+          point, simultaneous with the expanded body's slide-shut;
+          unmounted instantly on expand. */}
+      {collapsed && (
+        <SlideOpen open={settled} durationMs={dur}>
+          {/* Compact picker trigger — opens the same dropdown as expanded
+              mode so the active broadcast can be picked without expanding
+              the sidebar. Mirrors the Auto-Rules collapsed control. */}
+          <div ref={collapsedAnchorRef} className="flex justify-center pb-1">
+            <Tooltip content={broadcast ? broadcastTitle : 'Pick a broadcast'} side="right">
+              <button
+                onClick={togglePicker}
+                disabled={isStreaming}
+                className="p-1.5 rounded text-purple-400 hover:text-purple-300 hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                aria-label="Pick a broadcast"
+              >
+                <Calendar size={14} />
+              </button>
+            </Tooltip>
+          </div>
+          {/* Status dot stays centered in the 48px rail — a small
+              decorative indicator, not a primary icon. */}
+          <div className="flex items-center justify-center gap-1 pb-2">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              isStreaming ? 'bg-green-400 animate-pulse' :
+              status.state === 'listening' ? 'bg-gray-200' :
+              status.state === 'starting' || status.state === 'restarting' ? 'bg-amber-400' :
+              isError ? 'bg-red-400' :
+              'bg-gray-600'
+            }`} />
+          </div>
+        </SlideOpen>
+      )}
 
       {renderPickerDropdown()}
     </div>
