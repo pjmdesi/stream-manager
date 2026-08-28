@@ -7394,15 +7394,17 @@ function SidebarDetail({
             document.body,
           )}
           {/* Archived flag — marks the stream archived (excludes it from the
-              "pending" set). Absolutely centered in the header row, clear of the
-              date/nav on the left and the close button on the right. */}
+              "pending" set). In normal flow after the date/nav cluster: it
+              used to be absolutely centered in the header row, but at minimum
+              window width the left cluster grew into the center and slid
+              underneath it. */}
           <Checkbox
             checked={meta?.archived ?? false}
             onChange={(v) => onUpdateMeta({ archived: v })}
             label="Archived"
             color="green"
             size="sm"
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            className="shrink-0"
           />
           <Tooltip content="Close" side="bottom" triggerClassName="ml-auto">
             <Button

@@ -22,6 +22,8 @@ Target: TBD (the nav-refresh release) · emptied 2026-08-28 after the v2.4.0 rel
 - The player's "Enable Multi-track Audio" button now has a tooltip explaining what the mode does: one row per audio track, with the ability to choose which tracks to listen to and extract.
 - The Integrations page now opens in its last-known state instead of flashing the disconnected layout (briefly showing the expanded YouTube setup instructions, then reflowing) while its connection checks run.
 - The Stream Relay section header on the Integrations page now wears the same icon as the relay widget in the sidebar, slightly larger than the other section icons, so the two are recognizable as the same feature.
+- File cards in a stream item's files grid collapse their action buttons to icon-only when the grid gets narrow, instead of letting the labels overflow onto the thumbnail at minimum window width.
+- The Archived checkbox in the stream detail sidebar header now sits next to the date and episode navigation buttons instead of floating in the header's center, where it overlapped the episode buttons at minimum window width.
 - Converter and Combine progress redesign: instead of a thin bar squeezed between row elements (which never lined up between conversion rows and the archive group header), progress now fills the row's own background, a green fill on the archive group header and the app's neutral tint on conversion rows. The percentage, elapsed time, and ETA text stay where they were, completed rows return to the normal background, each conversion row's status icon sits in its own larger column so the state reads at a glance, and filenames use the same monospaced style as the stream list's date names.
 
 ## Navigation redesign
