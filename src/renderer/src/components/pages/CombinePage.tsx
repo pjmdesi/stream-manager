@@ -1125,27 +1125,44 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                        first write, so it already shows as a file row in
                        the footer slot (which becomes the done row on
                        completion). Converter active-row anatomy: status
-                       icon + name, progress bar, %/elapsed/ETA/output-dir
-                       line, divider, pause + cancel actions. No thumbnail
+                       column + name, progress as the row-background fill,
+                       %/elapsed/ETA/output-dir line, divider, pause +
+                       cancel actions. No thumbnail
                        attempt while the file is mid-write — a partial
                        decode would cache a bogus frame; the real one
                        arrives with the done row. */
                     <div className="border-t border-white/5 bg-navy-900/30">
-                      <div className="flex items-stretch gap-3 px-4 py-3">
+                      <div className="relative isolate overflow-hidden flex items-stretch gap-3 px-4 py-3">
+                        {/* Progress as the row background, converter parity:
+                            tinted fill growing behind the content instead of
+                            an inline bar. */}
+                        {(downloading || (runProgress === 0 && !paused)) ? (
+                          <div aria-hidden className={`absolute inset-0 -z-10 pointer-events-none animate-pulse ${downloading ? 'bg-blue-500/10' : 'bg-purple-500/10'}`} />
+                        ) : (
+                          <div
+                            aria-hidden
+                            className={`absolute inset-y-0 left-0 -z-10 pointer-events-none transition-[width] duration-300 ${paused ? 'bg-yellow-400/10' : 'bg-purple-500/10'}`}
+                            style={{ width: `${runProgress}%` }}
+                          />
+                        )}
                         <div className="self-center shrink-0 -my-1 -ms-2">
                           <div className="w-[100px] h-14 rounded-md bg-navy-800 border border-white/5 flex items-center justify-center">
                             <Film size={13} className="text-gray-500" />
                           </div>
                         </div>
+                        {/* Status column — converter parity: doubled icon in
+                            its own slot between the thumb and the text stack. */}
+                        <div className="self-center shrink-0 flex items-center justify-center w-8">
+                          {downloading
+                            ? <Cloud size={28} className="text-blue-400 animate-pulse shrink-0" />
+                            : paused
+                              ? <Pause size={28} className="text-yellow-400 shrink-0" />
+                              : <RefreshCw size={28} className="text-purple-400 animate-spin shrink-0" />}
+                        </div>
                         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                           <div className="flex items-center gap-2">
-                            {downloading
-                              ? <Cloud size={14} className="text-blue-400 animate-pulse shrink-0" />
-                              : paused
-                                ? <Pause size={14} className="text-yellow-400 shrink-0" />
-                                : <RefreshCw size={14} className="text-purple-400 animate-spin shrink-0" />}
                             <Tooltip content={g.outputPath} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
-                              <span className="block text-xs text-gray-200 truncate">{nameOf(g.outputPath)}</span>
+                              <span className="block font-mono text-sm text-gray-200 truncate">{nameOf(g.outputPath)}</span>
                             </Tooltip>
                             <span className="text-xs text-gray-400 shrink-0">
                               Combining {g.files.length} files
@@ -1162,12 +1179,6 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                               </button>
                             </Tooltip>
                           )}
-                          <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${downloading ? 'bg-blue-500 animate-pulse' : paused ? 'bg-yellow-400' : runProgress === 0 ? 'bg-purple-500 animate-pulse' : 'bg-purple-500'}`}
-                              style={{ width: downloading || (runProgress === 0 && !paused) ? '100%' : `${runProgress}%` }}
-                            />
-                          </div>
                           <div className={`flex items-center gap-3 text-xs tabular-nums ${downloading ? 'text-blue-300' : 'text-gray-400'}`}>
                             {/* No % / elapsed during the download — that
                                 clock measures the combine, and hydration

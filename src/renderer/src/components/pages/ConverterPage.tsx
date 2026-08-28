@@ -88,39 +88,43 @@ function audioTrackLabel(t: AudioTrackInfo): string {
   return `Track ${t.index + 1}${desc ? ` — ${desc}` : ''}${meta ? ` · ${meta}` : ''}`
 }
 
-function StatusIcon({ status }: { status: ConversionJob['status'] }) {
-  if (status === 'done')        return <CheckCircle size={14} className="text-green-400 shrink-0" />
-  if (status === 'error')       return <AlertCircle size={14} className="text-red-400 shrink-0" />
-  if (status === 'downloading') return <Cloud size={14} className="text-blue-400 animate-pulse shrink-0" />
-  if (status === 'running')     return <RefreshCw size={14} className="text-purple-400 animate-spin shrink-0" />
-  if (status === 'replacing')   return <RefreshCw size={14} className="text-purple-300 animate-spin shrink-0" />
-  if (status === 'paused')      return <Pause size={14} className="text-yellow-400 shrink-0" />
-  if (status === 'cancelled')   return <XCircle size={14} className="text-gray-400 shrink-0" />
-  return <Clock size={14} className="text-yellow-500 shrink-0" />
+function StatusIcon({ status, size = 14 }: { status: ConversionJob['status']; size?: number }) {
+  if (status === 'done')        return <CheckCircle size={size} className="text-green-400 shrink-0" />
+  if (status === 'error')       return <AlertCircle size={size} className="text-red-400 shrink-0" />
+  if (status === 'downloading') return <Cloud size={size} className="text-blue-400 animate-pulse shrink-0" />
+  if (status === 'running')     return <RefreshCw size={size} className="text-purple-400 animate-spin shrink-0" />
+  if (status === 'replacing')   return <RefreshCw size={size} className="text-purple-300 animate-spin shrink-0" />
+  if (status === 'paused')      return <Pause size={size} className="text-yellow-400 shrink-0" />
+  if (status === 'cancelled')   return <XCircle size={size} className="text-gray-400 shrink-0" />
+  return <Clock size={size} className="text-yellow-500 shrink-0" />
 }
 
-function ProgressBar({ percent, status }: { percent: number; status: ConversionJob['status'] }) {
+/** Progress rendered as the row's own background: a tinted fill that grows
+ *  left-to-right behind the content. Only in-flight states paint — terminal
+ *  rows (done/cancelled/error) revert to the plain row background. The host
+ *  row needs `relative isolate overflow-hidden` so the -z-10 fill stays
+ *  inside it. */
+function RowProgressFill({ percent, status, tint }: { percent: number; status: ConversionJob['status']; tint: string }) {
   const colorClass =
-    status === 'done'        ? 'bg-green-500' :
-    status === 'error'       ? 'bg-red-500' :
-    status === 'cancelled'   ? 'bg-gray-600' :
-    status === 'paused'      ? 'bg-yellow-400' :
-    status === 'downloading' ? 'bg-blue-500 animate-pulse' :
-    status === 'replacing'   ? 'bg-purple-300 animate-pulse' :
-    status === 'running' && percent === 0 ? 'bg-purple-500 animate-pulse' :
-    'bg-purple-500'
+    status === 'paused'      ? 'bg-yellow-400/10' :
+    status === 'downloading' ? 'bg-blue-500/10 animate-pulse' :
+    status === 'replacing'   ? `${tint} animate-pulse` :
+    status === 'running' && percent === 0 ? `${tint} animate-pulse` :
+    status === 'running'     ? tint :
+    null
 
+  if (!colorClass) return null
   const isIndeterminate =
     status === 'downloading' ||
     status === 'replacing' ||
     (status === 'running' && percent === 0)
+  const pct = Number.isFinite(percent) ? Math.min(Math.max(percent, 0), 100) : 0
   return (
-    <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-      <div
-        className={`h-full rounded-full transition-all ${colorClass}`}
-        style={{ width: isIndeterminate ? '100%' : `${percent}%` }}
-      />
-    </div>
+    <div
+      aria-hidden
+      className={`absolute inset-y-0 left-0 -z-10 pointer-events-none transition-[width] duration-300 ${colorClass}`}
+      style={{ width: isIndeterminate ? '100%' : `${pct}%` }}
+    />
   )
 }
 
@@ -537,26 +541,33 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     const streamOrigin = streamOrigins[job.inputFile]
 
     return (
-      <div key={job.id} className={`@container px-4 py-3 border-b border-white/5 last:border-0 flex items-stretch gap-3 ${indented ? 'pl-7' : ''}`}>
+      <div key={job.id} className={`@container relative isolate overflow-hidden px-4 py-3 border-b border-white/5 last:border-0 flex items-stretch gap-3 ${indented ? 'pl-7' : ''}`}>
+        {/* Progress paints as the row background — the app's "purple" tint,
+            growing behind the content. */}
+        <RowProgressFill percent={job.progress} status={job.status} tint="bg-purple-500/10" />
         {/* Thumbnail — pulled toward the left/top/bottom edges, keeps the
             gap to the right content. */}
         <div className="self-center shrink-0 -my-1 -ms-2">
           <VideoThumb path={job.inputFile} />
         </div>
+        {/* Status column — between the thumbnail and the text stack so the
+            state reads at a glance without hunting inside the filename row. */}
+        <div className="self-center shrink-0 flex items-center justify-center w-8">
+          <StatusIcon status={job.status} size={28} />
+        </div>
         {/* Left: all content */}
         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
           {/* Filenames row */}
           <div className="flex items-center gap-2">
-            <StatusIcon status={job.status} />
             <div className="shrink-0 max-w-[30%] min-w-0">
-              <TruncText text={job.inputFile.split(/[\\/]/).pop() ?? job.inputFile} className="text-xs text-gray-400" />
+              <TruncText text={job.inputFile.split(/[\\/]/).pop() ?? job.inputFile} className="font-mono text-sm text-gray-400" />
             </div>
-            <span className="text-xs text-gray-400 shrink-0">→</span>
+            <span className="text-sm text-gray-400 shrink-0">→</span>
             {/* Hide the temp-file name for replaceInput jobs — they're invisible
                 to the user; show the input file's name instead so the row reads
                 as "input → input (replaced in place)". */}
             <div className="flex-1 min-w-0">
-              <TruncText text={(job.replaceInput ? job.inputFile.split(/[\\/]/).pop() : outputName) ?? ''} className="text-xs text-gray-200" />
+              <TruncText text={(job.replaceInput ? job.inputFile.split(/[\\/]/).pop() : outputName) ?? ''} className="font-mono text-sm text-gray-200" />
             </div>
             <span className="text-xs text-gray-400 shrink-0">
               {job.preset.name}
@@ -578,8 +589,6 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               </button>
             </Tooltip>
           )}
-
-          <ProgressBar percent={job.progress} status={job.status} />
 
           {isDownloading && (
             <div className="flex items-center gap-3 text-xs text-blue-300 tabular-nums">
@@ -956,13 +965,21 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                         : `${finishedN}/${total} done`
                     items.push(
                       <div key={`g:${job.groupId}`} className="border-b border-white/5 last:border-0">
-                        <div className="flex items-center gap-2 px-4 py-2 bg-green-500/5 border-l-2 border-green-500/40">
+                        <div className="relative isolate overflow-hidden flex items-center gap-2 px-4 py-2 bg-green-500/5 border-l-2 border-green-500/40">
+                          {/* Aggregate progress as the header background — a
+                              stronger green fill over the resting green tint.
+                              Gone once the group settles, like the job rows. */}
+                          {groupActive && (
+                            <div
+                              aria-hidden
+                              className="absolute inset-y-0 left-0 -z-10 pointer-events-none transition-[width] duration-300 bg-green-500/15"
+                              style={{ width: `${aggregatePct}%` }}
+                            />
+                          )}
                           <Archive size={13} className="text-green-400 shrink-0" />
                           <span className="text-xs font-semibold text-gray-200 shrink-0">{job.groupLabel ?? 'Group'}</span>
                           <span className="text-[11px] text-gray-400 shrink-0 tabular-nums">· {groupSummary}</span>
-                          <div className="flex-1 mx-2">
-                            <ProgressBar percent={aggregatePct} status={groupActive ? 'running' : (errN > 0 ? 'error' : 'done')} />
-                          </div>
+                          <div className="flex-1" />
                           {groupActive && (
                             <Tooltip content="Cancel all jobs in this group">
                               <button
