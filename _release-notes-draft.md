@@ -14,6 +14,7 @@ Target: TBD (the nav-refresh release) · emptied 2026-08-28 after the v2.4.0 rel
 
 - Hovering a stream row's date now shows the complete date ("Saturday, July 25, 2026") instead of just the day of the week.
 
+- The palette panel's edit mode is unmistakable now: the pencil button lights up amber and an amber outline wraps the panel contents while editing. Previously the only tell was a subtly highlighted pencil, and the grayed-out recents list read as disabled rather than in-edit.
 - Thumbnail editor sidebar: the Layers and Properties panels are now collapsible like the Assets and Palette panels, the Layers panel has a header icon matching its siblings, and the asset-sources control in the Assets header looks like an actual button instead of a second decorative icon.
 
 ## Navigation redesign

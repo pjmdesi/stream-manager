@@ -7027,10 +7027,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Palette</span>
                   <div className={`ml-auto flex items-center gap-0.5${paletteCollapsed ? ' hidden' : ''}`}>
                     <Tooltip content={paletteEditMode ? 'Done editing' : 'Edit palette — click swatches to remove them'}>
+                      {/* Edit mode reads as a MODE now (thumbnails #14):
+                          amber-lit pencil + a matching ring around the
+                          panel body below — the old subtle bg-white/10
+                          active state made the grayed recents list look
+                          disabled rather than in-edit. */}
                       <button
                         type="button"
                         onClick={() => setPaletteEditMode(m => !m)}
-                        className={`p-0.5 rounded flex items-center justify-center transition-colors ${paletteEditMode ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                        className={`p-0.5 rounded flex items-center justify-center transition-colors ${paletteEditMode ? 'text-amber-300 bg-amber-500/20 ring-1 ring-amber-400/50' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
                       >
                         <Pencil size={12} />
                       </button>
@@ -7048,7 +7053,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   </div>
                 </div>
                 {!paletteCollapsed && (
-                  <div className="px-3 py-2 flex flex-col gap-2">
+                  // ring-inset (not border) so entering edit mode doesn't
+                  // shift the content by the border width.
+                  <div className={`px-3 py-2 flex flex-col gap-2${paletteEditMode ? ' ring-1 ring-inset ring-amber-400/40 rounded-md' : ''}`}>
                     {/* Edit-mode toolbar: selection count + delete, reset,
                         export, import. Deletion moved here from per-swatch
                         buttons when multi-select arrived. */}
