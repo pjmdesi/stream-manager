@@ -166,6 +166,25 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
+  // Ctrl+= acts as zoom-in (Bugs #3). Electron's default menu — invisible
+  // behind the frameless window, but its accelerators still fire — binds
+  // zoom-out to Ctrl+- and reset to Ctrl+0, while zoom-in is literally
+  // "Ctrl+Plus", which on a US layout only matches Ctrl+Shift+=. Plain
+  // Ctrl+= (the key everyone presses, and what browsers accept) matched
+  // nothing, so users could zoom out and never back in without knowing
+  // Ctrl+0. Mirror browser behavior: both Ctrl+= and Ctrl+Shift+= (and
+  // numpad +) zoom in. preventDefault also swallows the default menu's
+  // accelerator, so the shifted form can't double-fire.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return
+    if (input.key !== '=' && input.key !== '+') return
+    event.preventDefault()
+    const wc = mainWindow.webContents
+    // +0.5 per press = the default menu's own step; cap near the browser
+    // ceiling (level 8 ≈ 430%) so key repeat can't zoom into absurdity.
+    wc.setZoomLevel(Math.min(wc.getZoomLevel() + 0.5, 8))
+  })
+
   mainWindow.webContents.on('context-menu', (_event, params) => {
     const { isEditable, selectionText, editFlags, misspelledWord, dictionarySuggestions } = params
     const hasSelection = selectionText.trim().length > 0

@@ -96,6 +96,7 @@
 ### Integrations
 
 1. When navigating to this page, several elements on the page flash with content before the checks run and update, causing a reflow shortly after it loads in. Trying to avoid a loading overlay, let's try to make sure the initial size/layout of the elements matches in each potential state of the page. It's okay to show the checks running and applying their changes, it's only the reflow and element position changes I'm concerned about. ![Before load](image-2.png) ![After load](image-1.png). Judging be the screenshot, it seems like it's the "Show setup instructions" element in the YouTube section card, it's appearing expanded very briefly while the page loads.
+2. The icon for the stream relay section card header on the integrations page does not match the icon we are using in the widget. These should match. The icon size in the header can bump up in size a bit too. This specific usage of an icon can override the consistency rules since its helpful in this case to help the user identify the purpose of this section.
 
 ### YouTube & Twitch sync
 
