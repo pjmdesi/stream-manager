@@ -1,6 +1,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X, Combine, ChevronDown, ChevronRight, Upload, AlertTriangle } from 'lucide-react'
 import { VideoThumb, CHECKER, releaseThumbDecodes } from '../ui/VideoThumb'
+import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
@@ -388,10 +389,16 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
         {secondary && <p className={META_SECONDARY}>{secondary}</p>}
         <div className={`${ACTION_ROW}${selectMode ? ' invisible' : ''}`}>
           <Tooltip content="Send to player" side="top">
-            <button onClick={() => onSendToPlayer(path)} className={ACTION_PURPLE}><Play size={12} /> Player</button>
+            <button onClick={() => onSendToPlayer(path)} className={ACTION_PURPLE}>
+              <Play size={12} />
+              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Player</CollapsibleLabel>
+            </button>
           </Tooltip>
           <Tooltip content="Send to converter" side="top">
-            <button onClick={() => onSendToConverter(path)} className={ACTION_GREEN}><Zap size={12} /> Convert</button>
+            <button onClick={() => onSendToConverter(path)} className={ACTION_GREEN}>
+              <Zap size={12} />
+              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Convert</CollapsibleLabel>
+            </button>
           </Tooltip>
           <CloudAction isLocal={isLocal} active={cloudSyncActive} busy={busy} onOffload={() => onOffload(path)} onPin={() => onPin(path)} />
           <Tooltip content={blockReason ? `Can't delete: ${blockReason}` : 'Move to recycle bin'} side="top">
@@ -533,7 +540,10 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
         <div className={`${ACTION_ROW}${selectMode ? ' invisible' : ''}`}>
           {isSm && (
             <Tooltip content="Open in thumbnail editor" side="top" shortcut="Ctrl+Shift+T">
-              <button onClick={() => onEditThumbnail(ordinal!)} className={ACTION_GRAY}><FileImage size={12} /> Edit</button>
+              <button onClick={() => onEditThumbnail(ordinal!)} className={ACTION_GRAY}>
+                <FileImage size={12} />
+                <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Edit</CollapsibleLabel>
+              </button>
             </Tooltip>
           )}
           <CloudAction
@@ -1136,7 +1146,11 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
         </div>
         )}
       </div>
-      <div className="grid gap-3 max-h-[318px] overflow-y-auto p-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
+      {/* @container: the card action labels collapse to icon-only via a
+          container query against the GRID's width (@2xl ≈ the one-column
+          threshold of this auto-fill template) — a narrow one-column card
+          otherwise overflows its labeled buttons over the thumbnail. */}
+      <div className="@container grid gap-3 max-h-[318px] overflow-y-auto p-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
         {showVideo && folder.videos.map(path => {
           const entry = videoMap[videoMapKey(folder.folderPath, path)]
           return (
