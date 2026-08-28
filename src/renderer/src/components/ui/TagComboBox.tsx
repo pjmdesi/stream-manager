@@ -315,7 +315,7 @@ export function TagComboBox({
             key={v}
             text={v}
             chipClassName={`inline-flex items-center gap-1 border rounded-full shrink-0 max-w-full ${color.chip} ${chipSize}`}
-            textureStyle={getTagTextureStyle(tagTextures?.[v])}
+            textureStyle={getTagTextureStyle(tagTextures?.[v], tagColors?.[v])}
             onRemove={() => remove(v)}
             isSelected={selectedValue !== undefined && selectedValue === v}
             onSelect={onSelectValue ? () => onSelectValue(v) : undefined}

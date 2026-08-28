@@ -3860,7 +3860,7 @@ export function StreamsPage({
                                         >
                                           <span
                                             className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${filterTypes.has(t) ? `${color.highlight} border-transparent` : 'border-white/20'}`}
-                                            style={filterTypes.has(t) ? getTagTextureStyle(tagTextures[t]) : undefined}
+                                            style={filterTypes.has(t) ? getTagTextureStyle(tagTextures[t], tagColors[t]) : undefined}
                                           >
                                             {filterTypes.has(t) && <span className={`text-[9px] leading-none ${color.text}`}>✓</span>}
                                           </span>
@@ -5290,7 +5290,7 @@ const StreamListItem = memo(function StreamListItem({
                       key={t}
                       text={t}
                       className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border truncate max-w-full ${color.chip}`}
-                      style={getTagTextureStyle(tagTextures[t])}
+                      style={getTagTextureStyle(tagTextures[t], tagColors[t])}
                       onClick={selectMode ? (e) => onTagSelect('type', t, !(e.ctrlKey || e.metaKey)) : undefined}
                       actionTooltip={selectMode ? `Select all "${t}" · Ctrl-click to deselect` : undefined}
                     />

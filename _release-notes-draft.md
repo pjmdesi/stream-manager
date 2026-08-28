@@ -10,7 +10,7 @@ Target: TBD (the nav-refresh release) · emptied 2026-08-28 after the v2.4.0 rel
 
 ## UI polish
 
-- Four new tag colors: Purple, Brown, Black, and White. The color that was previously labeled Purple is actually the app's neutral cool gray, so it is now honestly labeled Gray, and its picker swatch is a step darker so it can't be confused with the new White. The new Purple is a true purple.
+- Four new tag colors: Purple, Brown, Black, and White. The color that was previously labeled Purple is actually the app's neutral cool gray, so it is now honestly labeled Gray, and its picker swatch is a step darker so it can't be confused with the new White. The new Purple is a true purple. Tag textures draw in light ink on Black tags so the patterns stay visible.
 
 ## Navigation redesign
 

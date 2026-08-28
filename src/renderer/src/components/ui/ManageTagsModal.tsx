@@ -529,7 +529,7 @@ function TagListPanel({
               ) : (
                 <span
                   className={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${resolvedChip}`}
-                  style={chipClass ? {} : getTagTextureStyle(tagTextures?.[styleKey])}
+                  style={chipClass ? {} : getTagTextureStyle(tagTextures?.[styleKey], tagColors?.[styleKey])}
                 >
                   {isRenameBusy ? renameBusy!.to : item}
                 </span>
@@ -711,7 +711,7 @@ function TagListPanel({
           {/* Chip with inline input */}
           <span
             className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full border font-medium ${newTagError ? 'bg-red-900/30 text-red-300 border-red-700/50' : getTagColor(newTag.colorKey).chip}`}
-            style={newTagError ? {} : getTagTextureStyle(newTag.textureKey)}
+            style={newTagError ? {} : getTagTextureStyle(newTag.textureKey, newTag.colorKey)}
           >
             <input
               ref={newTagInputRef}

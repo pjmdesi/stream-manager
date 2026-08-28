@@ -5424,7 +5424,7 @@ export function StreamsPage({
                             const viable = viableTypeOptions.has(t)
                             return (
                               <button key={t} onClick={() => viable && toggleTypeFilter(t)} className={`flex items-center gap-2 w-full px-3 py-1 text-left text-xs capitalize transition-colors ${!viable && !filterTypes.has(t) ? 'opacity-30 cursor-default' : filterTypes.has(t) ? `${color.text} hover:bg-white/5` : 'text-gray-300 hover:bg-white/5'}`}>
-                                <span className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${filterTypes.has(t) ? `${color.highlight} border-transparent` : 'border-white/20'}`} style={filterTypes.has(t) ? getTagTextureStyle(tagTextures[t]) : undefined}>
+                                <span className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${filterTypes.has(t) ? `${color.highlight} border-transparent` : 'border-white/20'}`} style={filterTypes.has(t) ? getTagTextureStyle(tagTextures[t], tagColors[t]) : undefined}>
                                   {filterTypes.has(t) && <span className={`text-[9px] leading-none ${color.text}`}>✓</span>}
                                 </span>
                                 {t}
@@ -5653,7 +5653,7 @@ export function StreamsPage({
                                   >
                                     <span
                                       className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${filterTypes.has(t) ? `${color.highlight} border-transparent` : 'border-white/20'}`}
-                                      style={filterTypes.has(t) ? getTagTextureStyle(tagTextures[t]) : undefined}
+                                      style={filterTypes.has(t) ? getTagTextureStyle(tagTextures[t], tagColors[t]) : undefined}
                                     >
                                       {filterTypes.has(t) && <span className={`text-[9px] leading-none ${color.text}`}>✓</span>}
                                     </span>
@@ -7073,7 +7073,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                   key={t}
                   text={t}
                   className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border truncate max-w-full ${color.chip}`}
-                  style={getTagTextureStyle(tagTextures[t])}
+                  style={getTagTextureStyle(tagTextures[t], tagColors[t])}
                 />
               )
             })}
@@ -7491,7 +7491,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                   key={t}
                   text={t}
                   className={`inline-block text-xs leading-tight px-2 py-0.5 rounded-full border truncate max-w-full ${color.chip}`}
-                  style={getTagTextureStyle(tagTextures[t])}
+                  style={getTagTextureStyle(tagTextures[t], tagColors[t])}
                 />
               )
             })}

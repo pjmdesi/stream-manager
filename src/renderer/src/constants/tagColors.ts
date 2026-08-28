@@ -220,9 +220,18 @@ export type TagTextureStyle = {
   backgroundPosition?: string
 }
 
-const D = 'rgba(0,0,0,0.5)'
+const DARK_INK = 'rgba(0,0,0,0.5)'
+/** Texture ink for the Black tag color — dark-on-black is invisible.
+ *  Lower opacity than the dark ink's 0.5: white-on-black has far more
+ *  contrast, so the same weight read garish (0.2 tuned by eye). */
+const LIGHT_INK = 'rgba(255,255,255,0.2)'
 
-export function getTagTextureStyle(textureKey: string | undefined): TagTextureStyle {
+export function getTagTextureStyle(textureKey: string | undefined, colorKey?: string): TagTextureStyle {
+  // Textures draw in translucent black, which disappears on the Black
+  // chip — flip to light ink there. Pass the tag's colorKey wherever the
+  // caller renders an actual colored chip; omit it for neutral surfaces
+  // (the texture picker's fixed preview background).
+  const D = colorKey === 'black' ? LIGHT_INK : DARK_INK
   switch (textureKey) {
     case 'diagonal':
       return { backgroundImage: `repeating-linear-gradient(45deg, ${D} 0px, ${D} 1.4px, transparent 1.4px, transparent 4.2px)` }
