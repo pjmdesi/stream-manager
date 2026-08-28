@@ -29,7 +29,19 @@ function srFormatDuration(s: number): string {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export function IntegrationsPage() {
+// Last-known quota, kept across remounts. The page is switch-mounted, so
+// without this the quota line pops in after the async fetch and shifts the
+// YouTube card on every visit.
+let lastYtQuota: { exceeded: boolean; resetsAt: string | null; used: number; limit: number } | null = null
+
+export function IntegrationsPage({ initialStatus }: {
+  /** Last-known per-service status from the nav indicator (App keeps it
+   *  fresh continuously). Seeds the connected/valid state synchronously so
+   *  a remount doesn't flash the disconnected layout — most visibly the
+   *  expanded YouTube setup instructions — before this page's own checks
+   *  land. Seed only; the page's checks stay authoritative after mount. */
+  initialStatus?: Record<'youtube' | 'twitch' | 'claude', { setUp: boolean; healthy: boolean }>
+}) {
   const { config, updateConfig } = useStore()
   // OS-level connectivity — drives the offline banner and blocks
   // ENABLING the relay (never disables an already-running session).
@@ -38,8 +50,8 @@ export function IntegrationsPage() {
   // ── YouTube state ─────────────────────────────────────────────────────────
   // Credential inputs bind directly to config (auto-save on every keystroke).
   // No local mirror state and no Save button needed.
-  const [ytConnected, setYtConnected] = useState(false)
-  const [ytTokenValid, setYtTokenValid] = useState(true)
+  const [ytConnected, setYtConnected] = useState(initialStatus?.youtube.setUp ?? false)
+  const [ytTokenValid, setYtTokenValid] = useState(initialStatus?.youtube.healthy ?? true)
   const [ytTokenError, setYtTokenError] = useState<string | null>(null)
   // Why the last validation failed: 'auth' = Google rejected the token
   // (genuinely expired/revoked), 'network' = the check itself couldn't
@@ -47,7 +59,7 @@ export function IntegrationsPage() {
   const [ytTokenIssue, setYtTokenIssue] = useState<'auth' | 'network' | null>(null)
   const [ytConnecting, setYtConnecting] = useState(false)
   const [ytError, setYtError] = useState<string | null>(null)
-  const [ytQuota, setYtQuota] = useState<{ exceeded: boolean; resetsAt: string | null; used: number; limit: number } | null>(null)
+  const [ytQuota, setYtQuota] = useState<{ exceeded: boolean; resetsAt: string | null; used: number; limit: number } | null>(lastYtQuota)
   const [importModalOpen, setImportModalOpen] = useState(false)
   const [linkModalOpen, setLinkModalOpen] = useState(false)
 
@@ -197,7 +209,7 @@ export function IntegrationsPage() {
   // Credential inputs bind directly to config (auto-save on every keystroke
   // via updateConfig's optimistic-update path) — no local mirror state and
   // no Save button needed.
-  const [twConnected, setTwConnected] = useState(false)
+  const [twConnected, setTwConnected] = useState(initialStatus?.twitch.setUp ?? false)
   const [twConnecting, setTwConnecting] = useState(false)
   const [twError, setTwError] = useState<string | null>(null)
 
@@ -314,8 +326,9 @@ export function IntegrationsPage() {
   // Live YouTube quota usage — fetch once, then update on every API call
   // (main pushes 'youtube:quota-changed' as usage accrues / resets at PT midnight).
   useEffect(() => {
-    window.api.youtubeGetQuotaState().then(setYtQuota).catch(() => {})
-    return window.api.onYouTubeQuotaChanged(setYtQuota)
+    const apply = (q: typeof lastYtQuota) => { lastYtQuota = q; setYtQuota(q) }
+    window.api.youtubeGetQuotaState().then(apply).catch(() => {})
+    return window.api.onYouTubeQuotaChanged(apply)
   }, [])
 
   // ── YouTube actions ───────────────────────────────────────────────────────

@@ -1396,7 +1396,7 @@ function AppInner() {
           {page === 'templates' && <TemplatesPage />}
           {page === 'rules'     && <RulesPage />}
           {page === 'launcher'  && <LauncherPage />}
-          {page === 'integrations'   && <IntegrationsPage />}
+          {page === 'integrations'   && <IntegrationsPage initialStatus={integrationStatus} />}
           {page === 'settings'  && (
             <SettingsPage
               onOpenOnboarding={() => setOnboardingOpen(true)}
