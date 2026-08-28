@@ -16,6 +16,7 @@ import {
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   FlipHorizontal2, FlipVertical2,
   ChevronDown, ChevronRight, Loader2, Radio, Palette, Upload,
+  Layers as LayersIcon,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -3617,6 +3618,21 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     localStorage.setItem('thumbAssetsCollapsed', String(next))
     if (next) setAssetOptionsOpen(false)
   }
+  // Layers + Properties panel collapse (UI-polish batch): every sidebar
+  // panel collapses now, and collapsibility is the default for any future
+  // panel here. Same persistence pattern as palette/assets.
+  const [layersCollapsed, setLayersCollapsed] = useState(() => localStorage.getItem('thumbLayersCollapsed') === 'true')
+  const toggleLayersCollapsed = () => {
+    const next = !layersCollapsed
+    setLayersCollapsed(next)
+    localStorage.setItem('thumbLayersCollapsed', String(next))
+  }
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(() => localStorage.getItem('thumbPropertiesCollapsed') === 'true')
+  const togglePropertiesCollapsed = () => {
+    const next = !propertiesCollapsed
+    setPropertiesCollapsed(next)
+    localStorage.setItem('thumbPropertiesCollapsed', String(next))
+  }
   useEffect(() => {
     if (!assetOptionsOpen) return
     const onDown = (e: MouseEvent) => {
@@ -6813,11 +6829,31 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
             {/* Right panel: Layers + Assets + Properties */}
             <div className="w-64 flex flex-col border-l border-white/5 bg-navy-800 shrink-0 overflow-hidden">
-              {/* Layers */}
+              {/* Layers — collapsible like every sidebar panel (UI-polish
+                  batch). The Edit/Preview toggle stays visible while
+                  collapsed: it switches the whole editor's mode, not panel
+                  content, so hiding it with the layer list would strand
+                  preview mode. */}
               <div className="flex flex-col" style={{ minHeight: 0, flex: '0 0 auto', maxHeight: '30%' }}>
-                <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 shrink-0">
+                {/* border-b always present (transparent when collapsed): the
+                    border participates in the h-8 border-box, so toggling it
+                    off grew the h-full chevron by 1px and shifted the row. */}
+                <div className={`flex items-center gap-1.5 px-3 h-8 shrink-0 border-b ${!layersCollapsed ? 'border-white/5' : 'border-transparent'}`}>
+                  <Tooltip
+                    content={layersCollapsed ? 'Expand layers panel' : 'Collapse layers panel'}
+                    triggerClassName="self-stretch -ml-3 flex"
+                  >
+                    <button
+                      type="button"
+                      onClick={toggleLayersCollapsed}
+                      className="h-full aspect-square flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                    >
+                      {layersCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                  </Tooltip>
+                  <LayersIcon size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Layers</span>
-                  <div className="flex items-center gap-2">
+                  <div className="ml-auto flex items-center gap-2">
                     {/* Edit/Preview toggle (thumbnails #8) — Preview swaps the
                         canvas viewport for YouTube-surface mockups; the
                         sidebar stays live so properties can be tweaked while
@@ -6843,7 +6879,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     <span className="text-[10px] text-gray-400">{layers.length}</span>
                   </div>
                 </div>
-                <div className="overflow-y-auto flex-1">
+                {/* `hidden` (not unmount) so drag/rename state survives a
+                    collapse round-trip, matching the assets panel. */}
+                <div className={`overflow-y-auto flex-1${layersCollapsed ? ' hidden' : ''}`}>
                   {(() => {
                     const displayLayers = [...layers].reverse()
                     return displayLayers.map((layer, displayIdx) => {
@@ -6972,7 +7010,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   + button adds via the native picker. Section border-b
                   doubles as the divider between palette and properties. */}
               <div className="flex flex-col shrink-0 border-b border-white/10">
-                <div className={`flex items-center gap-1.5 px-3 h-8 shrink-0 ${!paletteCollapsed ? 'border-b border-white/5' : ''}`}>
+                <div className={`flex items-center gap-1.5 px-3 h-8 shrink-0 border-b ${!paletteCollapsed ? 'border-white/5' : 'border-transparent'}`}>
                   <Tooltip
                     content={paletteCollapsed ? 'Expand palette' : 'Collapse palette'}
                     triggerClassName="self-stretch -ml-3 flex"
@@ -7272,15 +7310,34 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 </Modal>
               )}
 
-              {/* Properties */}
-              <div className="flex flex-col flex-1 overflow-hidden min-h-0">
-                <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/5 shrink-0">
+              {/* Properties — collapsible (UI-polish batch). Collapsed, it
+                  gives up its flex-1 filler role so it shrinks to the
+                  header; the panels below slide up and the leftover space
+                  sits at the sidebar's bottom. */}
+              <div className={`flex flex-col overflow-hidden min-h-0${propertiesCollapsed ? '' : ' flex-1'}`}>
+                <div className={`flex items-center gap-1.5 px-3 h-8 shrink-0 border-b ${!propertiesCollapsed ? 'border-white/5' : 'border-transparent'}`}>
+                  <Tooltip
+                    content={propertiesCollapsed ? 'Expand properties panel' : 'Collapse properties panel'}
+                    triggerClassName="self-stretch -ml-3 flex"
+                  >
+                    <button
+                      type="button"
+                      onClick={togglePropertiesCollapsed}
+                      className="h-full aspect-square flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                    >
+                      {propertiesCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                  </Tooltip>
                   <Sliders size={11} className="text-gray-400" />
                   <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Properties</span>
                 </div>
-                <PaletteContext.Provider value={paletteCtx}>
-                  <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} />
-                </PaletteContext.Provider>
+                {/* `hidden` (not unmount) so the panel's field drafts survive
+                    a collapse round-trip. */}
+                <div className={`flex flex-col flex-1 overflow-hidden min-h-0${propertiesCollapsed ? ' hidden' : ''}`}>
+                  <PaletteContext.Provider value={paletteCtx}>
+                    <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} />
+                  </PaletteContext.Provider>
+                </div>
               </div>
 
               {/* Divider */}
@@ -7321,10 +7378,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       shoved the icon above center. */}
                   <div ref={assetOptionsRef} className={`ml-auto relative flex items-center${assetsCollapsed ? ' hidden' : ''}`}>
                     <Tooltip content="Asset sources">
+                    {/* Bordered + filled like a real control (matches the
+                        Edit/Preview toggle's chrome) — the bare-icon version
+                        was indistinguishable from the decorative panel icon
+                        sitting in the same header. */}
                     <button
                       type="button"
                       onClick={() => setAssetOptionsOpen(o => !o)}
-                      className={`p-0.5 rounded flex items-center justify-center transition-colors ${assetOptionsOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                      className={`px-1 py-0.5 rounded-md border flex items-center justify-center transition-colors ${assetOptionsOpen ? 'bg-white/10 border-white/25 text-gray-200' : 'bg-navy-900 border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5'}`}
                     >
                       <Sliders size={12} />
                     </button>
