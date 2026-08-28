@@ -1,0 +1,71 @@
+# Release build (GitHub todo #1): every version-tag push gets a clean-room
+# Windows build — checkout, npm ci, typecheck + lint gate, then the full
+# `npm run dist` chain (electron-vite build + electron-builder) — and the
+# portable exe is attached to a DRAFT GitHub release for that tag.
+# Publishing stays manual: notes are pasted and the draft flipped live by
+# hand, exactly as before. Builds are unsigned by design (no certificate
+# exists; electron-builder's "signing with signtool" log lines are no-ops),
+# so no secrets are required.
+#
+# workflow_dispatch exists for iterating on this workflow without tag
+# clutter (build + artifact upload only, no release step). Note GitHub only
+# offers manual dispatch for workflows that exist on the DEFAULT branch —
+# before this lands on master, iterate by pushing a throwaway tag (e.g.
+# v0.0.1-ci) and deleting the tag + its draft release afterward.
+#
+# scripts/dist.cjs is CI-aware: tag builds get clean release naming even on
+# the detached-HEAD checkout Actions uses; branch dispatch runs build with
+# the same semantics as a local build of that branch (master = release
+# naming, anything else = _DEV markers).
+#
+# The Linux port slots in here later as a `matrix.os` entry (see
+# _cross-platform-analysis.md — ubuntu-latest joins windows-latest).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  # Needed to create the draft release and upload its asset.
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # The gate: no artifact if either fails. `npm run dist` re-runs the
+      # typecheck as part of the local command chain (cheap); the explicit
+      # steps here keep a failure's cause readable at a glance in the run.
+      - run: npm run typecheck
+      - run: npm run lint
+
+      - run: npm run dist
+
+      # Always upload the exe as a run artifact — this is what dispatch
+      # (iteration) runs produce, and it doubles as a backup for tag runs.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-exe
+          path: dist/*.exe
+          if-no-files-found: error
+
+      # Tag runs additionally attach the exe to a draft release for the
+      # tag (created if it doesn't exist yet). Publish stays manual.
+      - name: Attach exe to draft release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/*.exe

@@ -16,7 +16,25 @@ try {
   // Not a git checkout (e.g. building from a source archive) — release naming.
 }
 
-const isDevBuild = branch !== '' && branch !== 'master'
+// CI (GitHub Actions) checks out a detached HEAD, where rev-parse reports
+// the literal name "HEAD" — which reads as "not master" and would mis-mark
+// tag-triggered release builds as _DEV (with a dev-branch.txt saying
+// "HEAD"). Actions supplies the real ref instead:
+//   GITHUB_REF_TYPE 'tag'    → a release build cut from a version tag:
+//                              clean naming, no dev markers.
+//   GITHUB_REF_TYPE 'branch' → substitute GITHUB_REF_NAME as the branch,
+//                              so a workflow_dispatch run keeps the same
+//                              semantics as a local build of that branch
+//                              (master = release naming, anything else =
+//                              _DEV with the right branch badge).
+// A LOCAL detached checkout (no Actions env) keeps the old behavior:
+// "HEAD" is not master, so it builds as _DEV — the safe direction.
+const isTagBuild = process.env.GITHUB_REF_TYPE === 'tag'
+if (branch === 'HEAD' && process.env.GITHUB_REF_TYPE === 'branch' && process.env.GITHUB_REF_NAME) {
+  branch = process.env.GITHUB_REF_NAME
+}
+
+const isDevBuild = !isTagBuild && branch !== '' && branch !== 'master'
 
 let cmd = 'npx electron-builder'
 if (isDevBuild) {
