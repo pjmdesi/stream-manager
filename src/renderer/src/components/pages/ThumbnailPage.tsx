@@ -7032,19 +7032,22 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                           panel body below — the old subtle bg-white/10
                           active state made the grayed recents list look
                           disabled rather than in-edit. */}
+                      {/* Chrome matches the assets panel's options button
+                          (panel-header icon-button convention); the active
+                          state keeps its amber mode signal. */}
                       <button
                         type="button"
                         onClick={() => setPaletteEditMode(m => !m)}
-                        className={`p-0.5 rounded flex items-center justify-center transition-colors ${paletteEditMode ? 'text-amber-300 bg-amber-500/20 ring-1 ring-amber-400/50' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                        className={`p-1 rounded-md border flex items-center justify-center transition-colors ${paletteEditMode ? 'bg-amber-500/20 border-amber-400/50 text-amber-300' : 'bg-navy-900 border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5'}`}
                       >
-                        <Pencil size={12} />
+                        <Pencil size={13} />
                       </button>
                     </Tooltip>
                     <Tooltip content="Add a color to the palette">
                       <button
                         type="button"
                         onClick={() => paletteAddInputRef.current?.click()}
-                        className="p-0.5 rounded flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                        className="p-1 rounded-md border bg-navy-900 border-white/10 flex items-center justify-center text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5 transition-colors"
                       >
                         <Plus size={13} />
                       </button>
@@ -7053,9 +7056,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   </div>
                 </div>
                 {!paletteCollapsed && (
-                  // ring-inset (not border) so entering edit mode doesn't
-                  // shift the content by the border width.
-                  <div className={`px-3 py-2 flex flex-col gap-2${paletteEditMode ? ' ring-1 ring-inset ring-amber-400/40 rounded-md' : ''}`}>
+                  // Edit-mode outline: ring-inset (not border) so nothing
+                  // shifts, square corners to match the panel's geometry,
+                  // and the ringed box is inset a uniform 2px on ALL sides
+                  // via margin, with padding trades keeping the content
+                  // position identical (m-0.5+px-2.5 = px-3, m-0.5+py-1.5
+                  // = py-2). 4px read too snug against the swatch rows;
+                  // fully flush was ruled out (the ring's left pixel gets
+                  // cropped by the window edge).
+                  <div className={`flex flex-col gap-2 ${paletteEditMode ? 'm-0.5 px-2.5 py-1.5 ring-1 ring-inset ring-amber-400/40' : 'px-3 py-2'}`}>
                     {/* Edit-mode toolbar: selection count + delete, reset,
                         export, import. Deletion moved here from per-swatch
                         buttons when multi-select arrived. */}
@@ -7392,9 +7401,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     <button
                       type="button"
                       onClick={() => setAssetOptionsOpen(o => !o)}
-                      className={`px-1 py-0.5 rounded-md border flex items-center justify-center transition-colors ${assetOptionsOpen ? 'bg-white/10 border-white/25 text-gray-200' : 'bg-navy-900 border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5'}`}
+                      // p-1 + a 13px glyph: the border eats into the compact
+                      // p-0.5 box, so matching the old padding read cramped —
+                      // the chrome needs a hair more air than the bare icon
+                      // did for the glyph to stay parseable.
+                      className={`p-1 rounded-md border flex items-center justify-center transition-colors ${assetOptionsOpen ? 'bg-white/10 border-white/25 text-gray-200' : 'bg-navy-900 border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5'}`}
                     >
-                      <Sliders size={12} />
+                      <Sliders size={13} />
                     </button>
                     </Tooltip>
                     {assetOptionsOpen && (
