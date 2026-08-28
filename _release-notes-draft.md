@@ -12,6 +12,8 @@ Target: TBD (the nav-refresh release) · emptied 2026-08-28 after the v2.4.0 rel
 
 - Four new tag colors: Purple, Brown, Black, and White. The color that was previously labeled Purple is actually the app's neutral cool gray, so it is now honestly labeled Gray, and its picker swatch is a step darker so it can't be confused with the new White. The new Purple is a true purple. Tag textures draw in light ink on Black tags so the patterns stay visible.
 
+- Hovering a stream row's date now shows the complete date ("Saturday, July 25, 2026") instead of just the day of the week.
+
 ## Navigation redesign
 
 - The nav is reorganized into three groups: creation pages (Streams, Player, Thumbnails), utilities (Converter, Combine, Auto-Rules), and session tools (Launcher, with Stream Relay joining once it gets its own page). Integrations and Settings float to the bottom of the item area. The expanded sidebar is slightly wider.

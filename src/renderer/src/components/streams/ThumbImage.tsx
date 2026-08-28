@@ -3,10 +3,13 @@ import { Loader2, Cloud, AlertTriangle } from 'lucide-react'
 import { Tooltip } from '../ui/Tooltip'
 import { getCachedHydration, subscribeHydration } from '../../lib/hydrationCache'
 
+/** Tooltip text for stream date labels: weekday plus the full date
+ *  ("Saturday, July 25, 2026") — a complete human-readable restatement of
+ *  the compact ISO label it hovers over. */
 export function friendlyDate(iso: string): string {
   const [year, month, day] = iso.split('-')
   const d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
-  return d.toLocaleDateString(undefined, { weekday: 'long' })
+  return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 }
 
 export function toFileUrl(absPath: string): string {

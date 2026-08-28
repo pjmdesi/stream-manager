@@ -57,10 +57,11 @@ function today(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+// Kept in sync with ThumbImage.friendlyDate: weekday + full date.
 function friendlyDate(iso: string): string {
   const [year, month, day] = iso.split('-')
   const d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
-  return d.toLocaleDateString(undefined, { weekday: 'long' })
+  return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 }
 
 function toFileUrl(absPath: string): string {
