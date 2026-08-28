@@ -1,9 +1,17 @@
 /**
- * Tag color system — 12 predefined Tailwind-based color options.
+ * Tag color system — 16 predefined color options.
  *
  * All class strings are written out fully so Tailwind's build-time purge
  * never removes them. Dynamic construction (e.g. `bg-${color}-900/40`) is
- * intentionally avoided.
+ * intentionally avoided. Literal hex arbitrary classes (e.g. the Brown and
+ * true-Purple entries) are equally purge-safe as long as they appear
+ * verbatim in the source.
+ *
+ * THEME GOTCHA: the app's Tailwind `purple-*` family is REMAPPED to a cool
+ * slate-gray (tailwind.config.js) to neutralize the UI. The legacy 'purple'
+ * entry therefore RENDERS gray and is labeled Gray; its key stays 'purple'
+ * because keys are persisted in users' tagColors data. The real purple
+ * lives in the 'true-purple' entry via Tailwind's DEFAULT purple hexes.
  */
 
 export interface TagColor {
@@ -19,6 +27,10 @@ export interface TagColor {
   swatch: string
   /** Ring class for the highlighted chip in the dropdown */
   ring: string
+  /** Class for the check icon shown on the selected swatch. Only set on
+   *  swatches too light for the default white check (e.g. White). Render
+   *  sites fall back to 'text-white drop-shadow'. */
+  check?: string
 }
 
 export const TAG_COLORS: TagColor[] = [
@@ -113,12 +125,17 @@ export const TAG_COLORS: TagColor[] = [
     ring: 'ring-blue-400/70',
   },
   {
+    // Renders GRAY: the app's purple-* Tailwind family is remapped to cool
+    // slate-gray (see the header comment). Key stays 'purple' for stored
+    // data; the label tells the truth. Swatch darkened one step
+    // (purple-500 was #c9d5e3, nearly white — indistinguishable from the
+    // White swatch).
     key: 'purple',
-    label: 'Purple',
+    label: 'Gray',
     chip: 'bg-purple-900/40 text-purple-300 border-purple-300/30',
     text: 'text-purple-300',
     highlight: 'bg-purple-600/30',
-    swatch: 'bg-purple-500',
+    swatch: 'bg-purple-600',
     ring: 'ring-purple-400/70',
   },
   {
@@ -129,6 +146,51 @@ export const TAG_COLORS: TagColor[] = [
     highlight: 'bg-pink-600/30',
     swatch: 'bg-pink-500',
     ring: 'ring-pink-400/70',
+  },
+  {
+    // Tailwind's DEFAULT purple, as literal hexes — the purple-* classes
+    // can't produce it here (theme remap, see header comment).
+    key: 'true-purple',
+    label: 'Purple',
+    chip: 'bg-[#581c87]/40 text-[#d8b4fe] border-[#d8b4fe]/30',
+    text: 'text-[#d8b4fe]',
+    highlight: 'bg-[#9333ea]/30',
+    swatch: 'bg-[#a855f7]',
+    ring: 'ring-[#c084fc]/70',
+  },
+  {
+    // No Tailwind brown family exists — hand-rolled scale, same shape as
+    // the stock entries (dark translucent chip, light text).
+    key: 'brown',
+    label: 'Brown',
+    chip: 'bg-[#4a2c17]/40 text-[#d3b8a3] border-[#d3b8a3]/30',
+    text: 'text-[#d3b8a3]',
+    highlight: 'bg-[#8a5a3b]/30',
+    swatch: 'bg-[#a16b47]',
+    ring: 'ring-[#b98a68]/70',
+  },
+  {
+    // Bordered swatch: a pure-black circle disappears against the dark
+    // picker background.
+    key: 'black',
+    label: 'Black',
+    chip: 'bg-black/60 text-gray-300 border-white/25',
+    text: 'text-gray-300',
+    highlight: 'bg-white/10',
+    swatch: 'bg-gray-950 border border-white/30',
+    ring: 'ring-gray-400/70',
+  },
+  {
+    // Inverted chip (light background, dark text) — the only entry where
+    // the default white check would vanish, hence the check override.
+    key: 'white',
+    label: 'White',
+    chip: 'bg-gray-100/90 text-gray-800 border-gray-500/40',
+    text: 'text-gray-100',
+    highlight: 'bg-white/20',
+    swatch: 'bg-gray-100',
+    ring: 'ring-white/80',
+    check: 'text-gray-800',
   },
 ]
 
@@ -222,6 +284,13 @@ const WAVEFORM_FILL: Record<string, string> = {
   blue: 'fill-blue-400/70',
   purple: 'fill-purple-400/70',
   pink: 'fill-pink-400/70',
+  'true-purple': 'fill-[#c084fc]/70',
+  brown: 'fill-[#b98a68]/70',
+  // Black's literal fill would be invisible on the bg-black/60 waveform
+  // strip — a mid gray keeps the waveform readable while staying "black
+  // flavored". White is fine as-is.
+  black: 'fill-gray-500/70',
+  white: 'fill-white/70',
 }
 
 export function getWaveformFillClass(colorKey: string | undefined): string {
@@ -243,7 +312,7 @@ export function getTagColor(colorKey: string | undefined): TagColor {
 /**
  * Pick the best color for a newly created tag:
  * – randomly selects from colors not yet used by any tag;
- * – if all 12 are used, randomly selects from those with the lowest usage count.
+ * – if all are used, randomly selects from those with the lowest usage count.
  */
 export function pickColorForNewTag(tagColors: Record<string, string>): string {
   const usageCounts: Record<string, number> = {}

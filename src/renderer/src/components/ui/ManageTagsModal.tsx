@@ -59,7 +59,7 @@ function SwatchPicker({
             onMouseDown={e => { e.preventDefault(); onPick(c.key) }}
             className={`w-7 h-7 rounded-full ${c.swatch} transition-transform hover:scale-110 flex items-center justify-center`}
           >
-            {c.key === currentKey && <Check size={12} className="text-white drop-shadow" />}
+            {c.key === currentKey && <Check size={12} className={c.check ?? 'text-white drop-shadow'} />}
           </button>
           </Tooltip>
         ))}

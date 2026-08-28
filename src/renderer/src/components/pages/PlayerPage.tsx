@@ -398,7 +398,7 @@ function TrackColorPicker({
             onMouseDown={e => { e.preventDefault(); onPick(c.key) }}
             className={`w-6 h-6 rounded-full ${c.swatch} transition-transform hover:scale-110 flex items-center justify-center`}
           >
-            {c.key === currentKey && <Check size={11} className="text-white drop-shadow" />}
+            {c.key === currentKey && <Check size={11} className={c.check ?? 'text-white drop-shadow'} />}
           </button>
           </Tooltip>
         ))}

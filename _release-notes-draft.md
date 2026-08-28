@@ -2,4 +2,26 @@
 
 > Running draft, maintained ON `dev`. When a feature lands, append a line to the right section in the same sitting. At promotion time this gets edited into the GitHub-release copy (trim, reword, reorder headline-first; see `archive/_release-notes-v2.md` for the structure, but NO emojis anywhere) and the file is emptied for the next cycle. Wording here is working-quality, not final. Fixes that already shipped in a hotfix release do NOT belong here.
 
-Target: TBD · emptied 2026-08-28 after the v2.4.0 release.
+Target: TBD (the nav-refresh release) · emptied 2026-08-28 after the v2.4.0 release, then seeded from the nav-redesign branch merge the same day.
+
+## Under the hood
+
+- Releases are now built and published through a public CI pipeline (GitHub Actions): every release exe is built in a clean environment directly from the tagged source, with the build log public and a SHA-256 checksum shown on each download. Nothing changes about how the app is downloaded or used; it just makes every release verifiable.
+
+## UI polish
+
+- Four new tag colors: Purple, Brown, Black, and White. The color that was previously labeled Purple is actually the app's neutral cool gray, so it is now honestly labeled Gray, and its picker swatch is a step darker so it can't be confused with the new White. The new Purple is a true purple.
+
+## Navigation redesign
+
+- The nav is reorganized into three groups: creation pages (Streams, Player, Thumbnails), utilities (Converter, Combine, Auto-Rules), and session tools (Launcher, with Stream Relay joining once it gets its own page). Integrations and Settings float to the bottom of the item area. The expanded sidebar is slightly wider.
+- Page-jump shortcuts now follow the nav's visual order: Ctrl+1 through Ctrl+7 map to item positions (Thumbnails is Ctrl+3, Converter Ctrl+4, Combine Ctrl+5, Auto-Rules Ctrl+6, Launcher Ctrl+7). Ctrl+PageUp/PageDown cycle in the same order.
+- The Converter, Launcher, and Auto-Rules widgets no longer sit at the bottom of the sidebar; their info and controls live inside their nav items:
+    a. Converter: aggregate progress, status, and ETA appear under the item while jobs run, sliding open when a job starts and sliding shut when the last one finishes.
+    b. Launcher: an always-visible launch button on the row wears the pinned group's own icon and doubles as feedback (spinner while launching, check on success, warning when apps fail, details in the tooltip with the app list). Ctrl+L still quick-launches.
+    c. Auto-Rules: promoted from a widget to a real nav item, with a Start/Stop control on the row and a "Running" status line (enabled/total rules) while the watcher runs.
+- Context subtitles appear under active items: the open stream's title under Streams, the open video's stream (or its filename when external) under Player, the open canvas's stream under Thumbnails, and transient launch feedback under Launcher. Subtitles animate in and out, and the right-edge activity accent fades with them. Selecting a stream also gives the Streams item the same active styling the other items use.
+- The Integrations item shows per-service status: a dot and icon for each connected service (YouTube, Twitch, Claude AI), green when healthy, amber when broken (expired token, invalid key). Never-connected services show nothing. The collapsed rail aggregates this to a single green dot, or a warning triangle when any service is broken. Replaces the old YouTube-only warning triangle.
+- The startup-page star moved to the left edge of each row (hover to reveal), leaving the row's right side to the action buttons and the activity accent.
+- Collapsed sidebar polish: each item's column (icon, control, status) hovers, highlights, and selects as one unit, and clicking anywhere in the column outside the actual control navigates to the page. Controls line up across items.
+- Collapse/expand animation pass: while collapsing, expanded content clips against the moving edge and the compact controls slide in once the width settles; expanding dismisses the compact controls instantly and reveals the expanded layout with the motion. The Stream Relay widget follows the same choreography.
