@@ -14,9 +14,9 @@ Build: Stream Manager 2.3.1_DEV.exe from dev @ a41f4e7
 - [x] A real Studio-side edit (change tags on one video in YouTube Studio, wait past the 5-minute post-push grace window if that video was just pushed) still surfaces as "Changed on YouTube" on re-check.
 
 ### Twitch match check
-- [ ] A stream just pushed to Twitch reads as in sync (Push button disabled / no mismatch flag), including one whose title contains special characters.
-- [ ] Push a different stream, then re-select the first: it correctly reads as out of sync again (channel state moved on).
-- [ ] Post-stream auto-update (found 2026-08-23, fixed same day — needs the rebuilt exe): after the relay's post-stream Twitch update fires (auto or via the prompt), the target stream reads as in sync in the SAME app session (Push button disabled), and its `_meta.json` gains `twitchLastPushed*` values.
+- [x] A stream just pushed to Twitch reads as in sync (Push button disabled / no mismatch flag), including one whose title contains special characters.
+- [x] Push a different stream, then re-select the first: it correctly reads as out of sync again (channel state moved on).
+- [x] Post-stream auto-update (found 2026-08-23, fixed same day — needs the rebuilt exe): after the relay's post-stream Twitch update fires (auto or via the prompt), the target stream reads as in sync in the SAME app session (Push button disabled), and its `_meta.json` gains `twitchLastPushed*` values.
 
 ### Title edge-sanitize
 - [x] After the streams list loads once, spot-check a `_meta.json` that previously had a leading newline in `ytTitle` (e.g. the Alters stream): the edge whitespace is gone; interior spacing (including non-breaking spaces) is untouched.
