@@ -23,6 +23,7 @@ import { useConversionJobs } from '../../context/ConversionContext'
 import { useOpenItems, blockReasonText, type OpenSource } from '../../context/OpenItemsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
+import { usePageActivity } from '../../context/PageActivityContext'
 import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal, ClampedComment } from '../streams/legacyStreamsShared'
 import { YouTubeImportModal } from '../streams/YouTubeImportModal'
 import { pickColorForNewTag } from '../../constants/tagColors'
@@ -454,6 +455,17 @@ export function StreamsPage({
   // mode every stream shares folderPath (the dump dir), which collapsed
   // selection/edits/archive onto the first row.
   const [selectedStreamKey, setSelectedStreamKey] = useState<string | null>(null)
+  // Nav subtext (nav redesign Pass C): the open stream's rendered title
+  // (or its date when the title renders empty) under the Streams nav
+  // item; cleared when nothing is selected. The setter ignores identical
+  // values, so keying on `folders` (which changes on every meta write)
+  // costs nothing beyond the cheap re-derivation.
+  const { setNavSubtext } = usePageActivity()
+  useEffect(() => {
+    if (!selectedStreamKey) { setNavSubtext('streams', null); return }
+    const f = folders.find(x => x.relativePath === selectedStreamKey)
+    setNavSubtext('streams', f ? (renderStreamTitle(f, folders).trim() || f.date) : null)
+  }, [selectedStreamKey, folders, setNavSubtext])
   // Path-shaped select requests (App's navigateToStream, reschedule + new-
   // stream success) may arrive before the folder exists in state — stash and
   // resolve to the stream key as soon as the row appears. In dump mode a

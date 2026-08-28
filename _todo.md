@@ -85,6 +85,7 @@
 ### Launcher
 
 1. Add the ability for the launcher to track which of the apps in each launch group are still open and allow the user to quit them from the launcher. Need to discuss design. We could also add more options to the launcher group items after this such as 2 boolean options: Close with group (checked by default, unchecked means it won't quit when the user clicks the "Quit Group", for example, an app that the user would like to keep open after streaming), and Allow multiple instances (unchecked by default, checked means the app could be attempted to be launched multiple times when the group or individual launch buttons are clicked. Might need to check if it's possible to know if an app can have multiple instances so there's a smaller chance of conflict. If we can, the checkbox would not appear for those apps).
+2. Add a button in the header of an open launch group to duplicate the group. This would create a new launcher group with the exact same items and icon. The name should also be the same but with " — Copy" appended.
 
 ### YouTube & Twitch sync
 
@@ -123,6 +124,40 @@
 12. Ctrl+Z appears dead while an input is focused on the THUMBNAILS page (spotted during the v2.2.0 sweep, 2026-08-04). NOT a swallowed shortcut: the editor's undo handler correctly bails on typing targets (ThumbnailPage keyboard-shortcuts effect, the `tag === 'INPUT'` guard), so the keystroke reaches Chromium's NATIVE text undo, which is unreliable in React-controlled inputs (state round-trips plus direct DOM writes like NumberInput's onBlur canonicalization wipe or fight the input's undo stack), so it often does nothing visible. DESIGN DECIDED: scope is the thumbnails page only (streams-page fields are fine with native behavior). Property fields directly drive canvas items and every other undo is canvas-tied, so Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z in a focused property field should route to the CANVAS undo stack, i.e. hoist the undo/redo matches ABOVE the typing-target bail in the shortcuts handler. EXCEPTION: the text layer's text editor (the contenteditable chip editor, the `isContentEditable` part of the guard) keeps native granular text undo, since finer undo is needed while writing. Implementation gotchas:
     a. App.tsx's global Ctrl+Shift+Z `editRedo()` handler (~line 562) fires on ANY focused editable; it must stand down for thumbnails property fields or one keystroke triggers native redo AND canvas redo.
     b. Decide what happens to an in-progress hex DRAFT when canvas undo fires underneath it (the draft owns the field's display while focused; probably drop the draft so the undone value shows).
+13. Redesign of the nav sidebar:
+    a. New group separating out pages which have widgets: Converter, Combine, & Launcher will be in this new group. This will be called the Utilities group.
+    b. The group containing the remaining items (Streams, Player, Thumbnails) will be called the Create group.
+    c. The names for these groups won't show, they're just for internal reference.
+    d. These nav items will be converted to implement their widgets inside the nav items themselves instead of those being separate components in the bottom of the nav bar.
+    e. The Stream Relay and cloud sync status will stay as-is. These will one day have their own pages, but there's not much content for them right now.
+    f. The Auto-Rules widget will be converted into an actual nav item + widget and placed into the same group as Converter, Combine, & Launcher.
+    g. The integrations & settings group should float to the bottom of the nav space so it's sitting above the remaining widget (Stream Relay/cloud sync).
+    h. The new layout of the nav should be:
+        * Streams
+        * Player
+        * Thumbnails
+        * --Separator--
+        * Converter
+        * Combine
+        * Launcher
+        * Auto-Rules
+        * [SPACE]
+        * Integrations
+        * Settings
+        * --Separator-- (this one might not be needed)
+        * Stream Relay
+        * Help/version row
+    i. Each nav item that has an "active" state will have an additional indication: small text under the title (stacked with the title next to the icon) which will describe the current state or context of that item.
+       1. Streams: If a stream is currently active, the small text will display the stream's title or date if it has no title.
+       2. Player: The title/date of the open item's stream item, filename if the open item is externally loaded.
+       3. Thumbnails: The title/date of the open item's stream item
+    j. The "Utility" group will be hybrid nav button/widget components. When nothing is happening, they will appear as standard nav buttons. When an action is in progress, they will expand to show the information the widgets previously displayed. These new utility nav items will not adopt the background of the widgets, but everything else will basically be the same as the original widgets.
+    k. If it won't impact anything important, we should also bump up the width of the expanded sidebar to 200px or whatever the next default size is.
+    l. When the sidebar is collapsed, the utility nav items will show the same collapsed versions of the widget info.
+    m. The integrations nav item will also get a custom additional indicator showing the status of any connected integrations. These will be small colored dots+icon combinations.
+    n. Polish round: the Stream Relay widget needs an expand/collapse transition cleanup pass.
+    o. Polish round: the Converter & Combine items need a slide-in animation for when their live info blocks become visible (a job starts or finishes), matching the slide-in built for the Auto-Rules/Launcher collapsed extras.
+
 
 ## Bugs
 

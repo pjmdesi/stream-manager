@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
+import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, Bot, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
+import { Youtube as BrandYoutube, Twitch as BrandTwitch } from './components/ui/BrandIcons'
+import { SlideOpen, SlideBlock } from './components/ui/Slide'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
@@ -95,8 +97,21 @@ function formatEta(ms: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
-function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; collapsed: boolean }) {
+/** Live-conversion info block for the hybrid Converter nav item (nav
+ *  redesign Pass B). Slides shut while the converter is quiet (SlideBlock
+ *  animates the info's appearance when a job starts and its disappearance
+ *  when the last one finishes); while jobs are active it expands the nav
+ *  item with the info the old bottom-stack ConversionWidget showed — same
+ *  states (running / paused / error / all-downloading) and the same
+ *  aggregate progress + ETA math.
+ *  Deliberately no background, border, or click handling of its own: it
+ *  renders INSIDE the nav item's button (plain content only — nested
+ *  buttons are invalid HTML), so the item is one interactive surface.
+ *  Unlike the old widget it stays visible while the converter page is
+ *  open — hiding on selection would bounce the nav. */
+function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
   const { jobs, jobEtas } = useConversionJobs()
+  const anim = useAnimationConfig()
 
   // Include 'downloading' (cloud-hydrate wait) and 'replacing' (atomic swap)
   // as active states so the widget keeps surfacing while files are still
@@ -108,7 +123,9 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
     j.status === 'running' || j.status === 'paused' || j.status === 'error' ||
     j.status === 'downloading' || j.status === 'replacing'
   )
-  if (active.length === 0) return null
+  // No early null — the SlideBlock below animates the appearance and
+  // disappearance of the info, so it must stay mounted while quiet.
+  const hasContent = active.length > 0
 
   const hasError = active.some(j => j.status === 'error')
   const allPaused = !hasError && active.every(j => j.status === 'paused')
@@ -153,132 +170,238 @@ function ConversionWidget({ onNavigate, collapsed }: { onNavigate: () => void; c
     allDownloading ? 'text-blue-400' :
     'text-purple-400'
 
-  if (collapsed) {
-    return (
-      <Tooltip content={`Converting · ${label}${allDownloading ? '' : ` · ${totalProgress.toFixed(0)}%`}${etaText ? ` · ${etaText}` : ''}`} side="right" triggerClassName="block w-full">
-        <button
-          onClick={onNavigate}
-          // Two-container layout: primary Zap icon left-aligned at
-          // x=16 (matches nav icon column above), secondary indicators
-          // (percent, status spinner) centered below. Same convention
-          // as the AutoRulesWidget — primary icons follow the nav's
-          // left column, decorative status content stays centered.
-          className="w-full py-2.5 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors"
-        >
-          <div className="flex items-center px-4 mb-0.5">
-            <Zap size={14} className={statusColor} />
-          </div>
-          <div className="flex flex-col items-center gap-0.5">
-            {allDownloading
-              ? <Cloud size={12} className="text-blue-400" />
-              : <span className={`text-[10px] tabular-nums ${statusColor}`}>{totalProgress.toFixed(0)}%</span>
-            }
-            {hasError
-              ? <AlertCircle size={10} className="text-red-400" />
-              : allPaused
-                ? <Pause size={10} className="text-yellow-400" />
-                : <RefreshCw size={10} className={`${statusColor} animate-spin`} />
-            }
-          </div>
-        </button>
-      </Tooltip>
-    )
-  }
-
-  return (
-    <button
-      onClick={onNavigate}
-      className="w-full p-3 bg-navy-900 border-y border-white/5 hover:border-white/10 hover:bg-white/5 transition-colors text-left whitespace-nowrap"
-    >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Converting</span>
-        <span className={`text-[10px] font-medium ${statusColor}`}>{label}</span>
+  // Icon-mode: the nav item's own Zap is the primary icon directly
+  // above, so the extra only shows the secondary indicators (percent /
+  // cloud, status icon), centered under it.
+  const body = !hasContent ? null : collapsed ? (
+      <div className="w-full pt-0.5 pb-2 flex flex-col items-center gap-0.5">
+        {allDownloading
+          ? <Cloud size={12} className="text-blue-400" />
+          : <span className={`text-[10px] tabular-nums ${statusColor}`}>{totalProgress.toFixed(0)}%</span>
+        }
+        {hasError
+          ? <AlertCircle size={10} className="text-red-400" />
+          : allPaused
+            ? <Pause size={10} className="text-yellow-400" />
+            : <RefreshCw size={10} className={`${statusColor} animate-spin`} />
+        }
       </div>
+  ) : (
+    // Expanded: the nav item's label is the title, so no "Converting"
+    // header — just the aggregate bar and one status line.
+    <div className="w-full px-3.5 pt-0.5 pb-2 text-left whitespace-nowrap">
       <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all ${barColor}`}
           style={{ width: `${totalProgress}%` }}
         />
       </div>
-      <div className="mt-1.5 text-[10px] text-gray-400 tabular-nums flex items-center justify-between gap-2">
-        <span>
-          {allDownloading ? `${active.length} downloading` : `${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
+      <div className="mt-1 text-[10px] tabular-nums flex items-center justify-between gap-2">
+        <span className="min-w-0 overflow-hidden">
+          <span className={`font-medium ${statusColor}`}>{label}</span>
+          <span className="text-gray-400">
+            {allDownloading
+              ? ` · ${active.length} downloading`
+              : ` · ${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
+          </span>
         </span>
-        {etaText && <Tooltip content={etaTitle}><span>{etaText}</span></Tooltip>}
+        {etaText && <Tooltip content={etaTitle}><span className="text-gray-400 shrink-0">{etaText}</span></Tooltip>}
       </div>
-    </button>
-  )
-}
-
-function AutoRulesWidget({ active, onNavigate, collapsed }: { active: boolean; onNavigate: () => void; collapsed: boolean }) {
-  const { rules, running, startWatcher, stopWatcher } = useWatcher()
-  const enabledCount = rules.filter(r => r.enabled).length
-
-  // Main button row uses the exact nav-item pattern — same flex layout
-  // in both modes, icon at x=16 from the left, label always rendered
-  // and cropped by the parent nav's overflow-hidden as the sidebar
-  // shrinks. The Tooltip's content swaps based on `collapsed` so it
-  // doesn't fire in expanded mode where the label is already visible.
-  const mainButton = (
-    <button
-      onClick={onNavigate}
-      className={`relative flex items-center gap-3 w-full px-4 h-10 text-sm font-medium transition-colors ${active ? 'text-purple-300' : 'text-gray-400 hover:text-gray-200'}`}
-    >
-      <span className="shrink-0 inline-flex"><Shuffle size={18} /></span>
-      <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">Auto-Rules</span>
-    </button>
-  )
-  const mainButtonWrapped = collapsed
-    ? <Tooltip content="Auto-Rules" side="right" triggerClassName="block w-full">{mainButton}</Tooltip>
-    : mainButton
-
-  return (
-    <div className={`border-y transition-colors whitespace-nowrap ${active ? 'bg-purple-600/20 border-purple-600/30' : 'bg-navy-900 border-white/5'}`}>
-      {mainButtonWrapped}
-      {rules.length > 0 && (
-        <>
-          {/* Start/Stop button: centered in collapsed mode (the button
-              is a control, not a "column" element — visually the
-              square reads better in the middle of the 48px sidebar
-              than left-aligned with the button's left edge butting
-              against the sidebar edge). Full-width with text label
-              when expanded. */}
-          <div className={collapsed ? 'flex justify-center pb-1' : 'px-3 pb-1'}>
-            {running ? (
-              <Button variant="danger" size="sm" icon={<Square size={12} />} className={collapsed ? 'justify-center' : 'w-full whitespace-nowrap'} onClick={stopWatcher}>
-                {collapsed ? null : 'Stop Watcher'}
-              </Button>
-            ) : (
-              <Button variant="success" size="sm" icon={<Play size={12} />} className={collapsed ? 'justify-center' : 'w-full whitespace-nowrap'} onClick={startWatcher} disabled={enabledCount === 0}>
-                {collapsed ? null : 'Start Watcher'}
-              </Button>
-            )}
-          </div>
-          {/* Status row: centered with separate dot/bullet/count
-              elements when collapsed (small content reads better
-              centered in the 48px rail and the count stays visible);
-              left-aligned with prose "Running · N rules active" when
-              expanded. */}
-          {collapsed ? (
-            <div className="flex items-center justify-center gap-1 pb-2">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-              <span className="text-[10px] text-gray-400">•</span>
-              <span className="text-[10px] text-gray-400">{enabledCount}</span>
-            </div>
-          ) : (
-            <div className="px-4 py-2 flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-              <span className="text-[10px] text-gray-400">
-                {running ? 'Running' : 'Stopped'} · {enabledCount} rule{enabledCount !== 1 ? 's' : ''} active
-              </span>
-            </div>
-          )}
-        </>
-      )}
     </div>
   )
+  return (
+    <SlideBlock show={hasContent} durationMs={anim.duration(200)}>
+      {body}
+    </SlideBlock>
+  )
 }
 
+/** Watcher status for the hybrid Auto-Rules nav item (nav redesign Pass
+ *  B) — passive info, so it renders INSIDE the nav button (plain content
+ *  only). Shows only while the watcher is RUNNING: that's the "work in
+ *  progress" state that earns the item its expansion; stopped is the
+ *  quiet state (the start control stays reachable via the row action). */
+/** Compact watcher status as the Auto-Rules item's second line — the
+ *  subtitle layout the other nav items use: "[dot] Running • enabled/total",
+ *  only while the watcher runs. */
+function AutoRulesSubline() {
+  const { rules, running } = useWatcher()
+  const anim = useAnimationConfig()
+  const enabledCount = rules.filter(r => r.enabled).length
+  // No self-null: NavSublineReveal animates the line in and out the same
+  // way the text subtitles animate (start/stop of the watcher was the one
+  // subtitle that still popped).
+  return (
+    <NavSublineReveal show={running} durationMs={anim.duration(200)}>
+      <span className="flex items-center gap-1.5 leading-tight text-[10px] font-normal text-gray-400">
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
+        <span className="truncate">Running • {enabledCount}/{rules.length}</span>
+      </span>
+    </NavSublineReveal>
+  )
+}
+
+/** Dot+icon status row for the Integrations nav item (nav redesign Pass C
+ *  sub-item m), rendered as the item's second line. One pair per SET-UP
+ *  service (green dot healthy, amber dot broken); services the user never
+ *  connected show nothing at all — resting quiet beats a gray dot. */
+function IntegrationsSubline({ status }: { status: Record<'youtube' | 'twitch' | 'claude', { setUp: boolean; healthy: boolean }> }) {
+  const services: Array<{ key: 'youtube' | 'twitch' | 'claude'; icon: React.ReactNode }> = [
+    { key: 'youtube', icon: <BrandYoutube size={11} /> },
+    { key: 'twitch', icon: <BrandTwitch size={11} /> },
+    { key: 'claude', icon: <Bot size={11} /> },
+  ]
+  const shown = services.filter(s => status[s.key].setUp)
+  if (shown.length === 0) return null
+  return (
+    <span className="flex items-center gap-2 leading-tight">
+      {shown.map(s => (
+        <span key={s.key} className="flex items-center gap-1">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status[s.key].healthy ? 'bg-green-400' : 'bg-amber-400'}`} />
+          <span className="text-gray-400 inline-flex">{s.icon}</span>
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** Start/Stop control for the Auto-Rules nav item — an ACTION, so it gets
+ *  its own surface via NavItem.rowAction (same placement rules as the
+ *  Launcher's quick-launch). Self-nulls when no rules exist yet. */
+function AutoRulesNavAction({ collapsed, active, onNavigate }: { collapsed: boolean; active?: boolean; onNavigate?: () => void }) {
+  const { rules, running, startWatcher, stopWatcher } = useWatcher()
+  const enabledCount = rules.filter(r => r.enabled).length
+  if (rules.length === 0) return null
+  // stopPropagation: the collapsed container navigates on click, and the
+  // control must not double as a navigation.
+  const button = running ? (
+    <Button
+      variant="danger"
+      size="sm"
+      icon={<Square size={collapsed ? 12 : 14} />}
+      className="justify-center"
+      onClick={e => { e.stopPropagation(); stopWatcher() }}
+      aria-label="Stop watcher"
+    />
+  ) : (
+    <Button
+      variant="success"
+      size="sm"
+      icon={<Play size={collapsed ? 12 : 14} />}
+      className="justify-center"
+      onClick={e => { e.stopPropagation(); startWatcher() }}
+      disabled={enabledCount === 0}
+      aria-label="Start watcher"
+    />
+  )
+  const tooltip = running
+    ? 'Stop the file watcher'
+    : enabledCount === 0
+      ? 'No enabled rules — enable one on the Auto-Rules page first'
+      : `Start the file watcher · ${enabledCount} rule${enabledCount !== 1 ? 's' : ''} enabled`
+  if (collapsed) {
+    // Control first (directly under the nav icon), status below — and the
+    // status uses the same enabled/total format as the expanded subtitle.
+    // The block lives inside the item's group/nav wrapper, so the whole
+    // column washes as ONE hover surface; when the page is OPEN it
+    // continues the selected purple + side borders down the column
+    // (transparent borders otherwise, so selection never shifts layout).
+    return (
+      <div
+        onClick={onNavigate}
+        className={`flex flex-col items-center gap-1 pb-2 pt-0.5 border border-t-0 cursor-pointer transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}
+      >
+        <Tooltip content={tooltip} side="right">{button}</Tooltip>
+        {running && (
+          <div className="flex items-center justify-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400 animate-pulse" />
+            <span className="text-[10px] text-gray-400 tabular-nums">{enabledCount}/{rules.length}</span>
+          </div>
+        )}
+      </div>
+    )
+  }
+  return <Tooltip content={tooltip} side="right">{button}</Tooltip>
+}
+
+/** Animated appearance for a nav item's subtitle line (nav redesign): the
+ *  line's height eases open — which floats the title up to its two-line
+ *  position, since the row's flex centering tracks the growing stack —
+ *  while the text fades in and rises into place. Disappearing plays the
+ *  reverse, holding the last text through the exit before unmounting.
+ *  A text CHANGE while visible swaps in place with no animation. */
+function NavSubtextReveal({ text, durationMs }: { text: string | null | undefined; durationMs: number }) {
+  const [shown, setShown] = useState(!!text)
+  // Last non-null text — kept through the exit animation so the line has
+  // something to fade out.
+  const [held, setHeld] = useState<string | null>(text ?? null)
+  useEffect(() => {
+    if (text) {
+      setHeld(text)
+      // Double rAF: let the closed state paint first so a fresh
+      // appearance eases open instead of popping.
+      let raf2 = 0
+      const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setShown(true)) })
+      return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+    }
+    setShown(false)
+    const t = setTimeout(() => setHeld(null), durationMs)
+    return () => clearTimeout(t)
+  }, [text, durationMs])
+  if (!held) return null
+  return (
+    <span
+      className="grid transition-[grid-template-rows] ease-out"
+      style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
+    >
+      <span
+        className={`block truncate leading-tight text-[10px] font-normal text-gray-400 min-h-0 overflow-hidden transition-[opacity,transform] ease-out ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+        style={{ transitionDuration: `${durationMs}ms` }}
+      >
+        {held}
+      </span>
+    </span>
+  )
+}
+
+/** NavSubtextReveal's component-shaped sibling: the same height + fade +
+ *  rise animation, for subline content that isn't plain text (the
+ *  Auto-Rules status line). Children stay rendered through the exit;
+ *  mounting in the steady-shown state renders open without an entrance
+ *  slide. */
+function NavSublineReveal({ show, durationMs, children }: { show: boolean; durationMs: number; children: React.ReactNode }) {
+  const [shown, setShown] = useState(show)
+  const [mounted, setMounted] = useState(show)
+  useEffect(() => {
+    if (show) {
+      setMounted(true)
+      let raf2 = 0
+      const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setShown(true)) })
+      return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+    }
+    setShown(false)
+    const t = setTimeout(() => setMounted(false), durationMs)
+    return () => clearTimeout(t)
+  }, [show, durationMs])
+  if (!mounted) return null
+  return (
+    <span
+      className="grid transition-[grid-template-rows] ease-out"
+      style={{ gridTemplateRows: shown ? '1fr' : '0fr', transitionDuration: `${durationMs}ms` }}
+    >
+      <span
+        className={`block min-h-0 overflow-hidden transition-[opacity,transform] ease-out ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+        style={{ transitionDuration: `${durationMs}ms` }}
+      >
+        {children}
+      </span>
+    </span>
+  )
+}
+
+/** Resolve a launch group's chosen icon name (kebab-case, as the launcher
+ *  page stores it) to its Lucide component; falls back to Rocket when the
+ *  group has no icon set or the name doesn't resolve. */
 function GroupIcon({ name, size = 16 }: { name?: string; size?: number }) {
   const pascal = (n: string) => n.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
   const Icon = name
@@ -287,22 +410,44 @@ function GroupIcon({ name, size = 16 }: { name?: string; size?: number }) {
   return <Icon size={size} />
 }
 
-function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; collapsed: boolean }) {
+/** Quick-launch control for the Launcher nav item (nav redesign Pass B).
+ *  Launching is an ACTION, not passive status, so — unlike the converter's
+ *  info block — it gets its own interactive surface instead of living
+ *  inside the nav button:
+ *    expanded  → hover-revealed icon button on the row's right (the
+ *                startup-star pattern; sits left of the star's slot)
+ *    collapsed → compact centered launch row below the item, mirroring
+ *                the old widget's collapsed shape
+ *  Self-nulls when no launch group is pinned to the widget slot. The icon
+ *  doubles as transient feedback: spinner while launching, check on
+ *  success, amber alert when some apps failed (details in the tooltip). */
+function LauncherNavAction({ collapsed, active, onNavigate }: { collapsed: boolean; active?: boolean; onNavigate?: () => void }) {
   const { config } = useStore()
   const [groups, setGroups] = useState<LauncherGroup[]>([])
   const [launching, setLaunching] = useState(false)
-  const [feedback, setFeedback] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null)
 
   useEffect(() => {
     const refetch = () => { window.api.getLauncherGroups().then(setGroups).catch(() => {}) }
     refetch()
-    // LauncherPage dispatches this on every save so the widget reflects
+    // LauncherPage dispatches this on every save so the control reflects
     // renames / app-list edits live instead of serving a stale snapshot.
     window.addEventListener('sm:launcher-groups-changed', refetch)
     return () => window.removeEventListener('sm:launcher-groups-changed', refetch)
   }, [config.launcherWidgetGroupId])
 
   const group = groups.find(g => g.id === config.launcherWidgetGroupId) ?? null
+  // Transient launch feedback as the Launcher item's subtext — ONLY for
+  // the feedback window (2-4s), then cleared. The pinned group's NAME is
+  // deliberately not published: subtext pairs with the activity paradigm
+  // ("something is open / just happened"), and static configuration
+  // isn't that — the group's identity already shows via the launch
+  // button's icon and its tooltip (name + app list).
+  const { setNavSubtext } = usePageActivity()
+  const feedbackText = feedback?.text ?? null
+  useEffect(() => {
+    setNavSubtext('launcher', feedbackText)
+  }, [feedbackText, setNavSubtext])
   if (!group) return null
 
   const launch = async () => {
@@ -310,84 +455,155 @@ function LauncherWidget({ onNavigate, collapsed }: { onNavigate: () => void; col
     setLaunching(true)
     try {
       const result = await window.api.launchGroup(group.id)
-      setFeedback(result.failed.length > 0
-        ? `${result.launched} of ${result.launched + result.failed.length} launched`
-        : `Launched ${result.launched}`)
-      setTimeout(() => setFeedback(null), result.failed.length > 0 ? 4000 : 2000)
+      const ok = result.failed.length === 0
+      setFeedback({
+        text: ok
+          ? `Launched ${result.launched}`
+          : `${result.launched} of ${result.launched + result.failed.length} launched`,
+        ok,
+      })
+      setTimeout(() => setFeedback(null), ok ? 2000 : 4000)
     } finally {
       setLaunching(false)
     }
   }
 
   const appCount = group.apps.length
-  const appListContent = (
+  const tooltipContent = (
     <div className="flex flex-col gap-0.5">
-      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">{group.name}</p>
+      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
+        {feedback ? feedback.text : `Launch ${group.name}`}
+      </p>
       {group.apps.map(a => (
         <p key={a.id} className="text-xs text-gray-200">{a.name}</p>
       ))}
     </div>
   )
+  // Resting icon is the GROUP's chosen icon (Rocket only as its fallback),
+  // not a repeat of the nav item's Rocket right next to it — it identifies
+  // WHAT gets launched. Transient states still override.
+  const statusIcon = (size: number) =>
+    launching ? <Loader2 size={size} className="animate-spin" />
+      : feedback ? (feedback.ok ? <CheckCircle size={size} className="text-green-400" /> : <AlertCircle size={size} className="text-amber-400" />)
+        : <GroupIcon name={group.icon} size={size} />
 
-  // Main row uses the nav-item pattern — identical flex layout in both
-  // modes, icon at x=16 from the left, label always rendered + cropped
-  // by the nav's outer overflow-hidden as the sidebar shrinks. The header
-  // always navigates to the Launcher page (both modes); the launch action
-  // lives on the dedicated button below in both modes — matching the
-  // Auto-Rules widget's "header navigates, control acts" convention.
-  const mainButton = (
-    <button
-      onClick={onNavigate}
-      className="flex items-center gap-3 w-full px-4 h-10 text-sm font-medium text-gray-400 hover:text-gray-200 transition-colors"
-    >
-      <span className="shrink-0 inline-flex"><GroupIcon name={group.icon} size={16} /></span>
-      <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">{group.name}</span>
-    </button>
-  )
-  const mainButtonWrapped = collapsed
-    ? <Tooltip content={appListContent} side="right" triggerClassName="block w-full">{mainButton}</Tooltip>
-    : mainButton
-
-  return (
-    <div className="bg-navy-900 border-y border-white/5 hover:border-white/10 transition-colors whitespace-nowrap">
-      {mainButtonWrapped}
-      {/* Launch button — shown in both modes so collapsing the sidebar
-          doesn't hide quick-launch. Collapsed: icon-only, centered (mirrors
-          the Auto-Rules Start/Stop control); expanded: full-width + label. */}
-      <div className={collapsed ? 'flex justify-center pb-2' : 'px-3 pb-2'}>
-        <Tooltip content={appListContent} side="right" triggerClassName={collapsed ? '' : 'block w-full'} shortcut="Ctrl+L">
+  // `border border-transparent` on both buttons: the primary variant has
+  // no border while the Auto-Rules control uses bordered variants
+  // (success/danger) — without the compensation the two boxes differ by
+  // 2px and the column doesn't line up.
+  if (collapsed) {
+    // The block lives inside the item's group/nav wrapper, so the whole
+    // column washes as ONE hover surface; when the page is OPEN it
+    // continues the selected purple + side borders down the column
+    // (transparent borders otherwise, so selection never shifts layout).
+    return (
+      <div
+        onClick={onNavigate}
+        className={`flex justify-center pb-2 pt-0.5 border border-t-0 cursor-pointer transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}
+      >
+        <Tooltip content={tooltipContent} side="right" shortcut="Ctrl+L">
           <Button
             variant="primary"
             size="sm"
-            icon={<Rocket size={12} />}
-            className={collapsed ? 'justify-center' : 'w-full whitespace-nowrap'}
+            icon={statusIcon(12)}
+            className="justify-center border border-transparent"
             disabled={launching || appCount === 0}
-            onClick={launch}
-          >
-            {collapsed ? null : (feedback ?? `Launch ${appCount} app${appCount === 1 ? '' : 's'}`)}
-          </Button>
+            onClick={e => { e.stopPropagation(); launch() }}
+          />
         </Tooltip>
       </div>
-    </div>
+    )
+  }
+
+  // Expanded: proper Button treatment (same primary icon-button as the
+  // collapsed row), always visible — a launch affordance shouldn't need
+  // discovering via hover.
+  return (
+    <Tooltip content={tooltipContent} side="right" shortcut="Ctrl+L">
+      <Button
+        variant="primary"
+        size="sm"
+        icon={statusIcon(14)}
+        className="justify-center border border-transparent"
+        disabled={launching || appCount === 0}
+        onClick={launch}
+        aria-label={`Launch ${group.name}`}
+      />
+    </Tooltip>
   )
 }
 
-const NAV_ITEMS: { id: Page; label: string; icon: React.ReactNode }[] = [
-  { id: 'streams',      label: 'Streams',      icon: <Radio size={18} /> },
-  { id: 'player',       label: 'Player',       icon: <Film size={18} /> },
-  { id: 'converter',    label: 'Converter',    icon: <Zap size={18} /> },
-  { id: 'combine',      label: 'Combine',      icon: <Combine size={18} /> },
-  { id: 'thumbnails',   label: 'Thumbnails',   icon: <ImageIcon size={18} /> },
-  { id: 'launcher',     label: 'Launcher',     icon: <Rocket size={18} /> },
+type NavItem = {
+  id: Page
+  label: string
+  icon: React.ReactNode
+  /** Hybrid nav/widget items (nav redesign Pass B): a component rendered
+   *  INSIDE the nav item's button, below the icon+label line. It
+   *  self-nulls while its tool is quiet and expands the item with live
+   *  info while work is in progress — the widget behavior, absorbed into
+   *  the item as one interactive surface (one hover, one click, one
+   *  focus target). Must render plain content only, never its own
+   *  button: it lives inside the nav button. */
+  extra?: React.ComponentType<{ collapsed: boolean }>
+  /** ACTION control for the item — the counterpart to `extra` for hybrid
+   *  items whose widget behavior is a control rather than status (rule:
+   *  passive status lives inside the nav button, actions get their own
+   *  surface). Expanded: rendered as a hover-revealed overlay at the
+   *  row's right, left of the startup star. Collapsed: rendered as its
+   *  own compact row below the item, receiving `active` so it can
+   *  continue the selected-page styling down the column. May render real
+   *  buttons — it is never nested inside the nav button. Collapsed
+   *  blocks treat any click OUTSIDE their real button as navigation
+   *  (`onNavigate`) so the whole item column stays one navigable
+   *  surface. */
+  rowAction?: React.ComponentType<{ collapsed: boolean; active?: boolean; onNavigate?: () => void }>
+}
+
+// Nav groups (nav redesign). Group names are internal reference only —
+// nothing renders them.
+//   Create    — the content-producing pages.
+//   Utilities — post-stream processing tools with live activity; hybrid
+//               nav/widget items (Pass B), and Auto-Rules joins the group
+//               when its widget converts to one.
+//   Session   — live-session helpers: pre-stream prep now (Launcher),
+//               and Stream Relay whenever it gets its own page. Split
+//               from Utilities because these are action-oriented, not
+//               passive processing status.
+//   System    — settings pages, pinned to the bottom of the nav's
+//               flexible zone by the spacer in the render (they're also
+//               excluded from the startup-page selector).
+const NAV_GROUP_CREATE: NavItem[] = [
+  { id: 'streams',    label: 'Streams',    icon: <Radio size={18} /> },
+  { id: 'player',     label: 'Player',     icon: <Film size={18} /> },
+  { id: 'thumbnails', label: 'Thumbnails', icon: <ImageIcon size={18} /> },
+]
+const NAV_GROUP_UTILITIES: NavItem[] = [
+  { id: 'converter', label: 'Converter',  icon: <Zap size={18} />, extra: ConverterNavExtra },
+  { id: 'combine',   label: 'Combine',    icon: <Combine size={18} /> },
+  // Auto-Rules collapsed status lives inside its rowAction (control on
+  // top, dot + enabled/total below); expanded status is the subline.
+  { id: 'rules',     label: 'Auto-Rules', icon: <Shuffle size={18} />, rowAction: AutoRulesNavAction },
+]
+const NAV_GROUP_SESSION: NavItem[] = [
+  { id: 'launcher', label: 'Launcher', icon: <Rocket size={18} />, rowAction: LauncherNavAction },
+]
+const NAV_GROUP_SYSTEM: NavItem[] = [
   { id: 'integrations', label: 'Integrations', icon: <Plug size={18} /> },
   { id: 'settings',     label: 'Settings',     icon: <Settings size={18} /> },
 ]
+/** Flat list in rendered order — feeds startup-page validation and any
+ *  other "is this a nav page" check. */
+const NAV_ITEMS: NavItem[] = [...NAV_GROUP_CREATE, ...NAV_GROUP_UTILITIES, ...NAV_GROUP_SESSION, ...NAV_GROUP_SYSTEM]
 
 // Page-jump shortcut labels for the collapsed-nav tooltips (mirror the global
-// handler's Ctrl+1…6 / Ctrl+,).
+// handler's Ctrl+1…6 / Ctrl+,). The number corresponds to the item's VISUAL
+// position in the nav, not the page's identity — reordering the nav
+// renumbers the shortcuts. PAGE_NAV (the handler's array) must stay in sync
+// with this order.
 const NAV_SHORTCUTS: Partial<Record<Page, string>> = {
-  streams: 'Ctrl+1', player: 'Ctrl+2', converter: 'Ctrl+3',
-  combine: 'Ctrl+4', thumbnails: 'Ctrl+5', launcher: 'Ctrl+6', settings: 'Ctrl+,',
+  streams: 'Ctrl+1', player: 'Ctrl+2', thumbnails: 'Ctrl+3',
+  converter: 'Ctrl+4', combine: 'Ctrl+5', rules: 'Ctrl+6',
+  launcher: 'Ctrl+7', settings: 'Ctrl+,',
 }
 
 function AppInner() {
@@ -464,7 +680,15 @@ function AppInner() {
   }, [])
   const [helpOpen, setHelpOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const [integrationAlert, setIntegrationAlert] = useState(false)
+  // Per-service integration state for the Integrations nav indicator (nav
+  // redesign Pass C sub-item m). setUp = the user connected it; healthy =
+  // it currently works (token valid / key accepted). Not-set-up services
+  // show nothing at all — resting quiet beats a gray dot.
+  const [integrationStatus, setIntegrationStatus] = useState<Record<'youtube' | 'twitch' | 'claude', { setUp: boolean; healthy: boolean }>>({
+    youtube: { setUp: false, healthy: true },
+    twitch: { setUp: false, healthy: true },
+    claude: { setUp: false, healthy: true },
+  })
   // Persist collapse state across app restarts. localStorage is the right
   // store for UI-only prefs (matches the streams page's viewMode pattern).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
@@ -481,7 +705,7 @@ function AppInner() {
   // from the existing job context; player + thumbnails publish into
   // PageActivityContext since their working state is local to those
   // pages.
-  const { playerHasVideo, thumbnailHasCanvas, combineHasFiles } = usePageActivity()
+  const { playerHasVideo, thumbnailHasCanvas, combineHasFiles, navSubtext } = usePageActivity()
   const { jobs: conversionJobs } = useConversionJobs()
   const converterHasJobs = conversionJobs.some(j => j.status !== 'cancelled' && j.status !== 'done')
   // Honor the user's disable / slow-animation prefs for the nav-rail
@@ -489,41 +713,129 @@ function AppInner() {
   // when the rest of the app was respecting the 5x slow-down.
   const anim = useAnimationConfig()
   const navTransitionDurationMs = anim.duration(200)
+  // Collapse/expand choreography for the rail's per-item widgets (nav
+  // redesign): on COLLAPSE the expanded variants stay mounted and clip
+  // against the moving edge, and the collapsed variants (which exist at
+  // zero height throughout the width transition) slide open
+  // jQuery-slideDown style once the width lands. On EXPAND the collapsed
+  // variants disappear IMMEDIATELY (no exit animation — a slide-up here
+  // read as the content wandering while the rail widened) and the
+  // expanded ones are re-revealed by the moving edge.
+  //   railCollapsed — "steady collapsed state reached" (lags the toggle
+  //                    on collapse, resets instantly on expand)
+  const [railCollapsed, setRailCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
+  useEffect(() => {
+    if (!sidebarCollapsed) { setRailCollapsed(false); return }
+    const t = setTimeout(() => setRailCollapsed(true), navTransitionDurationMs)
+    return () => clearTimeout(t)
+  }, [sidebarCollapsed, navTransitionDurationMs])
+  // The width class lags the toggle by two frames on EXPAND: the
+  // collapsed variants unmount in the toggle's commit, and starting the
+  // width transition in that same frame made it hitch (transition start
+  // competing with the unmount reflow/paint). Two rAFs let the settled
+  // narrow layout paint first; then the widening runs smooth. Collapse
+  // keeps the width change immediate.
+  const [widthCollapsed, setWidthCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
+  useEffect(() => {
+    if (sidebarCollapsed) { setWidthCollapsed(true); return }
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setWidthCollapsed(false)) })
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+  }, [sidebarCollapsed])
   const pageActivity: Partial<Record<Page, boolean>> = {
+    // Streams derives from its subtext: both mean "a stream is open in
+    // the detail sidebar" (the subtext falls back to the date, so it's
+    // never empty while one is selected), and deriving keeps the accent
+    // and the subtitle from ever disagreeing.
+    streams: !!navSubtext['streams'],
     player: playerHasVideo,
     converter: converterHasJobs,
     thumbnails: thumbnailHasCanvas,
     combine: combineHasFiles,
   }
+  // Component-shaped second lines for items whose context isn't plain
+  // text (text sublines ride navSubtext instead). Rendered inside the
+  // label stack; each self-nulls when there's nothing to show.
+  const navSublines: Partial<Record<Page, React.ReactNode>> = {
+    rules: <AutoRulesSubline />,
+    integrations: <IntegrationsSubline status={integrationStatus} />,
+  }
+  // Collapsed-rail aggregate for the Integrations indicator: one green
+  // dot while every SET-UP service is healthy, a warning triangle when
+  // any is broken, nothing when none are connected.
+  const integrationsSetUp = Object.values(integrationStatus).some(s => s.setUp)
+  const integrationsUnhealthy = Object.values(integrationStatus).some(s => s.setUp && !s.healthy)
   // Tracks whether we've already routed to the user's chosen startup
   // page after first config load. A ref instead of state so toggling
   // it doesn't re-render; we only need it to fire once.
   const startupPageAppliedRef = useRef(false)
 
-  const checkIntegrationAlert = () => {
-    window.api.youtubeValidateToken?.().then(r => {
-      setIntegrationAlert(!r.valid)
+  // YouTube + Twitch legs of the integration indicator. On transport
+  // failure each leg keeps its previous state rather than flipping to
+  // "broken" — a dropped connection isn't a broken integration.
+  const checkIntegrationStatus = () => {
+    window.api.youtubeGetStatus?.().then(async (s: { connected: boolean }) => {
+      if (!s.connected) {
+        setIntegrationStatus(prev => ({ ...prev, youtube: { setUp: false, healthy: true } }))
+        return
+      }
+      const v = await window.api.youtubeValidateToken().catch(() => null)
+      setIntegrationStatus(prev => ({
+        ...prev,
+        youtube: { setUp: true, healthy: v ? !!v.valid : prev.youtube.healthy },
+      }))
+    }).catch(() => {})
+    window.api.twitchGetStatus?.().then((s: { connected: boolean }) => {
+      setIntegrationStatus(prev => ({ ...prev, twitch: { setUp: s.connected, healthy: true } }))
     }).catch(() => {})
   }
 
   useEffect(() => {
-    checkIntegrationAlert()
-  }, [])
-
-  useEffect(() => {
-    if (page === 'integrations') checkIntegrationAlert()
-  }, [page])
-
-  // Re-validate the moment a YouTube connect OR disconnect lands — the
-  // caution triangle on the Integrations nav item used to lag both ways
-  // (lingering after a reconnect, absent after a disconnect) until the
-  // user happened to revisit the page.
-  useEffect(() => {
-    const offConnected = window.api.onYouTubeConnected(() => checkIntegrationAlert())
-    const offDisconnected = window.api.onYouTubeDisconnected(() => checkIntegrationAlert())
-    return () => { offConnected(); offDisconnected() }
+    checkIntegrationStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (page === 'integrations') checkIntegrationStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page])
+
+  // Re-validate the moment a connect OR disconnect lands — the indicator
+  // on the Integrations nav item used to lag both ways (lingering after a
+  // reconnect, absent after a disconnect) until the user happened to
+  // revisit the page.
+  useEffect(() => {
+    const offs = [
+      window.api.onYouTubeConnected(() => checkIntegrationStatus()),
+      window.api.onYouTubeDisconnected(() => checkIntegrationStatus()),
+      window.api.onTwitchConnected(() => checkIntegrationStatus()),
+      window.api.onTwitchDisconnected(() => checkIntegrationStatus()),
+    ]
+    return () => offs.forEach(off => off())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Claude leg — keyed on the stored key. A cheap models-list call
+  // doubles as validation; its catch keeps the previous verdict (network
+  // trouble is not a broken key).
+  useEffect(() => {
+    const key = (config.claudeApiKey ?? '').trim()
+    if (!key) {
+      setIntegrationStatus(prev => ({ ...prev, claude: { setUp: false, healthy: true } }))
+      return
+    }
+    let cancelled = false
+    window.api.claudeListModels(key)
+      .then(r => {
+        if (cancelled) return
+        setIntegrationStatus(prev => ({ ...prev, claude: { setUp: true, healthy: !!r.ok } }))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setIntegrationStatus(prev => ({ ...prev, claude: { setUp: true, healthy: prev.claude.healthy } }))
+      })
+    return () => { cancelled = true }
+  }, [config.claudeApiKey])
 
   useEffect(() => {
     return window.api.onConfirmQuit(({ running, queued, fileOps, settingsDirty: dirtyDraft }) => {
@@ -589,7 +901,9 @@ function AppInner() {
   // shortcuts fire even with a field focused (they don't type a character and
   // edits autosave); `?` (help) stands down while the user is typing.
   useEffect(() => {
-    const PAGE_NAV: Page[] = ['streams', 'player', 'converter', 'combine', 'thumbnails', 'launcher']
+    // Ctrl+1…7 targets, in the nav's VISUAL order (Create, then
+    // Utilities, then Session) — keep in sync with NAV_SHORTCUTS above.
+    const PAGE_NAV: Page[] = ['streams', 'player', 'thumbnails', 'converter', 'combine', 'rules', 'launcher']
     const onKey = (e: KeyboardEvent) => {
       if (isAnyModalOpen()) return
       const mod = e.ctrlKey || e.metaKey
@@ -617,8 +931,8 @@ function AppInner() {
         }
         return
       }
-      // Ctrl+1…6 → jump directly to a page
-      if (!e.shiftKey && e.key >= '1' && e.key <= '6') {
+      // Ctrl+1…7 → jump directly to a page
+      if (!e.shiftKey && e.key >= '1' && e.key <= '7') {
         e.preventDefault()
         setPage(PAGE_NAV[Number(e.key) - 1])
         return
@@ -742,7 +1056,10 @@ function AppInner() {
           // `duration-200` so the nav participates in the slow-animation
           // setting (and snaps instantly when animations are disabled).
           style={{ transitionDuration: `${navTransitionDurationMs}ms` }}
-          className={`relative ${sidebarCollapsed ? 'w-12' : 'w-48'} bg-navy-800 flex flex-col shrink-0 transition-[width] overflow-hidden`}
+          // w-52 (208px): the nav-redesign width bump — the todo asked for
+          // "200px or the next default size"; 52 is the next Tailwind step
+          // up from the old w-48 (192px) that clears 200.
+          className={`relative ${widthCollapsed ? 'w-12' : 'w-52'} bg-navy-800 flex flex-col shrink-0 transition-[width] overflow-hidden`}
         >
           {/* Right edge — collapse/expand handle */}
           <Tooltip content={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right" triggerClassName="group/edge absolute right-0 inset-y-0 w-2 z-20">
@@ -754,16 +1071,14 @@ function AppInner() {
             <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-purple-500 transition-all duration-150" />
           </Tooltip>
 
-          <div className="flex-1">
-            {NAV_ITEMS.map(item => {
-              const showAlert = item.id === 'integrations' && integrationAlert
+          {(() => {
+            const renderNavItem = (item: NavItem) => {
               const isSelected = page === item.id
               const hasActivity = !!pageActivity[item.id]
               // Settings + integrations are excluded from the startup-
               // page selector: they're settings pages, not workflow
-              // surfaces. The horizontal divider rendered below sits
-              // between launcher (last functional page) and
-              // integrations to make this grouping legible.
+              // surfaces (the System nav group, pinned to the bottom of
+              // the flexible zone by the spacer below).
               const isStartupCandidate = item.id !== 'integrations' && item.id !== 'settings'
               // Fall back to 'streams' when the user hasn't set a
               // startup page yet — covers both brand-new installs
@@ -774,36 +1089,48 @@ function AppInner() {
               // launch routes there.
               const effectiveStartupPage = config.startupPage || 'streams'
               const isStartupPage = isStartupCandidate && effectiveStartupPage === item.id
+              // Hybrid items render their live-info block inside the nav
+              // button (self-nulls while quiet — see NavItem.extra) and/or
+              // an action control with its own surface (NavItem.rowAction).
+              const Extra = item.extra
+              const RowAction = item.rowAction
 
-              const row = (
-                // `group/nav` scopes the hover state to this row so the
-                // star only appears for the row the cursor is over. The
-                // outer wrapper is a div (not a button) so the star can
-                // be a real sibling button — nesting buttons is invalid
-                // HTML.
-                <div className="relative group/nav">
+              // The main nav button, defined separately so collapsed mode
+              // can wrap JUST it in the label tooltip while the row
+              // wrapper below (the group/nav hover scope) also contains
+              // the star and any row action — the whole item hovers as
+              // one surface in both modes, with zone-specific tooltips.
+              const navButton = (
                   <button
                     onClick={() => setPage(item.id)}
-                    // `h-10` locks the button height (40px = the natural
-                    // expanded height with `py-2.5` + text-sm content)
-                    // so collapse/expand doesn't bounce the row height
-                    // by the 2-3px difference between icon-only and
-                    // icon+text content. `gap-3 px-4` stays constant in
-                    // both modes — `justify-content` doesn't animate,
-                    // and keeping a stable flex layout means the icon's
-                    // x position never jumps. The label, star, and any
-                    // alert at the right get clipped by the nav's
-                    // outer `overflow-hidden` as the width shrinks.
+                    // Single interactive surface for the whole item: the
+                    // icon+label line and (for hybrid items) the live
+                    // info block below it share ONE button — one hover
+                    // highlight, one click target, one focus stop. The
+                    // inner line div carries the old `h-10` height lock
+                    // (so collapse/expand doesn't bounce the row height)
+                    // and the constant `gap-3 px-3.5` flex layout so the
+                    // icon's x position never jumps; labels and
+                    // right-side adornments clip at the nav's outer
+                    // `overflow-hidden` as the width shrinks.
+                    // Selected + steady-collapsed with a control block
+                    // below: the bottom border goes transparent so it
+                    // doesn't draw a hairline through the item. Keyed on
+                    // railCollapsed, not the raw toggle — during the
+                    // collapse transition nothing is below yet, and
+                    // dropping the border early left the box visibly
+                    // open along its bottom edge.
                     className={`
-                      relative w-full flex items-center gap-3 px-3.5 h-10 text-sm font-medium transition-all duration-150 border
+                      relative w-full flex flex-col text-sm font-medium transition-all duration-150 border
                       ${isSelected
-                        ? 'bg-purple-600/20 text-purple-300 border-purple-600/30'
+                        ? `bg-purple-600/20 text-purple-300 border-purple-600/30${railCollapsed && RowAction ? ' border-b-transparent' : ''}`
                         : hasActivity
-                          ? 'text-gray-100 hover:text-white hover:bg-white/5 border-transparent'
-                          : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border-transparent'
+                          ? 'text-gray-100 group-hover/nav:text-white group-hover/nav:bg-white/5 border-transparent'
+                          : 'text-gray-400 group-hover/nav:text-gray-200 group-hover/nav:bg-white/5 border-transparent'
                       }
                     `}
                   >
+                    <div className="w-full flex items-center gap-3 px-3.5 h-10">
                     {/* `shrink-0` on the icon wrapper prevents the SVG
                         from being compressed by the flex algorithm when
                         the parent button narrows below its content's
@@ -817,11 +1144,40 @@ function AppInner() {
                         `whitespace-nowrap` keeps the text on a single
                         line so it slides out the right edge instead of
                         wrapping; `overflow-hidden` clips the text at
-                        the label's diminishing width for a clean crop. */}
-                    <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">{item.label}</span>
-                    {!sidebarCollapsed && showAlert && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
-                    {sidebarCollapsed && showAlert && (
-                      <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        the label's diminishing width for a clean crop.
+                        With a published subtext (nav redesign Pass C:
+                        the open stream / pinned launch group) the label
+                        becomes a tight two-line stack that still fits
+                        the h-10 line, so the icon, star, and row-action
+                        anchors all stay put. */}
+                    <span className="flex-1 min-w-0 text-left whitespace-nowrap overflow-hidden">
+                      <span className="block truncate leading-tight">{item.label}</span>
+                      <NavSubtextReveal text={navSubtext[item.id]} durationMs={navTransitionDurationMs} />
+                      {navSublines[item.id]}
+                    </span>
+                    </div>
+                    {/* Hybrid items: live info inside the same button —
+                        self-nulls while the tool is quiet (NavItem.extra).
+                        Variant choice follows railCollapsed, not the raw
+                        toggle: during a collapse the expanded block stays
+                        (pinned at the expanded width so the moving edge
+                        CLIPS it instead of squeezing it), and the
+                        collapsed block slides open only once the width
+                        lands / slides shut the moment an expand starts. */}
+                    {Extra && !railCollapsed && (
+                      <div className="w-52">
+                        <Extra collapsed={false} />
+                      </div>
+                    )}
+                    {Extra && sidebarCollapsed && (
+                      <SlideOpen open={railCollapsed} durationMs={navTransitionDurationMs}>
+                        <Extra collapsed />
+                      </SlideOpen>
+                    )}
+                    {railCollapsed && item.id === 'integrations' && integrationsSetUp && (
+                      integrationsUnhealthy
+                        ? <AlertTriangle size={10} className="absolute top-1 right-1.5 text-amber-400" />
+                        : <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-green-400" />
                     )}
                     {/* Right-edge activity accent — muted purple bar
                         inside the button's right edge. Shown for any
@@ -829,11 +1185,28 @@ function AppInner() {
                         the currently-selected one (the user asked for
                         a consistent indicator regardless of selection
                         state). Sits below any alert dot via the inset
-                        top/bottom. */}
-                    {hasActivity && (
-                      <span className="pointer-events-none absolute right-0 top-2 bottom-2 w-[2px] rounded-full bg-purple-400/50" />
-                    )}
+                        top/bottom. Always mounted, fading in/out on the
+                        activity signal (no motion — just opacity). */}
+                    <span
+                      className={`pointer-events-none absolute right-0 top-2 bottom-2 w-[2px] rounded-full bg-purple-400/50 transition-opacity ease-out ${hasActivity ? 'opacity-100' : 'opacity-0'}`}
+                      style={{ transitionDuration: `${navTransitionDurationMs}ms` }}
+                    />
                   </button>
+              )
+
+              const row = (
+                // `group/nav` scopes the hover state to this row. The
+                // outer wrapper is a div (not a button) so the star and
+                // row action can be real sibling buttons — nesting
+                // buttons is invalid HTML.
+                <div className="relative group/nav">
+                  {sidebarCollapsed ? (
+                    <Tooltip content={item.label} side="right" triggerClassName="block w-full" shortcut={NAV_SHORTCUTS[item.id]}>
+                      {navButton}
+                    </Tooltip>
+                  ) : (
+                    navButton
+                  )}
                   {/* Startup-page star — hidden in collapsed sidebar
                       mode. Rendered in BOTH modes (just CSS-hidden
                       when collapsed) so collapse/expand doesn't have
@@ -853,7 +1226,15 @@ function AppInner() {
                     <Tooltip
                       content={isStartupPage ? 'Startup page' : 'Set as startup page'}
                       side="right"
-                      triggerClassName={`absolute right-2 top-1/2 -translate-y-1/2 ${sidebarCollapsed ? 'hidden' : ''}`}
+                      // Lives in the row's LEFT padding strip (the 14px
+                      // before the icon) — the one zone that's empty and
+                      // uniform on every row, unlike the right side where
+                      // action buttons and the accent now live. `top-5`
+                      // (20px = the icon line's h-10 center), not
+                      // top-1/2: a hybrid item's expanded info makes the
+                      // wrapper taller, and the star must stay centered
+                      // on the icon+label LINE, not the whole item.
+                      triggerClassName={`absolute left-0 top-5 -translate-y-1/2 ${sidebarCollapsed ? 'hidden' : ''}`}
                     >
                       <button
                         type="button"
@@ -865,50 +1246,86 @@ function AppInner() {
                         // appears on row hover. Trades the launcher's
                         // "always show the pin" pattern for a cleaner
                         // resting state; the user can still discover
-                        // their startup pick by hovering.
-                        className={`shrink-0 p-1 transition-colors opacity-0 group-hover/nav:opacity-100 ${
+                        // their startup pick by hovering. The button
+                        // fills the padding strip's width and the full
+                        // line height so the narrow column still has a
+                        // usable hit target; the 11px star clears the
+                        // 14px strip with a hair of margin.
+                        className={`w-3.5 h-10 flex items-center justify-center transition-colors opacity-0 group-hover/nav:opacity-100 ${
                           isStartupPage
                             ? 'text-yellow-400'
                             : 'text-gray-400 hover:text-gray-200'
                         }`}
                         aria-label={isStartupPage ? 'Startup page' : 'Set as startup page'}
                       >
-                        <Star size={12} className={isStartupPage ? 'fill-yellow-400' : ''} />
+                        <Star size={11} className={isStartupPage ? 'fill-yellow-400' : ''} />
                       </button>
                     </Tooltip>
+                  )}
+                  {/* Row action (e.g. Launcher's quick-launch) — always
+                      visible at the row's right edge (right-2, the slot
+                      the startup star vacated when it moved to the left
+                      padding strip; the activity accent at right-0 keeps
+                      a sliver of breathing room), vertically centered on
+                      the icon+label line (top-5 = the line's h-10
+                      center). A real sibling button: actions
+                      never nest inside the nav button (invalid HTML), and
+                      they deserve their own hover/focus surface.
+                      The pointer-events-none layer pins the control at
+                      the EXPANDED rail width, anchored left — a
+                      right-anchored control would ride the moving edge
+                      inward during a collapse; pinned, the edge clips it
+                      in place (and reveals it in place on expand). */}
+                  {RowAction && !railCollapsed && (
+                    <div className="pointer-events-none absolute inset-y-0 left-0 w-52">
+                      <div className="pointer-events-auto absolute right-2 top-5 -translate-y-1/2">
+                        <RowAction collapsed={false} />
+                      </div>
+                    </div>
+                  )}
+                  {/* Collapsed: the action control renders as its own
+                      block below the icon button — INSIDE the group/nav
+                      wrapper so the whole column hovers as one item,
+                      while keeping its own tooltip zone (the label
+                      tooltip wraps only the icon button above). Slides
+                      open after the collapse lands; on expand it
+                      unmounts instantly (no exit slide). */}
+                  {RowAction && sidebarCollapsed && (
+                    <SlideOpen open={railCollapsed} durationMs={navTransitionDurationMs}>
+                      <RowAction collapsed active={isSelected} onNavigate={() => setPage(item.id)} />
+                    </SlideOpen>
                   )}
                 </div>
               )
 
-              return (
-                <React.Fragment key={item.id}>
-                  {/* Subtle divider between the functional pages
-                      (above) and the settings pages — integrations,
-                      settings — (below). Rendered BEFORE the
-                      integrations item so the line sits visually
-                      between launcher and integrations regardless of
-                      future reordering inside each group. */}
-                  {item.id === 'integrations' && (
-                    <div className="my-1 mx-3 border-t border-white/10" />
-                  )}
-                  {sidebarCollapsed ? (
-                    <Tooltip content={item.label} side="right" triggerClassName="block w-full" shortcut={NAV_SHORTCUTS[item.id]}>
-                      {row}
-                    </Tooltip>
-                  ) : (
-                    row
-                  )}
-                </React.Fragment>
-              )
-            })}
-          </div>
+              return <React.Fragment key={item.id}>{row}</React.Fragment>
+            }
+            return (
+              <div className="flex-1 min-h-0 flex flex-col">
+                {NAV_GROUP_CREATE.map(renderNavItem)}
+                {/* Create ↔ Utilities separator. */}
+                <div className="my-1 mx-3 border-t border-white/10" />
+                {NAV_GROUP_UTILITIES.map(renderNavItem)}
+                {/* Utilities ↔ Session separator. */}
+                <div className="my-1 mx-3 border-t border-white/10" />
+                {NAV_GROUP_SESSION.map(renderNavItem)}
+                {/* Flexible gap — floats the System group to the bottom
+                    of the nav's item zone, directly above the widget
+                    stack. The gap itself is the visual separation, so
+                    no divider before Integrations. */}
+                <div className="flex-1" />
+                {NAV_GROUP_SYSTEM.map(renderNavItem)}
+              </div>
+            )
+          })()}
 
           <div className="border-t border-white/5" />
-          {page !== 'converter' && <ConversionWidget onNavigate={() => setPage('converter')} collapsed={sidebarCollapsed} />}
+          {/* Widget stack — the two permanent residents (per the redesign
+              spec: these get their own pages one day, but stay widgets
+              until there's enough content to justify it). Everything else
+              has been absorbed into the hybrid nav items above. */}
           <CloudOpsWidget collapsed={sidebarCollapsed} />
-          <LauncherWidget onNavigate={() => setPage('launcher')} collapsed={sidebarCollapsed} />
-          <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} />
-          <AutoRulesWidget active={page === 'rules'} onNavigate={() => setPage('rules')} collapsed={sidebarCollapsed} />
+          <StreamRelayWidget onNavigate={setPage} collapsed={sidebarCollapsed} collapsedSettled={railCollapsed} />
           <div className={`py-1 flex justify-center w-full ${sidebarCollapsed ? 'flex-col items-center gap-0.5' : 'gap-2'}`}>
             <Tooltip content="Open help" side="top" shortcut="?">
               <button
