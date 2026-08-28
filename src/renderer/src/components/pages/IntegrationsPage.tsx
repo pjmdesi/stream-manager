@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, Radio, Copy, Check, WifiOff } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, TrendingUpDown, Copy, Check, WifiOff } from 'lucide-react'
 import type { RelayStatus, RelayStats, OrchestratorEvent } from '../../types'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
@@ -611,7 +611,10 @@ export function IntegrationsPage({ initialStatus }: {
           <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden">
             {/* Card header: title on the left, live status + Enabled checkbox on the right */}
             <div className="px-4 py-2.5 border-b border-white/5 flex items-center gap-3">
-              <Radio size={12} className="text-purple-400 shrink-0" />
+              {/* Matches the relay nav widget's identity icon (TrendingUpDown,
+                  18px there) — deliberately larger than sibling header icons
+                  so the section is recognizable as the widget's home. */}
+              <TrendingUpDown size={16} className="text-purple-400 shrink-0" />
               <span className="text-xs font-medium text-gray-400">Stream Relay</span>
               {/* Status pill always renders so the user has a clear "Off"
                   affordance when the feature is disabled. When enabled, the
