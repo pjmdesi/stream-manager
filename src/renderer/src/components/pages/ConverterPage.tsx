@@ -552,8 +552,8 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         </div>
         {/* Status column — between the thumbnail and the text stack so the
             state reads at a glance without hunting inside the filename row. */}
-        <div className="self-center shrink-0 flex items-center justify-center w-8">
-          <StatusIcon status={job.status} size={28} />
+        <div className="self-center shrink-0 flex items-center justify-center w-6">
+          <StatusIcon status={job.status} size={20} />
         </div>
         {/* Left: all content */}
         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
@@ -609,18 +609,18 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
               {/* Guard: ffmpeg's first progress events can carry NaN before
                   a real timemark lands — show 0% instead of "NaN%". */}
-              <span>{(Number.isFinite(job.progress) ? job.progress : 0).toFixed(1)}%</span>
-              {elapsed > 0 && <span>Elapsed: {formatDuration(elapsed)}</span>}
-              <span>
+              <span className="whitespace-nowrap">{(Number.isFinite(job.progress) ? job.progress : 0).toFixed(1)}%</span>
+              {elapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatDuration(elapsed)}</span>}
+              <span className="whitespace-nowrap">
                 {job.progress === 0
                   ? 'Starting…'
                   : `ETA: ${eta !== null && eta > 0 ? formatDuration(eta) : 'Estimating…'}`}
               </span>
               {!job.replaceInput && (
-                <Tooltip content="Open output folder" side="top">
+                <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
                   <button
                     onClick={() => window.api.openInExplorer(outputDir)}
-                    className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
+                    className="block max-w-full text-gray-400 hover:text-gray-300 transition-colors truncate"
                   >
                     {outputDirText}
                   </button>
@@ -631,13 +631,13 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
           {isDone && (
             <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
-              <span>100%</span>
-              {finalElapsed > 0 && <span>Elapsed: {formatDuration(finalElapsed)}</span>}
+              <span className="whitespace-nowrap">100%</span>
+              {finalElapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatDuration(finalElapsed)}</span>}
               {!job.replaceInput && (
-                <Tooltip content="Open output folder" side="top">
+                <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
                   <button
                     onClick={() => window.api.openInExplorer(outputDir)}
-                    className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
+                    className="block max-w-full text-gray-400 hover:text-gray-300 transition-colors truncate"
                   >
                     {outputDirText}
                   </button>

@@ -1152,12 +1152,12 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         </div>
                         {/* Status column — converter parity: doubled icon in
                             its own slot between the thumb and the text stack. */}
-                        <div className="self-center shrink-0 flex items-center justify-center w-8">
+                        <div className="self-center shrink-0 flex items-center justify-center w-6">
                           {downloading
-                            ? <Cloud size={28} className="text-blue-400 animate-pulse shrink-0" />
+                            ? <Cloud size={20} className="text-blue-400 animate-pulse shrink-0" />
                             : paused
-                              ? <Pause size={28} className="text-yellow-400 shrink-0" />
-                              : <RefreshCw size={28} className="text-purple-400 animate-spin shrink-0" />}
+                              ? <Pause size={20} className="text-yellow-400 shrink-0" />
+                              : <RefreshCw size={20} className="text-purple-400 animate-spin shrink-0" />}
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                           <div className="flex items-center gap-2">
@@ -1187,8 +1187,8 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                               ? <span>Downloading sources from the cloud… (progress in the cloud widget)</span>
                               : (
                                 <>
-                                  <span>{runProgress}%</span>
-                                  {elapsedMs > 0 && <span>Elapsed: {formatDur(elapsedMs / 1000)}</span>}
+                                  <span className="whitespace-nowrap">{runProgress}%</span>
+                                  {elapsedMs > 0 && <span className="whitespace-nowrap">Elapsed: {formatDur(elapsedMs / 1000)}</span>}
                                   <span className={runProgress === 0 && elapsedMs >= 15000 ? 'text-amber-300' : undefined}>
                                     {paused
                                       ? 'Paused'
@@ -1202,10 +1202,10 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                   </span>
                                 </>
                               )}
-                            <Tooltip content="Open output folder" side="top">
+                            <Tooltip content={`Open output folder: ${displayPath(dirOf(g.outputPath))}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
                               <button
                                 onClick={() => window.api.openInExplorer(dirOf(g.outputPath))}
-                                className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
+                                className="block max-w-full text-gray-400 hover:text-gray-300 transition-colors truncate"
                               >
                                 {displayPath(dirOf(g.outputPath))}
                               </button>
