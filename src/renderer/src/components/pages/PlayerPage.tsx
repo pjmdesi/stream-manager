@@ -5237,16 +5237,18 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   click area. */}
               {!multiTrackEnabled && multiTrack && (
                 <div className={`flex justify-center ${isClipMode ? 'pt-5' : ''}`}>
-                  <button
-                    onClick={enableMultiTrack}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] bg-purple-600/15 border border-purple-500/30 text-purple-200 hover:bg-purple-600/25 transition-colors"
-                  >
-                    <Layers size={11} />
-                    Enable Multi-track Audio · {videoInfo?.audioTracks.length} tracks
-                    {cachedTrackCount > 0 && (
-                      <span className="text-purple-300/70">({cachedTrackCount} cached)</span>
-                    )}
-                  </button>
+                  <Tooltip content="Splits the audio into one row per track, so you can pick which tracks to listen to and extract from the video.">
+                    <button
+                      onClick={enableMultiTrack}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] bg-purple-600/15 border border-purple-500/30 text-purple-200 hover:bg-purple-600/25 transition-colors"
+                    >
+                      <Layers size={11} />
+                      Enable Multi-track Audio · {videoInfo?.audioTracks.length} tracks
+                      {cachedTrackCount > 0 && (
+                        <span className="text-purple-300/70">({cachedTrackCount} cached)</span>
+                      )}
+                    </button>
+                  </Tooltip>
                 </div>
               )}
               {multiTrackEnabled && (
