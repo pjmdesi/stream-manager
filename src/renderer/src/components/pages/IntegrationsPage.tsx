@@ -4,7 +4,7 @@ import type { RelayStatus, RelayStats, OrchestratorEvent } from '../../types'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
-import { Textarea } from '../ui/Input'
+import { Textarea, NumberInput } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
@@ -757,16 +757,24 @@ export function IntegrationsPage() {
                 />
                 {srUseCustomPort && (
                   <div className="flex flex-col gap-1 pl-6">
-                    <input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      value={srPort}
-                      onChange={e => setSrPort(e.target.value)}
-                      onBlur={srSavePort}
-                      disabled={srFieldsLocked}
-                      className="w-24 bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    />
+                    {/* NumberInput (app-wide number-field convention). The
+                        save stays on focus LEAVING the field group —
+                        srSavePort reapplies the relay config (bouncing the
+                        ffmpeg child when enabled), so committing per
+                        spinner click would rebind the port repeatedly. The
+                        focusout guard ignores focus hopping between the
+                        input and its own spinner buttons. */}
+                    <div onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) void srSavePort() }}>
+                      <NumberInput
+                        value={parseInt(srPort, 10) || 1935}
+                        onChange={v => setSrPort(String(v))}
+                        min={1}
+                        max={65535}
+                        disabled={srFieldsLocked}
+                        className="w-24"
+                        aria-label="Relay RTMP port"
+                      />
+                    </div>
                     <p className="text-xs text-gray-400">RTMP's default is 1935. Change only if it conflicts with something else on your machine.</p>
                   </div>
                 )}

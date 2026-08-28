@@ -388,7 +388,9 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         }`}
       />
       <div className="flex flex-col shrink-0">
-        <Tooltip content="Increment (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
+        {/* Tooltips name the actual step so a large increment (e.g. the
+            cache limit's 128) reads as intended, not broken. */}
+        <Tooltip content={`+${step} (Shift = ×10)`} side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}
@@ -402,7 +404,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
           <ChevronUp size={10} strokeWidth={2.5} />
         </button>
         </Tooltip>
-        <Tooltip content="Decrement (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
+        <Tooltip content={`-${step} (Shift = ×10)`} side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}

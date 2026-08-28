@@ -6,7 +6,7 @@ import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
-import { Input } from '../ui/Input'
+import { Input, NumberInput } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { DumpConvertExplainer } from '../DumpConvertExplainer'
 import type { ConversionPreset, ThumbnailTemplate, Page } from '../../types'
@@ -563,13 +563,16 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">Cache Limit {dirtyDot('audioCacheLimit')}</label>
             <div className="flex items-center gap-2">
-              <input
-                type="number"
+              {/* NumberInput (app-wide number-field convention): clamps to
+                  min itself, so the old Math.max guard lives in its props.
+                  Its spinner buttons self-document the 128 step. */}
+              <NumberInput
+                value={Math.round((local.audioCacheLimit ?? 1_073_741_824) / (1024 * 1024))}
+                onChange={v => set('audioCacheLimit', v * 1024 * 1024)}
                 min={128}
                 step={128}
-                value={Math.round((local.audioCacheLimit ?? 1_073_741_824) / (1024 * 1024))}
-                onChange={e => set('audioCacheLimit', Math.max(128, parseInt(e.target.value) || 128) * 1024 * 1024)}
-                className="w-28 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                className="w-28"
+                aria-label="Cache limit in megabytes"
               />
               <span className="text-sm text-gray-400">MB</span>
             </div>
@@ -773,14 +776,16 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
         <Section id="converter" icon={<Zap size={14} />} title="Converter" registerRef={registerSection}>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">Max simultaneous conversions {dirtyDot('maxConcurrentConversions')}</label>
-            <input
-              type="number"
+            {/* NumberInput handles the 1-4 clamp that the old inline
+                Math.min/Math.max guard enforced. */}
+            <NumberInput
+              value={local.maxConcurrentConversions ?? 2}
+              onChange={v => set('maxConcurrentConversions', v)}
               min={1}
               max={4}
               step={1}
-              value={local.maxConcurrentConversions ?? 2}
-              onChange={e => set('maxConcurrentConversions', Math.min(4, Math.max(1, parseInt(e.target.value) || 1)))}
-              className="w-28 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              className="w-28"
+              aria-label="Max simultaneous conversions"
             />
             <p className="text-xs text-gray-400">How many conversions auto-start at once when archiving in bulk. 2 is usually fastest on a GPU — one encode often leaves the encoder half-idle and a second fills it; higher can hit GPU encoder-session limits, and CPU-only presets don't benefit from running in parallel. Manually starting a queued job always runs it immediately, regardless of this limit.</p>
           </div>

@@ -12,6 +12,7 @@ Target: TBD (the nav-refresh release) · emptied 2026-08-28 after the v2.4.0 rel
 
 - Four new tag colors: Purple, Brown, Black, and White. The color that was previously labeled Purple is actually the app's neutral cool gray, so it is now honestly labeled Gray, and its picker swatch is a step darker so it can't be confused with the new White. The new Purple is a true purple. Tag textures draw in light ink on Black tags so the patterns stay visible.
 
+- Number fields' spinner buttons now state their actual step in the tooltip ("+128" on the cache limit) instead of a generic "Increment" label, and the last plain number inputs (Settings cache limit, max simultaneous conversions, and the relay's custom port) now use the app's standard stepper fields.
 - Hovering a stream row's date now shows the complete date ("Saturday, July 25, 2026") instead of just the day of the week.
 
 - The palette panel's edit mode is unmistakable now: the pencil button lights up amber and an amber outline wraps the panel contents while editing. Previously the only tell was a subtly highlighted pencil, and the grayed-out recents list read as disabled rather than in-edit.
