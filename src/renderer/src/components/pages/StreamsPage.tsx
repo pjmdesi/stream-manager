@@ -47,7 +47,7 @@ import { releaseThumbDecodes } from '../ui/VideoThumb'
 import { StreamFilesGrid, parseSmThumbnailOrdinal, type FilesGridHandle } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
-import { renderStreamTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber } from '../../lib/streamTitle'
+import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber } from '../../lib/streamTitle'
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import type { StreamFolder, StreamMeta, AiSuggestField } from '../../types'
@@ -7239,12 +7239,15 @@ function SidebarDetail({
           navigation chrome. */}
       <div className="ps-4 pe-2 pt-3 pb-4 border-b border-white/5 shrink-0 flex flex-col gap-2">
         {/* Title row — identity leads the header (sidebar cleanup,
-            2026-08-29), with the close button pinned to the top-right
-            corner beside it. The title wraps rather than truncates, so
-            the full title is always visible — no tooltip needed. */}
-        <div className="flex items-start gap-2">
+            2026-08-29), with the close button beside it. items-center:
+            the close button is taller than a one-line title, and
+            items-start left its extra height reading as a gap under the
+            text. The title wraps rather than truncates (full title
+            always visible, no tooltip needed); displayWrapTitle keeps a
+            wrapped line from opening with a stray space or lone pipe. */}
+        <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0 text-base font-semibold text-gray-100 break-words leading-snug">
-            {title}
+            {displayWrapTitle(title)}
           </div>
           <Tooltip content="Close" side="bottom" triggerClassName="shrink-0">
             <Button

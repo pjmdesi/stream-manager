@@ -139,6 +139,17 @@ export function renderTitleFromMeta(
   return opts.fallback?.trim() || meta?.games?.join(', ') || ''
 }
 
+/** Display-only massaging for title text that WRAPS (multi-line contexts
+ *  like the sidebar header — truncated one-liners don't need it): collapse
+ *  whitespace runs (YouTube round-trips can smuggle non-breaking spaces
+ *  into stored titles) and glue " |" separators to the preceding word with
+ *  a non-breaking space. A wrapped line then never starts with a stray
+ *  space or a lone pipe — breaks land after the pipe, and the next line
+ *  opens on a real word. Never feed the result back into storage. */
+export function displayWrapTitle(title: string): string {
+  return title.replace(/\s+/g, ' ').replace(/ \|/g, '\u00A0|')
+}
+
 /** Resolve a stream's display title: render its `ytTitle` (or `twitchTitle`)
  *  template body against the merge fields, falling back to the games list
  *  and then the folder name — the same fallback chain the streams list and
