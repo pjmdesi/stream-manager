@@ -975,6 +975,19 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const bulkOffload = () => { enqueueOffload(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
   const bulkPin = () => { enqueueHydrate(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
   const selectedHasBlocked = useMemo(() => selectedPaths.some(p => fileReason(p)), [selectedPaths, fileReason])
+  // Affected-file counts for the bulk tooltips — each verb touches a
+  // different subset: convert/combine only videos, offload only files
+  // that are currently local, pin only cloud-only files, delete
+  // everything not blocked by in-use checks. `undefined` hydration
+  // (still checking) counts as local, matching the cards' `?? true`
+  // scan-flag fallback, so local+remote always sum to the selection.
+  const selectedLocalCount = useMemo(
+    () => selectedPaths.filter(p => localStatus[p] !== false).length,
+    [selectedPaths, localStatus])
+  const selectedRemoteCount = selectedPaths.length - selectedLocalCount
+  const selectedDeletableCount = useMemo(
+    () => selectedPaths.filter(p => !fileReason(p)).length,
+    [selectedPaths, fileReason])
   const bulkTrash = async () => {
     const deleted: string[] = []
     // Release in-flight thumbnail decodes only for the files that will
@@ -1056,23 +1069,26 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
 
   // Stream-level ops — one JSX cluster rendered in BOTH header variants
   // (collapsed and expanded) so collapsing the grid never hides them.
-  // Labels collapse at @md against the SIDEBAR container (the header rows
-  // sit outside the grid's own @container, which only scopes the cards) —
-  // the same breakpoint as the sidebar header's New episode button.
+  // Labels collapse against the SIDEBAR container (the header rows sit
+  // outside the grid's own @container, which only scopes the cards).
+  // Breakpoints are tuned per row so labels fold JUST before the row
+  // would wrap: @[600px] fits the normal header (chevron + filter chips
+  // + these ops + Select); the select-mode cluster is much wider and
+  // uses @[920px] for its labels instead.
   const streamOps = (
     <div className="flex items-center gap-0.5">
       {cloudSyncActive && hasVideos && (
         <>
           <Tooltip content="Offload this stream's files to the cloud" side="top">
-            <button onClick={onOffloadAll} className={ACTION_PINK}><Cloud size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
+            <button onClick={onOffloadAll} className={ACTION_PINK}><Cloud size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
           </Tooltip>
           <Tooltip content="Pin this stream's files on this device" side="top">
-            <button onClick={onPinAllLocal} className={ACTION_CYAN}><CloudDownload size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
+            <button onClick={onPinAllLocal} className={ACTION_CYAN}><CloudDownload size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
           </Tooltip>
         </>
       )}
       <Tooltip content="Open this stream's folder in Explorer" side="top">
-        <button onClick={onOpenFolder} className={ACTION_YELLOW}><FolderOpen size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Open folder</CollapsibleLabel></button>
+        <button onClick={onOpenFolder} className={ACTION_YELLOW}><FolderOpen size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Open folder</CollapsibleLabel></button>
       </Tooltip>
     </div>
   )
@@ -1121,7 +1137,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             <>
               <div className="w-px h-5 bg-white/10 mx-1 self-center" />
               <Tooltip content="Select multiple files for bulk actions" side="top" shortcut="Ctrl+Shift+A">
-                <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Select</CollapsibleLabel></button>
+                <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Select</CollapsibleLabel></button>
               </Tooltip>
             </>
           ) : (
@@ -1129,27 +1145,27 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               <span className="text-[11px] text-gray-400 mr-1">{selectedPaths.length} selected</span>
               {selectedVideos.length > 0 && (
                 <>
-                  <Tooltip content="Send selected to converter" side="top">
-                    <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Convert</CollapsibleLabel></button>
+                  <Tooltip content={`Send selected (${selectedVideos.length}) to converter`} side="top">
+                    <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Convert</CollapsibleLabel></button>
                   </Tooltip>
-                  <Tooltip content="Send selected to combine" side="top">
-                    <button onClick={bulkCombine} className={ACTION_PURPLE}><Combine size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Combine</CollapsibleLabel></button>
+                  <Tooltip content={`Send selected (${selectedVideos.length}) to combine`} side="top">
+                    <button onClick={bulkCombine} className={ACTION_PURPLE}><Combine size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Combine</CollapsibleLabel></button>
                   </Tooltip>
                 </>
               )}
               {cloudSyncActive && selectedPaths.length > 0 && (
                 <>
-                  <Tooltip content="Offload selected to cloud" side="top">
-                    <button onClick={bulkOffload} className={ACTION_PINK}><Cloud size={12} /></button>
+                  <Tooltip content={`Offload selected (${selectedLocalCount}) to cloud`} side="top">
+                    <button onClick={bulkOffload} className={ACTION_PINK}><Cloud size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
                   </Tooltip>
-                  <Tooltip content="Pin selected on this device" side="top">
-                    <button onClick={bulkPin} className={ACTION_CYAN}><CloudDownload size={12} /></button>
+                  <Tooltip content={`Pin selected (${selectedRemoteCount}) on this device`} side="top">
+                    <button onClick={bulkPin} className={ACTION_CYAN}><CloudDownload size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
                   </Tooltip>
                 </>
               )}
               {selectedPaths.length > 0 && (
-                <Tooltip content={selectedHasBlocked ? 'Move selected to recycle bin (skips files in use)' : 'Move selected to recycle bin'} side="top">
-                  <button onClick={bulkTrash} className={ACTION_RED}><Trash2 size={12} /></button>
+                <Tooltip content={selectedHasBlocked ? `Move selected (${selectedDeletableCount}) to recycle bin (skips files in use)` : `Move selected (${selectedDeletableCount}) to recycle bin`} side="top">
+                  <button onClick={bulkTrash} className={ACTION_RED}><Trash2 size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Delete</CollapsibleLabel></button>
                 </Tooltip>
               )}
               {/* Selection management + exit — grouped with dividers so they
@@ -1162,7 +1178,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                     disabled={selectedPaths.length === visiblePaths.length}
                     className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
                   >
-                    <CheckCheck size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Select all</CollapsibleLabel>
+                    <CheckCheck size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Select all</CollapsibleLabel>
                   </button>
                 </Tooltip>
                 <Tooltip content="Clear current selection" side="top" shortcut={allVisibleSelected ? 'Ctrl+A' : undefined}>
@@ -1171,12 +1187,12 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                     disabled={selectedPaths.length === 0}
                     className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
                   >
-                    <Square size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Clear</CollapsibleLabel>
+                    <Square size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Clear</CollapsibleLabel>
                   </button>
                 </Tooltip>
                 <div className="w-px h-5 bg-white/10 mx-1 self-center" />
                 <Tooltip content="Exit selection mode" side="top" shortcut="Ctrl+Shift+A">
-                  <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Stop</CollapsibleLabel></button>
+                  <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Stop</CollapsibleLabel></button>
                 </Tooltip>
               </div>
             </>
@@ -1330,7 +1346,10 @@ function FilterToggle({ active, onClick, icon, label }: { active: boolean; onCli
           : 'text-gray-500 border-white/10 hover:text-gray-300'
       }`}
     >
-      {icon} {label}
+      {/* Label folds with the rest of the files-header row (@[600px] vs
+          the sidebar container) so the row goes fully icon-only before
+          it has to wrap at the smallest sidebar widths. */}
+      {icon}<CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">{label}</CollapsibleLabel>
     </button>
   )
 }
