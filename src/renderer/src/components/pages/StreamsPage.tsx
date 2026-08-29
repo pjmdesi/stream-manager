@@ -9701,7 +9701,10 @@ function BroadcastTimePrivacyRow({
             <button
               type="button"
               onClick={onDateClick}
-              className="bg-navy-900 border border-white/10 text-gray-200 font-mono tabular-nums text-xs rounded-lg px-2 pt-[5px] pb-1 flex items-center gap-1 hover:text-purple-300 hover:border-purple-500/40 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+              // py-1.5 matches PrivacyDropdown's height exactly — the time
+              // input's pt-[5px] pb-1 compensates for NATIVE chrome a plain
+              // button doesn't have, so copying it left this 3px short.
+              className="bg-navy-900 border border-white/10 text-gray-200 font-mono tabular-nums text-xs rounded-lg px-2 py-1.5 flex items-center gap-1 hover:text-purple-300 hover:border-purple-500/40 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/40"
             >
               {date}
               <PencilLine size={9} className="opacity-50" />
