@@ -392,7 +392,6 @@ function buildDateMarks(folders: StreamFolder[] | undefined): Map<string, DateMa
 // extended past the box).
 const PANEL_ACTION_BUTTON_BASE = 'inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-200'
 const PANEL_ACTION_BUTTON_GREEN = `${PANEL_ACTION_BUTTON_BASE} hover:text-green-400 hover:bg-green-500/10`
-const PANEL_ACTION_BUTTON_BLUE = `${PANEL_ACTION_BUTTON_BASE} hover:text-blue-400 hover:bg-blue-500/10`
 const PANEL_ACTION_BUTTON_RED = `${PANEL_ACTION_BUTTON_BASE} hover:text-red-400 hover:bg-red-500/10`
 const PANEL_ACTION_BUTTON_YELLOW = `${PANEL_ACTION_BUTTON_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
 const PANEL_ACTION_BUTTON_CYAN = `${PANEL_ACTION_BUTTON_BASE} hover:text-cyan-400 hover:bg-cyan-500/10`
@@ -7329,6 +7328,23 @@ function SidebarDetail({
               </Tooltip>
             </div>
           )}
+          {/* New episode — series functionality, so it lives with the episode
+              navigation (sidebar-reorg phase a; moved up from the footer's
+              button pile). OUTSIDE the nav group above: that group is hidden
+              for a single-episode series (no prev/next, not standalone), and
+              a brand-new series is exactly when this button matters most.
+              Icon-only like the rest of the header chrome; blue hover keeps
+              its footer identity as the creation verb. */}
+          <Tooltip content={isStandalone(meta) ? 'Standalone streams don’t have episodes — enable Series to use this' : 'New episode based on this stream'} side="bottom" shortcut={isStandalone(meta) ? undefined : 'Ctrl+Shift+N'}>
+            <button
+              type="button"
+              onClick={onNewEpisode}
+              disabled={isStandalone(meta)}
+              className="p-1 rounded text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400"
+            >
+              <CopyPlus size={13} />
+            </button>
+          </Tooltip>
           {/* Picker dropdown — portal-rendered so the sidebar's
               overflow-hidden + scrolling content can't clip it.
               Anchored to the List button's screen rect; flips to drop
@@ -8814,8 +8830,10 @@ function SidebarDetail({
             Layout is three equal-width columns (`grid-cols-3`) spanning
             the footer, each group's buttons centered within its column:
               · Col 1 — Send-to: Player / Converter / Combine / Thumbnail
-              · Col 2 — Stream ops: New episode / Offload / Pin local / Open folder
+              · Col 2 — Stream ops: Offload / Pin local / Open folder
               · Col 3 — Lifecycle: Archive / Delete
+            (New episode moved to the header next to the episode nav —
+            sidebar-reorg phase a.)
 
             All three columns collapse to icon-only at the SAME
             container-query breakpoint (@5xl). Since the columns are
@@ -8871,16 +8889,6 @@ function SidebarDetail({
             </Tooltip>
           </div>
           <div className="flex-1 flex items-center justify-center gap-1 px-3">
-            <Tooltip content={isStandalone(meta) ? 'Standalone streams don’t have episodes — enable Series above to use this' : 'New episode based on this stream'} shortcut={isStandalone(meta) ? undefined : 'Ctrl+Shift+N'}>
-              <button
-                onClick={onNewEpisode}
-                disabled={isStandalone(meta)}
-                className={PANEL_ACTION_BUTTON_BLUE}
-              >
-                <CopyPlus size={13} />
-                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">New episode</CollapsibleLabel>
-              </button>
-            </Tooltip>
             {cloudSyncActive && videoCount > 0 && (
               <>
                 <Tooltip content="Offload to cloud">
