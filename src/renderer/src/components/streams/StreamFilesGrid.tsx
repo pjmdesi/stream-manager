@@ -1155,17 +1155,35 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               )}
               {cloudSyncActive && selectedPaths.length > 0 && (
                 <>
+                  {/* Disabled at (0) — a clickable button that would affect
+                      nothing is a broken promise now that the counts are in
+                      the tooltips. The stream-level pair (non-select mode)
+                      deliberately does NOT do this: it acts on the recursive
+                      folder listing, which isn't in memory, so a visible-files
+                      guess could disable a button that would do real work. */}
                   <Tooltip content={`Offload selected (${selectedLocalCount}) to cloud`} side="top">
-                    <button onClick={bulkOffload} className={ACTION_PINK}><Cloud size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
+                    <button
+                      onClick={bulkOffload}
+                      disabled={selectedLocalCount === 0}
+                      className={`${ACTION_PINK} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                    ><Cloud size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
                   </Tooltip>
                   <Tooltip content={`Pin selected (${selectedRemoteCount}) on this device`} side="top">
-                    <button onClick={bulkPin} className={ACTION_CYAN}><CloudDownload size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
+                    <button
+                      onClick={bulkPin}
+                      disabled={selectedRemoteCount === 0}
+                      className={`${ACTION_CYAN} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                    ><CloudDownload size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
                   </Tooltip>
                 </>
               )}
               {selectedPaths.length > 0 && (
                 <Tooltip content={selectedHasBlocked ? `Move selected (${selectedDeletableCount}) to recycle bin (skips files in use)` : `Move selected (${selectedDeletableCount}) to recycle bin`} side="top">
-                  <button onClick={bulkTrash} className={ACTION_RED}><Trash2 size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Delete</CollapsibleLabel></button>
+                  <button
+                    onClick={bulkTrash}
+                    disabled={selectedDeletableCount === 0}
+                    className={`${ACTION_RED} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                  ><Trash2 size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Delete</CollapsibleLabel></button>
                 </Tooltip>
               )}
               {/* Selection management + exit — grouped with dividers so they
