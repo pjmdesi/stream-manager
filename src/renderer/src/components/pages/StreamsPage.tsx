@@ -7239,7 +7239,7 @@ function SidebarDetail({
           navigation chrome. */}
       <div className="ps-4 pe-2 pt-3 pb-4 border-b border-white/5 shrink-0 flex flex-col gap-2">
         <div className="relative flex items-center gap-2">
-          <Tooltip content="Reschedule stream" side="bottom">
+          <Tooltip content={<div>Reschedule stream<DateTooltipCalendar streamDate={folder.date} /></div>} side="bottom">
             <button
               type="button"
               onClick={() => onReschedule(broadcastMismatches.get('date'))}
@@ -9571,6 +9571,58 @@ const PRIVACY_OPTIONS: Array<{ value: PrivacyValue; label: string; Icon: typeof 
   { value: 'unlisted', label: 'Unlisted', Icon: LinkIcon },
   { value: 'private',  label: 'Private',  Icon: Lock },
 ]
+/** Compact read-only month calendar rendered inside the date buttons'
+ *  tooltips (sidebar-reorg phase d). Shows the STREAM's month with the
+ *  item's date filled in the accent color and today outlined when it
+ *  falls in the same month (the filled style wins when they coincide).
+ *  Reference only — the tooltip isn't interactive; clicking the button
+ *  opens the reschedule modal. Honors the Sunday/Monday first-day
+ *  setting like the sidebar month calendar. */
+function DateTooltipCalendar({ streamDate }: { streamDate: string }) {
+  const { config } = useStore()
+  const firstDayMondayBased = config.calendarFirstDayOfWeek === 'monday'
+  const y = parseInt(streamDate.slice(0, 4), 10)
+  const m = parseInt(streamDate.slice(5, 7), 10) - 1
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return null
+  const today = todayStr()
+  const first = new Date(y, m, 1)
+  const startDow = firstDayMondayBased ? (first.getDay() + 6) % 7 : first.getDay()
+  const cells: Array<{ iso: string; day: number; inMonth: boolean }> = []
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(y, m, 1 - startDow + i)
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    cells.push({ iso, day: d.getDate(), inMonth: d.getMonth() === m })
+  }
+  // Drop trailing all-out-of-month weeks so short months don't pad to six rows.
+  while (cells.length > 7 && cells.slice(-7).every(c => !c.inMonth)) cells.splice(-7)
+  const DOW = firstDayMondayBased ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+  const monthLabel = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+  return (
+    <div className="flex flex-col gap-1 pt-1.5 mt-1.5 border-t border-white/10">
+      <span className="text-[10px] uppercase tracking-wide text-gray-400 text-center">{monthLabel}</span>
+      <div className="grid grid-cols-7 gap-0.5">
+        {DOW.map((d, i) => (
+          <span key={`h${i}`} className="w-5 h-4 text-[9px] text-gray-500 flex items-center justify-center">{d}</span>
+        ))}
+        {cells.map(c => (
+          <span
+            key={c.iso}
+            className={`w-5 h-5 rounded text-[10px] tabular-nums flex items-center justify-center ${
+              c.iso === streamDate
+                ? 'bg-purple-600/60 text-white font-semibold'
+                : c.iso === today
+                  ? 'border border-purple-400/60 text-purple-200'
+                  : c.inMonth ? 'text-gray-300' : 'text-gray-600'
+            }`}
+          >
+            {c.day}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /**
  * BroadcastTimePrivacyRow — shared row layout for the inline broadcast
  * picker section. Used in both the unlinked state (alongside a Create
@@ -9645,7 +9697,7 @@ function BroadcastTimePrivacyRow({
       {showTime && date && onDateClick && (
         <div className="flex flex-col">
           <span className={`${labelCls} min-h-[16px] items-end`}>Date {renderDot(dateMismatch)}</span>
-          <Tooltip content="Reschedule stream" side="top">
+          <Tooltip content={<div>Reschedule stream<DateTooltipCalendar streamDate={date} /></div>} side="top">
             <button
               type="button"
               onClick={onDateClick}
