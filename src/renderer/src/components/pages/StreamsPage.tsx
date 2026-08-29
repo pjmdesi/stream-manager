@@ -3941,7 +3941,14 @@ export function StreamsPage({
                         </div>
                       </th>
                       <th className="text-left p-1 min-w-[100px] hidden @5xl:table-cell">Notes</th>
-                      <th className="text-right p-1 min-w-[160px]">Actions</th>
+                      {/* @xl: below ~576px of list width the hover actions
+                          encroach on the date/title content, so the label and
+                          the row buttons hide. The th/td BOXES must stay —
+                          the table is width-locked to the full list pane (the
+                          sidebar overlays it), so removing a cell makes auto
+                          layout redistribute its width into the visible
+                          columns and push content under the overlay. */}
+                      <th className="text-right p-1 min-w-[160px]"><span className="hidden @xl:inline">Actions</span></th>
                     </>
                 </tr>
               </thead>
@@ -5329,7 +5336,7 @@ const StreamListItem = memo(function StreamListItem({
           </td>
 
           <td className="px-2 py-2 align-middle">
-            <div className={`flex items-center justify-end transition-opacity ${selectMode ? 'opacity-0 pointer-events-none' : isSendingToPlayer ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+            <div className={`hidden @xl:flex items-center justify-end transition-opacity ${selectMode ? 'opacity-0 pointer-events-none' : isSendingToPlayer ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
               {!hasMeta && (
                 <span className="flex items-center gap-1 text-xs text-yellow-600 mr-1 shrink-0">
                   <AlertTriangle size={11} />
