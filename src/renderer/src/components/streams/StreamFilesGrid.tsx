@@ -1056,20 +1056,23 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
 
   // Stream-level ops — one JSX cluster rendered in BOTH header variants
   // (collapsed and expanded) so collapsing the grid never hides them.
+  // Labels collapse at @md against the SIDEBAR container (the header rows
+  // sit outside the grid's own @container, which only scopes the cards) —
+  // the same breakpoint as the sidebar header's New episode button.
   const streamOps = (
     <div className="flex items-center gap-0.5">
       {cloudSyncActive && hasVideos && (
         <>
           <Tooltip content="Offload this stream's files to the cloud" side="top">
-            <button onClick={onOffloadAll} className={ACTION_PINK}><Cloud size={12} /> Offload</button>
+            <button onClick={onOffloadAll} className={ACTION_PINK}><Cloud size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
           </Tooltip>
           <Tooltip content="Pin this stream's files on this device" side="top">
-            <button onClick={onPinAllLocal} className={ACTION_CYAN}><CloudDownload size={12} /> Pin local</button>
+            <button onClick={onPinAllLocal} className={ACTION_CYAN}><CloudDownload size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
           </Tooltip>
         </>
       )}
       <Tooltip content="Open this stream's folder in Explorer" side="top">
-        <button onClick={onOpenFolder} className={ACTION_YELLOW}><FolderOpen size={12} /> Open folder</button>
+        <button onClick={onOpenFolder} className={ACTION_YELLOW}><FolderOpen size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Open folder</CollapsibleLabel></button>
       </Tooltip>
     </div>
   )
@@ -1118,7 +1121,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             <>
               <div className="w-px h-5 bg-white/10 mx-1 self-center" />
               <Tooltip content="Select multiple files for bulk actions" side="top" shortcut="Ctrl+Shift+A">
-                <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /> Select</button>
+                <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Select</CollapsibleLabel></button>
               </Tooltip>
             </>
           ) : (
@@ -1127,10 +1130,10 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               {selectedVideos.length > 0 && (
                 <>
                   <Tooltip content="Send selected to converter" side="top">
-                    <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /> Convert</button>
+                    <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Convert</CollapsibleLabel></button>
                   </Tooltip>
                   <Tooltip content="Send selected to combine" side="top">
-                    <button onClick={bulkCombine} className={ACTION_PURPLE}><Combine size={12} /> Combine</button>
+                    <button onClick={bulkCombine} className={ACTION_PURPLE}><Combine size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Combine</CollapsibleLabel></button>
                   </Tooltip>
                 </>
               )}
@@ -1159,7 +1162,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                     disabled={selectedPaths.length === visiblePaths.length}
                     className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
                   >
-                    <CheckCheck size={12} /> Select all
+                    <CheckCheck size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Select all</CollapsibleLabel>
                   </button>
                 </Tooltip>
                 <Tooltip content="Clear current selection" side="top" shortcut={allVisibleSelected ? 'Ctrl+A' : undefined}>
@@ -1168,12 +1171,12 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                     disabled={selectedPaths.length === 0}
                     className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
                   >
-                    <Square size={12} /> Clear
+                    <Square size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Clear</CollapsibleLabel>
                   </button>
                 </Tooltip>
                 <div className="w-px h-5 bg-white/10 mx-1 self-center" />
                 <Tooltip content="Exit selection mode" side="top" shortcut="Ctrl+Shift+A">
-                  <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /> Stop</button>
+                  <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /><CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">Stop</CollapsibleLabel></button>
                 </Tooltip>
               </div>
             </>
