@@ -4184,8 +4184,6 @@ export function StreamsPage({
               onLoadAllVods={loadAllVods}
               defaultBroadcastTime={config.defaultBroadcastTime || '19:00'}
               claudeEnabled={claudeEnabled}
-              onSendToPlayer={() => handleSendToPlayer(renderedFolder)}
-              onSendToConverter={() => handleSendToConverter(renderedFolder)}
               onSendToCombine={() => handleSendToCombine(renderedFolder)}
               onSendFileToPlayer={handleSendFileToPlayer}
               onSendFileToConverter={(path) => onSendToConverter([path], {
@@ -5901,7 +5899,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToPlayer, onSendToConverter, onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, allowFileImport, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
+  onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, allowFileImport, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -5972,8 +5970,6 @@ function SidebarDetail({
   /** True when a Claude API key is configured. Drives whether the
    *  title/description fields wire up Ctrl+Space AI suggestions. */
   claudeEnabled: boolean
-  onSendToPlayer: () => void
-  onSendToConverter: () => void
   onSendToCombine: () => void
   /** Open / send one specific file — used by the files grid's per-file actions. */
   onSendFileToPlayer: (path: string) => void
@@ -6153,7 +6149,6 @@ function SidebarDetail({
   }, [undoMeta, redoMeta])
 
   const title = renderStreamTitle(folder, folders)
-  const hasSMThumbnail = folder.thumbnails.some(t => /[_-]sm-thumbnail\./i.test(t))
   const videoCount = folder.videoCount
   // Ref to the YT Category <select> so the soft-block on push (when
   // the user hasn't picked a category) can scroll it into view and
@@ -8321,6 +8316,9 @@ function SidebarDetail({
                 {streamDateInFuture && (
                   <div className="flex flex-col gap-1.5">
                     <BroadcastTimePrivacyRow
+                      date={folder.date}
+                      onDateClick={() => onReschedule(broadcastMismatches.get('date'))}
+                      dateMismatch={broadcastMismatches.get('date')}
                       time={newBroadcastTime}
                       onTimeChange={setNewBroadcastTime}
                       privacy={newBroadcastPrivacy}
@@ -8373,6 +8371,9 @@ function SidebarDetail({
               // "Loading…" forever (the lookup can never resolve).
               <BroadcastTimePrivacyRow
                 showTime={isUpcomingBroadcast}
+                date={folder.date}
+                onDateClick={() => onReschedule(broadcastMismatches.get('date'))}
+                dateMismatch={broadcastMismatches.get('date')}
                 time={displayedScheduledTime}
                 onTimeChange={v => onUpdateMeta({ scheduledTime: v || undefined })}
                 timeMismatch={broadcastMismatches.get('scheduledTime')}
@@ -8832,11 +8833,13 @@ function SidebarDetail({
 
             Layout is equal-width columns spanning the footer, each
             group's buttons centered within its column:
-              · Col 1 — Send-to: Player / Converter / Combine / Thumbnail
+              · Col 1 — Send-to: Combine (the sole survivor)
               · Col 2 — Lifecycle: Archive / Delete
             (Sidebar reorg: New episode moved to the header next to the
             episode nav in phase a; Offload / Pin local / Open folder
-            moved to the files-section header in phase b.)
+            moved to the files-section header in phase b; Player /
+            Converter / Thumbnails removed in phase c — the files grid's
+            per-file buttons and create-thumbnail tile replaced them.)
 
             All three columns collapse to icon-only at the SAME
             container-query breakpoint (@5xl). Since the columns are
@@ -8860,22 +8863,10 @@ function SidebarDetail({
             everything fits at 1/3 each, the three columns sit equal. */}
         <div className="flex divide-x divide-white/5 border-t border-white/15 pt-2">
           <div className="flex-1 flex items-center justify-center gap-1 px-3">
-            {videoCount > 0 && (
-              <Tooltip content="Send to Player">
-                <button onClick={onSendToPlayer} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
-                  <Film size={13} />
-                  <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Player</CollapsibleLabel>
-                </button>
-              </Tooltip>
-            )}
-            {videoCount > 0 && (
-              <Tooltip content="Send to Converter">
-                <button onClick={onSendToConverter} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
-                  <Zap size={13} />
-                  <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Converter</CollapsibleLabel>
-                </button>
-              </Tooltip>
-            )}
+            {/* Combine is the send that SURVIVED phase c: whole-stream
+                combine (every video, ordered) has no single-card grid
+                equivalent, unlike Player/Converter/Thumbnails whose jobs
+                moved to the files grid and its create-thumbnail tile. */}
             {videoCount > 1 && (
               <Tooltip content="Send to Combine">
                 <button onClick={onSendToCombine} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
@@ -8884,12 +8875,6 @@ function SidebarDetail({
                 </button>
               </Tooltip>
             )}
-            <Tooltip content={hasSMThumbnail ? 'Edit Stream Manager Thumbnail' : 'Create Stream Manager Thumbnail'} shortcut="Ctrl+Shift+T">
-              <button onClick={() => onOpenThumbnails()} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
-                <ImageIcon size={13} />
-                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Thumbnails</CollapsibleLabel>
-              </button>
-            </Tooltip>
           </div>
           <div className="flex-1 min-w-0 flex items-center justify-center gap-0.5">
             {videoCount > 0 && !meta?.archived && (
@@ -9599,11 +9584,22 @@ const PRIVACY_OPTIONS: Array<{ value: PrivacyValue; label: string; Icon: typeof 
  * accept schedule edits — only the privacy column renders in that case.
  */
 function BroadcastTimePrivacyRow({
+  date, onDateClick, dateMismatch,
   time, onTimeChange, timeMismatch, timeInvalid, showTime = true,
   privacy, onPrivacyChange, privacyMismatch,
   disabled, privacyLoading,
   trailing,
 }: {
+  /** Stream date as the row's FIRST field — a button opening the same
+   *  reschedule modal as the header's date button (sidebar-reorg phase c:
+   *  the date becomes verifiable right where the push happens; the header
+   *  copy stays because the broadcast row is hidden when YouTube is
+   *  inactive). Deliberately never disabled with the row — the date is SM
+   *  identity, editable regardless of push/link state, same as the header.
+   *  Hidden with showTime: schedule edits are rejected for past/live. */
+  date?: string
+  onDateClick?: () => void
+  dateMismatch?: 'local' | 'remote' | 'both' | 'unknown'
   time: string
   onTimeChange: (v: string) => void
   timeMismatch?: 'local' | 'remote' | 'both' | 'unknown'
@@ -9646,6 +9642,21 @@ function BroadcastTimePrivacyRow({
           items-end on the label row so the label baseline sits exactly
           at the input's top edge — matches MetaRow's tight spacing
           (the YouTube Title pattern) every other field uses. */}
+      {showTime && date && onDateClick && (
+        <div className="flex flex-col">
+          <span className={`${labelCls} min-h-[16px] items-end`}>Date {renderDot(dateMismatch)}</span>
+          <Tooltip content="Reschedule stream" side="top">
+            <button
+              type="button"
+              onClick={onDateClick}
+              className="bg-navy-900 border border-white/10 text-gray-200 font-mono tabular-nums text-xs rounded-lg px-2 pt-[5px] pb-1 flex items-center gap-1 hover:text-purple-300 hover:border-purple-500/40 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+            >
+              {date}
+              <PencilLine size={9} className="opacity-50" />
+            </button>
+          </Tooltip>
+        </div>
+      )}
       {showTime && (
         <div className="flex flex-col">
           <span className={`${labelCls} min-h-[16px] items-end`}>Broadcast time {renderDot(timeMismatch)}</span>
