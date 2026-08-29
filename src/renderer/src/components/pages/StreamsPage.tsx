@@ -4,7 +4,7 @@ import ReactDOM from 'react-dom'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
   Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ChevronsDown, ChevronsUp, X,
-  Film, Zap, Combine, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
+  Film, Zap, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
   Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon, ListRestart, Eye, WifiOff, CloudOff,
 } from 'lucide-react'
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
@@ -1606,14 +1606,6 @@ export function StreamsPage({
     const file = pickPrimaryVideo(folder)
     if (file) onSendToConverter([file], { folderPath: folder.folderPath, label: renderStreamTitle(folder, folders) || folder.folderName })
   }, [onSendToConverter, folders])
-
-  const handleSendToCombine = useCallback((folder: StreamFolder) => {
-    if (folder.videos.length > 0) onSendToCombine(folder.videos, {
-      folderPath: folder.folderPath,
-      label: renderStreamTitle(folder, folders) || folder.folderName,
-      date: folder.date,
-    })
-  }, [onSendToCombine, folders])
 
   // When a prompted cloud download finishes, route the now-local file to its
   // pending action and dismiss the modal. The pending download is read from a
@@ -4184,7 +4176,6 @@ export function StreamsPage({
               onLoadAllVods={loadAllVods}
               defaultBroadcastTime={config.defaultBroadcastTime || '19:00'}
               claudeEnabled={claudeEnabled}
-              onSendToCombine={() => handleSendToCombine(renderedFolder)}
               onSendFileToPlayer={handleSendFileToPlayer}
               onSendFileToConverter={(path) => onSendToConverter([path], {
                 folderPath: renderedFolder.folderPath,
@@ -5899,7 +5890,7 @@ function SidebarDetail({
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
-  onSendToCombine, onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, allowFileImport, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
+  onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, allowFileImport, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
   ytTitleTemplates, ytDescTemplates, ytTagTemplates, twitchTagTemplates,
@@ -5970,7 +5961,6 @@ function SidebarDetail({
   /** True when a Claude API key is configured. Drives whether the
    *  title/description fields wire up Ctrl+Space AI suggestions. */
   claudeEnabled: boolean
-  onSendToCombine: () => void
   /** Open / send one specific file — used by the files grid's per-file actions. */
   onSendFileToPlayer: (path: string) => void
   onSendFileToConverter: (path: string) => void
@@ -8835,56 +8825,17 @@ function SidebarDetail({
           )
         })()}
 
-        {/* Row-level action buttons. Pinned to the bottom of the footer
-            so destructive verbs (Archive, Delete) sit at the very end of
-            the visual flow.
-
-            Layout is equal-width columns spanning the footer, each
-            group's buttons centered within its column:
-              · Col 1 — Send-to: Combine (the sole survivor)
-              · Col 2 — Lifecycle: Archive / Delete
-            (Sidebar reorg: New episode moved to the header next to the
-            episode nav in phase a; Offload / Pin local / Open folder
-            moved to the files-section header in phase b; Player /
-            Converter / Thumbnails removed in phase c — the files grid's
-            per-file buttons and create-thumbnail tile replaced them.)
-
-            All three columns collapse to icon-only at the SAME
-            container-query breakpoint (@5xl). Since the columns are
-            equal width, mismatched thresholds would have one column
-            reflowing while the others stay put — staggered and ugly.
-            @5xl is dictated by Col 3 (the narrowest button group still
-            fits its labels at that width); the wider groups stay
-            consistent with it. `-ms-1.5` cancels the parent button's
-            `gap-1.5` while collapsed so the icon-only state has no
-            leftover whitespace.
-
-            `divide-x divide-white/5` adds a subtle vertical hairline
-            between columns — replaces the inline divider dots from the
-            old flex-wrap layout.
-
-            Sizing: flex with `flex-1` on each column. The default
-            `min-width: auto` (= min-content) on flex items means cols
-            1 and 2 won't shrink below their buttons' natural width.
-            Col 3 has `min-w-0` overriding that, so it gives up space
-            first when cols 1/2 need more than their 1/3 share. When
-            everything fits at 1/3 each, the three columns sit equal. */}
-        <div className="flex divide-x divide-white/5 border-t border-white/15 pt-2">
-          <div className="flex-1 flex items-center justify-center gap-1 px-3">
-            {/* Combine is the send that SURVIVED phase c: whole-stream
-                combine (every video, ordered) has no single-card grid
-                equivalent, unlike Player/Converter/Thumbnails whose jobs
-                moved to the files grid and its create-thumbnail tile. */}
-            {videoCount > 1 && (
-              <Tooltip content="Send to Combine">
-                <button onClick={onSendToCombine} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
-                  <Combine size={13} />
-                  <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Combine</CollapsibleLabel>
-                </button>
-              </Tooltip>
-            )}
-          </div>
-          <div className="flex-1 min-w-0 flex items-center justify-center gap-0.5">
+        {/* Lifecycle row — Archive / Delete, pinned to the bottom of the
+            footer so destructive verbs sit at the very end of the visual
+            flow. The old three-column send/ops/lifecycle layout emptied
+            out over the sidebar reorg: New episode → header (phase a),
+            Offload / Pin local / Open folder → files-section header
+            (phase b), Player / Converter / Thumbnails → files grid
+            per-file buttons + create-thumbnail tile (phase c), and
+            whole-stream Combine removed outright in the cleanup pass —
+            rarely used, and a combine should be a deliberate file
+            SELECTION, which the grid's select mode covers. */}
+        <div className="flex items-center justify-center gap-0.5 border-t border-white/15 pt-2">
             {videoCount > 0 && !meta?.archived && (
               <Tooltip content={isArchiving ? 'Already in the converter — archive in progress' : 'Archive'}>
                 <button onClick={onArchive} disabled={isArchiving} className={PANEL_ACTION_BUTTON_GREEN}>
@@ -8899,7 +8850,6 @@ function SidebarDetail({
                 <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Delete</CollapsibleLabel>
               </button>
             </Tooltip>
-          </div>
         </div>
       </div>
 
