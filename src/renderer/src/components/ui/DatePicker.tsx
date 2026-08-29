@@ -298,21 +298,28 @@ export function DatePicker({
     return (
       // mx-auto: the panel is a fixed-width block, so it centers itself
       // in whatever container it's dropped into (the modal content box).
-      <div className="w-64 mx-auto bg-navy-900 border border-white/10 rounded-lg p-2 flex flex-col gap-2">
+      <div className="w-64 mx-auto bg-navy-900 border border-white/10 rounded-lg p-2 flex flex-col gap-1.5">
         <div className={disabled ? 'opacity-60 pointer-events-none' : ''}>
           {calendarBody}
         </div>
-        <input
-          type="date"
-          value={value}
-          min={min}
-          onChange={e => onChange(e.target.value)}
-          disabled={disabled}
-          // `date-picker-input` hides the native calendar indicator
-          // (see index.css) — the always-visible calendar above IS the
-          // calendar; typing + arrow-key editing stay native.
-          className={`date-picker-input ${className ?? ''}`}
-        />
+        {/* Typed-entry footer — deliberately frameless (no border-in-
+            border nesting): a full-bleed hairline separates it from the
+            calendar and the input sits directly on the panel background,
+            so the combined element reads as ONE control. The native
+            date-segment highlight plus a focus tint carry the focus
+            affordance. `date-picker-input` hides the native calendar
+            indicator (see index.css) — the calendar above IS the
+            calendar; typing + arrow-key editing stay native. */}
+        <div className="border-t border-white/10 -mx-2 px-2 pt-1.5">
+          <input
+            type="date"
+            value={value}
+            min={min}
+            onChange={e => onChange(e.target.value)}
+            disabled={disabled}
+            className={`date-picker-input w-full bg-transparent text-xs text-gray-200 text-center px-1 py-0.5 rounded focus:outline-none focus:bg-white/5 disabled:opacity-60 [color-scheme:dark] ${className ?? ''}`}
+          />
+        </div>
       </div>
     )
   }

@@ -10106,17 +10106,16 @@ function RescheduleModal({
               </span>
             </div>
           )}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-gray-400">New date</label>
-            <DatePicker
-              inline
-              value={newDate}
-              onChange={setNewDate}
-              disabled={busy || pullMode}
-              markedDates={dateMarks}
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark] disabled:opacity-60"
-            />
-          </div>
+          {/* No label — the modal title + the combined picker are
+              self-explanatory, and a left-anchored label over the
+              centered panel read lopsided. */}
+          <DatePicker
+            inline
+            value={newDate}
+            onChange={setNewDate}
+            disabled={busy || pullMode}
+            markedDates={dateMarks}
+          />
 
           {sameDate && !pullMode && (
             <p className="text-xs text-gray-400 italic">Choose a different date to reschedule.</p>
@@ -10793,17 +10792,15 @@ function NewStreamModal({
             Pick the stream's date. You'll fill in the title, games, and any other details from the sidebar once it's open.
           </p>
         )}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-gray-400">Date</label>
-          <DatePicker
-            inline
-            value={date}
-            onChange={setDate}
-            disabled={busy}
-            markedDates={dateMarks}
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
-          />
-        </div>
+        {/* No label — the modal title + helper copy already say "pick
+            the date", and the combined picker is self-evident. */}
+        <DatePicker
+          inline
+          value={date}
+          onChange={setDate}
+          disabled={busy}
+          markedDates={dateMarks}
+        />
         {dateExists && (
           <p className="text-xs text-amber-400 flex items-start gap-1.5">
             <AlertTriangle size={11} className="shrink-0 mt-0.5" />
