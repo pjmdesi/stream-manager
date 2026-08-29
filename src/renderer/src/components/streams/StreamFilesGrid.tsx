@@ -975,16 +975,30 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const bulkOffload = () => { enqueueOffload(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
   const bulkPin = () => { enqueueHydrate(selectedPaths.map(p => ({ path: p, size: sizeOf(p) })), false); clearSelection() }
   const selectedHasBlocked = useMemo(() => selectedPaths.some(p => fileReason(p)), [selectedPaths, fileReason])
+  // The DISPLAYED thumbnail (preferred if its file still exists, else the
+  // first) is always kept pinned — main-side getProtectedPaths silently
+  // skips it on offload, same logic as the cards' isPreferred.
+  const displayedThumbnail = useMemo(() => {
+    if (folder.thumbnails.length === 0) return null
+    const pref = preferredThumbnail
+      ? folder.thumbnails.find(p => (p.split(/[\\/]/).pop() ?? '') === preferredThumbnail)
+      : undefined
+    return pref ?? folder.thumbnails[0]
+  }, [folder.thumbnails, preferredThumbnail])
   // Affected-file counts for the bulk tooltips — each verb touches a
   // different subset: convert/combine only videos, offload only files
-  // that are currently local, pin only cloud-only files, delete
+  // that are currently local (minus the protected displayed thumbnail,
+  // which offload would skip), pin only cloud-only files, delete
   // everything not blocked by in-use checks. `undefined` hydration
   // (still checking) counts as local, matching the cards' `?? true`
-  // scan-flag fallback, so local+remote always sum to the selection.
+  // scan-flag fallback. Remote is counted independently — the protected
+  // thumbnail is excluded from the offload count, not shifted across.
   const selectedLocalCount = useMemo(
-    () => selectedPaths.filter(p => localStatus[p] !== false).length,
+    () => selectedPaths.filter(p => localStatus[p] !== false && p !== displayedThumbnail).length,
+    [selectedPaths, localStatus, displayedThumbnail])
+  const selectedRemoteCount = useMemo(
+    () => selectedPaths.filter(p => localStatus[p] === false).length,
     [selectedPaths, localStatus])
-  const selectedRemoteCount = selectedPaths.length - selectedLocalCount
   const selectedDeletableCount = useMemo(
     () => selectedPaths.filter(p => !fileReason(p)).length,
     [selectedPaths, fileReason])
