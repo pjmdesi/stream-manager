@@ -29,7 +29,7 @@ function pad(n: number) { return String(n).padStart(2, '0') }
  * stream dots. Value is a `YYYY-MM-DD` string (or '' for empty).
  */
 export function DatePicker({
-  value, onChange, disabled, className, markedDates, min,
+  value, onChange, disabled, className, markedDates, min, inline,
 }: {
   value: string
   onChange: (v: string) => void
@@ -40,6 +40,12 @@ export function DatePicker({
   /** Optional minimum selectable date (YYYY-MM-DD). Days before it are
    *  disabled in the popup; the native input also gets the `min`. */
   min?: string
+  /** Render the calendar permanently, stacked above the input as one
+   *  combined panel, instead of a click-to-open popup. For modal date
+   *  steps (Reschedule, New stream/episode) where there's room to just
+   *  show it. The panel is fixed-width (~the empty-sidebar calendar)
+   *  rather than stretching to the modal. */
+  inline?: boolean
 }) {
   const { config } = useStore()
   const firstDayMondayBased = config.calendarFirstDayOfWeek === 'monday'
@@ -73,6 +79,17 @@ export function DatePicker({
     setViewMonth(parseInt(b.slice(5, 7), 10) - 1)
     setMonthPickerOpen(false)
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Inline mode has no "open" moment to re-sync on — follow the VALUE
+  // instead, so typing a date in the input walks the always-visible
+  // calendar to that month (picking a day passes through here too,
+  // which is a no-op month-wise).
+  useEffect(() => {
+    if (!inline) return
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return
+    setViewYear(parseInt(value.slice(0, 4), 10))
+    setViewMonth(parseInt(value.slice(5, 7), 10) - 1)
+  }, [inline, value])
 
   // Close on outside click — the popup is portaled out of the wrapper,
   // so the check excludes both the wrapper (input + calendar button)
@@ -150,39 +167,13 @@ export function DatePicker({
   const nextMonth = () => {
     setViewMonth(m => { if (m === 11) { setViewYear(y => y + 1); return 0 } return m + 1 })
   }
-  const pick = (iso: string) => { onChange(iso); setOpen(false) }
+  const pick = (iso: string) => { onChange(iso); if (!inline) setOpen(false) }
 
-  return (
-    <div ref={wrapRef} className="relative">
-      <input
-        type="date"
-        value={value}
-        min={min}
-        onChange={e => onChange(e.target.value)}
-        disabled={disabled}
-        // `date-picker-input` hides the native calendar dropdown
-        // indicator (see index.css) so only our custom popup opens; the
-        // text-segment typing + arrow-key editing stay native.
-        className={`date-picker-input ${className ?? ''}`}
-      />
-      <button
-        type="button"
-        onClick={() => !disabled && setOpen(o => !o)}
-        disabled={disabled}
-        aria-label="Open calendar"
-        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        tabIndex={-1}
-      >
-        <CalendarDays size={14} />
-      </button>
-
-      {open && ReactDOM.createPortal(
-        <div
-          ref={popupRef}
-          style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999, visibility: pos ? 'visible' : 'hidden' }}
-          className="z-[9999] bg-navy-900 border border-white/10 rounded-lg shadow-xl p-2 w-60"
-        >
-          {/* Month header with nav */}
+  // Shared calendar markup — the click-to-open popup and the inline
+  // panel render exactly this, so the two variants can't drift.
+  const calendarBody = (
+    <>
+      {/* Month header with nav */}
           <div className="relative flex items-center justify-between mb-2">
             <button
               type="button"
@@ -295,6 +286,68 @@ export function DatePicker({
               )
             })}
           </div>
+    </>
+  )
+
+  // Inline: one combined panel — calendar permanently on top, the
+  // typed-entry input below it. Fixed width (~the empty-sidebar
+  // calendar) instead of stretching to the container; the calendar
+  // half grays out and ignores clicks while disabled (the input's own
+  // disabled attribute covers the rest).
+  if (inline) {
+    return (
+      // mx-auto: the panel is a fixed-width block, so it centers itself
+      // in whatever container it's dropped into (the modal content box).
+      <div className="w-64 mx-auto bg-navy-900 border border-white/10 rounded-lg p-2 flex flex-col gap-2">
+        <div className={disabled ? 'opacity-60 pointer-events-none' : ''}>
+          {calendarBody}
+        </div>
+        <input
+          type="date"
+          value={value}
+          min={min}
+          onChange={e => onChange(e.target.value)}
+          disabled={disabled}
+          // `date-picker-input` hides the native calendar indicator
+          // (see index.css) — the always-visible calendar above IS the
+          // calendar; typing + arrow-key editing stay native.
+          className={`date-picker-input ${className ?? ''}`}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        type="date"
+        value={value}
+        min={min}
+        onChange={e => onChange(e.target.value)}
+        disabled={disabled}
+        // `date-picker-input` hides the native calendar dropdown
+        // indicator (see index.css) so only our custom popup opens; the
+        // text-segment typing + arrow-key editing stay native.
+        className={`date-picker-input ${className ?? ''}`}
+      />
+      <button
+        type="button"
+        onClick={() => !disabled && setOpen(o => !o)}
+        disabled={disabled}
+        aria-label="Open calendar"
+        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        tabIndex={-1}
+      >
+        <CalendarDays size={14} />
+      </button>
+
+      {open && ReactDOM.createPortal(
+        <div
+          ref={popupRef}
+          style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999, visibility: pos ? 'visible' : 'hidden' }}
+          className="z-[9999] bg-navy-900 border border-white/10 rounded-lg shadow-xl p-2 w-60"
+        >
+          {calendarBody}
         </div>,
         document.body
       )}

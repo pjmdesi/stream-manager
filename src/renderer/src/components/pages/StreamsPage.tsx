@@ -10062,7 +10062,7 @@ function RescheduleModal({
         }
       }}
       title={step === 'date' ? 'Reschedule stream' : 'Push to connected platforms?'}
-      width="2xl"
+      width="md"
       footer={
         step === 'date' ? (
           <>
@@ -10109,11 +10109,12 @@ function RescheduleModal({
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-gray-400">New date</label>
             <DatePicker
+              inline
               value={newDate}
               onChange={setNewDate}
               disabled={busy || pullMode}
               markedDates={dateMarks}
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark] disabled:opacity-60"
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark] disabled:opacity-60"
             />
           </div>
 
@@ -10795,11 +10796,12 @@ function NewStreamModal({
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-gray-400">Date</label>
           <DatePicker
+            inline
             value={date}
             onChange={setDate}
             disabled={busy}
             markedDates={dateMarks}
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
           />
         </div>
         {dateExists && (
