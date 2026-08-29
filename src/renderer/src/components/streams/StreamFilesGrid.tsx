@@ -1,5 +1,5 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X, Combine, ChevronDown, ChevronRight, Upload, AlertTriangle } from 'lucide-react'
+import { Zap, Play, Trash2, Bookmark, FileImage, Image as ImageIcon, Film, Scissors, Cloud, CloudCheck, CloudDownload, FolderOpen, Loader2, Maximize2, Archive, Check, CheckCheck, Square, ListChecks, X, Combine, ChevronDown, ChevronRight, Upload, AlertTriangle } from 'lucide-react'
 import { VideoThumb, CHECKER, releaseThumbDecodes } from '../ui/VideoThumb'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { ThumbImage } from './ThumbImage'
@@ -54,6 +54,7 @@ const ACTION_GRAY = `${ACTION_BASE} hover:text-gray-200 hover:bg-white/10`
 const ACTION_PINK = `${ACTION_BASE} hover:text-pink-400 hover:bg-pink-500/10`
 const ACTION_CYAN = `${ACTION_BASE} hover:text-cyan-400 hover:bg-cyan-500/10`
 const ACTION_RED = `${ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
+const ACTION_YELLOW = `${ACTION_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
 
 const CARD = 'group/file relative flex gap-3 p-2 rounded-lg bg-white/[0.03] border border-white/5 hover:bg-white/5 transition-colors'
 const ACTION_ROW = 'mt-auto flex items-center justify-end gap-0.5 opacity-0 group-hover/file:opacity-100 transition-opacity'
@@ -595,6 +596,14 @@ interface Props {
   /** File to flash with a focus ring (streams-list tooltip row click). The
    *  token re-triggers for repeat clicks on the same file. */
   highlightFile?: { path: string; token: number } | null
+  /** Stream-level file ops, relocated here from the sidebar footer
+   *  (sidebar-reorg phase b) so they sit with the files they act on and
+   *  stay visible while the grid is collapsed. Offload/pin render only
+   *  when cloud sync is active and the folder has videos — the same
+   *  gating the footer buttons used. */
+  onOpenFolder: () => void
+  onOffloadAll: () => void
+  onPinAllLocal: () => void
 }
 
 /**
@@ -616,7 +625,7 @@ export interface FilesGridHandle {
 export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function StreamFilesGrid({
   folder, thumbsKey, preferredThumbnail, cloudSyncActive,
   onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSendFilesToCombine, allowImport, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onFilesDeleted,
-  highlightFile,
+  highlightFile, onOpenFolder, onOffloadAll, onPinAllLocal,
 }, ref) {
   const videoMap = folder.meta?.videoMap ?? {}
   const hasVideos = folder.videos.length > 0
@@ -1045,15 +1054,36 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     draftCount > 0 ? plural(draftCount, 'clip draft') : null,
   ].filter(Boolean).join(' · ') || 'No files yet'
 
+  // Stream-level ops — one JSX cluster rendered in BOTH header variants
+  // (collapsed and expanded) so collapsing the grid never hides them.
+  const streamOps = (
+    <div className="flex items-center gap-0.5">
+      {cloudSyncActive && hasVideos && (
+        <>
+          <Tooltip content="Offload this stream's files to the cloud" side="top">
+            <button onClick={onOffloadAll} className={ACTION_PINK}><Cloud size={12} /> Offload</button>
+          </Tooltip>
+          <Tooltip content="Pin this stream's files on this device" side="top">
+            <button onClick={onPinAllLocal} className={ACTION_CYAN}><CloudDownload size={12} /> Pin local</button>
+          </Tooltip>
+        </>
+      )}
+      <Tooltip content="Open this stream's folder in Explorer" side="top">
+        <button onClick={onOpenFolder} className={ACTION_YELLOW}><FolderOpen size={12} /> Open folder</button>
+      </Tooltip>
+    </div>
+  )
+
   if (collapsed) {
     return (
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
         <Tooltip content="Expand the files grid" side="top">
           <button onClick={() => setCollapsedPersist(false)} className={COLLAPSE_BTN}>
             <ChevronRight size={14} />{ZWSP}
           </button>
         </Tooltip>
         <span className="text-[11px] text-gray-400">{collapsedSummary}</span>
+        <div className="ml-auto">{streamOps}</div>
       </div>
     )
   }
@@ -1079,13 +1109,18 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             </Tooltip>
           </>
         )}
-        {/* Select controls are pointless on an empty (import-only) grid. */}
-        {(hasVideos || hasImages) && (
         <div className="ml-auto flex items-center gap-0.5 flex-wrap">
-          {!selectMode ? (
-            <Tooltip content="Select multiple files for bulk actions" side="top" shortcut="Ctrl+Shift+A">
-              <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /> Select</button>
-            </Tooltip>
+          {/* Stream ops hide during select mode — the selection cluster
+              brings its own bulk versions of offload/pin. */}
+          {!selectMode && streamOps}
+          {/* Select controls are pointless on an empty (import-only) grid. */}
+          {(hasVideos || hasImages) && (!selectMode ? (
+            <>
+              <div className="w-px h-5 bg-white/10 mx-1 self-center" />
+              <Tooltip content="Select multiple files for bulk actions" side="top" shortcut="Ctrl+Shift+A">
+                <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /> Select</button>
+              </Tooltip>
+            </>
           ) : (
             <>
               <span className="text-[11px] text-gray-400 mr-1">{selectedPaths.length} selected</span>
@@ -1142,9 +1177,8 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                 </Tooltip>
               </div>
             </>
-          )}
+          ))}
         </div>
-        )}
       </div>
       {/* @container: the card action labels collapse to icon-only via a
           container query against the GRID's width (@2xl ≈ the one-column
@@ -1180,6 +1214,23 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             />
           )
         })}
+        {/* Create-thumbnail tile — dropzone-styled placeholder sitting where
+            the SM thumbnail card will appear once one exists (sidebar-reorg
+            phase b; covers the create case the footer's Thumbnails button
+            handled). Keyed on SM-CREATED thumbnails only: an imported or
+            preferred image doesn't dismiss the offer. Self-labeling like the
+            add-files tile, so no tooltip; Ctrl+Shift+T still works. */}
+        {showImage && !selectMode && !folder.thumbnails.some(p => parseSmThumbnailOrdinal(p) != null) && (
+          <button
+            type="button"
+            onClick={() => onEditThumbnail()}
+            className="flex flex-col items-center justify-center gap-1 p-2 min-h-[74px] rounded-lg border-2 border-dashed border-white/10 text-gray-400 text-center transition-colors hover:border-purple-500/50 hover:bg-purple-600/5 hover:text-gray-300"
+          >
+            <FileImage size={16} />
+            <span className="text-[11px]">Create thumbnail</span>
+            <span className="text-[10px] text-gray-500">Design one in the thumbnail editor</span>
+          </button>
+        )}
         {showImage && folder.thumbnails.map((path, i) => {
           const name = path.split(/[\\/]/).pop() ?? ''
           // Match main-side pickDisplayed: a preferredThumbnail that no longer

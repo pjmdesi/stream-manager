@@ -393,9 +393,6 @@ function buildDateMarks(folders: StreamFolder[] | undefined): Map<string, DateMa
 const PANEL_ACTION_BUTTON_BASE = 'inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-200'
 const PANEL_ACTION_BUTTON_GREEN = `${PANEL_ACTION_BUTTON_BASE} hover:text-green-400 hover:bg-green-500/10`
 const PANEL_ACTION_BUTTON_RED = `${PANEL_ACTION_BUTTON_BASE} hover:text-red-400 hover:bg-red-500/10`
-const PANEL_ACTION_BUTTON_YELLOW = `${PANEL_ACTION_BUTTON_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
-const PANEL_ACTION_BUTTON_CYAN = `${PANEL_ACTION_BUTTON_BASE} hover:text-cyan-400 hover:bg-cyan-500/10`
-const PANEL_ACTION_BUTTON_PINK = `${PANEL_ACTION_BUTTON_BASE} hover:text-pink-400 hover:bg-pink-500/10`
 
 /**
  * Streams page — new architecture. Replaces the table-with-modal layout of
@@ -7498,6 +7495,9 @@ function SidebarDetail({
                     onOpenLightbox={i => setLightboxIndex(i)}
                     onFilesDeleted={onFilesDeleted}
                     highlightFile={fileHighlight}
+                    onOpenFolder={onOpenFolder}
+                    onOffloadAll={onOffload}
+                    onPinAllLocal={onPinLocal}
                   />
                 </MetaRow>
               </div>
@@ -8830,13 +8830,13 @@ function SidebarDetail({
             so destructive verbs (Archive, Delete) sit at the very end of
             the visual flow.
 
-            Layout is three equal-width columns (`grid-cols-3`) spanning
-            the footer, each group's buttons centered within its column:
+            Layout is equal-width columns spanning the footer, each
+            group's buttons centered within its column:
               · Col 1 — Send-to: Player / Converter / Combine / Thumbnail
-              · Col 2 — Stream ops: Offload / Pin local / Open folder
-              · Col 3 — Lifecycle: Archive / Delete
-            (New episode moved to the header next to the episode nav —
-            sidebar-reorg phase a.)
+              · Col 2 — Lifecycle: Archive / Delete
+            (Sidebar reorg: New episode moved to the header next to the
+            episode nav in phase a; Offload / Pin local / Open folder
+            moved to the files-section header in phase b.)
 
             All three columns collapse to icon-only at the SAME
             container-query breakpoint (@5xl). Since the columns are
@@ -8888,30 +8888,6 @@ function SidebarDetail({
               <button onClick={() => onOpenThumbnails()} className={`${PANEL_ACTION_BUTTON_BASE} hover:text-purple-300 hover:bg-purple-500/10`}>
                 <ImageIcon size={13} />
                 <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Thumbnails</CollapsibleLabel>
-              </button>
-            </Tooltip>
-          </div>
-          <div className="flex-1 flex items-center justify-center gap-1 px-3">
-            {cloudSyncActive && videoCount > 0 && (
-              <>
-                <Tooltip content="Offload to cloud">
-                  <button onClick={onOffload} className={PANEL_ACTION_BUTTON_PINK}>
-                    <Cloud size={13} />
-                    <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Offload</CollapsibleLabel>
-                  </button>
-                </Tooltip>
-                <Tooltip content="Pin local">
-                  <button onClick={onPinLocal} className={PANEL_ACTION_BUTTON_CYAN}>
-                    <CloudDownload size={13} />
-                    <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Pin local</CollapsibleLabel>
-                  </button>
-                </Tooltip>
-              </>
-            )}
-            <Tooltip content="Open folder">
-              <button onClick={onOpenFolder} className={PANEL_ACTION_BUTTON_YELLOW}>
-                <FolderOpen size={13} />
-                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Open folder</CollapsibleLabel>
               </button>
             </Tooltip>
           </div>
