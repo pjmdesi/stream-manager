@@ -8838,16 +8838,19 @@ function SidebarDetail({
         <div className="flex items-center justify-center gap-0.5 border-t border-white/15 pt-2">
             {videoCount > 0 && !meta?.archived && (
               <Tooltip content={isArchiving ? 'Already in the converter — archive in progress' : 'Archive'}>
+                {/* Permanent icon+label (no CollapsibleLabel): with only
+                    these two in the row there's room at any sidebar
+                    width, and destructive verbs deserve their names. */}
                 <button onClick={onArchive} disabled={isArchiving} className={PANEL_ACTION_BUTTON_GREEN}>
                   <Archive size={13} />
-                  <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Archive</CollapsibleLabel>
+                  Archive
                 </button>
               </Tooltip>
             )}
             <Tooltip content={deleteBlockReason ? "Can't delete: files are currently in use" : 'Delete this stream and all its contents'}>
               <button onClick={onDelete} disabled={!!deleteBlockReason} className={`${PANEL_ACTION_BUTTON_RED} disabled:opacity-40 disabled:cursor-not-allowed`}>
                 <Trash2 size={13} />
-                <CollapsibleLabel expandClass="@5xl:grid-cols-[1fr] @5xl:ms-0" collapsedMarginStart="-ms-1.5">Delete</CollapsibleLabel>
+                Delete
               </button>
             </Tooltip>
         </div>
