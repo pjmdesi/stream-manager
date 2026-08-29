@@ -9736,7 +9736,10 @@ function BroadcastTimePrivacyRow({
           loading={privacyLoading}
         />
       </div>
-      {trailing}
+      {/* Trailing control centers against the INPUT band (30px: text-xs
+          line + py-1.5 + border), not the full row height — the labels
+          above the fields would otherwise drag it visually low. */}
+      {trailing && <div className="self-end flex items-center h-[30px]">{trailing}</div>}
     </div>
   )
 }
