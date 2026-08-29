@@ -1231,6 +1231,16 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
           ))}
         </div>
       </div>
+      {/* Input-style container around the grid items: the fields' chrome
+          (bg-navy-900, white/10 border) with concentric corners — item
+          rounded-lg (8px) + 12px inset = rounded-[20px]. The 12px inset is
+          this wrapper's p-2 plus the grid's p-1 ring breathing room,
+          matching the inputs' px-3. Deliberately a WRAPPER around the
+          scrolling grid, not styles on it, so the scrollbar sits inset
+          from the border instead of riding the corner curve; and it stays
+          within the content width so its border aligns with the other
+          fields' borders (items read like input text inset in a field). */}
+      <div className="bg-navy-900 border border-white/10 rounded-[20px] p-2">
       {/* @container: the card action labels collapse to icon-only via a
           container query against the GRID's width (@2xl ≈ the one-column
           threshold of this auto-fill template) — a narrow one-column card
@@ -1342,6 +1352,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             <span className="text-[10px] text-gray-500">Moves into this stream's folder · hold Ctrl while dropping to copy</span>
           </button>
         )}
+      </div>
       </div>
       {/* Per-file import failures — inline and persistent until the next
           import attempt (no toasts). */}
