@@ -7238,6 +7238,25 @@ function SidebarDetail({
           part of the metadata content and the header is for identity +
           navigation chrome. */}
       <div className="ps-4 pe-2 pt-3 pb-4 border-b border-white/5 shrink-0 flex flex-col gap-2">
+        {/* Title row — identity leads the header (sidebar cleanup,
+            2026-08-29), with the close button pinned to the top-right
+            corner beside it. The title wraps rather than truncates, so
+            the full title is always visible — no tooltip needed. */}
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0 text-base font-semibold text-gray-100 break-words leading-snug">
+            {title}
+          </div>
+          <Tooltip content="Close" side="bottom" triggerClassName="shrink-0">
+            <Button
+              variant="danger"
+              size="sm"
+              icon={<X size={14} />}
+              onClick={onClose}
+              aria-label="Close"
+            />
+          </Tooltip>
+        </div>
+        {/* Date / episode nav / New episode / Archived row. */}
         <div className="relative flex items-center gap-2">
           <Tooltip content={<div>Reschedule stream<DateTooltipCalendar streamDate={folder.date} /></div>} side="bottom">
             <button
@@ -7424,20 +7443,6 @@ function SidebarDetail({
             size="sm"
             className="shrink-0"
           />
-          <Tooltip content="Close" side="bottom" triggerClassName="ml-auto">
-            <Button
-              variant="danger"
-              size="sm"
-              icon={<X size={14} />}
-              onClick={onClose}
-              aria-label="Close"
-            />
-          </Tooltip>
-        </div>
-        {/* Wraps rather than truncates, so the full title is always visible —
-            no tooltip needed (the old native title= was redundant). */}
-        <div className="text-base font-semibold text-gray-100 break-words leading-snug">
-          {title}
         </div>
       </div>
 
