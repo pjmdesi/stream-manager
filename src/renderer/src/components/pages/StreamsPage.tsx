@@ -7333,16 +7333,19 @@ function SidebarDetail({
               button pile). OUTSIDE the nav group above: that group is hidden
               for a single-episode series (no prev/next, not standalone), and
               a brand-new series is exactly when this button matters most.
-              Icon-only like the rest of the header chrome; blue hover keeps
-              its footer identity as the creation verb. */}
+              Heavily used, so it keeps its label whenever the sidebar has
+              room (@md against the sidebar root container) and collapses to
+              icon-only on very narrow sidebars; blue hover keeps its footer
+              identity as the creation verb. */}
           <Tooltip content={isStandalone(meta) ? 'Standalone streams don’t have episodes — enable Series to use this' : 'New episode based on this stream'} side="bottom" shortcut={isStandalone(meta) ? undefined : 'Ctrl+Shift+N'}>
             <button
               type="button"
               onClick={onNewEpisode}
               disabled={isStandalone(meta)}
-              className="p-1 rounded text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400"
+              className="p-1 rounded flex items-center gap-1 text-xs text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400"
             >
               <CopyPlus size={13} />
+              <CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">New episode</CollapsibleLabel>
             </button>
           </Tooltip>
           {/* Picker dropdown — portal-rendered so the sidebar's
