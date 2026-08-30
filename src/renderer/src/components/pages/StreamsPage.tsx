@@ -7239,14 +7239,19 @@ function SidebarDetail({
           <div className="flex-1 min-w-0 text-base font-semibold text-gray-100 break-words leading-snug">
             {displayWrapTitle(title)}
           </div>
-          <Tooltip content="Close" side="bottom" triggerClassName="shrink-0">
+          {/* Labeled like the player/thumbnail close-session buttons
+              (sentence case matches theirs); collapses to icon-only at
+              the same sidebar breakpoint as New episode. */}
+          <Tooltip content="Close sidebar" side="bottom" triggerClassName="shrink-0">
             <Button
               variant="danger"
               size="sm"
               icon={<X size={14} />}
               onClick={onClose}
-              aria-label="Close"
-            />
+              collapsibleLabel="@md:grid-cols-[1fr] @md:ms-0"
+            >
+              Close sidebar
+            </Button>
           </Tooltip>
         </div>
         {/* Date / episode nav / New episode / Archived row. */}
