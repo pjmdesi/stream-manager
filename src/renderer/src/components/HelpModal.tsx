@@ -82,7 +82,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         <p>The Streams page shows a list of stream items stacked as rows sorted by date (descending) by default. Upcoming streams are streams scheduled for a future date and are colored teal. Streams happening on the current day are colored blue. Each stream item row is made up of the following elements:</p>
 
         <ElementSection icon={<ImageIcon size={14} />} title="Thumbnail">
-          <p>Stream Manager picks the best image to represent a stream item (typically the first available that matches certain criteria). To choose a different one, open the details sidebar and use the <strong className="text-gray-300">Media files</strong> section — set any image as the thumbnail there, or click it to browse every image full screen.</p>
+          <p>Stream Manager shows a stream item's picked thumbnail or picks the best image in the item's folder to represent a stream item (typically the first available that matches certain criteria). To choose a different one, open the details sidebar and use the <strong className="text-gray-300">Files</strong> section — set any image as the thumbnail there. Click a thumbnail image to open a lightbox to view the stream item's images full screen.</p>
         </ElementSection>
 
         <ElementSection icon={<Film size={14} />} title="Video Counter">
@@ -96,7 +96,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<Archive size={14} />} title="Status Badges">
-          <p>A row of small badges surfaces the stream's status at a glance:</p>
+          <p>A row of small badges shows a stream's status:</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
             <li className="flex items-baseline gap-2"><Archive size={11} className="shrink-0 text-green-400 translate-y-0.5" /><span><strong className="text-gray-300">Archived</strong> — the stream's videos have been compressed via the archive process.</span></li>
             <li className="flex items-baseline gap-2"><Radio size={11} className="shrink-0 text-teal-400 translate-y-0.5" /><span><strong className="text-gray-300">Upcoming</strong> — the stream is scheduled but hasn't aired yet.</span></li>
@@ -105,7 +105,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<Tag size={14} />} title="Type Tags">
-          <p>Used to categorize the stream however you like (or not at all). Create new tags on the fly when you create or edit a stream item, or via the <strong className="text-gray-300">Manage Tags</strong> button in the Streams page header. Tags can be customized with different colors and textures too.</p>
+          <p>Used to categorize the stream however you like (or not at all). Create new tags on the fly when you create or edit a stream item, or via the <strong className="text-gray-300">Manage Tags</strong> button in the Streams page header. Tags can be customized with different colors and textures.</p>
         </ElementSection>
 
         <ElementSection icon={<Hash size={14} />} title="Topics / Games">
@@ -113,11 +113,11 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<MessageSquare size={14} />} title="Notes">
-          <p>Free-form notes for anything the other fields don't cover. Located at the bottom of the detail sidebar main content.</p>
+          <p>Free-form notes for anything the other fields don't cover. Located at the bottom of the detail sidebar's main content.</p>
         </ElementSection>
 
         <ElementSection icon={<Zap size={14} />} title="Action Buttons">
-          <p>Click a stream item to open the details sidebar — that's where all editing happens. Hovering a row shows three quick actions on its right (they step aside when the list gets too narrow — everything stays reachable from the sidebar):</p>
+          <p>Click a stream item to open the details sidebar. That's where all editing happens. Hovering a row shows three quick actions on its right (hidden when the list rows get too narrow):</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
             <li className="flex items-baseline gap-2"><Film size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Player</strong> — open the stream's video in the Player page for review or clipping.</span></li>
             <li className="flex items-baseline gap-2"><Zap size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Converter</strong> — queue the stream's video for conversion using a chosen preset.</span></li>
