@@ -7546,45 +7546,32 @@ function SidebarDetail({
                     <span className={activeTitleMergeKeys.has('episode') ? 'font-mono text-purple-200 normal-case tracking-normal' : 'font-mono font-light text-purple-400/70 normal-case tracking-normal'}>{'{episode}'}</span>
                   </span>
                   <div className="flex items-stretch w-fit bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
-                    <Tooltip content={isStandalone(meta) ? 'Mark as a series episode — enables season/episode numbering' : 'Make this a standalone stream — turns off season/episode numbering'} side="top">
-                      <button
-                        type="button"
-                        aria-pressed={meta?.isSeries !== false}
-                        // Also clear the auto-detect pending flag — a manual
-                        // toggle means the user owns the value going forward.
-                        // Without this, clearing then re-adding games[] later
-                        // could silently flip the user's choice. Enabling Series
-                        // also fills season/episode from a matching existing
-                        // series (same logic as the auto-detect), so turning it
-                        // on by hand isn't left with empty placeholder fields.
-                        onClick={() => {
-                          const enabling = isStandalone(meta)
-                          if (!enabling) { onUpdateMeta({ isSeries: false, seriesAutoDetectPending: undefined }); return }
-                          const primary = resolvePrimaryGame(meta) || meta?.games?.[0] || ''
-                          const nums = primary ? computeSeriesNumbers(primary) : null
-                          const update: Partial<StreamMeta> = { isSeries: true, seriesAutoDetectPending: undefined }
-                          if (nums) {
-                            if (!meta?.ytSeason) update.ytSeason = nums.ytSeason
-                            if (!meta?.ytEpisode) update.ytEpisode = nums.ytEpisode
-                          }
-                          onUpdateMeta(update)
-                        }}
-                        // The whole half-pill IS the checkbox: check glyph
-                        // lights up in the accent when on, sits faint when
-                        // off. Sidebar-specific style — regular checkboxes
-                        // elsewhere stay as they are.
-                        // ON state wears the primary Button chrome
-                        // (bg-purple-800, like "New stream") so
-                        // enabled/disabled is unmistakable at a glance.
-                        className={`flex items-center self-stretch px-2.5 border-r border-white/10 transition-colors focus:outline-none focus:bg-white/5 ${
-                          meta?.isSeries !== false
-                            ? 'bg-purple-800 hover:bg-purple-700 text-white'
-                            : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'
-                        }`}
-                      >
-                        <Check size={12} strokeWidth={3} className={meta?.isSeries !== false ? '' : 'opacity-30'} />
-                      </button>
-                    </Tooltip>
+                    {/* Shared TogglePill (unified 2026-08-30 — the
+                        hand-rolled twin and the Twitch pills could drift).
+                        Also clears the auto-detect pending flag — a manual
+                        toggle means the user owns the value going forward;
+                        without this, clearing then re-adding games[] later
+                        could silently flip the user's choice. Enabling
+                        Series also fills season/episode from a matching
+                        existing series (same logic as the auto-detect), so
+                        turning it on by hand isn't left with empty
+                        placeholder fields. */}
+                    <TogglePill
+                      segment
+                      checked={meta?.isSeries !== false}
+                      tooltip={isStandalone(meta) ? 'Mark as a series episode — enables season/episode numbering' : 'Make this a standalone stream — turns off season/episode numbering'}
+                      onChange={v => {
+                        if (!v) { onUpdateMeta({ isSeries: false, seriesAutoDetectPending: undefined }); return }
+                        const primary = resolvePrimaryGame(meta) || meta?.games?.[0] || ''
+                        const nums = primary ? computeSeriesNumbers(primary) : null
+                        const update: Partial<StreamMeta> = { isSeries: true, seriesAutoDetectPending: undefined }
+                        if (nums) {
+                          if (!meta?.ytSeason) update.ytSeason = nums.ytSeason
+                          if (!meta?.ytEpisode) update.ytEpisode = nums.ytEpisode
+                        }
+                        onUpdateMeta(update)
+                      }}
+                    />
                     <div className={`flex items-center ${isStandalone(meta) ? 'opacity-50' : ''}`}>
                       <span className="pl-2 pr-0.5 text-[10px] font-medium text-gray-500 select-none">S</span>
                       <NumberStepperField
@@ -7920,11 +7907,11 @@ function SidebarDetail({
                 activates the custom input. While off, a disabled read-only
                 field shows the inherited value (what Twitch will actually
                 receive) with a "Defaults to …" hint beside the pill. */}
-            {/* Two columns that wrap to one when either would drop below
-                ~300px; the title takes the full line while its override
-                editor is open (chip editor + merge picker need room). */}
-            <div className="flex flex-wrap gap-2 items-start">
-              <div className={meta?.syncTitle === false ? 'basis-full min-w-0' : 'flex-1 basis-[300px] min-w-0'}>
+            {/* Title and category each get their own full-width row —
+                side-by-side columns made toggling the title override
+                reflow the whole section when it jumped to full width
+                for the editor, so the columns are gone (2026-08-30). */}
+            <div>
                 <MetaRow label="Twitch title">
                   {(() => {
                     const override = meta?.syncTitle === false
@@ -7957,7 +7944,13 @@ function SidebarDetail({
                           <TogglePill
                             segment
                             checked={override}
-                            onChange={v => onUpdateMeta({ syncTitle: !v })}
+                            // Enabling seeds the override from what it was
+                            // inheriting — template BODY + binding, so the
+                            // chips carry over and the user edits from
+                            // there (or clears for something new).
+                            onChange={v => onUpdateMeta(v
+                              ? { syncTitle: false, twitchTitle: meta?.ytTitle ?? '', twitchTitleTemplateId: meta?.ytTitleTemplateId ?? '' }
+                              : { syncTitle: true })}
                             tooltip={override ? 'Go back to reusing the YouTube title' : 'Write a custom Twitch title instead of reusing the YouTube title'}
                           />
                           <div className="flex-1 min-w-0 flex items-center">
@@ -7997,7 +7990,7 @@ function SidebarDetail({
                   })()}
                 </MetaRow>
               </div>
-              <div className="flex-1 basis-[300px] min-w-0">
+              <div>
                 <MetaRow label="Twitch category">
                   {(() => {
                     const override = meta?.syncGame === false
@@ -8018,7 +8011,11 @@ function SidebarDetail({
                           <TogglePill
                             segment
                             checked={override}
-                            onChange={v => onUpdateMeta({ syncGame: !v })}
+                            // Enabling seeds the override with the resolved
+                            // tag it was inheriting — edit from there.
+                            onChange={v => onUpdateMeta(v
+                              ? { syncGame: false, twitchGameName: resolveTwitchGame(meta) || '' }
+                              : { syncGame: true })}
                             tooltip={override ? 'Go back to picking the category from the topic/game tags' : 'Type a custom Twitch category instead of using the topic/game tags'}
                           />
                           <div className="flex-1 min-w-0 flex items-center">
@@ -8050,7 +8047,6 @@ function SidebarDetail({
                   })()}
                 </MetaRow>
               </div>
-            </div>
             <MetaRow
               label="Twitch tags"
               attachRight
@@ -8915,9 +8911,13 @@ function TogglePill({ checked, onChange, tooltip, label, segment }: {
         type="button"
         aria-pressed={checked}
         onClick={() => onChange(!checked)}
+        // Focus affordance is a focus-VISIBLE inset ring, never a
+        // background swap: focus:bg-* outranks the plain state bg, so a
+        // just-clicked pill showed the focus tint instead of its checked
+        // purple until blur — reading as a broken/mismatched state.
         className={segment
-          ? `flex items-center gap-2 px-2.5 border-r border-white/10 transition-colors focus:outline-none focus:bg-white/5 text-left ${stateCls}`
-          : `flex items-center gap-2 max-w-full px-2.5 py-1.5 rounded-lg border border-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/40 text-left ${stateCls}`}
+          ? `flex items-center gap-2 px-2.5 border-r border-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-purple-500/40 text-left ${stateCls}`
+          : `flex items-center gap-2 max-w-full px-2.5 py-1.5 rounded-lg border border-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/40 text-left ${stateCls}`}
       >
         <Check size={12} strokeWidth={3} className={`shrink-0 ${checked ? '' : 'opacity-30'}`} />
         {label != null && <span className="min-w-0">{label}</span>}
