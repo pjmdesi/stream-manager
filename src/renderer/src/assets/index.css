@@ -195,6 +195,19 @@ input.volume-slider-mt::-webkit-slider-runnable-track {
   display: none;
 }
 
+/* Time inputs (broadcast time field): the native clock indicator IS a
+   button — it opens Chromium's time dropdown — but it shipped with no
+   affordance at all. Pointer + a subtle hover tint make it read as
+   clickable; it can't take focus separately, so the input's existing
+   focus ring covers the keyboard side. */
+input[type='time']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  border-radius: 4px;
+}
+input[type='time']::-webkit-calendar-picker-indicator:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
 /* TemplateBodyEditor placeholder. Native <input placeholder> doesn't
    apply to contenteditable, so we forge it via ::before on the empty
    state. `:empty` only matches when the element has no children at
