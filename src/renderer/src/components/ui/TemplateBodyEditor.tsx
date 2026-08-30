@@ -27,6 +27,23 @@ export const MERGE_FIELD_CHIP_CLASS_INAPPLICABLE = 'inline-flex items-center box
  *  baseline; the column grows to whatever the value needs. */
 export const MERGE_FIELD_VALUE_CHIP_CLASS = 'inline-flex flex-col align-bottom box-border mx-px my-0.5 rounded border border-purple-800 bg-purple-950/60 px-1.5 py-0.5'
 
+/** Read-only chip-ified rendering of a template body: `{key}` tokens
+ *  render as the editor's merge chips, everything else as plain text.
+ *  For previews (template-list items) — chips ALL `{word}` tokens with
+ *  no knownKeys check, since saved templates only carry keys the
+ *  pickers inserted. Wrap in a truncating/clamping container as needed. */
+export function TemplateBodyPreview({ body }: { body: string }) {
+  return (
+    <>
+      {body.split(/(\{\w+\})/g).map((part, i) => {
+        const m = /^\{(\w+)\}$/.exec(part)
+        if (m) return <span key={i} className={`${MERGE_FIELD_CHIP_CLASS} mx-px align-middle`}>{m[1]}</span>
+        return part ? <span key={i}>{part}</span> : null
+      })}
+    </>
+  )
+}
+
 // ─── Source <-> DOM helpers ─────────────────────────────────────────────────
 
 /** Read a contenteditable token editor back as its source string.

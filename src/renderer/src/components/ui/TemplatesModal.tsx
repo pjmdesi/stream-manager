@@ -5,7 +5,7 @@ import { Modal } from './Modal'
 import { Button } from './Button'
 import { Tooltip } from './Tooltip'
 import { TagChipEditor } from './TagChipEditor'
-import { TemplateBodyEditor, MergeFieldPicker } from './TemplateBodyEditor'
+import { TemplateBodyEditor, MergeFieldPicker, TemplateBodyPreview, MERGE_FIELD_CHIP_CLASS } from './TemplateBodyEditor'
 import { useStore } from '../../hooks/useStore'
 import type { YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate } from '../../types'
 import { ytTagCharCount, YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
@@ -15,6 +15,13 @@ import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTa
 // `season_links` (description-only, resolved async at apply time).
 const TITLE_MERGE_KEYS = ['game', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
 const DESCRIPTION_MERGE_KEYS = [...TITLE_MERGE_KEYS, 'season_links'] as const
+
+/** A merge-field key rendered as the editors' chip, for instructional
+ *  prose — the braces convention is gone from the UI; the chip is the
+ *  merge field's visual identity everywhere. */
+const FieldChip = ({ k }: { k: string }) => (
+  <span className={`${MERGE_FIELD_CHIP_CLASS} align-middle`}>{k}</span>
+)
 
 // ─── Inline edit forms ────────────────────────────────────────────────────────
 
@@ -84,7 +91,7 @@ function DescriptionForm({ initial, onSave, onCancel }: {
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Description</label>
         <p className="text-xs text-gray-400 leading-relaxed">
-          <span className="font-mono text-purple-300">{'{season_links}'}</span> resolves
+          <FieldChip k="season_links" /> resolves
           to a list of previous-episode links, applied once when the template is selected.
         </p>
         <TemplateBodyEditor
@@ -482,12 +489,12 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
       {tab === 'titles' && (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-gray-400 leading-relaxed">
-            Use <span className="font-mono text-purple-400">{'{topic}'}</span>, <span className="font-mono text-purple-400">{'{topics}'}</span>, <span className="font-mono text-purple-400">{'{season}'}</span>, <span className="font-mono text-purple-400">{'{episode}'}</span>, <span className="font-mono text-purple-400">{'{total_episodes}'}</span>, <span className="font-mono text-purple-400">{'{tagline}'}</span> as merge fields.
+            Use <FieldChip k="topic" /> <FieldChip k="topics" /> <FieldChip k="season" /> <FieldChip k="episode" /> <FieldChip k="total_episodes" /> <FieldChip k="tagline" /> as merge fields.
             Title templates are shared between YouTube and Twitch.
           </p>
           <TemplateList
             items={titleTemplates}
-            subtitle={t => <p className="text-xs text-gray-400 font-mono truncate">{t.template}</p>}
+            subtitle={t => <p className="text-xs text-gray-400 truncate"><TemplateBodyPreview body={t.template} /></p>}
             onSave={t => saveTitles(upsert(titleTemplates, t))}
             onDelete={id => saveTitles(titleTemplates.filter(t => t.id !== id))}
             newLabel="New title template"
@@ -502,20 +509,14 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
         <div className="flex flex-col gap-3">
           <p className="text-xs text-gray-400 leading-relaxed">
             Pre-filled into the description field; can be edited before publishing.
-            Supports the same merge fields as titles (
-            <span className="font-mono text-purple-400">{'{topic}'}</span>,
-            {' '}<span className="font-mono text-purple-400">{'{topics}'}</span>,
-            {' '}<span className="font-mono text-purple-400">{'{season}'}</span>,
-            {' '}<span className="font-mono text-purple-400">{'{episode}'}</span>,
-            {' '}<span className="font-mono text-purple-400">{'{total_episodes}'}</span>,
-            {' '}<span className="font-mono text-purple-400">{'{tagline}'}</span>
-            ), plus
-            {' '}<span className="font-mono text-purple-400">{'{season_links}'}</span>
+            Supports the same merge fields as titles
+            (<FieldChip k="topic" /> <FieldChip k="topics" /> <FieldChip k="season" /> <FieldChip k="episode" /> <FieldChip k="total_episodes" /> <FieldChip k="tagline" />),
+            plus <FieldChip k="season_links" />
             {' '}— expands to a list of links to previous episodes in the same series+season (one per line, newest first).
           </p>
           <TemplateList
             items={descTemplates}
-            subtitle={t => <p className="text-xs text-gray-400 line-clamp-2 whitespace-pre-wrap">{t.description || <em className="text-gray-400">No description</em>}</p>}
+            subtitle={t => <p className="text-xs text-gray-400 line-clamp-2 whitespace-pre-wrap">{t.description ? <TemplateBodyPreview body={t.description} /> : <em className="text-gray-400">No description</em>}</p>}
             onSave={t => saveDescs(upsert(descTemplates, t))}
             onDelete={id => saveDescs(descTemplates.filter(t => t.id !== id))}
             newLabel="New description template"

@@ -31,7 +31,7 @@ import { ManageTagsModal } from '../ui/ManageTagsModal'
 import { TemplatesModal } from '../ui/TemplatesModal'
 import { TagChipEditor } from '../ui/TagChipEditor'
 import { DatePicker, type DateMark } from '../ui/DatePicker'
-import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
+import { TemplateBodyEditor, MergeFieldPicker, MERGE_FIELD_CHIP_CLASS } from '../ui/TemplateBodyEditor'
 import { TwitchCategoryRenamePrompt } from '../ui/TwitchCategoryRenamePrompt'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
@@ -7542,8 +7542,9 @@ function SidebarDetail({
               <div className="flex flex-col">
                   <span className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5 min-h-[16px]">
                     Series
-                    <span className={activeTitleMergeKeys.has('season') ? 'font-mono text-purple-200 normal-case tracking-normal' : 'font-mono font-light text-purple-400/70 normal-case tracking-normal'}>{'{season}'}</span>
-                    <span className={activeTitleMergeKeys.has('episode') ? 'font-mono text-purple-200 normal-case tracking-normal' : 'font-mono font-light text-purple-400/70 normal-case tracking-normal'}>{'{episode}'}</span>
+                    <span className="text-gray-600 font-light normal-case">→</span>
+                    <span className={`${activeTitleMergeKeys.has('season') ? MERGE_FIELD_CHIP_CLASS : MERGE_FIELD_CHIP_GHOST} normal-case tracking-normal`}>season</span>
+                    <span className={`${activeTitleMergeKeys.has('episode') ? MERGE_FIELD_CHIP_CLASS : MERGE_FIELD_CHIP_GHOST} normal-case tracking-normal`}>episode</span>
                   </span>
                   <div className="flex items-stretch w-fit bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
                     {/* Shared TogglePill (unified 2026-08-30 — the
@@ -8909,10 +8910,17 @@ function SidebarDetail({
  *  tag editors where horizontal room matters more than vertical compactness.
  *  The metadata area scrolls, so taller rows are cheap.
  *
- *  `mergeHint` (e.g. `{game}`) renders inline next to the label in mono /
- *  purple to mark which merge token populates / reads from this field when
- *  applying a template. `right` renders flush-right on the same line as
+ *  `mergeHint` (e.g. `{game}` — braces accepted and stripped) renders as a
+ *  muted arrow + the editors' merge-field chip next to the label, marking
+ *  which merge token this field feeds; ghost until `highlighted` says the
+ *  bound template uses it. `right` renders flush-right on the same line as
  *  the label — used for the template-picker dropdown. */
+/** Ghost variant of the editors' merge chip for label hints — same box
+ *  as MERGE_FIELD_CHIP_CLASS (so toggling highlight never reflows the
+ *  label row), colors dimmed until the bound template actually uses
+ *  the key. */
+const MERGE_FIELD_CHIP_GHOST = 'inline-flex items-center box-border leading-none text-[10px] text-purple-300/40 bg-purple-950/30 border border-purple-800/40 rounded px-1.5 py-0.5'
+
 /** Governor toggle pill — the stream-detail sidebar's checkbox style for
  *  OVERRIDE switches that own an adjacent input (Twitch custom
  *  title/category; the Series toggle is the same look hand-rolled in
@@ -8960,13 +8968,19 @@ function TogglePill({ checked, onChange, tooltip, label, segment }: {
 }
 
 function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched, children }: { label?: string; mergeHint?: string; right?: React.ReactNode; attachRight?: boolean; highlighted?: boolean; mismatched?: 'local' | 'remote' | 'both' | 'unknown' | undefined; children: React.ReactNode }) {
-  // When `highlighted`, the merge hint brightens (text-purple-200) and the
-  // weight steps up from font-light to the default font-normal. No
-  // background pill / border / padding shift — the badge's footprint is
-  // identical in both states, so toggling highlight never reflows the row.
-  const hintCls = highlighted
-    ? 'font-mono text-purple-200 normal-case tracking-normal'
-    : 'font-mono font-light text-purple-400/70 normal-case tracking-normal'
+  // Merge hint renders as label → chip: a muted arrow plus the editors'
+  // merge-field chip, replacing the old mono `{key}` text — the chip IS
+  // the identity users see in the title editor and Insert rows, so the
+  // braces convention is gone from labels. Ghost until the bound
+  // template actually uses the key, then the chip lights up in the full
+  // editor styling. Identical box in both states, so toggling highlight
+  // never reflows the row.
+  const hintChip = mergeHint ? (
+    <>
+      <span className="text-gray-600 font-light normal-case">→</span>
+      <span className={`${highlighted ? MERGE_FIELD_CHIP_CLASS : MERGE_FIELD_CHIP_GHOST} normal-case tracking-normal`}>{mergeHint.replace(/[{}]/g, '')}</span>
+    </>
+  ) : null
   const labelCls = 'text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5'
 
   // Direction-aware mismatch dot. Color encodes who is "ahead" of the
@@ -9006,7 +9020,7 @@ function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched
         <div className="flex items-end justify-between gap-2 min-h-[16px]">
           <span className={labelCls}>
             {label}
-            {mergeHint && <span className={hintCls}>{mergeHint}</span>}
+            {hintChip}
             {mismatchDot}
           </span>
           {right}
@@ -9024,7 +9038,7 @@ function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched
       <div className="flex items-end justify-between gap-2 min-h-[16px]">
         <span className={labelCls}>
           {label}
-          {mergeHint && <span className={hintCls}>{mergeHint}</span>}
+          {hintChip}
           {mismatchDot}
         </span>
         {right}
