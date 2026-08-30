@@ -7912,27 +7912,29 @@ function SidebarDetail({
                 reflow the whole section when it jumped to full width
                 for the editor, so the columns are gone (2026-08-30). */}
             <div>
-                <MetaRow label="Twitch title">
+                <MetaRow
+                  label="Twitch title"
+                  // Template controls live in the LABEL row like every
+                  // other templated field — an in-body row pushed the
+                  // lockup down when the override opened.
+                  right={meta?.syncTitle === false ? (
+                    <div className="flex items-center gap-2">
+                      {canSaveTwitchTitleTemplate && <SaveAsTemplateButton onSave={handleSaveTwitchTitleTemplate} />}
+                      <InlineTemplateSelect
+                        items={ytTitleTemplates}
+                        value={twitchTitleTplId}
+                        onChange={applyTwitchTitleTemplate}
+                        placeholder="Assign template"
+                        icon={<Link2 size={11} />}
+                      />
+                    </div>
+                  ) : undefined}
+                >
                   {(() => {
                     const override = meta?.syncTitle === false
-                    // The EFFECTIVE title in both modes — the counter tracks
-                    // it either way (a synced title can still bust Twitch's
-                    // limit).
                     const rendered = applyMergeFields((override ? meta?.twitchTitle : meta?.ytTitle) ?? '', mergeFields)
                     return (
                       <div className="flex flex-col gap-1">
-                        {override && (
-                          <div className="flex items-end justify-end gap-2 min-h-[16px]">
-                            {canSaveTwitchTitleTemplate && <SaveAsTemplateButton onSave={handleSaveTwitchTitleTemplate} />}
-                            <InlineTemplateSelect
-                              items={ytTitleTemplates}
-                              value={twitchTitleTplId}
-                              onChange={applyTwitchTitleTemplate}
-                              placeholder="Assign template"
-                              icon={<Link2 size={11} />}
-                            />
-                          </div>
-                        )}
                         {/* Lockup: [override pill │ value], series-group
                             construction (outer border, frameless children).
                             Off = disabled read-only view of the inherited
@@ -7971,7 +7973,7 @@ function SidebarDetail({
                             )}
                           </div>
                         </div>
-                        <span className="text-[10px] text-gray-400">Defaults to the YouTube title</span>
+                        {!override && <span className="text-[10px] text-gray-400">Using YouTube title</span>}
                         {override && (
                           <MergeFieldPicker
                             keys={titlePickerKeys}
@@ -7984,7 +7986,7 @@ function SidebarDetail({
                             <span>{rendered || <span className="italic text-gray-500">(empty)</span>}</span>
                           </p>
                         )}
-                        <TitleCharCounter count={rendered.length} limit={TWITCH_TITLE_CHAR_LIMIT} />
+                        {override && <TitleCharCounter count={rendered.length} limit={TWITCH_TITLE_CHAR_LIMIT} />}
                       </div>
                     )
                   })()}
@@ -8041,7 +8043,7 @@ function SidebarDetail({
                             )}
                           </div>
                         </div>
-                        <span className="text-[10px] text-gray-400">Defaults to the Topic / Game tag</span>
+                        {!override && <span className="text-[10px] text-gray-400">Using Topic / Game tag</span>}
                       </div>
                     )
                   })()}
