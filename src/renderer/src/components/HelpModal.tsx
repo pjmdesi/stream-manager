@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Keyboard, PanelRight, Layers, AlertTriangle, Upload, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Bot } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Keyboard, PanelRight, Layers, AlertTriangle, Upload, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Bot, Palette } from 'lucide-react'
 import { Youtube, Twitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { MERGE_FIELD_CHIP_CLASS, MERGE_FIELD_CHIP_CLASS_INAPPLICABLE } from './ui/TemplateBodyEditor'
@@ -367,8 +367,31 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <ImageIcon size={16} />,
     body: (
       <>
-        <p>The Thumbnail Editor is a Konva-based canvas (1280×720) for designing per-stream thumbnails. Build templates from images, text, and shapes; save them so they can be reused across streams.</p>
-        <p>When the editor opens for a stream, it auto-loads the template you selected at stream creation as a starting point. Save once to produce the PNG that appears in the Streams view.</p>
+        <p>Design 1280×720 thumbnails for your streams from images, text, and shapes. Open the editor from a stream (<Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>T</Kbd>, the row action, or the Files section) or start on the Thumbnails page itself.</p>
+
+        <ElementSection icon={<ImageIcon size={14} />} title="Sessions & saving">
+          <p>A stream session autosaves as you edit; the saved PNG lands in the stream's folder and shows up in the Files section and the stream row. Use <strong className="text-gray-300">Close session</strong> when you're done. Template sessions are the opposite: nothing is saved until you click <strong className="text-gray-300">Update template</strong>, so experiments can be abandoned safely.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Layers size={14} />} title="Layers & properties">
+          <p>Add image, text, and shape layers; reorder them in the <strong className="text-gray-300">Layers</strong> panel. Select a layer to edit it in the <strong className="text-gray-300">Properties</strong> panel: position and size, colors (solid or gradient), stroke, shadow, filters, and fonts for text.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Type size={14} />} title="Merge fields in text">
+          <p>Text layers can contain merge-field chips like <MF k="episode" /> or <MF k="topic" />, filled in from the stream's details. When those values change (a new episode, an edited topic), the thumbnail re-renders automatically. If a re-render can't load one of its images, the thumbnail shows a warning badge; open and save it in the editor to fix it.</p>
+        </ElementSection>
+
+        <ElementSection icon={<SquareDashedText size={14} />} title="Templates">
+          <p>Templates are reusable designs. Pick one when creating a stream and the editor auto-loads it as the starting point. Build and edit templates from the Thumbnails page; <strong className="text-gray-300">Update template</strong> saves your changes back to the template itself.</p>
+        </ElementSection>
+
+        <ElementSection icon={<LayoutGrid size={14} />} title="Variants">
+          <p>A stream can have several thumbnail designs. Switch between them (or add and delete them) with the variant control in the editor header, and pick which one is the stream's thumbnail in the Files section.</p>
+        </ElementSection>
+
+        <ElementSection icon={<Palette size={14} />} title="Assets & palette">
+          <p>The <strong className="text-gray-300">Assets</strong> panel lists images you can drop onto the canvas; the button in its header picks which folders it pulls from. The <strong className="text-gray-300">Palette</strong> panel keeps your recently used colors and a saved swatch list (the pencil edits it); swatches can hold gradients too. <strong className="text-gray-300">Frame grabs</strong> from the player page appear in the <strong className="text-gray-300">Assets</strong> panel automatically.</p>
+        </ElementSection>
       </>
     ),
   },

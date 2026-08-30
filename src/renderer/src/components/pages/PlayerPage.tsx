@@ -4081,7 +4081,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
               {/* Screenshot + popup buttons — visible on hover */}
               <div className="absolute bottom-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Tooltip content="Save screenshot (PNG)">
+                <Tooltip content="Save Frame Grab (PNG)">
                   <button
                     onClick={captureScreenshot}
                     className="p-2 rounded-lg bg-black/60 text-white/70 hover:text-white hover:bg-black/80"
