@@ -379,7 +379,7 @@ const HIST_COALESCE_MS = 600
  * cursor via offset helpers.
  */
 export function TemplateBodyEditor({
-  value, onSave, placeholder, knownKeys, inapplicableKeys, resolvedValues, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus, height, onHeightChange, aiFetcher, onAiReject, frameless,
+  value, onSave, placeholder, knownKeys, inapplicableKeys, resolvedValues, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus, height, onHeightChange, aiFetcher, onAiReject, attachLeft,
 }: {
   value: string
   onSave: (v: string) => Promise<void> | void
@@ -419,11 +419,10 @@ export function TemplateBodyEditor({
    *  (and only Esc — blur-accept and typing-over stay silent). Feeds the
    *  rejected-suggestions memory. */
   onAiReject?: (text: string) => void
-  /** Strip the editor's own border/background/rounding for use inside a
-   *  bordered lockup (the Twitch-override groups) — the host supplies
-   *  the chrome; focus shows as a background tint like the app's other
-   *  frameless inputs. Ignore tabAttached/tabActive in this mode. */
-  frameless?: boolean
+  /** Square the LEFT corners (keeping the full border as the seam) so a
+   *  control can attach flush to the editor's left edge — the Twitch
+   *  title override pill. Composable with tabAttached (top-right). */
+  attachLeft?: boolean
 }) {
   const [local, setLocal] = useState(value)
   const [saving, setSaving] = useState(false)
@@ -845,7 +844,7 @@ export function TemplateBodyEditor({
   }
 
   const borderCls = tabActive ? 'border-white/[0.18]' : 'border-white/10'
-  const cornerCls = tabAttached ? 'rounded-lg rounded-tr-none' : 'rounded-lg'
+  const cornerCls = `rounded-lg${tabAttached ? ' rounded-tr-none' : ''}${attachLeft ? ' rounded-l-none' : ''}`
   // overflow-y-auto lets content scroll once the user drags a height shorter
   // than the content; with no explicit height it just grows. The drag handle
   // below provides the resize (custom strip, larger hit target than the native
@@ -856,10 +855,7 @@ export function TemplateBodyEditor({
   // long content behaves like a normal text input (clipped, revealed by
   // cursor movement).
   const wrapCls = multiline ? 'whitespace-pre-wrap leading-relaxed overflow-y-auto resize-none' : 'whitespace-nowrap overflow-x-hidden leading-snug'
-  const chromeCls = frameless
-    ? 'bg-transparent focus:bg-white/5'
-    : `bg-navy-900/70 border ${borderCls} ${cornerCls} focus:border-purple-500/50 focus:bg-navy-900`
-  const cls = `template-body-editor w-full ${chromeCls} px-2 py-1 text-xs text-gray-200 focus:outline-none transition-colors ${saving ? 'opacity-60' : ''} ${wrapCls}`
+  const cls = `template-body-editor w-full bg-navy-900/70 border ${borderCls} ${cornerCls} px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''} ${wrapCls}`
 
   const editor = (
     <div

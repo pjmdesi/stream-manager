@@ -7914,9 +7914,11 @@ function SidebarDetail({
             <div>
                 <MetaRow
                   label="Twitch title"
-                  // Template controls live in the LABEL row like every
-                  // other templated field — an in-body row pushed the
-                  // lockup down when the override opened.
+                  attachRight
+                  // Full YouTube-title parity (that field is the reference):
+                  // template tab in the label row, attached flush to the
+                  // lockup's top-right corner. attachRight is inert while
+                  // the override is off (right is undefined → plain row).
                   right={meta?.syncTitle === false ? (
                     <div className="flex items-center gap-2">
                       {canSaveTwitchTitleTemplate && <SaveAsTemplateButton onSave={handleSaveTwitchTitleTemplate} />}
@@ -7926,6 +7928,8 @@ function SidebarDetail({
                         onChange={applyTwitchTitleTemplate}
                         placeholder="Assign template"
                         icon={<Link2 size={11} />}
+                        tabbed
+                        tabActive={!!twitchTitleTplId}
                       />
                     </div>
                   ) : undefined}
@@ -7933,46 +7937,73 @@ function SidebarDetail({
                   {(() => {
                     const override = meta?.syncTitle === false
                     const rendered = applyMergeFields((override ? meta?.twitchTitle : meta?.ytTitle) ?? '', mergeFields)
+                    // The pill is identical in both branches below — defined
+                    // once so the two lockup constructions can't drift.
+                    const pill = (
+                      <TogglePill
+                        segment
+                        checked={override}
+                        // Enabling seeds the override from what it was
+                        // inheriting — template BODY + binding, so the
+                        // chips carry over and the user edits from
+                        // there (or clears for something new).
+                        onChange={v => onUpdateMeta(v
+                          ? { syncTitle: false, twitchTitle: meta?.ytTitle ?? '', twitchTitleTemplateId: meta?.ytTitleTemplateId ?? '' }
+                          : { syncTitle: true })}
+                        tooltip={override ? 'Go back to reusing the YouTube title' : 'Write a custom Twitch title instead of reusing the YouTube title'}
+                      />
+                    )
                     return (
                       <div className="flex flex-col gap-1">
-                        {/* Lockup: [override pill │ value], series-group
-                            construction (outer border, frameless children).
-                            Off = disabled read-only view of the inherited
-                            YouTube title (what the push actually sends);
-                            on = the chip editor, frameless in the shared
-                            border. The template select sits plain above
-                            (no tabbed attach — the lockup owns the box). */}
-                        <div className="flex items-stretch bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
-                          <TogglePill
-                            segment
-                            checked={override}
-                            // Enabling seeds the override from what it was
-                            // inheriting — template BODY + binding, so the
-                            // chips carry over and the user edits from
-                            // there (or clears for something new).
-                            onChange={v => onUpdateMeta(v
-                              ? { syncTitle: false, twitchTitle: meta?.ytTitle ?? '', twitchTitleTemplateId: meta?.ytTitleTemplateId ?? '' }
-                              : { syncTitle: true })}
-                            tooltip={override ? 'Go back to reusing the YouTube title' : 'Write a custom Twitch title instead of reusing the YouTube title'}
-                          />
-                          <div className="flex-1 min-w-0 flex items-center">
-                            {override ? (
+                        {override ? (
+                          /* Override lockup: the pill ATTACHES to a fully
+                             normal TemplateBodyEditor (own border, tab
+                             attach, focus ring — exact YouTube-title field)
+                             via attachLeft, stepper-style: pill host is
+                             border-r-0, the editor's left border is the
+                             seam. GRID, not flex: the editor renders its
+                             AI-hint line as a sibling AFTER itself, and a
+                             flex row would stretch the pill to include the
+                             hint's height. display:contents flattens the
+                             editor+hint fragment into the grid — editor in
+                             the first row beside the pill, hint spanning the
+                             full second row ([&>p]:col-span-2 from col 1) so
+                             it left-aligns with the INSERT/PREVIEW lines
+                             below, BELOW the box like the YouTube field. */
+                          <div className="grid grid-cols-[auto_minmax(0,1fr)]">
+                            <div className={`flex bg-navy-900/70 border border-r-0 rounded-l-lg overflow-hidden ${twitchTitleTplId ? 'border-white/[0.18]' : 'border-white/10'}`}>
+                              {pill}
+                            </div>
+                            <div className="contents [&>p]:col-start-1 [&>p]:col-span-2">
                               <TemplateBodyEditor
-                                frameless
+                                attachLeft
+                                tabAttached
+                                tabActive={!!twitchTitleTplId}
                                 value={meta?.twitchTitle ?? ''}
                                 placeholder="Title for Twitch broadcast…"
                                 onSave={handleTwitchTitleSave}
                                 knownKeys={titleMergeKeySet}
                                 inapplicableKeys={titleInapplicableKeySet}
                                 insertRef={twitchTitleInsertRef}
+                                aiFetcher={aiFetchTitle}
+                                onAiReject={handleAiReject('title')}
                               />
-                            ) : (
+                            </div>
+                          </div>
+                        ) : (
+                          /* Off: simple bordered lockup around the pill and
+                             a read-only view of the inherited YouTube title
+                             (what the push actually sends). No hint sibling
+                             here, so plain flex is safe. */
+                          <div className="flex items-stretch bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
+                            {pill}
+                            <div className="flex-1 min-w-0 flex items-center">
                               <div className="w-full px-2 py-1 text-xs text-gray-500 truncate cursor-not-allowed select-none">
                                 {rendered || <span className="italic">(no YouTube title yet)</span>}
                               </div>
-                            )}
+                            </div>
                           </div>
-                        </div>
+                        )}
                         {!override && <span className="text-[10px] text-gray-400">Using YouTube title</span>}
                         {override && (
                           <MergeFieldPicker
@@ -8043,7 +8074,7 @@ function SidebarDetail({
                             )}
                           </div>
                         </div>
-                        {!override && <span className="text-[10px] text-gray-400">Using Topic / Game tag</span>}
+                        {!override && <span className="text-[10px] text-gray-400">Using the picked Topic / Game tag</span>}
                       </div>
                     )
                   })()}
