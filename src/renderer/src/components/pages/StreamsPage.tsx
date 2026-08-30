@@ -24,7 +24,7 @@ import { useOpenItems, blockReasonText, type OpenSource } from '../../context/Op
 import { useInUse } from '../../hooks/useInUse'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
 import { usePageActivity } from '../../context/PageActivityContext'
-import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, PickerThumbImage, DisplayTagChip, CloudDownloadModal, ClampedComment } from '../streams/legacyStreamsShared'
+import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, DisplayTagChip, CloudDownloadModal, ClampedComment } from '../streams/legacyStreamsShared'
 import { YouTubeImportModal } from '../streams/YouTubeImportModal'
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
@@ -6972,17 +6972,11 @@ function SidebarDetail({
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
 
   // ── YouTube thumbnail picker ─────────────────────────────────────────
-  // Mirrors the legacy MetaModal's picker: the YT push uploads whatever
-  // is set as the stream item's preferred thumbnail by default; toggling
-  // off the "use the stream item thumbnail" checkbox reveals a picker
-  // grid of qualifying images (16:9 / 1:1 / 9:16, ≥720px, ≤2MB). Picker
-  // state is intentionally LOCAL (not persisted to meta) — matching the
-  // legacy modal, the choice is treated as "what to push right now",
-  // not a stream-level setting.
-  const [ytQualifyingThumbnails, setYtQualifyingThumbnails] = useState<{ bestFit: string[]; rest: string[] }>({ bestFit: [], rest: [] })
-  const [ytShowAllThumbs, setYtShowAllThumbs] = useState(false)
-  const [ytSelectedThumbnail, setYtSelectedThumbnail] = useState<string | null>(null)
-  const [useStreamItemThumb, setUseStreamItemThumb] = useState(true)
+  // The YT push uploads the stream item's primary thumbnail, period
+  // (2026-08-30): the legacy per-push override picker was removed — the
+  // files grid (set-as-thumbnail, variants, editor) owns which image is
+  // primary, and the picker's transient never-persisted choice was
+  // redundant with it.
   // Resolve the stream item's "main" thumbnail the same way the row
   // does: preferredThumbnail basename → matching path → first thumbnail.
   // What gets uploaded when the checkbox is on.
@@ -6995,7 +6989,7 @@ function SidebarDetail({
     }
     return folder.thumbnails[0]
   }, [folder.thumbnails, meta?.preferredThumbnail])
-  const effectiveYtThumb = useStreamItemThumb ? resolvedStreamItemThumb : ytSelectedThumbnail
+  const effectiveYtThumb = resolvedStreamItemThumb
 
   // Thumbnail-change detection for the YT push button. SHA-1 the
   // currently-selected thumbnail's bytes; compare against
@@ -7039,27 +7033,6 @@ function SidebarDetail({
   // upload).
   const [ytPushing, setYtPushing] = useState(false)
   const [twPushing, setTwPushing] = useState(false)
-
-  // Fetch qualifying thumbnails when the folder's thumbnail list
-  // changes (stream switch, delete, new image added). Reset all picker
-  // state so the new folder starts fresh.
-  useEffect(() => {
-    setYtQualifyingThumbnails({ bestFit: [], rest: [] })
-    setYtShowAllThumbs(false)
-    setYtSelectedThumbnail(null)
-    setUseStreamItemThumb(true)
-    if (folder.thumbnails.length === 0) return
-    let cancelled = false
-    window.api.youtubeGetQualifyingThumbnails(folder.thumbnails).then(qualified => {
-      if (cancelled) return
-      setYtQualifyingThumbnails(qualified)
-      setYtSelectedThumbnail(qualified.bestFit[0] ?? qualified.rest[0] ?? null)
-      // If nothing fits the recommended aspect ratios, default to
-      // showing the full list so the picker isn't suddenly empty.
-      if (qualified.bestFit.length === 0) setYtShowAllThumbs(true)
-    })
-    return () => { cancelled = true }
-  }, [folder.thumbnails])
 
   const [manualUrl, setManualUrl] = useState('')
   const [manualUrlLoading, setManualUrlLoading] = useState(false)
@@ -7600,9 +7573,12 @@ function SidebarDetail({
                         // lights up in the accent when on, sits faint when
                         // off. Sidebar-specific style — regular checkboxes
                         // elsewhere stay as they are.
+                        // ON state wears the primary Button chrome
+                        // (bg-purple-800, like "New stream") so
+                        // enabled/disabled is unmistakable at a glance.
                         className={`flex items-center self-stretch px-2.5 border-r border-white/10 transition-colors focus:outline-none focus:bg-white/5 ${
                           meta?.isSeries !== false
-                            ? 'bg-purple-600/20 text-purple-200 hover:bg-purple-600/30'
+                            ? 'bg-purple-800 hover:bg-purple-700 text-white'
                             : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'
                         }`}
                       >
@@ -7716,93 +7692,25 @@ function SidebarDetail({
                 onAiReject={handleAiReject('tagline')}
               />
             </MetaRow>
-            {/* YouTube thumbnail picker — sits between title and
-                description because the upload goes alongside the YT
-                push from the footer. Default checkbox: reuse whatever's
-                set as the stream item's thumbnail (preferredThumbnail
-                or first thumb). Unchecking reveals a grid of qualifying
-                images (YouTube requires JPG/PNG/GIF/WebP, ≤2MB; the
-                IPC further filters to common video aspect ratios at
-                ≥720px on the longer side). Picker state is transient
-                and resets on stream switch — picking a thumbnail is
-                "which one to push now," not a persisted preference. */}
-            {(() => {
-              const totalQualifying = ytQualifyingThumbnails.bestFit.length + ytQualifyingThumbnails.rest.length
-              const shown = ytShowAllThumbs
-                ? [...ytQualifyingThumbnails.bestFit, ...ytQualifyingThumbnails.rest]
-                : ytQualifyingThumbnails.bestFit
-              const hiddenCount = ytQualifyingThumbnails.rest.length
-              const resolvedName = resolvedStreamItemThumb?.split(/[\\/]/).pop() ?? ''
-              return (
-                <MetaRow label="YouTube thumbnail" mismatched={!!selectedBroadcast && thumbnailNeedsPush ? 'local' : undefined}>
-                  {folder.thumbnails.length === 0 ? (
-                    <p className="text-xs text-gray-400 italic">No images found in this stream folder.</p>
-                  ) : (
-                    <div className="flex flex-col gap-1.5">
-                      <Checkbox
-                        checked={useStreamItemThumb}
-                        onChange={setUseStreamItemThumb}
-                        size="sm"
-                        label={
-                          <div>
-                            <div className="text-[11px] text-gray-200">Use the stream item thumbnail</div>
-                            <div className="text-[10px] text-gray-400 font-mono truncate">{resolvedName || '(none)'}</div>
-                          </div>
-                        }
-                      />
-                      {!useStreamItemThumb && (
-                        totalQualifying === 0 ? (
-                          <p className="text-[11px] text-gray-400 italic">
-                            No images meet YouTube's requirements (JPG/PNG/GIF/WebP, max 2 MB).
-                          </p>
-                        ) : (
-                          <>
-                            <div className="flex flex-wrap gap-1.5">
-                              {shown.map(p => {
-                                const isSelected = p === ytSelectedThumbnail
-                                const name = p.split(/[\\/]/).pop() ?? ''
-                                return (
-                                  <Tooltip key={p} content={name}>
-                                    <button
-                                      type="button"
-                                      onClick={() => setYtSelectedThumbnail(isSelected ? null : p)}
-                                      className={`relative w-20 h-14 rounded overflow-hidden border-2 transition-all shrink-0 ${isSelected ? 'border-red-400 ring-1 ring-red-400/50' : 'border-white/10 hover:border-white/30'}`}
-                                    >
-                                      {/* OS shell thumbnail (a few-KB PNG
-                                          Windows already cached) instead of
-                                          decoding the full-res source — keeps
-                                          large galleries snappy. */}
-                                      <PickerThumbImage path={p} thumbsKey={thumbsKey} alt={name} />
-                                      {isSelected && (
-                                        <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
-                                          <Check size={14} className="text-white drop-shadow" />
-                                        </div>
-                                      )}
-                                    </button>
-                                  </Tooltip>
-                                )
-                              })}
-                            </div>
-                            {hiddenCount > 0 && ytQualifyingThumbnails.bestFit.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => setYtShowAllThumbs(v => !v)}
-                                className="self-start text-[10px] text-gray-400 hover:text-gray-200 underline underline-offset-2 transition-colors"
-                              >
-                                {ytShowAllThumbs
-                                  ? 'Show best fit only'
-                                  : `Show all ${totalQualifying} images`}
-                              </button>
-                            )}
-                          </>
-                        )
-                      )}
-                      <p className="text-[10px] text-gray-400">Recommended: 1280×720 or larger. Uploads alongside the YouTube push from the footer.</p>
-                    </div>
-                  )}
-                </MetaRow>
-              )
-            })()}
+            {/* YouTube thumbnail — informational only (2026-08-30): the
+                push always uploads the stream item's primary thumbnail;
+                choosing it lives in the files grid (set-as-thumbnail,
+                variants, the editor). The old per-push override picker
+                was transient state (deliberately never persisted) that
+                the primary-thumbnail workflow made redundant. Eligibility
+                guard for the set-as-thumbnail affordance is a todo. */}
+            <MetaRow label="YouTube thumbnail" mismatched={!!selectedBroadcast && thumbnailNeedsPush ? 'local' : undefined}>
+              {folder.thumbnails.length === 0 ? (
+                <p className="text-xs text-gray-400 italic">No images found in this stream folder.</p>
+              ) : (
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <p className="text-[11px] text-gray-300 font-mono truncate">
+                    {resolvedStreamItemThumb?.split(/[\\/]/).pop() ?? '(none)'}
+                  </p>
+                  <p className="text-[10px] text-gray-400">The stream item thumbnail. Uploads alongside the YouTube push from the footer; change it from the files grid above.</p>
+                </div>
+              )}
+            </MetaRow>
             <MetaRow
               label="YouTube description"
               attachRight
@@ -8006,10 +7914,12 @@ function SidebarDetail({
             </div>
             {/* — Twitch — */}
             <div className="flex flex-col gap-3">
-            {/* Sync flag defaults to true (undefined → synced); when synced,
-                the override input is hidden — only the checkbox stays —
-                since the effective value is whatever was set on the YouTube
-                side above. */}
+            {/* Sync flags default to true (undefined → synced), but the
+                toggles present the INVERTED reading (2026-08-30): these are
+                overrides, so the pill is off by default and turning it ON
+                activates the custom input. While off, a disabled read-only
+                field shows the inherited value (what Twitch will actually
+                receive) with a "Defaults to …" hint beside the pill. */}
             <div className="grid grid-cols-2 gap-2 items-start">
               {/* When the title override is shown, the field spans both
                   columns so the chip editor + merge-field picker have
@@ -8017,93 +7927,130 @@ function SidebarDetail({
                   the category then wraps to the next grid row. */}
               <div className={meta?.syncTitle === false ? 'col-span-2' : ''}>
                 <MetaRow label="Twitch title">
-                  <div className="flex flex-col gap-1.5">
-                    <Checkbox
-                      size="sm"
-                      checked={meta?.syncTitle !== false}
-                      onChange={v => onUpdateMeta({ syncTitle: v })}
-                      label={<span className="text-[11px] text-gray-400">Same as YouTube title</span>}
-                    />
-                    {meta?.syncTitle === false && (
-                      // No-gap column so the template tab sits flush on
-                      // the editor's top-right corner (mirrors the YT
-                      // title's MetaRow attachRight layout). Picker +
-                      // preview space themselves via their own margins.
-                      <div className="flex flex-col">
-                        <div className="flex items-end justify-end gap-2 min-h-[16px]">
-                          {canSaveTwitchTitleTemplate && <SaveAsTemplateButton onSave={handleSaveTwitchTitleTemplate} />}
-                          <InlineTemplateSelect
-                            items={ytTitleTemplates}
-                            value={twitchTitleTplId}
-                            onChange={applyTwitchTitleTemplate}
-                            placeholder="Assign template"
-                            icon={<Link2 size={11} />}
-                            tabbed
-                            tabActive={!!twitchTitleTplId}
+                  {(() => {
+                    const override = meta?.syncTitle === false
+                    // The EFFECTIVE title in both modes — the counter tracks
+                    // it either way (a synced title can still bust Twitch's
+                    // limit).
+                    const rendered = applyMergeFields((override ? meta?.twitchTitle : meta?.ytTitle) ?? '', mergeFields)
+                    return (
+                      <div className="flex flex-col gap-1">
+                        {override && (
+                          <div className="flex items-end justify-end gap-2 min-h-[16px]">
+                            {canSaveTwitchTitleTemplate && <SaveAsTemplateButton onSave={handleSaveTwitchTitleTemplate} />}
+                            <InlineTemplateSelect
+                              items={ytTitleTemplates}
+                              value={twitchTitleTplId}
+                              onChange={applyTwitchTitleTemplate}
+                              placeholder="Assign template"
+                              icon={<Link2 size={11} />}
+                            />
+                          </div>
+                        )}
+                        {/* Lockup: [override pill │ value], series-group
+                            construction (outer border, frameless children).
+                            Off = disabled read-only view of the inherited
+                            YouTube title (what the push actually sends);
+                            on = the chip editor, frameless in the shared
+                            border. The template select sits plain above
+                            (no tabbed attach — the lockup owns the box). */}
+                        <div className="flex items-stretch bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
+                          <TogglePill
+                            segment
+                            checked={override}
+                            onChange={v => onUpdateMeta({ syncTitle: !v })}
+                            tooltip={override ? 'Go back to reusing the YouTube title' : 'Write a custom Twitch title instead of reusing the YouTube title'}
+                            label={<span className="text-[11px] whitespace-nowrap">Custom title</span>}
                           />
+                          <div className="flex-1 min-w-0 flex items-center">
+                            {override ? (
+                              <TemplateBodyEditor
+                                frameless
+                                value={meta?.twitchTitle ?? ''}
+                                placeholder="Title for Twitch broadcast…"
+                                onSave={handleTwitchTitleSave}
+                                knownKeys={titleMergeKeySet}
+                                inapplicableKeys={titleInapplicableKeySet}
+                                insertRef={twitchTitleInsertRef}
+                              />
+                            ) : (
+                              <div className="w-full px-2 py-1 text-xs text-gray-500 whitespace-nowrap overflow-x-auto cursor-not-allowed select-none">
+                                {rendered || <span className="italic">(no YouTube title yet)</span>}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <TemplateBodyEditor
-                          value={meta?.twitchTitle ?? ''}
-                          placeholder="Title for Twitch broadcast…"
-                          onSave={handleTwitchTitleSave}
-                          tabAttached
-                          tabActive={!!twitchTitleTplId}
-                          knownKeys={titleMergeKeySet}
-                          inapplicableKeys={titleInapplicableKeySet}
-                          insertRef={twitchTitleInsertRef}
-                        />
-                        <MergeFieldPicker
-                          keys={titlePickerKeys}
-                          onInsert={k => twitchTitleInsertRef.current?.(`{${k}}`)}
-                        />
-                        {(() => {
-                          const rendered = applyMergeFields(meta?.twitchTitle ?? '', mergeFields)
-                          return (
-                            <>
-                              {hasYtTitleMergeFields(meta?.twitchTitle ?? '') && (
-                                <p className="mt-2 text-xs text-gray-200 leading-snug flex items-baseline gap-1.5">
-                                  <span className="text-[10px] text-gray-500 uppercase tracking-wide shrink-0">Preview</span>
-                                  <span>{rendered || <span className="italic text-gray-500">(empty)</span>}</span>
-                                </p>
-                              )}
-                              <TitleCharCounter count={rendered.length} limit={TWITCH_TITLE_CHAR_LIMIT} />
-                            </>
-                          )
-                        })()}
+                        <span className="text-[10px] text-gray-500">Defaults to the YouTube title</span>
+                        {override && (
+                          <MergeFieldPicker
+                            keys={titlePickerKeys}
+                            onInsert={k => twitchTitleInsertRef.current?.(`{${k}}`)}
+                          />
+                        )}
+                        {override && hasYtTitleMergeFields(meta?.twitchTitle ?? '') && (
+                          <p className="mt-1 text-xs text-gray-200 leading-snug flex items-baseline gap-1.5">
+                            <span className="text-[10px] text-gray-500 uppercase tracking-wide shrink-0">Preview</span>
+                            <span>{rendered || <span className="italic text-gray-500">(empty)</span>}</span>
+                          </p>
+                        )}
+                        <TitleCharCounter count={rendered.length} limit={TWITCH_TITLE_CHAR_LIMIT} />
                       </div>
-                    )}
-                  </div>
+                    )
+                  })()}
                 </MetaRow>
               </div>
               <MetaRow label="Twitch category">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Checkbox
-                      size="sm"
-                      checked={meta?.syncGame !== false}
-                      onChange={v => onUpdateMeta({ syncGame: v })}
-                      label={<span className="text-[11px] text-gray-400">Pick Topic / Game tag</span>}
-                    />
-                    {/* When picking from tags and there's more than one, a dropdown
-                        chooses which tag Twitch uses — pinned, independent of the
-                        title's {topic}. One topic needs no picker (it's the default). */}
-                    {meta?.syncGame !== false && (meta?.games?.length ?? 0) > 1 && (
-                      <TopicSelect
-                        topics={meta!.games}
-                        value={resolveTwitchGame(meta)}
-                        onChange={v => onUpdateMeta({ twitchGameName: v })}
-                        aria-label="Twitch category topic"
-                      />
-                    )}
-                  </div>
-                  {meta?.syncGame === false && (
-                    <EditableTextField
-                      value={meta?.twitchGameName ?? ''}
-                      placeholder="Twitch category override…"
-                      onSave={v => onUpdateMeta({ twitchGameName: v })}
-                    />
-                  )}
-                </div>
+                {(() => {
+                  const override = meta?.syncGame === false
+                  return (
+                    <div className="flex flex-col gap-1">
+                      {/* Lockup: [override pill │ value], series-group
+                          construction. Default mode's value slot: with
+                          several tags the pinned topic dropdown IS the
+                          interactive default (choosing which tag Twitch
+                          uses — independent of the title's {topic}),
+                          rendered frameless via !important overrides
+                          (TopicSelect appends className after its base);
+                          with one or none, a read-only view of the
+                          resolved tag. Override mode swaps in the
+                          free-text field, frameless the same way. */}
+                      <div className="flex items-stretch w-fit max-w-full bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
+                        <TogglePill
+                          segment
+                          checked={override}
+                          onChange={v => onUpdateMeta({ syncGame: !v })}
+                          tooltip={override ? 'Go back to picking the category from the topic/game tags' : 'Type a custom Twitch category instead of using the topic/game tags'}
+                          label={<span className="text-[11px] whitespace-nowrap">Custom category</span>}
+                        />
+                        <div className="flex items-center min-w-0">
+                          {override ? (
+                            <div className="w-44">
+                              <EditableTextField
+                                value={meta?.twitchGameName ?? ''}
+                                placeholder="Twitch category override…"
+                                onSave={v => onUpdateMeta({ twitchGameName: v })}
+                                className="!bg-transparent !border-0 !rounded-none focus:!bg-white/5"
+                              />
+                            </div>
+                          ) : (meta?.games?.length ?? 0) > 1 ? (
+                            <TopicSelect
+                              topics={meta!.games}
+                              value={resolveTwitchGame(meta)}
+                              onChange={v => onUpdateMeta({ twitchGameName: v })}
+                              aria-label="Twitch category topic"
+                              className="!bg-transparent !border-0 !rounded-none mx-1"
+                            />
+                          ) : (
+                            <div className="px-2 py-1 text-xs text-gray-500 truncate cursor-not-allowed select-none">
+                              {resolveTwitchGame(meta) || <span className="italic">(no topic/game tag yet)</span>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-gray-500">Defaults to the Topic / Game tag</span>
+                    </div>
+                  )
+                })()}
               </MetaRow>
             </div>
             <MetaRow
@@ -8939,6 +8886,46 @@ function SidebarDetail({
  *  purple to mark which merge token populates / reads from this field when
  *  applying a template. `right` renders flush-right on the same line as
  *  the label — used for the template-picker dropdown. */
+/** Governor toggle pill — the stream-detail sidebar's checkbox style for
+ *  OVERRIDE switches that own an adjacent input (Twitch custom
+ *  title/category; the Series toggle is the same look hand-rolled in
+ *  its segment group). Off by default; turning it ON activates the
+ *  override, wearing the primary-button chrome (same bg-purple-800 as
+ *  "New stream") so the enabled state is unmistakable. `segment` embeds
+ *  the pill as the left anchor of a bordered lockup. Sidebar-only by
+ *  design — regular checkboxes elsewhere stay Checkbox. */
+function TogglePill({ checked, onChange, tooltip, label, segment }: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  /** Describes what the click does NOW (per the tooltip rule). */
+  tooltip: string
+  label: React.ReactNode
+  /** Render as the LEFT SEGMENT of a bordered lockup (the series /
+   *  Twitch-override groups): no own border box — full-height, a
+   *  hairline on the right, squared corners; the host group supplies
+   *  the border, background, and rounding. */
+  segment?: boolean
+}) {
+  const stateCls = checked
+    ? 'bg-purple-800 hover:bg-purple-700 text-white'
+    : `text-gray-500 hover:bg-white/5 hover:text-gray-300${segment ? '' : ' bg-navy-900/70'}`
+  return (
+    <Tooltip content={tooltip} side="top" triggerClassName={segment ? 'self-stretch flex' : undefined}>
+      <button
+        type="button"
+        aria-pressed={checked}
+        onClick={() => onChange(!checked)}
+        className={segment
+          ? `flex items-center gap-2 px-2.5 border-r border-white/10 transition-colors focus:outline-none focus:bg-white/5 text-left ${stateCls}`
+          : `flex items-center gap-2 max-w-full px-2.5 py-1.5 rounded-lg border border-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/40 text-left ${stateCls}`}
+      >
+        <Check size={12} strokeWidth={3} className={`shrink-0 ${checked ? '' : 'opacity-30'}`} />
+        <span className="min-w-0">{label}</span>
+      </button>
+    </Tooltip>
+  )
+}
+
 function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched, children }: { label?: string; mergeHint?: string; right?: React.ReactNode; attachRight?: boolean; highlighted?: boolean; mismatched?: 'local' | 'remote' | 'both' | 'unknown' | undefined; children: React.ReactNode }) {
   // When `highlighted`, the merge hint brightens (text-purple-200) and the
   // weight steps up from font-light to the default font-normal. No
