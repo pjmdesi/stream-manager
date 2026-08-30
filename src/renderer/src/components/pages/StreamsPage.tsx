@@ -7920,12 +7920,11 @@ function SidebarDetail({
                 activates the custom input. While off, a disabled read-only
                 field shows the inherited value (what Twitch will actually
                 receive) with a "Defaults to …" hint beside the pill. */}
-            <div className="grid grid-cols-2 gap-2 items-start">
-              {/* When the title override is shown, the field spans both
-                  columns so the chip editor + merge-field picker have
-                  room (matching the YouTube title's full-width layout);
-                  the category then wraps to the next grid row. */}
-              <div className={meta?.syncTitle === false ? 'col-span-2' : ''}>
+            {/* Two columns that wrap to one when either would drop below
+                ~300px; the title takes the full line while its override
+                editor is open (chip editor + merge picker need room). */}
+            <div className="flex flex-wrap gap-2 items-start">
+              <div className={meta?.syncTitle === false ? 'basis-full min-w-0' : 'flex-1 basis-[300px] min-w-0'}>
                 <MetaRow label="Twitch title">
                   {(() => {
                     const override = meta?.syncTitle === false
@@ -7960,7 +7959,6 @@ function SidebarDetail({
                             checked={override}
                             onChange={v => onUpdateMeta({ syncTitle: !v })}
                             tooltip={override ? 'Go back to reusing the YouTube title' : 'Write a custom Twitch title instead of reusing the YouTube title'}
-                            label={<span className="text-[11px] whitespace-nowrap">Custom title</span>}
                           />
                           <div className="flex-1 min-w-0 flex items-center">
                             {override ? (
@@ -7974,13 +7972,13 @@ function SidebarDetail({
                                 insertRef={twitchTitleInsertRef}
                               />
                             ) : (
-                              <div className="w-full px-2 py-1 text-xs text-gray-500 whitespace-nowrap overflow-x-auto cursor-not-allowed select-none">
+                              <div className="w-full px-2 py-1 text-xs text-gray-500 truncate cursor-not-allowed select-none">
                                 {rendered || <span className="italic">(no YouTube title yet)</span>}
                               </div>
                             )}
                           </div>
                         </div>
-                        <span className="text-[10px] text-gray-500">Defaults to the YouTube title</span>
+                        <span className="text-[10px] text-gray-400">Defaults to the YouTube title</span>
                         {override && (
                           <MergeFieldPicker
                             keys={titlePickerKeys}
@@ -7999,59 +7997,59 @@ function SidebarDetail({
                   })()}
                 </MetaRow>
               </div>
-              <MetaRow label="Twitch category">
-                {(() => {
-                  const override = meta?.syncGame === false
-                  return (
-                    <div className="flex flex-col gap-1">
-                      {/* Lockup: [override pill │ value], series-group
-                          construction. Default mode's value slot: with
-                          several tags the pinned topic dropdown IS the
-                          interactive default (choosing which tag Twitch
-                          uses — independent of the title's {topic}),
-                          rendered frameless via !important overrides
-                          (TopicSelect appends className after its base);
-                          with one or none, a read-only view of the
-                          resolved tag. Override mode swaps in the
-                          free-text field, frameless the same way. */}
-                      <div className="flex items-stretch w-fit max-w-full bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
-                        <TogglePill
-                          segment
-                          checked={override}
-                          onChange={v => onUpdateMeta({ syncGame: !v })}
-                          tooltip={override ? 'Go back to picking the category from the topic/game tags' : 'Type a custom Twitch category instead of using the topic/game tags'}
-                          label={<span className="text-[11px] whitespace-nowrap">Custom category</span>}
-                        />
-                        <div className="flex items-center min-w-0">
-                          {override ? (
-                            <div className="w-44">
+              <div className="flex-1 basis-[300px] min-w-0">
+                <MetaRow label="Twitch category">
+                  {(() => {
+                    const override = meta?.syncGame === false
+                    return (
+                      <div className="flex flex-col gap-1">
+                        {/* Lockup: [override pill │ value], series-group
+                            construction, spanning its column. Default
+                            mode's value slot: with several tags the
+                            pinned topic dropdown IS the interactive
+                            default (choosing which tag Twitch uses —
+                            independent of the title's {topic}), rendered
+                            frameless via !important overrides (TopicSelect
+                            appends className after its base); with one or
+                            none, a read-only view of the resolved tag.
+                            Override mode swaps in the free-text field,
+                            frameless the same way. */}
+                        <div className="flex items-stretch bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
+                          <TogglePill
+                            segment
+                            checked={override}
+                            onChange={v => onUpdateMeta({ syncGame: !v })}
+                            tooltip={override ? 'Go back to picking the category from the topic/game tags' : 'Type a custom Twitch category instead of using the topic/game tags'}
+                          />
+                          <div className="flex-1 min-w-0 flex items-center">
+                            {override ? (
                               <EditableTextField
                                 value={meta?.twitchGameName ?? ''}
                                 placeholder="Twitch category override…"
                                 onSave={v => onUpdateMeta({ twitchGameName: v })}
                                 className="!bg-transparent !border-0 !rounded-none focus:!bg-white/5"
                               />
-                            </div>
-                          ) : (meta?.games?.length ?? 0) > 1 ? (
-                            <TopicSelect
-                              topics={meta!.games}
-                              value={resolveTwitchGame(meta)}
-                              onChange={v => onUpdateMeta({ twitchGameName: v })}
-                              aria-label="Twitch category topic"
-                              className="!bg-transparent !border-0 !rounded-none mx-1"
-                            />
-                          ) : (
-                            <div className="px-2 py-1 text-xs text-gray-500 truncate cursor-not-allowed select-none">
-                              {resolveTwitchGame(meta) || <span className="italic">(no topic/game tag yet)</span>}
-                            </div>
-                          )}
+                            ) : (meta?.games?.length ?? 0) > 1 ? (
+                              <TopicSelect
+                                topics={meta!.games}
+                                value={resolveTwitchGame(meta)}
+                                onChange={v => onUpdateMeta({ twitchGameName: v })}
+                                aria-label="Twitch category topic"
+                                className="w-full !max-w-none !bg-transparent !border-0 !rounded-none mx-1"
+                              />
+                            ) : (
+                              <div className="w-full px-2 py-1 text-xs text-gray-500 truncate cursor-not-allowed select-none">
+                                {resolveTwitchGame(meta) || <span className="italic">(no topic/game tag yet)</span>}
+                              </div>
+                            )}
+                          </div>
                         </div>
+                        <span className="text-[10px] text-gray-400">Defaults to the Topic / Game tag</span>
                       </div>
-                      <span className="text-[10px] text-gray-500">Defaults to the Topic / Game tag</span>
-                    </div>
-                  )
-                })()}
-              </MetaRow>
+                    )
+                  })()}
+                </MetaRow>
+              </div>
             </div>
             <MetaRow
               label="Twitch tags"
@@ -8899,7 +8897,9 @@ function TogglePill({ checked, onChange, tooltip, label, segment }: {
   onChange: (v: boolean) => void
   /** Describes what the click does NOW (per the tooltip rule). */
   tooltip: string
-  label: React.ReactNode
+  /** Omit for an icon-only pill (segment lockups) — the tooltip then
+   *  carries the whole explanation. */
+  label?: React.ReactNode
   /** Render as the LEFT SEGMENT of a bordered lockup (the series /
    *  Twitch-override groups): no own border box — full-height, a
    *  hairline on the right, squared corners; the host group supplies
@@ -8920,7 +8920,7 @@ function TogglePill({ checked, onChange, tooltip, label, segment }: {
           : `flex items-center gap-2 max-w-full px-2.5 py-1.5 rounded-lg border border-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/40 text-left ${stateCls}`}
       >
         <Check size={12} strokeWidth={3} className={`shrink-0 ${checked ? '' : 'opacity-30'}`} />
-        <span className="min-w-0">{label}</span>
+        {label != null && <span className="min-w-0">{label}</span>}
       </button>
     </Tooltip>
   )

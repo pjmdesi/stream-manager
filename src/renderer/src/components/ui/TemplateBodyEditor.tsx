@@ -850,7 +850,12 @@ export function TemplateBodyEditor({
   // than the content; with no explicit height it just grows. The drag handle
   // below provides the resize (custom strip, larger hit target than the native
   // corner) — same pattern as the sidebar's EditableTextField.
-  const wrapCls = multiline ? 'whitespace-pre-wrap leading-relaxed overflow-y-auto resize-none' : 'whitespace-nowrap overflow-x-auto leading-snug'
+  // Single-line: overflow-x-HIDDEN, not auto — a one-line field must never
+  // grow a horizontal scrollbar. Chromium still auto-scrolls the hidden
+  // overflow to keep the caret visible while typing/arrowing through, so
+  // long content behaves like a normal text input (clipped, revealed by
+  // cursor movement).
+  const wrapCls = multiline ? 'whitespace-pre-wrap leading-relaxed overflow-y-auto resize-none' : 'whitespace-nowrap overflow-x-hidden leading-snug'
   const chromeCls = frameless
     ? 'bg-transparent focus:bg-white/5'
     : `bg-navy-900/70 border ${borderCls} ${cornerCls} focus:border-purple-500/50 focus:bg-navy-900`
