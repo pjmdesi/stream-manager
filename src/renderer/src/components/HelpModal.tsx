@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, CopyPlus, CloudDownload, SquareDashedText, Bot, Bookmark, Maximize2 } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Bot, Bookmark, Maximize2 } from 'lucide-react'
 import { Youtube, Twitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { MERGE_FIELD_CHIP_CLASS, MERGE_FIELD_CHIP_CLASS_INAPPLICABLE } from './ui/TemplateBodyEditor'
@@ -117,19 +117,11 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<Zap size={14} />} title="Action Buttons">
-          <p>Click a stream item to open the details sidebar. That's where all editing happens. Hovering a row shows three quick actions on its right (hidden when the list rows get too narrow):</p>
+          <p>Hovering a row shows three quick actions on its right (hidden when the list rows get too narrow):</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
             <li className="flex items-baseline gap-2"><Film size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Player</strong> — open the stream's video in the Player page for review or clipping.</span></li>
             <li className="flex items-baseline gap-2"><Zap size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Converter</strong> — queue the stream's video for conversion using a chosen preset.</span></li>
             <li className="flex items-baseline gap-2"><ImageIcon size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Create / Edit thumbnail</strong> — open the built-in thumbnail editor for this stream.</span></li>
-          </ul>
-          <p>The rest of a stream's actions live in the details sidebar, grouped by what they act on:</p>
-          <ul className="list-none pl-0 flex flex-col gap-1">
-            <li className="flex items-baseline gap-2"><CopyPlus size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">New episode</strong> — in the sidebar header next to the episode navigation. Creates the next episode of the series, carrying over its series details (<Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>N</Kbd>).</span></li>
-            <li className="flex items-baseline gap-2"><Cloud size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Offload / Pin local / Open folder</strong> — in the Files section's header (also while the section is collapsed). Offload "dehydrates" the stream's files to cloud-only; Pin local "hydrates" them back onto this device; Open folder reveals the stream's folder in your OS file explorer.</span></li>
-            <li className="flex items-baseline gap-2"><Archive size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Archive</strong> — in the sidebar footer. Converts the stream's recordings with your default archive preset (set in Settings) and tags the item as archived. This cannot be undone.</span></li>
-            <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — in the sidebar footer. Removes the stream item and all of its files. You'll be asked to confirm.</span></li>
-            <li className="flex items-baseline gap-2"><Combine size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Combine</strong> — select the parts in the Files section's select mode and use its Combine action to merge multi-part recordings into one file.</span></li>
           </ul>
         </ElementSection>
 
