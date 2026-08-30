@@ -356,8 +356,19 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <Combine size={16} />,
     body: (
       <>
-        <p>Stitch multi-part recordings into a single file. Useful when OBS splits a long stream across multiple files, or when you want to merge separate audio tracks back into the video.</p>
-        <p>Audio and video sync are preserved using the original timestamps.</p>
+        <p>Stitch multi-part recordings into a single file, for when OBS splits a long stream across several files. The parts are copied as-is (no re-encoding), so combining is fast and loses no quality. Start from the Combine page, or select the parts in a stream's Files section and use its <strong className="text-gray-300">Combine</strong> action.</p>
+
+        <ElementSection icon={<Layers size={14} />} title="Jobs">
+          <p>Dropping files starts a job; add more files to it or drop elsewhere to start another. Reorder the parts before combining. Several jobs can be set up, but only one combines at a time; the others wait their turn. Offloaded sources download from the cloud automatically before the run starts.</p>
+        </ElementSection>
+
+        <ElementSection icon={<AlertTriangle size={14} />} title="Compatibility">
+          <p>Because the streams are copied as-is, the parts must match. Properties that differ within a job turn red and block combining (codec, resolution, audio layout); convert the odd file first, then combine. A frame-rate difference shows amber but is allowed; the output just has a variable frame rate.</p>
+        </ElementSection>
+
+        <ElementSection icon={<FolderOpen size={14} />} title="Output & sources">
+          <p>Each job shows its output file and where it lands. Source files are kept unless you check <strong className="text-gray-300">Delete source files after combining</strong>.</p>
+        </ElementSection>
       </>
     ),
   },
