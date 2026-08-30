@@ -7503,19 +7503,14 @@ function SidebarDetail({
             {/* — Tags (SM-level: stream type + topics/games) — Order
                 matches the streams list columns (Type, then Games) so
                 the eye lands in the same place in both views. */}
-            {/* Single SM-metadata row — five fields on one horizontal
-                line above ~800px container width, wrapping the whole
-                Series group (checkbox + Season + Episode) to a second
-                line below that threshold. Container query (not media
-                query) so the breakpoint tracks the sidebar's actual
-                width, not the viewport's. `@container` here scopes
-                child `@[800px]:` rules to this element.
-                Stream Type + Topics/Games stay flex-grow with a 10rem
-                basis so the two tag combos share remaining space; the
-                Series group's `basis-full` forces a wrap below the
-                breakpoint while `@[800px]:basis-auto` lets it inline
-                above it. */}
-            <div className="@container">
+            {/* SM-metadata block — Stream Type + Topics/Games share the
+                first line (flex-grow, 10rem basis each so the two tag
+                combos split the space); the Series segment control sits
+                on its own row below. (2026-08-30: it used to wrap in and
+                out of the first line via an @[800px] container query,
+                but the segment group never sat comfortably beside the
+                tag combos at any width, so it got its own row.) */}
+            <div className="flex flex-col gap-3">
               <div className="flex gap-3 flex-wrap">
                 <div className="flex-1 min-w-0 basis-40">
                   <MetaRow label="Stream type">
@@ -7558,50 +7553,85 @@ function SidebarDetail({
                     />
                   </MetaRow>
                 </div>
-                <div className="flex flex-col basis-full @[800px]:basis-auto">
-                  <Checkbox
-                    checked={meta?.isSeries !== false}
-                    // Also clear the auto-detect pending flag — a manual
-                    // toggle means the user owns the value going forward.
-                    // Without this, clearing then re-adding games[] later
-                    // could silently flip the user's choice. Enabling Series
-                    // also fills season/episode from a matching existing
-                    // series (same logic as the auto-detect), so turning it
-                    // on by hand isn't left with empty placeholder fields.
-                    onChange={v => {
-                      if (!v) { onUpdateMeta({ isSeries: false, seriesAutoDetectPending: undefined }); return }
-                      const primary = resolvePrimaryGame(meta) || meta?.games?.[0] || ''
-                      const nums = primary ? computeSeriesNumbers(primary) : null
-                      const update: Partial<StreamMeta> = { isSeries: true, seriesAutoDetectPending: undefined }
-                      if (nums) {
-                        if (!meta?.ytSeason) update.ytSeason = nums.ytSeason
-                        if (!meta?.ytEpisode) update.ytEpisode = nums.ytEpisode
-                      }
-                      onUpdateMeta(update)
-                    }}
-                    label={<span className="text-[11px] text-gray-400">Series</span>}
-                  />
-                  {!isStandalone(meta) && (
-                    <div className="flex items-center gap-3">
-                      <MetaRow mergeHint="{season}" highlighted={activeTitleMergeKeys.has('season')}>
-                        <NumberStepperField
-                          value={meta?.ytSeason ?? ''}
-                          placeholder="1"
-                          onSave={handleSeasonSave}
-                          className="w-16"
-                        />
-                      </MetaRow>
-                      <MetaRow mergeHint="{episode}" highlighted={activeTitleMergeKeys.has('episode')}>
-                        <NumberStepperField
-                          value={meta?.ytEpisode ?? ''}
-                          placeholder="—"
-                          onSave={v => onUpdateMeta({ ytEpisode: v })}
-                          className="w-16"
-                        />
-                      </MetaRow>
+              </div>
+              {/* Series segment control (2026-08-30 polish): one bordered
+                  unit — [toggle │ S <season> │ E <episode>] — instead of
+                  a floating checkbox over two separate stepper boxes. The
+                  whole left half-pill IS the checkbox (no inner square —
+                  a check glyph that lights up when on), anchoring the
+                  group it governs (the combine-push "wrapping control"
+                  pattern, mirrored to this edge); unchecked leaves the
+                  number segments visible but disabled so the group never
+                  reflows. One shared label line carries both merge chips
+                  (MetaRow's classes verbatim — it only supports a single
+                  hint). S/E prefixes deliberately mirror the [S4E9]
+                  title output format. */}
+              <div className="flex flex-col">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5 min-h-[16px]">
+                    Series
+                    <span className={activeTitleMergeKeys.has('season') ? 'font-mono text-purple-200 normal-case tracking-normal' : 'font-mono font-light text-purple-400/70 normal-case tracking-normal'}>{'{season}'}</span>
+                    <span className={activeTitleMergeKeys.has('episode') ? 'font-mono text-purple-200 normal-case tracking-normal' : 'font-mono font-light text-purple-400/70 normal-case tracking-normal'}>{'{episode}'}</span>
+                  </span>
+                  <div className="flex items-stretch w-fit bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
+                    <Tooltip content={isStandalone(meta) ? 'Mark as a series episode — enables season/episode numbering' : 'Make this a standalone stream — turns off season/episode numbering'} side="top">
+                      <button
+                        type="button"
+                        aria-pressed={meta?.isSeries !== false}
+                        // Also clear the auto-detect pending flag — a manual
+                        // toggle means the user owns the value going forward.
+                        // Without this, clearing then re-adding games[] later
+                        // could silently flip the user's choice. Enabling Series
+                        // also fills season/episode from a matching existing
+                        // series (same logic as the auto-detect), so turning it
+                        // on by hand isn't left with empty placeholder fields.
+                        onClick={() => {
+                          const enabling = isStandalone(meta)
+                          if (!enabling) { onUpdateMeta({ isSeries: false, seriesAutoDetectPending: undefined }); return }
+                          const primary = resolvePrimaryGame(meta) || meta?.games?.[0] || ''
+                          const nums = primary ? computeSeriesNumbers(primary) : null
+                          const update: Partial<StreamMeta> = { isSeries: true, seriesAutoDetectPending: undefined }
+                          if (nums) {
+                            if (!meta?.ytSeason) update.ytSeason = nums.ytSeason
+                            if (!meta?.ytEpisode) update.ytEpisode = nums.ytEpisode
+                          }
+                          onUpdateMeta(update)
+                        }}
+                        // The whole half-pill IS the checkbox: check glyph
+                        // lights up in the accent when on, sits faint when
+                        // off. Sidebar-specific style — regular checkboxes
+                        // elsewhere stay as they are.
+                        className={`flex items-center self-stretch px-2.5 border-r border-white/10 transition-colors focus:outline-none focus:bg-white/5 ${
+                          meta?.isSeries !== false
+                            ? 'bg-purple-600/20 text-purple-200 hover:bg-purple-600/30'
+                            : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'
+                        }`}
+                      >
+                        <Check size={12} strokeWidth={3} className={meta?.isSeries !== false ? '' : 'opacity-30'} />
+                      </button>
+                    </Tooltip>
+                    <div className={`flex items-center ${isStandalone(meta) ? 'opacity-50' : ''}`}>
+                      <span className="pl-2 pr-0.5 text-[10px] font-medium text-gray-500 select-none">S</span>
+                      <NumberStepperField
+                        frameless
+                        disabled={isStandalone(meta)}
+                        value={meta?.ytSeason ?? ''}
+                        placeholder="1"
+                        onSave={handleSeasonSave}
+                        className="w-12"
+                      />
                     </div>
-                  )}
-                </div>
+                    <div className={`flex items-center border-l border-white/10 ${isStandalone(meta) ? 'opacity-50' : ''}`}>
+                      <span className="pl-2 pr-0.5 text-[10px] font-medium text-gray-500 select-none">E</span>
+                      <NumberStepperField
+                        frameless
+                        disabled={isStandalone(meta)}
+                        value={meta?.ytEpisode ?? ''}
+                        placeholder="—"
+                        onSave={v => onUpdateMeta({ ytEpisode: v })}
+                        className="w-12"
+                      />
+                    </div>
+                  </div>
               </div>
             </div>
             {/* — YouTube — */}
@@ -9413,7 +9443,7 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
  * arrows are always a useful no-state-needed entry point.
  */
 function NumberStepperField({
-  value, onSave, placeholder, min = 1, max, className,
+  value, onSave, placeholder, min = 1, max, className, frameless, disabled,
 }: {
   value: string
   onSave: (value: string) => Promise<void> | void
@@ -9421,6 +9451,14 @@ function NumberStepperField({
   min?: number
   max?: number
   className?: string
+  /** Strip the field's own border/background/rounding for use inside a
+   *  bordered group (the Series segment control) — hairline dividers
+   *  between input and steppers replace the box, and focus shows as a
+   *  background tint like the other frameless inputs. */
+  frameless?: boolean
+  /** Static disable (unlike the transient saving state, which must NOT
+   *  disable the input — see the comment on the input below). */
+  disabled?: boolean
 }) {
   const [local, setLocal] = useState(value)
   const [saving, setSaving] = useState(false)
@@ -9492,15 +9530,21 @@ function NumberStepperField({
         // class still signals saving state; any keystrokes the user
         // makes during the in-flight save just update local state and
         // commit on the next blur, so concurrent edits aren't lost.
-        className={`w-full bg-navy-900/70 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''}`}
+        disabled={disabled}
+        className={frameless
+          ? `w-full bg-transparent px-1.5 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:bg-white/5 transition-colors disabled:cursor-not-allowed ${saving ? 'opacity-60' : ''}`
+          : `w-full bg-navy-900/70 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors disabled:cursor-not-allowed ${saving ? 'opacity-60' : ''}`}
       />
       <div className="flex flex-col">
         <Tooltip content="Increment (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}
+          disabled={disabled}
           onClick={e => step(e.shiftKey ? 10 : 1)}
-          className="flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-b-0 border-white/10 rounded-tr-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          className={frameless
+            ? 'flex-1 flex items-center justify-center w-4 border-l border-white/10 text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'
+            : 'flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-b-0 border-white/10 rounded-tr-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'}
           aria-label="Increment"
         >
           <ChevronUp size={10} strokeWidth={2.5} />
@@ -9510,8 +9554,11 @@ function NumberStepperField({
         <button
           type="button"
           tabIndex={-1}
+          disabled={disabled}
           onClick={e => step(e.shiftKey ? -10 : -1)}
-          className="flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-white/10 rounded-br-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          className={frameless
+            ? 'flex-1 flex items-center justify-center w-4 border-l border-t border-white/10 text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'
+            : 'flex-1 flex items-center justify-center w-4 bg-navy-900/70 border border-l-0 border-white/10 rounded-br-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'}
           aria-label="Decrement"
         >
           <ChevronDown size={10} strokeWidth={2.5} />
