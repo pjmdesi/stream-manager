@@ -7263,7 +7263,7 @@ function SidebarDetail({
               className="text-xs text-gray-400 font-mono tabular-nums hover:text-purple-300 hover:bg-white/5 rounded px-1.5 py-0.5 -ml-1.5 transition-colors flex items-center gap-1"
             >
               <span>{folder.date}</span>
-              <PencilLine size={9} className="opacity-50" />
+              <PencilLine size={9} />
               {/* Direction-aware mismatch dot for the date — same
                   color/tooltip scheme as the MetaRow dots. Sits inside
                   the date button so a click on either still opens the
@@ -9673,7 +9673,7 @@ function BroadcastTimePrivacyRow({
               className="bg-navy-900 border border-white/10 text-gray-200 font-mono tabular-nums text-xs rounded-lg px-2 py-1.5 flex items-center gap-1 hover:text-purple-300 hover:border-purple-500/40 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/40"
             >
               {date}
-              <PencilLine size={9} className="opacity-50" />
+              <PencilLine size={9} />
             </button>
           </Tooltip>
         </div>
