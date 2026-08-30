@@ -7542,7 +7542,7 @@ function SidebarDetail({
               <div className="flex flex-col">
                   <span className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5 min-h-[16px]">
                     Series
-                    <span className="text-gray-600 font-light normal-case">→</span>
+                    <span className="text-gray-400 font-semibold normal-case">→</span>
                     <span className={`${activeTitleMergeKeys.has('season') ? MERGE_FIELD_CHIP_CLASS : MERGE_FIELD_CHIP_GHOST} normal-case tracking-normal`}>season</span>
                     <span className={`${activeTitleMergeKeys.has('episode') ? MERGE_FIELD_CHIP_CLASS : MERGE_FIELD_CHIP_GHOST} normal-case tracking-normal`}>episode</span>
                   </span>
@@ -8977,7 +8977,7 @@ function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched
   // never reflows the row.
   const hintChip = mergeHint ? (
     <>
-      <span className="text-gray-600 font-light normal-case">→</span>
+      <span className="text-gray-400 font-semibold normal-case">→</span>
       <span className={`${highlighted ? MERGE_FIELD_CHIP_CLASS : MERGE_FIELD_CHIP_GHOST} normal-case tracking-normal`}>{mergeHint.replace(/[{}]/g, '')}</span>
     </>
   ) : null
