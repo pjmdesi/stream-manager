@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Trash2, Keyboard, PanelRight, Layers, Play, AlertTriangle, Upload, Cloud, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, CopyPlus, CloudDownload, SquareDashedText, Bot, Bookmark, Maximize2 } from 'lucide-react'
 import { Youtube, Twitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
+import { MERGE_FIELD_CHIP_CLASS, MERGE_FIELD_CHIP_CLASS_INAPPLICABLE } from './ui/TemplateBodyEditor'
 import { useStore } from '../hooks/useStore'
 
 function ElementSection({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
@@ -16,6 +17,12 @@ function ElementSection({ icon, title, children }: { icon: React.ReactNode; titl
       </div>
     </div>
   )
+}
+
+/** A merge-field key rendered as the editors' chip — the app dropped the
+ *  `{braces}` convention from its UI, so the docs show the chip too. */
+function MF({ k, inapplicable }: { k: string; inapplicable?: boolean }) {
+  return <span className={`${inapplicable ? MERGE_FIELD_CHIP_CLASS_INAPPLICABLE : MERGE_FIELD_CHIP_CLASS} align-middle mx-px`}>{k}</span>
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
@@ -55,7 +62,7 @@ function ShortcutGroup({ title, rows }: { title: string; rows: { keys: React.Rea
 
 type HelpKey =
   | 'streams' | 'shortcuts' | 'player' | 'converter' | 'combine'
-  | 'thumbnails' | 'launcher' | 'integrations' | 'rules' | 'widgets'
+  | 'thumbnails' | 'launcher' | 'integrations' | 'rules' | 'relay'
 
 interface HelpItem {
   id: HelpKey
@@ -72,7 +79,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     icon: <Radio size={16} />,
     body: (
       <>
-        <p>The Streams page shows a list of stream items stacked as rows sorted by date (descending) by default. Upcoming streams are steams scheduled for a future date and are colored teal. Streams happening on the current day are colored blue. Each stream item row is made up of the following elements:</p>
+        <p>The Streams page shows a list of stream items stacked as rows sorted by date (descending) by default. Upcoming streams are streams scheduled for a future date and are colored teal. Streams happening on the current day are colored blue. Each stream item row is made up of the following elements:</p>
 
         <ElementSection icon={<ImageIcon size={14} />} title="Thumbnail">
           <p>Stream Manager picks the best image to represent a stream item (typically the first available that matches certain criteria). To choose a different one, open the details sidebar and use the <strong className="text-gray-300">Media files</strong> section — set any image as the thumbnail there, or click it to browse every image full screen.</p>
@@ -98,7 +105,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<Tag size={14} />} title="Type Tags">
-          <p>Used to categorize the stream however you like (or not at all). Create new tags on the fly when you create or edit a stream item, or via the <strong className="text-gray-300">Manage Tags</strong> button in the Streams page header. Tags can be customized with different colors and textures to.</p>
+          <p>Used to categorize the stream however you like (or not at all). Create new tags on the fly when you create or edit a stream item, or via the <strong className="text-gray-300">Manage Tags</strong> button in the Streams page header. Tags can be customized with different colors and textures too.</p>
         </ElementSection>
 
         <ElementSection icon={<Hash size={14} />} title="Topics / Games">
@@ -106,22 +113,23 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<MessageSquare size={14} />} title="Notes">
-          <p>Free-form notes for anything the other fields don't cover. Located at thee bottom of the detail sidebar main content.</p>
+          <p>Free-form notes for anything the other fields don't cover. Located at the bottom of the detail sidebar main content.</p>
         </ElementSection>
 
         <ElementSection icon={<Zap size={14} />} title="Action Buttons">
-          <p>Click a stream item to open the details sidebar — that's where all editing happens. Some action buttons are available on the very right of a stream item row when hovering while the sidebar is closed:</p>
+          <p>Click a stream item to open the details sidebar — that's where all editing happens. Hovering a row shows three quick actions on its right (they step aside when the list gets too narrow — everything stays reachable from the sidebar):</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
             <li className="flex items-baseline gap-2"><Film size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Player</strong> — open the stream's video in the Player page for review or clipping.</span></li>
             <li className="flex items-baseline gap-2"><Zap size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Send to Converter</strong> — queue the stream's video for conversion using a chosen preset.</span></li>
-            <li className="flex items-baseline gap-2"><Combine size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Combine videos</strong> — merge multi-part recordings into one file (only shown when there are 2+ videos).</span></li>
             <li className="flex items-baseline gap-2"><ImageIcon size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Create / Edit thumbnail</strong> — open the built-in thumbnail editor for this stream.</span></li>
-            <li className="flex items-baseline gap-2"><CopyPlus size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Create New episode</strong> — create a duplicate of the current stream item. Useful for quickly adding new episodes of the current series.</span></li>
-            <li className="flex items-baseline gap-2"><Cloud size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Offload files</strong> — "dehydrate" the stream's files (set the files inside the stream folder to be cloud-only through the Windows cloud service).</span></li>
-            <li className="flex items-baseline gap-2"><CloudDownload size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Pin files local</strong> — "hydrate" the stream's files (set the files inside the stream folder to be available locally through the Windows cloud service).</span></li>
-            <li className="flex items-baseline gap-2"><FolderOpen size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Open folder</strong> — reveal the stream's folder in your OS file explorer.</span></li>
-            <li className="flex items-baseline gap-2"><Archive size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Archive Stream</strong> — runs the archiving process for the stream's files. This converts the stream's recording files using the default archive encoding preset (set on the settings page) and, once finished, tags the stream item as archived. This cannot be undone.</span></li>
-            <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — remove the stream item and all of its files. You'll be asked to confirm.</span></li>
+          </ul>
+          <p>The rest of a stream's actions live in the details sidebar, grouped by what they act on:</p>
+          <ul className="list-none pl-0 flex flex-col gap-1">
+            <li className="flex items-baseline gap-2"><CopyPlus size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">New episode</strong> — in the sidebar header next to the episode navigation. Creates the next episode of the series, carrying over its series details (<Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>N</Kbd>).</span></li>
+            <li className="flex items-baseline gap-2"><Cloud size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Offload / Pin local / Open folder</strong> — in the Files section's header (also while the section is collapsed). Offload "dehydrates" the stream's files to cloud-only; Pin local "hydrates" them back onto this device; Open folder reveals the stream's folder in your OS file explorer.</span></li>
+            <li className="flex items-baseline gap-2"><Archive size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Archive</strong> — in the sidebar footer. Converts the stream's recordings with your default archive preset (set in Settings) and tags the item as archived. This cannot be undone.</span></li>
+            <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — in the sidebar footer. Removes the stream item and all of its files. You'll be asked to confirm.</span></li>
+            <li className="flex items-baseline gap-2"><Combine size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Combine</strong> — select the parts in the Files section's select mode and use its Combine action to merge multi-part recordings into one file.</span></li>
           </ul>
         </ElementSection>
 
@@ -138,23 +146,27 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             <li className="flex items-baseline gap-2"><Trash2 size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Delete</strong> — send the file to the recycle bin.</span></li>
           </ul>
           <p>Cards are tagged to show a file's role at a glance: a <strong className="text-gray-300">Clip</strong> / <strong className="text-gray-300">Short</strong> tray on edited videos, a bookmark tray on the chosen thumbnail image, and an <Archive size={11} className="inline align-baseline -translate-y-px text-emerald-400" /> <strong className="text-gray-300">Archived</strong> marker on compressed recordings. While cloud sync is active, a cloud icon on each card shows whether the file is on this device or offloaded (a spinner shows until that's confirmed).</p>
+          <p><strong className="text-gray-300">Select mode</strong> — the <em>Select</em> button in the section's header turns on bulk actions: send the selected videos to the converter or combine, offload / pin / delete the selection. Each button's tooltip states exactly how many files it will affect, and a button that would affect nothing disables itself.</p>
+          <p><strong className="text-gray-300">Create thumbnail</strong> — when a stream has no SM-made thumbnail yet, a dashed tile sits in the grid where the thumbnail card will appear; clicking it opens the thumbnail editor.</p>
+          <p>Bulk cloud transfers run through the <strong className="text-gray-300">Cloud sync</strong> widget that appears at the bottom of the navigation sidebar while an offload or download is active — click it to open the Cloud Operations dialog.</p>
         </ElementSection>
 
         <ElementSection icon={<PanelRight size={14} />} title="Details Sidebar">
           <p>Click any stream item to open the details sidebar — every field is edited inline and autosaves as you go. This sidebar is where you prepare and publish a stream's YouTube &amp; Twitch metadata. A few fields feed the title and description templates as <strong className="text-gray-300">merge fields</strong>:</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
-            <li className="flex items-baseline gap-2"><Hash size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Topics / Games</strong> — the selected tag is the <em>primary</em> one. It sets the <code>{'{topic}'}</code> merge field (use <code>{'{topics}'}</code> for all of them) and is the Twitch category by default.</span></li>
-            <li className="flex items-baseline gap-2"><PencilLine size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Tagline</strong> — a short catchy phrase that sets the <code>{'{tagline}'}</code> merge field. Press <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in the field for an AI suggestion using the stream's details, previous taglines in the series, and your preferences prompt configurable on the integrations page.</span></li>
-            <li className="flex items-baseline gap-2"><Layers size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Series / Season / Episode</strong> — for a stream series, these set the <code>{'{season}'}</code>, <code>{'{episode}'}</code>, and <code>{'{total_episodes}'}</code> merge fields. Turn off <em>Series</em> for one-off streams or to otherwise opt-out of the series system.</span></li>
+            <li className="flex items-baseline gap-2"><Hash size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Topics / Games</strong> — the selected tag is the <em>primary</em> one. It sets the <MF k="topic" /> merge field (use <MF k="topics" /> for all of them) and is the Twitch category by default.</span></li>
+            <li className="flex items-baseline gap-2"><PencilLine size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Tagline</strong> — a short catchy phrase that sets the <MF k="tagline" /> merge field. Press <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in the field for an AI suggestion using the stream's details, previous taglines in the series, and your preferences prompt configurable on the integrations page.</span></li>
+            <li className="flex items-baseline gap-2"><Layers size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Series / Season / Episode</strong> — for a stream series, these set the <MF k="season" />, <MF k="episode" />, and <MF k="total_episodes" /> merge fields. Turn off <em>Series</em> for one-off streams or to otherwise opt-out of the series system.</span></li>
           </ul>
+          <p>Fields that feed a merge field wear the chip right in their label (an arrow pointing at the chip); the chip lights up when the bound title template actually uses it.</p>
         </ElementSection>
 
         <ElementSection icon={<Type size={14} />} title="Title fields & merge fields">
-          <p>The YouTube Title and the Twitch Title (when you uncheck <em>Same as YouTube title</em>) are mini template editors. Type plain text, or insert a <strong className="text-gray-300">merge-field chip</strong> from the <em>Insert</em> row beneath the field. Chips like <code>{'{topic}'}</code> or <code>{'{episode}'}</code> are substituted live from the fields above.</p>
+          <p>The YouTube Title and the Twitch Title (when you enable <em>Custom title</em>) are mini template editors. Type plain text, or insert a <strong className="text-gray-300">merge-field chip</strong> from the <em>Insert</em> row beneath the field. Chips like <MF k="topic" /> or <MF k="episode" /> are substituted live from the fields above.</p>
           <ul className="list-none pl-0 flex flex-col gap-1.5">
             <li className="flex items-baseline gap-2"><Braces size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Preview</strong> — when a title contains merge fields, a preview line shows the final rendered title (exactly what publishes).</span></li>
             <li className="flex items-baseline gap-2"><Hash size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Character counter</strong> — counts the rendered title against the platform limit (100 for YouTube, 140 for Twitch) and turns red when you go over.</span></li>
-            <li className="flex items-baseline gap-2"><Braces size={11} className="shrink-0 text-red-400 translate-y-0.5" /><span>A merge field that doesn't apply — e.g. <code>{'{episode}'}</code> on a standalone stream — shows as a red chip. Turn on <em>Series</em> to use it.</span></li>
+            <li className="flex items-baseline gap-2"><Braces size={11} className="shrink-0 text-red-400 translate-y-0.5" /><span>A merge field that doesn't apply — e.g. <MF k="episode" inapplicable /> on a standalone stream — shows as a red chip. Turn on <em>Series</em> to use it.</span></li>
           </ul>
         </ElementSection>
 
@@ -176,7 +188,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             <li className="flex items-baseline gap-2"><span className="shrink-0 w-2 h-2 rounded-full bg-gradient-to-br from-blue-400 to-orange-400" /><span><strong className="text-gray-300">Two-tone</strong> — a conflict: both sides changed since the last sync. Pulling overwrites your local edits; pushing overwrites YouTube's.</span></li>
             <li className="flex items-baseline gap-2"><span className="shrink-0 w-2 h-2 rounded-full bg-gray-400" /><span><strong className="text-gray-300">Gray</strong> — the field differs from YouTube but the direction is unknown, because the stream hasn't been synced since per-field tracking was added. Push or pull once to start tracking direction.</span></li>
           </ul>
-          <p className="flex items-baseline gap-2"><Twitch size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span>Twitch pushes the title, category, and tags to your channel. <em>Same as YouTube title</em> mirrors the YouTube title; uncheck it to give Twitch its own (also template-aware) title. <em>Pick Topic / Game tag</em> sets the category from your topic tags (a dropdown picks which when there are several), independent of the title.</span></p>
+          <p className="flex items-baseline gap-2"><Twitch size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span>Twitch pushes the title, category, and tags to your channel. By default the title mirrors the YouTube title and the category comes from your topic tags (a dropdown picks which when there are several) — each field shows exactly what will be pushed. Toggle <em>Custom title</em> or <em>Custom category</em> to override: the custom field starts pre-filled with the inherited value so you can edit from there.</span></p>
           <p>Twitch fields don't show the per-field dots above — Twitch is a single channel state (one title/category/tags at a time) rather than a per-stream object, so there's no per-field direction to track. Instead the <strong className="text-gray-300">Push to Twitch</strong> button simply lights up when your channel doesn't match this stream's values and disables once they're in sync.</p>
         </ElementSection>
       </>
@@ -192,13 +204,17 @@ function getItems(isDumpMode: boolean): HelpItem[] {
 
         <ElementSection icon={<Keyboard size={14} />} title="Global — any page">
           <ShortcutGroup title="Navigation" rows={[
-            { keys: ['Ctrl', '1…6'], label: 'Jump to a page (Streams · Player · Converter · Combine · Thumbnails · Launcher)' },
+            { keys: ['Ctrl', '1…7'], label: 'Jump to a page in nav order (Streams · Player · Thumbnails · Converter · Combine · Launcher · Auto-Rules)' },
             { keys: ['Ctrl', 'PageUp / PageDown'], label: 'Cycle to the previous / next page' },
             { keys: ['Ctrl', ','], label: 'Open Settings' },
             { keys: ['?'], label: 'Open this Help' },
           ]} />
+          <ShortcutGroup title="View" rows={[
+            { keys: ['Ctrl', '+ / -'], label: 'Zoom the app UI in / out' },
+            { keys: ['Ctrl', '0'], label: 'Reset the app UI zoom' },
+          ]} />
           <ShortcutGroup title="Actions" rows={[
-            { keys: ['Ctrl', 'L'], label: "Launch the sidebar widget's default launch group" },
+            { keys: ['Ctrl', 'L'], label: 'Launch the pinned launch group (the Launcher nav item’s button)' },
           ]} />
         </ElementSection>
 
@@ -357,6 +373,10 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         <ElementSection icon={<Upload size={14} />} title="Importing HandBrake presets">
           <p>If you already have presets exported from HandBrake, click <em>Import HandBrake JSON</em> and select the <code>.json</code> file. The app translates the HandBrake settings into ffmpeg arguments and adds the preset to your list. Imported presets open in Advanced mode in the editor.</p>
         </ElementSection>
+
+        <ElementSection icon={<Layers size={14} />} title="In the navigation">
+          <p>While at least one job is queued, running, paused, or errored, the Converter's nav item shows the live status underneath it: combined progress, a status label, job count, and an ETA when one is available. Cloud-placeholder files that need to download before encoding can start are surfaced separately. It slides away when the last job finishes.</p>
+        </ElementSection>
       </>
     ),
   },
@@ -389,7 +409,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
     body: (
       <>
         <p>Save groups of apps, windows, or URLs and launch them all in one click. Useful for spinning up your full streaming setup (OBS, Discord, capture software, browser tabs) before going live.</p>
-        <p>Pin a group to the sidebar widget for one-click launch.</p>
+        <p>Pin a group (the star icon next to it on the Launcher page) and its launch button lives right on the Launcher item in the navigation, wearing the group's own icon. The button doubles as feedback: a spinner while launching, a check on success, and a warning when something fails — hover it for the app-by-app details. <Kbd>Ctrl</Kbd>+<Kbd>L</Kbd> launches the pinned group from anywhere.</p>
       </>
     ),
   },
@@ -436,39 +456,19 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         <p>Auto-Rules watch a folder and automatically move, copy, rename, or convert new files matching a glob pattern. Common setup: watch your OBS recordings folder and route files {isDumpMode ? 'into your dump folder' : 'into the matching dated stream folder'}.</p>
         <p>Sessions that run past midnight are handled automatically: a recording started in the small hours (before 6&nbsp;AM) whose date has no stream item of its own is routed into the previous day's stream — the session it actually belongs to.</p>
         <p>Rules can also queue up conversions automatically (e.g. archive every new recording with an AV1 preset).</p>
+        <p>Once you have rules, the Auto-Rules item in the navigation carries a <em>Start / Stop</em> control for the file-watcher, and shows a "Running" line with the number of enabled rules while it's on.</p>
       </>
     ),
   },
   {
-    id: 'widgets',
-    label: 'Widgets',
-    icon: <LayoutGrid size={16} />,
+    id: 'relay',
+    label: 'Stream Relay',
+    icon: <TrendingUpDown size={16} />,
     body: (
       <>
-        <p>Widgets are the live-status panels that show up in the bottom of the left sidebar. Some only appear when they have something to show (a file conversion, active cloud syncing, a pinned launch group, etc.). Click any widget's header to navigate to the page it is related to.</p>
-
-        <ElementSection icon={<Zap size={14} />} title="Converting">
-          <p>Visible while at least one conversion job is queued, running, paused, or errored. Shows the combined progress bar, a status label, job count, and an ETA when one is available. Cloud-placeholder files that need to download before encoding can start are surfaced separately.</p>
-        </ElementSection>
-
-        <ElementSection icon={<Cloud size={14} />} title="Cloud sync">
-          <p>Visible during a cloud-sync operation — either offloading local files to the cloud or downloading (hydrating) placeholders to disk.</p>
-          <p>Click the widget to open the Cloud Operations dialog.</p>
-        </ElementSection>
-
-        <ElementSection icon={<Rocket size={14} />} title="Launcher">
-          <p>Visible only after you've pinned one of your launch groups to the sidebar (the star icon next to a group on the Launcher page). Shows the pinned group's icon and name in the widget header.</p>
-          <p>Click <em>Launch</em> to spin up every app, window, and URL in the group in one shot.</p>
-        </ElementSection>
-
-        <ElementSection icon={<TrendingUpDown size={14} />} title="Stream Relay">
-          <p>Visible only when the relay is enabled in Integrations → Stream Relay. Shows the relay's current status (<em>Idle</em>, <em>Listening</em>, <em>Starting</em>, <em>Streaming</em>, <em>Error</em>), the active YouTube broadcast, and — once you go live — running kbps + duration stats.</p>
-          <p>Click the title row to jump to the Integrations page where the relay's setup and stream key live. Click the active-broadcast row to pick a different broadcast or use auto-pick mode.</p>
-        </ElementSection>
-
-        <ElementSection icon={<Shuffle size={14} />} title="Auto-Rules">
-          <p>Visible when you have one or more rules configured on the Auto-Rules page. The header row links to the Auto-Rules page; a <em>Start / Stop</em> button toggles the file-watcher; the bottom row shows the watcher's running state with a colored dot and the number of currently-enabled rules.</p>
-        </ElementSection>
+        <p>The Stream Relay widget sits at the bottom of the navigation sidebar. It's visible only when the relay is enabled in Integrations → Stream Relay (that's also where the relay's setup lives — see <em>Integrations → Stream Relay</em> for how it works).</p>
+        <p>It shows the relay's current status (<em>Idle</em>, <em>Listening</em>, <em>Starting</em>, <em>Streaming</em>, <em>Error</em>), the active YouTube broadcast, and — once you go live — running kbps + duration stats.</p>
+        <p>Click the title row to jump to the Integrations page where the relay's setup and stream key live. Click the active-broadcast row to pick a different broadcast or use auto-pick mode.</p>
       </>
     ),
   },
