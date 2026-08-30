@@ -258,12 +258,16 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
       <div className="self-center shrink-0 -my-1 -ms-2">
         <VideoThumb path={path} />
       </div>
+      {/* Status column — converter done-row parity: 20px icon in its own
+          slot between the thumbnail and the text stack. */}
+      <div className="self-center shrink-0 flex items-center justify-center w-6">
+        <CheckCircle2 size={20} className="text-green-400 shrink-0" />
+      </div>
       {/* Left: all content */}
       <div className="flex-1 min-w-0 flex flex-col gap-1.5">
         <div className="flex items-center gap-2">
-          <CheckCircle2 size={14} className="text-green-400 shrink-0" />
           <Tooltip content={path} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
-            <span className="block text-xs text-gray-200 truncate">{nameOf(path)}</span>
+            <span className="block font-mono text-sm text-gray-200 truncate">{nameOf(path)}</span>
           </Tooltip>
           {/* Output metadata where the converter shows its preset. */}
           <span className="text-xs text-gray-400 shrink-0 tabular-nums">
@@ -281,16 +285,16 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
             </button>
           </Tooltip>
         )}
-        <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-          <div className="h-full rounded-full bg-green-500 w-full" />
-        </div>
+        {/* No progress element — terminal rows revert to the plain
+            background, converter parity (the old full green bar lingered
+            here after the row-background-fill redesign). */}
         <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
-          <span>100%</span>
-          <span>Elapsed: {formatDur(elapsedMs / 1000)}</span>
-          <Tooltip content="Open output folder" side="top">
+          <span className="whitespace-nowrap">100%</span>
+          <span className="whitespace-nowrap">Elapsed: {formatDur(elapsedMs / 1000)}</span>
+          <Tooltip content={`Open output folder: ${displayPath(outDir)}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
             <button
               onClick={() => window.api.openInExplorer(outDir)}
-              className="ml-auto min-w-0 text-gray-400 hover:text-gray-300 transition-colors truncate"
+              className="block max-w-full text-gray-400 hover:text-gray-300 transition-colors truncate"
             >
               {displayPath(outDir)}
             </button>
