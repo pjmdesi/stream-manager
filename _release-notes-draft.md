@@ -37,8 +37,8 @@ Target: TBD (the nav-refresh release) · emptied 2026-08-28 after the v2.4.0 rel
 
 ## Navigation redesign
 
-- The nav is reorganized into three groups: creation pages (Streams, Player, Thumbnails), utilities (Converter, Combine, Auto-Rules), and session tools (Launcher, with Stream Relay joining once it gets its own page). Integrations and Settings float to the bottom of the item area. The expanded sidebar is slightly wider.
-- Page-jump shortcuts now follow the nav's visual order: Ctrl+1 through Ctrl+7 map to item positions (Thumbnails is Ctrl+3, Converter Ctrl+4, Combine Ctrl+5, Auto-Rules Ctrl+6, Launcher Ctrl+7). Ctrl+PageUp/PageDown cycle in the same order.
+- The nav is reorganized into three groups: creation pages (Streams, Player, Thumbnails), utilities (Converter, Combine), and session tools (Launcher and Auto-Rules, with Stream Relay joining once it gets its own page). Integrations and Settings float to the bottom of the item area. The expanded sidebar is slightly wider.
+- Page-jump shortcuts now follow the nav's visual order: Ctrl+1 through Ctrl+7 map to item positions (Thumbnails is Ctrl+3, Converter Ctrl+4, Combine Ctrl+5, Launcher Ctrl+6, Auto-Rules Ctrl+7). Ctrl+PageUp/PageDown cycle in the same order.
 - The Converter, Launcher, and Auto-Rules widgets no longer sit at the bottom of the sidebar; their info and controls live inside their nav items:
     a. Converter: aggregate progress, status, and ETA appear under the item while jobs run, sliding open when a job starts and sliding shut when the last one finishes.
     b. Launcher: an always-visible launch button on the row wears the pinned group's own icon and doubles as feedback (spinner while launching, check on success, warning when apps fail, details in the tooltip with the app list). Ctrl+L still quick-launches.

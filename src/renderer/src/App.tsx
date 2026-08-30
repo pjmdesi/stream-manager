@@ -563,12 +563,14 @@ type NavItem = {
 // nothing renders them.
 //   Create    — the content-producing pages.
 //   Utilities — post-stream processing tools with live activity; hybrid
-//               nav/widget items (Pass B), and Auto-Rules joins the group
-//               when its widget converts to one.
-//   Session   — live-session helpers: pre-stream prep now (Launcher),
-//               and Stream Relay whenever it gets its own page. Split
-//               from Utilities because these are action-oriented, not
-//               passive processing status.
+//               nav/widget items (Pass B).
+//   Session   — live-session helpers: pre-stream prep (Launcher),
+//               Auto-Rules (moved here 2026-08-30: its start/stop-control
+//               design matches the Launcher item, and running rules are a
+//               live-stream wrap-up activity more than post-stream
+//               processing), and Stream Relay whenever it gets its own
+//               page. Split from Utilities because these are
+//               action-oriented, not passive processing status.
 //   System    — settings pages, pinned to the bottom of the nav's
 //               flexible zone by the spacer in the render (they're also
 //               excluded from the startup-page selector).
@@ -580,12 +582,12 @@ const NAV_GROUP_CREATE: NavItem[] = [
 const NAV_GROUP_UTILITIES: NavItem[] = [
   { id: 'converter', label: 'Converter',  icon: <Zap size={18} />, extra: ConverterNavExtra },
   { id: 'combine',   label: 'Combine',    icon: <Combine size={18} /> },
-  // Auto-Rules collapsed status lives inside its rowAction (control on
-  // top, dot + enabled/total below); expanded status is the subline.
-  { id: 'rules',     label: 'Auto-Rules', icon: <Shuffle size={18} />, rowAction: AutoRulesNavAction },
 ]
 const NAV_GROUP_SESSION: NavItem[] = [
   { id: 'launcher', label: 'Launcher', icon: <Rocket size={18} />, rowAction: LauncherNavAction },
+  // Auto-Rules collapsed status lives inside its rowAction (control on
+  // top, dot + enabled/total below); expanded status is the subline.
+  { id: 'rules',    label: 'Auto-Rules', icon: <Shuffle size={18} />, rowAction: AutoRulesNavAction },
 ]
 const NAV_GROUP_SYSTEM: NavItem[] = [
   { id: 'integrations', label: 'Integrations', icon: <Plug size={18} /> },
@@ -602,8 +604,8 @@ const NAV_ITEMS: NavItem[] = [...NAV_GROUP_CREATE, ...NAV_GROUP_UTILITIES, ...NA
 // with this order.
 const NAV_SHORTCUTS: Partial<Record<Page, string>> = {
   streams: 'Ctrl+1', player: 'Ctrl+2', thumbnails: 'Ctrl+3',
-  converter: 'Ctrl+4', combine: 'Ctrl+5', rules: 'Ctrl+6',
-  launcher: 'Ctrl+7', settings: 'Ctrl+,',
+  converter: 'Ctrl+4', combine: 'Ctrl+5', launcher: 'Ctrl+6',
+  rules: 'Ctrl+7', settings: 'Ctrl+,',
 }
 
 function AppInner() {
@@ -903,7 +905,7 @@ function AppInner() {
   useEffect(() => {
     // Ctrl+1…7 targets, in the nav's VISUAL order (Create, then
     // Utilities, then Session) — keep in sync with NAV_SHORTCUTS above.
-    const PAGE_NAV: Page[] = ['streams', 'player', 'thumbnails', 'converter', 'combine', 'rules', 'launcher']
+    const PAGE_NAV: Page[] = ['streams', 'player', 'thumbnails', 'converter', 'combine', 'launcher', 'rules']
     const onKey = (e: KeyboardEvent) => {
       if (isAnyModalOpen()) return
       const mod = e.ctrlKey || e.metaKey
