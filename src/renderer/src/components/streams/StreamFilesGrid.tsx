@@ -1107,9 +1107,13 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     </div>
   )
 
+  // The section CONTAINER (input chrome, concentric corners) wraps the
+  // header controls in BOTH states — the controls read as owned by the
+  // section, panel-header style. Collapsed = the box shrinks to a slim
+  // bar of chevron + summary + stream ops.
   if (collapsed) {
     return (
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="bg-navy-900 border border-white/10 rounded-[20px] px-3 py-1.5 flex items-center gap-1.5 flex-wrap">
         <Tooltip content="Expand the files grid" side="top">
           <button onClick={() => setCollapsedPersist(false)} className={COLLAPSE_BTN}>
             <ChevronRight size={14} />{ZWSP}
@@ -1122,8 +1126,8 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   }
 
   const gridBody = (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-1.5 flex-wrap">
+    <div className="bg-navy-900 border border-white/10 rounded-[20px] p-2">
+      <div className="flex items-center gap-1.5 flex-wrap px-1 pb-1.5 border-b border-white/5">
         <Tooltip content="Collapse the files grid" side="top">
           <button
             onClick={() => { if (selectMode) exitSelectMode(); setCollapsedPersist(true) }}
@@ -1231,21 +1235,17 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
           ))}
         </div>
       </div>
-      {/* Input-style container around the grid items: the fields' chrome
-          (bg-navy-900, white/10 border) with concentric corners — item
-          rounded-lg (8px) + 12px inset = rounded-[20px]. The 12px inset is
-          this wrapper's p-2 plus the grid's p-1 ring breathing room,
-          matching the inputs' px-3. Deliberately a WRAPPER around the
-          scrolling grid, not styles on it, so the scrollbar sits inset
-          from the border instead of riding the corner curve; and it stays
-          within the content width so its border aligns with the other
-          fields' borders (items read like input text inset in a field). */}
-      <div className="bg-navy-900 border border-white/10 rounded-[20px] p-2">
+      {/* The container chrome notes: fields' bg/border with concentric
+          corners — item rounded-lg (8px) + 12px inset = rounded-[20px];
+          the inset is the container's p-2 plus this grid's p-1 ring
+          breathing room, matching the inputs' px-3. The scroll lives on
+          the GRID, not the container, so the scrollbar sits inset from
+          the border instead of riding the corner curve. */}
       {/* @container: the card action labels collapse to icon-only via a
           container query against the GRID's width (@2xl ≈ the one-column
           threshold of this auto-fill template) — a narrow one-column card
           otherwise overflows its labeled buttons over the thumbnail. */}
-      <div className="@container grid gap-3 max-h-[318px] overflow-y-auto p-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
+      <div className="@container grid gap-3 max-h-[318px] overflow-y-auto p-1 pt-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
         {showVideo && folder.videos.map(path => {
           const entry = videoMap[videoMapKey(folder.folderPath, path)]
           return (
@@ -1353,11 +1353,11 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
           </button>
         )}
       </div>
-      </div>
       {/* Per-file import failures — inline and persistent until the next
-          import attempt (no toasts). */}
+          import attempt (no toasts). Inside the container: they're this
+          section's feedback. */}
       {importErrors.length > 0 && (
-        <div className="flex flex-col gap-1 px-1">
+        <div className="flex flex-col gap-1 px-1 pt-1">
           {importErrors.map((f, i) => (
             <p key={i} className="text-[11px] text-red-300 flex items-start gap-1.5">
               <AlertTriangle size={11} className="shrink-0 mt-0.5" />
