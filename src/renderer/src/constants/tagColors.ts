@@ -33,16 +33,10 @@ export interface TagColor {
   check?: string
 }
 
+/* Array order IS the picker layout (both swatch grids render rows of 4
+ * straight from it): rows 1-3 run the 12 chromatic colors in rainbow
+ * order, row 4 is the neutrals — White, Gray, Slate, Black. */
 export const TAG_COLORS: TagColor[] = [
-  {
-    key: 'slate',
-    label: 'Slate',
-    chip: 'bg-slate-800/60 text-slate-300 border-slate-300/30',
-    text: 'text-slate-300',
-    highlight: 'bg-slate-600/30',
-    swatch: 'bg-slate-500',
-    ring: 'ring-slate-400/70',
-  },
   {
     key: 'red',
     label: 'Red',
@@ -125,6 +119,49 @@ export const TAG_COLORS: TagColor[] = [
     ring: 'ring-blue-400/70',
   },
   {
+    // Tailwind's DEFAULT purple, as literal hexes — the purple-* classes
+    // can't produce it here (theme remap, see header comment).
+    key: 'true-purple',
+    label: 'Purple',
+    chip: 'bg-[#581c87]/40 text-[#d8b4fe] border-[#d8b4fe]/30',
+    text: 'text-[#d8b4fe]',
+    highlight: 'bg-[#9333ea]/30',
+    swatch: 'bg-[#a855f7]',
+    ring: 'ring-[#c084fc]/70',
+  },
+  {
+    key: 'pink',
+    label: 'Pink',
+    chip: 'bg-pink-900/40 text-pink-300 border-pink-300/30',
+    text: 'text-pink-300',
+    highlight: 'bg-pink-600/30',
+    swatch: 'bg-pink-500',
+    ring: 'ring-pink-400/70',
+  },
+  {
+    // No Tailwind brown family exists — hand-rolled scale, same shape as
+    // the stock entries (dark translucent chip, light text).
+    key: 'brown',
+    label: 'Brown',
+    chip: 'bg-[#4a2c17]/40 text-[#d3b8a3] border-[#d3b8a3]/30',
+    text: 'text-[#d3b8a3]',
+    highlight: 'bg-[#8a5a3b]/30',
+    swatch: 'bg-[#a16b47]',
+    ring: 'ring-[#b98a68]/70',
+  },
+  {
+    // Inverted chip (light background, dark text) — the only entry where
+    // the default white check would vanish, hence the check override.
+    key: 'white',
+    label: 'White',
+    chip: 'bg-gray-100/90 text-gray-800 border-gray-500/40',
+    text: 'text-gray-100',
+    highlight: 'bg-white/20',
+    swatch: 'bg-gray-100',
+    ring: 'ring-white/80',
+    check: 'text-gray-800',
+  },
+  {
     // Renders GRAY: the app's purple-* Tailwind family is remapped to cool
     // slate-gray (see the header comment). Key stays 'purple' for stored
     // data; the label tells the truth. Swatch darkened one step
@@ -139,35 +176,13 @@ export const TAG_COLORS: TagColor[] = [
     ring: 'ring-purple-400/70',
   },
   {
-    key: 'pink',
-    label: 'Pink',
-    chip: 'bg-pink-900/40 text-pink-300 border-pink-300/30',
-    text: 'text-pink-300',
-    highlight: 'bg-pink-600/30',
-    swatch: 'bg-pink-500',
-    ring: 'ring-pink-400/70',
-  },
-  {
-    // Tailwind's DEFAULT purple, as literal hexes — the purple-* classes
-    // can't produce it here (theme remap, see header comment).
-    key: 'true-purple',
-    label: 'Purple',
-    chip: 'bg-[#581c87]/40 text-[#d8b4fe] border-[#d8b4fe]/30',
-    text: 'text-[#d8b4fe]',
-    highlight: 'bg-[#9333ea]/30',
-    swatch: 'bg-[#a855f7]',
-    ring: 'ring-[#c084fc]/70',
-  },
-  {
-    // No Tailwind brown family exists — hand-rolled scale, same shape as
-    // the stock entries (dark translucent chip, light text).
-    key: 'brown',
-    label: 'Brown',
-    chip: 'bg-[#4a2c17]/40 text-[#d3b8a3] border-[#d3b8a3]/30',
-    text: 'text-[#d3b8a3]',
-    highlight: 'bg-[#8a5a3b]/30',
-    swatch: 'bg-[#a16b47]',
-    ring: 'ring-[#b98a68]/70',
+    key: 'slate',
+    label: 'Slate',
+    chip: 'bg-slate-800/60 text-slate-300 border-slate-300/30',
+    text: 'text-slate-300',
+    highlight: 'bg-slate-600/30',
+    swatch: 'bg-slate-500',
+    ring: 'ring-slate-400/70',
   },
   {
     // Bordered swatch: a pure-black circle disappears against the dark
@@ -179,18 +194,6 @@ export const TAG_COLORS: TagColor[] = [
     highlight: 'bg-white/10',
     swatch: 'bg-gray-950 border border-white/30',
     ring: 'ring-gray-400/70',
-  },
-  {
-    // Inverted chip (light background, dark text) — the only entry where
-    // the default white check would vanish, hence the check override.
-    key: 'white',
-    label: 'White',
-    chip: 'bg-gray-100/90 text-gray-800 border-gray-500/40',
-    text: 'text-gray-100',
-    highlight: 'bg-white/20',
-    swatch: 'bg-gray-100',
-    ring: 'ring-white/80',
-    check: 'text-gray-800',
   },
 ]
 

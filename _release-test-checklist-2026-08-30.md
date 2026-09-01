@@ -8,14 +8,14 @@ Batch: navigation redesign + the UI polish campaign. All checks run against the 
 
 ### Navigation redesign
 
-- [ ] Nav order and groups: Streams / Player / Thumbnails · Converter / Combine · Launcher / Auto-Rules, with Integrations + Settings at the bottom. Auto-Rules sits under Launcher.
-- [ ] Page-jump shortcuts match positions: Ctrl+1 Streams … Ctrl+5 Combine, Ctrl+6 Launcher, Ctrl+7 Auto-Rules; collapsed-nav tooltips show the same numbers; Ctrl+PageUp/PageDown cycle in visual order.
-- [ ] Converter nav item: aggregate progress/ETA slides open under the item when a job starts and shut when the last finishes.
-- [ ] Launcher nav item: launch button on the row runs the pinned group (spinner → check; warning + tooltip details on a failure); Ctrl+L still quick-launches.
-- [ ] Auto-Rules nav item: Start/Stop control on the row works; "Running · enabled/total" subline while the watcher runs.
-- [ ] Context subtitles: open stream title under Streams, open video under Player, open canvas's stream under Thumbnails; subtitles animate in/out and the right-edge accent follows.
-- [ ] Integrations item: per-service dots (YouTube/Twitch/Claude) green when healthy; collapsed rail aggregates to one dot / warning triangle.
-- [ ] Sidebar collapse/expand: animation clean both ways, collapsed columns hover/select as one unit, clicking outside a control navigates; startup star on the row's left edge on hover.
+- [x] Nav order and groups: Streams / Player / Thumbnails · Converter / Combine · Launcher / Auto-Rules, with Integrations + Settings at the bottom. Auto-Rules sits under Launcher.
+- [x] Page-jump shortcuts match positions: Ctrl+1 Streams … Ctrl+5 Combine, Ctrl+6 Launcher, Ctrl+7 Auto-Rules; collapsed-nav tooltips show the same numbers; Ctrl+PageUp/PageDown cycle in visual order.
+- [x] Converter nav item: aggregate progress/ETA slides open under the item when a job starts and shut when the last finishes.
+- [x] Launcher nav item: launch button on the row runs the pinned group (spinner → check; warning + tooltip details on a failure); Ctrl+L still quick-launches.
+- [x] Auto-Rules nav item: Start/Stop control on the row works; "Running · enabled/total" subline while the watcher runs.
+- [x] Context subtitles: open stream title under Streams, open video under Player, open canvas's stream under Thumbnails; subtitles animate in/out and the right-edge accent follows.
+- [x] Integrations item: per-service dots (YouTube/Twitch/Claude) green when healthy; collapsed rail aggregates to one dot / warning triangle.
+- [x] Sidebar collapse/expand: animation clean both ways, collapsed columns hover/select as one unit, clicking outside a control navigates; startup star on the row's left edge on hover.
 
 ### Tag colors & textures
 
