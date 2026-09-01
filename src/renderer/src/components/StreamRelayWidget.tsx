@@ -135,17 +135,33 @@ export function StreamRelayWidget({
       ?? expandedAnchorRef.current ?? collapsedAnchorRef.current
     if (!pickerOpen || !anchor) return null
     const rect = anchor.getBoundingClientRect()
+    // Anchor in the lower half (the widget's usual home at the nav's
+    // bottom): align the popup's BOTTOM with the anchor and let it grow
+    // upward — top-aligning with the 160px maxHeight floor ran the box
+    // past the window's bottom edge (APP-13). Upper half keeps the
+    // original top-aligned, grow-down behavior. Same flip scheme as the
+    // sidebar's episode picker, adapted for side placement.
+    const alignBottom = rect.top > window.innerHeight / 2
+    const positionStyle: React.CSSProperties = alignBottom
+      ? {
+          position: 'fixed',
+          bottom: Math.max(8, window.innerHeight - rect.bottom),
+          left: rect.right + 4,
+          zIndex: 61,
+          maxHeight: Math.max(160, rect.bottom - 12),
+        }
+      : {
+          position: 'fixed',
+          top: rect.top,
+          left: rect.right + 4,
+          zIndex: 61,
+          maxHeight: Math.max(160, window.innerHeight - rect.top - 12),
+        }
     return ReactDOM.createPortal(
       <>
         <div className="fixed inset-0 z-[60]" onClick={() => setPickerOpen(false)} />
         <div
-          style={{
-            position: 'fixed',
-            top: rect.top,
-            left: rect.right + 4,
-            zIndex: 61,
-            maxHeight: Math.max(160, window.innerHeight - rect.top - 12),
-          }}
+          style={positionStyle}
           className="bg-navy-700 border border-white/10 rounded-lg shadow-xl w-72 overflow-y-auto"
         >
           <div className="sticky top-0 z-10 bg-navy-700 px-3 py-2 border-b border-white/5 flex items-center gap-2">

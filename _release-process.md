@@ -58,6 +58,8 @@ Build: Stream Manager <version>_DEV.exe from dev @ <commit>
 
 ## Promotion (dev → master)
 
+Since v2.5.0 the SHIPPED exe is built by CI (`.github/workflows/release.yml`): pushing the release tag triggers a clean-environment build that attaches the exe to a draft GitHub release. The local build that `release:minor` produces is no longer what ships (the dist folder carries a marker saying so); it only exists as a byproduct of the version script.
+
 Dev must already contain master (guaranteed by the hotfix rule). Then:
 
 ```powershell
@@ -65,20 +67,25 @@ git checkout master
 git merge dev                # clean merge; dev is a superset
 npm run typecheck            # paranoia pass on the merged result
 npm run lint
-npm run release:minor        # bumps X.Y.0, commits, tags vX.Y.0, builds
+npm run release:minor        # bumps X.Y.0, commits, tags vX.Y.0 (local build is a byproduct, not the artifact)
+git push origin master
+git push origin vX.Y.0       # THIS triggers the CI release build
 ```
 
-Smoke the release exe: correct name, normal icon, **no chips**. Then:
+Then on GitHub:
+
+1. Actions: wait for the release workflow run on the tag to go green (a few minutes; typecheck + lint + dist on a clean runner).
+2. Releases: the workflow created a DRAFT release for the tag with the exe attached. Download that exe and smoke it: correct name, normal icon, **no chips** (a dev marker means the tag was cut from the wrong branch).
+3. Edit the draft: paste notes (edited from `_release-notes-draft.md`, then empty the draft file for the next cycle), mark **latest**, publish. No manual exe attach; the workflow already did it.
+4. Verify `releases/latest` resolves to the new version; the website's download buttons point there.
+
+Back in the repo:
 
 ```powershell
-git push origin master
-git push origin vX.Y.0
 git checkout dev
 git merge master             # bring the version-bump commit back
 git push
 ```
-
-Publish: GitHub → Releases → draft for the new tag → paste notes (edited from `_release-notes-draft.md`, then empty the draft for the next cycle) → attach the exe (same artifact format as the previous release) → mark **latest** → publish. Verify `releases/latest` resolves to the new version — the website's download buttons point there.
 
 ## Hotfixes
 
@@ -88,7 +95,9 @@ Bug in the published release → fix on `master`:
 git checkout master
 # fix, verify, commit
 npm run release:patch
-# smoke-test, push master + tag, publish release (marked latest)
+git push origin master
+git push origin vX.Y.Z       # triggers the CI build, same as a minor release
+# wait for Actions, smoke the CI exe from the draft release, publish (marked latest)
 git checkout dev
 git merge master             # IMMEDIATELY — keeps dev a superset
 git push

@@ -1,0 +1,20 @@
+{
+  "tags": [
+    {
+      "name": "maybe",
+      "color": "#4f4f4f"
+    },
+    {
+      "name": "big",
+      "color": "#ffffff"
+    },
+    {
+      "name": "investigate",
+      "color": "#000000"
+    },
+    {
+      "name": "a11y",
+      "color": "#ff94c2"
+    }
+  ]
+}

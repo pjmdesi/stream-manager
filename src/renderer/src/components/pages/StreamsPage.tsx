@@ -5263,7 +5263,10 @@ const StreamListItem = memo(function StreamListItem({
               className="text-[10px] leading-normal text-gray-400 max-w-[204px] overflow-hidden"
               style={{ display: '-webkit-box', WebkitLineClamp: titleLines, WebkitBoxOrient: 'vertical' }}
             >
-              {title}
+              {/* displayWrapTitle: same pipe-safe wrapping as the sidebar
+                  title — without it a wrapped line can open on a stray
+                  space after a "|" (STR-13). */}
+              {displayWrapTitle(title)}
             </div>
           </Tooltip>
         )}
