@@ -2,8 +2,10 @@
 
 ## Queue
 
-1. APP-13
-2. STR-13
+1. STR-14
+2. THU-7
+3. THU-11
+4. CONV-2
 
 ## Improvement ideas
 
@@ -59,8 +61,11 @@
 - **STR-12**
   Add duplicate buttons to the template and tag items so that they can easily be copied and the user can have a starting point on new items instead of having to manually copy the items or starting from scratch.
 
-- **STR-13** [bug] [ui]
+- **STR-13** [bug] [ui] [done]
   Stream tites in the stream item row info column are conditionally rendering spaces as the first character of a new line when wrapping occurs. Seems to happen when the space immediately follows a "|" character. We fixed this for the stream item detail sidebar title, and I thought we had fixed it for these elements as well, but I might be misrememebering.
+
+- **STR-14**
+  For the game category: even with the reminder to edit the game title in the banner after a push to YouTube, I still missed doing this for 3 streams in a row. I think I got used to the banner. I know we can't push this info through SM, but would it be possible to read it? We could see if it has been properly filled, and if not show a persistent (but dismissable) message in the same place as the reminder (it would have to wait a little bit, so it doesn't show immediately).
 
 ### Player
 
@@ -286,7 +291,7 @@
 - **APP-12** [ui]
   Expose the UI zoom level as a setting in the settings page (probably the Appearance section) to complement the Ctrl+= / Ctrl+- / Ctrl+0 shortcuts with a more exact control. Likely a stepper or a percentage dropdown that reads and writes the same zoom level the shortcuts adjust. Needs a check on persistence: verify whether Electron already persists the shortcut-driven zoom across restarts, and decide whether the setting becomes the single source of truth for it.
 
-- **APP-13** [bug] [ui]
+- **APP-13** [bug] [ui] [done]
   The Stream Relay picker popup is getting clipped by the bottom of the app window. It needs to be moved up dynamically so it is always fully visible.
 
 ## GitHub

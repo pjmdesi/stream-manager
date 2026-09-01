@@ -1,6 +1,6 @@
 # Release test checklist — v2.5.0 (2026-08-30)
 
-Build: Stream Manager 2.4.0_DEV.exe from dev @ 79a9334
+Build: Stream Manager 2.4.0_DEV.exe from dev @ dac98f2
 
 Batch: navigation redesign + the UI polish campaign. All checks run against the PACKAGED build, not the dev server.
 
