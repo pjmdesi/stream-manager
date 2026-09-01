@@ -6,6 +6,7 @@
 2. THU-7
 3. THU-11
 4. CONV-2
+5. APP-16
 
 ## Improvement ideas
 
@@ -293,6 +294,25 @@
 
 - **APP-13** [bug] [ui] [done]
   The Stream Relay picker popup is getting clipped by the bottom of the app window. It needs to be moved up dynamically so it is always fully visible.
+
+- **APP-16** [ui]
+  Fix the hack for the tailwind purple color assignment. We need to go through the app and replace all instances of the class usage of the default tailwind purple color because it was modified at a high level to be a slate gray instead.
+
+- **APP-15** [blocked:APP-16] [ui]
+  Catalog colors across SM. Find and record all uses of color in the app and catalog based on how they are used. Background variants, accents, borders, warnings, text variants. Only need to exclude things that are already UI customization elements such as the tag color picker and various thumbnail editor items. This will be used to build the themes in the APP-14 task.
+
+- **APP-14** [blocked:APP-15] [ui]
+  Add theme options to SM UI. 4 Options to start with:
+    - Slate (current design)
+    - Light
+    - Pure Black (OLED)
+    - Clown Vomit (stupid/silly theme)
+  Eventually, allow users to create their own theme. This would probably be a modal in the settings page which lists all the editable colors in the app. It would need to change them on the fly, have dummy versions of commin elements, and warn against hard-to-read combinations using accessibility standards.
+
+### Onboarding & Setup
+
+- **ONB-1** [investigate]
+  If it doesn't already exist, add the ability for the dump-mode conversion to folder-per-stream mode to use the creation date of recording files to organize files during onboarding. This should also extend to the converstion functionality in the settings after onboarding. For actually generating stream items in dump mode, it might be possible to use this metadata as well, but will need to be tested. It's probably not a very reliable data point for perfect organization, but it might help users get close, perhaps requiring some manual organization afterward.
 
 ## GitHub
 
