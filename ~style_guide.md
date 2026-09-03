@@ -15,6 +15,8 @@ Consistency is held by three layers, not by this doc alone:
 
 When adding UI: reach for a primitive → if it doesn't fit, extend the primitive → only then write bespoke markup, and add a rule here.
 
+**Public accountability doc:** `PRINCIPLES.md` (repo root, rendered at stream-manager.app/principles) makes the app-level rules below into public, falsifiable claims. It cites this file's "App-level rules" section and these source paths: `src/main/services/updateCheck.ts`, `src/main/ipc/net.ts`, `writeAllMeta` in `src/main/ipc/streams.ts`, `.github/workflows/release.yml`. Two duties follow: (1) if any of those files move or those mechanisms change, update the citations in `PRINCIPLES.md` in the same commit; (2) before shipping a feature that touches notifications, network requests, storage, or the build pipeline, check it against the published principles: a change that breaks one either doesn't ship or the principle is publicly amended, never quietly outgrown.
+
 ---
 
 ## Foundations

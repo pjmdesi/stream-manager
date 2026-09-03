@@ -37,3 +37,8 @@ _monetization.md
 # Local Netlify folder
 .netlify
 TODO-FORMAT.md
+
+# Held until the next release ships (the website /principles page goes live
+# with it; committing this earlier would publish a file pointing at a 404).
+# To release: delete these two lines, commit PRINCIPLES.md with the release.
+PRINCIPLES.md

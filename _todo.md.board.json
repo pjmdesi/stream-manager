@@ -15,6 +15,10 @@
     {
       "name": "a11y",
       "color": "#ff94c2"
+    },
+    {
+      "name": "differentiator",
+      "color": "#4dd2fe"
     }
   ]
 }
