@@ -348,7 +348,7 @@ function formatBytes(bytes: number): string {
 
 const CATEGORY_LABEL: Record<string, string> = { full: 'vid', short: 'short', clip: 'clip' }
 const CATEGORY_STYLES: Record<string, string> = {
-  full:  'text-purple-400 border-purple-400/50',
+  full:  'text-accent-400 border-accent-400/50',
   short: 'text-blue-400 border-blue-400/50',
   clip:  'text-gray-400 border-gray-600',
 }
@@ -659,14 +659,14 @@ function SeriesEpisodesTooltip({
             const title = ep.meta?.ytTitle || ep.meta?.games?.join(', ') || ep.date
             const inner = (
               <div className="flex items-baseline gap-2 px-3 py-1 text-xs">
-                <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{epNum}:</span>
-                <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{ep.date}</span>
-                <span className={`shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>·</span>
-                <TruncatedText text={title} className={`truncate ${isCurrent ? 'text-purple-300 font-medium' : 'text-gray-200'}`} />
+                <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>{epNum}:</span>
+                <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>{ep.date}</span>
+                <span className={`shrink-0 ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>·</span>
+                <TruncatedText text={title} className={`truncate ${isCurrent ? 'text-accent-300 font-medium' : 'text-gray-200'}`} />
               </div>
             )
             return isCurrent ? (
-              <div key={ep.folderPath} className="bg-purple-900/25 cursor-default">{inner}</div>
+              <div key={ep.folderPath} className="bg-accent-900/25 cursor-default">{inner}</div>
             ) : (
               <button
                 key={ep.folderPath}
@@ -828,20 +828,20 @@ export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onS
           {onEditThumbnail && SM_THUMB_REGEX.test(currentPath) && (
             <button
               onClick={() => onEditThumbnail(parseSmThumbnailOrdinal(currentPath) ?? undefined)}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-purple-600/40 border border-white/20 hover:border-purple-500/50 text-gray-300 hover:text-purple-200 text-xs font-medium transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-accent-600/40 border border-white/20 hover:border-accent-500/50 text-gray-300 hover:text-accent-200 text-xs font-medium transition-colors"
             >
               <PencilLine size={12} /> Edit thumbnail
             </button>
           )}
           {onSetAsThumbnail && (
             isPreferred ? (
-              <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-600/30 border border-purple-500/40 text-purple-300 text-xs font-medium">
+              <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent-600/30 border border-accent-500/40 text-accent-300 text-xs font-medium">
                 <Check size={12} /> Currently shown
               </span>
             ) : (
               <button
                 onClick={() => onSetAsThumbnail(currentPath)}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-purple-600/40 border border-white/20 hover:border-purple-500/50 text-gray-300 hover:text-purple-200 text-xs font-medium transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-accent-600/40 border border-white/20 hover:border-accent-500/50 text-gray-300 hover:text-accent-200 text-xs font-medium transition-colors"
               >
                 <Bookmark size={12} /> Set as item thumbnail
               </button>
@@ -911,7 +911,7 @@ export function Lightbox({ thumbnails, index, thumbsKey, preferredThumbnail, onS
                 onClick={() => onNavigate(i)}
                 className={`shrink-0 h-10 aspect-video bg-navy-600 rounded overflow-hidden border-2 transition-all ${
                   i === index
-                    ? 'border-purple-500 opacity-100 scale-105'
+                    ? 'border-accent-500 opacity-100 scale-105'
                     : 'border-transparent opacity-40 hover:opacity-75'
                 }`}
               >
@@ -1156,7 +1156,7 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
             <Tooltip content="Edit thumbnail">
             <button
               onClick={() => onEditThumbnail(parseSmThumbnailOrdinal(currentPath) ?? undefined)}
-              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-purple-600/30 border border-white/15 hover:border-purple-500/45 text-gray-400 hover:text-purple-200 text-xs font-medium whitespace-nowrap transition-colors"
+              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-accent-600/30 border border-white/15 hover:border-accent-500/45 text-gray-400 hover:text-accent-200 text-xs font-medium whitespace-nowrap transition-colors"
             >
               <PencilLine size={11} /> Edit thumbnail
             </button>
@@ -1164,13 +1164,13 @@ export function ThumbnailCarousel({ thumbnails, thumbsKey, preferredThumbnail, o
           )}
           {onSetAsThumbnail && (
             isPreferred ? (
-              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-600/25 border border-purple-500/35 text-purple-300 text-xs font-medium whitespace-nowrap">
+              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-accent-600/25 border border-accent-500/35 text-accent-300 text-xs font-medium whitespace-nowrap">
                 <Check size={11} /> Item thumbnail
               </span>
             ) : (
               <button
                 onClick={() => onSetAsThumbnail(currentPath)}
-                className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-purple-600/30 border border-white/15 hover:border-purple-500/45 text-gray-400 hover:text-purple-200 text-xs font-medium whitespace-nowrap transition-colors"
+                className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/8 hover:bg-accent-600/30 border border-white/15 hover:border-accent-500/45 text-gray-400 hover:text-accent-200 text-xs font-medium whitespace-nowrap transition-colors"
               >
                 <ImageIcon size={11} /> Set as item thumbnail
               </button>
@@ -2608,7 +2608,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 value={date}
                 onChange={e => setDate(e.target.value)}
                 disabled
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 [color-scheme:dark]"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:opacity-50 [color-scheme:dark]"
               />
             </Tooltip>
           ) : (
@@ -2617,7 +2617,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               value={date}
               onChange={e => setDate(e.target.value)}
               disabled={mode !== 'new'}
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 [color-scheme:dark]"
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:opacity-50 [color-scheme:dark]"
             />
           )}
           {mode === 'new' && date && (() => {
@@ -2696,7 +2696,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
             onChange={e => setComments(e.target.value)}
             rows={3}
             placeholder="Notes about this stream…"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none"
+            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-accent-500/50 resize-none"
           />
         </div>
 
@@ -2721,14 +2721,14 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
                 Game Title
-                <span className="font-mono text-purple-400 font-normal">{'{game}'}</span>
+                <span className="font-mono text-accent-400 font-normal">{'{game}'}</span>
                 <LucideYoutube size={11} className="text-red-400/70" />
                 {twConnected && syncGame && <LucideTwitch size={11} className="text-twitch-400/70" />}
               </label>
               <input
                 value={ytGameTitle}
                 onChange={e => setYtGameTitle(e.target.value)}
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
               />
               {twConnected ? (
                 <Checkbox checked={syncGame} onChange={setSyncGame} label="Sync with Twitch" size="sm" />
@@ -2738,13 +2738,13 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-400">
-                Tagline <span className="font-mono text-purple-400 font-normal">{'{tagline}'}</span>
+                Tagline <span className="font-mono text-accent-400 font-normal">{'{tagline}'}</span>
               </label>
               <input
                 value={ytCatchyTitle}
                 onChange={e => setYtCatchyTitle(e.target.value)}
                 placeholder="catchy tagline…"
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 placeholder-gray-700"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40 placeholder-gray-700"
               />
             </div>
             <div className="flex flex-col gap-1 items-center">
@@ -2752,12 +2752,12 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 <Tooltip content="Auto-inherited from the most recent preceding stream in the same series. Change it to start a new season — episode numbering will restart from 1." side="top">
                   <Info size={11} className="text-gray-400 cursor-default" />
                 </Tooltip>
-                <span className="font-mono text-purple-400">{'{season}'}</span>
+                <span className="font-mono text-accent-400">{'{season}'}</span>
               </label>
               <input
                 value={ytSeason}
                 onChange={e => { ytSeasonUserEdited.current = true; ytEpisodeUserEdited.current = false; setYtSeason(e.target.value) }}
-                className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
               />
             </div>
             <div className="flex items-end gap-1.5">
@@ -2766,18 +2766,18 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                   <Tooltip content="Auto-detected by counting preceding streams with the same game and season. Resets to 1 when season changes. Can be overridden manually." side="top">
                     <Info size={11} className="text-gray-400 cursor-default" />
                   </Tooltip>
-                  <span className="font-mono text-purple-400">{'{episode}'}</span>
+                  <span className="font-mono text-accent-400">{'{episode}'}</span>
                 </label>
                 <input
                   value={ytEpisode}
                   onChange={e => { ytEpisodeUserEdited.current = true; setYtEpisode(e.target.value) }}
-                  className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                  className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
                 />
               </div>
               <span className="text-gray-400 text-xs pb-1.5 shrink-0">/</span>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-400 whitespace-nowrap flex items-center gap-1">
-                  <span className="font-mono text-purple-400">{'{total_episodes}'}</span>
+                  <span className="font-mono text-accent-400">{'{total_episodes}'}</span>
                   <Tooltip content="Total episodes in this season. Auto-counted from all streams sharing the same game and season, including this one. Can be overridden manually." side="top">
                     <Info size={11} className="text-gray-400 cursor-default" />
                   </Tooltip>
@@ -2785,7 +2785,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 <input
                   value={ytTotalEpisodes}
                   onChange={e => setYtTotalEpisodes(e.target.value)}
-                  className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                  className="w-10 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
                 />
               </div>
             </div>
@@ -2812,7 +2812,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               ref={titleSg.ref as React.RefObject<HTMLInputElement>}
               value={ytTitle}
               maxLength={100}
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
               {...titleSg.props}
             />
             <div className="flex items-center justify-between min-h-[16px]">
@@ -2834,7 +2834,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 value={twitchTitle}
                 onChange={e => setTwitchTitle(e.target.value)}
                 maxLength={140}
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
               />
               <p className="text-right text-xs text-gray-400">{twitchTitle.length}/140</p>
             </div>
@@ -2862,7 +2862,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               onAccept={handleDescAccept}
               onDismiss={handleDescDismiss}
               rows={6}
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500/40"
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:ring-2 focus:ring-accent-500/40"
             />
             <div className="flex items-center min-h-[16px]">
               {claudeEnabled && descLoading && <Loader2 size={10} className="animate-spin text-gray-400" />}
@@ -2905,7 +2905,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
             <textarea
               ref={tagsSg.ref as React.RefObject<HTMLTextAreaElement>}
               value={ytTagsText}
-              className="w-full min-h-[3.25rem] bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none overflow-hidden"
+              className="w-full min-h-[3.25rem] bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/40 resize-none overflow-hidden"
               {...tagsSg.props}
             />
             <div className="flex items-center justify-between min-h-[16px]">
@@ -2958,7 +2958,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
               <textarea
                 ref={twitchTagsSg.ref as React.RefObject<HTMLTextAreaElement>}
                 value={twitchTagsText}
-                className="w-full min-h-[3.25rem] bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none overflow-hidden"
+                className="w-full min-h-[3.25rem] bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/40 resize-none overflow-hidden"
                 {...twitchTagsSg.props}
               />
               <div className="flex items-center justify-between min-h-[16px]">
@@ -2992,7 +2992,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                 value={twitchGameName}
                 onChange={e => setTwitchGameName(e.target.value)}
                 placeholder="e.g. Elden Ring"
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 placeholder-gray-700"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/40 placeholder-gray-700"
               />
               <p className="text-xs text-gray-400">Searched against Twitch categories — closest match will be used.</p>
             </div>
@@ -3127,7 +3127,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
                               disabled={savingPrivacy && !active}
                               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
                                 active
-                                  ? 'bg-purple-600/25 border-purple-500/40 text-purple-200'
+                                  ? 'bg-accent-600/25 border-accent-500/40 text-accent-200'
                                   : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200 disabled:opacity-40 disabled:hover:bg-white/5 disabled:hover:text-gray-400'
                               }`}
                             >
@@ -3466,7 +3466,7 @@ export function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId
             <select
               value={selected}
               onChange={e => setSelected(e.target.value)}
-              className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
             >
               {presets.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -3554,7 +3554,7 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
             <button
               key={t.id}
               className={`w-full text-left px-3 py-2 text-xs transition-colors ${
-                t.id === value ? 'text-purple-300 bg-purple-600/20' : 'text-gray-300 hover:bg-white/5'
+                t.id === value ? 'text-accent-300 bg-accent-600/20' : 'text-gray-300 hover:bg-white/5'
               }`}
               onClick={() => { onChange(t.id); close() }}
             >
@@ -3652,7 +3652,7 @@ export function SaveAsTemplateButton({
         // names aren't truncated, with a floor that matches the
         // placeholder width.
         size={Math.max(14, name.length + 1)}
-        className={`text-xs bg-navy-900 border ${isDuplicate ? 'border-amber-500/40' : 'border-white/10'} text-gray-200 rounded-lg px-1.5 py-0.5 focus:outline-none focus:ring-1 ${isDuplicate ? 'focus:ring-amber-500/40' : 'focus:ring-purple-500/40'}`}
+        className={`text-xs bg-navy-900 border ${isDuplicate ? 'border-amber-500/40' : 'border-white/10'} text-gray-200 rounded-lg px-1.5 py-0.5 focus:outline-none focus:ring-1 ${isDuplicate ? 'focus:ring-amber-500/40' : 'focus:ring-accent-500/40'}`}
       />
       <Tooltip content={isDuplicate ? (confirmOverwrite ? 'Click to confirm overwrite' : 'A template with this name exists — click to overwrite') : 'Save'}>
       <button
@@ -3751,7 +3751,7 @@ export function BulkTagModal({
           <div className="flex flex-col gap-2 w-full">
             <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
               <div
-                className="bg-purple-500 h-full rounded-full transition-all duration-150"
+                className="bg-accent-500 h-full rounded-full transition-all duration-150"
                 style={{ width: `${pct}%` }}
               />
             </div>
@@ -3783,7 +3783,7 @@ export function BulkTagModal({
           <div className="flex rounded-lg overflow-hidden border border-white/10 self-start">
             <button
               onClick={() => switchMode('add')}
-              className={`px-4 py-1.5 text-xs font-medium transition-colors ${mode === 'add' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+              className={`px-4 py-1.5 text-xs font-medium transition-colors ${mode === 'add' ? 'bg-accent-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
             >
               Add Tags
             </button>
@@ -3885,7 +3885,7 @@ export function CloudDownloadModal({
       ) : (
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <Loader2 size={16} className="shrink-0 text-purple-400 animate-spin" />
+            <Loader2 size={16} className="shrink-0 text-accent-400 animate-spin" />
             <p className="text-sm text-gray-300">
               Downloading <span className="font-medium text-gray-100">{fileName}</span>…
             </p>
@@ -3962,7 +3962,7 @@ function VideoPickerModal({
             <Tooltip key={f} content={f} maxWidth="max-w-md" triggerClassName="block">
             <button
               onClick={() => { onPick(f); onClose() }}
-              className="w-full text-left px-3 py-2.5 rounded-lg text-sm text-gray-200 hover:bg-purple-600/20 hover:text-purple-200 border border-transparent hover:border-purple-600/30 transition-colors font-mono truncate"
+              className="w-full text-left px-3 py-2.5 rounded-lg text-sm text-gray-200 hover:bg-accent-600/20 hover:text-accent-200 border border-transparent hover:border-accent-600/30 transition-colors font-mono truncate"
             >
               {name}
             </button>
@@ -5374,7 +5374,7 @@ export function StreamsPage({
                   centered, in a muted purple to match the "new stream"
                   primary action's color family. */}
               {newStreamDraft && (
-                <span className="absolute left-0 right-0 top-full mt-0.5 text-[9px] text-purple-300/70 text-center pointer-events-none whitespace-nowrap leading-none">
+                <span className="absolute left-0 right-0 top-full mt-0.5 text-[9px] text-accent-300/70 text-center pointer-events-none whitespace-nowrap leading-none">
                   draft in progress
                 </span>
               )}
@@ -5404,7 +5404,7 @@ export function StreamsPage({
               <div ref={gridTypeFilterAnchorRef} className="relative">
                 <button
                   onClick={openTypeFilter}
-                  className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors text-[11px] ${filterTypes.size > 0 ? 'border-purple-600/50 text-purple-400 bg-purple-900/20' : 'border-white/10 text-gray-400 hover:text-gray-300 hover:border-white/20'}`}
+                  className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors text-[11px] ${filterTypes.size > 0 ? 'border-accent-600/50 text-accent-400 bg-accent-900/20' : 'border-white/10 text-gray-400 hover:text-gray-300 hover:border-white/20'}`}
                 >
                   <ListFilter size={11} />
                   Type{filterTypes.size > 0 && ` (${filterTypes.size})`}
@@ -5417,7 +5417,7 @@ export function StreamsPage({
                         <p className="px-3 py-2 text-xs text-gray-400">No types tagged yet</p>
                       ) : (
                         <>
-                          <button onClick={() => { setFilterTypes(new Set()); setOpenFilter(null) }} disabled={filterTypes.size === 0} className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-purple-400 hover:text-purple-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-purple-400">
+                          <button onClick={() => { setFilterTypes(new Set()); setOpenFilter(null) }} disabled={filterTypes.size === 0} className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-accent-400 hover:text-accent-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-accent-400">
                             <X size={11} className="shrink-0" /> Clear filters
                           </button>
                           {allStreamTypes.map(t => {
@@ -5616,7 +5616,7 @@ export function StreamsPage({
                     <Tooltip content="Filter by type" side="bottom">
                       <button
                         onClick={openTypeFilter}
-                        className={`p-0.5 rounded transition-colors ${filterTypes.size > 0 ? 'text-purple-400' : 'text-gray-400 hover:text-gray-400'}`}
+                        className={`p-0.5 rounded transition-colors ${filterTypes.size > 0 ? 'text-accent-400' : 'text-gray-400 hover:text-gray-400'}`}
                       >
                         <ListFilter size={12} />
                       </button>
@@ -5632,7 +5632,7 @@ export function StreamsPage({
                               <button
                                 onClick={() => { setFilterTypes(new Set()); setOpenFilter(null) }}
                                 disabled={filterTypes.size === 0}
-                                className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-purple-400 hover:text-purple-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-purple-400"
+                                className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-accent-400 hover:text-accent-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-accent-400"
                               >
                                 <X size={11} className="shrink-0" />
                                 Clear filters
@@ -6003,7 +6003,7 @@ return (
                 type="date"
                 value={rescheduleDate}
                 onChange={e => setRescheduleDate(e.target.value)}
-                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+                className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/40 [color-scheme:dark]"
               />
             </div>
 
@@ -6041,7 +6041,7 @@ return (
                         type="time"
                         value={rescheduleTime}
                         onChange={e => setRescheduleTime(e.target.value)}
-                        className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+                        className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/40 [color-scheme:dark]"
                       />
                       <span className="text-[10px] text-gray-400">your local time</span>
                     </div>
@@ -6055,7 +6055,7 @@ return (
                               name="rescheduleBroadcastPrivacy"
                               checked={rescheduleBroadcastPrivacy === p}
                               onChange={() => setRescheduleBroadcastPrivacy(p)}
-                              className="cursor-pointer accent-purple-500"
+                              className="cursor-pointer accent-accent-500"
                             />
                             <span className="text-xs text-gray-300 capitalize">{p}</span>
                           </label>
@@ -6937,8 +6937,8 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
         isPending
           ? 'border-teal-900/40 bg-teal-950/20 hover:bg-teal-950/30'
           : selected
-            ? 'border-purple-600/40 bg-purple-900/10'
-            : 'border-purple-900/25 bg-white/[0.02] hover:bg-white/[0.04] hover:border-purple-800/40'
+            ? 'border-accent-600/40 bg-accent-900/10'
+            : 'border-accent-900/25 bg-white/[0.02] hover:bg-white/[0.04] hover:border-accent-800/40'
       }`}
       onClick={selectMode ? () => onToggleSelect(false) : undefined}
       style={selectMode ? { cursor: 'pointer', userSelect: 'none' } : undefined}
@@ -6973,8 +6973,8 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
 
         {/* Select checkbox overlay */}
         {selectMode && (
-          <div className={`absolute inset-0 flex items-center justify-center transition-colors ${selected ? 'bg-purple-900/40' : 'bg-black/20'}`}>
-            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-purple-700 border-purple-700' : 'border-white/60 bg-black/30'}`}>
+          <div className={`absolute inset-0 flex items-center justify-center transition-colors ${selected ? 'bg-accent-900/40' : 'bg-black/20'}`}>
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-accent-700 border-accent-700' : 'border-white/60 bg-black/30'}`}>
               {selected && <CheckCheck size={12} className="text-white" />}
             </div>
           </div>
@@ -6991,7 +6991,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                 <span className="font-mono text-sm font-medium text-gray-200">{date}</span>
               </Tooltip>
               {sameDayIndex && sameDayIndex > 1 && (
-                <span className="font-mono text-sm font-medium text-purple-400/70">#{sameDayIndex}</span>
+                <span className="font-mono text-sm font-medium text-accent-400/70">#{sameDayIndex}</span>
               )}
               </div>
             <div className="inline-flex gap-1">
@@ -7089,7 +7089,7 @@ function StreamCard({ folder, selectMode, selected, isNextUpcoming, isPending, i
                 <DisplayTagChip
                   key={g}
                   text={g}
-                  className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30 truncate max-w-full"
+                  className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-accent-900/20 text-accent-300 border border-accent-300/30 truncate max-w-full"
                 />
               ) : (
                 <DisplayTagChip
@@ -7294,7 +7294,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
         isPending
           ? `border-teal-900/30 hover:bg-teal-900/30 ${zebra ? 'bg-teal-900/20' : 'bg-teal-900/15'}`
           : `border-white/5 hover:bg-white/[0.03] ${zebra ? 'bg-white/[0.02]' : ''}`
-      } ${selected ? 'bg-purple-900/10' : ''} ${expanded ? '!border-b-0' : ''}`}
+      } ${selected ? 'bg-accent-900/10' : ''} ${expanded ? '!border-b-0' : ''}`}
       onClick={handleRowClick}
       onMouseDown={selectMode ? (e) => { e.preventDefault(); onDragStart() } : undefined}
       onMouseEnter={selectMode ? onDragEnter : undefined}
@@ -7304,7 +7304,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
       {/* Checkbox */}
       {selectMode && (
         <td className="pl-4 align-middle" onClick={e => { e.stopPropagation(); onToggleSelect(e.shiftKey) }}>
-          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-purple-700 border-purple-700' : 'border-gray-600 hover:border-gray-400'}`}>
+          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${selected ? 'bg-accent-700 border-accent-700' : 'border-gray-600 hover:border-gray-400'}`}>
             {selected && <CheckCheck size={10} className="text-white" />}
           </div>
         </td>
@@ -7354,7 +7354,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
           data-no-row-toggle
           onMouseDown={onThumbResizeStart}
         >
-          <div className="absolute top-0 right-0 w-px h-full bg-purple-500 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
+          <div className="absolute top-0 right-0 w-px h-full bg-accent-500 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
         </div>
       </td>
 
@@ -7391,7 +7391,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                 <span className="font-mono text-sm text-gray-200">{date}</span>
             </Tooltip>
             {sameDayIndex && sameDayIndex > 1 && (
-                <span className="font-mono text-sm text-purple-400/70 font-semibold">#{sameDayIndex}</span>
+                <span className="font-mono text-sm text-accent-400/70 font-semibold">#{sameDayIndex}</span>
             )}
           </div>
           <div className="inline-flex gap-1">
@@ -7511,7 +7511,7 @@ function StreamRow({ folder, zebra, selectMode, selected, isNextUpcoming, isPend
                 <DisplayTagChip
                   key={g}
                   text={g}
-                  className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30 truncate max-w-full"
+                  className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-accent-900/20 text-accent-300 border border-accent-300/30 truncate max-w-full"
                 />
               ) : (
                 <DisplayTagChip

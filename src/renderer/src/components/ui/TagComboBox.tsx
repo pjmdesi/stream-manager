@@ -13,7 +13,7 @@ import { Tooltip } from './Tooltip'
  *
  * Optional selection + reorder:
  *   - `onSelect` flips the chip into a clickable affordance; `isSelected`
- *     adds a purple ring (the app's themed `purple-400/70`, NOT the real
+ *     adds an accent ring (the app's `accent-400/70`, NOT the real
  *     twitch purple — see StreamsPage's Topics/Games row where this is
  *     used: selection drives both YT title's {game} merge field AND the
  *     Twitch category, so a Twitch-specific accent would mis-signal the
@@ -68,7 +68,7 @@ function ComboTagChip({
   }, [])
   useEffect(() => () => { obsCleanupRef.current?.() }, [])
 
-  const selectionRing = isSelected ? 'ring-2 ring-purple-400/70 ring-offset-1 ring-offset-navy-900' : ''
+  const selectionRing = isSelected ? 'ring-2 ring-accent-400/70 ring-offset-1 ring-offset-navy-900' : ''
   // Cursor signals primary affordance: drag wins when both are present
   // (matches OS convention — visible grab handle suggests reorder, the
   // click still works on mouseup-without-drag).
@@ -131,7 +131,7 @@ function HighlightMatch({ text, query }: { text: string; query: string }) {
   return (
     <>
       {text.slice(0, idx)}
-      <span className="font-semibold text-purple-300">{text.slice(idx, idx + query.length)}</span>
+      <span className="font-semibold text-accent-300">{text.slice(idx, idx + query.length)}</span>
       {text.slice(idx + query.length)}
     </>
   )
@@ -227,7 +227,7 @@ interface TagComboBoxProps {
   onNewTag?: (tag: string) => void
   /** Renders chips at a slightly smaller size — for high-volume lists like Topics/Games */
   compact?: boolean
-  /** When set, the chip whose value equals this gets a purple ring and
+  /** When set, the chip whose value equals this gets an accent ring and
    *  the chips become click-to-select. Used for the Topics/Games row to
    *  expose `meta.primaryGame` selection (which drives the YT title's
    *  `{game}` merge field AND the Twitch category push). */
@@ -305,7 +305,7 @@ export function TagComboBox({
   return (
     <div
       ref={containerRef}
-      className="flex flex-wrap items-center gap-1.5 min-h-[38px] w-full bg-navy-900 border border-white/10 rounded-lg px-2 py-1.5 cursor-text focus-within:ring-2 focus-within:ring-purple-500/50"
+      className="flex flex-wrap items-center gap-1.5 min-h-[38px] w-full bg-navy-900 border border-white/10 rounded-lg px-2 py-1.5 cursor-text focus-within:ring-2 focus-within:ring-accent-500/50"
       onClick={() => inputRef.current?.focus()}
     >
       {values.map((v, idx) => {
@@ -385,7 +385,7 @@ export function TagComboBox({
             <button
               type="button"
               onMouseDown={e => { e.preventDefault(); add(input.trim()) }}
-              className="w-full text-left px-3 py-2 text-sm text-purple-400 hover:bg-purple-600/20 transition-colors border-t border-white/5"
+              className="w-full text-left px-3 py-2 text-sm text-accent-400 hover:bg-accent-600/20 transition-colors border-t border-white/5"
             >
               Add "{input.trim()}"
             </button>

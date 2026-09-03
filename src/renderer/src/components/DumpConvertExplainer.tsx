@@ -6,7 +6,7 @@ function FeatureCard({ icon, title, children }: { icon: React.ReactNode; title: 
   return (
     <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-navy-800/60 border border-white/5">
       <div className="flex items-center gap-1.5 text-gray-200">
-        <span className="text-purple-400">{icon}</span>
+        <span className="text-accent-400">{icon}</span>
         <span className="text-xs font-semibold">{title}</span>
       </div>
       <p className="text-[11px] text-gray-300 leading-relaxed">{children}</p>

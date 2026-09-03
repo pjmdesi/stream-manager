@@ -1283,9 +1283,9 @@ function PreviewGallery({ snapshot, title, channelName, overlay, setOverlay, wat
   // built via fromCharCode so no invisible literal hides in this file.)
   const displayTitle = title.replace(/\|(?=\s)/g, '|' + String.fromCharCode(0x2060))
   const segCls = (on: boolean) =>
-    `px-2 py-1 text-xs whitespace-nowrap transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
+    `px-2 py-1 text-xs whitespace-nowrap transition-colors ${on ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
   const chipCls = (on: boolean) =>
-    `px-2 py-1 rounded-lg text-xs border transition-colors ${on ? 'bg-purple-600/25 text-purple-200 border-purple-300/40' : 'bg-navy-900 text-gray-400 border-white/10 hover:text-gray-200 hover:bg-white/5'}`
+    `px-2 py-1 rounded-lg text-xs border transition-colors ${on ? 'bg-accent-600/25 text-accent-200 border-accent-300/40' : 'bg-navy-900 text-gray-400 border-white/10 hover:text-gray-200 hover:bg-white/5'}`
   return (
     <div className="absolute inset-0 z-20 flex flex-col">
       {/* Control bar — app chrome */}
@@ -1593,7 +1593,7 @@ function Overview({ streamsDir, templates, recents, onNewBlank, onOpenTemplate, 
             {templates.map(t => (
               <div
                 key={t.id}
-                className="group relative bg-navy-800 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-purple-500/50 transition-colors"
+                className="group relative bg-navy-800 border border-white/10 rounded-lg overflow-hidden cursor-pointer hover:border-accent-500/50 transition-colors"
                 onClick={() => onOpenTemplate(t)}
               >
                 <TemplatePreview streamsDir={streamsDir} templateId={t.id} name={t.name} cacheKey={t.updatedAt} />
@@ -1991,7 +1991,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
   return (
     <div
       ref={wrapRef}
-      className={`relative flex items-center min-w-0 rounded-lg ${dragHover ? 'ring-1 ring-purple-300/60' : ''}`}
+      className={`relative flex items-center min-w-0 rounded-lg ${dragHover ? 'ring-1 ring-accent-300/60' : ''}`}
       // The whole field sits inside a <label>: clicks on our custom controls
       // would otherwise FORWARD to the label's first control — the native
       // color input — and pop its dialog (the phantom picker seen after
@@ -2020,7 +2020,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
       {/* Unified input: swatch | hex | opacity share ONE frame (single
           border/background, thin internal dividers) so the row reads as a
           single control instead of three boxes. */}
-      <div className="flex items-stretch flex-1 min-w-0 h-6 bg-navy-900 border border-white/10 rounded-lg overflow-visible focus-within:border-purple-500/50 transition-colors">
+      <div className="flex items-stretch flex-1 min-w-0 h-6 bg-navy-900 border border-white/10 rounded-lg overflow-visible focus-within:border-accent-500/50 transition-colors">
         {/* Checker sits BEHIND the swatch (opaque wrapper + alpha-faded
             input on top), so a transparent color reveals the pattern
             rather than the panel background. */}
@@ -2294,10 +2294,10 @@ function GradientFillControl({ layer, update, fallback }: {
     recordGradient({ stops: next })
   }
   const segCls = (on: boolean) =>
-    `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
+    `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
   return (
     <div
-      className={`flex flex-col gap-0.5 rounded-lg ${gradDragHover ? 'ring-1 ring-purple-300/60' : ''}`}
+      className={`flex flex-col gap-0.5 rounded-lg ${gradDragHover ? 'ring-1 ring-accent-300/60' : ''}`}
       // The WHOLE control is the gradient-swatch drop target, both modes —
       // a gradient describes the entire fill, not any one sub-field. In
       // gradient mode it ALSO accepts solid drops, replacing the gradient
@@ -2537,10 +2537,10 @@ function GradientFillControl({ layer, update, fallback }: {
                     the actual flex item, so flex-1 on the buttons alone
                     left the pair unevenly sized. */}
                 <Tooltip content="oklch — keeps saturated blends vivid (recommended)" triggerClassName="flex-1 min-w-0 flex">
-                  <button type="button" onClick={() => { update({ gradientColorSpace: 'oklch' }); recordGradient({ colorSpace: 'oklch' }) }} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
+                  <button type="button" onClick={() => { update({ gradientColorSpace: 'oklch' }); recordGradient({ colorSpace: 'oklch' }) }} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
                 </Tooltip>
                 <Tooltip content="sRGB — classic CSS blending; use when brand colors expect it" triggerClassName="flex-1 min-w-0 flex">
-                  <button type="button" onClick={() => { update({ gradientColorSpace: 'srgb' }); recordGradient({ colorSpace: 'srgb' }) }} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
+                  <button type="button" onClick={() => { update({ gradientColorSpace: 'srgb' }); recordGradient({ colorSpace: 'srgb' }) }} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
                 </Tooltip>
               </div>
             </div>
@@ -2604,7 +2604,7 @@ function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0
           type="range" min={min} max={max} step={step} value={value}
           onChange={e => onChange(Number(e.target.value))}
           onDoubleClick={() => onChange(defaultValue)}
-          className="flex-1 accent-purple-600"
+          className="flex-1 accent-accent-600"
         />
         </Tooltip>
         <NumberInput
@@ -2624,7 +2624,7 @@ function FilterToggle({ label, checked, onChange }: {
     <label className="flex items-center gap-1.5 text-[10px] text-gray-300 cursor-pointer">
       <input
         type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
-        className="accent-purple-600"
+        className="accent-accent-600"
       />
       {label}
     </label>
@@ -2800,7 +2800,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                       type="button"
                       onClick={toggleAspectLock}
                       className={`h-full w-3 relative flex items-center justify-center transition-colors ${
-                        aspectLocked ? 'text-purple-300 hover:text-purple-200' : 'text-gray-400 hover:text-gray-200'
+                        aspectLocked ? 'text-accent-300 hover:text-accent-200' : 'text-gray-400 hover:text-gray-200'
                       }`}
                       aria-label={aspectLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
                     >
@@ -3052,7 +3052,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                           type="button"
                           onClick={() => update({ textTransform: opt.value })}
                           className={`flex-1 py-1 text-xs transition-colors ${
-                            selected ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                            selected ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                           }`}
                         >
                           {opt.label}
@@ -3255,7 +3255,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
               type="checkbox"
               checked={!!layer.outlineEnabled}
               onChange={e => update({ outlineEnabled: e.target.checked })}
-              className="accent-purple-600"
+              className="accent-accent-600"
             />
             Enable
           </label>
@@ -3306,7 +3306,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 type="checkbox"
                 checked={!!layer.filtersEnabled}
                 onChange={e => update({ filtersEnabled: e.target.checked })}
-                className="accent-purple-600"
+                className="accent-accent-600"
               />
               Enable
             </label>
@@ -6208,7 +6208,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       <button
                         type="button"
                         onClick={() => { startNewVariant(); setVariantPickerOpen(false) }}
-                        className="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-left text-purple-300 hover:bg-white/5 transition-colors"
+                        className="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-left text-accent-300 hover:bg-white/5 transition-colors"
                       >
                         <span className="w-12 h-7 rounded border border-dashed border-white/10 flex items-center justify-center shrink-0">
                           <Plus size={12} />
@@ -6243,7 +6243,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               <Tooltip content={`Smart guides ${smartSnapEnabled ? '(on)' : '(off)'} — snap to edges & centers`} side="bottom">
                 <button
                   onClick={() => setSmartSnapEnabled(v => !v)}
-                  className={`p-1.5 rounded transition-colors ${smartSnapEnabled ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                  className={`p-1.5 rounded transition-colors ${smartSnapEnabled ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
                 >
                   <Magnet size={14} />
                 </button>
@@ -6251,7 +6251,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               <Tooltip content={`Grid snap ${gridSnapEnabled ? '(on)' : '(off)'} — snap to ${GRID_SIZE}px grid (G)`} side="bottom">
                 <button
                   onClick={() => setGridSnapEnabled(v => !v)}
-                  className={`p-1.5 rounded transition-colors ${gridSnapEnabled ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                  className={`p-1.5 rounded transition-colors ${gridSnapEnabled ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
                 >
                   <Grid3x3 size={14} />
                 </button>
@@ -6261,7 +6261,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
               <Tooltip content="Align to artboard (canvas)" side="bottom">
                 <button
                   onClick={() => setAlignMode('artboard')}
-                  className={`p-1.5 rounded transition-colors ${alignMode === 'artboard' ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                  className={`p-1.5 rounded transition-colors ${alignMode === 'artboard' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
                 >
                   <Frame size={14} />
                 </button>
@@ -6270,7 +6270,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <button
                   onClick={() => setAlignMode('selection')}
                   disabled={selectedIds.length < 2}
-                  className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${alignMode === 'selection' ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                  className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${alignMode === 'selection' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
                 >
                   <BoxSelect size={14} />
                 </button>
@@ -6315,7 +6315,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       disabled={selectedIds.length === 0}
                       className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                         allSelectedAreFlipped
-                          ? 'bg-purple-600/30 text-purple-300'
+                          ? 'bg-accent-600/30 text-accent-300'
                           : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'
                       }`}
                     >
@@ -6337,12 +6337,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       if (e.key === 'Escape') setSaveTemplateOpen(false)
                     }}
                     placeholder="Template name…"
-                    className="h-6 px-2 rounded-lg bg-navy-900 border border-purple-500/50 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-purple-400 w-36"
+                    className="h-6 px-2 rounded-lg bg-navy-900 border border-accent-500/50 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-accent-400 w-36"
                   />
                   <button
                     onClick={commitSaveTemplate}
                     disabled={!saveTemplateName.trim()}
-                    className="p-1 rounded bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="p-1 rounded bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <Check size={12} />
                   </button>
@@ -6800,7 +6800,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                         key={z}
                         onClick={() => setZoomCentered(z)}
                         className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded transition-colors ${
-                          active ? 'bg-purple-600/30 text-purple-200' : 'bg-black/50 text-gray-400 hover:text-gray-200'
+                          active ? 'bg-accent-600/30 text-accent-200' : 'bg-black/50 text-gray-400 hover:text-gray-200'
                         }`}
                       >
                         {Math.round(z * 100)}%
@@ -6810,7 +6810,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <button
                     onClick={() => setZoomCentered(fitScale)}
                     className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-                      Math.abs(viewZoom - fitScale) < 0.001 ? 'bg-purple-600/30 text-purple-200' : 'bg-black/50 text-gray-400 hover:text-gray-200'
+                      Math.abs(viewZoom - fitScale) < 0.001 ? 'bg-accent-600/30 text-accent-200' : 'bg-black/50 text-gray-400 hover:text-gray-200'
                     }`}
                   >
                     Fit
@@ -6861,7 +6861,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
                       <Tooltip content="Edit the canvas">
                         <button
-                          className={`px-1.5 py-0.5 text-[10px] transition-colors ${!previewMode ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                          className={`px-1.5 py-0.5 text-[10px] transition-colors ${!previewMode ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
                           onClick={() => setPreviewMode(false)}
                         >
                           Edit
@@ -6869,7 +6869,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       </Tooltip>
                       <Tooltip content="Preview how this thumbnail looks on YouTube — real sizes, badges, light/dark theme">
                         <button
-                          className={`px-1.5 py-0.5 text-[10px] transition-colors ${previewMode ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                          className={`px-1.5 py-0.5 text-[10px] transition-colors ${previewMode ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
                           onClick={() => setPreviewMode(true)}
                         >
                           Preview
@@ -6891,7 +6891,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       return (
                         <React.Fragment key={layer.id}>
                           {dropTargetDisplayIdx === displayIdx && (
-                            <div className="h-0.5 bg-purple-500" />
+                            <div className="h-0.5 bg-accent-500" />
                           )}
                           <div
                             draggable={!isRenaming}
@@ -6938,7 +6938,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             // the same shared hoveredLayerId.
                             onMouseEnter={() => setHoveredLayerId(layer.id)}
                             onMouseLeave={() => setHoveredLayerId(null)}
-                            className={`flex items-center gap-1.5 px-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-purple-600/20' : hoveredLayerId === layer.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
+                            className={`flex items-center gap-1.5 px-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-accent-600/20' : hoveredLayerId === layer.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
                           >
                             <Tooltip content={layer.visible ? 'Hide layer' : 'Show layer'} side="top">
                               <button
@@ -6963,7 +6963,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                   if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
                                   else if (e.key === 'Escape') { e.preventDefault(); setRenamingLayerId(null) }
                                 }}
-                                className="flex-1 min-w-0 bg-navy-900 border border-purple-500/60 rounded px-1.5 py-0 text-xs text-gray-200 focus:outline-none"
+                                className="flex-1 min-w-0 bg-navy-900 border border-accent-500/60 rounded px-1.5 py-0 text-xs text-gray-200 focus:outline-none"
                               />
                             ) : (
                               <span
@@ -6992,7 +6992,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             </div>
                           </div>
                           {displayIdx === displayLayers.length - 1 && dropTargetDisplayIdx === displayLayers.length && (
-                            <div className="h-0.5 bg-purple-500" />
+                            <div className="h-0.5 bg-accent-500" />
                           )}
                         </React.Fragment>
                       )
@@ -7204,7 +7204,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                       if (swatchDropIndex !== null) commitSwatchReorder(swatchDropIndex)
                                     }}
                                     onDragEnd={() => setSwatchDropIndex(null)}
-                                    className={`relative w-5 h-5 rounded-md border transition-shadow ${selectedSwatches.has(i) ? 'border-transparent ring-2 ring-purple-400' : 'border-white/50 hover:ring-1 hover:ring-white/70'}`}
+                                    className={`relative w-5 h-5 rounded-md border transition-shadow ${selectedSwatches.has(i) ? 'border-transparent ring-2 ring-accent-400' : 'border-white/50 hover:ring-1 hover:ring-white/70'}`}
                                     style={swatchTileStyle(v)}
                                   >
                                     {/* Reorder insertion marker — anchored INSIDE
@@ -7221,10 +7221,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                         gap, and -top-px/h-5 to span the full
                                         20px tile height. */}
                                     {swatchDropIndex === i && (
-                                      <span className="pointer-events-none absolute -left-[5px] -top-px h-5 w-0.5 rounded bg-purple-500" />
+                                      <span className="pointer-events-none absolute -left-[5px] -top-px h-5 w-0.5 rounded bg-accent-500" />
                                     )}
                                     {swatchDropIndex === palette.length && i === palette.length - 1 && (
-                                      <span className="pointer-events-none absolute -right-[5px] -top-px h-5 w-0.5 rounded bg-purple-500" />
+                                      <span className="pointer-events-none absolute -right-[5px] -top-px h-5 w-0.5 rounded bg-accent-500" />
                                     )}
                                   </button>
                                 ) : (
@@ -7424,7 +7424,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                               onClick={onToggle}
                               className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-[11px] transition-colors ${disabled ? 'cursor-default opacity-60' : 'hover:bg-white/5'}`}
                             >
-                              <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${checked ? 'bg-purple-600/40 border-purple-500/60 text-purple-100' : 'border-white/20'}`}>
+                              <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${checked ? 'bg-accent-600/40 border-accent-500/60 text-accent-100' : 'border-white/20'}`}>
                                 {checked && <Check size={10} strokeWidth={3} />}
                               </span>
                               <span className="text-gray-200">{label}</span>
@@ -7535,7 +7535,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             )
                             return (
                               <Tooltip key={p} content={tooltipContent} side="left">
-                                <div className="group relative aspect-square bg-navy-900 border border-white/5 hover:border-purple-500/60 rounded overflow-hidden flex items-center justify-center transition-colors">
+                                <div className="group relative aspect-square bg-navy-900 border border-white/5 hover:border-accent-500/60 rounded overflow-hidden flex items-center justify-center transition-colors">
                                   <img
                                     src={`file://${p}`}
                                     alt=""
@@ -7567,7 +7567,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                                     <button
                                       type="button"
                                       onClick={e => { e.stopPropagation(); addImageLayerFromPath(p).catch(() => {}) }}
-                                      className="flex items-center justify-center w-7 h-7 rounded-full bg-white/10 hover:bg-purple-600/60 border border-white/20 hover:border-purple-400/70 text-gray-200 hover:text-white transition-colors"
+                                      className="flex items-center justify-center w-7 h-7 rounded-full bg-white/10 hover:bg-accent-600/60 border border-white/20 hover:border-accent-400/70 text-gray-200 hover:text-white transition-colors"
                                     >
                                       <Plus size={14} />
                                     </button>
@@ -7826,7 +7826,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     in the new-alternative flow (targetVariant set)
                     AND when we have a current stream + layers to copy
                     from. Rendered first so it sits in the most visible
-                    grid slot. Purple border + label make it visually
+                    grid slot. Accent border + label make it visually
                     distinct from the template cards. */}
                 {templatePickerStream.targetVariant
                   && templatePickerStream.targetVariant > 1
@@ -7834,7 +7834,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   && layers.length > 0 && (
                   <div
                     className={`group bg-navy-900 border rounded-lg overflow-hidden cursor-pointer transition-colors ${
-                      pickerChoice === 'duplicate' ? 'border-purple-400 ring-1 ring-purple-400/60' : 'border-purple-500/50 hover:border-purple-400'
+                      pickerChoice === 'duplicate' ? 'border-accent-400 ring-1 ring-accent-400/60' : 'border-accent-500/50 hover:border-accent-400'
                     }`}
                     onClick={() => setPickerChoice('duplicate')}
                   >
@@ -7850,7 +7850,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       />
                     </div>
                     <div className="px-2 py-1.5">
-                      <span className="text-xs text-purple-300 truncate block">Duplicate current</span>
+                      <span className="text-xs text-accent-300 truncate block">Duplicate current</span>
                     </div>
                   </div>
                 )}
@@ -7858,7 +7858,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <div
                     key={t.id}
                     className={`group bg-navy-900 border rounded-lg overflow-hidden cursor-pointer transition-colors ${
-                      pickerChoice === t.id ? 'border-purple-400 ring-1 ring-purple-400/60' : 'border-white/10 hover:border-purple-500/60'
+                      pickerChoice === t.id ? 'border-accent-400 ring-1 ring-accent-400/60' : 'border-white/10 hover:border-accent-500/60'
                     }`}
                     onClick={() => setPickerChoice(t.id)}
                   >
@@ -7873,7 +7873,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     makeCheckerPattern) so it reads as "empty canvas". */}
                 <div
                   className={`group bg-navy-900 border rounded-lg overflow-hidden cursor-pointer transition-colors ${
-                    pickerChoice === 'blank' ? 'border-purple-400 ring-1 ring-purple-400/60' : 'border-white/10 hover:border-purple-500/60'
+                    pickerChoice === 'blank' ? 'border-accent-400 ring-1 ring-accent-400/60' : 'border-white/10 hover:border-accent-500/60'
                   }`}
                   onClick={() => setPickerChoice('blank')}
                 >

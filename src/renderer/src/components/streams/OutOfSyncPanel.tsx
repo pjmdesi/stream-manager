@@ -97,9 +97,9 @@ function Row({
         onMouseDown={onSelectMouseDown}
         onMouseEnter={onSelectMouseEnter}
         onClick={e => onSelectClick(e.shiftKey)}
-        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors cursor-pointer select-none ${selected ? 'bg-purple-600/20' : 'hover:bg-white/5'}`}
+        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors cursor-pointer select-none ${selected ? 'bg-accent-600/20' : 'hover:bg-white/5'}`}
       >
-        <span className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${selected ? 'bg-purple-700 border-purple-700' : 'border-gray-600 hover:border-gray-400'}`}>
+        <span className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${selected ? 'bg-accent-700 border-accent-700' : 'border-gray-600 hover:border-gray-400'}`}>
           {selected && <Check size={10} className="text-white" strokeWidth={3} />}
         </span>
         {inner}

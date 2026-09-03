@@ -14,7 +14,7 @@ function normalizeStreamTypes(v: string | string[] | undefined): string[] {
   return Array.isArray(v) ? v : [v]
 }
 
-const TOPIC_CHIP = 'bg-purple-900/40 text-purple-300 border-purple-300/40'
+const TOPIC_CHIP = 'bg-accent-900/40 text-accent-300 border-accent-300/40'
 
 // ─── Swatch picker portal ─────────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ function TexturePicker({
               type="button"
               onMouseDown={e => { e.preventDefault(); onPick(t.key) }}
               className={`w-14 h-9 rounded-md border transition-colors flex items-center justify-center relative overflow-hidden ${
-                t.key === currentKey ? 'border-purple-400/70 ring-1 ring-purple-400/50' : 'border-white/10 hover:border-white/30'
+                t.key === currentKey ? 'border-accent-400/70 ring-1 ring-accent-400/50' : 'border-white/10 hover:border-white/30'
               }`}
               style={{ backgroundColor: TEXTURE_PREVIEW_BG, ...getTagTextureStyle(t.key) }}
             >
@@ -472,7 +472,7 @@ function TagListPanel({
                 ${isPendingDelete
                   ? 'bg-red-900/20 border-red-800/40'
                   : isRenaming
-                  ? 'bg-navy-700/80 border-purple-700/40'
+                  ? 'bg-navy-700/80 border-accent-700/40'
                   : isSurvivor
                   ? 'bg-navy-700/80 border-yellow-700/40 survivor-pulse'
                   : isDying
@@ -520,7 +520,7 @@ function TagListPanel({
                       if (e.key === 'Enter') { e.preventDefault(); commitRename() }
                       else if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
                     }}
-                    className="bg-navy-900 border border-white/10 text-sm text-gray-100 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/40 w-full min-w-0"
+                    className="bg-navy-900 border border-white/10 text-sm text-gray-100 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/40 w-full min-w-0"
                   />
                   {renameError && (
                     <span className="text-[11px] text-red-400">{renameError}</span>
@@ -826,7 +826,7 @@ function TagListPanel({
           )}
           {selected.length === 1 && (
             <span>
-              <span className={`font-medium ${chipClass ? 'text-purple-300' : getTagColor(tagColors?.[selected[0]]).text}`}>
+              <span className={`font-medium ${chipClass ? 'text-accent-300' : getTagColor(tagColors?.[selected[0]]).text}`}>
                 {selected[0]}
               </span>
               {' '}will survive. Select at least one more to merge into it.
@@ -834,14 +834,14 @@ function TagListPanel({
           )}
           {selected.length >= 2 && (
             <span>
-              <span className={`font-medium ${chipClass ? 'text-purple-300' : getTagColor(tagColors?.[selected[0]]).text}`}>
+              <span className={`font-medium ${chipClass ? 'text-accent-300' : getTagColor(tagColors?.[selected[0]]).text}`}>
                 {selected[0]}
               </span>
               {' '}will absorb{' '}
               {selected.slice(1).map((t, i) => (
                 <React.Fragment key={t}>
                   {i > 0 && ', '}
-                  <span className={`font-medium ${chipClass ? 'text-purple-300' : getTagColor(tagColors?.[t]).text}`}>
+                  <span className={`font-medium ${chipClass ? 'text-accent-300' : getTagColor(tagColors?.[t]).text}`}>
                     {t}
                   </span>
                 </React.Fragment>

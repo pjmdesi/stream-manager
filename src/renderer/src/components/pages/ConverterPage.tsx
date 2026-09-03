@@ -92,8 +92,8 @@ function StatusIcon({ status, size = 14 }: { status: ConversionJob['status']; si
   if (status === 'done')        return <CheckCircle size={size} className="text-green-400 shrink-0" />
   if (status === 'error')       return <AlertCircle size={size} className="text-red-400 shrink-0" />
   if (status === 'downloading') return <Cloud size={size} className="text-blue-400 animate-pulse shrink-0" />
-  if (status === 'running')     return <RefreshCw size={size} className="text-purple-400 animate-spin shrink-0" />
-  if (status === 'replacing')   return <RefreshCw size={size} className="text-purple-300 animate-spin shrink-0" />
+  if (status === 'running')     return <RefreshCw size={size} className="text-accent-400 animate-spin shrink-0" />
+  if (status === 'replacing')   return <RefreshCw size={size} className="text-accent-300 animate-spin shrink-0" />
   if (status === 'paused')      return <Pause size={size} className="text-yellow-400 shrink-0" />
   if (status === 'cancelled')   return <XCircle size={size} className="text-gray-400 shrink-0" />
   return <Clock size={size} className="text-yellow-500 shrink-0" />
@@ -542,9 +542,9 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
     return (
       <div key={job.id} className={`@container relative isolate overflow-hidden px-4 py-3 border-b border-white/5 last:border-0 flex items-stretch gap-3 ${indented ? 'pl-7' : ''}`}>
-        {/* Progress paints as the row background — the app's "purple" tint,
+        {/* Progress paints as the row background — the app's accent tint,
             growing behind the content. */}
-        <RowProgressFill percent={job.progress} status={job.status} tint="bg-purple-500/10" />
+        <RowProgressFill percent={job.progress} status={job.status} tint="bg-accent-500/10" />
         {/* Thumbnail — pulled toward the left/top/bottom edges, keeps the
             gap to the right content. */}
         <div className="self-center shrink-0 -my-1 -ms-2">
@@ -583,7 +583,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               <button
                 type="button"
                 onClick={() => onNavigateToStream?.(streamOrigin.folderPath)}
-                className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                className="block max-w-full truncate text-[11px] text-accent-300/90 hover:text-accent-200 hover:underline transition-colors"
               >
                 {streamOrigin.label}
               </button>
@@ -599,7 +599,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           )}
 
           {isReplacing && (
-            <div className="flex items-center gap-3 text-xs text-purple-200 tabular-nums">
+            <div className="flex items-center gap-3 text-xs text-accent-200 tabular-nums">
               <span>Replacing original…</span>
               {elapsed > 0 && <span className="text-gray-400">Elapsed: {formatDuration(elapsed)}</span>}
             </div>
@@ -763,7 +763,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                           <button
                             type="button"
                             onClick={() => onNavigateToStream?.(stream.folderPath)}
-                            className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                            className="block max-w-full truncate text-[11px] text-accent-300/90 hover:text-accent-200 hover:underline transition-colors"
                           >
                             {stream.label}
                           </button>
@@ -775,7 +775,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                           <select
                             value={preset?.id ?? ''}
                             onChange={e => setFilePreset(path, e.target.value)}
-                            className="appearance-none max-w-[180px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                            className="appearance-none max-w-[180px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                           >
                             <optgroup label="Built-in">
                               {builtinPresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -803,7 +803,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                                 setFileOutputDir(path, v)
                               }
                             }}
-                            className="appearance-none max-w-[220px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                            className="appearance-none max-w-[220px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                           >
                             <option value="">Next to original</option>
                             {pickedDir && <option value={pickedDir}>{shortenDir(pickedDir)}</option>}
@@ -842,7 +842,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                             <select
                               value={String(file.audioTrackIndex ?? 0)}
                               onChange={e => setFileAudioTrack(path, Number(e.target.value))}
-                              className="appearance-none max-w-[200px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                              className="appearance-none max-w-[200px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                             >
                               {audioTracksByPath[path].map(t => (
                                 <option key={t.index} value={String(t.index)}>{audioTrackLabel(t)}</option>

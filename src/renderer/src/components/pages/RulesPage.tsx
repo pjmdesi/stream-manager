@@ -85,7 +85,7 @@ function RuleModal({
           <label className="text-sm font-medium text-gray-300">Watch Path</label>
           <div className="flex gap-2">
             <input
-              className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
               value={watchPath}
               onChange={e => setWatchPath(e.target.value)}
               placeholder="Folder to watch…"
@@ -161,7 +161,7 @@ function RuleModal({
             {destinationMode === 'static' && (
               <div className="flex gap-2">
                 <input
-                  className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                   value={destination}
                   onChange={e => setDestination(e.target.value)}
                   placeholder="Destination folder…"
@@ -292,21 +292,21 @@ export function RulesPage() {
                 )}
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-mono text-gray-300 truncate">{rule.watchPath}</span>
-                  <span className="text-xs bg-surface-100 text-purple-300 px-2 py-0.5 rounded">{rule.pattern}</span>
+                  <span className="text-xs bg-surface-100 text-accent-300 px-2 py-0.5 rounded">{rule.pattern}</span>
                   <span className={`text-xs px-2 py-0.5 rounded ${
                     rule.action === 'move' ? 'bg-blue-900/30 text-blue-300' :
                     rule.action === 'copy' ? 'bg-green-900/30 text-green-300' :
-                    rule.action === 'convert' ? 'bg-purple-900/30 text-purple-300' :
+                    rule.action === 'convert' ? 'bg-accent-900/30 text-accent-300' :
                     'bg-yellow-900/30 text-yellow-300'
                   }`}>{rule.action}</span>
                 </div>
                 {rule.destinationMode === 'auto' ? (
                   <div className="text-xs text-gray-400 mt-1">
-                    → <span className="text-purple-400">auto</span>
+                    → <span className="text-accent-400">auto</span>
                     {rule.autoMatchDate && <span className="text-gray-400"> · match date in filename</span>}
                   </div>
                 ) : rule.destinationMode === 'next-to-original' ? (
-                  <div className="text-xs text-gray-400 mt-1">→ <span className="text-purple-400">next to original</span></div>
+                  <div className="text-xs text-gray-400 mt-1">→ <span className="text-accent-400">next to original</span></div>
                 ) : rule.destination ? (
                   <div className="text-xs text-gray-400 mt-1 truncate">→ {rule.destination}</div>
                 ) : null}
@@ -350,7 +350,7 @@ export function RulesPage() {
                     <div className="mt-1">
                       <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-purple-500 rounded-full transition-all duration-200"
+                          className="h-full bg-accent-500 rounded-full transition-all duration-200"
                           style={{ width: `${ev.progress}%` }}
                         />
                       </div>

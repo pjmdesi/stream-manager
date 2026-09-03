@@ -75,8 +75,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         onDrop={handleDrop}
       >
         {isDragging && (
-          <div className="absolute inset-0 bg-purple-600/20 border-2 border-dashed border-purple-500 rounded-xl z-10 flex items-center justify-center pointer-events-none">
-            <div className="text-purple-300 font-medium text-center px-4">{overlayLabel}</div>
+          <div className="absolute inset-0 bg-accent-600/20 border-2 border-dashed border-accent-500 rounded-xl z-10 flex items-center justify-center pointer-events-none">
+            <div className="text-accent-300 font-medium text-center px-4">{overlayLabel}</div>
           </div>
         )}
         {children}
@@ -91,8 +91,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
           relative flex items-center justify-center gap-2 px-4 py-3
           border-2 border-dashed rounded-lg cursor-pointer transition-all duration-200
           ${isDragging
-            ? 'border-purple-500 bg-purple-600/10'
-            : 'border-white/10 hover:border-purple-500/50 hover:bg-purple-600/5'
+            ? 'border-accent-500 bg-accent-600/10'
+            : 'border-white/10 hover:border-accent-500/50 hover:bg-accent-600/5'
           }
           ${className}
         `}
@@ -102,7 +102,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         onClick={handleBrowse}
       >
         {isDragging
-          ? <Upload size={16} className="text-purple-400" />
+          ? <Upload size={16} className="text-accent-400" />
           : <Film size={16} className="text-gray-400" />}
         <p className="text-xs text-gray-400">{label}</p>
       </div>
@@ -115,8 +115,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         relative flex flex-col items-center justify-center gap-4 p-8
         border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200
         ${isDragging
-          ? 'border-purple-500 bg-purple-600/10'
-          : 'border-white/10 bg-white/2 hover:border-purple-500/50 hover:bg-purple-600/5'
+          ? 'border-accent-500 bg-accent-600/10'
+          : 'border-white/10 bg-white/2 hover:border-accent-500/50 hover:bg-accent-600/5'
         }
         ${className}
       `}
@@ -125,9 +125,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       onDrop={handleDrop}
       onClick={handleBrowse}
     >
-      <div className={`p-4 rounded-full transition-colors ${isDragging ? 'bg-purple-600/20' : 'bg-white/5'}`}>
+      <div className={`p-4 rounded-full transition-colors ${isDragging ? 'bg-accent-600/20' : 'bg-white/5'}`}>
         {isDragging ? (
-          <Upload size={32} className="text-purple-400" />
+          <Upload size={32} className="text-accent-400" />
         ) : (
           <Film size={32} className="text-gray-400" />
         )}

@@ -511,10 +511,10 @@ export function IntegrationsPage({ initialStatus }: {
               <div className="flex flex-col gap-2.5 text-xs text-gray-400 leading-relaxed">
                 <p>
                   To connect YouTube, you need OAuth 2.0 credentials from the{' '}
-                  <button onClick={() => window.api.openUrl('https://console.cloud.google.com')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">Google Cloud Console</button>.
+                  <button onClick={() => window.api.openUrl('https://console.cloud.google.com')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">Google Cloud Console</button>.
                   Credentials are stored locally only and never shared.
                   See Google's{' '}
-                  <button onClick={() => window.api.openUrl('https://developers.google.com/youtube/registering_an_application')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">registration guide</button>
+                  <button onClick={() => window.api.openUrl('https://developers.google.com/youtube/registering_an_application')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">registration guide</button>
                   {' '}for more detail.
                 </p>
                 {(!ytConnected || !ytTokenValid || ytInstructionsExpanded) && (
@@ -522,17 +522,17 @@ export function IntegrationsPage({ initialStatus }: {
                     <li>In the Cloud Console, create a new project (or select an existing one).</li>
                     <li>
                       Go to{' '}
-                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/library/youtube.googleapis.com')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">APIs &amp; Services → Library</button>
+                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/library/youtube.googleapis.com')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">APIs &amp; Services → Library</button>
                       , search for <span className="text-gray-300">YouTube Data API v3</span>, and enable it.
                     </li>
                     <li>
                       Go to{' '}
-                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/credentials/consent')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">OAuth consent screen</button>.
+                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/credentials/consent')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">OAuth consent screen</button>.
                       Set User Type to <span className="text-gray-300">External</span>, fill in the required app name and email fields, then add your Google account as a <span className="text-gray-300">Test user</span>. You do not need to submit for verification.
                     </li>
                     <li>
                       Go to{' '}
-                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/credentials')} className="text-purple-400 hover:text-purple-300 hover:underline transition-colors">Credentials</button>
+                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/credentials')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">Credentials</button>
                       {' '}→ <span className="text-gray-300">Create Credentials → OAuth client ID</span>. Set Application type to <span className="text-gray-300">Web application</span>.
                     </li>
                     <li>
@@ -565,7 +565,7 @@ export function IntegrationsPage({ initialStatus }: {
                     value={config.youtubeClientId ?? ''}
                     onChange={e => updateConfig({ youtubeClientId: e.target.value })}
                     placeholder="…apps.googleusercontent.com"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
@@ -576,7 +576,7 @@ export function IntegrationsPage({ initialStatus }: {
                       value={config.youtubeClientSecret ?? ''}
                       onChange={e => updateConfig({ youtubeClientSecret: e.target.value })}
                       placeholder="GOCSPX-…"
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                     />
                     <button onClick={() => requestReveal('yt-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors">
                       {revealed.has('yt-secret') ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -614,7 +614,7 @@ export function IntegrationsPage({ initialStatus }: {
               {/* Matches the relay nav widget's identity icon (TrendingUpDown,
                   18px there) — deliberately larger than sibling header icons
                   so the section is recognizable as the widget's home. */}
-              <TrendingUpDown size={16} className="text-purple-400 shrink-0" />
+              <TrendingUpDown size={16} className="text-accent-400 shrink-0" />
               <span className="text-xs font-medium text-gray-400">Stream Relay</span>
               {/* Status pill always renders so the user has a clear "Off"
                   affordance when the feature is disabled. When enabled, the
@@ -825,7 +825,7 @@ export function IntegrationsPage({ initialStatus }: {
                       }}
                       placeholder="xxxx-xxxx-xxxx-xxxx"
                       disabled={srFieldsLocked}
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     <button
                       onClick={() => requestReveal('sr-key')}
@@ -894,7 +894,7 @@ export function IntegrationsPage({ initialStatus }: {
               <p className="text-xs text-gray-400 leading-relaxed">
                 Create an application at{' '}
                 <button onClick={() => window.api.openUrl('https://dev.twitch.tv/console')}
-                  className="font-mono text-purple-400 hover:text-purple-300 hover:underline transition-colors">
+                  className="font-mono text-accent-400 hover:text-accent-300 hover:underline transition-colors">
                   dev.twitch.tv/console
                 </button>
                 {' '}using <strong className="text-gray-300">Confidential</strong> as the Client Type,
@@ -909,7 +909,7 @@ export function IntegrationsPage({ initialStatus }: {
                     value={config.twitchClientId ?? ''}
                     onChange={e => updateConfig({ twitchClientId: e.target.value })}
                     placeholder="Twitch Client ID"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
@@ -920,7 +920,7 @@ export function IntegrationsPage({ initialStatus }: {
                       value={config.twitchClientSecret ?? ''}
                       onChange={e => updateConfig({ twitchClientSecret: e.target.value })}
                       placeholder="Twitch Client Secret"
-                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                      className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                     />
                     <button onClick={() => requestReveal('tw-secret')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors">
                       {revealed.has('tw-secret') ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -932,7 +932,7 @@ export function IntegrationsPage({ initialStatus }: {
                 {!twConnected
                   ? <Button variant="primary" size="sm" onClick={connectTw} disabled={!config.twitchClientId || !config.twitchClientSecret || twConnecting}
                       icon={twConnecting ? <Loader2 size={13} className="animate-spin" /> : <Twitch size={13} />}
-                      className="bg-purple-600 hover:bg-purple-500">
+                      className="bg-accent-600 hover:bg-accent-500">
                       {twConnecting ? 'Connecting…' : 'Connect to Twitch'}
                     </Button>
                   : <Button variant="danger" size="sm" onClick={disconnectTw}>Disconnect</Button>
@@ -972,7 +972,7 @@ export function IntegrationsPage({ initialStatus }: {
                           onClick={() => updateConfig({ autoUpdateTwitchAfterStream: value })}
                           className={`flex items-center justify-center px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
                             active
-                              ? 'bg-purple-600/25 border-purple-500/40 text-purple-200'
+                              ? 'bg-accent-600/25 border-accent-500/40 text-accent-200'
                               : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200'
                           } disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/5 disabled:hover:text-gray-400`}
                         >
@@ -1006,7 +1006,7 @@ export function IntegrationsPage({ initialStatus }: {
             <div className="px-4 py-4 flex flex-col gap-4">
               <p className="text-xs text-gray-400 leading-relaxed">
                 Connect your Anthropic API key to enable AI-generated suggestions for stream titles, descriptions, and tags.
-                Get a key at <button onClick={() => window.api.openUrl('https://console.anthropic.com')} className="text-purple-400 font-mono hover:text-purple-300 hover:underline transition-colors">console.anthropic.com</button>. Stored locally only.
+                Get a key at <button onClick={() => window.api.openUrl('https://console.anthropic.com')} className="text-accent-400 font-mono hover:text-accent-300 hover:underline transition-colors">console.anthropic.com</button>. Stored locally only.
               </p>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-400">API Key</label>
@@ -1016,7 +1016,7 @@ export function IntegrationsPage({ initialStatus }: {
                     value={config.claudeApiKey ?? ''}
                     onChange={e => updateConfig({ claudeApiKey: e.target.value })}
                     placeholder="sk-ant-…"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                   />
                   <button onClick={() => requestReveal('claude-key')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-400 transition-colors">
                     {revealed.has('claude-key') ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -1030,7 +1030,7 @@ export function IntegrationsPage({ initialStatus }: {
                     <select
                       value={config.claudeModel ?? ''}
                       onChange={e => updateConfig({ claudeModel: e.target.value })}
-                      className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                      className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                     >
                       <option value="">Default (Claude Sonnet 4.6)</option>
                       {/* Stored model that isn't in the fetched list (not loaded

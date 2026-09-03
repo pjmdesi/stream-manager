@@ -6,8 +6,8 @@ export const theme = {
   bgElevated: '#131825',   // --color-bg-elevated / navy-800
   panel: '#1c2333',        // --color-panel / navy-700
   text: '#e2e8f0',         // --color-text
-  accent: '#c9d5e3',       // --color-accent / purple-500
-  accentLight: '#f1f5fa',  // --color-accent-light / purple-300
+  accent: '#c9d5e3',       // --color-accent / accent-500
+  accentLight: '#f1f5fa',  // --color-accent-light / accent-300
 } as const
 
 // Convenience: rgba helpers from the same palette

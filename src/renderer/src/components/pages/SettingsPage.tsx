@@ -41,7 +41,7 @@ function DirInput({
       <label className="text-sm font-medium text-gray-300">{label}</label>
       <div className="flex gap-2">
         <input
-          className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+          className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder="Select a folder…"
@@ -158,7 +158,7 @@ function Section({
       className="flex flex-col gap-4 scroll-mt-4"
     >
       <h2 className={`flex items-center gap-2 text-sm font-semibold uppercase tracking-wider border-b pb-2 ${headerClass ?? 'text-gray-300 border-white/5'}`}>
-        <span className={headerClass ? 'text-yellow-600' : 'text-purple-300'}>{icon}</span>
+        <span className={headerClass ? 'text-yellow-600' : 'text-accent-300'}>{icon}</span>
         {title}
       </h2>
       {children}
@@ -448,10 +448,10 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                 type="button"
                 onClick={() => jumpTo(s.id)}
                 className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs whitespace-nowrap transition-colors ${
-                  active ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  active ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                 }`}
               >
-                <span className={active ? 'text-purple-300' : (s.dev ? 'text-yellow-600' : 'text-gray-500')}>{s.icon}</span>
+                <span className={active ? 'text-accent-300' : (s.dev ? 'text-yellow-600' : 'text-gray-500')}>{s.icon}</span>
                 {s.label}
                 {dirty && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-400" />}
               </button>
@@ -509,7 +509,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               <button
                 type="button"
                 onClick={() => onNavigate?.('integrations')}
-                className="flex items-center gap-1 text-xs text-gray-400 hover:text-purple-300 transition-colors ml-auto"
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-accent-300 transition-colors ml-auto"
               >
                 Manage integrations
                 <ArrowRight size={12} />
@@ -609,7 +609,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                 <select
                   value={local.defaultBuiltinThumbnailTemplate ?? ''}
                   onChange={e => set('defaultBuiltinThumbnailTemplate', e.target.value)}
-                  className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                 >
                   <option value="">— None —</option>
                   {builtinTemplates.map(t => (
@@ -633,7 +633,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               <select
                 value={local.defaultThumbnailTemplate ?? ''}
                 onChange={e => set('defaultThumbnailTemplate', e.target.value)}
-                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
               >
                 <option value="">— None —</option>
                 {thumbnailTemplates.map(t => (
@@ -651,7 +651,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               <select
                 value={local.archivePresetId ?? ''}
                 onChange={e => set('archivePresetId', e.target.value)}
-                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
               >
                 <option value="">— None selected —</option>
                 {allPresets.map(p => (
@@ -681,7 +681,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               type="time"
               value={local.defaultBroadcastTime || '19:00'}
               onChange={e => set('defaultBroadcastTime', e.target.value || '19:00')}
-              className="w-32 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 [color-scheme:dark]"
+              className="w-32 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50 [color-scheme:dark]"
             />
             <p className="text-xs text-gray-400">Pre-fills the start time when scheduling a YouTube broadcast — both when creating one from a stream item and when rescheduling. You can still change it per-broadcast.</p>
           </div>
@@ -693,7 +693,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                 value={local.defaultYouTubeCategoryId ?? ''}
                 onChange={e => set('defaultYouTubeCategoryId', e.target.value)}
                 disabled={!ytStatus?.connected || ytCategories.length === 0}
-                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 [color-scheme:dark] disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50 [color-scheme:dark] disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <option value="">— None —</option>
                 {ytCategories.filter(c => c.assignable).map(c => (
@@ -720,7 +720,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               <select
                 value={local.clipPresetId ?? ''}
                 onChange={e => set('clipPresetId', e.target.value)}
-                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
               >
                 <option value="">— Default (H.264 CRF 18 + AAC 192k) —</option>
                 {allPresets.filter(p => isClipExportCompatible(p.ffmpegArgs)).map(p => (
@@ -746,7 +746,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
 
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">
-              Default Bleep Volume — <span className="text-purple-400 tabular-nums">{Math.round((local.defaultBleepVolume ?? 0.25) * 100)}%</span> {dirtyDot('defaultBleepVolume')}
+              Default Bleep Volume — <span className="text-accent-400 tabular-nums">{Math.round((local.defaultBleepVolume ?? 0.25) * 100)}%</span> {dirtyDot('defaultBleepVolume')}
             </label>
             <input
               type="range"
@@ -755,7 +755,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               step={0.01}
               value={local.defaultBleepVolume ?? 0.25}
               onChange={e => set('defaultBleepVolume', parseFloat(e.target.value))}
-              className="w-full accent-purple-500"
+              className="w-full accent-accent-500"
             />
             <div className="flex justify-between text-xs text-gray-400">
               <span>Silent</span>
@@ -817,7 +817,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                     type="button"
                     onClick={() => set('calendarFirstDayOfWeek', opt)}
                     className={`flex-1 py-1.5 text-sm capitalize transition-colors ${
-                      selected ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                      selected ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                     }`}
                   >
                     {opt}

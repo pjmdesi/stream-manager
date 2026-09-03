@@ -279,7 +279,7 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
             <button
               type="button"
               onClick={() => onNavigateToStream?.(stream.folderPath)}
-              className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+              className="block max-w-full truncate text-[11px] text-accent-300/90 hover:text-accent-200 hover:underline transition-colors"
             >
               {stream.label}
             </button>
@@ -850,7 +850,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                     <button
                       type="button"
                       onClick={() => onNavigateToStream?.(g.stream!.folderPath)}
-                      className="block max-w-full truncate text-xs font-medium text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                      className="block max-w-full truncate text-xs font-medium text-accent-300/90 hover:text-accent-200 hover:underline transition-colors"
                     >
                       {g.stream.label}
                     </button>
@@ -897,7 +897,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                 // target though — rows dragged from other jobs (and OS
                 // file drops via the zone below) refill it.
                 <div
-                  className={`px-4 py-4 transition-colors ${drop?.groupId === g.id ? 'bg-purple-900/20' : ''}`}
+                  className={`px-4 py-4 transition-colors ${drop?.groupId === g.id ? 'bg-accent-900/20' : ''}`}
                   onDragEnter={e => {
                     if (e.dataTransfer.types.includes(ROW_REORDER_MIME)) e.preventDefault()
                   }}
@@ -978,10 +978,10 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                             measured from the padding box, 1px inside the row
                             border — hence 5px). */}
                         {drop && drop.groupId === g.id && drop.at === i && (
-                          <span className="pointer-events-none absolute -top-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
+                          <span className="pointer-events-none absolute -top-[5px] left-0 right-0 h-0.5 rounded bg-accent-500" />
                         )}
                         {drop && drop.groupId === g.id && drop.at === g.files.length && i === g.files.length - 1 && (
-                          <span className="pointer-events-none absolute -bottom-[5px] left-0 right-0 h-0.5 rounded bg-purple-500" />
+                          <span className="pointer-events-none absolute -bottom-[5px] left-0 right-0 h-0.5 rounded bg-accent-500" />
                         )}
                         {/* Drag handle — pointless on a finished job's
                             record rows, so it disappears with the run. */}
@@ -1009,7 +1009,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                               <button
                                 type="button"
                                 onClick={() => onNavigateToStream?.(f.stream!.folderPath)}
-                                className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                                className="block max-w-full truncate text-[11px] text-accent-300/90 hover:text-accent-200 hover:underline transition-colors"
                               >
                                 {f.stream.label}{f.stream.date ? ` · ${f.stream.date}` : ''}
                               </button>
@@ -1141,11 +1141,11 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                             tinted fill growing behind the content instead of
                             an inline bar. */}
                         {(downloading || (runProgress === 0 && !paused)) ? (
-                          <div aria-hidden className={`absolute inset-0 -z-10 pointer-events-none animate-pulse ${downloading ? 'bg-blue-500/10' : 'bg-purple-500/10'}`} />
+                          <div aria-hidden className={`absolute inset-0 -z-10 pointer-events-none animate-pulse ${downloading ? 'bg-blue-500/10' : 'bg-accent-500/10'}`} />
                         ) : (
                           <div
                             aria-hidden
-                            className={`absolute inset-y-0 left-0 -z-10 pointer-events-none transition-[width] duration-300 ${paused ? 'bg-yellow-400/10' : 'bg-purple-500/10'}`}
+                            className={`absolute inset-y-0 left-0 -z-10 pointer-events-none transition-[width] duration-300 ${paused ? 'bg-yellow-400/10' : 'bg-accent-500/10'}`}
                             style={{ width: `${runProgress}%` }}
                           />
                         )}
@@ -1161,7 +1161,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                             ? <Cloud size={20} className="text-blue-400 animate-pulse shrink-0" />
                             : paused
                               ? <Pause size={20} className="text-yellow-400 shrink-0" />
-                              : <RefreshCw size={20} className="text-purple-400 animate-spin shrink-0" />}
+                              : <RefreshCw size={20} className="text-accent-400 animate-spin shrink-0" />}
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                           <div className="flex items-center gap-2">
@@ -1177,7 +1177,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                               <button
                                 type="button"
                                 onClick={() => onNavigateToStream?.(g.stream!.folderPath)}
-                                className="block max-w-full truncate text-[11px] text-purple-300/90 hover:text-purple-200 hover:underline transition-colors"
+                                className="block max-w-full truncate text-[11px] text-accent-300/90 hover:text-accent-200 hover:underline transition-colors"
                               >
                                 {g.stream.label}
                               </button>
@@ -1266,7 +1266,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                       <input
                         value={g.outputPath}
                         onChange={e => patchGroup(g.id, gg => ({ ...gg, outputPath: e.target.value }))}
-                        className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                        className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                       />
                       <Button variant="ghost" size="sm" icon={<FolderOpen size={13} />} onClick={() => void browseOutput(g.id)} />
                     </div>

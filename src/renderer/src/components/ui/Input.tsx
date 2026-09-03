@@ -43,7 +43,7 @@ export const Input: React.FC<InputProps> = ({
           className={`
             w-full bg-navy-900 border text-gray-200 text-sm rounded-lg
             px-3 py-2 placeholder-gray-600
-            focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50
+            focus:outline-none focus:ring-2 focus:ring-accent-500/50 focus:border-accent-500/50
             transition-colors duration-200
             ${error ? 'border-red-500/50' : 'border-white/10'}
             ${prefix ? 'pl-9' : ''}
@@ -189,7 +189,7 @@ export const Textarea: React.FC<TextareaProps> = ({
             relative z-10
             w-full bg-navy-900 border text-gray-200 text-sm rounded-lg
             px-3 py-2 placeholder-gray-600 resize-none
-            focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50
+            focus:outline-none focus:ring-2 focus:ring-accent-500/50 focus:border-accent-500/50
             transition-colors duration-200
             ${error ? 'border-red-500/50' : 'border-white/10'}
             ${className}
@@ -250,7 +250,7 @@ export const Select: React.FC<SelectProps> = ({
         className={`
           w-full bg-navy-900 border text-gray-200 text-sm rounded-lg
           px-3 py-2
-          focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50
+          focus:outline-none focus:ring-2 focus:ring-accent-500/50 focus:border-accent-500/50
           transition-colors duration-200
           ${error ? 'border-red-500/50' : 'border-white/10'}
           ${className}
@@ -384,7 +384,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         // The arbitrary selectors strip Chromium's native spin buttons
         // since we render our own vertical +/- buttons to the right.
         className={`w-full font-mono font-[350] ${merged ? 'ps-1' : 'ps-2'} py-1 ${inlineNote ? 'pr-12' : ''} text-xs text-gray-200 placeholder-gray-500 focus:outline-none transition-colors disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
-          frameless ? 'bg-transparent' : 'bg-navy-900 border border-r-0 border-white/10 rounded-l-lg focus:border-purple-500/50'
+          frameless ? 'bg-transparent' : 'bg-navy-900 border border-r-0 border-white/10 rounded-l-lg focus:border-accent-500/50'
         }`}
       />
       <div className="flex flex-col shrink-0">

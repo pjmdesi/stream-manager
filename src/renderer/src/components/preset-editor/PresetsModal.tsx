@@ -28,7 +28,7 @@ interface Props {
  * Mirrors the Templates modal: a scrollable list with inline create/edit
  * forms. Three per-preset markers:
  *   - ★ default (amber)   → defaultConversionPresetId (preset new files get)
- *   - Archive (purple)    → archivePresetId (used by the streams archive flow)
+ *   - Archive (accent)    → archivePresetId (used by the streams archive flow)
  *   - ThumbsUp (emerald)  → system recommendation (read-only)
  */
 export function PresetsModal({
@@ -76,7 +76,7 @@ export function PresetsModal({
               <button
                 type="button"
                 onClick={() => updateConfig({ archivePresetId: isArchive ? '' : p.id })}
-                className={`p-1 rounded transition-colors ${isArchive ? 'text-purple-400 hover:text-purple-300' : 'text-gray-500 hover:text-gray-300'}`}
+                className={`p-1 rounded transition-colors ${isArchive ? 'text-accent-400 hover:text-accent-300' : 'text-gray-500 hover:text-gray-300'}`}
               >
                 <Archive size={13} />
               </button>
@@ -111,7 +111,7 @@ export function PresetsModal({
       <div className="h-[580px] overflow-y-auto -mx-6 px-6 flex flex-col gap-5">
         <p className="text-xs text-gray-400 leading-relaxed">
           Mark a preset as the <Star size={11} className="inline -mt-0.5 text-amber-400" fill="currentColor" /> default for new
-          conversions, or the <Archive size={11} className="inline -mt-0.5 text-purple-400" /> default for archiving streams.
+          conversions, or the <Archive size={11} className="inline -mt-0.5 text-accent-400" /> default for archiving streams.
           The <ThumbsUp size={11} className="inline -mt-0.5 text-emerald-400" /> badge marks the encoder we recommend for this machine.
         </p>
 

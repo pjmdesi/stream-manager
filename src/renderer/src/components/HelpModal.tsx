@@ -9,7 +9,7 @@ function ElementSection({ icon, title, children }: { icon: React.ReactNode; titl
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2 text-gray-200">
-        <span className="text-purple-300 shrink-0">{icon}</span>
+        <span className="text-accent-300 shrink-0">{icon}</span>
         <h4 className="text-sm font-semibold">{title}</h4>
       </div>
       <div className="text-[13px] text-gray-400 leading-relaxed pl-6 [&_p]:m-0 flex flex-col gap-2">
@@ -123,9 +123,9 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         <ElementSection icon={<PanelRight size={14} />} title="Details Sidebar">
           <p>Every field edits inline and autosaves as you go. This is where you prepare and publish a stream's YouTube &amp; Twitch metadata. A few fields feed the title and description templates as <strong className="text-gray-300">merge fields</strong>:</p>
           <ul className="list-none pl-0 flex flex-col gap-1">
-            <li className="flex items-baseline gap-2"><Hash size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Topics / Games</strong>: the selected tag is the <em>primary</em> one. It sets the <MF k="topic" /> merge field (use <MF k="topics" /> for all of them) and is the Twitch category by default.</span></li>
-            <li className="flex items-baseline gap-2"><PencilLine size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Tagline</strong>: a short catchy phrase that sets the <MF k="tagline" /> merge field. Press <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in the field for an AI suggestion using the stream's details, previous taglines in the series, and your preferences prompt configurable on the integrations page.</span></li>
-            <li className="flex items-baseline gap-2"><Layers size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Series / Season / Episode</strong>: for a stream series, these set the <MF k="season" />, <MF k="episode" />, and <MF k="total_episodes" /> merge fields. Turn off <em>Series</em> for one-off streams or to otherwise opt-out of the series system.</span></li>
+            <li className="flex items-baseline gap-2"><Hash size={11} className="shrink-0 text-accent-300 translate-y-0.5" /><span><strong className="text-gray-300">Topics / Games</strong>: the selected tag is the <em>primary</em> one. It sets the <MF k="topic" /> merge field (use <MF k="topics" /> for all of them) and is the Twitch category by default.</span></li>
+            <li className="flex items-baseline gap-2"><PencilLine size={11} className="shrink-0 text-accent-300 translate-y-0.5" /><span><strong className="text-gray-300">Tagline</strong>: a short catchy phrase that sets the <MF k="tagline" /> merge field. Press <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in the field for an AI suggestion using the stream's details, previous taglines in the series, and your preferences prompt configurable on the integrations page.</span></li>
+            <li className="flex items-baseline gap-2"><Layers size={11} className="shrink-0 text-accent-300 translate-y-0.5" /><span><strong className="text-gray-300">Series / Season / Episode</strong>: for a stream series, these set the <MF k="season" />, <MF k="episode" />, and <MF k="total_episodes" /> merge fields. Turn off <em>Series</em> for one-off streams or to otherwise opt-out of the series system.</span></li>
           </ul>
           <p>Fields that feed a merge field wear the chip right in their label (an arrow pointing at the chip); the chip lights up when the bound title template actually uses it.</p>
           <p>The header's <strong className="text-gray-300">New episode</strong> button creates the next episode of the series (<Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>N</Kbd>). The footer holds <strong className="text-gray-300">Archive</strong> (compresses the recordings with your default archive preset; can't be undone) and <strong className="text-gray-300">Delete</strong>.</p>
@@ -134,7 +134,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         <ElementSection icon={<Type size={14} />} title="Title fields & merge fields">
           <p>The YouTube Title and the Twitch Title (when you enable <em>Custom title</em>) are mini template editors. Type plain text, or insert a <strong className="text-gray-300">merge-field chip</strong> from the <em>Insert</em> row beneath the field. Chips like <MF k="topic" /> or <MF k="episode" /> are substituted live from the fields above.</p>
           <ul className="list-none pl-0 flex flex-col gap-1.5">
-            <li className="flex items-baseline gap-2"><Braces size={11} className="shrink-0 text-purple-300 translate-y-0.5" /><span><strong className="text-gray-300">Preview</strong>: when a title contains merge fields, a preview line shows the final rendered title (exactly what publishes).</span></li>
+            <li className="flex items-baseline gap-2"><Braces size={11} className="shrink-0 text-accent-300 translate-y-0.5" /><span><strong className="text-gray-300">Preview</strong>: when a title contains merge fields, a preview line shows the final rendered title (exactly what publishes).</span></li>
             <li className="flex items-baseline gap-2"><Hash size={11} className="shrink-0 text-gray-400 translate-y-0.5" /><span><strong className="text-gray-300">Character counter</strong>: counts the rendered title against the platform limit (100 for YouTube, 140 for Twitch) and turns red when you go over.</span></li>
             <li className="flex items-baseline gap-2"><Braces size={11} className="shrink-0 text-red-400 translate-y-0.5" /><span>A merge field that doesn't apply, like <MF k="episode" inapplicable /> on a standalone stream, shows as a red chip. Turn on <em>Series</em> to use it.</span></li>
           </ul>
@@ -499,11 +499,11 @@ export function HelpModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                 onClick={() => setActive(i.id)}
                 className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm transition-colors text-left ${
                   isActive
-                    ? 'bg-purple-700/30 text-purple-200 border border-purple-700/40'
+                    ? 'bg-accent-700/30 text-accent-200 border border-accent-700/40'
                     : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'
                 }`}
               >
-                <span className={isActive ? 'text-purple-300' : 'text-gray-400'}>{i.icon}</span>
+                <span className={isActive ? 'text-accent-300' : 'text-gray-400'}>{i.icon}</span>
                 <span>{i.label}</span>
               </button>
             )
@@ -516,7 +516,7 @@ export function HelpModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
             without scattering the class through each section body. */}
         <div className="flex-1 min-w-0 flex flex-col gap-3 text-sm text-gray-400 leading-relaxed text-pretty [&_p]:m-0 overflow-y-auto pr-2">
           <div className="flex items-center gap-2 text-gray-200">
-            <span className="text-purple-300">{item.icon}</span>
+            <span className="text-accent-300">{item.icon}</span>
             <h3 className="text-base font-semibold">{item.label}</h3>
           </div>
           <div className="flex flex-col gap-3">

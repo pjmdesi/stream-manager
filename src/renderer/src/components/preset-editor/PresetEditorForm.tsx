@@ -192,7 +192,7 @@ export function PresetEditorForm({ onSave, onCancel, editing }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4 bg-white/[0.04] rounded-lg border border-purple-500/20">
+    <div className="flex flex-col gap-4 px-4 py-4 bg-white/[0.04] rounded-lg border border-accent-500/20">
       {/* ── General ───────────────────────────────────────────────── */}
       <Section title="General">
         <div className="grid grid-cols-2 gap-3">
@@ -203,7 +203,7 @@ export function PresetEditorForm({ onSave, onCancel, editing }: Props) {
               onChange={e => setName(e.target.value)}
               placeholder="e.g. YouTube 1080p"
               autoFocus
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
             />
           </Field>
           <Field label="Output container">
@@ -221,7 +221,7 @@ export function PresetEditorForm({ onSave, onCancel, editing }: Props) {
             value={description}
             onChange={e => setDescription(e.target.value)}
             placeholder="What is this preset for?"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
           />
         </Field>
       </Section>
@@ -343,7 +343,7 @@ export function PresetEditorForm({ onSave, onCancel, editing }: Props) {
               checked={!!form.audio.keepAllTracks}
               disabled={advancedMode}
               onChange={e => setForm(f => ({ ...f, audio: { ...f.audio, keepAllTracks: e.target.checked } }))}
-              className="accent-purple-500 mt-0.5"
+              className="accent-accent-500 mt-0.5"
             />
             <span className="flex flex-col gap-0.5">
               <span className="text-gray-300">Keep all audio tracks</span>
@@ -379,7 +379,7 @@ export function PresetEditorForm({ onSave, onCancel, editing }: Props) {
               readOnly={!advancedMode}
               onChange={e => setRawArgs(e.target.value)}
               rows={3}
-              className={`w-full font-mono text-xs rounded-lg px-3 py-2 border focus:outline-none focus:ring-2 focus:ring-purple-500/50 ${
+              className={`w-full font-mono text-xs rounded-lg px-3 py-2 border focus:outline-none focus:ring-2 focus:ring-accent-500/50 ${
                 advancedMode
                   ? 'bg-navy-900 border-white/10 text-gray-200'
                   : 'bg-navy-900/50 border-white/5 text-gray-400 cursor-default'
@@ -390,7 +390,7 @@ export function PresetEditorForm({ onSave, onCancel, editing }: Props) {
                 type="checkbox"
                 checked={advancedMode}
                 onChange={e => setAdvancedMode(e.target.checked)}
-                className="accent-purple-500"
+                className="accent-accent-500"
               />
               Edit raw args (disables form)
             </label>
@@ -451,7 +451,7 @@ function SelectMenu({
         value={value}
         onChange={e => onChange(e.target.value)}
         disabled={disabled}
-        className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {options.map(o => (
           <option key={o.value} value={o.value}>{o.label}</option>

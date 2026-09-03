@@ -23,7 +23,7 @@ When adding UI: reach for a primitive → if it doesn't fit, extend the primitiv
 
 ### Color tokens (`tailwind.config.js`)
 
-Class names are kept legacy (`navy-*`, `purple-*`) but the palette is **slate-flavored**, not literal navy/purple.
+`navy-*` is a legacy name for the slate-flavored background grays. `accent-*` is the app's semantic accent (slate-with-extra-blue). Until APP-16 (2026-09) the accent was remapped OVER Tailwind's `purple-*` classes ("the purple hack"); that remap is gone: `purple-*` is Tailwind's real purple again and appears only where actual purple is intended (the true-purple tag color, the merge-field chip selection tint).
 
 | Token | Use |
 |---|---|
@@ -32,16 +32,16 @@ Class names are kept legacy (`navy-*`, `purple-*`) but the palette is **slate-fl
 | `navy-700` `#1c2333` | panels, **modal body** |
 | `navy-600` / `navy-500` | raised surfaces, borders-as-fills |
 | `surface-100..400` | button/input fills (`surface-100` = secondary button bg) |
-| `purple-800` `#44566f` | **primary button** bg |
-| `purple-600` `#8fa2bc` | accent fill |
-| `purple-500` `#c9d5e3` | hover / slider thumb (`--color-accent`) |
-| `purple-400` `#e0e7f0` | accent **text** |
-| `purple-300`/`200` | highlighted/active text |
+| `accent-800` `#44566f` | **primary button** bg |
+| `accent-600` `#8fa2bc` | accent fill |
+| `accent-500` `#c9d5e3` | hover / slider thumb (`--color-accent`) |
+| `accent-400` `#e0e7f0` | accent **text** |
+| `accent-300`/`200` | highlighted/active text |
 | `twitch-500/400/300` `#9146ff…` | **Twitch-only** UI — literal brand purple, never themed |
 
 Text ramp: `gray-200` primary · `gray-300` field labels · `gray-400` secondary · `gray-500/600` muted/placeholder. Borders: `border-white/5` (subtle) · `border-white/10` (standard).
 
-Semantic colors: red = danger **and** YouTube brand (`red-400`); green = success; the slate `purple-*` = primary accent; `twitch-*` = Twitch brand.
+Semantic colors: red = danger **and** YouTube brand (`red-400`); green = success; the slate `accent-*` = primary accent; `twitch-*` = Twitch brand.
 
 CSS vars in `index.css` (`--color-bg`, `--color-panel`, `--color-accent`, …) mirror a subset for non-Tailwind contexts (sliders, playhead). Keep them in sync with the Tailwind tokens.
 
@@ -75,14 +75,14 @@ CSS vars in `index.css` (`--color-bg`, `--color-panel`, `--color-accent`, …) m
 
 ### Button (`Button.tsx`)
 
-- **Variants:** `primary` (purple, shadowed) · `secondary` (**default**, surface fill + border) · `ghost` (transparent, for low-emphasis/cancel) · `danger` (red) · `success` (green).
+- **Variants:** `primary` (accent, shadowed) · `secondary` (**default**, surface fill + border) · `ghost` (transparent, for low-emphasis/cancel) · `danger` (red) · `success` (green).
 - **Sizes:** `icon-sm` · `sm` · `md` (**default**) · `lg`.
 - `icon`, `loading` (built-in spinner), `collapsibleLabel` (animated icon-only↔icon+label via container query — see file).
 - Sets `data-variant`, which **Modal autofocus relies on** to find the action button. Keep action buttons as `primary`/`danger`/`success`, cancel buttons as `ghost`/`secondary`.
 
 ### Inputs (`Input.tsx`)
 
-Shared field skin: `bg-navy-900` · `border-white/10` · `rounded-lg` · focus `ring-2 ring-purple-500/50 + border-purple-500/50` · error `border-red-500/50`. Labels `text-sm font-medium text-gray-300`. Error text `text-xs text-red-400`; hint `text-xs text-gray-400`.
+Shared field skin: `bg-navy-900` · `border-white/10` · `rounded-lg` · focus `ring-2 ring-accent-500/50 + border-accent-500/50` · error `border-red-500/50`. Labels `text-sm font-medium text-gray-300`. Error text `text-xs text-red-400`; hint `text-xs text-gray-400`.
 
 - **`Input`** — label/error/hint/prefix/suffix slots.
 - **`Textarea`** — auto-grows to content by default (`useAutoGrowTextarea`); custom bottom drag-handle strip (double-click resets to auto). Prefer this over bare `<textarea>`.
@@ -91,7 +91,7 @@ Shared field skin: `bg-navy-900` · `border-white/10` · `rounded-lg` · focus `
 
 ### Checkbox (`Checkbox.tsx`)
 
-Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `red` · `green` · `blue`; sizes `sm`/`md`. Single check icon, `strokeWidth=3`.
+Custom `role="checkbox"` button (not native). Colors `accent` (**default**) · `red` · `green` · `blue`; sizes `sm`/`md`. Single check icon, `strokeWidth=3`.
 
 ### Modal (`Modal.tsx`)
 
@@ -110,9 +110,9 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 
 ### Chips / badges (rule)
 
-- **Chip border color matches its text color** (e.g. `text-purple-300` → `border-purple-300/40`). Don't pair a colored text with a neutral border.
+- **Chip border color matches its text color** (e.g. `text-accent-300` → `border-accent-300/40`). Don't pair a colored text with a neutral border.
 - Tag chips: `text-[10px] px-1.5 py-0.5 rounded`. Merge-field chips: see `TemplateBodyEditor` exports (`MERGE_FIELD_CHIP_CLASS`).
-- **File-class tag-border palette** (files grid `TaggedThumb`): the video class is the warm family — **red** Recording · **pink** Clip · **violet** Short — images are cool — **teal** selected thumbnail · **gray** alternates. **Blue is reserved** (unassigned; save it for a future marker). Shorts use Tailwind's literal `violet-*`, never the app's `purple-*` tokens (those are the remapped slate accent and would collide with selection rings). SM-made files always show their tag statically; hover-only tags are for affordances on non-SM files (e.g. set-as-thumbnail).
+- **File-class tag-border palette** (files grid `TaggedThumb`): the video class is the warm family — **red** Recording · **pink** Clip · **violet** Short — images are cool — **teal** selected thumbnail · **gray** alternates. **Blue is reserved** (unassigned; save it for a future marker). Shorts use Tailwind's literal `violet-*`, never the app's `accent-*` tokens (the slate accent would collide with selection rings). SM-made files always show their tag statically; hover-only tags are for affordances on non-SM files (e.g. set-as-thumbnail).
 
 ---
 
@@ -127,9 +127,9 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 - **Errors surface inline**, not via toasts (consistent with no-toast rule) — e.g. the AI hint lines turn red with the message.
 - **Build/environment naming (rule).** Two independent axes, three terms — never say just "dev":
   - **Release build** — packaged from `master`. Ships NO markers: no `_DEV` name, normal icon, no sidebar chips. This absence is a guarantee, enforced by `scripts/dist.cjs` (only non-master builds get dev markers).
-  - **Dev build** — packaged from any non-master branch (`npm run dist` on `dev`). `_DEV` artifact name, yellow dev icon, purple **branch chip** (GitBranch icon + branch name, from the shipped `dev-branch.txt` marker).
+  - **Dev build** — packaged from any non-master branch (`npm run dist` on `dev`). `_DEV` artifact name, yellow dev icon, accent-colored **branch chip** (GitBranch icon + branch name, from the shipped `dev-branch.txt` marker).
   - **Dev server** — running unpackaged via `npm run dev` (electron-vite), any branch. Amber **`server` chip** (`import.meta.env.DEV`, label kept short for the collapsed sidebar); the branch chip also shows when the checkout isn't on master.
-  - Chip colors are reserved: **purple = git branch**, **amber = environment**. The chips live on their own row under the version line (they made the version row too wide inline); each chip carries its own explanatory tooltip, and the About modal spells out both states.
+  - Chip colors are reserved: **accent = git branch**, **amber = environment**. The chips live on their own row under the version line (they made the version row too wide inline); each chip carries its own explanatory tooltip, and the About modal spells out both states.
 
 ---
 
@@ -142,7 +142,7 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 - **Platform icons by field label** — `<Youtube size={11} className="text-red-400/70" />`, `<Twitch size={11} className="text-twitch-400/70" />` to mark which platform a field targets.
 - **Collapsible panels/sections (rule)** — the collapse chevron sits on the **LEFT, before the panel title/content** (ChevronDown = expanded, ChevronRight = collapsed), never on the right. Collapsed keeps a constant-height header — include a summary line where it's useful (e.g. the files grid's file-class counts). Collapse state is a persisted UI pref (`localStorage`), global rather than per-item. Two size variants: **in a control row** (files grid), the button matches its sibling buttons' box exactly (it's the row-height anchor); **in a panel header** (Assets panel), it fills the row's FULL height, flush to the left edge, square aspect, no rounded corners — an easy large hit target. Header gotcha: if the header's bottom border is conditional on collapse, keep it always present and swap to `border-transparent` when collapsed — removing it changes the border-box and nudges the full-height chevron by 1px.
 - **Panel-header icon buttons (rule)** — action buttons in a panel header (asset sources, palette edit/add) get REAL button chrome so they don't read as decorative icons: `p-1 rounded-md border` with idle `bg-navy-900 border-white/10 text-gray-400` and hover `text-gray-200 border-white/25 bg-white/5`; glyph ~13px. An active/toggled state may recolor the whole treatment (e.g. the palette pencil's amber edit-mode state) but keeps the same box. Purely decorative panel icons (the 11px icon next to the title) stay bare — the chrome is what separates "button" from "label icon". Segmented controls in headers (Layers' Edit/Preview) already carry `bg-navy-900 border` chrome and are consistent by construction.
-- **Sidebar governor toggles (rule)** — in the stream-detail sidebar, a checkbox that OWNS an adjacent field or push behavior (Series numbering, thumbnail upload, Twitch title/category sync) renders as a toggle pill, not a square checkbox: the WHOLE pill is the control (check glyph + label), wearing the primary Button chrome when on (g-purple-800 hover:bg-purple-700 text-white, same as "New stream") and g-navy-900/70 text-gray-500 with a faint check when off. Shared component: TogglePill in StreamsPage; the Series toggle is the same look embedded as the left segment of its group. Sidebar-only by design — checkboxes everywhere else stay the regular Checkbox.
+- **Sidebar governor toggles (rule)** — in the stream-detail sidebar, a checkbox that OWNS an adjacent field or push behavior (Series numbering, thumbnail upload, Twitch title/category sync) renders as a toggle pill, not a square checkbox: the WHOLE pill is the control (check glyph + label), wearing the primary Button chrome when on (g-accent-800 hover:bg-accent-700 text-white, same as "New stream") and g-navy-900/70 text-gray-500 with a faint check when off. Shared component: TogglePill in StreamsPage; the Series toggle is the same look embedded as the left segment of its group. Sidebar-only by design — checkboxes everywhere else stay the regular Checkbox.
 - **Persistent vs conditional pages** — Player/Converter stay mounted (`hidden` class) to preserve state; others are conditionally rendered. Wrap page content in `PageErrorBoundary`.
 - **Streams list column widths** — thumbnail `p-0` (48px img) · stream type `w-[230px]` · video count `w-[44px]` · date `min-w-[130px]` · comments `w-[140px]`; all cells `px-2 py-2 align-middle`. `TODO:` confirm still current after the planned redesigns.
 
@@ -153,7 +153,7 @@ Custom `role="checkbox"` button (not native). Colors `purple` (**default**) · `
 Spotted while auditing the primitives — decide the canonical choice and align:
 
 1. **Placeholder color:** `Input`/`Textarea`/`Select` use `placeholder-gray-600`; `NumberInput` uses `placeholder-gray-500`. Pick one.
-2. **Focus treatment:** `Input`/`Textarea`/`Select` use `focus:ring-2 ring-purple-500/50 + border`; `NumberInput` uses border-only (no ring). Standardize the focus affordance across all fields.
+2. **Focus treatment:** `Input`/`Textarea`/`Select` use `focus:ring-2 ring-accent-500/50 + border`; `NumberInput` uses border-only (no ring). Standardize the focus affordance across all fields.
 3. **Field text size:** standard fields are `text-sm`; `NumberInput` is `text-xs`. Decide if compact primitives are an intentional exception (and document it) or unify.
 4. **Field label color:** `Input`/`Textarea`/`Select` labels are `text-gray-300`; many page/sidebar field labels use `text-gray-400`. Pick one label color.
 5. **Select usage:** the `Select` primitive vs raw themed `<select> + ChevronDown` (used in Settings/Integrations). Consolidate or document when each applies.

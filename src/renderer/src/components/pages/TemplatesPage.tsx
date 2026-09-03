@@ -85,7 +85,7 @@ function ApplyModal({
             <label className="text-sm font-medium text-gray-300">Base Directory</label>
             <div className="flex gap-2">
               <input
-                className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                 value={basePath}
                 onChange={e => setBasePath(e.target.value)}
                 placeholder="Select or type a path…"
@@ -247,7 +247,7 @@ export function TemplatesPage() {
                 {t.variables.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {t.variables.map(v => (
-                      <span key={v.key} className="text-xs bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-300/40">
+                      <span key={v.key} className="text-xs bg-accent-900/30 text-accent-300 px-2 py-0.5 rounded border border-accent-300/40">
                         {'{' + v.key + '}'}
                       </span>
                     ))}

@@ -123,8 +123,8 @@ export function BroadcastPicker({
         type="button"
         onClick={handleOpen}
         disabled={loading}
-        className={`w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 ${cursorCls} text-left relative ${
-          open ? 'ring-2 ring-purple-500/50' : ''
+        className={`w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:opacity-50 ${cursorCls} text-left relative ${
+          open ? 'ring-2 ring-accent-500/50' : ''
         } ${disableOpen ? 'opacity-70' : ''}`}
       >
         {selected ? (

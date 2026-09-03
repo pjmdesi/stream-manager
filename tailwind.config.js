@@ -19,9 +19,12 @@ module.exports = {
           600: '#283447',
           500: '#34425a',
         },
-        // Slate-hue accent with +5pp HSL saturation over Tailwind's slate scale.
-        // Class names kept (purple-*) — colors are slate-with-extra-blue.
-        purple: {
+        // The app's semantic accent: a slate hue with +5pp HSL saturation over
+        // Tailwind's slate scale. Historically these values were remapped OVER
+        // the purple-* family (the "purple hack", removed 2026-09 by APP-16);
+        // purple-* is Tailwind's real purple again and accent-* is the only
+        // name for the app's accent.
+        accent: {
           950: '#1b273c',
           900: '#30415a',
           800: '#44566f',

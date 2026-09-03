@@ -3710,7 +3710,7 @@ export function StreamsPage({
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setSearchFocused(false)}
                   placeholder="Search title, topics, notes…  /"
-                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
                 />
                 {searchQuery && (
                   <button
@@ -3728,7 +3728,7 @@ export function StreamsPage({
             <select
               value={sortMode}
               onChange={e => setSortMode(e.target.value as typeof sortMode)}
-              className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark]"
+              className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40 [color-scheme:dark]"
             >
               <option value="date-desc">Newest first</option>
               <option value="date-asc">Oldest first</option>
@@ -3810,7 +3810,7 @@ export function StreamsPage({
                           <Tooltip content="Filter by type" side="bottom">
                             <button
                               onClick={openTypeFilter}
-                              className={`p-0.5 rounded transition-colors ${filterTypes.size > 0 ? 'text-purple-400' : 'text-gray-400 hover:text-gray-300'}`}
+                              className={`p-0.5 rounded transition-colors ${filterTypes.size > 0 ? 'text-accent-400' : 'text-gray-400 hover:text-gray-300'}`}
                             >
                               <ListFilter size={12} />
                             </button>
@@ -3826,7 +3826,7 @@ export function StreamsPage({
                                     <button
                                       onClick={() => { setFilterTypes(new Set()); setOpenFilter(null) }}
                                       disabled={filterTypes.size === 0}
-                                      className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-purple-400 hover:text-purple-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-purple-400"
+                                      className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs border-b border-white/5 transition-colors disabled:opacity-30 disabled:cursor-default text-accent-400 hover:text-accent-300 hover:bg-white/5 disabled:hover:bg-transparent disabled:hover:text-accent-400"
                                     >
                                       <X size={11} className="shrink-0" />
                                       Clear filters
@@ -4044,7 +4044,7 @@ export function StreamsPage({
             selected. When no selection, the edge toggle's own indicator
             (z-20) renders on top at the same position with the same
             color — visually identical — and replaces this with the
-            purple hover state. */}
+            accent hover state. */}
         <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/5 z-10" />
 
         {/* Edge toggle — only present when no stream is selected. The
@@ -4062,7 +4062,7 @@ export function StreamsPage({
               className="absolute inset-0 cursor-col-resize"
               aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             />
-            <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-purple-500 transition-all duration-150" />
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-accent-500 transition-all duration-150" />
           </Tooltip>
         )}
 
@@ -4947,7 +4947,7 @@ const StreamListItem = memo(function StreamListItem({
    *  visible row carrying this type/game tag. */
   onTagSelect: (kind: 'type' | 'game', value: string, additive: boolean) => void
 }) {
-  // Selected-row indicator timing — drives the purple bar on the date
+  // Selected-row indicator timing — drives the accent bar on the date
   // cell. Lags behind `selected` on open (waits for the sidebar to
   // finish sliding so the indicator just pops into place rather than
   // racing the slide) but matches it instantly on close. The close
@@ -5048,13 +5048,13 @@ const StreamListItem = memo(function StreamListItem({
           ? (isToday
               ? 'border-b border-blue-700/40 !bg-blue-700/30 hover:!bg-blue-700/40'
               : 'border-b border-teal-700/40 !bg-teal-700/30 hover:!bg-teal-700/40')
-          : '!bg-purple-900/20'}`
+          : '!bg-accent-900/20'}`
       ) : ''} ${selectMode && multiSelected ? (
         isPending
           ? (isToday
               ? '!bg-blue-600/30 hover:!bg-blue-600/40'
               : '!bg-teal-600/30 hover:!bg-teal-600/40')
-          : '!bg-purple-600/30 hover:!bg-purple-600/40')
+          : '!bg-accent-600/30 hover:!bg-accent-600/40')
         : ''}`}
     >
       {/* Checkbox column — only renders in select mode. The pl-3 keeps
@@ -5066,7 +5066,7 @@ const StreamListItem = memo(function StreamListItem({
           onClick={e => { e.stopPropagation(); onToggleMultiSelect(index, e.shiftKey) }}
         >
           <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
-            multiSelected ? 'bg-purple-700 border-purple-700' : 'border-gray-600 hover:border-gray-400'
+            multiSelected ? 'bg-accent-700 border-accent-700' : 'border-gray-600 hover:border-gray-400'
           }`}>
             {multiSelected && <Check size={10} className="text-white" strokeWidth={3} />}
           </div>
@@ -5126,7 +5126,7 @@ const StreamListItem = memo(function StreamListItem({
           data-no-row-toggle
           onMouseDown={onThumbResizeStart}
         >
-          <div className="absolute top-0 right-0 w-px h-full bg-purple-500 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
+          <div className="absolute top-0 right-0 w-px h-full bg-accent-500 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
         </div>
       </td>
 
@@ -5160,7 +5160,7 @@ const StreamListItem = memo(function StreamListItem({
       </td>
 
       {/* Date + status badges + title clamp.
-          selected-row-indicator: the right-edge purple bar that marks
+          selected-row-indicator: the right-edge accent bar that marks
           the selected row lives HERE rather than on the <tr> so it
           sits inside the date column (always visible) instead of at
           the row's actual right edge (covered by the sidebar overlay
@@ -5173,14 +5173,14 @@ const StreamListItem = memo(function StreamListItem({
           is gated on `indicatorVisible` (lags `selected` on open,
           instant on close) so the bar lands once the sidebar settles
           rather than racing the slide. */}
-      <td className={`p-1 align-middle min-w-[220px] ${indicatorVisible ? 'relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-purple-600' : ''}`}>
+      <td className={`p-1 align-middle min-w-[220px] ${indicatorVisible ? 'relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-accent-600' : ''}`}>
         <div className="flex items-center justify-between gap-1.5 w-full">
           <div className="inline-flex gap-1 mt-0.5">
             <Tooltip content={friendlyDate(date)} side="top">
               <span className="font-mono text-sm text-gray-200">{date}</span>
             </Tooltip>
             {sameDayIndex && sameDayIndex > 1 && (
-              <span className="font-mono text-sm text-purple-400/70 font-semibold">#{sameDayIndex}</span>
+              <span className="font-mono text-sm text-accent-400/70 font-semibold">#{sameDayIndex}</span>
             )}
           </div>
           <div className="inline-flex gap-1">
@@ -5304,7 +5304,7 @@ const StreamListItem = memo(function StreamListItem({
                   <DisplayTagChip
                     key={g}
                     text={g}
-                    className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30 truncate max-w-full"
+                    className="inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-accent-900/20 text-accent-300 border border-accent-300/30 truncate max-w-full"
                     onClick={selectMode ? (e) => onTagSelect('game', g, !(e.ctrlKey || e.metaKey)) : undefined}
                     actionTooltip={selectMode ? `Select all "${g}" · Ctrl-click to deselect` : undefined}
                   />
@@ -5367,7 +5367,7 @@ const StreamListItem = memo(function StreamListItem({
 
 /** Month-view calendar shown in the sidebar when no stream is selected.
  *  Past streams render as gray dots under the day number; future streams
- *  as purple dots. Clicking a day with streams selects the first one. */
+ *  as accent dots. Clicking a day with streams selects the first one. */
 function SidebarMonthCalendar({
   folders,
   onSelectStream,
@@ -5619,7 +5619,7 @@ function SidebarMonthCalendar({
                       disabled
                         ? 'text-gray-700 cursor-not-allowed'
                         : isSelected
-                          ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40'
+                          ? 'bg-accent-600/30 text-accent-200 border border-accent-500/40'
                           : 'text-gray-300 hover:bg-white/5',
                     ].join(' ')}
                   >
@@ -5706,7 +5706,7 @@ function SidebarMonthCalendar({
           // the same status at a glance.
           const dotColor = isFuture ? 'bg-teal-400' : 'bg-gray-400'
           const dayNumberClass = c.isToday
-            ? 'text-purple-300 font-semibold'
+            ? 'text-accent-300 font-semibold'
             : !c.inMonth
               ? 'text-gray-600'
               : has
@@ -5726,7 +5726,7 @@ function SidebarMonthCalendar({
               className={[
                 'relative w-full h-full flex items-center justify-center rounded transition-colors',
                 has ? 'cursor-pointer hover:bg-white/10' : 'cursor-default',
-                c.isToday ? 'ring-1 ring-purple-500/50' : '',
+                c.isToday ? 'ring-1 ring-accent-500/50' : '',
               ].join(' ')}
             >
               <span className={`text-xs leading-none ${dayNumberClass}`}>{c.day}</span>
@@ -5842,7 +5842,7 @@ function SidebarMonthCalendar({
                       type="button"
                       onClick={() => updateConfig({ calendarFirstDayOfWeek: opt })}
                       className={`flex-1 py-1 text-xs capitalize transition-colors ${
-                        selected ? 'bg-purple-600/25 text-purple-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                        selected ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                       }`}
                     >
                       {opt}
@@ -7236,7 +7236,7 @@ function SidebarDetail({
             <button
               type="button"
               onClick={() => onReschedule(broadcastMismatches.get('date'))}
-              className="text-xs text-gray-400 font-mono tabular-nums hover:text-purple-300 hover:bg-white/5 rounded px-1.5 py-0.5 -ml-1.5 transition-colors flex items-center gap-1"
+              className="text-xs text-gray-400 font-mono tabular-nums hover:text-accent-300 hover:bg-white/5 rounded px-1.5 py-0.5 -ml-1.5 transition-colors flex items-center gap-1"
             >
               <span>{folder.date}</span>
               <PencilLine size={9} />
@@ -7387,14 +7387,14 @@ function SidebarDetail({
                           disabled={isCurrent}
                           className={`flex items-baseline gap-2 w-full px-3 py-1 text-xs text-left transition-colors ${
                             isCurrent
-                              ? 'bg-purple-900/25 text-purple-300 cursor-default'
+                              ? 'bg-accent-900/25 text-accent-300 cursor-default'
                               : 'text-gray-300 hover:bg-white/5'
                           }`}
                         >
-                          <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{epNum}:</span>
-                          <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>{ep.date}</span>
-                          <span className={`shrink-0 ${isCurrent ? 'text-purple-300' : 'text-gray-400'}`}>·</span>
-                          <TruncatedText text={epTitle} className={`truncate ${isCurrent ? 'text-purple-300 font-medium' : 'text-gray-200'}`} />
+                          <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>{epNum}:</span>
+                          <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>{ep.date}</span>
+                          <span className={`shrink-0 ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>·</span>
+                          <TruncatedText text={epTitle} className={`truncate ${isCurrent ? 'text-accent-300 font-medium' : 'text-gray-200'}`} />
                         </button>
                       )
                     })}
@@ -7892,7 +7892,7 @@ function SidebarDetail({
                   ref={ytCategorySelectRef}
                   value={meta?.ytCategoryId ?? ''}
                   onChange={e => onUpdateMeta({ ytCategoryId: e.target.value || undefined })}
-                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/40 [color-scheme:dark] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40 [color-scheme:dark] disabled:opacity-40 disabled:cursor-not-allowed"
                   disabled={!ytConnected || ytCategories.length === 0}
                 >
                   <option value="">— None —</option>
@@ -8753,7 +8753,7 @@ function SidebarDetail({
                     `:hover` still fires on disabled elements in
                     modern browsers, which would otherwise let the
                     hover bg win over the disabled bg. */}
-                <div className="relative bg-purple-800 group-has-[.push-all-btn:hover:not(:disabled)]:bg-purple-700 group-has-[.push-all-btn:focus-visible:not(:disabled)]:bg-purple-700 group-has-[.push-all-btn:disabled]:bg-purple-800/50 transition-colors rounded-tl-lg rounded-tr-lg @[280px]:rounded-tr-none @[280px]:rounded-bl-lg">
+                <div className="relative bg-accent-800 group-has-[.push-all-btn:hover:not(:disabled)]:bg-accent-700 group-has-[.push-all-btn:focus-visible:not(:disabled)]:bg-accent-700 group-has-[.push-all-btn:disabled]:bg-accent-800/50 transition-colors rounded-tl-lg rounded-tr-lg @[280px]:rounded-tr-none @[280px]:rounded-bl-lg">
                   {/* Layer 2: sidebar-bg overlay, 1px inset, all four
                       corners rounded — gives the inner "transparent"
                       area its soft pill shape regardless of which
@@ -8801,7 +8801,7 @@ function SidebarDetail({
                         // the tailwind config) for the border + text,
                         // transparent bg with a subtle on-hover wash.
                         // Distinct from the YouTube button's red-on-tint
-                        // treatment because the app's `purple-*` scale
+                        // treatment because the app's `accent-*` scale
                         // was rethemed to a cool gray, so the literal
                         // brand purple has to come from `twitch-*`.
                         className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-transparent hover:bg-twitch-500/10 border border-twitch-500/50 hover:border-twitch-500 text-twitch-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
@@ -8816,8 +8816,8 @@ function SidebarDetail({
                 {/* PUSH TO ALL — `.push-all-btn` class is the hook
                     that the wrapper's `group-has-[…]:` modifiers
                     above use to mirror this button's state. Styled
-                    like the primary Button (purple-800 → purple-700
-                    on hover, soft purple-900 shadow). */}
+                    like the primary Button (accent-800 → accent-700
+                    on hover, soft accent-900 shadow). */}
                 <Tooltip content={
                   allDisabled && netProblem === 'offline' ? 'No internet connection.'
                     : allDisabled && stagedScheduleInPast ? 'The staged broadcast time is in the past. Fix the date or time, then push.'
@@ -8828,7 +8828,7 @@ function SidebarDetail({
                     type="button"
                     onClick={handlePushAll}
                     disabled={allDisabled}
-                    className="push-all-btn flex items-center justify-center px-3 py-1.5 rounded-bl-lg rounded-br-lg @[280px]:rounded-bl-none @[280px]:rounded-tr-lg text-xs font-medium bg-purple-800 hover:bg-purple-700 text-white shadow-lg shadow-purple-900/30 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 focus:ring-offset-navy-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-purple-800 whitespace-nowrap"
+                    className="push-all-btn flex items-center justify-center px-3 py-1.5 rounded-bl-lg rounded-br-lg @[280px]:rounded-bl-none @[280px]:rounded-tr-lg text-xs font-medium bg-accent-800 hover:bg-accent-700 text-white shadow-lg shadow-accent-900/30 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1 focus:ring-offset-navy-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-accent-800 whitespace-nowrap"
                   >
                     Push to all
                   </button>
@@ -8922,13 +8922,13 @@ function SidebarDetail({
  *  as MERGE_FIELD_CHIP_CLASS (so toggling highlight never reflows the
  *  label row), colors dimmed until the bound template actually uses
  *  the key. */
-const MERGE_FIELD_CHIP_GHOST = 'inline-flex items-center box-border leading-none text-[10px] text-purple-300/40 bg-purple-950/30 border border-purple-800/40 rounded px-1.5 py-0.5'
+const MERGE_FIELD_CHIP_GHOST = 'inline-flex items-center box-border leading-none text-[10px] text-accent-300/40 bg-accent-950/30 border border-accent-800/40 rounded px-1.5 py-0.5'
 
 /** Governor toggle pill — the stream-detail sidebar's checkbox style for
  *  OVERRIDE switches that own an adjacent input (Twitch custom
  *  title/category; the Series toggle is the same look hand-rolled in
  *  its segment group). Off by default; turning it ON activates the
- *  override, wearing the primary-button chrome (same bg-purple-800 as
+ *  override, wearing the primary-button chrome (same bg-accent-800 as
  *  "New stream") so the enabled state is unmistakable. `segment` embeds
  *  the pill as the left anchor of a bordered lockup. Sidebar-only by
  *  design — regular checkboxes elsewhere stay Checkbox. */
@@ -8947,7 +8947,7 @@ function TogglePill({ checked, onChange, tooltip, label, segment }: {
   segment?: boolean
 }) {
   const stateCls = checked
-    ? 'bg-purple-800 hover:bg-purple-700 text-white'
+    ? 'bg-accent-800 hover:bg-accent-700 text-white'
     : `text-gray-500 hover:bg-white/5 hover:text-gray-300${segment ? '' : ' bg-navy-900/70'}`
   return (
     <Tooltip content={tooltip} side="top" triggerClassName={segment ? 'self-stretch flex' : undefined}>
@@ -8958,10 +8958,10 @@ function TogglePill({ checked, onChange, tooltip, label, segment }: {
         // Focus affordance is a focus-VISIBLE inset ring, never a
         // background swap: focus:bg-* outranks the plain state bg, so a
         // just-clicked pill showed the focus tint instead of its checked
-        // purple until blur — reading as a broken/mismatched state.
+        // accent-tinted until blur — reading as a broken/mismatched state.
         className={segment
-          ? `flex items-center gap-2 px-2.5 border-r border-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-purple-500/40 text-left ${stateCls}`
-          : `flex items-center gap-2 max-w-full px-2.5 py-1.5 rounded-lg border border-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/40 text-left ${stateCls}`}
+          ? `flex items-center gap-2 px-2.5 border-r border-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/40 text-left ${stateCls}`
+          : `flex items-center gap-2 max-w-full px-2.5 py-1.5 rounded-lg border border-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 text-left ${stateCls}`}
       >
         <Check size={12} strokeWidth={3} className={`shrink-0 ${checked ? '' : 'opacity-30'}`} />
         {label != null && <span className="min-w-0">{label}</span>}
@@ -9217,7 +9217,7 @@ function EditableTextField({
 
   const borderCls = tabActive ? 'border-white/[0.18]' : 'border-white/10'
   const cornerCls = tabAttached ? 'rounded-lg rounded-tr-none' : 'rounded-lg'
-  const sharedCls = `w-full bg-navy-900/70 border ${borderCls} ${cornerCls} px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''} ${className ?? ''}`
+  const sharedCls = `w-full bg-navy-900/70 border ${borderCls} ${cornerCls} px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-accent-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''} ${className ?? ''}`
 
   // Type-cast aliases for the input vs textarea render branches. Both
   // resolve to the same `sg.ref` DOM node — useFieldSuggestion attaches
@@ -9455,7 +9455,7 @@ function InlineTemplateSelect<T extends { id: string; name: string }>({
             <button
               key={t.id}
               className={`w-full text-left px-3 py-2 text-xs transition-colors ${
-                t.id === value ? 'text-purple-300 bg-purple-600/20' : 'text-gray-300 hover:bg-white/5'
+                t.id === value ? 'text-accent-300 bg-accent-600/20' : 'text-gray-300 hover:bg-white/5'
               }`}
               onClick={() => { onChange(t.id); close() }}
             >
@@ -9570,7 +9570,7 @@ function NumberStepperField({
         disabled={disabled}
         className={frameless
           ? `w-full bg-transparent px-1.5 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:bg-white/5 transition-colors disabled:cursor-not-allowed ${saving ? 'opacity-60' : ''}`
-          : `w-full bg-navy-900/70 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors disabled:cursor-not-allowed ${saving ? 'opacity-60' : ''}`}
+          : `w-full bg-navy-900/70 border border-r-0 border-white/10 rounded-l-lg px-2 py-1 text-xs text-gray-200 placeholder-gray-500 text-center focus:outline-none focus:border-accent-500/50 focus:bg-navy-900 transition-colors disabled:cursor-not-allowed ${saving ? 'opacity-60' : ''}`}
       />
       <div className="flex flex-col">
         <Tooltip content="Increment (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
@@ -9659,9 +9659,9 @@ function DateTooltipCalendar({ streamDate }: { streamDate: string }) {
             key={c.iso}
             className={`w-5 h-5 rounded text-[10px] tabular-nums flex items-center justify-center ${
               c.iso === streamDate
-                ? 'bg-purple-600/60 text-white font-semibold'
+                ? 'bg-accent-600/60 text-white font-semibold'
                 : c.iso === today
-                  ? 'border border-purple-400/60 text-purple-200'
+                  ? 'border border-accent-400/60 text-accent-200'
                   : c.inMonth ? 'text-gray-300' : 'text-gray-600'
             }`}
           >
@@ -9754,7 +9754,7 @@ function BroadcastTimePrivacyRow({
               // py-1.5 matches PrivacyDropdown's height exactly — the time
               // input's pt-[5px] pb-1 compensates for NATIVE chrome a plain
               // button doesn't have, so copying it left this 3px short.
-              className="bg-navy-900 border border-white/10 text-gray-200 font-mono tabular-nums text-xs rounded-lg px-2 py-1.5 flex items-center gap-1 hover:text-purple-300 hover:border-purple-500/40 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+              className="bg-navy-900 border border-white/10 text-gray-200 font-mono tabular-nums text-xs rounded-lg px-2 py-1.5 flex items-center gap-1 hover:text-accent-300 hover:border-accent-500/40 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500/40"
             >
               {date}
               <PencilLine size={9} />

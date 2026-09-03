@@ -179,7 +179,7 @@ export function StreamRelayWidget({
           <button
             onClick={() => pickBroadcast(null)}
             className={`flex flex-col items-start w-full px-3 py-2 text-left transition-colors border-b border-white/5 ${
-              !active.isManual ? 'bg-purple-600/20 text-purple-200' : 'text-gray-300 hover:bg-white/5'
+              !active.isManual ? 'bg-accent-600/20 text-accent-200' : 'text-gray-300 hover:bg-white/5'
             }`}
           >
             <span className="text-[11px] font-medium">Use today's broadcast (auto)</span>
@@ -198,7 +198,7 @@ export function StreamRelayWidget({
                 key={b.id}
                 onClick={() => pickBroadcast(b.id)}
                 className={`flex flex-col items-start w-full px-3 py-1.5 text-left transition-colors ${
-                  isCurrent ? 'bg-purple-600/20 text-purple-200' : 'text-gray-300 hover:bg-white/5'
+                  isCurrent ? 'bg-accent-600/20 text-accent-200' : 'text-gray-300 hover:bg-white/5'
                 }`}
               >
                 <span className="text-[11px] truncate w-full">{title}</span>
@@ -289,13 +289,13 @@ export function StreamRelayWidget({
             disabled={isStreaming}
             className="flex items-start gap-1.5 w-full px-2 py-1 rounded text-left hover:bg-white/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           >
-            <Calendar size={11} className="text-purple-400 shrink-0 mt-0.5" />
+            <Calendar size={11} className="text-accent-400 shrink-0 mt-0.5" />
             <div className="flex flex-col flex-1 min-w-0 leading-tight">
               <span className="text-[11px] text-gray-200 truncate">{broadcastTitle}</span>
               <span className="text-[10px] text-gray-400 tabular-nums">
                 {broadcastTime}
                 {active.isLiveSession && <span className="text-green-400 ml-1">· live</span>}
-                {!active.isLiveSession && active.isManual && <span className="text-purple-400 ml-1">· picked</span>}
+                {!active.isLiveSession && active.isManual && <span className="text-accent-400 ml-1">· picked</span>}
                 {!active.isLiveSession && !active.isManual && <span className="text-gray-400 ml-1">· auto</span>}
               </span>
             </div>
@@ -411,7 +411,7 @@ export function StreamRelayWidget({
               <button
                 onClick={togglePicker}
                 disabled={isStreaming}
-                className="p-1.5 rounded text-purple-400 hover:text-purple-300 hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                className="p-1.5 rounded text-accent-400 hover:text-accent-300 hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 aria-label="Pick a broadcast"
               >
                 <Calendar size={14} />

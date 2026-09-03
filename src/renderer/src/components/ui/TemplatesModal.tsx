@@ -41,11 +41,11 @@ function TitleForm({ initial, onSave, onCancel }: {
     onSave({ id: initial.id ?? uuid(), name: name.trim(), template: template.trim() })
   }
   return (
-    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-purple-500/20">
+    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-accent-500/20">
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Template name</label>
         <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Gaming — Standard" autoFocus
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/50" />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Title template</label>
@@ -82,11 +82,11 @@ function DescriptionForm({ initial, onSave, onCancel }: {
     onSave({ id: initial.id ?? uuid(), name: name.trim(), description })
   }
   return (
-    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-purple-500/20">
+    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-accent-500/20">
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Template name</label>
         <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Standard stream description" autoFocus
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/50" />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Description</label>
@@ -131,11 +131,11 @@ function TagForm({ initial, onSave, onCancel }: {
     onSave({ id: initial.id ?? uuid(), name: name.trim(), tags })
   }
   return (
-    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-purple-500/20">
+    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-accent-500/20">
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Template name</label>
         <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Elden Ring tags" autoFocus
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/50" />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Tags</label>
@@ -176,11 +176,11 @@ function TwitchTagForm({ initial, onSave, onCancel }: {
     onSave({ id: initial.id ?? uuid(), name: name.trim(), tags: compat })
   }
   return (
-    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-purple-500/20">
+    <div className="flex flex-col gap-3 px-4 py-3 bg-white/[0.04] rounded-lg border border-accent-500/20">
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Template name</label>
         <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. EldenRing tags" autoFocus
-          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50" />
+          className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/50" />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-gray-400">Tags</label>
@@ -459,7 +459,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
             onClick={() => setTab(t.id)}
             className={`px-3 py-2 text-sm font-medium rounded-t transition-colors ${
               tab === t.id
-                ? 'text-white border-b-2 border-purple-500'
+                ? 'text-white border-b-2 border-accent-500'
                 : 'text-gray-400 hover:text-gray-300'
             }`}
           >

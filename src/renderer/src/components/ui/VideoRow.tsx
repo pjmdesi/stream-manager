@@ -131,14 +131,14 @@ export function VideoRow({
     <div
       onClick={onClick}
       className={`group/vrow flex items-center gap-2.5 ${indent} py-1.5 rounded-lg transition-colors ${onClick ? 'cursor-pointer' : ''} ${
-        active ? 'bg-purple-600/20' : 'hover:bg-white/5'
+        active ? 'bg-accent-600/20' : 'hover:bg-white/5'
       }${justHydrated ? ' save-attention' : ''}`}
     >
       <VideoThumb path={path} height={compact ? 22 : 34} checker={isClipKind} rounded="rounded" />
       {!compact && (
         <>
           <div className="min-w-0 flex-1">
-            <div className={`text-[11px] font-medium truncate leading-tight ${active ? 'text-purple-200' : 'text-gray-200'}`}>{name}</div>
+            <div className={`text-[11px] font-medium truncate leading-tight ${active ? 'text-accent-200' : 'text-gray-200'}`}>{name}</div>
             <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
               {category && (
                 <span className={`shrink-0 inline-block text-[9px] font-mono border rounded px-1 leading-tight ${CAT_STYLE[category] ?? ''}`}>

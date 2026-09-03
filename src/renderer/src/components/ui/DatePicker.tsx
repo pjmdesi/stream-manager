@@ -220,7 +220,7 @@ export function DatePicker({
                         onClick={() => { setViewYear(pickerYear); setViewMonth(i); setMonthPickerOpen(false) }}
                         className={[
                           'py-1.5 rounded text-xs transition-colors',
-                          isSel ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40' : 'text-gray-300 hover:bg-white/5',
+                          isSel ? 'bg-accent-600/30 text-accent-200 border border-accent-500/40' : 'text-gray-300 hover:bg-white/5',
                         ].join(' ')}
                       >
                         {m}
@@ -250,9 +250,9 @@ export function DatePicker({
               const belowMin = !!min && c.iso < min
               const dotColor = isFuture ? 'bg-teal-400' : 'bg-gray-400'
               const dayNumberClass = isSelected
-                ? 'text-purple-100 font-semibold'
+                ? 'text-accent-100 font-semibold'
                 : isToday
-                  ? 'text-purple-300 font-semibold'
+                  ? 'text-accent-300 font-semibold'
                   : !c.inMonth
                     ? 'text-gray-600'
                     : has
@@ -267,7 +267,7 @@ export function DatePicker({
                     className={[
                       'relative h-7 w-full flex items-center justify-center rounded transition-colors',
                       belowMin ? 'cursor-not-allowed opacity-30' : 'hover:bg-white/10 cursor-pointer',
-                      isSelected ? 'bg-purple-600/30 ring-1 ring-purple-500/50' : isToday ? 'ring-1 ring-purple-500/40' : '',
+                      isSelected ? 'bg-accent-600/30 ring-1 ring-accent-500/50' : isToday ? 'ring-1 ring-accent-500/40' : '',
                     ].join(' ')}
                   >
                     <span className={`text-xs leading-none ${dayNumberClass}`}>{c.day}</span>

@@ -163,12 +163,12 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
     hasError ? 'bg-red-500' :
     allPaused ? 'bg-yellow-400' :
     allDownloading ? 'bg-blue-400' :
-    'bg-purple-500'
+    'bg-accent-500'
   const statusColor =
     hasError ? 'text-red-400' :
     allPaused ? 'text-yellow-400' :
     allDownloading ? 'text-blue-400' :
-    'text-purple-400'
+    'text-accent-400'
 
   // Icon-mode: the nav item's own Zap is the primary icon directly
   // above, so the extra only shows the secondary indicators (percent /
@@ -304,12 +304,12 @@ function AutoRulesNavAction({ collapsed, active, onNavigate }: { collapsed: bool
     // status uses the same enabled/total format as the expanded subtitle.
     // The block lives inside the item's group/nav wrapper, so the whole
     // column washes as ONE hover surface; when the page is OPEN it
-    // continues the selected purple + side borders down the column
+    // continues the selected accent + side borders down the column
     // (transparent borders otherwise, so selection never shifts layout).
     return (
       <div
         onClick={onNavigate}
-        className={`flex flex-col items-center gap-1 pb-2 pt-0.5 border border-t-0 cursor-pointer transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}
+        className={`flex flex-col items-center gap-1 pb-2 pt-0.5 border border-t-0 cursor-pointer transition-colors ${active ? 'bg-accent-600/20 border-accent-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}
       >
         <Tooltip content={tooltip} side="right">{button}</Tooltip>
         {running && (
@@ -494,12 +494,12 @@ function LauncherNavAction({ collapsed, active, onNavigate }: { collapsed: boole
   if (collapsed) {
     // The block lives inside the item's group/nav wrapper, so the whole
     // column washes as ONE hover surface; when the page is OPEN it
-    // continues the selected purple + side borders down the column
+    // continues the selected accent + side borders down the column
     // (transparent borders otherwise, so selection never shifts layout).
     return (
       <div
         onClick={onNavigate}
-        className={`flex justify-center pb-2 pt-0.5 border border-t-0 cursor-pointer transition-colors ${active ? 'bg-purple-600/20 border-purple-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}
+        className={`flex justify-center pb-2 pt-0.5 border border-t-0 cursor-pointer transition-colors ${active ? 'bg-accent-600/20 border-accent-600/30' : 'border-transparent group-hover/nav:bg-white/5'}`}
       >
         <Tooltip content={tooltipContent} side="right" shortcut="Ctrl+L">
           <Button
@@ -633,7 +633,7 @@ function AppInner() {
   useEffect(() => { window.api.setSettingsDirty(settingsDirty) }, [settingsDirty])
   const [aboutOpen, setAboutOpen] = useState(false)
   // Two independent "not the release" signals badge the sidebar version:
-  // - branchBadge (purple, GitBranch icon): the git BRANCH the code came
+  // - branchBadge (accent-colored, GitBranch icon): the git BRANCH the code came
   //   from — .git/HEAD in dev runs, the dev-branch.txt marker in packaged
   //   _DEV builds. Null on master and in release builds.
   // - isDevServer (amber): the ENVIRONMENT — true only when running
@@ -1012,7 +1012,7 @@ function AppInner() {
       >
         <div className="flex items-center gap-2">
           <img src={logoUrl} alt="" className="w-5 h-5 shrink-0" />
-          <span className="text-sm font-semibold text-purple-400 tracking-wide">Stream Manager</span>
+          <span className="text-sm font-semibold text-accent-400 tracking-wide">Stream Manager</span>
         </div>
         <div
           className="flex items-center gap-1"
@@ -1070,7 +1070,7 @@ function AppInner() {
               className="absolute inset-0 cursor-col-resize"
               aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             />
-            <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-purple-500 transition-all duration-150" />
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-accent-500 transition-all duration-150" />
           </Tooltip>
 
           {(() => {
@@ -1125,7 +1125,7 @@ function AppInner() {
                     className={`
                       relative w-full flex flex-col text-sm font-medium transition-all duration-150 border
                       ${isSelected
-                        ? `bg-purple-600/20 text-purple-300 border-purple-600/30${railCollapsed && RowAction ? ' border-b-transparent' : ''}`
+                        ? `bg-accent-600/20 text-accent-300 border-accent-600/30${railCollapsed && RowAction ? ' border-b-transparent' : ''}`
                         : hasActivity
                           ? 'text-gray-100 group-hover/nav:text-white group-hover/nav:bg-white/5 border-transparent'
                           : 'text-gray-400 group-hover/nav:text-gray-200 group-hover/nav:bg-white/5 border-transparent'
@@ -1181,7 +1181,7 @@ function AppInner() {
                         ? <AlertTriangle size={10} className="absolute top-1 right-1.5 text-amber-400" />
                         : <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-green-400" />
                     )}
-                    {/* Right-edge activity accent — muted purple bar
+                    {/* Right-edge activity accent — muted accent bar
                         inside the button's right edge. Shown for any
                         page that currently has work open, including
                         the currently-selected one (the user asked for
@@ -1190,7 +1190,7 @@ function AppInner() {
                         top/bottom. Always mounted, fading in/out on the
                         activity signal (no motion — just opacity). */}
                     <span
-                      className={`pointer-events-none absolute right-0 top-2 bottom-2 w-[2px] rounded-full bg-purple-400/50 transition-opacity ease-out ${hasActivity ? 'opacity-100' : 'opacity-0'}`}
+                      className={`pointer-events-none absolute right-0 top-2 bottom-2 w-[2px] rounded-full bg-accent-400/50 transition-opacity ease-out ${hasActivity ? 'opacity-100' : 'opacity-0'}`}
                       style={{ transitionDuration: `${navTransitionDurationMs}ms` }}
                     />
                   </button>
@@ -1349,7 +1349,7 @@ function AppInner() {
             </Tooltip>
           </div>
           {/* Not-the-release chips get their own row: inline with the version
-              they pushed the footer too wide to scan. Purple = git branch,
+              they pushed the footer too wide to scan. Accent = git branch,
               amber = environment (see ~style_guide.md build/env naming). */}
           {(isDevServer || branchBadge) && (
             <div className={`pb-1 flex justify-center items-center w-full ${sidebarCollapsed ? 'flex-col gap-0.5' : 'gap-1'}`}>
@@ -1362,7 +1362,7 @@ function AppInner() {
               )}
               {branchBadge && (
                 <Tooltip content={`Built from the ${branchBadge} git branch`} side="top">
-                  <span className="px-1 rounded bg-purple-500/20 text-purple-300 text-[10px] font-semibold leading-tight flex items-center gap-0.5">
+                  <span className="px-1 rounded bg-accent-500/20 text-accent-300 text-[10px] font-semibold leading-tight flex items-center gap-0.5">
                     <GitBranch size={9} className="shrink-0" />
                     {branchBadge}
                   </span>
@@ -1581,7 +1581,7 @@ function AppInner() {
           <a
             href="https://github.com/pjmdesi/stream-manager"
             onClick={e => { e.preventDefault(); window.api.openUrl('https://github.com/pjmdesi/stream-manager') }}
-            className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+            className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
           >
             github.com/pjmdesi/stream-manager
           </a>

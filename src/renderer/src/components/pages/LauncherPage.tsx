@@ -61,7 +61,7 @@ function EditableLabel({
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel() }}
           onBlur={commit}
-          className="flex-1 min-w-0 bg-navy-900 border border-purple-500/50 rounded-lg px-2 py-0.5 text-sm text-gray-200 outline-none focus:ring-1 focus:ring-purple-500/50"
+          className="flex-1 min-w-0 bg-navy-900 border border-accent-500/50 rounded-lg px-2 py-0.5 text-sm text-gray-200 outline-none focus:ring-1 focus:ring-accent-500/50"
           placeholder={placeholder}
           autoFocus
         />
@@ -195,11 +195,11 @@ function AppDropZone({ onClick, onFileDrop, compact = false }: {
         onClick={onClick}
         className={`flex items-center justify-center gap-3 border border-dashed rounded-lg px-4 py-3 cursor-pointer transition-all
           ${isDragging
-            ? 'border-purple-500 bg-purple-600/10'
-            : 'border-white/10 hover:border-purple-500/40'
+            ? 'border-accent-500 bg-accent-600/10'
+            : 'border-white/10 hover:border-accent-500/40'
           }`}
       >
-        <div className={`shrink-0 transition-colors ${isDragging ? 'text-purple-400' : 'text-gray-400'}`}>
+        <div className={`shrink-0 transition-colors ${isDragging ? 'text-accent-400' : 'text-gray-400'}`}>
           {isDragging ? <Upload size={14} /> : <Plus size={14} />}
         </div>
         <div className="pointer-events-none">
@@ -216,13 +216,13 @@ function AppDropZone({ onClick, onFileDrop, compact = false }: {
       onClick={onClick}
       className={`flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200
         ${isDragging
-          ? 'border-purple-500 bg-purple-600/10'
-          : 'border-white/10 hover:border-purple-500/50 hover:bg-purple-600/5'
+          ? 'border-accent-500 bg-accent-600/10'
+          : 'border-white/10 hover:border-accent-500/50 hover:bg-accent-600/5'
         }`}
     >
       <div className="p-3 rounded-full transition-colors pointer-events-none">
         {isDragging
-          ? <Upload size={24} className="text-purple-400" />
+          ? <Upload size={24} className="text-accent-400" />
           : <Plus size={24} className="text-gray-400" />
         }
       </div>
@@ -351,7 +351,7 @@ function AddAppModal({
               ref={anchorRef}
               type="button"
               onClick={() => setDropdownOpen(v => !v)}
-              className="w-full flex items-center gap-2 bg-navy-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-left hover:border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-colors"
+              className="w-full flex items-center gap-2 bg-navy-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-left hover:border-white/20 focus:outline-none focus:ring-2 focus:ring-accent-500/50 transition-colors"
             >
               {selectedExisting ? (
                 <>
@@ -393,7 +393,7 @@ function AddAppModal({
                       onClick={() => { setSelectedExistingId(app.id); setDropdownOpen(false) }}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors ${
                         app.id === selectedExistingId
-                          ? 'bg-purple-600/20 text-purple-300'
+                          ? 'bg-accent-600/20 text-accent-300'
                           : 'text-gray-300 hover:bg-white/5'
                       }`}
                     >
@@ -419,7 +419,7 @@ function AddAppModal({
                 type="button"
                 onClick={() => setItemType(t)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  itemType === t ? 'bg-purple-600/30 text-purple-200' : 'text-gray-400 hover:text-gray-200'
+                  itemType === t ? 'bg-accent-600/30 text-accent-200' : 'text-gray-400 hover:text-gray-200'
                 }`}
               >
                 {lbl}
@@ -469,7 +469,7 @@ function AddAppModal({
             onKeyDown={e => { if (e.key === 'Enter') confirm() }}
             placeholder="https://example.com"
             autoFocus
-            className="bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            className="bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-accent-500/50"
           />
           <p className="text-[11px] text-gray-400 px-1">Opens in your default browser when the group launches.</p>
         </div>
@@ -490,7 +490,7 @@ function AddAppModal({
               onKeyDown={e => { if (e.key === 'Enter') confirm() }}
               placeholder={itemType === 'url' ? 'Website name (optional)' : 'App name'}
               disabled={!newAppMode}
-              className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:cursor-not-allowed"
+              className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:cursor-not-allowed"
             />
           </div>
         </div>
@@ -666,7 +666,7 @@ function GroupRow({
   onToggleWidget: () => void
 }) {
   const launchable = group.apps.length > 0 && group.apps.some(a => a.path)
-  // Selected-row indicator timing — the purple right-edge bar lands once the
+  // Selected-row indicator timing — the accent right-edge bar lands once the
   // detail sidebar finishes sliding in (mirrors the Streams list). Lags on
   // open; instant on close (useLayoutEffect updates the class before paint).
   const [indicatorVisible, setIndicatorVisible] = useState(false)
@@ -679,7 +679,7 @@ function GroupRow({
     <div
       onClick={onSelect}
       className={`group/row flex items-stretch border-b border-white/5 cursor-pointer transition-colors ${
-        selected ? 'bg-purple-600/15' : 'hover:bg-white/5'
+        selected ? 'bg-accent-600/15' : 'hover:bg-white/5'
       }`}
     >
       {/* Left zone (icon + name) — stays visible under the open sidebar. The
@@ -687,17 +687,17 @@ function GroupRow({
           edge (= the sidebar's left edge at GROUP_ROW_WIDTH) so it sits flush
           against the sidebar, mirroring the Streams list. */}
       <div
-        className={`shrink-0 flex items-center gap-3 pl-6 pr-3 py-3 ${indicatorVisible ? 'relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-purple-600' : ''}`}
+        className={`shrink-0 flex items-center gap-3 pl-6 pr-3 py-3 ${indicatorVisible ? 'relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-accent-600' : ''}`}
         style={{ width: GROUP_ROW_WIDTH }}
       >
         <div className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-lg ${
-          selected ? 'bg-purple-500/20 text-purple-200' : 'bg-white/5 text-gray-300'
+          selected ? 'bg-accent-500/20 text-accent-200' : 'bg-white/5 text-gray-300'
         }`}>
           <GroupIcon name={group.icon} size={18} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className={`text-sm font-medium truncate ${selected ? 'text-purple-200' : 'text-gray-200'}`}>{group.name}</span>
+            <span className={`text-sm font-medium truncate ${selected ? 'text-accent-200' : 'text-gray-200'}`}>{group.name}</span>
           </div>
           <span className="text-[11px] text-gray-400">{group.apps.length} {group.apps.length === 1 ? 'app' : 'apps'}</span>
         </div>

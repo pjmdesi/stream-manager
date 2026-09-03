@@ -36,7 +36,7 @@ function ModeCard({ selected, suggested, onSelect, title, flavor, image }: ModeC
       onClick={onSelect}
       className={`relative flex-1 flex flex-col items-center gap-3 p-5 rounded-xl border-2 transition-all text-left ${
         selected
-          ? 'border-purple-500 bg-purple-600/15'
+          ? 'border-accent-500 bg-accent-600/15'
           : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/8'
       }`}
     >
@@ -48,9 +48,9 @@ function ModeCard({ selected, suggested, onSelect, title, flavor, image }: ModeC
       <img src={image} alt={title} className="w-full aspect-video rounded-lg object-cover" />
       <div className="flex flex-col gap-1 w-full">
         <div className="flex items-center justify-between gap-2">
-          <span className={`text-sm font-semibold ${selected ? 'text-purple-200' : 'text-gray-200'}`}>{title}</span>
+          <span className={`text-sm font-semibold ${selected ? 'text-accent-200' : 'text-gray-200'}`}>{title}</span>
           <div className={`w-4 h-4 rounded-full border-2 shrink-0 transition-all ${
-            selected ? 'border-purple-400 bg-purple-400' : 'border-white/20'
+            selected ? 'border-accent-400 bg-accent-400' : 'border-white/20'
           }`} />
         </div>
         <span className="text-xs text-gray-400 leading-relaxed">{flavor}</span>
@@ -172,7 +172,7 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
 
       <div className="flex gap-2">
         <input
-          className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+          className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
           value={streamsDir}
           readOnly
           placeholder="Select your streams folder…"
@@ -191,7 +191,7 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
           <DetectionBanner detection={detection} />
 
           {detection.layoutKind === 'nested' && (
-            <p className="rounded-lg border border-purple-400/30 bg-purple-500/10 px-4 py-3 text-sm text-purple-100 leading-relaxed">
+            <p className="rounded-lg border border-accent-400/30 bg-accent-500/10 px-4 py-3 text-sm text-accent-100 leading-relaxed">
               New streams created in the app will land as flat <span className="font-mono text-white">YYYY-MM-DD</span> folders at the root of your streams directory, regardless of how existing streams are grouped.
             </p>
           )}
@@ -381,7 +381,7 @@ function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChang
           <label className="text-sm font-medium text-gray-300">Recordings folder <span className="text-gray-400 font-normal">(where your streaming software saves files)</span></label>
           <div className="flex gap-2">
             <input
-              className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
               value={recordingsDir}
               readOnly
               placeholder="Select your recordings folder…"
@@ -418,21 +418,21 @@ function StepAutoRule({ streamsDir, recordingsDir, pattern, onRecordingsDirChang
             <Tooltip width="w-72" content={
               <>
                 <p className="font-semibold text-gray-200 mb-1">Glob pattern syntax</p>
-                <p><span className="font-mono text-purple-300">*</span> — matches any sequence of characters</p>
-                <p><span className="font-mono text-purple-300">?</span> — matches any single character</p>
-                <p><span className="font-mono text-purple-300">{'*.{mkv,mp4}'}</span> — matches multiple types using comma-separated values inside <span className="font-mono">{'{}'}</span></p>
+                <p><span className="font-mono text-accent-300">*</span> — matches any sequence of characters</p>
+                <p><span className="font-mono text-accent-300">?</span> — matches any single character</p>
+                <p><span className="font-mono text-accent-300">{'*.{mkv,mp4}'}</span> — matches multiple types using comma-separated values inside <span className="font-mono">{'{}'}</span></p>
                 <p className="mt-1.5 font-semibold text-gray-400">Examples</p>
-                <p><span className="font-mono text-purple-300">*.mkv</span> — all MKV files (OBS default)</p>
-                <p><span className="font-mono text-purple-300">*.mp4</span> — all MP4 files</p>
-                <p><span className="font-mono text-purple-300">{'*.{mkv,mp4}'}</span> — MKV or MP4</p>
-                <p><span className="font-mono text-purple-300">*</span> — all files <span className="text-gray-400">(not recommended)</span></p>
+                <p><span className="font-mono text-accent-300">*.mkv</span> — all MKV files (OBS default)</p>
+                <p><span className="font-mono text-accent-300">*.mp4</span> — all MP4 files</p>
+                <p><span className="font-mono text-accent-300">{'*.{mkv,mp4}'}</span> — MKV or MP4</p>
+                <p><span className="font-mono text-accent-300">*</span> — all files <span className="text-gray-400">(not recommended)</span></p>
               </>
             }>
               <HelpCircle size={14} className="text-gray-400 hover:text-gray-400 cursor-default transition-colors" />
             </Tooltip>
           </div>
           <input
-            className="w-48 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            className="w-48 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
             value={pattern}
             onChange={e => onPatternChange(e.target.value)}
             placeholder="e.g. *.mkv"
@@ -490,7 +490,7 @@ function StepDone({ mode, streamsDir, convertResult, autoRule }: StepDoneProps) 
         <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Suggested next steps</h3>
         <div className="flex flex-col divide-y divide-white/5 rounded-xl border border-white/10 overflow-hidden">
           <div className="flex items-start gap-3 px-4 py-3">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-purple-600/30 text-purple-200 text-xs font-semibold flex items-center justify-center mt-0.5">1</span>
+            <span className="shrink-0 w-5 h-5 rounded-full bg-accent-600/30 text-accent-200 text-xs font-semibold flex items-center justify-center mt-0.5">1</span>
             <p className="text-sm text-gray-300 leading-relaxed">
               <span className="font-semibold text-gray-200">Connect your accounts</span> on the{' '}
               <span className="font-semibold text-gray-200">Integrations</span> page. Connecting YouTube and
@@ -499,7 +499,7 @@ function StepDone({ mode, streamsDir, convertResult, autoRule }: StepDoneProps) 
             </p>
           </div>
           <div className="flex items-start gap-3 px-4 py-3">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-purple-600/30 text-purple-200 text-xs font-semibold flex items-center justify-center mt-0.5">2</span>
+            <span className="shrink-0 w-5 h-5 rounded-full bg-accent-600/30 text-accent-200 text-xs font-semibold flex items-center justify-center mt-0.5">2</span>
             <p className="text-sm text-gray-300 leading-relaxed">
               <span className="font-semibold text-gray-200">Import your channel.</span> Once YouTube is
               connected, <span className="font-semibold text-gray-200">Import from YouTube</span> brings your
@@ -507,7 +507,7 @@ function StepDone({ mode, streamsDir, convertResult, autoRule }: StepDoneProps) 
             </p>
           </div>
           <div className="flex items-start gap-3 px-4 py-3">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-purple-600/30 text-purple-200 text-xs font-semibold flex items-center justify-center mt-0.5">3</span>
+            <span className="shrink-0 w-5 h-5 rounded-full bg-accent-600/30 text-accent-200 text-xs font-semibold flex items-center justify-center mt-0.5">3</span>
             <p className="text-sm text-gray-300 leading-relaxed">
               <span className="font-semibold text-gray-200">Learn the ropes</span> with{' '}
               <span className="font-semibold text-gray-200">How to use</span> at the bottom of the sidebar —

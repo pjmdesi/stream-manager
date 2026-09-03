@@ -9,7 +9,7 @@ import { ThumbImage } from './ThumbImage'
 import { useStore } from '../../hooks/useStore'
 
 const SELECT_CLS =
-  'appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 max-w-[260px] truncate focus:outline-none focus:ring-2 focus:ring-purple-500/50'
+  'appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 max-w-[260px] truncate focus:outline-none focus:ring-2 focus:ring-accent-500/50'
 
 // A stream crossing midnight gets a YouTube date one day off its folder date
 // (broadcast start vs. recording date), so pairing treats same-day OR

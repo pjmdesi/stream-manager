@@ -24,7 +24,7 @@ const PRIVACY: Record<string, { label: string; cls: string; Icon: typeof Globe }
 }
 
 const SELECT_CLS =
-  'appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50'
+  'appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/50'
 
 /**
  * Phase 1 of "Import from YouTube": a read-only picker listing the connected
@@ -213,7 +213,7 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search titles…"
-              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-8 pr-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-8 pr-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
             />
           </div>
           <select value={sortDir} onChange={e => setSortDir(e.target.value as any)} className={SELECT_CLS}>
@@ -233,7 +233,7 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
           </select>
           {importedCount > 0 && (
             <label className="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={hideImported} onChange={e => setHideImported(e.target.checked)} className="accent-purple-600" />
+              <input type="checkbox" checked={hideImported} onChange={e => setHideImported(e.target.checked)} className="accent-accent-600" />
               Hide imported
             </label>
           )}
@@ -277,11 +277,11 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
                 key={v.videoId}
                 onClick={imported ? undefined : (e) => toggle(v.videoId, e.shiftKey)}
                 className={`flex items-center gap-3 px-3 py-2 select-none ${
-                  imported ? 'opacity-50' : `cursor-pointer ${isSelected ? 'bg-purple-500/10' : 'hover:bg-white/5'}`
+                  imported ? 'opacity-50' : `cursor-pointer ${isSelected ? 'bg-accent-500/10' : 'hover:bg-white/5'}`
                 }`}
               >
                 <div className={`w-4 h-4 shrink-0 rounded border-2 flex items-center justify-center transition-colors ${
-                  imported ? 'border-white/10' : isSelected ? 'bg-purple-700 border-purple-700' : 'border-gray-500'
+                  imported ? 'border-white/10' : isSelected ? 'bg-accent-700 border-accent-700' : 'border-gray-500'
                 }`}>
                   {isSelected && !imported && <Check size={10} className="text-white" strokeWidth={3} />}
                 </div>

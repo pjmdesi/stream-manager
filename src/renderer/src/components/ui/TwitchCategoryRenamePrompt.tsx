@@ -17,11 +17,11 @@ interface TwitchCategoryRenamePromptProps {
 // Canonical topic/game-tag chip styling — purposely *not* sourced from
 // `tagColors` / `tagTextures` because those maps only configure the
 // user-editable "stream type" tags. Topic/game tags are fixed-style
-// chips (the small purple pill used in the streams table + sidebar),
+// chips (the small accent-colored pill used in the streams table + sidebar),
 // and the visual must match exactly so the comparison reads as
 // "this tag → that name" rather than as some new chip variant.
 const TOPIC_CHIP =
-  'inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-purple-900/20 text-purple-300 border border-purple-300/30'
+  'inline-block text-[10px] leading-tight px-1.5 py-0.5 rounded-full bg-accent-900/20 text-accent-300 border border-accent-300/30'
 
 export const TwitchCategoryRenamePrompt: React.FC<TwitchCategoryRenamePromptProps> = ({
   isOpen,

@@ -61,7 +61,7 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}
             placeholder="Search by name or keyword…"
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
           />
           {query && (
             <button
@@ -89,7 +89,7 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
                       onClick={() => select(name)}
                       className={`w-full flex flex-col items-center justify-center h-12 rounded-lg transition-colors ${
                         isSelected
-                          ? 'bg-purple-600/30 text-purple-300 ring-1 ring-purple-500/50'
+                          ? 'bg-accent-600/30 text-accent-300 ring-1 ring-accent-500/50'
                           : 'text-gray-300 hover:bg-white/5 hover:text-white'
                       }`}
                     >

@@ -554,7 +554,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
             <select
               value={presetId}
               onChange={e => setPresetId(e.target.value)}
-              className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
             >
               <option value="">— Default (H.264 CRF 18 + AAC 192k) —</option>
               {presets.map(p => (
@@ -576,7 +576,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
               type="checkbox"
               checked={saveNextToSource}
               onChange={e => setSaveNextToSource(e.target.checked)}
-              className="w-4 h-4 rounded accent-purple-500"
+              className="w-4 h-4 rounded accent-accent-500"
             />
             <span className="text-sm text-gray-300">Save next to source</span>
           </label>
@@ -584,7 +584,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
             <>
               <div className="flex gap-2">
                 <input
-                  className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  className="flex-1 bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                   value={outputDir}
                   readOnly
                   placeholder="Select output folder…"
@@ -634,18 +634,18 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
                     onClick={() => toggleTrack(i)}
                     className={`w-full text-left px-3 py-1.5 rounded-lg border transition-colors ${
                       checked
-                        ? 'bg-purple-600/20 border-purple-600/40'
+                        ? 'bg-accent-600/20 border-accent-600/40'
                         : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06]'
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
-                        checked ? 'bg-purple-700 border-purple-700' : 'border-gray-600'
+                        checked ? 'bg-accent-700 border-accent-700' : 'border-gray-600'
                       }`}>
                         {checked && <Check size={10} className="text-white" strokeWidth={3} />}
                       </div>
                       <div className="flex flex-col min-w-0 flex-1">
-                        <span className={`text-xs font-medium leading-tight ${checked ? 'text-purple-200' : 'text-gray-300'}`}>
+                        <span className={`text-xs font-medium leading-tight ${checked ? 'text-accent-200' : 'text-gray-300'}`}>
                           {label}
                           <span className="text-gray-400 font-normal"> · Track {i + 1}</span>
                         </span>
@@ -655,7 +655,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
                         <span className="text-[10px] text-gray-400 shrink-0 italic">not playing</span>
                       )}
                       <Tooltip content="Volume from the audio controls row — adjust there to change it for the export." triggerClassName="shrink-0">
-                        <span className={`text-[11px] tabular-nums ${checked ? 'text-purple-200' : 'text-gray-400'}`}>
+                        <span className={`text-[11px] tabular-nums ${checked ? 'text-accent-200' : 'text-gray-400'}`}>
                           {volPct}%
                         </span>
                       </Tooltip>
@@ -674,7 +674,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium text-gray-300">Filename Suffix</label>
           <input
-            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            className="w-full bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
             value={suffix}
             onChange={e => setSuffix(e.target.value)}
             placeholder="_clip"
@@ -728,7 +728,7 @@ interface PendingFile { path: string; token: number }
 
 const SESSION_CATEGORY_LABEL: Record<string, string> = { full: 'vid', short: 'short', clip: 'clip' }
 const SESSION_CATEGORY_STYLES: Record<string, string> = {
-  full:  'text-purple-400 border-purple-400/50',
+  full:  'text-accent-400 border-accent-400/50',
   short: 'text-blue-400 border-blue-400/50',
   clip:  'text-gray-400 border-gray-600',
 }
@@ -860,7 +860,7 @@ function DraftSessionItem({
   const body = (
     <div
       className={`group/item w-full text-left flex items-center gap-2 ${compact ? 'pl-3 pr-1' : 'pl-6 pr-2'} py-1.5 rounded-lg transition-colors ${editing ? '' : isExporting ? 'cursor-not-allowed' : 'cursor-pointer'} ${
-        isActive ? 'bg-purple-600/20' : isExporting ? 'opacity-60' : 'hover:bg-white/5'
+        isActive ? 'bg-accent-600/20' : isExporting ? 'opacity-60' : 'hover:bg-white/5'
       }`}
       onClick={editing || isExporting ? undefined : onClick}
     >
@@ -888,14 +888,14 @@ function DraftSessionItem({
                 onBlur={commit}
                 onClick={e => e.stopPropagation()}
                 className={`w-full text-[11px] font-medium bg-navy-900 border rounded-lg px-1.5 py-0.5 text-gray-200 focus:outline-none focus:ring-1 ${
-                  error ? 'border-red-500/60 focus:ring-red-500/40' : 'border-white/15 focus:ring-purple-500/40'
+                  error ? 'border-red-500/60 focus:ring-red-500/40' : 'border-white/15 focus:ring-accent-500/40'
                 }`}
                 spellCheck={false}
               />
               </Tooltip>
             ) : (
               <div className="flex items-center gap-1 min-w-0">
-                <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-purple-200' : 'text-gray-300'}`}>
+                <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? 'text-accent-200' : 'text-gray-300'}`}>
                   {displayName}
                 </div>
                 <Tooltip content="Rename draft" side="top" triggerClassName="ml-auto shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
@@ -4093,7 +4093,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   <Tooltip content={isPopupOpen ? 'Return video to player' : 'Pop out video (for stream capture)'}>
                     <button
                       onClick={isPopupOpen ? () => window.api.closeVideoPopup() : openVideoPopup}
-                      className={`p-2 rounded-lg bg-black/60 hover:bg-black/80 transition-colors ${isPopupOpen ? 'text-purple-400 hover:text-purple-300' : 'text-white/70 hover:text-white'}`}
+                      className={`p-2 rounded-lg bg-black/60 hover:bg-black/80 transition-colors ${isPopupOpen ? 'text-accent-400 hover:text-accent-300' : 'text-white/70 hover:text-white'}`}
                     >
                       <Tv2 size={16} />
                     </button>
@@ -4104,7 +4104,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
               {/* Popup placeholder — shown when video is open in the popup window */}
               {isPopupOpen && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 pointer-events-none">
-                  <Tv2 size={28} className="text-purple-400 opacity-60" />
+                  <Tv2 size={28} className="text-accent-400 opacity-60" />
                   <p className="text-sm text-gray-400">Video opened in separate window</p>
                   <p className="text-xs text-gray-400">Controls still work from here</p>
                 </div>
@@ -4144,7 +4144,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                               <button
                                 onClick={splitSegment}
                                 disabled={!canSplit}
-                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-purple-400 border border-purple-500/30 hover:bg-purple-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-accent-400 border border-accent-500/30 hover:bg-accent-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 <Scissors size={11} /> Split<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Segment</CollapsibleLabel>
                               </button>
@@ -4416,7 +4416,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       <button
                         onClick={() => setShowExportDialog(true)}
                         disabled={clipState.clipRegions.length === 0}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-purple-300 border-purple-600/30 bg-purple-600/20 hover:bg-purple-600/35 disabled:hover:bg-transparent"
+                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-accent-300 border-accent-600/30 bg-accent-600/20 hover:bg-accent-600/35 disabled:hover:bg-transparent"
                       >
                         <Upload size={11} /> Export<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Clip</CollapsibleLabel>
                       </button>
@@ -4575,7 +4575,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       // fall back to the per-index default rotation so
                       // every track has a distinct look out of the box.
                       const effectiveColorKey = track.color ?? DEFAULT_TRACK_COLORS[track.index % DEFAULT_TRACK_COLORS.length]
-                      const swatchClass = TAG_COLOR_MAP[effectiveColorKey]?.swatch ?? 'bg-purple-500'
+                      const swatchClass = TAG_COLOR_MAP[effectiveColorKey]?.swatch ?? 'bg-accent-500'
                       const fillClass = getWaveformFillClass(effectiveColorKey)
                       const colorDot = (
                         <Tooltip content="Change track color" triggerClassName="shrink-0">
@@ -4609,10 +4609,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                             {track.status === 'extracting' ? (
                               <div className="col-span-2 flex items-center gap-2">
                                 {colorDot}
-                                <Loader2 size={12} className="animate-spin shrink-0 text-purple-400" />
+                                <Loader2 size={12} className="animate-spin shrink-0 text-accent-400" />
                                 <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
                                   <div
-                                    className="h-full bg-purple-500 rounded-full transition-all"
+                                    className="h-full bg-accent-500 rounded-full transition-all"
                                     style={{ width: `${track.extractProgress}%` }}
                                   />
                                 </div>
@@ -4665,8 +4665,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                     // chokes on linear-gradient() commas
                                     // when nested in a pseudo-element
                                     // selector. Fill color is the project's
-                                    // purple-500 (#c9d5e3) — slate light-grey
-                                    // per tailwind.config.js, not real purple.
+                                    // accent-500 (#c9d5e3) — slate light-grey
+                                    // per tailwind.config.js.
                                     const draft = volumeInputs[track.index]
                                     const displayed = draft ?? String(pct)
                                     const commit = (raw: string) => {
@@ -4743,7 +4743,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                     className={`w-5 h-4 flex items-center justify-center rounded transition-colors ${
                                       collapsed
                                         ? 'text-gray-400 hover:text-gray-200 hover:bg-white/10'
-                                        : 'text-purple-400 hover:text-purple-300 hover:bg-purple-600/15'
+                                        : 'text-accent-400 hover:text-accent-300 hover:bg-accent-600/15'
                                     }`}
                                   >
                                     <AudioLines size={11} className="shrink-0" />
@@ -4758,9 +4758,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                   <Tooltip content={`Decode and play ${label}`}>
                                   <button
                                     onClick={() => playTrack(track.index)}
-                                    className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] bg-white/5 border border-white/10 hover:bg-purple-600/15 hover:border-purple-500/30 text-purple-200 transition-colors"
+                                    className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] bg-white/5 border border-white/10 hover:bg-accent-600/15 hover:border-accent-500/30 text-accent-200 transition-colors"
                                   >
-                                    <AudioLines size={11} className="text-purple-400 shrink-0" />
+                                    <AudioLines size={11} className="text-accent-400 shrink-0" />
                                     Add track to playback
                                   </button>
                                   </Tooltip>
@@ -5240,12 +5240,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   <Tooltip content="Splits the audio into one row per track, so you can pick which tracks to listen to and extract from the video.">
                     <button
                       onClick={enableMultiTrack}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] bg-purple-600/15 border border-purple-500/30 text-purple-200 hover:bg-purple-600/25 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] bg-accent-600/15 border border-accent-500/30 text-accent-200 hover:bg-accent-600/25 transition-colors"
                     >
                       <Layers size={11} />
                       Enable Multi-track Audio · {videoInfo?.audioTracks.length} tracks
                       {cachedTrackCount > 0 && (
-                        <span className="text-purple-300/70">({cachedTrackCount} cached)</span>
+                        <span className="text-accent-300/70">({cachedTrackCount} cached)</span>
                       )}
                     </button>
                   </Tooltip>
@@ -5282,7 +5282,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       }}
                     />
                   ))}
-                  {/* Thumb — purple to distinguish from clip markers.
+                  {/* Thumb — accent-colored to distinguish from clip markers.
                       Rectangular (not rounded) because the boundary
                       markers now flank the thumb and provide the pill
                       caps. The thumb's left/right edges sit exactly at
@@ -5293,7 +5293,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       px-3 padding area (which gives ~2px of slack
                       before line 3161's overflow-hidden would clip). */}
                   <div
-                    className="absolute inset-y-0 bg-purple-500/30 hover:bg-purple-500/40 cursor-grab active:cursor-grabbing flex items-center"
+                    className="absolute inset-y-0 bg-accent-500/30 hover:bg-accent-500/40 cursor-grab active:cursor-grabbing flex items-center"
                     style={{
                       left: `${(vStart / duration) * 100}%`,
                       width: `${(vSpan / duration) * 100}%`,
@@ -5329,7 +5329,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         protrudes 10px to the left into the scrollbar's
                         margin. */}
                     <div
-                      className="absolute right-full top-0 bottom-0 w-2.5 rounded-l-full cursor-ew-resize bg-purple-400/60 hover:bg-purple-400/90 transition-colors z-10"
+                      className="absolute right-full top-0 bottom-0 w-2.5 rounded-l-full cursor-ew-resize bg-accent-400/60 hover:bg-accent-400/90 transition-colors z-10"
                       onMouseDown={e => {
                         e.preventDefault(); e.stopPropagation()
                         ;(document.activeElement as HTMLElement)?.blur()
@@ -5355,7 +5355,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         the thumb's right edge at vEnd; rounded side
                         protrudes 10px to the right. */}
                     <div
-                      className="absolute left-full top-0 bottom-0 w-2.5 rounded-r-full cursor-ew-resize bg-purple-400/60 hover:bg-purple-400/90 transition-colors z-10"
+                      className="absolute left-full top-0 bottom-0 w-2.5 rounded-r-full cursor-ew-resize bg-accent-400/60 hover:bg-accent-400/90 transition-colors z-10"
                       onMouseDown={e => {
                         e.preventDefault(); e.stopPropagation()
                         ;(document.activeElement as HTMLElement)?.blur()
@@ -5456,7 +5456,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       if (t !== null) seekRef.current(Math.max(0, Math.min(t, duration)))
                       setEditingTimecode(false)
                     }}
-                    className="w-24 shrink-0 text-xs text-purple-300 tabular-nums bg-transparent border-b border-purple-500 focus:outline-none"
+                    className="w-24 shrink-0 text-xs text-accent-300 tabular-nums bg-transparent border-b border-accent-500 focus:outline-none"
                   />
                 ) : (
                   <Tooltip content="Click to enter timecode" shortcut="T">
@@ -5514,7 +5514,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         key={s}
                         onClick={() => applyPlaybackRate(s)}
                         className={`px-1.5 py-1 rounded text-xs tabular-nums transition-colors ${
-                          sel ? 'text-purple-300 bg-white/10'
+                          sel ? 'text-accent-300 bg-white/10'
                           : s === 8 ? 'text-amber-300/90 hover:text-amber-200 hover:bg-white/10'
                           : 'text-gray-400 hover:text-gray-100 hover:bg-white/10'
                         }`}
@@ -5596,7 +5596,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           <button
                             data-kbd-flash="play"
                             onClick={effectiveTogglePlay}
-                            className="pl-2 pr-2.5 py-2 mx-1 rounded-full bg-purple-800 hover:bg-purple-700 text-white transition-colors flex items-center gap-1"
+                            className="pl-2 pr-2.5 py-2 mx-1 rounded-full bg-accent-800 hover:bg-accent-700 text-white transition-colors flex items-center gap-1"
                           >
                             {isPlaying ? <Pause size={16} /> : <Play size={16} />}
                             <span className="text-[10px] font-semibold tabular-nums leading-none">{speedLabel(playbackRate)}</span>
@@ -5673,7 +5673,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                 className="absolute inset-0 cursor-col-resize"
                 aria-label={panelCollapsed ? 'Expand panel' : 'Collapse panel'}
               />
-              <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-purple-500 transition-all duration-150" />
+              <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/5 group-hover/edge:w-0.5 group-hover/edge:bg-accent-500 transition-all duration-150" />
             </Tooltip>
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 
@@ -5799,7 +5799,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                 disabled={empty || isCurrent}
                                 className={`flex flex-col items-start w-full px-3 py-1.5 text-left transition-colors ${
                                   isCurrent
-                                    ? 'bg-purple-600/20 text-purple-200 cursor-default'
+                                    ? 'bg-accent-600/20 text-accent-200 cursor-default'
                                     : empty
                                       ? 'text-gray-400 cursor-default'
                                       : 'text-gray-300 hover:bg-white/5'
@@ -5808,7 +5808,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                 <span className="text-[11px] tabular-nums leading-tight">
                                   {folder.date}
                                   {empty && <span className="ml-1 text-gray-400 italic">(no videos)</span>}
-                                  {isCurrent && <span className="ml-1 text-purple-400 italic">(current)</span>}
+                                  {isCurrent && <span className="ml-1 text-accent-400 italic">(current)</span>}
                                 </span>
                                 <span className="text-xs truncate w-full leading-tight">{fTitle}</span>
                               </button>
@@ -6288,7 +6288,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       >
         <div className="flex flex-col gap-3">
           <div className="flex items-start gap-2.5 text-sm text-gray-300 leading-relaxed">
-            <Layers size={15} className="text-purple-400 mt-0.5 shrink-0" />
+            <Layers size={15} className="text-accent-400 mt-0.5 shrink-0" />
             <span>
               This video has <strong className="text-white">{videoInfo?.audioTracks.length} audio tracks</strong>.
               You'll only hear <strong className="text-white">Track 1</strong> unless you enable multi-track playback.

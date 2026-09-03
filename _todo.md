@@ -4,12 +4,13 @@
 
 1. APP-16
 2. STR-14
-3. THU-7
-4. THU-11
-5. CONV-2
-6. APP-17
-7. APP-12
+3. CONV-2
+4. APP-12
+5. APP-17
+6. THU-7
+7. THU-11
 8. IDEA-4
+9. IDEA-11
 
 ## Improvement ideas
 
@@ -132,6 +133,12 @@
   - Bounds: SM-created markers are clamped to the video duration by construction (create and edit). File-read chapters are untrusted input: clamp or drop out-of-range entries with an honest note in the player. OBS facts verified 2026-09-02: the chapter hotkey requires Hybrid MP4 output (MKV recordings never get OBS markers even though the container supports chapters); Hybrid MP4 is crash-recoverable per OBS docs, but chapters are written at finalization and are LOST in a crash; known OBS issue with chapters + automatic file splitting.
   - The {markers} to YouTube description chapters idea is split out to IDEA-12 [investigate]: recording-vs-VOD clock offset plus Studio trimming makes automatic mapping impossible in the general case. The merge-field phase waits on that investigation.
   - Phasing: (1) player markers + file-chapter reading + metadata storage, (2) the {markers} merge field IF IDEA-12 finds a viable shape, (3) carry-through extras (user-prompted bake, converter bake-in, combine merge).
+
+- **PLR-11**
+  Clip region interaction refinement:
+  - Currently, clicking and dragging inside a clip region will drag that clip region. Since that is a lesser-used interaction (it's more common to drag the end handles), let's move that interaction to the [start timecode] -> [end timecode] label popup that appears above the clip region when that region is selected. Clicking and dragging that element will be what drags the whole region. Currently, that element has no interaction, so it is a goo dplace for it. That will leave the actual area inside the clip region accessible to place the playhead marker (which is unavailable right now. To get the playhead marker inside a clip region, one must click outside a clip region and drag it inside, manually edit the playhead timecode, or use keyboard shortcuts. This change allows the obvious and most comming click-to-place interaciton to be available inside clip regions)
+  - Additional to this change: the [start timecode] -> [end timecode] label popup should appear on clip region hover now instead of it having to be selected (and moving the cursor up to that label should keep it opened, allowing for selection and drag). Selecting a clip region should still allow it to stay opened until clicked off of (clicked somewhere else in the timeline or on another clip region).
+  - Lastly, the method to deselect a clip region is a bit awkward. One must click on the timeline track, but not on the part where the thumbnails are. Only clicking on the timeline audio waveform part will deselect the clip region (any audio waveform in multi-track mode). We just need to extend this functionality to include the thumbnails track, so it's not confusing why clicking away from a clip region does not deselect it.
 
 ### Thumbnail editor
 
@@ -360,6 +367,10 @@
 - **APP-20**
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
 
+- **IDEA-11**
+  Investigate better ways to allow users to connect to their YouTube channel without needing to create a google dev account and generate custom OAuth credentials. There's too many steps and it's too technical for most users. Either 3rd party OAuth credentials or something google themselves provide.
+  Investigation resolved 2026-09-03. The governing fact: YouTube Data API quota is per PROJECT (10,000 free units/day, no official paid tier), so a shared SM OAuth client would pool every user into one project's quota: dead past a handful of users without a YouTube quota-extension audit plus Google OAuth app verification, and it would make the project operationally responsible for a revocable credential. (Apps that offer token-based connection, like ChatPlex behind a subscription, are funding exactly that shared-infrastructure burden.) Third-party credential brokers are ruled out on principle: SM has no server of its own and only talks to services the user connects. Bring-your-own is actually the better deal for users (a private 10k units/day each, maximum privacy); its only cost is onboarding pain. Direction therefore: make the BYO flow wizard-grade instead of replacing it: exact deep links into the Google Cloud console in order, per-step validation of pasted values with honest errors (detect a client secret pasted into the client ID field, etc.), and a visible progress checklist, so a non-technical user succeeds by copy-paste. The shared-client route stays on record as a someday option with its prerequisites named, worth revisiting only if the user base ever justifies the audit paperwork.
+
 ### Onboarding & Setup
 
 - **ONB-1** [investigate]
@@ -432,10 +443,6 @@
 - **IDEA-10**
   If possible, we should attempt to measure and store the time it takes for files to hydrate from the cloud. After enough samples, we could use that data to estimate how long it will take to hydrate a file based on its size and the user's connection speed. We could then add this estimate to the various tooltips, & modals where hydration is involved. This would give the user a good idea of how long it will take to hydrate a file before they start the process, and they can plan accordingly. Since it's not possible to actually track the connection speed or the actual rate of download while its happening, we would make it clear that this is a rough estimate somehow. If multiple files are being downloaded at once, the estimates would probably be very inaccurate (for instance when pinning several items local at the same time).
   2026-09-03 triage notes: same learned-from-history pattern as CONV-5 (measure real operations, store samples, predict), but the easier case: throughput is size over elapsed, no machine scoring. Whichever builds first establishes the sample-store idiom (rolling window, recency-weighted). Design rules: bucket samples per cloud provider (NAS over LAN vs OneDrive over WAN are different worlds); present a RANGE from the sample spread, never a fake-precise point; show nothing until enough samples exist (no made-up cold-start default); tag samples with the concurrent-download count and qualify the estimate while several hydrations run instead of pretending the math holds; estimating reads only metadata SM already has, never probes placeholder files.
-
-- **IDEA-11**
-  Investigate better ways to allow users to connect to their YouTube channel without needing to create a google dev account and generate custom OAuth credentials. There's too many steps and it's too technical for most users. Either 3rd party OAuth credentials or something google themselves provide.
-  Investigation resolved 2026-09-03. The governing fact: YouTube Data API quota is per PROJECT (10,000 free units/day, no official paid tier), so a shared SM OAuth client would pool every user into one project's quota: dead past a handful of users without a YouTube quota-extension audit plus Google OAuth app verification, and it would make the project operationally responsible for a revocable credential. (Apps that offer token-based connection, like ChatPlex behind a subscription, are funding exactly that shared-infrastructure burden.) Third-party credential brokers are ruled out on principle: SM has no server of its own and only talks to services the user connects. Bring-your-own is actually the better deal for users (a private 10k units/day each, maximum privacy); its only cost is onboarding pain. Direction therefore: make the BYO flow wizard-grade instead of replacing it: exact deep links into the Google Cloud console in order, per-step validation of pasted values with honest errors (detect a client secret pasted into the client ID field, etc.), and a visible progress checklist, so a non-technical user succeeds by copy-paste. The shared-client route stays on record as a someday option with its prerequisites named, worth revisiting only if the user base ever justifies the audit paperwork.
 
 - **IDEA-12** [investigate]
   Split from IDEA-4 (2026-09-02): can player markers become YouTube description chapters honestly? The blockers found so far: (1) clock offset, marker timecodes live on the recording's timeline while description chapters apply to the VOD's timeline, shifted by the gap between recording start and broadcast start; (2) Studio trimming, the ~5 minute starting-soon trim shifts everything by one offset (solvable with a per-item offset field, or derived from relay session logs since the relay observes when the broadcast ran), but MID-VIDEO removals shift every later timestamp piecewise and the YouTube API does not expose trim edits, so fully automatic mapping is impossible in the general case. Shapes worth investigating: offset-only support with an honest "only valid if the VOD is untrimmed or start-trimmed" gate; semi-manual (SM renders the chapter lines from markers, the user pastes and adjusts against the VOD timeline in Studio); or confirming there is no API surface for trims and documenting the limitation. Whatever ships must validate YouTube's chapter rules (first at 0:00, minimum three, each at least 10 seconds) and auto-prepend a 0:00 entry rather than letting a push silently produce no chapters.

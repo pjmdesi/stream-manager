@@ -48,7 +48,7 @@ export function parseSmThumbnailOrdinal(path: string): number | null {
 // Per-file action buttons — same scheme as the converter rows: neutral at rest,
 // color only on hover. The row is right-aligned.
 const ACTION_BASE = 'inline-flex shrink-0 items-center gap-1 px-1.5 py-1 rounded-md text-[11px] text-gray-400 transition-colors'
-const ACTION_PURPLE = `${ACTION_BASE} hover:text-purple-300 hover:bg-purple-500/10`
+const ACTION_PURPLE = `${ACTION_BASE} hover:text-accent-300 hover:bg-accent-500/10`
 const ACTION_GREEN = `${ACTION_BASE} hover:text-green-400 hover:bg-green-500/10`
 const ACTION_GRAY = `${ACTION_BASE} hover:text-gray-200 hover:bg-white/10`
 const ACTION_PINK = `${ACTION_BASE} hover:text-pink-400 hover:bg-pink-500/10`
@@ -68,7 +68,7 @@ const META_SECONDARY = 'text-[11px] text-gray-500 truncate'
 // (Recording), pink (Clip), violet (Short), orange (Combined) — while
 // IMAGES are cool: teal (selected thumbnail) + neutral gray (alternates).
 // Blue is deliberately unassigned (reserved for a future marker). Shorts
-// use Tailwind's real `violet-*`, NOT the app's `purple-*` tokens — those
+// use Tailwind's real `violet-*`, NOT the app's `accent-*` tokens — those
 // are remapped to the slate accent and would collide with selection rings.
 type TagColor = 'red' | 'pink' | 'violet' | 'orange' | 'teal' | 'blue' | 'neutral'
 // 1px border in the tag color: top + sides on the thumbnail, sides + bottom on
@@ -216,7 +216,7 @@ function SelectBox({ checked, onToggle }: { checked: boolean; onToggle: (shiftKe
       onMouseDown={e => e.stopPropagation()}
       onClick={e => { e.stopPropagation(); onToggle(e.shiftKey) }}
       className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
-        checked ? 'bg-purple-700 border-purple-700' : 'bg-navy-900/70 border-gray-500 hover:border-gray-300'
+        checked ? 'bg-accent-700 border-accent-700' : 'bg-navy-900/70 border-gray-500 hover:border-gray-300'
       }`}
     >
       {checked && <Check size={10} className="text-white" strokeWidth={3} />}
@@ -322,7 +322,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   return (
     <div
       data-fp={path}
-      className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''} ${highlighted ? 'ring-2 ring-purple-400/80' : ''}`}
+      className={`${CARD} ${selectMode && selected ? 'ring-1 ring-accent-500/60 bg-accent-500/5' : ''} ${highlighted ? 'ring-2 ring-accent-400/80' : ''}`}
       onClick={selectMode ? undefined : (e) => {
         // Shift/Ctrl-click = quick entry into select mode with this file.
         // Buttons keep their own actions (their clicks bubble here).
@@ -466,7 +466,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
 
   return (
     <div
-      className={`${CARD} ${selectMode && selected ? 'ring-1 ring-purple-500/60 bg-purple-500/5' : ''}`}
+      className={`${CARD} ${selectMode && selected ? 'ring-1 ring-accent-500/60 bg-accent-500/5' : ''}`}
       onClick={selectMode ? undefined : (e) => {
         // Shift/Ctrl-click = quick entry into select mode with this file.
         if (!(e.shiftKey || e.ctrlKey || e.metaKey)) return
@@ -1285,7 +1285,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
           <button
             type="button"
             onClick={() => onEditThumbnail()}
-            className="flex flex-col items-center justify-center gap-1 p-2 min-h-[74px] rounded-lg border-2 border-dashed border-white/10 text-gray-400 text-center transition-colors hover:border-purple-500/50 hover:bg-purple-600/5 hover:text-gray-300"
+            className="flex flex-col items-center justify-center gap-1 p-2 min-h-[74px] rounded-lg border-2 border-dashed border-white/10 text-gray-400 text-center transition-colors hover:border-accent-500/50 hover:bg-accent-600/5 hover:text-gray-300"
           >
             <FileImage size={16} />
             <span className="text-[11px]">Create thumbnail</span>
@@ -1344,7 +1344,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             className={`flex flex-col items-center justify-center gap-1 p-2 min-h-[74px] rounded-lg border-2 border-dashed text-center transition-colors ${
               importBusy
                 ? 'border-white/10 text-gray-500 cursor-default'
-                : 'border-white/10 text-gray-400 hover:border-purple-500/50 hover:bg-purple-600/5 hover:text-gray-300'
+                : 'border-white/10 text-gray-400 hover:border-accent-500/50 hover:bg-accent-600/5 hover:text-gray-300'
             }`}
           >
             {importBusy ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
@@ -1385,7 +1385,7 @@ function FilterToggle({ active, onClick, icon, label }: { active: boolean; onCli
       onClick={onClick}
       className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] border transition-colors ${
         active
-          ? 'text-purple-200 border-purple-500/40 bg-purple-500/15'
+          ? 'text-accent-200 border-accent-500/40 bg-accent-500/15'
           : 'text-gray-500 border-white/10 hover:text-gray-300'
       }`}
     >

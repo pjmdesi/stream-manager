@@ -13,7 +13,7 @@ import { cleanIpcError } from '../../lib/ipcError'
  *  JSX or imperatively on a DOM element. `box-border` + `leading-none`
  *  pin the chip's box to its content so neither line-height nor
  *  border-box mode causes drift between the two contexts. */
-export const MERGE_FIELD_CHIP_CLASS = 'inline-flex items-center box-border leading-none text-[10px] text-purple-300 bg-purple-950 border border-purple-800 rounded px-1.5 py-0.5'
+export const MERGE_FIELD_CHIP_CLASS = 'inline-flex items-center box-border leading-none text-[10px] text-accent-300 bg-accent-950 border border-accent-800 rounded px-1.5 py-0.5'
 /** Red variant — applied to tokens that exist in the body but don't
  *  apply to the current target (e.g. {episode} on a standalone stream).
  *  Caller decides which keys are inapplicable; the chip still serializes
@@ -25,7 +25,7 @@ export const MERGE_FIELD_CHIP_CLASS_INAPPLICABLE = 'inline-flex items-center box
  *  editor is given a `resolvedValues` map so the user sees what each token
  *  actually renders to, inline. `align-bottom` keeps it sitting on the text
  *  baseline; the column grows to whatever the value needs. */
-export const MERGE_FIELD_VALUE_CHIP_CLASS = 'inline-flex flex-col align-bottom box-border mx-px my-0.5 rounded border border-purple-800 bg-purple-950/60 px-1.5 py-0.5'
+export const MERGE_FIELD_VALUE_CHIP_CLASS = 'inline-flex flex-col align-bottom box-border mx-px my-0.5 rounded border border-accent-800 bg-accent-950/60 px-1.5 py-0.5'
 
 /** Read-only chip-ified rendering of a template body: `{key}` tokens
  *  render as the editor's merge chips, everything else as plain text.
@@ -114,15 +114,15 @@ function render(
       if (!inapplicable && resolvedValues?.has(key)) {
         chip.className = MERGE_FIELD_VALUE_CHIP_CLASS
         const nameEl = document.createElement('span')
-        nameEl.className = 'block text-[8px] uppercase tracking-wider text-purple-400 leading-none mb-0.5'
+        nameEl.className = 'block text-[8px] uppercase tracking-wider text-accent-400 leading-none mb-0.5'
         nameEl.textContent = key
         const valEl = document.createElement('span')
         const value = resolvedValues.get(key) ?? ''
         if (value) {
-          valEl.className = 'block text-xs text-purple-100 leading-snug whitespace-pre-wrap'
+          valEl.className = 'block text-xs text-accent-100 leading-snug whitespace-pre-wrap'
           valEl.textContent = value
         } else {
-          valEl.className = 'block text-xs italic text-purple-300/60 leading-snug'
+          valEl.className = 'block text-xs italic text-accent-300/60 leading-snug'
           valEl.textContent = '(empty)'
         }
         chip.appendChild(nameEl)
@@ -872,7 +872,7 @@ export function TemplateBodyEditor({
   // long content behaves like a normal text input (clipped, revealed by
   // cursor movement).
   const wrapCls = multiline ? 'whitespace-pre-wrap leading-relaxed overflow-y-auto resize-none' : 'whitespace-nowrap overflow-x-hidden leading-snug'
-  const cls = `template-body-editor w-full bg-navy-900/70 border ${borderCls} ${cornerCls} px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-purple-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''} ${wrapCls}`
+  const cls = `template-body-editor w-full bg-navy-900/70 border ${borderCls} ${cornerCls} px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-accent-500/50 focus:bg-navy-900 transition-colors ${saving ? 'opacity-60' : ''} ${wrapCls}`
 
   const editor = (
     <div
@@ -971,7 +971,7 @@ export function MergeFieldPicker({
           // onMouseDown over onClick + preventDefault so the editor
           // doesn't lose focus before we insert.
           onMouseDown={e => { e.preventDefault(); onInsert(k) }}
-          className={`${MERGE_FIELD_CHIP_CLASS} hover:bg-purple-900 hover:border-purple-700 transition-colors`}
+          className={`${MERGE_FIELD_CHIP_CLASS} hover:bg-accent-900 hover:border-accent-700 transition-colors`}
         >
           {k}
         </button>

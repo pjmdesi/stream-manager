@@ -140,7 +140,7 @@ export function SendToConverterModal({ isOpen, folder, onClose, onSend }: Props)
         <div className="flex items-center justify-between">
           <span className="text-xs text-gray-400">{selected.size} of {rows.length} selected</span>
           <div className="flex items-center gap-3">
-            <button onClick={selectAll} className="text-xs text-purple-300 hover:text-purple-200 transition-colors">Select all</button>
+            <button onClick={selectAll} className="text-xs text-accent-300 hover:text-accent-200 transition-colors">Select all</button>
             <button onClick={clear} className="text-xs text-gray-400 hover:text-gray-300 transition-colors">Clear</button>
           </div>
         </div>

@@ -29,8 +29,8 @@
   --color-bg-elevated:  #131825; /* navy-800 */
   --color-panel:        #1c2333; /* navy-700 */
   --color-text:         #e2e8f0;
-  --color-accent:       #c9d5e3; /* purple-500 */
-  --color-accent-light: #f1f5fa; /* purple-300 */
+  --color-accent:       #c9d5e3; /* accent-500 */
+  --color-accent-light: #f1f5fa; /* accent-300 */
 }
 
 * {
@@ -115,7 +115,7 @@ input.volume-slider-mt::-webkit-slider-thumb {
   height: 12px;
   border: 2px solid var(--color-accent-light);
   margin-top: -4px;
-  background: #c9d5e3; /* project purple-500 — one notch darker than the border */
+  background: #c9d5e3; /* project accent-500 — one notch darker than the border */
 }
 input.volume-slider-mt::-webkit-slider-runnable-track {
   background: transparent;
@@ -125,7 +125,7 @@ input.volume-slider-mt::-webkit-slider-runnable-track {
    1px solid center with two 1px translucent halos (left + right) gives
    a precise-feeling indicator that remains visible when it crosses
    region boundary markers or other overlays — without obscuring them.
-   Color is the project's "purple"-400 (slate light-grey #e0e7f0) at
+   Color is the project's accent-400 (slate light-grey #e0e7f0) at
    90% / 30% alpha respectively. Halos use box-shadow so they don't
    participate in layout (no width change, no clipping by content-box). */
 .playhead-line {
@@ -225,7 +225,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
    (TemplateBodyEditor's selectionchange listener) so inclusion is visible.
    Purple for normal/value chips, red-flavored for inapplicable chips. */
 .template-body-editor [data-token][data-selected] {
-  background-color: rgb(107 33 168); /* purple-800 */
+  background-color: rgb(107 33 168); /* real purple-800 — deliberately vivid, NOT the slate accent */
   border-color: rgb(192 132 252);    /* purple-400 */
   color: rgb(243 232 255);           /* purple-100 */
 }

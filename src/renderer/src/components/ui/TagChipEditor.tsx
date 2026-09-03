@@ -173,11 +173,11 @@ export function TagChipEditor({
     if (next !== value) onChange(next)
   }
 
-  const chipCls = 'inline-flex items-center gap-1 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/25 rounded px-1.5 py-0.5 max-w-full'
+  const chipCls = 'inline-flex items-center gap-1 text-[10px] text-accent-300/80 bg-accent-500/10 border border-accent-500/25 rounded px-1.5 py-0.5 max-w-full'
 
   return (
     <div className="flex flex-col">
-      <div className={`flex flex-wrap gap-1 items-center min-h-[1.75rem] bg-navy-900/70 border ${tabActive ? 'border-white/[0.18]' : 'border-white/10'} px-1.5 py-1 focus-within:border-purple-500/50 focus-within:bg-navy-900 transition-colors ${tabAttached ? 'rounded-lg rounded-tr-none' : 'rounded-lg'}`}>
+      <div className={`flex flex-wrap gap-1 items-center min-h-[1.75rem] bg-navy-900/70 border ${tabActive ? 'border-white/[0.18]' : 'border-white/10'} px-1.5 py-1 focus-within:border-accent-500/50 focus-within:bg-navy-900 transition-colors ${tabAttached ? 'rounded-lg rounded-tr-none' : 'rounded-lg'}`}>
         {value.map((tag, i) => (
           <EditorTagChip
             key={`${tag}-${i}`}

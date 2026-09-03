@@ -10,7 +10,7 @@ interface SliderProps {
   onCommit?: (value: number) => void  // called once on mouseup
   onHover?: (ratio: number | null) => void  // called with 0–1 ratio on hover, null on leave
   className?: string
-  color?: 'purple' | 'blue' | 'green'
+  color?: 'accent' | 'blue' | 'green'
   vertical?: boolean
 }
 
@@ -24,13 +24,13 @@ export const Slider: React.FC<SliderProps> = ({
   onCommit,
   onHover,
   className = '',
-  color = 'purple',
+  color = 'accent',
   vertical = false
 }) => {
   const percent = ((value - min) / (max - min)) * 100
   const trackRef = useRef<HTMLDivElement>(null)
 
-  const fillColor = color === 'purple' ? 'bg-purple-500' : color === 'blue' ? 'bg-blue-500' : 'bg-green-500'
+  const fillColor = color === 'accent' ? 'bg-accent-500' : color === 'blue' ? 'bg-blue-500' : 'bg-green-500'
 
   const valueFromMouse = useCallback((clientX: number) => {
     const rect = trackRef.current?.getBoundingClientRect()

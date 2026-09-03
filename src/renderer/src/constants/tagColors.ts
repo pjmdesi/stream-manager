@@ -3,15 +3,15 @@
  *
  * All class strings are written out fully so Tailwind's build-time purge
  * never removes them. Dynamic construction (e.g. `bg-${color}-900/40`) is
- * intentionally avoided. Literal hex arbitrary classes (e.g. the Brown and
- * true-Purple entries) are equally purge-safe as long as they appear
- * verbatim in the source.
+ * intentionally avoided. Literal hex arbitrary classes (the Brown entry)
+ * are equally purge-safe as long as they appear verbatim in the source.
  *
- * THEME GOTCHA: the app's Tailwind `purple-*` family is REMAPPED to a cool
- * slate-gray (tailwind.config.js) to neutralize the UI. The legacy 'purple'
- * entry therefore RENDERS gray and is labeled Gray; its key stays 'purple'
- * because keys are persisted in users' tagColors data. The real purple
- * lives in the 'true-purple' entry via Tailwind's DEFAULT purple hexes.
+ * KEY-NAME HISTORY: before APP-16 (2026-09) the app's slate accent was
+ * remapped OVER Tailwind's purple-* classes, so the accent-colored tag
+ * entry got the key 'purple'. The remap is gone (accent-* is the accent,
+ * purple-* is real purple again) but the KEYS are persisted in users'
+ * tagColors data and never change: 'purple' renders the slate accent and
+ * is labeled Gray; 'true-purple' is actual purple and is labeled Purple.
  */
 
 export interface TagColor {
@@ -119,15 +119,16 @@ export const TAG_COLORS: TagColor[] = [
     ring: 'ring-blue-400/70',
   },
   {
-    // Tailwind's DEFAULT purple, as literal hexes — the purple-* classes
-    // can't produce it here (theme remap, see header comment).
+    // Actual purple. Written as literal hexes while the theme remap
+    // squatted on purple-*; real classes since APP-16 (same pixels —
+    // the old literals WERE Tailwind's default purple values).
     key: 'true-purple',
     label: 'Purple',
-    chip: 'bg-[#581c87]/40 text-[#d8b4fe] border-[#d8b4fe]/30',
-    text: 'text-[#d8b4fe]',
-    highlight: 'bg-[#9333ea]/30',
-    swatch: 'bg-[#a855f7]',
-    ring: 'ring-[#c084fc]/70',
+    chip: 'bg-purple-900/40 text-purple-300 border-purple-300/30',
+    text: 'text-purple-300',
+    highlight: 'bg-purple-600/30',
+    swatch: 'bg-purple-500',
+    ring: 'ring-purple-400/70',
   },
   {
     key: 'pink',
@@ -162,18 +163,17 @@ export const TAG_COLORS: TagColor[] = [
     check: 'text-gray-800',
   },
   {
-    // Renders GRAY: the app's purple-* Tailwind family is remapped to cool
-    // slate-gray (see the header comment). Key stays 'purple' for stored
-    // data; the label tells the truth. Swatch darkened one step
-    // (purple-500 was #c9d5e3, nearly white — indistinguishable from the
-    // White swatch).
+    // Renders GRAY: this is the app's slate accent (accent-*). Key stays
+    // 'purple' for stored data (see KEY-NAME HISTORY in the header); the
+    // label tells the truth. Swatch darkened one step (accent-500 is
+    // #c9d5e3, nearly white — indistinguishable from the White swatch).
     key: 'purple',
     label: 'Gray',
-    chip: 'bg-purple-900/40 text-purple-300 border-purple-300/30',
-    text: 'text-purple-300',
-    highlight: 'bg-purple-600/30',
-    swatch: 'bg-purple-600',
-    ring: 'ring-purple-400/70',
+    chip: 'bg-accent-900/40 text-accent-300 border-accent-300/30',
+    text: 'text-accent-300',
+    highlight: 'bg-accent-600/30',
+    swatch: 'bg-accent-600',
+    ring: 'ring-accent-400/70',
   },
   {
     key: 'slate',
@@ -294,9 +294,9 @@ const WAVEFORM_FILL: Record<string, string> = {
   teal: 'fill-teal-400/70',
   cyan: 'fill-cyan-400/70',
   blue: 'fill-blue-400/70',
-  purple: 'fill-purple-400/70',
+  purple: 'fill-accent-400/70',
   pink: 'fill-pink-400/70',
-  'true-purple': 'fill-[#c084fc]/70',
+  'true-purple': 'fill-purple-400/70',
   brown: 'fill-[#b98a68]/70',
   // Black's literal fill would be invisible on the bg-black/60 waveform
   // strip — a mid gray keeps the waveform readable while staying "black

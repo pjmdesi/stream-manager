@@ -5,14 +5,14 @@ interface CheckboxProps {
   checked: boolean
   onChange: (checked: boolean) => void
   label?: React.ReactNode
-  color?: 'purple' | 'red' | 'green' | 'blue'
+  color?: 'accent' | 'red' | 'green' | 'blue'
   size?: 'sm' | 'md'
   disabled?: boolean
   className?: string
 }
 
 const COLOR_MAP = {
-  purple: 'bg-purple-700 border-purple-700',
+  accent: 'bg-accent-700 border-accent-700',
   red:    'bg-red-500 border-red-500',
   green:  'bg-green-600 border-green-600',
   blue:   'bg-blue-500 border-blue-500',
@@ -22,7 +22,7 @@ export function Checkbox({
   checked,
   onChange,
   label,
-  color = 'purple',
+  color = 'accent',
   size = 'md',
   disabled = false,
   className = '',

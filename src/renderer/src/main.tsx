@@ -23,7 +23,7 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, { error:
             className="flex items-center justify-between h-10 bg-navy-800 border-b border-white/5 px-4 shrink-0"
             style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
           >
-            <span className="text-sm font-semibold text-purple-400 tracking-wide">Stream Manager</span>
+            <span className="text-sm font-semibold text-accent-400 tracking-wide">Stream Manager</span>
             <div
               className="flex items-center gap-1"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
