@@ -8191,6 +8191,9 @@ function SidebarDetail({
       </div>
 
       {/* Sticky bottom action area. Top → bottom:
+            0. Feedback banners + Studio-task reminder (top of the footer
+               so appearing/disappearing rows only change its height here
+               instead of shoving the broadcast + push rows around)
             1. Broadcast picker (YouTube linkage + privacy controls)
             2. Push pills (YouTube + Twitch — the publishing climax of the sidebar)
             3. Row-level action buttons (Player/Converter/folder/Archive/Delete)
@@ -8199,7 +8202,79 @@ function SidebarDetail({
           broadcast-picker → push-pills publishing path reads
           top-to-bottom uninterrupted. */}
       <div className="shrink-0 border-t border-white/5 bg-navy-700 px-3 py-2 flex flex-col gap-2">
-        {/* Broadcast picker — first item in the footer because picking
+        {/* Banner stack — multiple entries can coexist (e.g. a YouTube
+            success and a Twitch success from the same Push-to-all),
+            each rendering as its own row. Each banner is a flex row
+            (not a <button>) so the optional action link can sit
+            alongside the message without nesting interactive elements
+            inside a button. Clicking anywhere on the body dismisses
+            that one banner; the action button stops propagation to
+            open the URL without dismissing first. */}
+        {banners.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            {banners.map(banner => (
+              <Tooltip key={banner.id} content="Dismiss" triggerClassName="block">
+              <div
+                onClick={() => onDismissBanner(banner.id)}
+                className={`flex items-center gap-2 text-left text-[11px] rounded-md px-2.5 py-1.5 border transition-colors cursor-pointer ${
+                  banner.type === 'success'
+                    ? 'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/15'
+                    : 'bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/15'
+                }`}
+              >
+                <span className="flex-1">{banner.message}</span>
+                {banner.action && (
+                  <button
+                    type="button"
+                    onClick={e => { e.stopPropagation(); window.api.openUrl(banner.action!.url) }}
+                    className="shrink-0 underline underline-offset-2 hover:no-underline"
+                  >
+                    {banner.action.label}
+                  </button>
+                )}
+              </div>
+              </Tooltip>
+            ))}
+          </div>
+        )}
+        {(() => {
+          // Persistent Studio-task row (STR-14). The transient post-push
+          // banner above proved miss-able, so pushes of categories with a
+          // Studio-only field also persist a task into meta; it surfaces
+          // here after a quiet window and only "Done" clears it (per
+          // video id, forever). The Data API can't READ these fields, so
+          // this is honestly worded as a task, never a status claim.
+          const rem = meta?.studioFieldReminder
+          if (!rem || rem.dismissedAt || rem.videoId !== meta?.ytVideoId) return null
+          const fragment = STUDIO_REMINDER_FRAGMENTS[rem.categoryId]
+          if (!fragment) return null
+          if (Date.now() - rem.pushedAt < STUDIO_REMINDER_DELAY_MS) return null
+          return (
+            <div className="flex items-center gap-2 text-left text-[11px] rounded-md px-2.5 py-1.5 border bg-amber-500/10 border-amber-500/30 text-amber-300">
+              <span className="flex-1">Reminder: set {fragment} for this video in Studio.</span>
+              <Tooltip content="Open this video's edit page in YouTube Studio" side="top">
+                <button
+                  type="button"
+                  onClick={() => window.api.openUrl(`https://studio.youtube.com/video/${rem.videoId}/edit`)}
+                  className="shrink-0 underline underline-offset-2 hover:no-underline"
+                >
+                  Open in Studio
+                </button>
+              </Tooltip>
+              <Tooltip content="Mark as done. SM won't remind again for this video." side="top">
+                <button
+                  type="button"
+                  onClick={dismissStudioReminder}
+                  className="shrink-0 underline underline-offset-2 hover:no-underline"
+                >
+                  Done
+                </button>
+              </Tooltip>
+            </div>
+          )
+        })()}
+        {/* Broadcast picker — first CONTROL in the footer (only the
+            transient banner/reminder rows sit above) because picking
             a broadcast IS the prerequisite for the YouTube push pill
             directly below it. Only renders when YT is connected. */}
         {ytConnected && (
@@ -8482,77 +8557,6 @@ function SidebarDetail({
         )}
 
         {/* Push row — two pill buttons, one per platform. */}
-        {/* Banner stack — multiple entries can coexist (e.g. a YouTube
-            success and a Twitch success from the same Push-to-all),
-            each rendering as its own row. Each banner is a flex row
-            (not a <button>) so the optional action link can sit
-            alongside the message without nesting interactive elements
-            inside a button. Clicking anywhere on the body dismisses
-            that one banner; the action button stops propagation to
-            open the URL without dismissing first. */}
-        {banners.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            {banners.map(banner => (
-              <Tooltip key={banner.id} content="Dismiss" triggerClassName="block">
-              <div
-                onClick={() => onDismissBanner(banner.id)}
-                className={`flex items-center gap-2 text-left text-[11px] rounded-md px-2.5 py-1.5 border transition-colors cursor-pointer ${
-                  banner.type === 'success'
-                    ? 'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/15'
-                    : 'bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/15'
-                }`}
-              >
-                <span className="flex-1">{banner.message}</span>
-                {banner.action && (
-                  <button
-                    type="button"
-                    onClick={e => { e.stopPropagation(); window.api.openUrl(banner.action!.url) }}
-                    className="shrink-0 underline underline-offset-2 hover:no-underline"
-                  >
-                    {banner.action.label}
-                  </button>
-                )}
-              </div>
-              </Tooltip>
-            ))}
-          </div>
-        )}
-        {(() => {
-          // Persistent Studio-task row (STR-14). The transient post-push
-          // banner above proved miss-able, so pushes of categories with a
-          // Studio-only field also persist a task into meta; it surfaces
-          // here after a quiet window and only "Done" clears it (per
-          // video id, forever). The Data API can't READ these fields, so
-          // this is honestly worded as a task, never a status claim.
-          const rem = meta?.studioFieldReminder
-          if (!rem || rem.dismissedAt || rem.videoId !== meta?.ytVideoId) return null
-          const fragment = STUDIO_REMINDER_FRAGMENTS[rem.categoryId]
-          if (!fragment) return null
-          if (Date.now() - rem.pushedAt < STUDIO_REMINDER_DELAY_MS) return null
-          return (
-            <div className="flex items-center gap-2 text-left text-[11px] rounded-md px-2.5 py-1.5 border bg-amber-500/10 border-amber-500/30 text-amber-300">
-              <span className="flex-1">Reminder: set {fragment} for this video in Studio.</span>
-              <Tooltip content="Open this video's edit page in YouTube Studio" side="top">
-                <button
-                  type="button"
-                  onClick={() => window.api.openUrl(`https://studio.youtube.com/video/${rem.videoId}/edit`)}
-                  className="shrink-0 underline underline-offset-2 hover:no-underline"
-                >
-                  Open in Studio
-                </button>
-              </Tooltip>
-              <Tooltip content="Mark as done. SM won't remind again for this video." side="top">
-                <button
-                  type="button"
-                  onClick={dismissStudioReminder}
-                  className="shrink-0 underline underline-offset-2 hover:no-underline"
-                >
-                  Done
-                </button>
-              </Tooltip>
-            </div>
-          )
-        })()}
         {(() => {
           // Hoisted disabled flags + push handlers so they can be reused
           // by the platform buttons individually AND the "Push to all"
