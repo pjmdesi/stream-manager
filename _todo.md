@@ -341,10 +341,10 @@
 - **APP-13** [bug] [ui] [done]
   The Stream Relay picker popup is getting clipped by the bottom of the app window. It needs to be moved up dynamically so it is always fully visible.
 
-- **APP-16** [ui]
+- **APP-16** [ui] [done]
   Fix the hack for the tailwind purple color assignment. We need to go through the app and replace all instances of the class usage of the default tailwind purple color because it was modified at a high level to be a slate gray instead.
 
-- **APP-15** [blocked:APP-16] [ui]
+- **APP-15** [ui]
   Catalog colors across SM. Find and record all uses of color in the app and catalog based on how they are used. Background variants, accents, borders, warnings, text variants. Only need to exclude things that are already UI customization elements such as the tag color picker and various thumbnail editor items. This will be used to build the themes in the APP-14 task.
 
 - **APP-14** [blocked:APP-15] [ui]

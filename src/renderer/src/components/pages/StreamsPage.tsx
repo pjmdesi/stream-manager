@@ -59,6 +59,18 @@ import type { StreamFolder, StreamMeta, AiSuggestField } from '../../types'
  *  goes unnoticed — acceptable, the next check after expiry catches it. */
 const PUSH_OVERLAY_TTL_MS = 5 * 60 * 1000
 
+// Categories with an extra Studio-only field the Data API can neither read
+// nor write (verified against the videos resource docs 2026-09-03) —
+// Gaming's "Game" picker, Education's detail fields. Drives the transient
+// post-push banner AND the persistent studioFieldReminder task (STR-14).
+const STUDIO_REMINDER_FRAGMENTS: Record<string, string> = {
+  '20': 'the Game',                 // Gaming
+  '27': 'the education details',    // Education
+}
+// Quiet window before the persistent reminder row appears — the field is
+// usually set right after the push; only nag when it plausibly slipped.
+const STUDIO_REMINDER_DELAY_MS = 10 * 60 * 1000
+
 /** Caps for the per-stream rejected-AI-suggestions memory
  *  (meta.aiRejectedSuggestions): each field's list drops oldest entries
  *  past its cap, and a single entry stores at most AI_REJECT_ENTRY_MAX_CHARS
@@ -2030,18 +2042,24 @@ export function StreamsPage({
         // pick up the new server state.
       }
       // Category-specific Studio reminders. Some YouTube categories
-      // unlock additional Studio fields that aren't writable via the
-      // public Data API — Gaming's "Game" picker, Education's extra
-      // detail fields. When the user pushes one of these categories,
-      // surface a tap-able reminder pointing at Studio's edit page
-      // (works for upcoming, live, and completed broadcasts). Keyed on
-      // category id so adding another is one entry, not another branch.
-      const STUDIO_REMINDER_FRAGMENTS: Record<string, string> = {
-        '20': 'the Game',                 // Gaming
-        '27': 'the education details',    // Education
-      }
+      // unlock additional Studio fields that the public Data API can
+      // neither read nor write — Gaming's "Game" picker, Education's
+      // extra detail fields. Two layers on every push of such a
+      // category (STR-14 — the transient banner alone proved
+      // miss-able): the tap-able banner for the just-pushed moment,
+      // plus a persisted studioFieldReminder task that surfaces in the
+      // sidebar after a quiet window until the user marks it Done. A
+      // reminder dismissed for this video id never re-arms — the
+      // Studio-side field survives re-pushes.
       const reminderFragment = categoryId ? STUDIO_REMINDER_FRAGMENTS[categoryId] : undefined
       if (reminderFragment) {
+        const existingRem = meta.studioFieldReminder
+        const doneForThisVideo = !!(existingRem && existingRem.videoId === meta.ytVideoId && existingRem.dismissedAt)
+        if (meta.ytVideoId && categoryId && !doneForThisVideo) {
+          await updateMeta(folder.relativePath, {
+            studioFieldReminder: { videoId: meta.ytVideoId, categoryId, pushedAt: Date.now() },
+          })
+        }
         showBanner({
           streamKey: folder.relativePath,
           type: 'success',
@@ -5878,7 +5896,7 @@ function SidebarMonthCalendar({
  *  Pull-from-YouTube (it carries ytLastPushed* keys) out of the user's undo
  *  timeline, where reverting it would be surprising. */
 const META_HISTORY_SKIP = new Set<string>([
-  'ytVideoId', 'ytGameTitle', 'ytThumbnailPushedHash',
+  'ytVideoId', 'ytGameTitle', 'ytThumbnailPushedHash', 'studioFieldReminder',
   'ytLastPushedTitle', 'ytLastPushedDescription', 'ytLastPushedTags',
   'ytLastPushedCategoryId', 'ytLastPushedDate', 'ytLastPushedScheduledTime',
   'ytLastPushedPrivacy', 'preferredThumbnail', 'smThumbnail', 'smThumbnailTemplate',
@@ -6079,6 +6097,25 @@ function SidebarDetail({
   // keeps every downstream callback that depends on `onUpdateMeta` stable).
   const onUpdateMetaRawRef = useRef(onUpdateMetaRaw)
   useEffect(() => { onUpdateMetaRawRef.current = onUpdateMetaRaw })
+  // Studio-task reminder (STR-14): tick one re-render when the armed
+  // reminder's quiet window elapses while the sidebar stays open —
+  // otherwise the row would only appear on the next unrelated render.
+  const [, bumpStudioRemTick] = useState(0)
+  useEffect(() => {
+    const rem = meta?.studioFieldReminder
+    if (!rem || rem.dismissedAt || rem.videoId !== meta?.ytVideoId) return
+    const remaining = STUDIO_REMINDER_DELAY_MS - (Date.now() - rem.pushedAt)
+    if (remaining <= 0) return
+    const t = setTimeout(() => bumpStudioRemTick(n => n + 1), remaining + 250)
+    return () => clearTimeout(t)
+  }, [meta?.studioFieldReminder, meta?.ytVideoId])
+  // Done = per-video-id, forever. Raw write: reminder state is system
+  // bookkeeping, not an undoable user edit (also in META_HISTORY_SKIP).
+  const dismissStudioReminder = useCallback(() => {
+    const rem = metaRef.current?.studioFieldReminder
+    if (!rem) return
+    onUpdateMetaRawRef.current({ studioFieldReminder: { ...rem, dismissedAt: Date.now() } })
+  }, [])
   const metaUndoRef = useRef<{ before: Partial<StreamMeta>; after: Partial<StreamMeta> }[]>([])
   const metaRedoRef = useRef<{ before: Partial<StreamMeta>; after: Partial<StreamMeta> }[]>([])
   // Fresh history per stream — undoing into another stream's edits would be
@@ -8480,6 +8517,42 @@ function SidebarDetail({
             ))}
           </div>
         )}
+        {(() => {
+          // Persistent Studio-task row (STR-14). The transient post-push
+          // banner above proved miss-able, so pushes of categories with a
+          // Studio-only field also persist a task into meta; it surfaces
+          // here after a quiet window and only "Done" clears it (per
+          // video id, forever). The Data API can't READ these fields, so
+          // this is honestly worded as a task, never a status claim.
+          const rem = meta?.studioFieldReminder
+          if (!rem || rem.dismissedAt || rem.videoId !== meta?.ytVideoId) return null
+          const fragment = STUDIO_REMINDER_FRAGMENTS[rem.categoryId]
+          if (!fragment) return null
+          if (Date.now() - rem.pushedAt < STUDIO_REMINDER_DELAY_MS) return null
+          return (
+            <div className="flex items-center gap-2 text-left text-[11px] rounded-md px-2.5 py-1.5 border bg-amber-500/10 border-amber-500/30 text-amber-300">
+              <span className="flex-1">Reminder: set {fragment} for this video in Studio.</span>
+              <Tooltip content="Open this video's edit page in YouTube Studio" side="top">
+                <button
+                  type="button"
+                  onClick={() => window.api.openUrl(`https://studio.youtube.com/video/${rem.videoId}/edit`)}
+                  className="shrink-0 underline underline-offset-2 hover:no-underline"
+                >
+                  Open in Studio
+                </button>
+              </Tooltip>
+              <Tooltip content="Mark as done. SM won't remind again for this video." side="top">
+                <button
+                  type="button"
+                  onClick={dismissStudioReminder}
+                  className="shrink-0 underline underline-offset-2 hover:no-underline"
+                >
+                  Done
+                </button>
+              </Tooltip>
+            </div>
+          )
+        })()}
         {(() => {
           // Hoisted disabled flags + push handlers so they can be reused
           // by the platform buttons individually AND the "Push to all"

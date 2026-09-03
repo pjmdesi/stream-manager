@@ -385,6 +385,14 @@ export interface StreamMeta {
    *  user opens the sidebar so the first push doesn't surprise-change
    *  what YouTube auto-derived. */
   ytCategoryId?: string
+  /** Persistent "set the Studio-only field" task (STR-14). Written on a
+   *  successful YouTube push of a category with a Studio sub-field the
+   *  Data API can neither read nor write (Gaming's "Game", Education's
+   *  details). Surfaces in the sidebar after a quiet window until the
+   *  user marks it Done (dismissedAt). Keyed to the video id: once
+   *  dismissed for a video it never re-arms — the Studio field
+   *  survives re-pushes. */
+  studioFieldReminder?: { videoId: string; categoryId: string; pushedAt: number; dismissedAt?: number }
   /** Snapshot of the per-field values at the last successful YouTube
    *  sync — either a push OR a pull, both represent "local and remote
    *  agreed at this moment." Used by the direction-aware mismatch
