@@ -18,7 +18,7 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 ## Cloud sync
 
-- Cancelling downloads now actually stops files that are mid-download, not just the ones still waiting their turn. Previously a small batch could be entirely in flight the moment Cancel was clicked, leaving the button stuck on "Cancelling" while everything finished anyway.
+- Cancelling downloads now does what it says for every file: waiting files are skipped, and a file already mid-transfer finishes downloading (transfers can't be interrupted) and is then returned to the cloud, with its row marked cancelled instead of done. The Cancel button's tooltip explains this. Previously a small batch could be entirely in flight the moment Cancel was clicked, making the cancel a visible no-op.
 - Cloud status icons in the files grid no longer get stuck on a stale state after opposite operations on the same file (like offloading a file that was downloaded earlier in the session).
 - Quitting while a conversion is running now cleans up the partial output file it leaves behind; if the sync client briefly locks the file, the cleanup finishes on the next launch instead of leaving a corrupt file in the stream folder.
 

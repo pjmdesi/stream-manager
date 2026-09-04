@@ -167,9 +167,16 @@ function CloudOpsSection({ direction, items, active, cancelling, onCancel }: Sec
           {active && <Loader2 size={11} className="text-blue-300 animate-spin" />}
         </div>
         {active && (
-          <Button variant="ghost" size="sm" onClick={onCancel} disabled={cancelling}>
-            {cancelling ? 'Cancelling…' : 'Cancel'}
-          </Button>
+          <Tooltip
+            content={isOffload
+              ? 'Skips the files still waiting. A file already being offloaded finishes first.'
+              : 'Skips the files still waiting. A file already downloading finishes its transfer first (downloads can’t be interrupted mid-transfer), then goes back to the cloud.'}
+            side="top"
+          >
+            <Button variant="ghost" size="sm" onClick={onCancel} disabled={cancelling}>
+              {cancelling ? 'Cancelling…' : 'Cancel'}
+            </Button>
+          </Tooltip>
         )}
       </div>
       <div className="px-3 py-3 space-y-3">

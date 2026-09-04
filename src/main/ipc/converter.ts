@@ -481,6 +481,9 @@ export async function prepareConverterForQuit(timeoutMs = 4000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   const remaining: string[] = []
   for (const p of partials) {
+    // Swallow the unlink's watcher echo — reduces shutdown-time stat noise
+    // on a file a sync client may still be poking at.
+    expectSelfWrite(p)
     let deleted = false
     while (Date.now() < deadline) {
       try {
@@ -503,7 +506,10 @@ function sweepQuitPartials(): void {
   const leftovers = (getStore().get(QUIT_PARTIALS_KEY, []) as string[]) || []
   if (leftovers.length === 0) return
   getStore().set(QUIT_PARTIALS_KEY, [])
-  for (const p of leftovers) deleteWithRetry(p, 'quit-stranded partial output')
+  for (const p of leftovers) {
+    expectSelfWrite(p)
+    deleteWithRetry(p, 'quit-stranded partial output')
+  }
 }
 
 export function restorePendingJobs(): void {
