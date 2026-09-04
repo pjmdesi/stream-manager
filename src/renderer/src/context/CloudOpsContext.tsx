@@ -83,6 +83,26 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
     const unsub = window.api.onCloudSyncProgress(ev => {
       const setter = ev.direction === 'offload' ? setOffloadItems : setHydrateItems
       if (ev.type === 'init') {
+        // Externally-initiated batch (the converter hydrating a job's
+        // input, CONV-1): main created it, so no renderer rows exist yet —
+        // create them here so the widget, files grid icons, and hydration
+        // cache all see the download exactly like a user-initiated pin.
+        // No modal pop; the widget's presence is the announcement.
+        if (ev.external) {
+          const rows: CloudOpItem[] = ev.external.files.map(f => ({
+            path: f.path,
+            name: basename(f.path),
+            size: f.size,
+            status: 'pending',
+            direction: ev.direction,
+            batchId: ev.batchId,
+          }))
+          setter(prev => {
+            const stillActive = prev.filter(it => !isTerminal(it.status))
+            return [...stillActive, ...rows]
+          })
+          return
+        }
         // Mark protected paths as skipped (offload only — hydrate sends [] here).
         if (ev.skippedProtected.length === 0) return
         const protectedSet = new Set(ev.skippedProtected)

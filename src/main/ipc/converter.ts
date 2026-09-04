@@ -287,6 +287,47 @@ function settleJobError(id: string, err: Error): void {
   if (w) { w.reject(err); jobWaiters.delete(id) }
 }
 
+// ── Cloud-sync event bridge (CONV-1) ─────────────────────────────────────
+// Converter hydrations keep their own touch-and-poll mechanics (cancel-
+// friendly, timeout-guarded — the pin pipeline's blocking CfHydrate call
+// offers neither) but SPEAK the same cloud-sync event protocol the pin
+// flow uses: a synthetic single-file batch on 'cloud-sync:progress' (the
+// CloudOps context creates rows for externally-initiated batches, which
+// lights the widget, the files grid icons/spinners, and the shared
+// hydration cache), plus 'files:cloudDownloadDone' on success (the
+// VideoThumb post-hydration fill-in listens for it).
+function converterHydrateEvents(jobId: string, filePath: string, size?: number) {
+  const batchId = `converter-${jobId}-${Date.now().toString(36)}`
+  const base = { direction: 'hydrate' as const, batchId }
+  notifyAll('cloud-sync:progress', {
+    type: 'init', ...base, eligible: [filePath], skippedProtected: [],
+    external: { source: 'converter', files: [{ path: filePath, size: size ?? 0 }] },
+  })
+  notifyAll('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'running' })
+  return {
+    done() {
+      notifyAll('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'done' })
+      notifyAll('cloud-sync:progress', { type: 'complete', ...base, ok: 1, failed: 0, alreadyLocal: 0, cancelled: false })
+      notifyAll('files:cloudDownloadDone', filePath)
+    },
+    cancelled() {
+      notifyAll('cloud-sync:progress', { type: 'complete', ...base, ok: 0, failed: 0, alreadyLocal: 0, cancelled: true })
+    },
+    failed(reason: string) {
+      notifyAll('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'failed', reason })
+      notifyAll('cloud-sync:progress', { type: 'complete', ...base, ok: 0, failed: 1, alreadyLocal: 0, cancelled: false })
+    },
+  }
+}
+
+/** The cloud widget's "Cancel downloads" also aborts converter-triggered
+ *  hydrations — their rows sit in the same list, so a cancel that skipped
+ *  them would look ignored. Flipping the flags routes each job through
+ *  its normal cancelled path (status, events, scheduler kick). */
+export function cancelAllConverterHydrations(): void {
+  for (const flag of downloadCancelFlags.values()) flag.cancelled = true
+}
+
 // Deferred clip-export pipelines keyed by job id — registered 'queued' and
 // invoked by scheduleNext() when an encode slot frees, so exports obey the
 // concurrency cap like every other job. Their parameters (regions, crop,
@@ -327,6 +368,7 @@ async function ensureHydrated(jobId: string): Promise<void> {
     const flag = { cancelled: false }
     downloadCancelFlags.set(jobId, flag)
     cancellers.set(jobId, () => { flag.cancelled = true })
+    const hydEv = converterHydrateEvents(jobId, job.inputFile, jobs.get(jobId)?.inputSize)
 
     // Touching the file is what nudges the OS sync provider to start
     // hydrating. Reading 1 byte is enough; the actual content streams in
@@ -360,12 +402,14 @@ async function ensureHydrated(jobId: string): Promise<void> {
         // event overwrote the row's 'cancelled' state with a red error,
         // losing the Requeue affordance.
       }
+      hydEv.cancelled()
       scheduleNext()
       return
     }
 
     // Hydrate finished — drop back to 'queued' so the scheduler can pick it
     // up when an encode slot is free (kicks immediately if one is).
+    hydEv.done()
     setJobStatus(jobId, 'queued')
     scheduleNext()
   } finally {
@@ -931,6 +975,7 @@ export async function startConversionJob(
           // control here: cloud hydration has no pause (neither CFAPI nor
           // Synology offer one).
           cancellers.set(id, () => { flag.cancelled = true })
+          const hydEv = converterHydrateEvents(id, job.inputFile, jobs.get(id)?.inputSize)
           fs.open(job.inputFile, 'r', (err, fd) => {
             if (err) return
             const buf = Buffer.alloc(1)
@@ -945,6 +990,7 @@ export async function startConversionJob(
           while (!flag.cancelled && !(await inputIsLocal())) {
             if (Date.now() - downloadStart > DOWNLOAD_TIMEOUT_MS) {
               downloadCancelFlags.delete(id)
+              hydEv.failed('Cloud download timed out after 6 hours.')
               handleError(new Error('Cloud download timed out after 6 hours. Check that the sync client is running and the file is available, then requeue.'))
               return
             }
@@ -986,11 +1032,13 @@ export async function startConversionJob(
                 console.warn('[converter] hydration abort failed:', err)
               }
             })()
+            hydEv.cancelled()
             maybeFireGroupHook(id)
             scheduleNext()
             resolve()
             return
           }
+          hydEv.done()
           // Hydrated — re-check the cap before encoding (CONV-2). This
           // job's slot was up for grabs while it sat in 'downloading'
           // (hydration deliberately holds no encode slot), so other jobs

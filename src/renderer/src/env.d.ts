@@ -97,7 +97,7 @@ declare global {
       cloudSyncPin(paths: string[], batchId: string): Promise<void>
       cloudSyncCancelPin(): Promise<void>
       onCloudSyncProgress(cb: (event:
-        | { type: 'init'; direction: 'offload' | 'hydrate'; batchId: string; eligible: string[]; skippedProtected: string[] }
+        | { type: 'init'; direction: 'offload' | 'hydrate'; batchId: string; eligible: string[]; skippedProtected: string[]; external?: { source: 'converter'; files: { path: string; size: number }[] } }
         | { type: 'item'; direction: 'offload' | 'hydrate'; batchId: string; path: string; status: 'running' | 'done' | 'already-offline' | 'already-local' | 'failed'; reason?: string }
         | { type: 'complete'; direction: 'offload' | 'hydrate'; batchId: string; ok: number; failed: number; alreadyOffline?: number; alreadyLocal?: number; cancelled: boolean }
       ) => void): () => void

@@ -221,5 +221,10 @@ export function registerCloudSyncIPC(): void {
   })
   ipcMain.handle('cloud-sync:cancel-pin', () => {
     for (const b of liveBatches.hydrate) b.cancelled = true
+    // Converter-triggered hydrations show in the same widget list, so the
+    // cancel covers them too (their batches are synthetic, not in
+    // liveBatches — the converter routes each job through its own
+    // cancelled path). Lazy import: the converter module registers later.
+    void import('./converter').then(m => m.cancelAllConverterHydrations()).catch(() => {})
   })
 }
