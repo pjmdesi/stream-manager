@@ -187,6 +187,26 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
   const autoDeletePartial = !!config.autoDeletePartialOnCancel
 
+  // Derive a job's source stream from its input path: file lives under a
+  // stream folder → that folder is the origin, labeled by its folder name.
+  // Slices the ORIGINAL path string so the folderPath keeps the same
+  // separators as folder.folderPath (the navigate matcher compares
+  // verbatim). Dump mode is excluded — a bare folder path is ambiguous
+  // there (every stream shares the dump folder).
+  const deriveStreamOrigin = (filePath: string): { folderPath: string; label: string } | undefined => {
+    const dir = config.streamsDir
+    if (!dir || config.streamMode === 'dump-folder') return undefined
+    const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+    const root = norm(dir)
+    const file = norm(filePath)
+    if (!file.startsWith(root + '/')) return undefined
+    const rel = file.slice(root.length + 1)
+    const seg = rel.split('/')[0]
+    // A file sitting directly at the library root belongs to no stream.
+    if (!seg || rel === seg) return undefined
+    return { folderPath: filePath.slice(0, root.length + 1 + seg.length), label: seg }
+  }
+
   // The default preset (★ in the Presets modal; falls back to the first
   // built-in) is assigned to each file as it's added — so changing the default
   // later only affects newly-added files. Each row can override it via its
@@ -544,7 +564,13 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     // path.join, "/" from clip exports) — display normalizes to "/"
     // (displayPath); openInExplorer still gets the raw path.
     const outputDirText = displayPath(outputDir)
-    const streamOrigin = streamOrigins[job.inputFile]
+    // Stream link: prefer the explicit origin captured when the file was
+    // sent from a stream (session state, nicest label), else DERIVE it
+    // from the path — any input inside a stream folder gets the link.
+    // Session-only origins were why the link appeared inconsistently:
+    // archive jobs, clip exports, and jobs restored after a reload had no
+    // entry. External files outside the library correctly get none.
+    const streamOrigin = streamOrigins[job.inputFile] ?? deriveStreamOrigin(job.inputFile)
 
     return (
       <div key={job.id} className={`@container relative isolate overflow-hidden px-4 py-3 border-b border-white/5 last:border-0 flex items-stretch gap-3 ${indented ? 'pl-7' : ''}`}>

@@ -227,6 +227,11 @@ function setJobStatus(jobId: string, status: ConversionJob['status']): void {
   const cur = jobs.get(jobId)
   if (!cur) return
   jobs.set(jobId, { ...cur, status })
+  // Keep the persisted pending queue truthful across the queued boundary
+  // in BOTH directions — a queued job moving to 'downloading' used to
+  // leave its stale snapshot in the store, which resurrected removed jobs
+  // after a restart.
+  if (cur.status === 'queued' || status === 'queued') persistPendingJobs()
   notifyAll('converter:jobStatus', { jobId, status })
 }
 
@@ -276,6 +281,14 @@ function settleJobError(id: string, err: Error): void {
   const w = jobWaiters.get(id)
   if (w) { w.reject(err); jobWaiters.delete(id) }
 }
+
+// Deferred clip-export pipelines keyed by job id — registered 'queued' and
+// invoked by scheduleNext() when an encode slot frees, so exports obey the
+// concurrency cap like every other job. Their parameters (regions, crop,
+// bleeps, mixes) exist only in memory, which is also why these jobs are
+// excluded from pending-queue persistence: a restored entry would re-run
+// as a plain whole-file conversion.
+const clipRunners = new Map<string, () => void>()
 
 /**
  * Pre-encode hydrate task. Runs in parallel for every job in a group so the
@@ -366,7 +379,7 @@ async function ensureHydrated(jobId: string): Promise<void> {
 const PENDING_JOBS_KEY = 'pendingJobs'
 
 function persistPendingJobs(): void {
-  const parked = [...jobs.values()].filter(j => j.status === 'queued' && !j.groupId)
+  const parked = [...jobs.values()].filter(j => j.status === 'queued' && !j.groupId && !clipRunners.has(j.id))
   getStore().set(PENDING_JOBS_KEY, parked)
 }
 
@@ -377,7 +390,10 @@ export function restorePendingJobs(): void {
     if (job.status !== 'queued') continue
     // Drop entries whose source no longer exists — the job would fail anyway.
     if (!fs.existsSync(job.inputFile)) { dropped++; continue }
-    jobs.set(job.id, { ...job, progress: 0 })
+    // Restored jobs always come back PARKED (autoStart stripped): a job
+    // that was waiting for a slot at quit must not start encoding
+    // unattended at the next launch.
+    jobs.set(job.id, { ...job, progress: 0, autoStart: undefined })
   }
   if (dropped > 0) {
     console.warn(`[converter] dropped ${dropped} pending job(s) — input file missing`)
@@ -629,7 +645,15 @@ function scheduleNext(): void {
     } else if (!j.autoStart) {
       continue
     }
-    startConversionJob(j).catch(() => { /* error broadcast separately */ })
+    const clipRunner = clipRunners.get(j.id)
+    if (clipRunner) {
+      // Clip exports carry their own deferred pipeline (parameters live
+      // only in memory) — dispatch it instead of the generic encoder.
+      clipRunners.delete(j.id)
+      clipRunner()
+    } else {
+      startConversionJob(j).catch(() => { /* error broadcast separately */ })
+    }
     free--
   }
 }
@@ -1416,9 +1440,14 @@ export function registerConverterIPC(): void {
     const clipCategory: 'clip' | 'short' = cropAspect === '9:16' ? 'short' : 'clip'
     outputArgs.push('-metadata', `comment=${clipProvenanceComment(clipCategory, app.getVersion())}`)
 
-    // Register the job immediately so it appears in the UI
-    const newJob: ConversionJob = { ...job, id, status: 'running', progress: 0 }
+    // Register queued + runnable so it appears in the UI immediately and
+    // the SCHEDULER decides when it runs (CONV-2 follow-up: clip exports
+    // used to start instantly regardless of the concurrency cap). The
+    // pipeline below is wrapped as a deferred runner that scheduleNext()
+    // invokes when a slot is free.
+    const newJob: ConversionJob = { ...withInputSize(job), id, status: 'queued', progress: 0, autoStart: true }
     jobs.set(id, newJob)
+    broadcastJobAdded(newJob)
 
     const win = BrowserWindow.fromWebContents(event.sender)
 
@@ -1432,11 +1461,15 @@ export function registerConverterIPC(): void {
       cancellers.delete(id); pausers.delete(id); resumers.delete(id)
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
       notifyStreamOutput(job.outputFile)
+      // Free the slot for whatever's waiting — finished exports never used
+      // to kick the scheduler, leaving queued jobs sitting.
+      scheduleNext()
     }
     const onError = (err: Error) => {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
       cancellers.delete(id); pausers.delete(id); resumers.delete(id)
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobError', { jobId: id, error: err.message })
+      scheduleNext()
     }
 
     // Reject incompatible presets after onError is wired so the user sees
@@ -1454,6 +1487,15 @@ export function registerConverterIPC(): void {
       return id
     }
 
+    // Everything below is the actual pipeline, deferred until the scheduler
+    // grants an encode slot (the body keeps its original indentation to
+    // keep the wrap reviewable). Skips silently if the job was cancelled
+    // or removed while waiting.
+    const runClipJob = async () => {
+    const atStart = jobs.get(id)
+    if (!atStart || atStart.status !== 'queued') return
+    jobs.set(id, { ...atStart, status: 'running' })
+    notifyAll('converter:jobStatus', { jobId: id, status: 'running' })
     win?.webContents.send('converter:jobProgress', { jobId: id, percent: 0 })
 
     // Temp directory — one MKV per segment will be stream-copied here
@@ -1477,6 +1519,7 @@ export function registerConverterIPC(): void {
         const j = jobs.get(id)
         if (j) jobs.set(id, { ...j, status: 'cancelled' })
         cancellers.delete(id); pausers.delete(id); resumers.delete(id)
+        scheduleNext()
       })
     }
     installCanceller(() => {})
@@ -1491,7 +1534,7 @@ export function registerConverterIPC(): void {
     const tempStartTimes: number[] = []
     try {
       for (let i = 0; i < n; i++) {
-        if (cancelled) { cleanup(); return id }
+        if (cancelled) { cleanup(); return }
         const { inPoint, outPoint } = clipRegions[i]
         const tempFile = path.join(tempDir, `seg_${i}.mkv`)
         tempFiles.push(tempFile)
@@ -1507,10 +1550,10 @@ export function registerConverterIPC(): void {
       }
     } catch (err) {
       if (!cancelled) { cleanup(); onError(err as Error) }
-      return id
+      return
     }
 
-    if (cancelled) { cleanup(); return id }
+    if (cancelled) { cleanup(); return }
 
     // ── Build filter_complex (after Phase 1 so tempStartTimes are known) ─────
     const fcParts: string[] = []
@@ -1591,7 +1634,7 @@ export function registerConverterIPC(): void {
     fcParts.push(`${concatInputs}concat=n=${n}:v=1:a=1[vout][aout]`)
     const filterComplex = fcParts.join(';')
 
-    if (cancelled) { cleanup(); return id }
+    if (cancelled) { cleanup(); return }
 
     // ── Phase 2: Encode using filter_complex on the small temp files ──────────
     const result = runClipConversion({
@@ -1609,7 +1652,12 @@ export function registerConverterIPC(): void {
     installCanceller(result.cancel)
     pausers.set(id, result.pause)
     resumers.set(id, result.resume)
+    }
 
+    clipRunners.set(id, () => {
+      runClipJob().catch(err => onError(err instanceof Error ? err : new Error(String(err))))
+    })
+    scheduleNext()
     return id
   })
 
@@ -1623,14 +1671,15 @@ export function registerConverterIPC(): void {
     if (dlFlag) dlFlag.cancelled = true
     const j = jobs.get(jobId)
     if (j) {
-      const wasQueued = j.status === 'queued'
       jobs.set(jobId, { ...j, status: 'cancelled' })
-      if (wasQueued) persistPendingJobs()
       // Settle any done-waiter (cancel resolves, it is a user action, not
       // an error) — essential for jobs cancelled while still QUEUED, whose
       // startConversionJob paths never ran to settle it. No-op if the
-      // running path already settled.
+      // running path already settled. A clip export cancelled while
+      // waiting also drops its deferred pipeline.
       settleJobDone(jobId)
+      clipRunners.delete(jobId)
+      persistPendingJobs()
       const config = getStore().get('config')
       // The renderer surfaces (session videos, files grid) hide the output
       // while the job is writing — on cancel the job leaves that state, so
@@ -1678,9 +1727,8 @@ export function registerConverterIPC(): void {
       resumers.delete(j.id)
       const dlFlag = downloadCancelFlags.get(j.id)
       if (dlFlag) dlFlag.cancelled = true
-      const wasQueued = j.status === 'queued'
       jobs.set(j.id, { ...j, status: 'cancelled' })
-      if (wasQueued) persistPendingJobs()
+      persistPendingJobs()
       settleJobDone(j.id)
       if (j.replaceInput && j.outputFile) {
         deleteWithRetry(j.outputFile, 'archive temp file (cancel-group)')
@@ -1754,8 +1802,14 @@ export function registerConverterIPC(): void {
     resumers.delete(jobId)
     downloadCancelFlags.delete(jobId)
     // A removed queued job will never run — settle any done-waiter so an
-    // auto-rule (or other caller) awaiting it doesn't hang forever.
+    // auto-rule (or other caller) awaiting it doesn't hang forever, and
+    // drop any deferred clip pipeline.
     settleJobDone(jobId)
-    if (j.status === 'queued') persistPendingJobs()
+    clipRunners.delete(jobId)
+    // Unconditional: the persisted queue must reflect every removal (a
+    // job removed as 'cancelled' could still have a stale queued snapshot
+    // in the store from before its downloading transition — the ghost-job
+    // bug where removed items reappeared after a restart).
+    persistPendingJobs()
   })
 }

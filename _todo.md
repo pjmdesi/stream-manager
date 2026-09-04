@@ -1,16 +1,17 @@
-# To-Do
+# To-Do | Stream Manager
 
 ## Queue
 
 1. APP-16
 2. STR-14
-3. CONV-2
-4. APP-12
-5. APP-17
-6. THU-7
-7. THU-11
-8. IDEA-4
-9. IDEA-11
+3. CONV-1
+4. CONV-2
+5. APP-12
+6. APP-17
+7. THU-7
+8. THU-11
+9. IDEA-4
+10. IDEA-11
 
 ## Improvement ideas
 
@@ -203,6 +204,7 @@
 
 - **CONV-1** [investigate]
   Not explicitly a converter item... When the user sends a file to the converter via the archive path, the conversions start immediately (this is fine), however if files were not hydrated beforehand, they begin to hydrate (also fine). The issue is the only feedback the user has for this is the "waiting on download" message in the converter nav item extra details section (and the actual rows on the converter page). This is probably enough for most users, but I'm wondering if it would be more consistent to make sure the cloud sync widget also shows for these items. Since that is the way SM tells the user that it triggered cloud-based actions for SM-related files.
+  2026-09-04 scope addition, from CONV-2 testing: the root cause is that the converter runs its OWN hydration loop (touch the placeholder, poll checkLocalFiles) that the rest of the app never hears about, and two more symptoms share it: (a) converter row thumbnails stay the placeholder graphic forever because the post-hydration VideoThumb fill-in never learns the file became local; (b) the files grid's cloud status for the hydrated file stays stale while the stream is open in the sidebar. Fix direction: route converter-triggered hydration through (or at least announce it to) the same cloud-sync machinery that pin-local uses, so the widget appears, per-file cloud statuses refresh, and thumbnails generate as soon as the file is local, even while the job waits for an encode slot.
 
 - **CONV-2** [bug]
   I recently ran a bulk archive process on 5 stream items. All the stream recording files started dehydrated and the hydration process ran well. However, as the 4th and 5th items completed hydration, the conversion process for them started. This goes against my SM "Max simultaneous conversions" setting of 3. When items become available in the converter for any reason (new ones added, hydration finishes, etc.), they should not begin the actual conversion process unless a max conversion slot is freed (a running conversion process finishes, is stopped by the user, or errors out) or unless the user manually starts it. After discovering this, I also added stream items one at a time (go to stream item, find recording file, press convert button, press start on the individual item in the queue, item starts converting) and the same issue happened. The converter page is not respecting the max setting. I do see the waiting icon appear briefly, so it may actually be checking, but for some reason it is failing to actually set the conversion items to pending. We need to make the max conversion slot system more robust kind of like what we did with the cloud sync functionality (maybe look into that for reference).
