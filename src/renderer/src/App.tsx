@@ -1493,7 +1493,7 @@ function AppInner() {
           : quitConfirm.running > 0 ? 'Conversions in progress'
           : quitConfirm.fileOps > 0 ? 'File operations in progress'
           : 'Unsaved settings'}
-        width="sm"
+        width="md"
         footer={
           <>
             <Button variant="ghost" onClick={() => setQuitConfirm(null)}>Cancel</Button>
@@ -1526,7 +1526,7 @@ function AppInner() {
               )}
               <p className="text-gray-400">
                 {(quitConfirm.running > 0 || quitConfirm.fileOps > 0) &&
-                  'Quitting now will cancel them and any progress will be lost. A partially-transferred file is cleaned up and its original stays in place. '}
+                  'Quitting now stops all conversions and their encoding progress will be lost. Regular conversions will be waiting in the Converter next launch. You can start them manually. Archive batches and clip exports are not restored. A partially-converted file is cleaned up and its original stays in place.'}
                 {quitConfirm.settingsDirty && 'Unsaved Settings changes will be discarded.'}
               </p>
             </div>
