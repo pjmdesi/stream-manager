@@ -101,6 +101,11 @@ export interface ConversionJob {
    *  enforced in exactly one place: scheduleNext(). Grouped jobs don't
    *  need it — a groupId is its own scheduling eligibility. */
   autoStart?: boolean
+  /** True on clip/Short export jobs. Their pipeline parameters (regions,
+   *  crops, bleeps, track mixes) exist only in memory, so these jobs are
+   *  excluded from pending-queue persistence and quit-parking — a
+   *  restored entry would re-run as a plain whole-file conversion. */
+  isClipExport?: boolean
 }
 
 // All video presets begin with `-map 0:v? -map 0:a?` so EVERY audio track
@@ -379,8 +384,25 @@ async function ensureHydrated(jobId: string): Promise<void> {
 const PENDING_JOBS_KEY = 'pendingJobs'
 
 function persistPendingJobs(): void {
-  const parked = [...jobs.values()].filter(j => j.status === 'queued' && !j.groupId && !clipRunners.has(j.id))
+  const parked = [...jobs.values()].filter(j => j.status === 'queued' && !j.groupId && !j.isClipExport)
   getStore().set(PENDING_JOBS_KEY, parked)
+}
+
+/** Called on a confirmed quit while conversions are in flight: standalone
+ *  jobs that are running/paused/downloading/replacing are written into the
+ *  persisted pending queue as PARKED entries (queued, progress 0, manual
+ *  start), so the work the quit killed comes back visible on the next
+ *  launch instead of silently vanishing while the merely-waiting jobs
+ *  survive. Groups stay deliberately forgotten (see the persistence note
+ *  above), and clip exports cannot survive (memory-only parameters). */
+export function parkInFlightJobsForQuit(): void {
+  for (const j of jobs.values()) {
+    if (j.groupId || j.isClipExport) continue
+    if (j.status === 'running' || j.status === 'downloading' || j.status === 'replacing' || j.status === 'paused') {
+      jobs.set(j.id, { ...j, status: 'queued', progress: 0, autoStart: undefined })
+    }
+  }
+  persistPendingJobs()
 }
 
 export function restorePendingJobs(): void {
@@ -388,6 +410,10 @@ export function restorePendingJobs(): void {
   let dropped = 0
   for (const job of persisted) {
     if (job.status !== 'queued') continue
+    // Belt and braces: a clip export must never restore (its pipeline
+    // parameters died with the process); persistence already excludes
+    // them, this guards against entries from older versions.
+    if (job.isClipExport) { dropped++; continue }
     // Drop entries whose source no longer exists — the job would fail anyway.
     if (!fs.existsSync(job.inputFile)) { dropped++; continue }
     // Restored jobs always come back PARKED (autoStart stripped): a job
@@ -1445,7 +1471,7 @@ export function registerConverterIPC(): void {
     // used to start instantly regardless of the concurrency cap). The
     // pipeline below is wrapped as a deferred runner that scheduleNext()
     // invokes when a slot is free.
-    const newJob: ConversionJob = { ...withInputSize(job), id, status: 'queued', progress: 0, autoStart: true }
+    const newJob: ConversionJob = { ...withInputSize(job), id, status: 'queued', progress: 0, autoStart: true, isClipExport: true }
     jobs.set(id, newJob)
     broadcastJobAdded(newJob)
 

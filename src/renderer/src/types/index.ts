@@ -141,6 +141,9 @@ export interface ConversionJob {
    *  an encode slot frees (CONV-2). Drives the row's waiting state in
    *  place of the Start button. */
   autoStart?: boolean
+  /** True on clip/Short export jobs (memory-only pipeline parameters; the
+   *  main process excludes them from restart persistence). */
+  isClipExport?: boolean
   /** Optional logical grouping (used by archive — one group per stream folder).
    *  Renderer renders these together with collective controls; main process
    *  fires the completion hook when all jobs in the group succeed. */

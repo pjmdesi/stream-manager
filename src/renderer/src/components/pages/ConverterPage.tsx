@@ -12,6 +12,7 @@ import { PresetsModal } from '../preset-editor/PresetsModal'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { VideoThumb } from '../ui/VideoThumb'
 import { displayPath } from '../../lib/displayPath'
+import { renderStreamTitle } from '../../lib/streamTitle'
 
 // Row action buttons — neutral at rest, colored only on hover, with a label
 // that collapses to icon-only as the row narrows. Mirrors the stream detail
@@ -199,13 +200,47 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
     const root = norm(dir)
     const file = norm(filePath)
-    if (!file.startsWith(root + '/')) return undefined
+    // Case-insensitive: Windows paths from different producers disagree
+    // on casing (drive letters especially), and clip exports arrive via
+    // the player rather than the streams page.
+    if (!file.toLowerCase().startsWith(root.toLowerCase() + '/')) return undefined
     const rel = file.slice(root.length + 1)
     const seg = rel.split('/')[0]
     // A file sitting directly at the library root belongs to no stream.
     if (!seg || rel === seg) return undefined
     return { folderPath: filePath.slice(0, root.length + 1 + seg.length), label: seg }
   }
+
+  // folderPath (normalized, lowercased) → rendered stream title, so the
+  // rows' stream links show the item's TITLE when it has one and fall back
+  // to the folder name/date otherwise. Loaded on mount and refreshed with
+  // a debounce on streams:changed — this page stays mounted for the app's
+  // lifetime, so the reload must not run per-event.
+  const [streamTitles, setStreamTitles] = useState<Record<string, string>>({})
+  useEffect(() => {
+    const dir = config.streamsDir
+    if (!dir || config.streamMode === 'dump-folder') return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let disposed = false
+    const load = () => {
+      window.api.listStreams(dir, 'folder-per-stream').then(folders => {
+        if (disposed) return
+        const map: Record<string, string> = {}
+        for (const f of folders) {
+          if (!(f.meta?.ytTitle?.trim() || f.meta?.twitchTitle?.trim())) continue
+          const title = renderStreamTitle(f, folders).trim()
+          if (title) map[f.folderPath.replace(/\\/g, '/').toLowerCase()] = title
+        }
+        setStreamTitles(map)
+      }).catch(() => {})
+    }
+    load()
+    const unsub = window.api.onStreamsChanged(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(load, 3000)
+    })
+    return () => { disposed = true; if (timer) clearTimeout(timer); unsub() }
+  }, [config.streamsDir, config.streamMode])
 
   // The default preset (★ in the Presets modal; falls back to the first
   // built-in) is assigned to each file as it's added — so changing the default
@@ -571,6 +606,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     // archive jobs, clip exports, and jobs restored after a reload had no
     // entry. External files outside the library correctly get none.
     const streamOrigin = streamOrigins[job.inputFile] ?? deriveStreamOrigin(job.inputFile)
+    // Label preference: the stream's rendered TITLE (from the titles map)
+    // over whatever label the origin carried (usually the folder name).
+    const streamOriginLabel = streamOrigin
+      ? (streamTitles[streamOrigin.folderPath.replace(/\\/g, '/').toLowerCase()] ?? streamOrigin.label)
+      : undefined
 
     return (
       <div key={job.id} className={`@container relative isolate overflow-hidden px-4 py-3 border-b border-white/5 last:border-0 flex items-stretch gap-3 ${indented ? 'pl-7' : ''}`}>
@@ -611,13 +651,13 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
           {/* Link back to the source stream (only for files sent from one). */}
           {streamOrigin && (
-            <Tooltip content={`Open “${streamOrigin.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
+            <Tooltip content={`Open “${streamOriginLabel}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
               <button
                 type="button"
                 onClick={() => onNavigateToStream?.(streamOrigin.folderPath)}
                 className="block max-w-full truncate text-[11px] text-accent-300/90 hover:text-accent-200 hover:underline transition-colors"
               >
-                {streamOrigin.label}
+                {streamOriginLabel}
               </button>
             </Tooltip>
           )}

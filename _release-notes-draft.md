@@ -12,7 +12,8 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - The max simultaneous conversions setting is now enforced everywhere. Manually started conversions, auto-rule conversions, clip and Short exports from the player, and archive batches whose files just finished downloading from the cloud all wait for a free slot instead of piling on. Waiting items show a "Waiting" state and start automatically, in order, as slots free up.
 - Removed conversion items no longer reappear after an app restart. A stale snapshot of the queue could survive in storage when a downloading job was cancelled and cleared, resurrecting it on the next launch.
-- The link back to the source stream on conversion rows now shows for every job whose file lives in a stream folder, including archive jobs, clip exports, and jobs restored after a restart. Files from outside the library still show no link, as intended.
+- Quitting while conversions are running now brings those items back on the next launch, parked alongside the ones that were waiting, ready to start manually. Nothing starts encoding unattended at launch. Archive batches are still forgotten on quit (redoing the archive is the safe path), and clip exports cannot survive a restart since their edit settings only exist while the app runs.
+- The link back to the source stream on conversion rows now shows for every job whose file lives in a stream folder, including archive jobs, clip exports, and jobs restored after a restart, and it displays the stream's title (falling back to the folder date when there is none). Files from outside the library still show no link, as intended.
 
 ## Under the hood
 
