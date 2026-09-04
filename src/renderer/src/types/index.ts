@@ -137,6 +137,10 @@ export interface ConversionJob {
    *  first queued/started. Stable for the lifetime of the job (cloud
    *  placeholders return the full size, not the on-disk footprint). */
   inputSize?: number
+  /** True on a QUEUED standalone job the scheduler will start as soon as
+   *  an encode slot frees (CONV-2). Drives the row's waiting state in
+   *  place of the Start button. */
+  autoStart?: boolean
   /** Optional logical grouping (used by archive — one group per stream folder).
    *  Renderer renders these together with collective controls; main process
    *  fires the completion hook when all jobs in the group succeed. */

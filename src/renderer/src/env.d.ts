@@ -151,7 +151,7 @@ declare global {
       onJobComplete(cb: (data: { jobId: string; outputPath: string }) => void): () => void
       onJobError(cb: (data: { jobId: string; error: string }) => void): () => void
       onJobAdded(cb: (job: ConversionJob) => void): () => void
-      onJobStatus(cb: (data: { jobId: string; status: ConversionJob['status'] }) => void): () => void
+      onJobStatus(cb: (data: { jobId: string; status: ConversionJob['status']; autoStart?: boolean }) => void): () => void
 
       // ── Store ────────────────────────────────────────────────────────────────
       getConfig(): Promise<AppConfig>

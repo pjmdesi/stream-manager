@@ -94,6 +94,13 @@ export interface ConversionJob {
    *  (prepends `-map 0:a:<index>` to the args). Undefined keeps ffmpeg's
    *  default selection. */
   audioTrackIndex?: number
+  /** Marks a QUEUED standalone job as runnable by the global scheduler
+   *  (CONV-2). Every "start this" path (converter page start, manual
+   *  Start on a queued row, auto-rules with start-immediately) sets this
+   *  instead of launching the encode directly, so the concurrency cap is
+   *  enforced in exactly one place: scheduleNext(). Grouped jobs don't
+   *  need it — a groupId is its own scheduling eligibility. */
+  autoStart?: boolean
 }
 
 // All video presets begin with `-map 0:v? -map 0:a?` so EVERY audio track
@@ -221,6 +228,53 @@ function setJobStatus(jobId: string, status: ConversionJob['status']): void {
   if (!cur) return
   jobs.set(jobId, { ...cur, status })
   notifyAll('converter:jobStatus', { jobId, status })
+}
+
+/** Statuses that occupy an encode slot. 'downloading' deliberately does
+ *  NOT count — hydration runs in parallel and holds no slot. */
+function isActiveJob(j: ConversionJob): boolean {
+  return j.status === 'running' || j.status === 'replacing' || j.status === 'paused'
+}
+
+// ── Job-completion waiters ────────────────────────────────────────────────
+// The `done` promise handed to callers (auto-rules awaits it to mark a rule
+// applied) is keyed by JOB ID and survives re-queues: a job that bounces
+// back to 'queued' (its inline hydrate finished while every encode slot was
+// taken) settles the SAME waiter when its later run completes. Progress
+// callbacks ride along for the same reason. Cancellation RESOLVES (a user
+// action is not an error), matching the pre-existing done semantics.
+type JobWaiter = {
+  promise: Promise<void>
+  resolve: () => void
+  reject: (err: Error) => void
+  progress: Set<(pct: number) => void>
+}
+const jobWaiters = new Map<string, JobWaiter>()
+function getJobWaiter(id: string): JobWaiter {
+  let w = jobWaiters.get(id)
+  if (!w) {
+    let resolve!: () => void
+    let reject!: (err: Error) => void
+    const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej })
+    // Fire-and-forget callers never await — pre-attach a no-op catch so a
+    // rejection is never "unhandled" (real awaiters still see it).
+    promise.catch(() => {})
+    w = { promise, resolve, reject, progress: new Set() }
+    jobWaiters.set(id, w)
+  }
+  return w
+}
+function notifyJobProgress(id: string, pct: number): void {
+  const w = jobWaiters.get(id)
+  if (w) for (const cb of w.progress) cb(pct)
+}
+function settleJobDone(id: string): void {
+  const w = jobWaiters.get(id)
+  if (w) { w.resolve(); jobWaiters.delete(id) }
+}
+function settleJobError(id: string, err: Error): void {
+  const w = jobWaiters.get(id)
+  if (w) { w.reject(err); jobWaiters.delete(id) }
 }
 
 /**
@@ -503,6 +557,32 @@ export function addPendingJob(job: ConversionJob): string {
   return id
 }
 
+/** Enqueue a job as runnable by the scheduler. This is the ONLY sanctioned
+ *  way for user/auto actions to request an encode (CONV-2): the job enters
+ *  'queued' with autoStart and scheduleNext() decides when it actually
+ *  runs, so the concurrency cap is a real cap on every path. (It used to
+ *  govern only archive groups — the converter page's Start, manual starts
+ *  on queued rows, and auto-rules all barged straight into
+ *  startConversionJob.) Placeholder inputs begin hydrating immediately
+ *  (hydration holds no encode slot); the job becomes schedulable once
+ *  local. Returns the id plus a `done` promise that settles when the
+ *  encode eventually finishes, however long it waited for a slot. */
+export function enqueueRunnableJob(
+  job: ConversionJob,
+  onProgress?: (pct: number) => void
+): { id: string; done: Promise<void> } {
+  const id = job.id || uuidv4()
+  const queuedJob: ConversionJob = { ...withInputSize(job), id, status: 'queued', progress: 0, autoStart: true }
+  jobs.set(id, queuedJob)
+  persistPendingJobs()
+  broadcastJobAdded(queuedJob)
+  const waiter = getJobWaiter(id)
+  if (onProgress) waiter.progress.add(onProgress)
+  enqueueHydrate(id)
+  scheduleNext()
+  return { id, done: waiter.promise }
+}
+
 /** Configured cap on how many conversions the auto-scheduler runs at once.
  *  Clamped to a minimum of 1. */
 function getMaxConcurrentConversions(): number {
@@ -511,41 +591,44 @@ function getMaxConcurrentConversions(): number {
   return Math.max(1, n)
 }
 
-/** Global encode scheduler. Auto-starts queued GROUP jobs (archive batches)
- *  up to the configured concurrency cap, across all groups, while keeping at
- *  most one active encode per group (so a multi-file folder still serializes
- *  internally).
+/** Global encode scheduler — the ONE place encodes are allowed to start
+ *  (CONV-2). Starts queued jobs up to the configured concurrency cap:
  *
- *  - The cap governs AUTOMATIC scheduling only. Manual starts
- *    (converter:startQueued / converter:addToQueue) call startConversionJob
- *    directly and bypass this, so a user override can exceed the cap; the
- *    scheduler then won't auto-start anything new until the active count drops
- *    back under it.
- *  - Standalone queued jobs (no groupId — e.g. auto-rules with "start
- *    immediately" off) are intentionally NOT auto-started; they wait for the
- *    user's manual Start. Only archive-style group jobs auto-schedule.
- *  - All active encodes count toward the cap (grouped or not) so a manual job
- *    correctly reserves a slot.
+ *  - GROUP jobs (archive batches) auto-schedule with at most one active
+ *    encode per group (a multi-file folder still serializes internally).
+ *  - STANDALONE jobs are schedulable only once flagged autoStart (set by
+ *    the converter page's Start, manual Start on a queued row, and
+ *    auto-rules with "start immediately"). Un-flagged standalone jobs
+ *    (auto-rules with it off) wait for the user's Start.
+ *  - The cap applies to EVERY start. It used to govern automatic group
+ *    scheduling only, with manual paths calling startConversionJob
+ *    directly — that was the CONV-2 leak.
  *
  *  'downloading' is NOT counted as active — hydrate runs in parallel and
- *  shouldn't tie up an encode slot. Re-invoked on job end, group submission,
+ *  shouldn't tie up an encode slot; startConversionJob re-checks the cap
+ *  when its inline hydrate finishes. Re-invoked on job end, submission,
  *  hydrate completion, and cancellation. */
 function scheduleNext(): void {
   const all = [...jobs.values()]
-  const isActive = (j: ConversionJob) =>
-    j.status === 'running' || j.status === 'replacing' || j.status === 'paused'
-  let free = getMaxConcurrentConversions() - all.filter(isActive).length
+  let free = getMaxConcurrentConversions() - all.filter(isActiveJob).length
   if (free <= 0) return
   // Groups that already have an in-flight encode — never start a second from
   // the same group automatically (per-group serialization).
-  const activeGroups = new Set(all.filter(j => isActive(j) && j.groupId).map(j => j.groupId as string))
+  const activeGroups = new Set(all.filter(j => isActiveJob(j) && j.groupId).map(j => j.groupId as string))
   const claimedGroups = new Set<string>()
   // Map iteration preserves submission order, so first-queued-first-started.
   for (const j of all) {
     if (free <= 0) break
-    if (j.status !== 'queued' || !j.groupId) continue
-    if (activeGroups.has(j.groupId) || claimedGroups.has(j.groupId)) continue
-    claimedGroups.add(j.groupId)
+    if (j.status !== 'queued') continue
+    if (j.groupId) {
+      // A manual Start on a grouped row (autoStart) overrides the group's
+      // internal one-at-a-time rule — the user explicitly picked it — but
+      // never the global cap.
+      if (!j.autoStart && (activeGroups.has(j.groupId) || claimedGroups.has(j.groupId))) continue
+      claimedGroups.add(j.groupId)
+    } else if (!j.autoStart) {
+      continue
+    }
     startConversionJob(j).catch(() => { /* error broadcast separately */ })
     free--
   }
@@ -654,10 +737,20 @@ export async function startConversionJob(
     const j = jobs.get(id)
     if (j) jobs.set(id, { ...j, progress: percent })
     notifyAll('converter:jobProgress', { jobId: id, percent })
-    onProgress?.(percent)
+    notifyJobProgress(id, percent)
   }
 
-  const done = new Promise<void>((resolve, reject) => {
+  // Completion settles through the id-keyed waiter so the `done` promise
+  // survives a re-queue: when the inline hydrate below finishes with every
+  // encode slot taken, the job falls back to 'queued' and a LATER
+  // startConversionJob run for the same id settles the SAME promise.
+  // `resolve`/`reject` keep their old names so the body reads unchanged.
+  const waiter = getJobWaiter(id)
+  if (onProgress) waiter.progress.add(onProgress)
+  const done = waiter.promise
+  const resolve = () => settleJobDone(id)
+  const reject = (err: Error) => settleJobError(id, err)
+  {
     const handleComplete = () => {
       const cur = jobs.get(id)!
       // For replaceInput jobs the output is a temp file — swap it into the
@@ -848,6 +941,25 @@ export async function startConversionJob(
             resolve()
             return
           }
+          // Hydrated — re-check the cap before encoding (CONV-2). This
+          // job's slot was up for grabs while it sat in 'downloading'
+          // (hydration deliberately holds no encode slot), so other jobs
+          // may have filled the lanes; barging into 'running' here was
+          // the cap leak behind over-cap archive batches. Fall back into
+          // the queue as an autoStart job — the scheduler starts it when
+          // a slot frees, and the SAME waiter settles the original
+          // caller's done promise then.
+          if ([...jobs.values()].filter(j => j.id !== id && isActiveJob(j)).length >= getMaxConcurrentConversions()) {
+            const cur = jobs.get(id)
+            if (cur) {
+              jobs.set(id, { ...cur, status: 'queued', autoStart: true })
+              persistPendingJobs()
+              notifyAll('converter:jobStatus', { jobId: id, status: 'queued', autoStart: true })
+            }
+            cancellers.delete(id)
+            scheduleNext()
+            return
+          }
           setStatus('running')
         }
 
@@ -875,7 +987,7 @@ export async function startConversionJob(
         handleError(err instanceof Error ? err : new Error(String(err)))
       }
     })()
-  })
+  }
 
   return { id, done }
 }
@@ -1142,9 +1254,10 @@ export function registerConverterIPC(): void {
   })
 
   ipcMain.handle('converter:addToQueue', async (_event, job: ConversionJob) => {
-    const { id, done } = await startConversionJob(job)
-    // Don't await `done` — the renderer gets completion via the broadcast 'converter:jobComplete' event.
-    done.catch(() => { /* error broadcast separately */ })
+    // Through the scheduler, never straight into startConversionJob — the
+    // concurrency cap applies to every path (CONV-2). The renderer gets
+    // completion via the broadcast 'converter:jobComplete' event as before.
+    const { id } = enqueueRunnableJob(job)
     return id
   })
 
@@ -1171,8 +1284,15 @@ export function registerConverterIPC(): void {
   ipcMain.handle('converter:startQueued', async (_event, jobId: string) => {
     const existing = jobs.get(jobId)
     if (!existing || existing.status !== 'queued') return
-    const { done } = await startConversionJob(existing)
-    done.catch(() => { /* error broadcast separately */ })
+    // Mark runnable and let the scheduler start it when a slot is free
+    // (immediately, if one is) — a direct startConversionJob here was one
+    // of the CONV-2 cap bypasses. The autoStart flag also flips the
+    // renderer row from its Start button to the waiting state.
+    jobs.set(jobId, { ...existing, autoStart: true })
+    persistPendingJobs()
+    notifyAll('converter:jobStatus', { jobId, status: 'queued', autoStart: true })
+    enqueueHydrate(jobId)
+    scheduleNext()
   })
 
   ipcMain.handle('converter:addClipToQueue', async (event, params: {
@@ -1506,6 +1626,11 @@ export function registerConverterIPC(): void {
       const wasQueued = j.status === 'queued'
       jobs.set(jobId, { ...j, status: 'cancelled' })
       if (wasQueued) persistPendingJobs()
+      // Settle any done-waiter (cancel resolves, it is a user action, not
+      // an error) — essential for jobs cancelled while still QUEUED, whose
+      // startConversionJob paths never ran to settle it. No-op if the
+      // running path already settled.
+      settleJobDone(jobId)
       const config = getStore().get('config')
       // The renderer surfaces (session videos, files grid) hide the output
       // while the job is writing — on cancel the job leaves that state, so
@@ -1556,6 +1681,7 @@ export function registerConverterIPC(): void {
       const wasQueued = j.status === 'queued'
       jobs.set(j.id, { ...j, status: 'cancelled' })
       if (wasQueued) persistPendingJobs()
+      settleJobDone(j.id)
       if (j.replaceInput && j.outputFile) {
         deleteWithRetry(j.outputFile, 'archive temp file (cancel-group)')
       }
@@ -1627,6 +1753,9 @@ export function registerConverterIPC(): void {
     pausers.delete(jobId)
     resumers.delete(jobId)
     downloadCancelFlags.delete(jobId)
+    // A removed queued job will never run — settle any done-waiter so an
+    // auto-rule (or other caller) awaiting it doesn't hang forever.
+    settleJobDone(jobId)
     if (j.status === 'queued') persistPendingJobs()
   })
 }

@@ -8,6 +8,10 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - After pushing a video in a category with a Studio-only field (like Gaming's Game), a reminder now stays in the sidebar until it's marked done, instead of only the brief banner that was easy to miss. It appears a few minutes after the push (no nag if the field gets set right away) and never returns once marked done for that video.
 
+## Converter
+
+- The max simultaneous conversions setting is now enforced everywhere. Manually started conversions, auto-rule conversions, and archive batches whose files just finished downloading from the cloud all wait for a free slot instead of piling on. Waiting items show a "Waiting" state and start automatically, in order, as slots free up.
+
 ## Under the hood
 
 - The app's accent color classes are named honestly now: the internal "purple" class family (which actually rendered the slate accent) is renamed accent-*, and Tailwind's real purple is back for things that are genuinely purple, like the Purple tag color. No visual change anywhere.

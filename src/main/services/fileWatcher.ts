@@ -579,7 +579,7 @@ class FileWatcher {
       }
     } else if (rule.action === 'convert') {
       if (!rule.conversionPresetId) throw new Error('No conversion preset configured')
-      const { getPresetById, startConversionJob, addPendingJob } = await import('../ipc/converter')
+      const { getPresetById, enqueueRunnableJob, addPendingJob } = await import('../ipc/converter')
       const preset = getPresetById(rule.conversionPresetId)
       if (!preset) throw new Error(`Conversion preset not found: ${rule.conversionPresetId}`)
 
@@ -604,7 +604,10 @@ class FileWatcher {
       const jobStub = { id: '', inputFile: filePath, outputFile: outputPath, preset, status: 'queued' as const, progress: 0 }
 
       if (rule.startImmediately) {
-        const { done } = await startConversionJob(jobStub, onProgress)
+        // Through the scheduler (CONV-2): the job may wait for a free
+        // encode slot; `done` settles when the conversion itself finishes
+        // (or the job is cancelled/removed while waiting).
+        const { done } = enqueueRunnableJob(jobStub, onProgress)
         await done
       } else {
         // Add to converter queue for manual start; rule is 'applied' as soon as the job is queued.

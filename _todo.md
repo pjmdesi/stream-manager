@@ -69,7 +69,7 @@
 - **STR-13** [bug] [ui] [done]
   Stream tites in the stream item row info column are conditionally rendering spaces as the first character of a new line when wrapping occurs. Seems to happen when the space immediately follows a "|" character. We fixed this for the stream item detail sidebar title, and I thought we had fixed it for these elements as well, but I might be misrememebering.
 
-- **STR-14**
+- **STR-14** [done]
   For the game category: even with the reminder to edit the game title in the banner after a push to YouTube, I still missed doing this for 3 streams in a row. I think I got used to the banner. I know we can't push this info through SM, but would it be possible to read it? We could see if it has been properly filled, and if not show a persistent (but dismissable) message in the same place as the reminder (it would have to wait a little bit, so it doesn't show immediately).
 
 - **IDEA-1** [needs-design]

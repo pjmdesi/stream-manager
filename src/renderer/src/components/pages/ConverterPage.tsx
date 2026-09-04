@@ -402,6 +402,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
       audioTrackIndex: isAudioPreset(preset) && (audioTracksByPath[file.path]?.length ?? 0) > 1
         ? (file.audioTrackIndex ?? 0)
         : undefined,
+      // Started-by-the-user jobs are scheduler-runnable from birth; the flag
+      // must be on the OPTIMISTIC row too, since the jobAdded broadcast
+      // dedupes against it (the row would otherwise show a Start button
+      // while genuinely waiting for a slot).
+      autoStart: true,
     }
     // Update the UI synchronously — add to Converting and drop from the ready
     // list in the same tick — before awaiting the IPC, so the row never shows
@@ -438,6 +443,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         audioTrackIndex: isAudioPreset(preset) && (audioTracksByPath[file.path]?.length ?? 0) > 1
           ? (file.audioTrackIndex ?? 0)
           : undefined,
+        autoStart: true,
       })
       startedPaths.add(file.path)
     }
@@ -666,11 +672,19 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         {/* Right: action buttons — same scheme as the ready-files rows (neutral
             at rest, color on hover, label collapses to icon-only as it narrows). */}
         <div className="self-center flex flex-row items-center justify-center gap-1 shrink-0">
-          {job.status === 'queued' && (
+          {job.status === 'queued' && !job.autoStart && (
             <button onClick={() => window.api.startQueuedJob(job.id)} className={ROW_ACTION_GREEN}>
               <Play size={13} />
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
             </button>
+          )}
+          {job.status === 'queued' && job.autoStart && (
+            <Tooltip content="Waiting for a free conversion slot (max simultaneous conversions in Settings). Starts automatically when one frees up." side="top">
+              <span className="inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-400 cursor-default">
+                <Clock size={13} />
+                <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Waiting</CollapsibleLabel>
+              </span>
+            </Tooltip>
           )}
           {isActive && (
             <button

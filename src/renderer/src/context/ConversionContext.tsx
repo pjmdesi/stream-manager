@@ -75,8 +75,13 @@ export function ConversionProvider({ children }: { children: React.ReactNode }) 
         return { ...j, progress: percent, status: next }
       }))
     })
-    const unsubStatus = window.api.onJobStatus(({ jobId, status }) => {
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status } : j))
+    const unsubStatus = window.api.onJobStatus(({ jobId, status, autoStart }) => {
+      // autoStart rides along on queued-state notifications (manual Start
+      // with no free slot, a hydrated job re-queued at the cap) so the row
+      // can swap its Start button for the waiting state.
+      setJobs(prev => prev.map(j => j.id === jobId
+        ? { ...j, status, ...(autoStart !== undefined ? { autoStart } : {}) }
+        : j))
     })
     const unsubComplete = window.api.onJobComplete(({ jobId }: { jobId: string }) => {
       const elapsed = jobElapsed.current.get(jobId)
