@@ -1,5 +1,5 @@
 import { ipcMain, WebContents } from 'electron'
-import { dehydrateOnePath, hydrateOnePath, isCfApiSyncRoot, DEHYDRATE_CONCURRENCY, HYDRATE_CONCURRENCY } from '../services/cfapi'
+import { dehydrateOnePath, dehydratePaths, hydrateOnePath, isCfApiSyncRoot, DEHYDRATE_CONCURRENCY, HYDRATE_CONCURRENCY } from '../services/cfapi'
 import { getProtectedPaths, pauseStreamsWatcher } from './streams'
 import { getStore } from './store'
 
@@ -71,6 +71,13 @@ interface Unit {
 const unitQueue: Record<Direction, Unit[]> = { offload: [], hydrate: [] }
 const activeWorkers: Record<Direction, number> = { offload: 0, hydrate: 0 }
 const liveBatches: Record<Direction, Set<BatchState>> = { offload: new Set(), hydrate: new Set() }
+// Paths whose CFAPI call is in flight RIGHT NOW. Cancel-pin uses this to
+// abort active hydrations (a dehydrate command cancels an in-progress
+// recall — the only control CFAPI offers, the same trick the converter's
+// cancel uses); mere batch-stamping only ever skipped the queued units,
+// which made Cancel a no-op for any batch small enough to be entirely
+// in flight.
+const inFlightPaths: Record<Direction, Set<string>> = { offload: new Set(), hydrate: new Set() }
 
 function safeSend(sender: WebContents, channel: string, payload: unknown): void {
   // The sender's window may have closed between events. Guard so a stale
@@ -141,9 +148,11 @@ async function worker(direction: Direction): Promise<void> {
       safeSend(b.sender, 'cloud-sync:progress', {
         type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'running',
       })
+      inFlightPaths[direction].add(unit.path)
       const res = direction === 'offload'
         ? await dehydrateOnePath(unit.path)
         : await hydrateOnePath(unit.path)
+      inFlightPaths[direction].delete(unit.path)
       if (res.outcome === 'ok') {
         b.ok += 1
         safeSend(b.sender, 'cloud-sync:progress', {
@@ -154,6 +163,10 @@ async function worker(direction: Direction): Promise<void> {
         safeSend(b.sender, 'cloud-sync:progress', {
           type: 'item', direction, batchId: b.batchId, path: unit.path, status: res.outcome,
         })
+      } else if (b.cancelled) {
+        // Aborted mid-hydrate by the cancel's dehydrate — not a real
+        // failure. No item event; the batch's complete(cancelled) promotes
+        // the row to 'cancelled'.
       } else {
         b.failed += 1
         safeSend(b.sender, 'cloud-sync:progress', {
@@ -221,6 +234,32 @@ export function registerCloudSyncIPC(): void {
   })
   ipcMain.handle('cloud-sync:cancel-pin', () => {
     for (const b of liveBatches.hydrate) b.cancelled = true
+    // Abort hydrations that are ALREADY in flight: a dehydrate command
+    // cancels an in-progress recall (the converter's cancel established
+    // the pattern, including the watcher pause — Synology rejects
+    // CfDehydratePlaceholder while the streams watcher's directory
+    // handles are open). Short retries cover the transfer's own
+    // transient handles; best-effort throughout.
+    const targets = [...inFlightPaths.hydrate]
+    if (targets.length > 0) {
+      void (async () => {
+        try {
+          const restartWatcher = await pauseStreamsWatcher()
+          try {
+            for (const delay of [0, 1000, 3000]) {
+              if (delay) await new Promise(r => setTimeout(r, delay))
+              const still = targets.filter(p => inFlightPaths.hydrate.has(p))
+              if (still.length === 0) return
+              await dehydratePaths(still, () => {}, () => false)
+            }
+          } finally {
+            restartWatcher()
+          }
+        } catch (err) {
+          console.warn('[cloud-sync] hydration abort failed:', err)
+        }
+      })()
+    }
     // Converter-triggered hydrations show in the same widget list, so the
     // cancel covers them too (their batches are synthetic, not in
     // liveBatches — the converter routes each job through its own

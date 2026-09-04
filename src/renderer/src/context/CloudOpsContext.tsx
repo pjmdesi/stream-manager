@@ -76,6 +76,21 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
   // the error visible while respecting a user who closes the modal mid-batch.
   const failurePoppedBatches = useRef<Set<string>>(new Set())
 
+  // Starting an op on a path drops that path's TERMINAL rows from the
+  // OPPOSITE direction's list. The files grid derives its icons from both
+  // lists, and a lingering terminal row kept re-asserting its stale status
+  // — e.g. a done hydrate row from a converter download made a later
+  // offload of the same file look ignored (the icon stayed "local").
+  // Terminal rows only; an actually-active opposite op is a real conflict
+  // that should stay visible.
+  const purgeOppositeRows = useCallback((direction: CloudOpDirection, paths: string[]) => {
+    const setter = direction === 'offload' ? setHydrateItems : setOffloadItems
+    const set = new Set(paths)
+    setter(prev => prev.some(it => set.has(it.path) && isTerminal(it.status))
+      ? prev.filter(it => !(set.has(it.path) && isTerminal(it.status)))
+      : prev)
+  }, [])
+
   // Listen for progress events from main. One listener for the lifetime of
   // the provider — events carry direction + batchId so we route them to the
   // right queue regardless of how many batches are concurrently in flight.
@@ -89,6 +104,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
         // cache all see the download exactly like a user-initiated pin.
         // No modal pop; the widget's presence is the announcement.
         if (ev.external) {
+          purgeOppositeRows(ev.direction, ev.external.files.map(f => f.path))
           const rows: CloudOpItem[] = ev.external.files.map(f => ({
             path: f.path,
             name: basename(f.path),
@@ -144,7 +160,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
       }
     })
     return () => unsub()
-  }, [])
+  }, [purgeOppositeRows])
 
   // Derive active flags from queue contents. A direction is "active" iff it
   // has any row not yet in a terminal state.
@@ -176,6 +192,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
 
   const enqueueOffload = useCallback((files: { path: string; size: number }[], openModal = true) => {
     if (files.length === 0) return
+    purgeOppositeRows('offload', files.map(f => f.path))
     const batchId = makeBatchId('offload')
     const newRows: CloudOpItem[] = files.map(f => ({
       path: f.path,
@@ -202,10 +219,11 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
           : it))
       setModalOpen(true)
     })
-  }, [])
+  }, [purgeOppositeRows])
 
   const enqueueHydrate = useCallback((files: { path: string; size: number }[], openModal = true) => {
     if (files.length === 0) return
+    purgeOppositeRows('hydrate', files.map(f => f.path))
     const batchId = makeBatchId('hydrate')
     const newRows: CloudOpItem[] = files.map(f => ({
       path: f.path,
@@ -227,10 +245,11 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
           : it))
       setModalOpen(true)
     })
-  }, [])
+  }, [purgeOppositeRows])
 
   const retryItem = useCallback((item: CloudOpItem) => {
     if (item.status !== 'failed') return
+    purgeOppositeRows(item.direction, [item.path])
     const batchId = makeBatchId(item.direction)
     const setter = item.direction === 'offload' ? setOffloadItems : setHydrateItems
     // Reset the row under a fresh batch id so incoming events route to it —
@@ -246,7 +265,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
           ? { ...it, status: 'failed' as CloudOpItemStatus, reason: item.direction === 'offload' ? 'Could not start the offload' : 'Could not start the download' }
           : it))
     })
-  }, [])
+  }, [purgeOppositeRows])
 
   const cancelOffload = useCallback(() => {
     if (!offloadActive || offloadCancelling) return

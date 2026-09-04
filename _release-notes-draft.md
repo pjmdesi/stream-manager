@@ -16,6 +16,12 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - Conversions that need to download their file from the cloud now announce it the same way pinning files locally does: per-file rows in the cloud sync widget, live cloud-status icons and spinners in the files grid, and converter row thumbnails appearing as soon as the file lands. The widget's Cancel stops converter downloads too.
 - The link back to the source stream on conversion rows now shows for every job whose file lives in a stream folder, including archive jobs, clip exports, and jobs restored after a restart, and it displays the stream's title (falling back to the folder date when there is none). Files from outside the library still show no link, as intended.
 
+## Cloud sync
+
+- Cancelling downloads now actually stops files that are mid-download, not just the ones still waiting their turn. Previously a small batch could be entirely in flight the moment Cancel was clicked, leaving the button stuck on "Cancelling" while everything finished anyway.
+- Cloud status icons in the files grid no longer get stuck on a stale state after opposite operations on the same file (like offloading a file that was downloaded earlier in the session).
+- Quitting while a conversion is running now cleans up the partial output file it leaves behind; if the sync client briefly locks the file, the cleanup finishes on the next launch instead of leaving a corrupt file in the stream folder.
+
 ## Under the hood
 
 - The app's accent color classes are named honestly now: the internal "purple" class family (which actually rendered the slate accent) is renamed accent-*, and Tailwind's real purple is back for things that are genuinely purple, like the Purple tag color. No visual change anywhere.

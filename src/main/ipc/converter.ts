@@ -449,6 +449,63 @@ export function parkInFlightJobsForQuit(): void {
   persistPendingJobs()
 }
 
+// Partial conversion outputs a quit could strand. The quit path deletes
+// them best-effort within a short window, but a sync client (Synology
+// analyzing the file SM just stopped writing) can hold a lock longer than
+// a closing app can wait — so the list persists and the NEXT launch sweeps
+// the stragglers with the full retry ladder.
+const QUIT_PARTIALS_KEY = 'quitPartialOutputs'
+
+/** Quit-time conversion teardown. The snapshot, the kills, the parking,
+ *  and the partials-list persist all happen SYNCHRONOUSLY in one tick —
+ *  a killed ffmpeg's close event fires no earlier than the next tick, so
+ *  statuses can't flip to 'error' under the park. Only the bounded
+ *  best-effort deletion of partial outputs awaits; anything a sync
+ *  client still holds locked stays in the persisted list for the next
+ *  launch's sweep. */
+export async function prepareConverterForQuit(timeoutMs = 4000): Promise<void> {
+  const encoding = [...jobs.values()].filter(j =>
+    j.status === 'running' || j.status === 'replacing' || j.status === 'paused')
+  for (const j of encoding) {
+    const cancel = cancellers.get(j.id)
+    try { cancel?.() } catch { /* dying process — best effort */ }
+  }
+  // Downloads die with the process; flip their flags anyway so any loop
+  // that gets a tick before close exits cleanly.
+  for (const flag of downloadCancelFlags.values()) flag.cancelled = true
+  parkInFlightJobsForQuit()
+  const partials = [...new Set(encoding.filter(j => j.outputFile).map(j => j.outputFile))]
+  if (partials.length === 0) return
+  // Persist FIRST so a lock (or anything else) can't lose the list.
+  getStore().set(QUIT_PARTIALS_KEY, partials)
+  const deadline = Date.now() + timeoutMs
+  const remaining: string[] = []
+  for (const p of partials) {
+    let deleted = false
+    while (Date.now() < deadline) {
+      try {
+        if (!fs.existsSync(p)) { deleted = true; break }
+        fs.unlinkSync(p)
+        deleted = true
+        break
+      } catch {
+        await new Promise(r => setTimeout(r, 250))
+      }
+    }
+    if (!deleted) remaining.push(p)
+  }
+  getStore().set(QUIT_PARTIALS_KEY, remaining)
+}
+
+/** Next-launch half of the quit cleanup: sweep partials a closing app
+ *  could not delete (sync-client locks release long before this runs). */
+function sweepQuitPartials(): void {
+  const leftovers = (getStore().get(QUIT_PARTIALS_KEY, []) as string[]) || []
+  if (leftovers.length === 0) return
+  getStore().set(QUIT_PARTIALS_KEY, [])
+  for (const p of leftovers) deleteWithRetry(p, 'quit-stranded partial output')
+}
+
 export function restorePendingJobs(): void {
   const persisted = (getStore().get(PENDING_JOBS_KEY, []) as ConversionJob[]) || []
   let dropped = 0
@@ -1224,6 +1281,8 @@ export function getActiveConversionCounts(): { running: number; queued: number }
 export function registerConverterIPC(): void {
   // Restore queued jobs persisted from a previous session
   restorePendingJobs()
+  // Delete partial outputs the previous quit could not (sync-client locks).
+  sweepQuitPartials()
 
   ipcMain.handle('converter:getBuiltinPresets', async () => BUILTIN_PRESETS)
 

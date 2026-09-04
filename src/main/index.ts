@@ -104,7 +104,7 @@ if (!app.isPackaged) {
 import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
-import { registerConverterIPC, getConverterStatus, getActiveConversionCounts, parkInFlightJobsForQuit } from './ipc/converter'
+import { registerConverterIPC, getConverterStatus, getActiveConversionCounts, prepareConverterForQuit } from './ipc/converter'
 import { registerStoreIPC, getStore, setConfigPartial } from './ipc/store'
 import { registerStreamsIPC, backupMetaOnQuit } from './ipc/streams'
 import { registerCombineIPC } from './ipc/combine'
@@ -507,9 +507,10 @@ app.whenReady().then(() => {
   })
   ipcMain.on('app:proceedQuit', async () => {
     confirmedClose = true
-    // Standalone conversions the quit is about to kill come back parked
-    // on the next launch, same as the jobs that were merely waiting.
-    parkInFlightJobsForQuit()
+    // Converter teardown: kills in-flight encodes, parks standalone jobs
+    // for the next launch, and clears partial outputs (bounded
+    // best-effort; still-locked files are swept next launch).
+    await prepareConverterForQuit()
     // Abort in-flight watcher copies and sweep their partial destination
     // files while the process is still alive to do it.
     await fileWatcher.abortAllInFlight()
