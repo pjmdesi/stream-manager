@@ -24,7 +24,6 @@ import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
 import { Checkbox } from '../ui/Checkbox'
-import { NumberInput } from '../ui/Input'
 import { VideoRow } from '../ui/VideoRow'
 import { isClipExportCompatible } from '../../lib/clipExport'
 import { renderStreamTitle } from '../../lib/streamTitle'
@@ -430,6 +429,55 @@ function TrackColorPicker({
       </div>
     </div>,
     document.body
+  )
+}
+
+// ── Crop toolbar number field ────────────────────────────────────────────────
+
+/** Micro number field for the clip toolbar's crop x/y/w/h. Deliberately NOT
+ *  the NumberInput primitive (a sanctioned consistency exception): the
+ *  toolbar's density demands the original 16px-tall, 10px-text styling,
+ *  which the primitive's chrome can't shrink to. It still follows the
+ *  primitive's BEHAVIOR contract — +/- spinners, arrow keys, Shift = x10
+ *  (APP-22), preventDefault against native stepping — just at micro scale.
+ *  Clamping beyond `min` lives in the callers' setters. */
+function CropNumberInput({ value, onChange, min, disabled, ariaLabel }: {
+  value: number
+  onChange: (v: number) => void
+  min?: number
+  disabled?: boolean
+  ariaLabel: string
+}) {
+  const clampMin = (n: number) => (min !== undefined ? Math.max(min, n) : n)
+  const stepBy = (dir: 1 | -1, shift: boolean) => onChange(clampMin(value + dir * (shift ? 10 : 1)))
+  const spinCls = 'flex-1 flex items-center justify-center w-3 bg-navy-800 border border-l-0 border-white/10 text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-navy-800 disabled:hover:text-gray-400'
+  return (
+    <div className="flex items-stretch">
+      <input
+        type="number"
+        value={value}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) onChange(clampMin(v)) }}
+        onKeyDown={e => {
+          if (e.key === 'ArrowUp') { e.preventDefault(); stepBy(1, e.shiftKey) }
+          else if (e.key === 'ArrowDown') { e.preventDefault(); stepBy(-1, e.shiftKey) }
+        }}
+        className="w-10 px-0.5 py-0 text-[10px] tabular-nums text-right bg-navy-800 border border-r-0 border-white/10 rounded-l text-gray-200 focus:outline-none focus:border-blue-400/40 disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      <div className="flex flex-col shrink-0">
+        <Tooltip content="+1 (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
+          <button type="button" tabIndex={-1} disabled={disabled} onClick={e => stepBy(1, e.shiftKey)} className={`${spinCls} border-b-0 rounded-tr`} aria-label="Increment">
+            <ChevronUp size={7} strokeWidth={3} />
+          </button>
+        </Tooltip>
+        <Tooltip content="-1 (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
+          <button type="button" tabIndex={-1} disabled={disabled} onClick={e => stepBy(-1, e.shiftKey)} className={`${spinCls} rounded-br`} aria-label="Decrement">
+            <ChevronDown size={7} strokeWidth={3} />
+          </button>
+        </Tooltip>
+      </div>
+    </div>
   )
 }
 
@@ -4670,23 +4718,22 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           <div className={`flex items-center gap-1 ${disabled ? 'opacity-50' : ''}`}>
                             {/* 2×2 grid: x/y on top, w/h below — frees up
                                 horizontal space the toolbar needs at narrow
-                                window widths. NumberInput primitive for the
-                                +/- spinner consistency rule; its Shift = x10
-                                keyboard stepping rides along (APP-22). The
-                                setters clamp internally, so no min/max
-                                except the >0 floor on dimensions. */}
+                                window widths. CropNumberInput: the micro
+                                spinner variant of the NumberInput behavior
+                                (see its comment); setters clamp internally,
+                                so no min except the >0 floor on dimensions. */}
                             <div className="flex flex-col gap-0.5">
                               <div className="flex items-center gap-1">
                                 <span className={labelCls}>x</span>
-                                <NumberInput value={offsetX} onChange={setOffsetX} disabled={disabled} className="w-16" aria-label="Crop offset X" />
+                                <CropNumberInput value={offsetX} onChange={setOffsetX} disabled={disabled} ariaLabel="Crop offset X" />
                                 <span className={labelCls}>y</span>
-                                <NumberInput value={offsetY} onChange={setOffsetY} disabled={disabled} className="w-16" aria-label="Crop offset Y" />
+                                <CropNumberInput value={offsetY} onChange={setOffsetY} disabled={disabled} ariaLabel="Crop offset Y" />
                               </div>
                               <div className="flex items-center gap-1">
                                 <span className={labelCls}>w</span>
-                                <NumberInput value={dispW} onChange={setWidth} min={1} disabled={disabled} className="w-16" aria-label="Crop width" />
+                                <CropNumberInput value={dispW} onChange={setWidth} min={1} disabled={disabled} ariaLabel="Crop width" />
                                 <span className={labelCls}>h</span>
-                                <NumberInput value={dispH} onChange={setHeight} min={1} disabled={disabled} className="w-16" aria-label="Crop height" />
+                                <CropNumberInput value={dispH} onChange={setHeight} min={1} disabled={disabled} ariaLabel="Crop height" />
                               </div>
                             </div>
                             <button

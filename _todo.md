@@ -156,6 +156,9 @@
   - Let's move the "enable multi-track audio" and its disable button to the sidebar. The disable button should then be styled more like a close button (red, button size/style). The text for each should then change to open/close instead of enable/disable. That way it is more of a mode toggle like the clipping mode is. It should go right above the clipping mode button.
   - If possible, for the clip region start/end markers, if possible, the glow should only show on the outside of the markers, so it's not glowing inside the region. So for the start marker, the glow would only show on the left (and maybe top/bottom), and for the end marker, it would be on the right.
 
+- **PLR-14** [investigate] [ui]
+  Rethink the bleep marker design in the clip timeline (2026-09-06). They work, but the design predates the timeline polish that regions and markers have since received (attached pills, matched selection blues, pixel-snapped edges, hover states) and it shows: plain black boxes spanning the waveform area, a floating length popup, and z-order juggling against the multi-track rows (currently z-42 so they stay grabbable above the hover-lifted rows). Questions for the pass: should bleeps get hover/selection states and attached-style labels like regions; should the length popup become an attached pill; are the 0.25s minimum and 10s cap right; and how they should read when overlapping multi-track rows. Low personal usage, but bleep users deserve the same care as the rest of the clip tools.
+
 ### Thumbnail editor
 
 - **THU-1**
