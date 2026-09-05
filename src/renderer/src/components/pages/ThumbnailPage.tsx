@@ -29,6 +29,7 @@ import type { PendingThumbnailStream } from '../../context/ThumbnailEditorContex
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
+import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { theme, rgba } from '../../theme'
 import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
 import { Modal } from '../ui/Modal'
@@ -2198,6 +2199,70 @@ function GradientFillControl({ layer, update, fallback }: {
   const space = layer.gradientColorSpace ?? 'oklch'
   const angle = layer.gradientAngle ?? 0
 
+  const anim = useAnimationConfig()
+  // Rows display in STOP ORDER (top of the bar first) while the ARRAY
+  // keeps insertion order — stable keys (the array index) preserve editing
+  // focus and undo identity while rows re-sort, and give the swap
+  // animation real elements to move (THU-7 round 2; supersedes the old
+  // never-resort decision, whose row-jump objection the FLIP animation
+  // resolves). Ties keep insertion order so equal positions don't jitter.
+  const sortedOrder = stops
+    .map((st, origIdx) => ({ st, origIdx }))
+    .sort((a, b) => a.st.pos - b.st.pos || a.origIdx - b.origIdx)
+  // origIdx → sorted row slot. The SVG track renders in STABLE array
+  // order and only reads row targets from this map: reordering keyed SVG
+  // nodes moves them in the DOM, and a moved node loses its pointer
+  // capture — that's what broke a slow drag the moment it crossed a
+  // neighbor and the rows swapped.
+  const rowOf = new Map(sortedOrder.map((o, r) => [o.origIdx, r]))
+  // Blender-style smart add anchors on the most recently touched stop.
+  const lastTouchedRef = useRef<number | null>(null)
+  // Stable per-stop identities for row keys and FLIP. Array indices shift
+  // on delete, which made React unmount the LAST index's row and
+  // re-content every row after the deleted one — the wrong row visibly
+  // vanished. Ids live only in this control: our own add/remove handlers
+  // adjust them in place (so those animate correctly), and any EXTERNAL
+  // count change (undo/redo, swatch apply, layer switch) regenerates them
+  // — those redraws are instant, which is fine.
+  const stopIdsRef = useRef<{ layerId: string; ids: number[] }>({ layerId: '', ids: [] })
+  const nextStopIdRef = useRef(1)
+  if (stopIdsRef.current.layerId !== layer.id || stopIdsRef.current.ids.length !== stops.length) {
+    stopIdsRef.current = { layerId: layer.id, ids: stops.map(() => nextStopIdRef.current++) }
+  }
+  const stopIds = stopIdsRef.current.ids
+  // FLIP the rows: any row whose offsetTop changed since the last render
+  // glides to its new slot. Measured every render — a handful of rows.
+  const rowElsRef = useRef(new Map<number, HTMLDivElement>())
+  const rowTopsRef = useRef(new Map<number, number>())
+  const rowsSeenRef = useRef(false)
+  useLayoutEffect(() => {
+    const tops = rowTopsRef.current
+    const firstRender = !rowsSeenRef.current
+    rowsSeenRef.current = true
+    rowElsRef.current.forEach((el, key) => {
+      const top = el.offsetTop
+      const prev = tops.get(key)
+      if (!anim.noAnimation) {
+        if (prev === undefined && !firstRender) {
+          // Freshly added row: fade in so the insertion reads clearly
+          // (the neighbors' FLIP glide shows where it pushed them).
+          el.style.transition = 'none'
+          el.style.opacity = '0'
+          void el.offsetHeight
+          el.style.transition = `opacity ${anim.duration(200)}ms linear`
+          el.style.opacity = ''
+        } else if (prev !== undefined && prev !== top) {
+          el.style.transition = 'none'
+          el.style.transform = `translateY(${prev - top}px)`
+          void el.offsetHeight
+          el.style.transition = `transform ${anim.duration(200)}ms linear`
+          el.style.transform = ''
+        }
+      }
+      tops.set(key, top)
+    })
+  })
+
   // Gradient recents capture: ANY committed gradient edit — stop color,
   // stop position, angle, blend space — records the whole gradient as one
   // swatch, tied per layer so a tweaking session updates a single entry.
@@ -2284,26 +2349,46 @@ function GradientFillControl({ layer, update, fallback }: {
   }, [gradPopOpen])
 
   const setStop = (idx: number, color: string) => {
+    lastTouchedRef.current = idx
     const next = stops.map((st, k) => (k === idx ? { ...st, color } : st))
     update({ gradientStops: next, ...(idx === 0 ? { fill: color } : {}) })
   }
   const setStopPos = (idx: number, pos: number) => {
+    lastTouchedRef.current = idx
     const clamped = Math.min(1, Math.max(0, pos))
     const next = stops.map((st, k) => (k === idx ? { ...st, pos: clamped } : st))
     update({ gradientStops: next })
     recordGradient({ stops: next })
   }
-  // New stops APPEND (rows keep array order — the design decision that
-  // rows never jump under the cursor) and take the gradient's own color
-  // at that position, so adding a stop doesn't change the ramp.
+  // New stops APPEND to the array (stable identity); the sorted display
+  // slots them into place. The color samples the gradient at the position
+  // so adding a stop doesn't change the ramp.
   const addStop = (pos: number) => {
     const clamped = Math.round(Math.min(1, Math.max(0, pos)) * 100) / 100
     const next = [...stops, { color: sampleGradientAt(stops, space, clamped), pos: clamped }]
+    lastTouchedRef.current = stops.length
+    stopIdsRef.current.ids = [...stopIds, nextStopIdRef.current++]
     update({ gradientStops: next })
     recordGradient({ stops: next })
   }
+  // Blender-style add: halfway between the last-touched stop and its
+  // neighbor ABOVE in the sorted rows (the top-most anchor uses the
+  // neighbor below instead). The new stop becomes the anchor, so repeated
+  // clicks keep subdividing.
+  const addStopSmart = () => {
+    const lt = lastTouchedRef.current
+    const anchorOrig = lt !== null && lt < stops.length ? lt : sortedOrder[sortedOrder.length - 1].origIdx
+    const rowIdx = sortedOrder.findIndex(o => o.origIdx === anchorOrig)
+    const neighborRow = rowIdx > 0 ? rowIdx - 1 : rowIdx + 1
+    const a = sortedOrder[rowIdx].st
+    const b = sortedOrder[neighborRow].st
+    addStop((a.pos + b.pos) / 2)
+  }
   const removeStop = (idx: number) => {
     if (stops.length <= 2) return
+    const lt = lastTouchedRef.current
+    if (lt !== null) lastTouchedRef.current = lt === idx ? null : lt > idx ? lt - 1 : lt
+    stopIdsRef.current.ids = stopIds.filter((_, k) => k !== idx)
     const next = stops.filter((_, k) => k !== idx)
     // fill keeps mirroring the FIRST stop (solid-mode / back-compat).
     update({ gradientStops: next, ...(idx === 0 ? { fill: next[0].color } : {}) })
@@ -2486,9 +2571,9 @@ function GradientFillControl({ layer, update, fallback }: {
                   viewBox={`0 0 ${TRACK_W} ${trackH}`}
                   style={{ overflow: 'visible' }}
                 >
-                  {stops.map((st, idx) => {
+                  {stops.map((st, origIdx) => {
                     const ay = Math.min(1, Math.max(0, st.pos)) * trackH
-                    const ry = idx * (ROW + GAP) + ROW / 2
+                    const ry = (rowOf.get(origIdx) ?? 0) * (ROW + GAP) + ROW / 2
                     const posFromEvent = (e: React.PointerEvent<SVGRectElement>): number | null => {
                       const svg = e.currentTarget.ownerSVGElement
                       if (!svg) return null
@@ -2497,7 +2582,7 @@ function GradientFillControl({ layer, update, fallback }: {
                       return Math.round(Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) * 100) / 100
                     }
                     return (
-                      <g key={idx}>
+                      <g key={stopIds[origIdx] ?? origIdx}>
                         <line x1={6} y1={ay} x2={TRACK_W} y2={ry} stroke="currentColor" strokeWidth={1} />
                         <path d={`M0 ${ay} L6 ${ay - 5} L6 ${ay + 5} Z`} fill="currentColor" />
                         {/* Invisible widened hit area so the 6px triangle
@@ -2505,7 +2590,9 @@ function GradientFillControl({ layer, update, fallback }: {
                             capture keeps the drag alive off the track;
                             update() folds the whole drag into ONE undo
                             entry (same patch key = one gesture), and the
-                            gradient swatch records once on release. */}
+                            gradient swatch records once on release.
+                            Crossing a neighbor mid-drag swaps the rows
+                            live (sorted display + FLIP). */}
                         <rect
                           x={-3}
                           y={ay - 8}
@@ -2515,19 +2602,20 @@ function GradientFillControl({ layer, update, fallback }: {
                           style={{ cursor: 'ns-resize' }}
                           onPointerDown={e => {
                             e.stopPropagation()
+                            lastTouchedRef.current = origIdx
                             e.currentTarget.setPointerCapture(e.pointerId)
                           }}
                           onPointerMove={e => {
                             if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
                             const pos = posFromEvent(e)
                             if (pos === null || pos === st.pos) return
-                            update({ gradientStops: stops.map((s2, k) => (k === idx ? { ...s2, pos } : s2)) })
+                            update({ gradientStops: stops.map((s2, k) => (k === origIdx ? { ...s2, pos } : s2)) })
                           }}
                           onPointerUp={e => {
                             if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
                             e.currentTarget.releasePointerCapture(e.pointerId)
                             const pos = posFromEvent(e) ?? st.pos
-                            recordGradient({ stops: stops.map((s2, k) => (k === idx ? { ...s2, pos } : s2)) })
+                            recordGradient({ stops: stops.map((s2, k) => (k === origIdx ? { ...s2, pos } : s2)) })
                           }}
                         />
                       </g>
@@ -2537,14 +2625,26 @@ function GradientFillControl({ layer, update, fallback }: {
               )
             })()}
             <div className="flex flex-col gap-1.5 flex-1 min-w-0 justify-between">
-              {stops.map((st, idx) => (
-                <div key={idx} className="flex items-center gap-1">
+              {sortedOrder.map(({ st, origIdx }) => (
+                <div
+                  key={stopIds[origIdx] ?? origIdx}
+                  // Inline ref callbacks fire null-then-element EVERY
+                  // render — the tops history must survive that, or FLIP
+                  // never sees a previous position (the missing-animation
+                  // bug). Element map only; stale top entries are inert.
+                  ref={el => {
+                    const uid = stopIds[origIdx] ?? origIdx
+                    if (el) rowElsRef.current.set(uid, el)
+                    else rowElsRef.current.delete(uid)
+                  }}
+                  className="flex items-center gap-1"
+                >
                 <div className="flex-1 min-w-0">
                 <ColorAlphaField
                   value={st.color}
                   fallback={fallback}
                   showHex
-                  onChange={c => setStop(idx, c)}
+                  onChange={c => setStop(origIdx, c)}
                   // Stored `pos` is the canonical distance along the
                   // gradient line (0 = line start = bar TOP at 0°), which
                   // is what CSS/Konva expect. The FIELD shows its
@@ -2555,7 +2655,7 @@ function GradientFillControl({ layer, update, fallback }: {
                   // lossy in binary floating point (1 - 0.7 renders as
                   // 0.30000000000000004 otherwise).
                   stopPos={Math.round((1 - st.pos) * 100) / 100}
-                  onStopPosChange={p => setStopPos(idx, Math.round((1 - p) * 100) / 100)}
+                  onStopPosChange={p => setStopPos(origIdx, Math.round((1 - p) * 100) / 100)}
                   // Stop commits feed the GRADIENT recents entry (whole
                   // snapshot), not solid recents. The committed color is
                   // spliced in HERE rather than read from `stops`: for
@@ -2566,14 +2666,14 @@ function GradientFillControl({ layer, update, fallback }: {
                   // caught, 2026-08-04). Only the native picker's change
                   // event fires late enough to see a fresh render.
                   onCommitColor={c => recordGradient({
-                    stops: stops.map((s2, k) => (k === idx ? { ...s2, color: c } : s2)),
+                    stops: stops.map((s2, k) => (k === origIdx ? { ...s2, color: c } : s2)),
                   })}
                 />
                 </div>
                 <Tooltip content={stops.length <= 2 ? 'A gradient needs at least two stops' : 'Remove this stop (the colors stay untouched elsewhere)'}>
                   <button
                     type="button"
-                    onClick={() => removeStop(idx)}
+                    onClick={() => removeStop(origIdx)}
                     disabled={stops.length <= 2}
                     className="p-0.5 rounded shrink-0 text-gray-500 transition-colors enabled:hover:text-red-400 enabled:hover:bg-red-500/10 disabled:opacity-30 disabled:cursor-not-allowed"
                   >
@@ -2584,6 +2684,20 @@ function GradientFillControl({ layer, update, fallback }: {
               ))}
             </div>
           </div>
+          {/* Blender-style add (THU-7 round 2): splits the gap above the
+              last-touched stop, sampling the gradient's color there so
+              the ramp doesn't change. Sits between the stops and the
+              angle/blend row — it acts on the stops list above it. */}
+          <Tooltip content="Add a stop halfway between the last edited stop and its neighbor above. Its color samples the gradient there, so the look doesn't change." triggerClassName="flex">
+            <button
+              type="button"
+              onClick={addStopSmart}
+              className="flex-1 flex items-center justify-center gap-1 py-1 rounded-md bg-navy-900 border border-white/10 text-[10px] text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+            >
+              <Plus size={11} />
+              Add stop
+            </button>
+          </Tooltip>
           <div className="grid grid-cols-2 gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Angle °</span>

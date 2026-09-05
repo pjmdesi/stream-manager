@@ -161,7 +161,7 @@
 - **THU-6** [ui]
   Add a subtle text link below the font family dropdown in the properties panel for text layers which will show the last used font family in the thumbnail editor. This will allow the user to easily pick the last used font family without having to scroll through the list of fonts. The link should say "Last used: [font family]" and when clicked, it will set the font family of the selected text layer to the last used font family. The last used font family should be stored in the app's settings so that it persists across sessions. If the user uses the dropdown and picks any font family, the link will hide and that font will then be the last used font family.
 
-- **THU-7**
+- **THU-7** [done]
   Multi-stop gradients (3+ stops): extends the 2-stop gradient shipped 2026-08-01. Most of the groundwork already generalizes: `gradientStops` is an array, `buildKonvaColorStops` (lib/gradient.ts) samples every consecutive pair, `cssGradientPreview` maps all stops, and the preview bar's SVG arrow track derives its height from `stops.length`. What's missing is purely the editing UI in `GradientFillControl`:
     a. An add-stop affordance. Clicking the preview bar is the natural one; the click's Y gives the new stop's position directly.
     b. A per-row remove button (floor of 2 stops).
