@@ -8,6 +8,10 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - After pushing a video in a category with a Studio-only field (like Gaming's Game), a reminder now stays in the sidebar until it's marked done, instead of only the brief banner that was easy to miss. It appears a few minutes after the push (no nag if the field gets set right away) and never returns once marked done for that video.
 
+## Player
+
+- The player timeline now shows markers. Press M (or the bookmark button in the playback controls) to add one at the playhead, click a marker to jump to it, and double-click to name it, change its color, or move it to an exact timecode. Chapters embedded in video files show up as markers too, including the ones OBS's Hybrid MP4 chapter hotkey writes during a stream. SM-added markers are saved in the stream's metadata next to the file; video files are never modified.
+
 ## Converter
 
 - The max simultaneous conversions setting is now enforced everywhere. Manually started conversions, auto-rule conversions, clip and Short exports from the player, and archive batches whose files just finished downloading from the cloud all wait for a free slot instead of piling on. Waiting items show a "Waiting" state and start automatically, in order, as slots free up.

@@ -58,11 +58,23 @@ export interface VideoInfo {
   /** Format-level `comment` container tag, if present. Carries the SM clip
    *  provenance marker on app-exported clips (see clipProvenanceComment). */
   comment?: string
+  /** Chapters embedded in the container (e.g. OBS Hybrid MP4 hotkey
+   *  chapters). Times in seconds from video start. Read-only — SM never
+   *  writes chapters into files. */
+  chapters?: ChapterInfo[]
+}
+
+export interface ChapterInfo {
+  start: number
+  end: number
+  title?: string
 }
 
 export async function probeFile(filePath: string): Promise<VideoInfo> {
   return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
+    // -show_chapters on top of the default streams+format sections —
+    // fluent-ffmpeg only populates metadata.chapters when asked.
+    ffmpeg.ffprobe(filePath, ['-show_chapters'], (err, metadata) => {
       if (err) {
         reject(new Error(`FFprobe error: ${err.message}`))
         return
@@ -93,6 +105,17 @@ export async function probeFile(filePath: string): Promise<VideoInfo> {
 
       const fmtTags = (metadata.format as { tags?: Record<string, string> }).tags
 
+      // Chapter times arrive as strings in ffprobe's JSON; entries that
+      // don't parse to a finite start are dropped (untrusted input —
+      // range clamping against the duration happens in the player).
+      const chapters: ChapterInfo[] = (metadata.chapters ?? [])
+        .map((c: { start_time?: string | number; end_time?: string | number; tags?: Record<string, string> }) => ({
+          start: Number(c.start_time),
+          end: Number(c.end_time),
+          title: c.tags?.title ?? c.tags?.TITLE,
+        }))
+        .filter(c => Number.isFinite(c.start))
+
       resolve({
         path: filePath,
         duration: metadata.format.duration || 0,
@@ -104,6 +127,7 @@ export async function probeFile(filePath: string): Promise<VideoInfo> {
         fps,
         videoBitrate,
         comment: fmtTags?.comment ?? fmtTags?.COMMENT,
+        chapters: chapters.length > 0 ? chapters : undefined,
       })
     })
   })

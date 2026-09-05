@@ -17,6 +17,15 @@ export interface VideoInfo {
   fps?: number
   /** Video stream bitrate in bits/sec from ffprobe (may be absent for some containers) */
   videoBitrate?: number
+  /** Chapters embedded in the container (e.g. OBS Hybrid MP4 hotkey
+   *  chapters), read-only. Times in seconds from video start. */
+  chapters?: ChapterInfo[]
+}
+
+export interface ChapterInfo {
+  start: number
+  end: number
+  title?: string
 }
 
 export interface FolderNode {
@@ -324,6 +333,26 @@ export interface ClipDraft {
   updatedAt: number     // ms epoch
 }
 
+/** A player timeline marker (IDEA-4). SM-added markers live here in the
+ *  stream's metadata — NEVER written into the video file — and merge at
+ *  display time with chapters read from the file itself. Saved under
+ *  `StreamMeta.videoMarkers`, keyed the same way as `videoMap`. */
+export interface VideoMarker {
+  id: string
+  /** Seconds from video start. Clamped to the video duration on create/edit. */
+  time: number
+  name?: string
+  /** Tag-color key (constants/tagColors). Absent = default marker color. */
+  color?: string
+  /** Set when this marker is a user edit of a file-embedded chapter: the
+   *  chapter's original start time in seconds (its identity). The display
+   *  merge hides the raw chapter and shows this marker instead, so the
+   *  file is never touched. */
+  chapterOf?: number
+  createdAt: number
+  updatedAt: number
+}
+
 /** The AI-suggestion surfaces in the stream detail sidebar — matches the
  *  field ids `claudeGenerate` is called with. Keys `aiRejectedSuggestions`
  *  in StreamMeta. */
@@ -343,6 +372,7 @@ export interface StreamMeta {
   archived?: boolean
   videoMap?: Record<string, VideoEntry>  // key = filename (not full path)
   clipDrafts?: Record<string, ClipDraft> // key = draft id
+  videoMarkers?: Record<string, VideoMarker[]> // key = videoMap-style relative path
   // YouTube
   ytVideoId?: string
   /** True when this stream was created by importing an existing YouTube video

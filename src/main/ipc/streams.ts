@@ -38,6 +38,16 @@ export interface ClipDraft {
   updatedAt: number
 }
 
+export interface VideoMarker {
+  id: string
+  time: number
+  name?: string
+  color?: string
+  chapterOf?: number
+  createdAt: number
+  updatedAt: number
+}
+
 export interface AudioTrackSetting {
   muted?: boolean
   solo?: boolean
@@ -61,6 +71,8 @@ export interface StreamMeta {
   preferredThumbnail?: string
   videoMap?: Record<string, VideoEntry>
   clipDrafts?: Record<string, ClipDraft>
+  // Player timeline markers keyed by videoMap-style relative path.
+  videoMarkers?: Record<string, VideoMarker[]>
   // Multi-track audio settings keyed by filename → trackIndex → settings.
   // Persisted so reopening a file restores the user's M/S/volume choices.
   audioSettings?: Record<string, Record<number, AudioTrackSetting>>
@@ -1544,6 +1556,23 @@ export function registerStreamsIPC(): void {
     // Mirror of clipDraft:save — the badge also clears promptly on delete.
     // (Drafts consumed by an export clear via the converter's scoped send.)
     notifyClipDraftChange(key)
+  })
+
+  // Replace one video's marker list in the folder's meta, preserving other
+  // videos' markers. Server-side merge mirrors clipDraft:save. Marker
+  // mutations are individual user actions (add / edit / delete — no
+  // autosave stream), and nothing outside the player renders markers yet,
+  // so no streams:changed announcement is needed.
+  ipcMain.handle('videoMarkers:save', async (_event, folderPath: string, videoKey: string, markers: VideoMarker[], metaKeyOverride?: string) => {
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    const allMeta = readAllMeta(streamsDir)
+    const existing = allMeta[key] ?? ({} as StreamMeta)
+    const all = { ...(existing.videoMarkers ?? {}) }
+    if (markers.length > 0) all[videoKey] = markers
+    else delete all[videoKey]
+    allMeta[key] = { ...existing, videoMarkers: all }
+    writeAllMeta(streamsDir, allMeta)
   })
 
   // Tag an exported clip's videoMap entry with clipOf + clipState so the user can reopen it

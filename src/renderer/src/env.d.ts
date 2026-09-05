@@ -14,6 +14,7 @@ import type {
   YouTubeImportVideo,
   DetectedStructure,
   ClipDraft,
+  VideoMarker,
   YTTitleTemplate,
   YTDescriptionTemplate,
   YTTagTemplate,
@@ -177,6 +178,7 @@ declare global {
       backfillThumbnailHashes(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<{ updated: number; skippedNoThumb: number }>
       saveClipDraft(folderPath: string, draft: ClipDraft, metaKey?: string): Promise<void>
       deleteClipDraft(folderPath: string, draftId: string, metaKey?: string): Promise<void>
+      saveVideoMarkers(folderPath: string, videoKey: string, markers: VideoMarker[], metaKey?: string): Promise<void>
       clipTagExport(folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null, metaKey?: string): Promise<void>
       listStreamTemplates(streamsDir: string): Promise<{ name: string; path: string }[]>
       createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder', sourceThumbName?: string): Promise<string>

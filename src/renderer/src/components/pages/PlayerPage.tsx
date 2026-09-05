@@ -1,7 +1,7 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward } from 'lucide-react'
-import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass } from '../../constants/tagColors'
+import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward, Bookmark, TriangleAlert } from 'lucide-react'
+import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass, getMarkerFillClass, DEFAULT_MARKER_COLOR } from '../../constants/tagColors'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useOpenItems } from '../../context/OpenItemsContext'
@@ -9,7 +9,7 @@ import { rememberHydrationOne } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { isAnyModalOpen } from '../../lib/shortcuts'
 import { useStore } from '../../hooks/useStore'
-import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry } from '../../types'
+import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry, VideoMarker } from '../../types'
 import { ThumbImage } from '../streams/ThumbImage'
 import { RecentRow } from '../ui/RecentRow'
 import { CloudDownloadModal } from '../streams/legacyStreamsShared'
@@ -405,6 +405,140 @@ function TrackColorPicker({
       </div>
     </div>,
     document.body
+  )
+}
+
+// ── Marker edit popup (IDEA-4) ────────────────────────────────────────────────
+
+/** How a displayed timeline marker relates to storage: 'sm' = plain SM marker
+ *  (deletable), 'chapter-edit' = SM override of a file-embedded chapter
+ *  (resettable to the file's version), 'chapter' = raw file chapter (read-only
+ *  until edited, which creates an override — the file is never touched). */
+type MarkerKind = 'sm' | 'chapter-edit' | 'chapter'
+
+/** Double-click popover for a timeline marker: color swatches, name, and a
+ *  placement timecode. Rendered inside the marker layer (not a portal) so it
+ *  tracks the strip's coordinate space like the clip handle popups do.
+ *  Commits are discrete: color on click, name/time on Enter or blur (arrow
+ *  keys in the timecode write through immediately, like other timecode
+ *  inputs on this page). */
+function MarkerEditPopup({
+  marker, kind, fps, duration, leftPct, onApply, onRemove, onClose,
+}: {
+  marker: VideoMarker
+  kind: MarkerKind
+  fps: number | undefined
+  duration: number
+  /** Horizontal position within the strips wrapper, pre-clamped by the caller. */
+  leftPct: number
+  onApply: (patch: Partial<Pick<VideoMarker, 'name' | 'color' | 'time'>>) => void
+  onRemove: () => void
+  onClose: () => void
+}) {
+  const popupRef = useRef<HTMLDivElement>(null)
+  const timeInputRef = useRef<HTMLInputElement>(null)
+  const [nameInput, setNameInput] = useState(marker.name ?? '')
+  const [timeInput, setTimeInput] = useState(formatViewTime(marker.time, fps))
+  // Re-seed local inputs only when the popup re-targets (chapter → its new
+  // override, or another marker) — not on every marker.time change, which
+  // would fight the user's typing mid-edit.
+  const markerId = marker.id
+  useEffect(() => {
+    setNameInput(marker.name ?? '')
+    setTimeInput(formatViewTime(marker.time, fps))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markerId])
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  const commitName = () => {
+    const trimmed = nameInput.trim()
+    if (trimmed !== (marker.name ?? '')) onApply({ name: trimmed || undefined })
+  }
+  const commitTime = () => {
+    const t = parseTimecode(timeInput, fps)
+    if (t !== null) onApply({ time: Math.max(0, Math.min(duration, t)) })
+  }
+
+  return (
+    <div
+      ref={popupRef}
+      className="absolute -translate-x-1/2 z-[70] pointer-events-auto"
+      style={{ left: `${leftPct}%`, bottom: '100%', marginBottom: 6 }}
+      onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}
+      onMouseDown={e => e.stopPropagation()}
+      onClick={e => e.stopPropagation()}
+      onDoubleClick={e => e.stopPropagation()}
+    >
+      <div className="bg-navy-700 border border-white/10 rounded-lg shadow-2xl p-2 w-[232px] flex flex-col gap-2">
+        <div className="grid grid-cols-8 gap-1">
+          {TAG_COLORS.map(c => (
+            <Tooltip key={c.key} content={c.label}>
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); onApply({ color: c.key }) }}
+                className={`w-5 h-5 rounded-full ${c.swatch} transition-transform hover:scale-110 flex items-center justify-center`}
+              >
+                {(marker.color ?? DEFAULT_MARKER_COLOR) === c.key && <Check size={10} className={c.check ?? 'text-white drop-shadow'} />}
+              </button>
+            </Tooltip>
+          ))}
+        </div>
+        <input
+          value={nameInput}
+          onChange={e => setNameInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { commitName(); onClose() } }}
+          onBlur={commitName}
+          placeholder="Marker name"
+          className="w-full px-1.5 py-1 text-xs bg-navy-800 border border-white/10 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:border-accent-500/50"
+        />
+        <div className="flex items-center gap-1.5">
+          <input
+            ref={timeInputRef}
+            value={timeInput}
+            onChange={e => setTimeInput(e.target.value)}
+            onKeyDown={e => {
+              const arrow = applyTimecodeArrow(e, timeInput, timeInputRef, fps, 0, duration)
+              if (arrow) { setTimeInput(arrow.newValue); onApply({ time: arrow.newTime }) }
+              if (e.key === 'Enter') { commitTime(); onClose() }
+            }}
+            onBlur={commitTime}
+            className="w-24 px-1.5 py-1 text-[11px] tabular-nums bg-navy-800 border border-white/10 rounded text-gray-200 focus:outline-none focus:border-accent-500/50"
+          />
+          <div className="flex-1" />
+          {kind === 'chapter' ? (
+            <Tooltip content="Chapter read from the video file. Edits are saved beside the file — the file itself is never changed.">
+              <span className="flex items-center gap-1 text-[10px] text-gray-400 select-none">
+                <Film size={10} /> From file
+              </span>
+            </Tooltip>
+          ) : kind === 'chapter-edit' ? (
+            <Tooltip content="Discard edits and show the file's chapter as read">
+              <button
+                onClick={onRemove}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-400 border border-white/15 hover:text-amber-300 hover:border-amber-400/40 transition-colors"
+              >
+                <RotateCcw size={10} /> Reset
+              </button>
+            </Tooltip>
+          ) : (
+            <Tooltip content="Delete marker">
+              <button
+                onClick={onRemove}
+                className="flex items-center justify-center w-6 h-6 rounded text-red-500/70 hover:text-red-400 hover:bg-red-600/15 transition-colors"
+              >
+                <Trash2 size={12} />
+              </button>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -1244,8 +1378,30 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   const folderDraftsRef = useRef<import('../../types').ClipDraft[]>([])
   useEffect(() => { folderDraftsRef.current = folderDrafts }, [folderDrafts])
 
+  // ── Timeline markers (IDEA-4) ──────────────────────────────────────────────
+  // SM-added markers for the CURRENT file, hydrated from StreamMeta
+  // .videoMarkers in reloadSessionPanel and persisted on every discrete
+  // mutation (add / edit / delete — no autosave stream). File-embedded
+  // chapters are NOT in this list; they merge in at display time
+  // (displayMarkers) so the video file itself is never touched.
+  const [markers, setMarkers] = useState<VideoMarker[]>([])
+  const markersRef = useRef<VideoMarker[]>([])
+  useEffect(() => { markersRef.current = markers }, [markers])
+  // videoMap-style relative key of the current file within its stream folder —
+  // the key its marker list is stored under.
+  const currentVideoKeyRef = useRef<string | null>(null)
+  // Id of the marker whose edit popup is open (display id — a raw chapter's
+  // synthetic "chapter-…" id until editing materializes an override).
+  const [markerPopupId, setMarkerPopupId] = useState<string | null>(null)
+  const markerPopupIdRef = useRef<string | null>(null)
+  useEffect(() => { markerPopupIdRef.current = markerPopupId }, [markerPopupId])
+  // Close the popup when the loaded file changes — chapter display ids are
+  // synthesized from start times, so one could collide across files and
+  // leave the popup editing the wrong video's chapter.
+  useEffect(() => { setMarkerPopupId(null) }, [state.filePath])
+
   const reloadSessionPanel = useCallback(async (fp: string | null) => {
-    if (!fp) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; return }
+    if (!fp) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; currentVideoKeyRef.current = null; setMarkers([]); setMarkerPopupId(null); return }
     // Find the stream folder (date-named ancestor or, in dump mode, derive
     // from filename) and compute the canonical _meta.json key for it.
     const { dir, metaKey, streamsDir, isDump, date } = resolveStreamContext(fp, config.streamsDir)
@@ -1284,6 +1440,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
         return p.startsWith(dirNormForKey + '/') ? p.slice(dirNormForKey.length + 1) : p.split('/').pop() ?? p
       }
       const currentRelKey = relKey(fp)
+      // Hydrate the current file's markers. Same key convention as videoMap
+      // (relative path, basename fallback for legacy/dump entries).
+      const allMarkers: Record<string, VideoMarker[]> = folderMeta.videoMarkers ?? {}
+      currentVideoKeyRef.current = currentRelKey
+      setMarkers(allMarkers[currentRelKey] ?? allMarkers[currentName] ?? [])
       // Detect whether the currently-loaded file is a known clip output
       const currentEntry = videoMap[currentRelKey] ?? videoMap[currentName]
       if (currentEntry?.clipOf && currentEntry?.clipState) {
@@ -2959,6 +3120,100 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   const zoomLevel = duration > 0 ? duration / vSpan : 1
   const isZoomed  = isClipMode && zoomLevel > 1.01
 
+  // ── Timeline markers: display merge + mutations (IDEA-4) ──────────────────
+  // What the timeline shows = SM markers merged with file-embedded chapters
+  // that have no SM override. Chapter identity is its original start time
+  // (`chapterOf` on the override). Chapters are untrusted input: negative
+  // starts clamp to 0, entries past the video's end are dropped and counted
+  // for the honest note chip. 'sm' = plain marker, 'chapter-edit' = SM
+  // override of a chapter, 'chapter' = raw file chapter (read-only until
+  // edited, which materializes an override).
+  const displayMarkers = useMemo(() => {
+    const list: { marker: VideoMarker; kind: MarkerKind }[] = markers.map(m => ({
+      marker: m,
+      kind: m.chapterOf !== undefined ? 'chapter-edit' as const : 'sm' as const,
+    }))
+    let droppedChapters = 0
+    if (duration > 0) {
+      for (const c of videoInfo?.chapters ?? []) {
+        if (c.start > duration + 0.5) { droppedChapters++; continue }
+        if (markers.some(m => m.chapterOf !== undefined && Math.abs(m.chapterOf - c.start) < 0.01)) continue
+        list.push({
+          marker: {
+            id: `chapter-${c.start}`,
+            time: Math.max(0, Math.min(duration, c.start)),
+            name: c.title,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+          kind: 'chapter',
+        })
+      }
+    }
+    list.sort((a, b) => a.marker.time - b.marker.time)
+    return { list, droppedChapters }
+  }, [markers, videoInfo, duration])
+  const displayMarkersRef = useRef(displayMarkers)
+  useEffect(() => { displayMarkersRef.current = displayMarkers }, [displayMarkers])
+
+  // Replace the current file's marker list in state and persist it. Fire and
+  // forget: mutations are individual user actions and the server-side merge
+  // (videoMarkers:save) keeps other files' lists intact.
+  const applyMarkers = useCallback((next: VideoMarker[]) => {
+    setMarkers(next)
+    const dir = folderPathRef.current
+    const key = currentVideoKeyRef.current
+    if (!dir || !key) return
+    window.api.saveVideoMarkers(dir, key, next, folderMetaKeyRef.current ?? undefined).catch(() => {})
+  }, [])
+
+  // M / the toolbar button. If a displayed marker already sits at the
+  // playhead (within one frame), open its edit popup instead of stacking a
+  // duplicate — Resolve's behavior for repeated M presses.
+  const addMarkerAtPlayhead = useCallback(() => {
+    const dur = durationRef.current
+    if (!dur) return
+    const t = Math.max(0, Math.min(dur, currentTimeRef.current))
+    const eps = 1 / (videoInfoRef.current?.fps ?? 30)
+    const existing = displayMarkersRef.current.list.find(d => Math.abs(d.marker.time - t) <= eps)
+    if (existing) { setMarkerPopupId(existing.marker.id); return }
+    const now = Date.now()
+    applyMarkers([...markersRef.current, { id: `marker-${uuidv4()}`, time: t, createdAt: now, updatedAt: now }])
+  }, [applyMarkers])
+
+  // Edit-popup mutations, addressed by DISPLAY id. Editing a raw chapter
+  // creates its SM override (chapterOf = the chapter's original start) and
+  // re-targets the popup at the new marker so the edit session continues
+  // seamlessly. Times clamp to the video duration by construction.
+  const applyMarkerPatch = useCallback((displayId: string, patch: Partial<Pick<VideoMarker, 'name' | 'color' | 'time'>>) => {
+    const entry = displayMarkersRef.current.list.find(d => d.marker.id === displayId)
+    if (!entry) return
+    const dur = durationRef.current
+    const clamped = patch.time !== undefined ? { ...patch, time: Math.max(0, Math.min(dur, patch.time)) } : patch
+    const now = Date.now()
+    if (entry.kind === 'chapter') {
+      const override: VideoMarker = {
+        ...entry.marker,
+        ...clamped,
+        id: `marker-${uuidv4()}`,
+        chapterOf: entry.marker.time,
+        createdAt: now,
+        updatedAt: now,
+      }
+      applyMarkers([...markersRef.current, override])
+      setMarkerPopupId(override.id)
+    } else {
+      applyMarkers(markersRef.current.map(m => m.id === displayId ? { ...m, ...clamped, updatedAt: now } : m))
+    }
+  }, [applyMarkers])
+
+  // Delete an SM marker — or, for a chapter override, discard SM's edits so
+  // the file's chapter shows as read again. Raw chapters have no remove:
+  // they live in the video file, which SM never edits.
+  const removeMarker = useCallback((displayId: string) => {
+    applyMarkers(markersRef.current.filter(m => m.id !== displayId))
+    setMarkerPopupId(null)
+  }, [applyMarkers])
 
   const handleFiles = useCallback((paths: string[]) => {
     if (paths[0]) guardedLoadFile(paths[0])
@@ -3650,6 +3905,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
       if (clipModeModal || draftPendingDelete || showExportDialog) return
       // …or any app-level modal (Help, delete confirms, post-stream prompt).
       if (isAnyModalOpen()) return
+      // Marker edit popup open — Escape closes it, everything else is
+      // muted so transport shortcuts can't fire under an active edit.
+      // (Typing inside its inputs never reaches here — the tag guard
+      // above already returns for INPUT targets.)
+      if (markerPopupIdRef.current) {
+        if (e.key === 'Escape') { e.preventDefault(); setMarkerPopupId(null) }
+        return
+      }
 
       const ctrl = e.ctrlKey || e.metaKey
       const shift = e.shiftKey
@@ -3801,6 +4064,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
           setTimeout(() => timecodeInputRef.current?.select(), 0)
           return
         }
+        // M — add marker at playhead (or open the marker already there)
+        if (k === 'm' || k === 'M') {
+          if (!durationRef.current) return
+          e.preventDefault()
+          if (!e.repeat) { flashShortcutTarget('marker-add'); addMarkerAtPlayhead() }
+          return
+        }
       }
 
       // ── Clip mode only ──────────────────────────────────────────────────
@@ -3878,7 +4148,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     effectiveTogglePlay, skip, stepFrame, stepPlaybackRate, applyPlaybackRate, flashShortcutTarget, holdFlashTarget, startSkipRepeat, stopSkipRepeat, stopFrameRing, multiTrack, multiTrackEnabled, isExtracting,
     config.skipClipMergeWarning, exitClipMode,
     setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
-    state.filePath, addSegment, splitSegment, jumpToMarker,
+    state.filePath, addSegment, splitSegment, jumpToMarker, addMarkerAtPlayhead,
     activeBleepId, flatSessionItems, guardedLoadFile, loadDraft, activeDraftId,
   ])
 
@@ -5228,6 +5498,74 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   </div>
                 </>
               )}
+              {/* Marker layer (IDEA-4) — DaVinci-style triangles hanging from
+                  the top edge of the thumbnail strip, tip pointing down at
+                  the marked time. Zero-height overlay: only the triangles
+                  themselves take pointer events, so the strip's click-to-seek
+                  underneath keeps working. Single click seeks, double click
+                  opens the edit popup (the popup renders in this layer too,
+                  above the strips, tracking zoom/pan like the handle popups).
+                  z-[46] clears the clip-region shading (z-[40]) and the hover
+                  line (z-[45]) so markers stay clickable in clip mode. */}
+              {duration > 0 && (
+                <div className="absolute inset-x-0 top-0 z-[46] pointer-events-none">
+                  {displayMarkers.list.map(({ marker: m, kind }) => {
+                    const pct = ((m.time - vStart) / vSpan) * 100
+                    if (pct < 0 || pct > 100) return null
+                    const name = m.name?.trim()
+                    const tip = name ? `${name} — ${formatTime(m.time, videoInfo?.fps)}` : formatTime(m.time, videoInfo?.fps)
+                    return (
+                      <div key={m.id} className="absolute -translate-x-1/2 pointer-events-auto" style={{ left: `${pct}%`, top: 0 }}>
+                        <Tooltip content={kind === 'chapter' ? `${tip} (from file)` : tip}>
+                          <button
+                            type="button"
+                            className="block px-0.5 pb-0.5 cursor-pointer transition-transform origin-top hover:scale-125"
+                            onMouseDown={e => e.stopPropagation()}
+                            onClick={e => { e.stopPropagation(); seekRef.current(m.time) }}
+                            onDoubleClick={e => { e.stopPropagation(); setMarkerPopupId(m.id) }}
+                          >
+                            <svg width="12" height="9" viewBox="0 0 12 9" className="block drop-shadow">
+                              <path d="M0.5 0.5 H11.5 L6 8.5 Z" className={`${getMarkerFillClass(m.color)} stroke-white/30`} strokeWidth="1" />
+                            </svg>
+                          </button>
+                        </Tooltip>
+                      </div>
+                    )
+                  })}
+                  {/* Honest note — chapters the file claims beyond the video's
+                      end are dropped, not silently ignored. */}
+                  {displayMarkers.droppedChapters > 0 && (
+                    <div className="absolute right-1 top-0.5 pointer-events-auto">
+                      <Tooltip content={displayMarkers.droppedChapters === 1
+                        ? 'This file contains 1 chapter placed beyond the video\'s end. It isn\'t shown.'
+                        : `This file contains ${displayMarkers.droppedChapters} chapters placed beyond the video's end. They aren't shown.`}>
+                        <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-950/80 border border-amber-600/40 text-amber-300 text-[9px] select-none">
+                          <TriangleAlert size={9} /> {displayMarkers.droppedChapters}
+                        </span>
+                      </Tooltip>
+                    </div>
+                  )}
+                  {/* Edit popup — anchored to the marker's timeline position,
+                      clamped to the wrapper edges like the handle popups. */}
+                  {markerPopupId && (() => {
+                    const entry = displayMarkers.list.find(d => d.marker.id === markerPopupId)
+                    if (!entry) return null
+                    const pct = ((entry.marker.time - vStart) / vSpan) * 100
+                    return (
+                      <MarkerEditPopup
+                        marker={entry.marker}
+                        kind={entry.kind}
+                        fps={videoInfo?.fps}
+                        duration={duration}
+                        leftPct={Math.max(2, Math.min(98, pct))}
+                        onApply={patch => applyMarkerPatch(entry.marker.id, patch)}
+                        onRemove={() => removeMarker(entry.marker.id)}
+                        onClose={() => setMarkerPopupId(null)}
+                      />
+                    )
+                  })()}
+                </div>
+              )}
               </div>{/* end stripsWrapperRef */}
 
               {/* Multi-track entry/exit affordances. Rendered OUTSIDE the
@@ -5644,6 +5982,19 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       <Tooltip content="Skip to end" shortcut="End">
                         <button data-kbd-flash="skip-end" onClick={() => seekRef.current(duration)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
                           <ChevronsRight size={15} />
+                        </button>
+                      </Tooltip>
+
+                      {/* Add marker — always available, not clip-mode gated */}
+                      <div className="w-px h-3 bg-white/10 mx-0.5 shrink-0" />
+                      <Tooltip content="Add marker at playhead" shortcut="M">
+                        <button
+                          data-kbd-flash="marker-add"
+                          onClick={addMarkerAtPlayhead}
+                          disabled={!duration}
+                          className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                        >
+                          <Bookmark size={14} />
                         </button>
                       </Tooltip>
                       </div>

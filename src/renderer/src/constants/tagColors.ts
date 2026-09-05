@@ -309,6 +309,39 @@ export function getWaveformFillClass(colorKey: string | undefined): string {
   return WAVEFORM_FILL[colorKey ?? ''] ?? WAVEFORM_FILL[DEFAULT_TAG_COLOR]
 }
 
+/**
+ * Per-color SVG fill class for player timeline markers. Solid fills that
+ * mirror each entry's picker swatch so a marker triangle and its swatch in
+ * the edit popup read as the same color. Static map — purge-safe.
+ */
+const MARKER_FILL: Record<string, string> = {
+  red: 'fill-red-500',
+  orange: 'fill-orange-500',
+  amber: 'fill-amber-500',
+  yellow: 'fill-yellow-400',
+  lime: 'fill-lime-500',
+  green: 'fill-green-500',
+  teal: 'fill-teal-500',
+  cyan: 'fill-cyan-500',
+  blue: 'fill-blue-500',
+  'true-purple': 'fill-purple-500',
+  pink: 'fill-pink-500',
+  brown: 'fill-[#a16b47]',
+  white: 'fill-gray-100',
+  purple: 'fill-accent-600',
+  slate: 'fill-slate-500',
+  black: 'fill-gray-950',
+}
+
+/** Default color for player markers: SM-added markers with no explicit
+ *  choice and file-read chapters until recolored. Cyan — distinct from the
+ *  clip feature's blue so markers never read as clip UI. */
+export const DEFAULT_MARKER_COLOR = 'cyan'
+
+export function getMarkerFillClass(colorKey: string | undefined): string {
+  return MARKER_FILL[colorKey ?? ''] ?? MARKER_FILL[DEFAULT_MARKER_COLOR]
+}
+
 /** Default color rotation for per-track audio coloring. Indexed by track
  *  number so each track gets a distinct color out of the box. */
 export const DEFAULT_TRACK_COLORS = [

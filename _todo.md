@@ -11,7 +11,9 @@
 7. THU-7
 8. THU-11
 9. IDEA-4
-10. IDEA-11
+10. PLR-12
+11. PLR-13
+12. IDEA-11
 
 ## Improvement ideas
 
@@ -140,6 +142,14 @@
   - Currently, clicking and dragging inside a clip region will drag that clip region. Since that is a lesser-used interaction (it's more common to drag the end handles), let's move that interaction to the [start timecode] -> [end timecode] label popup that appears above the clip region when that region is selected. Clicking and dragging that element will be what drags the whole region. Currently, that element has no interaction, so it is a goo dplace for it. That will leave the actual area inside the clip region accessible to place the playhead marker (which is unavailable right now. To get the playhead marker inside a clip region, one must click outside a clip region and drag it inside, manually edit the playhead timecode, or use keyboard shortcuts. This change allows the obvious and most comming click-to-place interaciton to be available inside clip regions)
   - Additional to this change: the [start timecode] -> [end timecode] label popup should appear on clip region hover now instead of it having to be selected (and moving the cursor up to that label should keep it opened, allowing for selection and drag). Selecting a clip region should still allow it to stay opened until clicked off of (clicked somewhere else in the timeline or on another clip region).
   - Lastly, the method to deselect a clip region is a bit awkward. One must click on the timeline track, but not on the part where the thumbnails are. Only clicking on the timeline audio waveform part will deselect the clip region (any audio waveform in multi-track mode). We just need to extend this functionality to include the thumbnails track, so it's not confusing why clicking away from a clip region does not deselect it.
+
+- **PLR-12** [bug]
+  There seems to be a bug in the timecode inputs on the player page. I happened to land the playhead on 1:45:32:30. When I clicked on the playhead timecode input and tried to increase the timecode on the frame vaule with the arrow keys, the up arrow didn't work. I could increment down to 29, 28, etc. And I could increment *back* up, but it would stop working again at 30. I was able to replicate this in the new marker popup timecode input as well, same position (same timecode value), could iterate down on the frames value with arrow keys, but not up past 30. All the other values seem to work still. This was the initial discovery. I then clicked the playhead around and discovered that the frames value gets stuck pretty much anywhere. one can only increment the frames value down.
+
+- **PLR-13**
+  Some layout refinements for the player page:
+  - When in clipping mode, we should show a stop clipping button in the place of the start clipping button in the sidebar to close clipping mode, that way the user can look back to where they were to turn it on instead of having to find the stop clipping button in case this is their first time and they don't know where it is. We can then remove the stop clipping button from the clip mode toolbar. This should be a new rule in the style guide: "Close buttons should be location in the same place (or as near as possble) as their respective open buttons."
+  - Let's move the "enable multi-track audio" and its disable button to the sidebar. The disable button should then be styled more like a close button (red, button size/style). The text for each should then change to open/close instead of enable/disable. That way it is more of a mode toggle like the clipping mode is. It should go right above the clipping mode button.
 
 ### Thumbnail editor
 
