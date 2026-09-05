@@ -401,9 +401,9 @@
   Investigation resolved 2026-09-03. The governing fact: YouTube Data API quota is per PROJECT (10,000 free units/day, no official paid tier), so a shared SM OAuth client would pool every user into one project's quota: dead past a handful of users without a YouTube quota-extension audit plus Google OAuth app verification, and it would make the project operationally responsible for a revocable credential. (Apps that offer token-based connection, like ChatPlex behind a subscription, are funding exactly that shared-infrastructure burden.) Third-party credential brokers are ruled out on principle: SM has no server of its own and only talks to services the user connects. Bring-your-own is actually the better deal for users (a private 10k units/day each, maximum privacy); its only cost is onboarding pain. Direction therefore: make the BYO flow wizard-grade instead of replacing it: exact deep links into the Google Cloud console in order, per-step validation of pasted values with honest errors (detect a client secret pasted into the client ID field, etc.), and a visible progress checklist, so a non-technical user succeeds by copy-paste. The shared-client route stays on record as a someday option with its prerequisites named, worth revisiting only if the user base ever justifies the audit paperwork.
 
 - **APP-23**
-  Remove all mentions of my name in any comments in any files in the app's code. My name should not appear anywhere. For example: tagColors.ts line 341. Comments can describe desicions that were made and why, but they should not elude to discussions or that something was "PJ's decision", just that it was decided.
+  Remove all mentions of my name in any comments in any files in the app's code. My name should not appear anywhere. For example: tagColors.ts line 341. Comments can describe desicions that were made and why, but they should not elude to discussions or that something was "PJ's decision" or "per PJ", just that it was decided.
 
-  This is a hard rule that must be remembered.
+  This is a hard rule that must be remembered. This also applies to files like this very todo. My name should just not appear in any files for this project. Local user storage is fine.
 
 - **APP-24** [cleanup]
   Go over the style guide to look for any inconsistencies, conflicts, or out-of-date or no longer relevant rules.

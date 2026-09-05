@@ -24,6 +24,7 @@ import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
 import { Checkbox } from '../ui/Checkbox'
+import { NumberInput } from '../ui/Input'
 import { VideoRow } from '../ui/VideoRow'
 import { isClipExportCompatible } from '../../lib/clipExport'
 import { renderStreamTitle } from '../../lib/streamTitle'
@@ -1246,8 +1247,19 @@ function CropAspectSelector({ value, onChange, videoW, videoH }: {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
 
+  // Short label: preset value without the descriptive word ("16:9", not
+  // "16:9 Widescreen"). Collapses to icon-only below @2xl like the rest of
+  // the clip toolbar; the chevron stays as the dropdown affordance.
+  const label = (
+    <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">
+      {isOn ? current.label.replace(/ .*$/, '') : 'Crop'}
+    </CollapsibleLabel>
+  )
   return (
-    <div className="relative">
+    // flex (not block): the closed state's Tooltip trigger is inline-flex,
+    // and on a block wrapper its text baseline added a 1px line-height
+    // strut that made this control taller than its toolbar siblings.
+    <div className="relative flex">
       {/* Tooltip only wraps the button so it doesn't obscure the dropdown when open */}
       {open ? (
         <button
@@ -1259,7 +1271,7 @@ function CropAspectSelector({ value, onChange, videoW, videoH }: {
               : 'text-gray-400 border-white/20 hover:text-blue-300 hover:border-blue-400/40'
           }`}
         >
-          <Crop size={11} /> {isOn ? current.label.replace(/ .*$/, '') : 'Crop'}
+          <Crop size={11} />{label}
           <ChevronDown size={9} className="rotate-180 transition-transform" />
         </button>
       ) : (
@@ -1273,7 +1285,7 @@ function CropAspectSelector({ value, onChange, videoW, videoH }: {
                 : 'text-gray-400 border-white/20 hover:text-blue-300 hover:border-blue-400/40'
             }`}
           >
-            <Crop size={11} /> {isOn ? current.label.replace(/ .*$/, '') : 'Crop'}
+            <Crop size={11} />{label}
             <ChevronDown size={9} className="transition-transform" />
           </button>
         </Tooltip>
@@ -4499,8 +4511,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
             </FileDropZone>
 
-            {/* Playback controls */}
-            <div className="bg-navy-800 border-t border-white/5 py-2 px-3 flex flex-col gap-2 shrink-0">
+            {/* Playback controls. @container so the clip toolbar's labels and
+                the transport row's skip buttons can respond to the PLAYER
+                SECTION's width (viewport breakpoints lie once sidebars are
+                open): toolbar labels collapse to icon-only below @2xl
+                (672px), skip buttons shed outside-in below @3xl/@2xl/@xl. */}
+            <div className="bg-navy-800 border-t border-white/5 py-2 px-3 flex flex-col gap-2 shrink-0 @container">
 
               {/* Clip mode toolbar */}
               {isClipMode && (
@@ -4527,7 +4543,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                 disabled={!canSplit}
                                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-accent-400 border border-accent-500/30 hover:bg-accent-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                               >
-                                <Scissors size={11} /> Split<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Segment</CollapsibleLabel>
+                                <Scissors size={11} /><CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Split Segment</CollapsibleLabel>
                               </button>
                             </Tooltip>
                             {!canSplit && (
@@ -4547,7 +4563,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                             disabled={noRoom}
                             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400 border border-blue-500/30 hover:bg-blue-950/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            <PlusSquare size={11} /> Add<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Segment</CollapsibleLabel>
+                            <PlusSquare size={11} /><CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Add Segment</CollapsibleLabel>
                           </button>
                           {(noRoom || addSegmentError) && (
                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -4567,7 +4583,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                             : 'text-blue-400/70 border-blue-500/20 hover:bg-blue-950/60'
                         }`}
                       >
-                        <Repeat size={11} /> Focus
+                        <Repeat size={11} /><CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Focus</CollapsibleLabel>
                       </button>
                     </Tooltip>
 
@@ -4592,7 +4608,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       }}
                         className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors"
                       >
-                        <AudioWaveform size={11} /> <CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">Add{' '}</CollapsibleLabel>Bleep
+                        <AudioWaveform size={11} /><CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Add Bleep</CollapsibleLabel>
                       </button>
                     </Tooltip>
 
@@ -4648,46 +4664,29 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       }
                       const setHeight = (px: number) => setWidth((px / maxH) * maxW)
                       const reset = () => apply({ cropX: DEFAULT_CROP_X, cropY: DEFAULT_CROP_Y, cropScale: DEFAULT_CROP_SCALE })
-                      // Arrow-step with Shift = x10 (APP-22), matching
-                      // NumberInput's spinners. preventDefault keeps the
-                      // native number-input step from doubling up.
-                      const arrowStep = (e: React.KeyboardEvent<HTMLInputElement>, current: number, applyVal: (v: number) => void) => {
-                        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
-                        e.preventDefault()
-                        applyVal(current + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1))
-                      }
-                      // Tighter padding + hidden native spinner arrows. The
-                      // native up/down arrows render at OS-default size and
-                      // look out of place in this dense toolbar; users can
-                      // still scroll-to-adjust or type directly.
-                      const inputCls = 'w-10 px-0.5 py-0 text-[10px] tabular-nums text-right bg-navy-800 border border-white/10 rounded text-gray-200 focus:outline-none focus:border-blue-400/40 disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
                       const labelCls = 'text-[10px] text-gray-400 select-none w-2'
                       return (
                         <Tooltip content={disabled ? 'Move the playhead inside a clip region to edit its crop' : 'Crop position (offset from center) and dimensions, in source pixels'}>
                           <div className={`flex items-center gap-1 ${disabled ? 'opacity-50' : ''}`}>
                             {/* 2×2 grid: x/y on top, w/h below — frees up
                                 horizontal space the toolbar needs at narrow
-                                window widths. */}
+                                window widths. NumberInput primitive for the
+                                +/- spinner consistency rule; its Shift = x10
+                                keyboard stepping rides along (APP-22). The
+                                setters clamp internally, so no min/max
+                                except the >0 floor on dimensions. */}
                             <div className="flex flex-col gap-0.5">
                               <div className="flex items-center gap-1">
                                 <span className={labelCls}>x</span>
-                                <input type="number" disabled={disabled} className={inputCls} value={offsetX}
-                                  onKeyDown={e => arrowStep(e, offsetX, setOffsetX)}
-                                  onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetX(v) }} />
+                                <NumberInput value={offsetX} onChange={setOffsetX} disabled={disabled} className="w-16" aria-label="Crop offset X" />
                                 <span className={labelCls}>y</span>
-                                <input type="number" disabled={disabled} className={inputCls} value={offsetY}
-                                  onKeyDown={e => arrowStep(e, offsetY, setOffsetY)}
-                                  onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetY(v) }} />
+                                <NumberInput value={offsetY} onChange={setOffsetY} disabled={disabled} className="w-16" aria-label="Crop offset Y" />
                               </div>
                               <div className="flex items-center gap-1">
                                 <span className={labelCls}>w</span>
-                                <input type="number" disabled={disabled} className={inputCls} value={dispW}
-                                  onKeyDown={e => arrowStep(e, dispW, setWidth)}
-                                  onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setWidth(v) }} />
+                                <NumberInput value={dispW} onChange={setWidth} min={1} disabled={disabled} className="w-16" aria-label="Crop width" />
                                 <span className={labelCls}>h</span>
-                                <input type="number" disabled={disabled} className={inputCls} value={dispH}
-                                  onKeyDown={e => arrowStep(e, dispH, setHeight)}
-                                  onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setHeight(v) }} />
+                                <NumberInput value={dispH} onChange={setHeight} min={1} disabled={disabled} className="w-16" aria-label="Crop height" />
                               </div>
                             </div>
                             <button
@@ -4811,7 +4810,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         disabled={clipState.clipRegions.length === 0}
                         className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-accent-300 border-accent-600/30 bg-accent-600/20 hover:bg-accent-600/35 disabled:hover:bg-transparent"
                       >
-                        <Upload size={11} /> Export<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Clip</CollapsibleLabel>
+                        <Upload size={11} /><CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Export Clip</CollapsibleLabel>
                       </button>
                     </Tooltip>
                   </div>
@@ -4942,12 +4941,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                 <>
                   {/* Per-track rows. anySolo is computed once so every row
                       can flag its waveform as dimmed when solo'd out. */}
-                  {/* Multi-track audio area wraps in a relative+z-30 container
-                      so the playhead (z-20 inside the strips wrapper) renders
-                      BEHIND each track row rather than over it. Control rows
-                      have a low-opacity background so the playhead bleeds
-                      faintly through. */}
-                  <div className="relative z-30">
+                  {/* Multi-track audio area. The z-30 that keeps the playhead
+                      (z-20) BEHIND the rows lives on each ROW, not here — a z
+                      on this container would trap the rows in its stacking
+                      context and defeat their hover raise (below). Control
+                      rows have a low-opacity background so the playhead
+                      bleeds faintly through. */}
+                  <div className="relative">
                   {(() => {
                     const anySolo = tracks.some(t => t.solo)
                     const onTrackHover = (clientX: number, rect: DOMRect) => {
@@ -4981,7 +4981,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         </Tooltip>
                       )
                       return (
-                        <div key={track.index} className="border-t border-navy-700/70">
+                        // z-30 keeps the row above the playhead (z-20).
+                        // hover:z-[41] lifts the hovered row above the
+                        // out-of-region clip shading (z-[40]) so its controls
+                        // read as interactive in clip mode instead of
+                        // permanently dimmed — but below the bleep markers
+                        // (z-[42]) so bleeps stay grabbable over rows.
+                        <div key={track.index} className="relative z-30 hover:z-[41] border-t border-navy-700/70">
                           {/* Controls row. Bg matches the waveform strip so
                               the playhead is uniformly visible/hidden across
                               the two; a subtle 1px bottom border separates
@@ -5258,7 +5264,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     return (
                       <div
                         key={region.id}
-                        className="absolute top-8 bottom-0 bg-black overflow-hidden cursor-grab active:cursor-grabbing z-[40] border border-white/20"
+                        className="absolute top-8 bottom-0 bg-black overflow-hidden cursor-grab active:cursor-grabbing z-[42] border border-white/20"
                         style={{ left: `${l}%`, right: `${r}%` }}
                         onMouseDown={e => {
                           if (e.button !== 0) return
@@ -6047,6 +6053,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     const abs = Math.abs(s)
                     return abs === 1 ? `Shift+${arrow}` : abs === 5 ? `Ctrl+${arrow}` : abs === 10 ? `Ctrl+Shift+${arrow}` : undefined
                   }
+                  // Narrow-player shedding (container query on the controls
+                  // column): skip increments drop outside-in as room runs
+                  // out — ±5m below @3xl, ±1m below @2xl, ±10s below @xl.
+                  // Their shortcuts keep working; only the buttons leave.
+                  const skipVis = (s: number): string => {
+                    const abs = Math.abs(s)
+                    return abs === 300 ? 'hidden @3xl:inline-flex'
+                      : abs === 60 ? 'hidden @2xl:inline-flex'
+                      : abs === 10 ? 'hidden @xl:inline-flex'
+                      : 'inline-flex'
+                  }
                   // Prev/next clip-region marker — disabled state is computed
                   // by peeking at clipState.clipRegions vs. currentTime. eps
                   // matches jumpToMarker so the buttons enable/disable in lockstep.
@@ -6108,7 +6125,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
                       {/* Skip back: -5m, -1m, -10s, -5s, -1s */}
                       {[-300, -60, -10, -5, -1].map(s => (
-                        <Tooltip key={s} content={skipTip(s)} shortcut={skipShortcut(s)}>
+                        <Tooltip key={s} content={skipTip(s)} shortcut={skipShortcut(s)} triggerClassName={skipVis(s)}>
                           <button data-kbd-flash={`skip${s}`} onClick={() => skip(s)} className="px-1 py-1 rounded text-xs text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
                             {skipLabel(s)}
                           </button>
@@ -6171,7 +6188,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
                       {/* Skip forward: +1s, +5s, +10s, +1m, +5m */}
                       {[1, 5, 10, 60, 300].map(s => (
-                        <Tooltip key={s} content={skipTip(s)} shortcut={skipShortcut(s)}>
+                        <Tooltip key={s} content={skipTip(s)} shortcut={skipShortcut(s)} triggerClassName={skipVis(s)}>
                           <button data-kbd-flash={`skip${s}`} onClick={() => skip(s)} className="px-1 py-1 rounded text-xs text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors tabular-nums">
                             {skipLabel(s)}
                           </button>
