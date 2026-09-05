@@ -440,12 +440,16 @@ function TrackColorPicker({
  *  clamping fully into the container when the region's edges run out of
  *  view. Measures itself after every render — its content and the region
  *  both move (drags, aspect changes, stage zoom/pan). */
-function CropControlsPanel({ anchor, boundsW, boundsH, children }: {
+function CropControlsPanel({ anchor, boundsW, boundsH, onMouseDown, children }: {
   /** The crop region's rect in CONTAINER coordinates (already mapped
    *  through the stage's zoom/pan transform). */
   anchor: { x: number; y: number; w: number; h: number }
   boundsW: number
   boundsH: number
+  /** The panel is a SIBLING of the zoom/pan wrapper, so stage gestures
+   *  don't bubble to it naturally — the caller forwards middle-click here
+   *  to keep panning available from anywhere on the stage. */
+  onMouseDown?: (e: React.MouseEvent) => void
   children: React.ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -474,6 +478,7 @@ function CropControlsPanel({ anchor, boundsW, boundsH, children }: {
       ref={ref}
       className="absolute z-20 flex items-center gap-1.5 px-1.5 py-1 rounded-lg bg-navy-800/95 border border-blue-500/30 shadow-xl"
       style={{ left: pos.left, top: pos.top }}
+      onMouseDown={onMouseDown}
     >
       {children}
     </div>
@@ -514,16 +519,29 @@ function CropNumberInput({ value, onChange, min, disabled, ariaLabel }: {
         className="w-10 px-0.5 py-0 text-[10px] tabular-nums text-right bg-navy-800 border border-r-0 border-white/10 rounded-l text-gray-200 focus:outline-none focus:border-blue-400/40 disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       <div className="flex flex-col shrink-0">
-        <Tooltip content="+1 (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
-          <button type="button" tabIndex={-1} disabled={disabled} onClick={e => stepBy(1, e.shiftKey)} className={`${spinCls} border-b-0 rounded-tr`} aria-label="Increment">
-            <ChevronUp size={7} strokeWidth={3} />
-          </button>
-        </Tooltip>
-        <Tooltip content="-1 (Shift = ×10)" side="right" triggerClassName="flex-1 flex min-h-0">
-          <button type="button" tabIndex={-1} disabled={disabled} onClick={e => stepBy(-1, e.shiftKey)} className={`${spinCls} rounded-br`} aria-label="Decrement">
-            <ChevronDown size={7} strokeWidth={3} />
-          </button>
-        </Tooltip>
+        {/* Spinner tooltips are dropped entirely while disabled — a hint on
+            a control that can't act is noise (the group's own tooltip
+            explains the disabled state). */}
+        {[1 as const, -1 as const].map(dir => {
+          const btn = (
+            <button
+              key={dir}
+              type="button"
+              tabIndex={-1}
+              disabled={disabled}
+              onClick={e => stepBy(dir, e.shiftKey)}
+              className={`${spinCls} ${dir === 1 ? 'border-b-0 rounded-tr' : 'rounded-br'}`}
+              aria-label={dir === 1 ? 'Increment' : 'Decrement'}
+            >
+              {dir === 1 ? <ChevronUp size={7} strokeWidth={3} /> : <ChevronDown size={7} strokeWidth={3} />}
+            </button>
+          )
+          return disabled ? btn : (
+            <Tooltip key={dir} content={`${dir === 1 ? '+' : '-'}1 (Shift = ×10)`} side="right" triggerClassName="flex-1 flex min-h-0">
+              {btn}
+            </Tooltip>
+          )
+        })}
       </div>
     </div>
   )
@@ -3052,6 +3070,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
   // Corner resize: scales the crop rect around the opposite corner (which stays pinned).
   const handleCropCornerResize = useCallback((e: React.MouseEvent, corner: 'tl' | 'tr' | 'bl' | 'br') => {
+    // Left only — middle bubbles to the pan handler (see handleCropDrag).
+    if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
     const region = activeCropRegionRef.current
@@ -3098,6 +3118,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
   // Drag the crop rect to pan (horizontal/vertical as the active aspect allows) within the active region.
   const handleCropDrag = useCallback((e: React.MouseEvent) => {
+    // Left only — and return BEFORE stopping propagation so a middle-click
+    // bubbles up to the zoom wrapper's startVideoPanDrag: panning works
+    // from anywhere on the stage, crop frame included.
+    if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
     const region = activeCropRegionRef.current
@@ -4620,7 +4644,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   const reset = () => apply({ cropX: DEFAULT_CROP_X, cropY: DEFAULT_CROP_Y, cropScale: DEFAULT_CROP_SCALE })
                   const labelCls = 'text-[10px] text-gray-400 select-none w-2'
                   return (
-                    <CropControlsPanel anchor={anchor} boundsW={vcSize.w} boundsH={vcSize.h}>
+                    <CropControlsPanel
+                      anchor={anchor}
+                      boundsW={vcSize.w}
+                      boundsH={vcSize.h}
+                      onMouseDown={e => { if (e.button === 1) startVideoPanDrag(e) }}
+                    >
                       <CropAspectSelector
                         value={clipState.cropAspect}
                         onChange={a => setClipState(s => ({ ...s, cropAspect: a }))}
@@ -4648,16 +4677,23 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                               <CropNumberInput value={dispH} onChange={setHeight} min={1} disabled={disabled} ariaLabel="Crop height" />
                             </div>
                           </div>
-                          <Tooltip content="Reset crop position and size">
-                            <button
-                              type="button"
-                              disabled={disabled}
-                              onClick={reset}
-                              className="flex items-center px-1 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-center"
-                            >
-                              <RotateCcw size={11} />
-                            </button>
-                          </Tooltip>
+                          {/* Tooltip dropped while disabled, like the field
+                              spinners — the group's tooltip explains why. */}
+                          {(() => {
+                            const resetBtn = (
+                              <button
+                                type="button"
+                                disabled={disabled}
+                                onClick={reset}
+                                className="flex items-center px-1 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-center"
+                              >
+                                <RotateCcw size={11} />
+                              </button>
+                            )
+                            return disabled ? resetBtn : (
+                              <Tooltip content="Reset crop position and size">{resetBtn}</Tooltip>
+                            )
+                          })()}
                         </div>
                       </Tooltip>
                     </CropControlsPanel>
