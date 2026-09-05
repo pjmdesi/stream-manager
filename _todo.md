@@ -13,7 +13,9 @@
 9. IDEA-4
 10. PLR-12
 11. PLR-13
-12. IDEA-11
+12. APP-22
+13. IDEA-11
+14. APP-23
 
 ## Improvement ideas
 
@@ -147,9 +149,10 @@
   There seems to be a bug in the timecode inputs on the player page. I happened to land the playhead on 1:45:32:30. When I clicked on the playhead timecode input and tried to increase the timecode on the frame vaule with the arrow keys, the up arrow didn't work. I could increment down to 29, 28, etc. And I could increment *back* up, but it would stop working again at 30. I was able to replicate this in the new marker popup timecode input as well, same position (same timecode value), could iterate down on the frames value with arrow keys, but not up past 30. All the other values seem to work still. This was the initial discovery. I then clicked the playhead around and discovered that the frames value gets stuck pretty much anywhere. one can only increment the frames value down.
 
 - **PLR-13**
-  Some layout refinements for the player page:
+  Some design/layout refinements for the player page:
   - When in clipping mode, we should show a stop clipping button in the place of the start clipping button in the sidebar to close clipping mode, that way the user can look back to where they were to turn it on instead of having to find the stop clipping button in case this is their first time and they don't know where it is. We can then remove the stop clipping button from the clip mode toolbar. This should be a new rule in the style guide: "Close buttons should be location in the same place (or as near as possble) as their respective open buttons."
   - Let's move the "enable multi-track audio" and its disable button to the sidebar. The disable button should then be styled more like a close button (red, button size/style). The text for each should then change to open/close instead of enable/disable. That way it is more of a mode toggle like the clipping mode is. It should go right above the clipping mode button.
+  - If possible, for the clip region start/end markers, if possible, the glow should only show on the outside of the markers, so it's not glowing inside the region. So for the start marker, the glow would only show on the left (and maybe top/bottom), and for the end marker, it would be on the right.
 
 ### Thumbnail editor
 
@@ -385,9 +388,20 @@
 - **APP-20**
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
 
+- **APP-22** [ui]
+  Shift = 10x arrow stepping in steppable numeric and timecode inputs, app-wide rule (2026-09-05). The NumberInput primitive already does Shift = x10 on its spinners; extend the same convention to the hand-rolled inputs that step with arrow keys:
+  - The player page's timecode inputs (playhead, viewport range start/end, segment duration, handle popups, marker edit popup): Shift multiplies the segment under the cursor, so 10 frames / 10 seconds / 10 minutes / 10 hours. Central change in applyTimecodeArrow.
+  - The clipping mode crop tool's x/y/w/h fields (these currently rely on native number-input stepping; give them proper arrow handling with the 10x shift).
+  Exceptions, keep plain 1x stepping: decided case-by-case at build time rather than by a hard rule; known examples are tiny-range inputs where a 10x jump is most or all of the range, like the max simultaneous conversions setting and the integrations port number. No tooltip hints advertising the shift behavior (PJ's call: it stays an unadvertised power-user convention, tooltips would add noise to dense toolbars). Codify in the style guide when built.
+
 - **IDEA-11**
   Investigate better ways to allow users to connect to their YouTube channel without needing to create a google dev account and generate custom OAuth credentials. There's too many steps and it's too technical for most users. Either 3rd party OAuth credentials or something google themselves provide.
   Investigation resolved 2026-09-03. The governing fact: YouTube Data API quota is per PROJECT (10,000 free units/day, no official paid tier), so a shared SM OAuth client would pool every user into one project's quota: dead past a handful of users without a YouTube quota-extension audit plus Google OAuth app verification, and it would make the project operationally responsible for a revocable credential. (Apps that offer token-based connection, like ChatPlex behind a subscription, are funding exactly that shared-infrastructure burden.) Third-party credential brokers are ruled out on principle: SM has no server of its own and only talks to services the user connects. Bring-your-own is actually the better deal for users (a private 10k units/day each, maximum privacy); its only cost is onboarding pain. Direction therefore: make the BYO flow wizard-grade instead of replacing it: exact deep links into the Google Cloud console in order, per-step validation of pasted values with honest errors (detect a client secret pasted into the client ID field, etc.), and a visible progress checklist, so a non-technical user succeeds by copy-paste. The shared-client route stays on record as a someday option with its prerequisites named, worth revisiting only if the user base ever justifies the audit paperwork.
+
+- **APP-23**
+  Remove all mentions of my name in any comments in any files in the app's code. My name should not appear anywhere. For example: tagColors.ts line 341. Comments can describe desicions that were made and why, but they should not elude to discussions or that something was "PJ's decision", just that it was decided.
+
+  This is a hard rule that must be remembered.
 
 ### Onboarding & Setup
 

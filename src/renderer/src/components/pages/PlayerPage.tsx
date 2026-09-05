@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
+import React, { useRef, useCallback, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import ReactDOM from 'react-dom'
 import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward, Bookmark, TriangleAlert } from 'lucide-react'
 import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass, getMarkerFillClass, DEFAULT_MARKER_COLOR } from '../../constants/tagColors'
@@ -92,11 +92,22 @@ function resolveFolderThumb(folder: StreamFolder): { path: string; isLocal: bool
   return { path: folder.thumbnails[idx], isLocal: folder.thumbnailLocalFlags?.[idx] ?? true }
 }
 
+/** Frame index for display. Floor with a small epsilon: a time that is
+ *  mathematically ON a frame boundary can land a hair under it in floating
+ *  point (parseTimecode("…:31") × fps = 30.999…96), and a plain floor then
+ *  showed one frame low — which made arrow-stepping the frames segment
+ *  stick, since each step re-read the stuck display value (PLR-12).
+ *  Clamped so a time a hair under a whole second can't display an
+ *  out-of-range frame equal to the fps. */
+function frameOf(seconds: number, fps: number): number {
+  return Math.min(Math.max(0, Math.ceil(fps) - 1), Math.floor((seconds % 1) * fps + 1e-4))
+}
+
 function formatTime(seconds: number, fps?: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   const s = Math.floor(seconds % 60)
-  const frameStr = fps != null ? ':' + String(Math.floor((seconds % 1) * fps)).padStart(2, '0') : ''
+  const frameStr = fps != null ? ':' + String(frameOf(seconds, fps)).padStart(2, '0') : ''
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}${frameStr}`
   return `${m}:${String(s).padStart(2, '0')}${frameStr}`
 }
@@ -165,8 +176,18 @@ function formatViewTime(seconds: number, fps?: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   const s = Math.floor(seconds % 60)
-  const frameStr = fps != null ? ':' + String(Math.floor((seconds % 1) * fps)).padStart(2, '0') : ''
+  const frameStr = fps != null ? ':' + String(frameOf(seconds, fps)).padStart(2, '0') : ''
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}${frameStr}`
+}
+
+/** Playhead readout format: every place value the video's duration can
+ *  reach, fully zero-padded (hours only on videos an hour or longer). The
+ *  readout doubles as the click-to-edit jump target, so a 4-hour video
+ *  must show its hour place even at 0:00 — otherwise jumping by hour
+ *  means scrubbing the playhead somewhere non-zero first. */
+function formatPlayheadTime(seconds: number, duration: number, fps?: number): string {
+  const full = formatViewTime(seconds, fps) // HH:MM:SS[:FF]
+  return duration >= 3600 ? full : full.slice(3)
 }
 
 /**
@@ -423,20 +444,40 @@ type MarkerKind = 'sm' | 'chapter-edit' | 'chapter'
  *  keys in the timecode write through immediately, like other timecode
  *  inputs on this page). */
 function MarkerEditPopup({
-  marker, kind, fps, duration, leftPct, onApply, onRemove, onClose,
+  marker, kind, fps, duration, leftPct, boundsRef, onApply, onRemove, onClose,
 }: {
   marker: VideoMarker
   kind: MarkerKind
   fps: number | undefined
   duration: number
-  /** Horizontal position within the strips wrapper, pre-clamped by the caller. */
+  /** Horizontal anchor within the strips wrapper (the marker's position). */
   leftPct: number
+  /** The clipping container to stay inside (the strips wrapper — the page
+   *  panel around it is overflow-hidden, so an unshifted popup near either
+   *  end would get cut off). Style-guide rule: anchored popovers clamp
+   *  themselves into their clipping container before showing. */
+  boundsRef: React.RefObject<HTMLDivElement>
   onApply: (patch: Partial<Pick<VideoMarker, 'name' | 'color' | 'time'>>) => void
   onRemove: () => void
   onClose: () => void
 }) {
   const popupRef = useRef<HTMLDivElement>(null)
   const timeInputRef = useRef<HTMLInputElement>(null)
+  // Horizontal shift (px) that keeps the centered popup inside the bounds.
+  // Measured before paint; re-measured whenever the anchor moves (zoom,
+  // pan, timecode edits).
+  const [shift, setShift] = useState(0)
+  useLayoutEffect(() => {
+    const el = popupRef.current
+    const bounds = boundsRef.current
+    if (!el || !bounds) return
+    const br = bounds.getBoundingClientRect()
+    const w = el.offsetWidth
+    const anchorX = br.left + (leftPct / 100) * br.width
+    const idealLeft = anchorX - w / 2
+    const clampedLeft = Math.max(br.left, Math.min(idealLeft, br.right - w))
+    setShift(Math.round(clampedLeft - idealLeft))
+  }, [leftPct, boundsRef])
   const [nameInput, setNameInput] = useState(marker.name ?? '')
   const [timeInput, setTimeInput] = useState(formatViewTime(marker.time, fps))
   // Re-seed local inputs only when the popup re-targets (chapter → its new
@@ -468,8 +509,8 @@ function MarkerEditPopup({
   return (
     <div
       ref={popupRef}
-      className="absolute -translate-x-1/2 z-[70] pointer-events-auto"
-      style={{ left: `${leftPct}%`, bottom: '100%', marginBottom: 6 }}
+      className="absolute z-[70] pointer-events-auto"
+      style={{ left: `${leftPct}%`, bottom: '100%', marginBottom: 6, transform: `translateX(calc(-50% + ${shift}px))` }}
       onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}
       onMouseDown={e => e.stopPropagation()}
       onClick={e => e.stopPropagation()}
@@ -5498,9 +5539,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   </div>
                 </>
               )}
-              {/* Marker layer (IDEA-4) — DaVinci-style triangles hanging from
-                  the top edge of the thumbnail strip, tip pointing down at
-                  the marked time. Zero-height overlay: only the triangles
+              {/* Marker layer (IDEA-4) — DaVinci-style triangles pointing down
+                  at the marked time. They sit in the padding space ABOVE the
+                  thumbnail strip with only the ~2px tip pushing into it
+                  (top: -7px on a 9px triangle), so colorful thumbnails never
+                  swallow them. Zero-height overlay: only the triangles
                   themselves take pointer events, so the strip's click-to-seek
                   underneath keeps working. Single click seeks, double click
                   opens the edit popup (the popup renders in this layer too,
@@ -5514,17 +5557,24 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     if (pct < 0 || pct > 100) return null
                     const name = m.name?.trim()
                     const tip = name ? `${name} — ${formatTime(m.time, videoInfo?.fps)}` : formatTime(m.time, videoInfo?.fps)
+                    // Wrapper is flex + block trigger: the Tooltip trigger's
+                    // default inline-flex sits on a text baseline, which gave
+                    // the wrapper a 24px line-height strut and let the
+                    // triangle settle fully inside the strip.
                     return (
-                      <div key={m.id} className="absolute -translate-x-1/2 pointer-events-auto" style={{ left: `${pct}%`, top: 0 }}>
-                        <Tooltip content={kind === 'chapter' ? `${tip} (from file)` : tip}>
+                      <div key={m.id} className="absolute -translate-x-1/2 pointer-events-auto flex" style={{ left: `${pct}%`, top: '-7px' }}>
+                        <Tooltip content={kind === 'chapter' ? `${tip} (from file)` : tip} triggerClassName="block">
                           <button
                             type="button"
-                            className="block px-0.5 pb-0.5 cursor-pointer transition-transform origin-top hover:scale-125"
+                            className="block px-0.5 cursor-pointer transition-transform origin-top hover:scale-125"
                             onMouseDown={e => e.stopPropagation()}
                             onClick={e => { e.stopPropagation(); seekRef.current(m.time) }}
                             onDoubleClick={e => { e.stopPropagation(); setMarkerPopupId(m.id) }}
                           >
-                            <svg width="12" height="9" viewBox="0 0 12 9" className="block drop-shadow">
+                            {/* Shadow applied twice: drop-shadow() has no
+                                spread parameter, so stacking the same 1px
+                                shadow is how it gets its density. */}
+                            <svg width="12" height="9" viewBox="0 0 12 9" className="block [filter:drop-shadow(0_0_1px_rgba(0,0,0,0.9))_drop-shadow(0_0_1px_rgba(0,0,0,0.9))]">
                               <path d="M0.5 0.5 H11.5 L6 8.5 Z" className={`${getMarkerFillClass(m.color)} stroke-white/30`} strokeWidth="1" />
                             </svg>
                           </button>
@@ -5535,7 +5585,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   {/* Honest note — chapters the file claims beyond the video's
                       end are dropped, not silently ignored. */}
                   {displayMarkers.droppedChapters > 0 && (
-                    <div className="absolute right-1 top-0.5 pointer-events-auto">
+                    <div className="absolute right-1 pointer-events-auto" style={{ bottom: '100%', marginBottom: 2 }}>
                       <Tooltip content={displayMarkers.droppedChapters === 1
                         ? 'This file contains 1 chapter placed beyond the video\'s end. It isn\'t shown.'
                         : `This file contains ${displayMarkers.droppedChapters} chapters placed beyond the video's end. They aren't shown.`}>
@@ -5545,8 +5595,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       </Tooltip>
                     </div>
                   )}
-                  {/* Edit popup — anchored to the marker's timeline position,
-                      clamped to the wrapper edges like the handle popups. */}
+                  {/* Edit popup — anchored to the marker's timeline position;
+                      it measures and shifts itself to stay inside the strips
+                      wrapper (the page panel clips anything past it). */}
                   {markerPopupId && (() => {
                     const entry = displayMarkers.list.find(d => d.marker.id === markerPopupId)
                     if (!entry) return null
@@ -5557,7 +5608,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         kind={entry.kind}
                         fps={videoInfo?.fps}
                         duration={duration}
-                        leftPct={Math.max(2, Math.min(98, pct))}
+                        leftPct={Math.max(0, Math.min(100, pct))}
+                        boundsRef={stripsWrapperRef}
                         onApply={patch => applyMarkerPatch(entry.marker.id, patch)}
                         onRemove={() => removeMarker(entry.marker.id)}
                         onClose={() => setMarkerPopupId(null)}
@@ -5807,10 +5859,22 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         setTimeout(() => timecodeInputRef.current?.select(), 0)
                       }}
                     >
-                      {formatTime(currentTime, videoInfo?.fps)}
+                      {formatPlayheadTime(currentTime, duration, videoInfo?.fps)}
                     </span>
                   </Tooltip>
                 )}
+                {/* Add marker — next to the playhead timecode on purpose:
+                    that readout IS the timecode the marker will land on. */}
+                <Tooltip content="Add marker at playhead" shortcut="M">
+                  <button
+                    data-kbd-flash="marker-add"
+                    onClick={addMarkerAtPlayhead}
+                    disabled={!duration}
+                    className="px-1 py-1.5 rounded shrink-0 text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                  >
+                    <Bookmark size={14} />
+                  </button>
+                </Tooltip>
                 <div ref={controlsRowRef} className="flex-1 flex items-center justify-center" style={{ gap: `${controlsGap}px` }}>
                 {/* Skip label/tooltip helpers — keeps the buttons themselves tight.
                     Magnitudes < 60s display as integer seconds (e.g. "-10", "+5");
@@ -5982,19 +6046,6 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       <Tooltip content="Skip to end" shortcut="End">
                         <button data-kbd-flash="skip-end" onClick={() => seekRef.current(duration)} className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors">
                           <ChevronsRight size={15} />
-                        </button>
-                      </Tooltip>
-
-                      {/* Add marker — always available, not clip-mode gated */}
-                      <div className="w-px h-3 bg-white/10 mx-0.5 shrink-0" />
-                      <Tooltip content="Add marker at playhead" shortcut="M">
-                        <button
-                          data-kbd-flash="marker-add"
-                          onClick={addMarkerAtPlayhead}
-                          disabled={!duration}
-                          className="px-1 py-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
-                        >
-                          <Bookmark size={14} />
                         </button>
                       </Tooltip>
                       </div>

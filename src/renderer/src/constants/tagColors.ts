@@ -334,9 +334,12 @@ const MARKER_FILL: Record<string, string> = {
 }
 
 /** Default color for player markers: SM-added markers with no explicit
- *  choice and file-read chapters until recolored. Cyan — distinct from the
- *  clip feature's blue so markers never read as clip UI. */
-export const DEFAULT_MARKER_COLOR = 'cyan'
+ *  choice and file-read chapters until recolored. The Gray entry (key
+ *  'purple' — the app's accent slate; see KEY-NAME HISTORY): neutral until
+ *  the user gives a marker meaning, stands out better than Slate on the
+ *  dark strip, and is distinct from the clip feature's blue so markers
+ *  never read as clip UI (PJ's pick, 2026-09-05). */
+export const DEFAULT_MARKER_COLOR = 'purple'
 
 export function getMarkerFillClass(colorKey: string | undefined): string {
   return MARKER_FILL[colorKey ?? ''] ?? MARKER_FILL[DEFAULT_MARKER_COLOR]

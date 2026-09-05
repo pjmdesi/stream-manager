@@ -108,6 +108,10 @@ Custom `role="checkbox"` button (not native). Colors `accent` (**default**) · `
 - **Shortcut chips:** if a keyboard shortcut triggers the button, pass `shortcut`. When one key toggles between two buttons' actions (Ctrl+A = select-all ↔ clear-when-complete), the chip sits on whichever button the key would *currently* trigger — a shown shortcut must never be wrong.
 - `side` (`top` default) with automatic fallback to a side that fits; `w-max` capped at `max-w-xs` (override via `maxWidth`); `interactive` (hoverable body, click-to-dismiss); `open`+`triggerStyle` for anchoring over non-React visuals (e.g. contenteditable chips). Portal at `z-[10001]`, `bg-navy-800`.
 
+### Anchored popovers (rule)
+
+Any floating popup anchored to a point in the UI (marker edit popup, track color picker, clip handle popups, dropdown panels) **must keep itself fully inside its clipping container before it shows**: the viewport for portalled popovers, or the nearest `overflow-hidden` ancestor for inline ones. A popover that renders half-cut at a container edge is a bug, not a cosmetic nit (codified 2026-09-05 from the marker edit popup clipping at the timeline's ends). `<Tooltip>` already does this (side fallback + fit logic); it is the default choice for hover info, including `interactive` for hoverable content. Write a bespoke popover only when it needs focusable controls (inputs, swatch grids), and give it the clamp: measure after mount in a `useLayoutEffect` and shift the panel so it fits, keeping the logical anchor position (reference implementation: `MarkerEditPopup` in PlayerPage, which clamps against the strips wrapper via a `boundsRef`).
+
 ### Chips / badges (rule)
 
 - **Chip border color matches its text color** (e.g. `text-accent-300` → `border-accent-300/40`). Don't pair a colored text with a neutral border.
