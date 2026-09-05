@@ -12,6 +12,8 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - The player timeline now shows markers. Press M (or the bookmark button in the playback controls) to add one at the playhead, click a marker to jump to it, and double-click to name it, change its color, or move it to an exact timecode. Chapters embedded in video files show up as markers too, including the ones OBS's Hybrid MP4 chapter hotkey writes during a stream. SM-added markers are saved in the stream's metadata next to the file; video files are never modified.
 - Fixed the frames segment of timecode inputs getting stuck when stepping up with the arrow keys (a floating-point rounding issue could display a frame value one frame low, so each up-step was read back and cancelled out).
+- Clipping mode and multi-track audio are now proper mode toggles in the player sidebar. Start Clipping swaps to Stop Clipping in the same spot while clipping (the clip toolbar no longer duplicates it), and multi-track audio is opened and closed from the same slot right above it instead of a chip under the waveform.
+- Clip region edge handles now land on whole pixels, with a subtle glow only on the outer side of each edge. Fractional positioning used to blur the handles into a both-sides shimmer.
 
 ## Converter
 

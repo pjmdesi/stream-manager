@@ -291,7 +291,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<Layers size={14} />} title="Multi-track audio">
-          <p>When a source has multiple audio tracks (e.g. game + microphone + Discord), an <em>Enable Multi-track Audio</em> button appears below the waveform. Click it to split the waveform track in the timeline into  per-track rows.</p>
+          <p>When a source has multiple audio tracks (e.g. game + microphone + Discord), an <em>Open Multi-track Audio</em> button appears in the player sidebar, above the clipping button. Click it to split the waveform track in the timeline into per-track rows; the same spot then offers <em>Close Multi-track Audio</em> to collapse them again.</p>
           <p>Track 0 is the source's built-in audio and is always available immediately. Other tracks decode on demand: click <em>Add track to playback</em> on a row to extract the audio to a temporary file (stored in the app's cache) and start hearing it during playback.</p>
           <p>Exporting a clip preserves every audio track in the output by default. The export dialog has checkboxes to pick which tracks to include in the mix, and each track's volume setting applies to that mix.</p>
         </ElementSection>

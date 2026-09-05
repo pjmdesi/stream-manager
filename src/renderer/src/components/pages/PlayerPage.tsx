@@ -4075,7 +4075,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
         if (k === 'k' || k === 'K') { e.preventDefault(); if (!e.repeat) { flashShortcutTarget('play'); applyPlaybackRate(1) } return }
         if (k === 'l' || k === 'L') { e.preventDefault(); if (!e.repeat) { flashShortcutTarget('play'); stepPlaybackRate(1) } return }
 
-        // C — toggle clip mode (mirror the toolbar button's logic). Show
+        // C — toggle clip mode (mirror the sidebar toggle's logic). Show
         // the merge-warning modal only when a merge is genuinely needed
         // and not already running, and the user hasn't opted out.
         if (k === 'c' || k === 'C') {
@@ -4429,16 +4429,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
               {/* Clip mode toolbar */}
               {isClipMode && (
                 <div className="flex flex-col gap-0 -mx-1">
+                  {/* No Stop Clipping button here — it lives in the sidebar,
+                      in the same slot as Start Clipping (style-guide rule:
+                      close buttons render where their open buttons were). */}
                   <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-t-lg bg-blue-950/40 border border-blue-500/20">
-                    <button
-                      onClick={exitClipMode}
-                      className="flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded text-[11px] font-medium text-gray-300 border border-white/15 bg-white/5 hover:bg-white/10 transition-colors"
-                    >
-                      <X size={12} />
-                      Stop<CollapsibleLabel expandClass="2xl:grid-cols-[1fr] 2xl:ms-0" collapsedMarginStart="-ms-1">{' '}Clipping</CollapsibleLabel>
-                    </button>
-                    <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
-
                     {/* Add Segment / Split Segment button */}
                     {(() => {
                       const fps = videoInfo?.fps ?? 30
@@ -5238,26 +5232,41 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           className={`absolute inset-y-0 border-y pointer-events-none z-[9] transition-colors ${selectedRegionId === seg.id ? 'border-blue-300 bg-blue-400/10' : hoveredRegionId === seg.id ? 'border-blue-400/80 bg-blue-400/5' : 'border-blue-400/50'}`}
                           style={{ left: `${lPct}%`, right: `${rPct}%` }}
                         />
-                        {/* In-point handle */}
-                        {seg.inPoint >= vStart - 0.001 && seg.inPoint <= vEnd + 0.001 && (
-                          <div
-                            className="absolute inset-y-0 z-20 cursor-ew-resize"
-                            style={{ left: `${lPct}%`, transform: 'translateX(-50%)', width: '12px' }}
-                            onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'in')}
-                          >
-                            <div className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] rounded-sm transition-colors ${selectedRegionId === seg.id ? 'bg-blue-200' : 'bg-blue-400'}`} />
-                          </div>
-                        )}
-                        {/* Out-point handle */}
-                        {seg.outPoint >= vStart - 0.001 && seg.outPoint <= vEnd + 0.001 && (
-                          <div
-                            className="absolute inset-y-0 z-20 cursor-ew-resize"
-                            style={{ left: `${100 - rPct}%`, transform: 'translateX(-50%)', width: '12px' }}
-                            onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'out')}
-                          >
-                            <div className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] rounded-sm transition-colors ${selectedRegionId === seg.id ? 'bg-blue-200' : 'bg-blue-400'}`} />
-                          </div>
-                        )}
+                        {/* In/out handles — pixel-snapped: percentage lefts
+                            landed the bars on fractional pixels and the
+                            sub-pixel anti-aliasing read as a glow bleeding
+                            both ways (PLR-13). Now: whole-pixel positions,
+                            square 2px bars straddling the boundary 1px each
+                            side, and a REAL glow via box-shadow offset 1px
+                            OUTWARD (left on in, right on out) so it never
+                            shows inside the region. Shadow hexes are
+                            Tailwind blue-400/blue-200, matching the bar
+                            (arbitrary shadow values can't reference the
+                            palette). */}
+                        {seg.inPoint >= vStart - 0.001 && seg.inPoint <= vEnd + 0.001 && (() => {
+                          const inPx = Math.round(((seg.inPoint - vStart) / vSpan) * stripWidth)
+                          return (
+                            <div
+                              className="absolute inset-y-0 z-20 cursor-ew-resize"
+                              style={{ left: `${inPx - 6}px`, width: '12px' }}
+                              onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'in')}
+                            >
+                              <div className={`absolute inset-y-0 left-[5px] w-[2px] transition-colors ${selectedRegionId === seg.id ? 'bg-blue-200 shadow-[-1px_0_2px_#bfdbfe]' : 'bg-blue-400 shadow-[-1px_0_2px_#60a5fa]'}`} />
+                            </div>
+                          )
+                        })()}
+                        {seg.outPoint >= vStart - 0.001 && seg.outPoint <= vEnd + 0.001 && (() => {
+                          const outPx = Math.round(((seg.outPoint - vStart) / vSpan) * stripWidth)
+                          return (
+                            <div
+                              className="absolute inset-y-0 z-20 cursor-ew-resize"
+                              style={{ left: `${outPx - 6}px`, width: '12px' }}
+                              onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'out')}
+                            >
+                              <div className={`absolute inset-y-0 left-[5px] w-[2px] transition-colors ${selectedRegionId === seg.id ? 'bg-blue-200 shadow-[1px_0_2px_#bfdbfe]' : 'bg-blue-400 shadow-[1px_0_2px_#60a5fa]'}`} />
+                            </div>
+                          )
+                        })()}
                         {/* Timecode label — shown above region when selected */}
                         {selectedRegionId === seg.id && (
                           <div className="absolute flex -translate-x-1/2 z-50 pointer-events-none" style={{ left: `${centerPct}%`, bottom: '100%', marginBottom: '4px' }}>
@@ -5620,38 +5629,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
               )}
               </div>{/* end stripsWrapperRef */}
 
-              {/* Multi-track entry/exit affordances. Rendered OUTSIDE the
-                  strips wrapper on purpose so the clip-region shading and
-                  the playhead indicator (both absolute-positioned within
-                  the wrapper) can't extend over the button and block its
-                  click area. */}
-              {!multiTrackEnabled && multiTrack && (
-                <div className={`flex justify-center ${isClipMode ? 'pt-5' : ''}`}>
-                  <Tooltip content="Splits the audio into one row per track, so you can pick which tracks to listen to and extract from the video.">
-                    <button
-                      onClick={enableMultiTrack}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] bg-accent-600/15 border border-accent-500/30 text-accent-200 hover:bg-accent-600/25 transition-colors"
-                    >
-                      <Layers size={11} />
-                      Enable Multi-track Audio · {videoInfo?.audioTracks.length} tracks
-                      {cachedTrackCount > 0 && (
-                        <span className="text-accent-300/70">({cachedTrackCount} cached)</span>
-                      )}
-                    </button>
-                  </Tooltip>
-                </div>
-              )}
-              {multiTrackEnabled && (
-                <div className={`flex justify-start ${isClipMode ? 'pt-5' : ''}`}>
-                  <button
-                    onClick={disableMultiTrack}
-                    className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-300 transition-colors"
-                  >
-                    <X size={10} />
-                    Disable Multi-track Audio
-                  </button>
-                </div>
-              )}
+              {/* The multi-track open/close affordances moved to the sidebar
+                  (PLR-13), where they pair with the clipping mode toggle. In
+                  clip mode their old row doubled as clearance for the segment
+                  duration/delete pills that hang below the strips, so a
+                  spacer keeps that room reserved. */}
+              {isClipMode && <div className="h-6 shrink-0" />}
 
               {/* Viewport scrollbar — below waveform, above playback controls */}
               {duration > 0 && (
@@ -6544,7 +6527,40 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           </button>
                         </Tooltip>
                       )}
-                      {!isClipMode && (
+                      {/* Multi-track audio mode toggle — open and close live in
+                          the SAME slot (style-guide rule: a mode's close button
+                          renders where its open button was), directly above the
+                          clipping toggle so the two mode switches pair up. */}
+                      {multiTrack && !multiTrackEnabled && (
+                        <Tooltip
+                          content={`Splits the audio into one row per track (${videoInfo?.audioTracks.length ?? 0} tracks${cachedTrackCount > 0 ? `, ${cachedTrackCount} cached`  : ''}), so you can pick which tracks to listen to and extract from the video.`}
+                          side="left"
+                        >
+                          <button
+                            onClick={enableMultiTrack}
+                            className={`${btnBase} bg-accent-600/15 border border-accent-500/30 text-accent-200 hover:bg-accent-600/25`}
+                          >
+                            <Layers size={14} className="shrink-0" />
+                            {!panelCollapsed && <span className="truncate">Open Multi-track Audio</span>}
+                          </button>
+                        </Tooltip>
+                      )}
+                      {multiTrack && multiTrackEnabled && (
+                        <Tooltip content="Collapse the tracks back into the single mixed waveform" side="left">
+                          <button
+                            onClick={disableMultiTrack}
+                            className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
+                          >
+                            <Layers size={14} className="shrink-0" />
+                            {!panelCollapsed && <span className="truncate">Close Multi-track Audio</span>}
+                          </button>
+                        </Tooltip>
+                      )}
+                      {/* Clipping mode toggle — same-slot rule as above: in clip
+                          mode this exact spot becomes Stop Clipping (the toolbar
+                          carries no duplicate), so the user who just clicked
+                          Start knows where the exit is. */}
+                      {!isClipMode ? (
                         <Tooltip content={clipTooltip} side="left">
                           <button
                             disabled={sourceMissing}
@@ -6553,6 +6569,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           >
                             <Scissors size={14} className="shrink-0" />
                             {!panelCollapsed && <span className="truncate">{clipLabel}</span>}
+                          </button>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip content="Stop Clipping (C)" side="left">
+                          <button
+                            onClick={exitClipMode}
+                            className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
+                          >
+                            <Scissors size={14} className="shrink-0" />
+                            {!panelCollapsed && <span className="truncate">Stop Clipping</span>}
                           </button>
                         </Tooltip>
                       )}
@@ -6683,7 +6709,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                 setIsClipMode(true)
               }}
             >
-              Enable Multi-track Audio
+              Open Multi-track Audio
             </Button>
           </>
         }

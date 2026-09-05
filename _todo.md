@@ -13,9 +13,10 @@
 9. IDEA-4
 10. PLR-12
 11. PLR-13
-12. APP-22
-13. IDEA-11
-14. APP-23
+12. PLR-11
+13. APP-22
+14. IDEA-11
+15. APP-23
 
 ## Improvement ideas
 
@@ -145,7 +146,7 @@
   - Additional to this change: the [start timecode] -> [end timecode] label popup should appear on clip region hover now instead of it having to be selected (and moving the cursor up to that label should keep it opened, allowing for selection and drag). Selecting a clip region should still allow it to stay opened until clicked off of (clicked somewhere else in the timeline or on another clip region).
   - Lastly, the method to deselect a clip region is a bit awkward. One must click on the timeline track, but not on the part where the thumbnails are. Only clicking on the timeline audio waveform part will deselect the clip region (any audio waveform in multi-track mode). We just need to extend this functionality to include the thumbnails track, so it's not confusing why clicking away from a clip region does not deselect it.
 
-- **PLR-12** [bug]
+- **PLR-12** [bug] [done]
   There seems to be a bug in the timecode inputs on the player page. I happened to land the playhead on 1:45:32:30. When I clicked on the playhead timecode input and tried to increase the timecode on the frame vaule with the arrow keys, the up arrow didn't work. I could increment down to 29, 28, etc. And I could increment *back* up, but it would stop working again at 30. I was able to replicate this in the new marker popup timecode input as well, same position (same timecode value), could iterate down on the frames value with arrow keys, but not up past 30. All the other values seem to work still. This was the initial discovery. I then clicked the playhead around and discovered that the frames value gets stuck pretty much anywhere. one can only increment the frames value down.
 
 - **PLR-13**
