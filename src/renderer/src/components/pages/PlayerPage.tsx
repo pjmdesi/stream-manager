@@ -211,7 +211,9 @@ function applyTimecodeArrow(
   const parts = inputValue.split(':')
   const { index: segIdx } = segmentAtCursor(inputValue, cursorPos)
   const fromRight = parts.length - 1 - segIdx
-  const step = segmentStep(fromRight, fps)
+  // Shift = x10, matching NumberInput's spinners (APP-22): ten of whatever
+  // segment the cursor is on — 10 frames, 10 seconds, 10 minutes.
+  const step = segmentStep(fromRight, fps) * (e.shiftKey ? 10 : 1)
   const current = parseTimecode(inputValue, fps) ?? 0
   const newTime = Math.max(minTime, Math.min(current + (e.key === 'ArrowUp' ? step : -step), maxTime))
   const newValue = formatViewTime(newTime, fps)
@@ -4646,6 +4648,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       }
                       const setHeight = (px: number) => setWidth((px / maxH) * maxW)
                       const reset = () => apply({ cropX: DEFAULT_CROP_X, cropY: DEFAULT_CROP_Y, cropScale: DEFAULT_CROP_SCALE })
+                      // Arrow-step with Shift = x10 (APP-22), matching
+                      // NumberInput's spinners. preventDefault keeps the
+                      // native number-input step from doubling up.
+                      const arrowStep = (e: React.KeyboardEvent<HTMLInputElement>, current: number, applyVal: (v: number) => void) => {
+                        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+                        e.preventDefault()
+                        applyVal(current + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1))
+                      }
                       // Tighter padding + hidden native spinner arrows. The
                       // native up/down arrows render at OS-default size and
                       // look out of place in this dense toolbar; users can
@@ -4662,17 +4672,21 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                               <div className="flex items-center gap-1">
                                 <span className={labelCls}>x</span>
                                 <input type="number" disabled={disabled} className={inputCls} value={offsetX}
+                                  onKeyDown={e => arrowStep(e, offsetX, setOffsetX)}
                                   onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetX(v) }} />
                                 <span className={labelCls}>y</span>
                                 <input type="number" disabled={disabled} className={inputCls} value={offsetY}
+                                  onKeyDown={e => arrowStep(e, offsetY, setOffsetY)}
                                   onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setOffsetY(v) }} />
                               </div>
                               <div className="flex items-center gap-1">
                                 <span className={labelCls}>w</span>
                                 <input type="number" disabled={disabled} className={inputCls} value={dispW}
+                                  onKeyDown={e => arrowStep(e, dispW, setWidth)}
                                   onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setWidth(v) }} />
                                 <span className={labelCls}>h</span>
                                 <input type="number" disabled={disabled} className={inputCls} value={dispH}
+                                  onKeyDown={e => arrowStep(e, dispH, setHeight)}
                                   onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setHeight(v) }} />
                               </div>
                             </div>
@@ -5103,7 +5117,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                               e.preventDefault()
                                               const base = parseInt(displayed, 10)
                                               if (isNaN(base)) return
-                                              const next = Math.max(0, Math.min(100, base + (e.key === 'ArrowUp' ? 1 : -1)))
+                                              // Shift = x10 (APP-22)
+                                              const next = Math.max(0, Math.min(100, base + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1)))
                                               setVolumeInputs(prev => ({ ...prev, [track.index]: String(next) }))
                                               setTrackVolume(track.index, next / 100)
                                             }

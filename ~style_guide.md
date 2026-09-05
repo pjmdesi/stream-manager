@@ -89,6 +89,8 @@ Shared field skin: `bg-navy-900` · `border-white/10` · `rounded-lg` · focus `
 - **`Select`** — native select, themed; `options` array. (Some places use a raw themed `<select>` + `ChevronDown` overlay — `TODO:` consolidate onto this or document when raw is OK.)
 - **`NumberInput`** — number field with custom vertical +/− (Shift = ×10), native spinner stripped. Primitive: owns no label/error.
 
+**Shift = ×10 stepping (rule, APP-22).** Every input that steps with arrow keys or spinners multiplies the step by 10 while Shift is held: NumberInput's spinners, the player timecode inputs (ten of whatever segment the cursor is on: 10 frames, 10 seconds, 10 minutes; central implementation in `applyTimecodeArrow`), the crop x/y/w/h fields, the track volume %. Custom handlers must `preventDefault` so the native number-input step can't double up. Exceptions are decided case-by-case for tiny-range inputs where a ×10 jump spans most of the range: opt a NumberInput out with `disableShiftStep` (which also drops the "(Shift = ×10)" note from its spinner tooltips — a shown hint must never be wrong); current exceptions are max simultaneous conversions and the relay port. Deliberately unadvertised: no tooltip hints outside NumberInput's own spinner tooltips.
+
 ### Checkbox (`Checkbox.tsx`)
 
 Custom `role="checkbox"` button (not native). Colors `accent` (**default**) · `red` · `green` · `blue`; sizes `sm`/`md`. Single check icon, `strokeWidth=3`.

@@ -787,6 +787,7 @@ export function IntegrationsPage({ initialStatus }: {
                         min={1}
                         max={65535}
                         disabled={srFieldsLocked}
+                        disableShiftStep
                         className="w-24"
                         aria-label="Relay RTMP port"
                       />

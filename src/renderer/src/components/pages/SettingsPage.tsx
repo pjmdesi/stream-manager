@@ -784,6 +784,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               min={1}
               max={4}
               step={1}
+              disableShiftStep
               className="w-28"
               aria-label="Max simultaneous conversions"
             />

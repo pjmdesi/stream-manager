@@ -16,6 +16,8 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - Clip region edge handles now land on whole pixels, with a subtle glow only on the outer side of each edge. Fractional positioning used to blur the handles into a both-sides shimmer.
 - Clip regions are easier to work with. Clicking inside a region now places the playhead (and selects the region) instead of being reserved for dragging; moving the whole region lives on its timecode tag, which now appears on hover with drag grips and connects visually to the region's border. Clicking the thumbnail strip deselects a region, the same as clicking the waveform always did.
 
+- Holding Shift while arrow-stepping an input jumps by 10x everywhere stepping exists: timecode inputs (10 of whatever segment the cursor is on), the crop tool's position and size fields, and the track volume, matching the number fields that already did this. Tiny-range settings like max simultaneous conversions and the relay port deliberately keep plain stepping.
+
 ## Converter
 
 - The max simultaneous conversions setting is now enforced everywhere. Manually started conversions, auto-rule conversions, clip and Short exports from the player, and archive batches whose files just finished downloading from the cloud all wait for a free slot instead of piling on. Waiting items show a "Waiting" state and start automatically, in order, as slots free up.

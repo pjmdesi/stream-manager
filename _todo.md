@@ -10,14 +10,14 @@
 6. APP-17
 7. THU-7
 8. THU-11
-9. IDEA-4
-10. PLR-12
-11. PLR-13
-12. PLR-11
-13. PLR-6
-14. APP-22
-15. IDEA-11
-16. APP-23
+9. PLR-12
+10. PLR-13
+11. PLR-11
+12. PLR-6
+13. APP-22
+14. IDEA-11
+15. APP-23
+16. IDEA-4
 
 ## Improvement ideas
 
@@ -116,7 +116,7 @@
 - **PLR-5** [bug]
   Clicking on the timeline track within some distance from the edges seems to auto-scroll the track instead of placing the playhead. It seems to be whenever the click happens within the auto-scroll margin of the playhead. This needs to be fixed.
 
-- **PLR-6**
+- **PLR-6** [done]
   We need to make it so that if the user left clicks on the timeline track and holds down and drags, it should place then scrub the playhead. Currently, if the user clicks and drags, it does nothing.
 
 - **PLR-7**

@@ -295,6 +295,11 @@ interface NumberInputProps {
    *  Escape a "zero this field" meaning (e.g. ColorAlphaField's opacity).
    *  The key event is consumed, so it never reaches page-level handlers. */
   onEscape?: () => void
+  /** Opt out of the Shift = ×10 stepping for tiny-range fields where a ×10
+   *  jump spans most of the range (max simultaneous conversions, the relay
+   *  port). Also drops the "(Shift = ×10)" note from the spinner tooltips,
+   *  since a shown hint must never be wrong. APP-22 exception list. */
+  disableShiftStep?: boolean
   'aria-label'?: string
 }
 
@@ -312,7 +317,7 @@ interface NumberInputProps {
  */
 export const NumberInput: React.FC<NumberInputProps> = ({
   value, onChange, min, max, step = 1, placeholder, disabled, className = '', title,
-  inlineNote, frameless = false, merged = false, onEscape,
+  inlineNote, frameless = false, merged = false, onEscape, disableShiftStep = false,
   'aria-label': ariaLabel,
 }) => {
   const clamp = (n: number) => {
@@ -328,7 +333,8 @@ export const NumberInput: React.FC<NumberInputProps> = ({
   // (0.30000000000000004).
   const stepDecimals = (String(step).split('.')[1] ?? '').length
   const stepBy = (dir: 1 | -1, shift: boolean) =>
-    onChange(clamp(Number((value + dir * step * (shift ? 10 : 1)).toFixed(stepDecimals))))
+    onChange(clamp(Number((value + dir * step * (shift && !disableShiftStep ? 10 : 1)).toFixed(stepDecimals))))
+  const shiftNote = disableShiftStep ? '' : ' (Shift = ×10)'
   const atMin = min !== undefined && value <= min
   const atMax = max !== undefined && value >= max
 
@@ -390,7 +396,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
       <div className="flex flex-col shrink-0">
         {/* Tooltips name the actual step so a large increment (e.g. the
             cache limit's 128) reads as intended, not broken. */}
-        <Tooltip content={`+${step} (Shift = ×10)`} side="right" triggerClassName="flex-1 flex min-h-0">
+        <Tooltip content={`+${step}${shiftNote}`} side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}
@@ -404,7 +410,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
           <ChevronUp size={10} strokeWidth={2.5} />
         </button>
         </Tooltip>
-        <Tooltip content={`-${step} (Shift = ×10)`} side="right" triggerClassName="flex-1 flex min-h-0">
+        <Tooltip content={`-${step}${shiftNote}`} side="right" triggerClassName="flex-1 flex min-h-0">
         <button
           type="button"
           tabIndex={-1}
