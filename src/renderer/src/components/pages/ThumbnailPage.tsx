@@ -2700,7 +2700,10 @@ function GradientFillControl({ layer, update, fallback }: {
               Add stop
             </button>
           </Tooltip>
-          <div className="grid grid-cols-3 gap-1.5">
+          {/* Angle only ever holds 1-3 digits — fixed narrow column so the
+              Style select and the Blend pair get the room they need
+              (widths hand-tuned by PJ). */}
+          <div className="grid grid-cols-[3.1rem_minmax(0,1.3fr)_minmax(0,1.3fr)] gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Angle °</span>
               <NumberInput

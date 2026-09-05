@@ -185,7 +185,7 @@
 - **THU-10** [ui]
   Allow swatches from the recent list to be dragged into the saved palette list. When the user drags, they should be able to drop the swatch in between any two existing swatches in the palette list, and the new swatch should be inserted at that position. The palette list should update immediately to reflect the new order of swatches. It should be removed from the recents list just as clicking the swatch to add does today.
 
-- **THU-11**
+- **THU-11** [done]
   Add a "hard" option to the gradients in the thumbnail editor. This would allow the user to create a gradient where the colors hard transition from one to the next instead of blending together. This is a common way to do certain effects an easier way than having to create multiple objects, especially for text. We'll only have the 2 modes for now: "soft" (the current mode) and "hard".
 
 - **THU-12** [ui]
