@@ -14,6 +14,7 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - Fixed the frames segment of timecode inputs getting stuck when stepping up with the arrow keys (a floating-point rounding issue could display a frame value one frame low, so each up-step was read back and cancelled out).
 - Clipping mode and multi-track audio are now proper mode toggles in the player sidebar. Start Clipping swaps to Stop Clipping in the same spot while clipping (the clip toolbar no longer duplicates it), and multi-track audio is opened and closed from the same slot right above it instead of a chip under the waveform.
 - Clip region edge handles now land on whole pixels, with a subtle glow only on the outer side of each edge. Fractional positioning used to blur the handles into a both-sides shimmer.
+- Clip regions are easier to work with. Clicking inside a region now places the playhead (and selects the region) instead of being reserved for dragging; moving the whole region lives on its timecode tag, which now appears on hover with drag grips and connects visually to the region's border. Clicking the thumbnail strip deselects a region, the same as clicking the waveform always did.
 
 ## Converter
 

@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward, Bookmark, TriangleAlert } from 'lucide-react'
+import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward, Bookmark, TriangleAlert, GripVertical } from 'lucide-react'
 import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass, getMarkerFillClass, DEFAULT_MARKER_COLOR } from '../../constants/tagColors'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
@@ -426,6 +426,21 @@ function TrackColorPicker({
       </div>
     </div>,
     document.body
+  )
+}
+
+// ── Mode-close icon (style guide: mode open/close buttons) ──────────────────
+
+/** The mode's own icon with a small X badge at its lower right. Used on the
+ *  close state of a mode toggle (Stop Clipping, Close Multi-track Audio):
+ *  the red chrome plus this badge is what says "this now closes what it
+ *  opened" when the sidebar is collapsed to icons and there's no label. */
+function ModeCloseIcon({ icon }: { icon: React.ReactNode }) {
+  return (
+    <span className="relative shrink-0 flex">
+      {icon}
+      <X size={9} strokeWidth={3.5} className="absolute -bottom-1 -right-1 rounded-full bg-navy-800 text-red-300" />
+    </span>
   )
 }
 
@@ -4738,6 +4753,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                 ref={setFilmstripEl}
                 className="relative h-8 w-full cursor-pointer select-none"
                 onClick={e => {
+                  // Deselect like the waveform strips do (PLR-11) — clicking
+                  // anywhere in the timeline outside a region deselects; the
+                  // region hit areas sit above this and re-select instead.
+                  setSelectedRegionId(null)
                   const rect = e.currentTarget.getBoundingClientRect()
                   const ratio = (e.clientX - rect.left) / rect.width
                   seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
@@ -5214,70 +5233,116 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     const frameTime = 1 / fps
                     const stripWidth = stripsWrapperRef.current?.offsetWidth ?? 1000
                     const mergeThresholdSec = Math.max(frameTime, (vSpan / stripWidth) * 2)
+                    // Device-pixel snapping for the edge handles (see the
+                    // comment on the handle JSX). devicePixelRatio reflects
+                    // OS display scaling AND the app's zoom factor.
+                    const dpr = window.devicePixelRatio || 1
+                    const snapDev = (v: number) => Math.round(v * dpr) / dpr
+                    const handleW = Math.max(1 / dpr, snapDev(2))
                     const nextSeg = clipState.clipRegions.find(r => r.inPoint > seg.outPoint - frameTime)
                     const showMerge = nextSeg && nextSeg.id !== seg.id && (nextSeg.inPoint - seg.outPoint) <= mergeThresholdSec
 
                     return (
                       <React.Fragment key={seg.id}>
-                        {/* Transparent drag hit area — z-[2] so bleeps (z-[4]) take priority */}
+                        {/* Transparent hit area — z-[2] so bleeps (z-[4]) take
+                            priority. Clicking inside a region SEEKS (and
+                            selects the region); moving the whole region now
+                            lives on the timecode pill above it (PLR-11), so
+                            the most common interaction, click-to-place the
+                            playhead, works inside regions too. */}
                         <div
-                          className="absolute inset-y-0 z-[2] cursor-grab active:cursor-grabbing"
+                          className="absolute inset-y-0 z-[2] cursor-pointer"
                           style={{ left: `${lPct}%`, right: `${rPct}%` }}
-                          onMouseDown={e => startSegmentDrag(e, seg.id)}
+                          onClick={e => {
+                            const rect = stripsWrapperRef.current?.getBoundingClientRect()
+                            if (!rect) return
+                            const ratio = (e.clientX - rect.left) / rect.width
+                            seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
+                            setSelectedRegionId(seg.id)
+                          }}
                           onMouseEnter={() => setHoveredRegionId(seg.id)}
                           onMouseLeave={() => setHoveredRegionId(null)}
                         />
                         {/* Visual border — brightens on hover, solid when selected */}
                         <div
-                          className={`absolute inset-y-0 border-y pointer-events-none z-[9] transition-colors ${selectedRegionId === seg.id ? 'border-blue-300 bg-blue-400/10' : hoveredRegionId === seg.id ? 'border-blue-400/80 bg-blue-400/5' : 'border-blue-400/50'}`}
+                          className={`absolute inset-y-0 border-y pointer-events-none z-[9] transition-colors ${selectedRegionId === seg.id ? 'border-blue-300 bg-blue-400/10' : hoveredRegionId === seg.id ? 'border-blue-400 bg-blue-400/5' : 'border-blue-400'}`}
                           style={{ left: `${lPct}%`, right: `${rPct}%` }}
                         />
-                        {/* In/out handles — pixel-snapped: percentage lefts
-                            landed the bars on fractional pixels and the
-                            sub-pixel anti-aliasing read as a glow bleeding
-                            both ways (PLR-13). Now: whole-pixel positions,
-                            square 2px bars straddling the boundary 1px each
-                            side, and a REAL glow via box-shadow offset 1px
-                            OUTWARD (left on in, right on out) so it never
-                            shows inside the region. Shadow hexes are
-                            Tailwind blue-400/blue-200, matching the bar
+                        {/* In/out handles — snapped to DEVICE pixels: whole
+                            CSS pixels are only whole device pixels at 100%
+                            zoom on a 1x display, and with UI zoom or OS
+                            scaling (devicePixelRatio covers both) identical
+                            2px bars rasterized 1px, 2px, or blurry depending
+                            on landing phase. Each bar's left edge and width
+                            snap through dpr so every handle paints the same.
+                            The glow is a box-shadow offset 1px OUTWARD (left
+                            on in, right on out) so it never shows inside the
+                            region. Colors: blue-400 idle / blue-300 selected,
+                            matching the region borders and label pills;
+                            shadow rgba values are those same colors at 60%
                             (arbitrary shadow values can't reference the
                             palette). */}
                         {seg.inPoint >= vStart - 0.001 && seg.inPoint <= vEnd + 0.001 && (() => {
-                          const inPx = Math.round(((seg.inPoint - vStart) / vSpan) * stripWidth)
+                          const inX = ((seg.inPoint - vStart) / vSpan) * stripWidth
                           return (
                             <div
                               className="absolute inset-y-0 z-20 cursor-ew-resize"
-                              style={{ left: `${inPx - 6}px`, width: '12px' }}
+                              style={{ left: `${inX - 6}px`, width: '12px' }}
                               onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'in')}
                             >
-                              <div className={`absolute inset-y-0 left-[5px] w-[2px] transition-colors ${selectedRegionId === seg.id ? 'bg-blue-200 shadow-[-1px_0_2px_#bfdbfe]' : 'bg-blue-400 shadow-[-1px_0_2px_#60a5fa]'}`} />
+                              <div
+                                className={`absolute inset-y-0 transition-colors ${selectedRegionId === seg.id ? 'bg-blue-300 shadow-[-1px_0_2px_rgba(147,197,253,0.6)]' : 'bg-blue-400 shadow-[-1px_0_2px_rgba(96,165,250,0.6)]'}`}
+                                style={{ left: `${snapDev(inX - 1) - inX + 6}px`, width: `${handleW}px` }}
+                              />
                             </div>
                           )
                         })()}
                         {seg.outPoint >= vStart - 0.001 && seg.outPoint <= vEnd + 0.001 && (() => {
-                          const outPx = Math.round(((seg.outPoint - vStart) / vSpan) * stripWidth)
+                          const outX = ((seg.outPoint - vStart) / vSpan) * stripWidth
                           return (
                             <div
                               className="absolute inset-y-0 z-20 cursor-ew-resize"
-                              style={{ left: `${outPx - 6}px`, width: '12px' }}
+                              style={{ left: `${outX - 6}px`, width: '12px' }}
                               onMouseDown={e => startSegmentHandleDrag(e, seg.id, 'out')}
                             >
-                              <div className={`absolute inset-y-0 left-[5px] w-[2px] transition-colors ${selectedRegionId === seg.id ? 'bg-blue-200 shadow-[1px_0_2px_#bfdbfe]' : 'bg-blue-400 shadow-[1px_0_2px_#60a5fa]'}`} />
+                              <div
+                                className={`absolute inset-y-0 transition-colors ${selectedRegionId === seg.id ? 'bg-blue-300 shadow-[1px_0_2px_rgba(147,197,253,0.6)]' : 'bg-blue-400 shadow-[1px_0_2px_rgba(96,165,250,0.6)]'}`}
+                                style={{ left: `${snapDev(outX - 1) - outX + 6}px`, width: `${handleW}px` }}
+                              />
                             </div>
                           )
                         })()}
                         {/* Timecode label — shown above region when selected */}
-                        {selectedRegionId === seg.id && (
-                          <div className="absolute flex -translate-x-1/2 z-50 pointer-events-none" style={{ left: `${centerPct}%`, bottom: '100%', marginBottom: '4px' }}>
-                            <div className="bg-blue-950 border border-blue-300 rounded px-1.5 py-0.5 text-[11px] text-blue-100 tabular-nums whitespace-nowrap shadow-xl">
+                        {/* Timecode pill above the region. Mirrors the duration
+                            pill below: same chrome, reflected (top corners
+                            rounded), bottom border overlapping the region's top
+                            border by 1px so the two read as one connected
+                            shape. Shows on hover as well as selection, and IS
+                            the whole-region drag handle (PLR-11) — hence the
+                            grips and its own hover handlers, which keep it
+                            open while the cursor travels up onto it. */}
+                        {(selectedRegionId === seg.id || hoveredRegionId === seg.id) && (
+                          <div
+                            className="absolute flex -translate-x-1/2 z-50"
+                            style={{ left: `${centerPct}%`, bottom: '100%', marginBottom: '-1px' }}
+                            onMouseEnter={() => setHoveredRegionId(seg.id)}
+                            onMouseLeave={() => setHoveredRegionId(null)}
+                          >
+                            <div
+                              className={`bg-blue-950 border ${selectedRegionId === seg.id ? 'border-blue-300' : 'border-blue-400'} rounded-t px-1 pt-0 pb-0.5 text-[11px] text-blue-200 tabular-nums whitespace-nowrap shadow-xl flex items-center gap-1 cursor-grab active:cursor-grabbing select-none`}
+                              onMouseDown={e => startSegmentDrag(e, seg.id)}
+                            >
+                              <GripVertical size={9} className="text-blue-400/80 shrink-0" />
                               {formatTime(seg.inPoint, videoInfo?.fps)} → {formatTime(seg.outPoint, videoInfo?.fps)}
+                              <GripVertical size={9} className="text-blue-400/80 shrink-0" />
                             </div>
                           </div>
                         )}
                         {/* Duration label + delete button — centered below the region */}
-                        <div className="absolute flex -translate-x-1/2" style={{ left: `${centerPct}%`, top: '100%', zIndex: selectedRegionId === seg.id ? 60 : 40 }}>
-                          <div className="bg-blue-950 border border-blue-400 rounded-b px-1 pt-0.5 pb-0 flex items-center gap-1 shadow-xl">
+                        <div className="absolute flex -translate-x-1/2" style={{ left: `${centerPct}%`, top: 'calc(100% - 1px)', zIndex: selectedRegionId === seg.id ? 60 : 40 }}>
+                          {/* Border matches the region's selection blues (blue-300
+                              selected / blue-400 idle) like the handles do. */}
+                          <div className={`bg-blue-950 border ${selectedRegionId === seg.id ? 'border-blue-300' : 'border-blue-400'} rounded-b px-1 pt-0.5 pb-0 flex items-center gap-1 shadow-xl`}>
                             <Tooltip content={lockedRegionIds.has(seg.id) ? 'Unlock duration' : 'Lock duration'}>
                               <button
                                 onMouseDown={e => e.preventDefault()}
@@ -5634,7 +5699,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   clip mode their old row doubled as clearance for the segment
                   duration/delete pills that hang below the strips, so a
                   spacer keeps that room reserved. */}
-              {isClipMode && <div className="h-6 shrink-0" />}
+              {isClipMode && <div className="h-3 shrink-0" />}
 
               {/* Viewport scrollbar — below waveform, above playback controls */}
               {duration > 0 && (
@@ -6500,6 +6565,59 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         style as the other section dividers in the
                         sidebar — no inner divider needed. */}
                     <div className={`${stackCls} border-t border-white/5`}>
+                      {/* Clipping mode toggle — open and close live in the SAME
+                          slot (style-guide rule: a mode's close button renders
+                          where its open button was), so the user who just
+                          clicked Start knows where the exit is. The toolbar
+                          carries no duplicate stop button. */}
+                      {!isClipMode ? (
+                        <Tooltip content={clipTooltip} side="left">
+                          <button
+                            disabled={sourceMissing}
+                            onClick={onClipClick}
+                            className={`${btnBase} bg-blue-950/40 border border-blue-500/30 text-blue-400 hover:bg-blue-950/60 disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            <Scissors size={14} className="shrink-0" />
+                            {!panelCollapsed && <span className="truncate">{clipLabel}</span>}
+                          </button>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip content="Stop Clipping (C)" side="left">
+                          <button
+                            onClick={exitClipMode}
+                            className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
+                          >
+                            <ModeCloseIcon icon={<Scissors size={14} />} />
+                            {!panelCollapsed && <span className="truncate">Stop Clipping</span>}
+                          </button>
+                        </Tooltip>
+                      )}
+                      {/* Multi-track audio mode toggle — same-slot rule. */}
+                      {multiTrack && !multiTrackEnabled && (
+                        <Tooltip
+                          content={`Splits the audio into one row per track (${videoInfo?.audioTracks.length ?? 0} tracks${cachedTrackCount > 0 ? `, ${cachedTrackCount} cached`  : ''}), so you can pick which tracks to listen to and extract from the video.`}
+                          side="left"
+                        >
+                          <button
+                            onClick={enableMultiTrack}
+                            className={`${btnBase} bg-accent-600/15 border border-accent-500/30 text-accent-200 hover:bg-accent-600/25`}
+                          >
+                            <Layers size={14} className="shrink-0" />
+                            {!panelCollapsed && <span className="truncate">Open Multi-track Audio</span>}
+                          </button>
+                        </Tooltip>
+                      )}
+                      {multiTrack && multiTrackEnabled && (
+                        <Tooltip content="Collapse the tracks back into the single mixed waveform" side="left">
+                          <button
+                            onClick={disableMultiTrack}
+                            className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
+                          >
+                            <ModeCloseIcon icon={<Layers size={14} />} />
+                            {!panelCollapsed && <span className="truncate">Close Multi-track Audio</span>}
+                          </button>
+                        </Tooltip>
+                      )}
                       {videoInfo && (
                         <Tooltip
                           content={
@@ -6524,61 +6642,6 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                 </span>
                               </div>
                             )}
-                          </button>
-                        </Tooltip>
-                      )}
-                      {/* Multi-track audio mode toggle — open and close live in
-                          the SAME slot (style-guide rule: a mode's close button
-                          renders where its open button was), directly above the
-                          clipping toggle so the two mode switches pair up. */}
-                      {multiTrack && !multiTrackEnabled && (
-                        <Tooltip
-                          content={`Splits the audio into one row per track (${videoInfo?.audioTracks.length ?? 0} tracks${cachedTrackCount > 0 ? `, ${cachedTrackCount} cached`  : ''}), so you can pick which tracks to listen to and extract from the video.`}
-                          side="left"
-                        >
-                          <button
-                            onClick={enableMultiTrack}
-                            className={`${btnBase} bg-accent-600/15 border border-accent-500/30 text-accent-200 hover:bg-accent-600/25`}
-                          >
-                            <Layers size={14} className="shrink-0" />
-                            {!panelCollapsed && <span className="truncate">Open Multi-track Audio</span>}
-                          </button>
-                        </Tooltip>
-                      )}
-                      {multiTrack && multiTrackEnabled && (
-                        <Tooltip content="Collapse the tracks back into the single mixed waveform" side="left">
-                          <button
-                            onClick={disableMultiTrack}
-                            className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
-                          >
-                            <Layers size={14} className="shrink-0" />
-                            {!panelCollapsed && <span className="truncate">Close Multi-track Audio</span>}
-                          </button>
-                        </Tooltip>
-                      )}
-                      {/* Clipping mode toggle — same-slot rule as above: in clip
-                          mode this exact spot becomes Stop Clipping (the toolbar
-                          carries no duplicate), so the user who just clicked
-                          Start knows where the exit is. */}
-                      {!isClipMode ? (
-                        <Tooltip content={clipTooltip} side="left">
-                          <button
-                            disabled={sourceMissing}
-                            onClick={onClipClick}
-                            className={`${btnBase} bg-blue-950/40 border border-blue-500/30 text-blue-400 hover:bg-blue-950/60 disabled:opacity-40 disabled:cursor-not-allowed`}
-                          >
-                            <Scissors size={14} className="shrink-0" />
-                            {!panelCollapsed && <span className="truncate">{clipLabel}</span>}
-                          </button>
-                        </Tooltip>
-                      ) : (
-                        <Tooltip content="Stop Clipping (C)" side="left">
-                          <button
-                            onClick={exitClipMode}
-                            className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
-                          >
-                            <Scissors size={14} className="shrink-0" />
-                            {!panelCollapsed && <span className="truncate">Stop Clipping</span>}
                           </button>
                         </Tooltip>
                       )}
