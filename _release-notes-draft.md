@@ -21,6 +21,10 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - Zooming the UI now shows a percentage overlay (with odometer-rolling digits) so you can see where you landed, the zoom level survives restarts, and an exact zoom control lives in Settings under Appearance. The shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) step through browser-style zoom levels.
 - The About window lists the open source libraries the app is built with, each linking to its project page.
 
+## Thumbnail editor
+
+- Gradients now take any number of color stops. Click the preview bar to add a stop exactly where you clicked (it picks up the gradient's existing color at that spot, so the ramp doesn't jump), drag the arrow markers to reposition stops directly, and remove stops from their rows (a gradient keeps at least two). Works in both blend modes and records into gradient swatches like before.
+
 ## Cloud sync
 
 - Cancelling downloads is honest now: waiting files are skipped, and a file already mid-transfer finishes and stays on your PC, since transfers can't be interrupted and throwing away a completed download would waste the bandwidth already spent. The Cancel button's tooltip explains exactly what it does.

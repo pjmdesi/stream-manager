@@ -95,6 +95,40 @@ function mixOklch(c1: Rgba, c2: Rgba, t: number): Rgba {
   return oklabToRgba({ L, A: C * Math.cos(h), B: C * Math.sin(h), a: lab1.a + (lab2.a - lab1.a) * t })
 }
 
+function toHex8({ r, g, b, a }: Rgba): string {
+  const h = (c: number) => Math.round(clamp01(c) * 255).toString(16).padStart(2, '0')
+  return `#${h(r)}${h(g)}${h(b)}${h(a)}`
+}
+
+/** The gradient's color at `pos` (0..1) — what a stop inserted there
+ *  should take so adding it doesn't change the ramp (THU-7). oklch mode
+ *  samples through the same mix the renderer uses; sRGB lerps channels
+ *  linearly. Returns #rrggbbaa. */
+export function sampleGradientAt(stops: GradientStop[], space: GradientColorSpace, pos: number): string {
+  const ordered = [...stops].sort((x, y) => x.pos - y.pos)
+  if (ordered.length === 0) return '#ffffffff'
+  const p = Math.min(1, Math.max(0, pos))
+  if (p <= ordered[0].pos) return toHex8(parseHex(ordered[0].color))
+  if (p >= ordered[ordered.length - 1].pos) return toHex8(parseHex(ordered[ordered.length - 1].color))
+  let i = 0
+  while (i < ordered.length - 2 && ordered[i + 1].pos < p) i++
+  const a = ordered[i]
+  const b = ordered[i + 1]
+  const span = b.pos - a.pos
+  const t = span <= 0 ? 0 : (p - a.pos) / span
+  const ca = parseHex(a.color)
+  const cb = parseHex(b.color)
+  const mixed = space === 'oklch'
+    ? mixOklch(ca, cb, t)
+    : {
+        r: ca.r + (cb.r - ca.r) * t,
+        g: ca.g + (cb.g - ca.g) * t,
+        b: ca.b + (cb.b - ca.b) * t,
+        a: ca.a + (cb.a - ca.a) * t,
+      }
+  return toHex8(mixed)
+}
+
 /** Konva `fillLinearGradientColorStops` array ([pos, color, pos, color…]).
  *  oklch mode subdivides each stop pair into `samplesPerSegment` pieces so
  *  the canvas's native sRGB interpolation only ever bridges tiny,

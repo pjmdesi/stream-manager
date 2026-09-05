@@ -360,7 +360,7 @@
     - Clown Vomit (stupid/silly theme)
   Eventually, allow users to create their own theme. This would probably be a modal in the settings page which lists all the editable colors in the app. It would need to change them on the fly, have dummy versions of commin elements, and warn against hard-to-read combinations using accessibility standards.
 
-- **APP-17**
+- **APP-17** [done]
   List 3rd-party libraries with links to their respective web pages in the about modal.
 
 - **APP-18**

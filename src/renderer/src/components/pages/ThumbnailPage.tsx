@@ -22,7 +22,7 @@ import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { RecentRow, SmoothThumb } from '../ui/RecentRow'
 import { NumberInput } from '../ui/Input'
-import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview } from '../../lib/gradient'
+import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import type { PendingThumbnailStream } from '../../context/ThumbnailEditorContext'
@@ -2293,6 +2293,22 @@ function GradientFillControl({ layer, update, fallback }: {
     update({ gradientStops: next })
     recordGradient({ stops: next })
   }
+  // New stops APPEND (rows keep array order — the design decision that
+  // rows never jump under the cursor) and take the gradient's own color
+  // at that position, so adding a stop doesn't change the ramp.
+  const addStop = (pos: number) => {
+    const clamped = Math.round(Math.min(1, Math.max(0, pos)) * 100) / 100
+    const next = [...stops, { color: sampleGradientAt(stops, space, clamped), pos: clamped }]
+    update({ gradientStops: next })
+    recordGradient({ stops: next })
+  }
+  const removeStop = (idx: number) => {
+    if (stops.length <= 2) return
+    const next = stops.filter((_, k) => k !== idx)
+    // fill keeps mirroring the FIRST stop (solid-mode / back-compat).
+    update({ gradientStops: next, ...(idx === 0 ? { fill: next[0].color } : {}) })
+    recordGradient({ stops: next })
+  }
   const segCls = (on: boolean) =>
     `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
   return (
@@ -2380,7 +2396,7 @@ function GradientFillControl({ layer, update, fallback }: {
               Solid
             </button>
           </Tooltip>
-          <Tooltip content="Two-color linear gradient fill">
+          <Tooltip content="Linear gradient fill (click the preview bar to add stops)">
             <button
               type="button"
               onClick={() => update({
@@ -2424,23 +2440,30 @@ function GradientFillControl({ layer, update, fallback }: {
         <div className="flex flex-col gap-1.5 mt-0.5">
           {/* Vertical preview bar is the gradient's spine (top = first
               stop); each stop row carries a ◄ pointer at its spot on the
-              bar. The whole assembly grows naturally when multi-stop
-              editing arrives. CSS renders `in oklch` natively, so both
-              blend modes preview accurately; direction is on the canvas. */}
+              bar. Multi-stop (THU-7): clicking the bar adds a stop at the
+              clicked position, the arrows drag, rows carry a remove.
+              CSS renders `in oklch` natively, so both blend modes preview
+              accurately; direction is on the canvas. */}
           <div className="flex">
-            <div
-              className="w-3 -ms-3 border border-white/25 shrink-0 border-s-0 self-stretch"
-              // Layered backgrounds: gradient on top (no-repeat — subpixel
-              // sampling at the bottom edge wrapped 1px of the FIRST stop
-              // back in with repeat on), and a checker underneath so
-              // transparent regions read as transparency.
-              style={{
-                backgroundImage: `${cssGradientPreview(stops, space, 180)}, ${CHECKER_IMAGE}`,
-                backgroundSize: 'auto, 8px 8px',
-                backgroundPosition: '0 0, -1px 0',
-                backgroundRepeat: 'no-repeat, repeat',
-              }}
-            />
+            <Tooltip content="Click to add a color stop at that spot. Drag the arrows beside the bar to move stops." side="top" triggerClassName="w-3 -ms-3 shrink-0 self-stretch flex">
+              <div
+                className="w-full border border-white/25 border-s-0 cursor-copy"
+                // Layered backgrounds: gradient on top (no-repeat — subpixel
+                // sampling at the bottom edge wrapped 1px of the FIRST stop
+                // back in with repeat on), and a checker underneath so
+                // transparent regions read as transparency.
+                style={{
+                  backgroundImage: `${cssGradientPreview(stops, space, 180)}, ${CHECKER_IMAGE}`,
+                  backgroundSize: 'auto, 8px 8px',
+                  backgroundPosition: '0 0, -1px 0',
+                  backgroundRepeat: 'no-repeat, repeat',
+                }}
+                onClick={e => {
+                  const r = e.currentTarget.getBoundingClientRect()
+                  if (r.height > 0) addStop((e.clientY - r.top) / r.height)
+                }}
+              />
+            </Tooltip>
             {/* Arrow track: each ◄ rides the bar at its stop's EXACT
                 position (top = 0, bottom = 1), and a link line runs from
                 the triangle's right edge to its swatch's left edge —
@@ -2466,10 +2489,47 @@ function GradientFillControl({ layer, update, fallback }: {
                   {stops.map((st, idx) => {
                     const ay = Math.min(1, Math.max(0, st.pos)) * trackH
                     const ry = idx * (ROW + GAP) + ROW / 2
+                    const posFromEvent = (e: React.PointerEvent<SVGRectElement>): number | null => {
+                      const svg = e.currentTarget.ownerSVGElement
+                      if (!svg) return null
+                      const r = svg.getBoundingClientRect()
+                      if (r.height <= 0) return null
+                      return Math.round(Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) * 100) / 100
+                    }
                     return (
                       <g key={idx}>
                         <line x1={6} y1={ay} x2={TRACK_W} y2={ry} stroke="currentColor" strokeWidth={1} />
                         <path d={`M0 ${ay} L6 ${ay - 5} L6 ${ay + 5} Z`} fill="currentColor" />
+                        {/* Invisible widened hit area so the 6px triangle
+                            drags without pixel hunting (THU-7). Pointer
+                            capture keeps the drag alive off the track;
+                            update() folds the whole drag into ONE undo
+                            entry (same patch key = one gesture), and the
+                            gradient swatch records once on release. */}
+                        <rect
+                          x={-3}
+                          y={ay - 8}
+                          width={TRACK_W + 3}
+                          height={16}
+                          fill="transparent"
+                          style={{ cursor: 'ns-resize' }}
+                          onPointerDown={e => {
+                            e.stopPropagation()
+                            e.currentTarget.setPointerCapture(e.pointerId)
+                          }}
+                          onPointerMove={e => {
+                            if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
+                            const pos = posFromEvent(e)
+                            if (pos === null || pos === st.pos) return
+                            update({ gradientStops: stops.map((s2, k) => (k === idx ? { ...s2, pos } : s2)) })
+                          }}
+                          onPointerUp={e => {
+                            if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
+                            e.currentTarget.releasePointerCapture(e.pointerId)
+                            const pos = posFromEvent(e) ?? st.pos
+                            recordGradient({ stops: stops.map((s2, k) => (k === idx ? { ...s2, pos } : s2)) })
+                          }}
+                        />
                       </g>
                     )
                   })}
@@ -2478,8 +2538,9 @@ function GradientFillControl({ layer, update, fallback }: {
             })()}
             <div className="flex flex-col gap-1.5 flex-1 min-w-0 justify-between">
               {stops.map((st, idx) => (
+                <div key={idx} className="flex items-center gap-1">
+                <div className="flex-1 min-w-0">
                 <ColorAlphaField
-                  key={idx}
                   value={st.color}
                   fallback={fallback}
                   showHex
@@ -2508,6 +2569,18 @@ function GradientFillControl({ layer, update, fallback }: {
                     stops: stops.map((s2, k) => (k === idx ? { ...s2, color: c } : s2)),
                   })}
                 />
+                </div>
+                <Tooltip content={stops.length <= 2 ? 'A gradient needs at least two stops' : 'Remove this stop (the colors stay untouched elsewhere)'}>
+                  <button
+                    type="button"
+                    onClick={() => removeStop(idx)}
+                    disabled={stops.length <= 2}
+                    className="p-0.5 rounded shrink-0 text-gray-500 transition-colors enabled:hover:text-red-400 enabled:hover:bg-red-500/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </Tooltip>
+                </div>
               ))}
             </div>
           </div>
