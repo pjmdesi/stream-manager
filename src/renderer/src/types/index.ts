@@ -792,6 +792,10 @@ export interface ThumbnailLayer {
   /** Interpolation space — oklch (default) keeps saturated blends vivid;
    *  srgb matches classic CSS blending for brand-guide parity. */
   gradientColorSpace?: 'oklch' | 'srgb'
+  /** 'smooth' (default) blends between stops; 'hard' renders each stop as
+   *  a solid band whose edges sit at the MIDPOINTS to its neighbors —
+   *  no blending, so gradientColorSpace is inert (THU-11). */
+  gradientStyle?: 'smooth' | 'hard'
   // Shared (text + shape)
   fill?: string
   stroke?: string
@@ -864,6 +868,8 @@ export interface GradientSwatchData {
   /** App convention: 0° = top→bottom, increasing clockwise. */
   angle: number
   colorSpace: 'oklch' | 'srgb'
+  /** Absent on swatches captured before THU-11 — treat as 'smooth'. */
+  style?: 'smooth' | 'hard'
 }
 
 /** One palette swatch (thumbnails #1). Stored in `_palette.json` beside

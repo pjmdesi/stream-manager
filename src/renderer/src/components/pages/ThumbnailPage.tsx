@@ -879,7 +879,7 @@ function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, on
       fillPriority: 'linear-gradient',
       fillLinearGradientStartPoint: start,
       fillLinearGradientEndPoint: end,
-      fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch'),
+      fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch', layer.gradientStyle ?? 'smooth'),
     }
   }
 
@@ -983,7 +983,7 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
       fillPriority: 'linear-gradient',
       fillLinearGradientStartPoint: { x: start.x + sx, y: start.y + sy },
       fillLinearGradientEndPoint: { x: end.x + sx, y: end.y + sy },
-      fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch'),
+      fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch', layer.gradientStyle ?? 'smooth'),
     }
   }
 
@@ -1730,7 +1730,7 @@ function swatchTileStyle(v: SwatchValue): React.CSSProperties {
     // +180: cssGradientPreview takes a CSS angle (0° = bottom→top), but
     // the swatch stores the APP angle (0° = top→bottom) — same conversion
     // gradientLinePoints does for the canvas.
-    : cssGradientPreview(v.gradient.stops, v.gradient.colorSpace, v.gradient.angle + 180)
+    : cssGradientPreview(v.gradient.stops, v.gradient.colorSpace, v.gradient.angle + 180, v.gradient.style ?? 'smooth')
   return {
     backgroundImage: `${top}, ${CHECKER_IMAGE}`,
     backgroundSize: 'auto, 6px 6px',
@@ -2198,6 +2198,7 @@ function GradientFillControl({ layer, update, fallback }: {
   const stops = (layer.gradientStops?.length ?? 0) >= 2 ? layer.gradientStops! : defaultStops
   const space = layer.gradientColorSpace ?? 'oklch'
   const angle = layer.gradientAngle ?? 0
+  const gStyle = layer.gradientStyle ?? 'smooth'
 
   const anim = useAnimationConfig()
   // Rows display in STOP ORDER (top of the bar first) while the ARRAY
@@ -2272,7 +2273,7 @@ function GradientFillControl({ layer, update, fallback }: {
   const { recordRecent, breakRecentTie } = useContext(PaletteContext)
   const recordGradient = (over: Partial<GradientSwatchData> = {}) => {
     recordRecent(
-      { gradient: { stops: over.stops ?? stops, angle: over.angle ?? angle, colorSpace: over.colorSpace ?? space } },
+      { gradient: { stops: over.stops ?? stops, angle: over.angle ?? angle, colorSpace: over.colorSpace ?? space, style: over.style ?? gStyle } },
       `${layer.id}:fill-gradient`,
     )
   }
@@ -2290,6 +2291,7 @@ function GradientFillControl({ layer, update, fallback }: {
       gradientStops: g.stops,
       gradientAngle: g.angle,
       gradientColorSpace: g.colorSpace,
+      gradientStyle: g.style ?? 'smooth',
       // fill mirrors the first stop (solid-mode / back-compat degrade).
       fill: g.stops[0]?.color,
     })
@@ -2297,7 +2299,7 @@ function GradientFillControl({ layer, update, fallback }: {
     // mode switch, and post-adoption edits must never mutate old entries.
     breakRecentTie(`${layer.id}:fill-gradient`)
     breakRecentTie(`${layer.id}:fill`)
-    recordRecent({ gradient: { stops: g.stops, angle: g.angle, colorSpace: g.colorSpace } })
+    recordRecent({ gradient: { stops: g.stops, angle: g.angle, colorSpace: g.colorSpace, style: g.style ?? 'smooth' } })
   }
 
   // The reverse adoption: a SOLID swatch dropped on the control while in
@@ -2365,7 +2367,7 @@ function GradientFillControl({ layer, update, fallback }: {
   // so adding a stop doesn't change the ramp.
   const addStop = (pos: number) => {
     const clamped = Math.round(Math.min(1, Math.max(0, pos)) * 100) / 100
-    const next = [...stops, { color: sampleGradientAt(stops, space, clamped), pos: clamped }]
+    const next = [...stops, { color: sampleGradientAt(stops, space, clamped, gStyle), pos: clamped }]
     lastTouchedRef.current = stops.length
     stopIdsRef.current.ids = [...stopIds, nextStopIdRef.current++]
     update({ gradientStops: next })
@@ -2538,7 +2540,7 @@ function GradientFillControl({ layer, update, fallback }: {
                 // back in with repeat on), and a checker underneath so
                 // transparent regions read as transparency.
                 style={{
-                  backgroundImage: `${cssGradientPreview(stops, space, 180)}, ${CHECKER_IMAGE}`,
+                  backgroundImage: `${cssGradientPreview(stops, space, 180, gStyle)}, ${CHECKER_IMAGE}`,
                   backgroundSize: 'auto, 8px 8px',
                   backgroundPosition: '0 0, -1px 0',
                   backgroundRepeat: 'no-repeat, repeat',
@@ -2698,7 +2700,7 @@ function GradientFillControl({ layer, update, fallback }: {
               Add stop
             </button>
           </Tooltip>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Angle °</span>
               <NumberInput
@@ -2715,19 +2717,37 @@ function GradientFillControl({ layer, update, fallback }: {
                 className="w-full"
               />
             </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-400">Style</span>
+              <Tooltip content="Smooth blends between stops. Hard renders each stop as a solid band with edges halfway to its neighbors." triggerClassName="flex">
+                <select
+                  value={gStyle}
+                  onChange={e => {
+                    const gradientStyle = e.target.value as 'smooth' | 'hard'
+                    update({ gradientStyle })
+                    recordGradient({ style: gradientStyle })
+                  }}
+                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+                >
+                  <option value="smooth">Smooth</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </Tooltip>
+            </label>
             <div className="flex flex-col gap-0.5">
               {/* div, not label — a label would forward caption clicks to
                   the first button. */}
               <span className="text-[10px] text-gray-400">Blend</span>
-              <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
+              <div className={`flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden ${gStyle === 'hard' ? 'opacity-40' : ''}`}>
                 {/* triggerClassName carries flex-1: the Tooltip wrapper is
                     the actual flex item, so flex-1 on the buttons alone
-                    left the pair unevenly sized. */}
-                <Tooltip content="oklch — keeps saturated blends vivid (recommended)" triggerClassName="flex-1 min-w-0 flex">
-                  <button type="button" onClick={() => { update({ gradientColorSpace: 'oklch' }); recordGradient({ colorSpace: 'oklch' }) }} className={`flex-1 py-1 text-xs transition-colors ${space === 'oklch' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>oklch</button>
+                    left the pair unevenly sized. Hard style disables the
+                    pair — bands don't blend, so the space does nothing. */}
+                <Tooltip content={gStyle === 'hard' ? 'No blending happens between hard bands' : 'oklch — keeps saturated blends vivid (recommended)'} triggerClassName="flex-1 min-w-0 flex">
+                  <button type="button" disabled={gStyle === 'hard'} onClick={() => { update({ gradientColorSpace: 'oklch' }); recordGradient({ colorSpace: 'oklch' }) }} className={`flex-1 py-1 text-xs transition-colors disabled:cursor-not-allowed ${space === 'oklch' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 enabled:hover:text-gray-200 enabled:hover:bg-white/5'}`}>oklch</button>
                 </Tooltip>
-                <Tooltip content="sRGB — classic CSS blending; use when brand colors expect it" triggerClassName="flex-1 min-w-0 flex">
-                  <button type="button" onClick={() => { update({ gradientColorSpace: 'srgb' }); recordGradient({ colorSpace: 'srgb' }) }} className={`flex-1 py-1 text-xs transition-colors ${space === 'srgb' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}>sRGB</button>
+                <Tooltip content={gStyle === 'hard' ? 'No blending happens between hard bands' : 'sRGB — classic CSS blending; use when brand colors expect it'} triggerClassName="flex-1 min-w-0 flex">
+                  <button type="button" disabled={gStyle === 'hard'} onClick={() => { update({ gradientColorSpace: 'srgb' }); recordGradient({ colorSpace: 'srgb' }) }} className={`flex-1 py-1 text-xs transition-colors disabled:cursor-not-allowed ${space === 'srgb' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 enabled:hover:text-gray-200 enabled:hover:bg-white/5'}`}>sRGB</button>
                 </Tooltip>
               </div>
             </div>

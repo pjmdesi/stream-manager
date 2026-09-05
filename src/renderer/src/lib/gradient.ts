@@ -19,6 +19,25 @@ export interface GradientStop {
 
 export type GradientColorSpace = 'oklch' | 'srgb'
 
+/** 'smooth' blends between stops; 'hard' renders each stop as a solid
+ *  band whose edges sit at the MIDPOINTS between neighboring stops
+ *  (THU-11). Hard edges are the canonical coincident-stop technique —
+ *  two stops at the same position — which both canvas gradients and CSS
+ *  support natively; no blending happens, so the color space is inert. */
+export type GradientStyle = 'smooth' | 'hard'
+
+/** The hard-mode band layout: each sorted stop's color spans from the
+ *  midpoint below to the midpoint above (first band starts at 0, last
+ *  ends at 1). Shared by the Konva builder, the CSS preview, and the
+ *  position sampler so all three agree on where bands break. */
+function hardBands(ordered: GradientStop[]): { color: string; start: number; end: number }[] {
+  return ordered.map((s, i) => ({
+    color: s.color,
+    start: i === 0 ? 0 : (ordered[i - 1].pos + s.pos) / 2,
+    end: i === ordered.length - 1 ? 1 : (s.pos + ordered[i + 1].pos) / 2,
+  }))
+}
+
 interface Rgba { r: number; g: number; b: number; a: number }
 interface Oklab { L: number; A: number; B: number; a: number }
 
@@ -104,10 +123,16 @@ function toHex8({ r, g, b, a }: Rgba): string {
  *  should take so adding it doesn't change the ramp (THU-7). oklch mode
  *  samples through the same mix the renderer uses; sRGB lerps channels
  *  linearly. Returns #rrggbbaa. */
-export function sampleGradientAt(stops: GradientStop[], space: GradientColorSpace, pos: number): string {
+export function sampleGradientAt(stops: GradientStop[], space: GradientColorSpace, pos: number, style: GradientStyle = 'smooth'): string {
   const ordered = [...stops].sort((x, y) => x.pos - y.pos)
   if (ordered.length === 0) return '#ffffffff'
   const p = Math.min(1, Math.max(0, pos))
+  if (style === 'hard') {
+    // The band the position falls in — i.e. the NEAREST stop's color, so
+    // a stop added there starts invisible until recolored.
+    const band = hardBands(ordered).find(b => p >= b.start && p <= b.end) ?? { color: ordered[0].color }
+    return toHex8(parseHex(band.color))
+  }
   if (p <= ordered[0].pos) return toHex8(parseHex(ordered[0].color))
   if (p >= ordered[ordered.length - 1].pos) return toHex8(parseHex(ordered[ordered.length - 1].color))
   let i = 0
@@ -136,9 +161,19 @@ export function sampleGradientAt(stops: GradientStop[], space: GradientColorSpac
 export function buildKonvaColorStops(
   stops: GradientStop[],
   space: GradientColorSpace,
+  style: GradientStyle = 'smooth',
   samplesPerSegment = 16,
 ): (number | string)[] {
   const ordered = [...stops].sort((x, y) => x.pos - y.pos)
+  if (style === 'hard' && ordered.length >= 2) {
+    // Coincident stops at each band edge: one band's end sits at the same
+    // position as the next band's start, with different colors = a
+    // mathematically hard edge.
+    return hardBands(ordered).flatMap(b => {
+      const c = cssRgba(parseHex(b.color))
+      return [b.start, c, b.end, c]
+    })
+  }
   if (space === 'srgb' || ordered.length < 2) {
     return ordered.flatMap(s => [s.pos, cssRgba(parseHex(s.color))])
   }
@@ -187,8 +222,16 @@ export function gradientLinePoints(
  *  blend modes accurately. The angle orients the bar itself (180° for the
  *  vertical spine: first stop at top) — it previews the COLORS; the
  *  gradient's real direction is visible on the canvas. */
-export function cssGradientPreview(stops: GradientStop[], space: GradientColorSpace, angleDeg = 90): string {
+export function cssGradientPreview(stops: GradientStop[], space: GradientColorSpace, angleDeg = 90, style: GradientStyle = 'smooth'): string {
   const ordered = [...stops].sort((x, y) => x.pos - y.pos)
+  if (style === 'hard' && ordered.length >= 2) {
+    // Classic CSS hard-stripe pairs; the color space is irrelevant since
+    // nothing interpolates.
+    const list = hardBands(ordered)
+      .map(b => `${b.color} ${Math.round(b.start * 100)}%, ${b.color} ${Math.round(b.end * 100)}%`)
+      .join(', ')
+    return `linear-gradient(${angleDeg}deg, ${list})`
+  }
   const list = ordered.map(s => `${s.color} ${Math.round(s.pos * 100)}%`).join(', ')
   return `linear-gradient(${angleDeg}deg${space === 'oklch' ? ' in oklch' : ''}, ${list})`
 }
