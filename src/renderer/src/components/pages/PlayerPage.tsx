@@ -4804,8 +4804,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                 </div>
               )}
 
-              {/* Thumbnail strip + waveform strip — wrapped so handles can span both */}
-              <div ref={stripsWrapperRef} className="relative">
+              {/* Thumbnail strip + waveform strip — wrapped so handles can span
+                  both. `isolate` gives the wrapper its own stacking context:
+                  the timeline's internal z ladder (hit areas 2 … marker layer
+                  65 … popups 70) orders elements INSIDE the timeline only,
+                  and can never climb above app-level overlays like the Modal
+                  backdrop (z-50, portaled to body) — markers were poking
+                  through the delete-draft confirm's backdrop. */}
+              <div ref={stripsWrapperRef} className="relative isolate">
 
               {/* Thumbnail strip */}
               <div
