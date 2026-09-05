@@ -405,6 +405,9 @@
 
   This is a hard rule that must be remembered.
 
+- **APP-24** [cleanup]
+  Go over the style guide to look for any inconsistencies, conflicts, or out-of-date or no longer relevant rules.
+
 ### Onboarding & Setup
 
 - **ONB-1** [investigate]

@@ -19,6 +19,10 @@
     {
       "name": "differentiator",
       "color": "#4dd2fe"
+    },
+    {
+      "name": "cleanup",
+      "color": "#009980"
     }
   ]
 }

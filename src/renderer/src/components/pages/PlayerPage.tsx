@@ -357,7 +357,7 @@ function TrackWaveformStrip({
 }) {
   return (
     <div
-      className="relative h-8 w-full cursor-pointer bg-black/60"
+      className="relative h-8 w-full cursor-crosshair bg-black/60"
       onClick={e => onSeek(e.clientX, e.currentTarget.getBoundingClientRect())}
       onMouseDown={onMiddleDown}
       onMouseMove={e => onHover(e.clientX, e.currentTarget.getBoundingClientRect())}
@@ -441,6 +441,38 @@ function ModeCloseIcon({ icon }: { icon: React.ReactNode }) {
       {icon}
       <X size={9} strokeWidth={3.5} className="absolute -bottom-1 -right-1 rounded-full bg-navy-800 text-red-300" />
     </span>
+  )
+}
+
+// ── Region-attached pill (clip region timecode/duration tags) ───────────────
+
+/** Pill that visually attaches to a clip region's edge: flat on the touching
+ *  side while narrower than the region, fully rounded once WIDER than it (a
+ *  flat edge sticking out past the region it touches read as detached).
+ *  Measures itself after every render since its content (live timecodes) and
+ *  the region's on-screen width both change during drags and zooms. */
+function RegionAttachedPill({ regionPx, position, className, children, onMouseDown }: {
+  /** The region's current on-screen width in px (visible portion). */
+  regionPx: number
+  /** Where the pill sits relative to the region: 'above' is flat on its
+   *  bottom, 'below' flat on its top. */
+  position: 'above' | 'below'
+  className: string
+  children: React.ReactNode
+  onMouseDown?: (e: React.MouseEvent) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [detached, setDetached] = useState(false)
+  useLayoutEffect(() => {
+    // setState bails out when the value is unchanged, so measuring every
+    // render doesn't loop.
+    setDetached((ref.current?.offsetWidth ?? 0) > regionPx)
+  })
+  const rounding = detached ? 'rounded' : position === 'above' ? 'rounded-t' : 'rounded-b'
+  return (
+    <div ref={ref} className={`${rounding} ${className}`} onMouseDown={onMouseDown}>
+      {children}
+    </div>
   )
 }
 
@@ -4751,7 +4783,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
               {/* Thumbnail strip */}
               <div
                 ref={setFilmstripEl}
-                className="relative h-8 w-full cursor-pointer select-none"
+                className="relative h-8 w-full cursor-crosshair select-none"
                 onClick={e => {
                   // Deselect like the waveform strips do (PLR-11) — clicking
                   // anywhere in the timeline outside a region deselects; the
@@ -4827,7 +4859,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                 <>
                   <div
                     ref={waveformStripRef}
-                    className="relative h-10 w-full cursor-pointer bg-black/30"
+                    className="relative h-10 w-full cursor-crosshair bg-black/30"
                     onClick={e => {
                       setSelectedRegionId(null)
                       const rect = e.currentTarget.getBoundingClientRect()
@@ -5239,6 +5271,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     const dpr = window.devicePixelRatio || 1
                     const snapDev = (v: number) => Math.round(v * dpr) / dpr
                     const handleW = Math.max(1 / dpr, snapDev(2))
+                    // Visible on-screen width of the region — the attached
+                    // pills compare themselves against this to decide whether
+                    // their touching edge still reads as connected.
+                    const regionPx = ((100 - lPct - rPct) / 100) * stripWidth
                     const nextSeg = clipState.clipRegions.find(r => r.inPoint > seg.outPoint - frameTime)
                     const showMerge = nextSeg && nextSeg.id !== seg.id && (nextSeg.inPoint - seg.outPoint) <= mergeThresholdSec
 
@@ -5251,7 +5287,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                             the most common interaction, click-to-place the
                             playhead, works inside regions too. */}
                         <div
-                          className="absolute inset-y-0 z-[2] cursor-pointer"
+                          className="absolute inset-y-0 z-[2] cursor-crosshair"
                           style={{ left: `${lPct}%`, right: `${rPct}%` }}
                           onClick={e => {
                             const rect = stripsWrapperRef.current?.getBoundingClientRect()
@@ -5320,29 +5356,41 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                             shape. Shows on hover as well as selection, and IS
                             the whole-region drag handle (PLR-11) — hence the
                             grips and its own hover handlers, which keep it
-                            open while the cursor travels up onto it. */}
-                        {(selectedRegionId === seg.id || hoveredRegionId === seg.id) && (
+                            open while the cursor travels up onto it. Hover
+                            alone doesn't show it during a handle drag: a fast
+                            drag sweeps the cursor in and out of the region's
+                            hit area, and the pill flashing along with that
+                            hover churn looked broken (the handle's own
+                            timecode popup is up anyway). Reading the ref at
+                            render time is safe here because the drag re-
+                            renders continuously through setClipState. */}
+                        {(selectedRegionId === seg.id || (hoveredRegionId === seg.id && !isDraggingHandleRef.current)) && (
                           <div
                             className="absolute flex -translate-x-1/2 z-50"
                             style={{ left: `${centerPct}%`, bottom: '100%', marginBottom: '-1px' }}
                             onMouseEnter={() => setHoveredRegionId(seg.id)}
                             onMouseLeave={() => setHoveredRegionId(null)}
                           >
-                            <div
-                              className={`bg-blue-950 border ${selectedRegionId === seg.id ? 'border-blue-300' : 'border-blue-400'} rounded-t px-1 pt-0 pb-0.5 text-[11px] text-blue-200 tabular-nums whitespace-nowrap shadow-xl flex items-center gap-1 cursor-grab active:cursor-grabbing select-none`}
+                            <RegionAttachedPill
+                              regionPx={regionPx}
+                              position="above"
+                              className={`bg-blue-950 border ${selectedRegionId === seg.id ? 'border-blue-300' : 'border-blue-400'} px-1 pt-0 pb-0.5 text-[11px] text-blue-200 tabular-nums whitespace-nowrap shadow-xl flex items-center gap-1 cursor-grab active:cursor-grabbing select-none`}
                               onMouseDown={e => startSegmentDrag(e, seg.id)}
                             >
                               <GripVertical size={9} className="text-blue-400/80 shrink-0" />
                               {formatTime(seg.inPoint, videoInfo?.fps)} → {formatTime(seg.outPoint, videoInfo?.fps)}
                               <GripVertical size={9} className="text-blue-400/80 shrink-0" />
-                            </div>
+                            </RegionAttachedPill>
                           </div>
                         )}
                         {/* Duration label + delete button — centered below the region */}
                         <div className="absolute flex -translate-x-1/2" style={{ left: `${centerPct}%`, top: 'calc(100% - 1px)', zIndex: selectedRegionId === seg.id ? 60 : 40 }}>
                           {/* Border matches the region's selection blues (blue-300
                               selected / blue-400 idle) like the handles do. */}
-                          <div className={`bg-blue-950 border ${selectedRegionId === seg.id ? 'border-blue-300' : 'border-blue-400'} rounded-b px-1 pt-0.5 pb-0 flex items-center gap-1 shadow-xl`}>
+                          <RegionAttachedPill
+                            regionPx={regionPx}
+                            position="below"
+                            className={`bg-blue-950 border ${selectedRegionId === seg.id ? 'border-blue-300' : 'border-blue-400'} px-1 pt-0.5 pb-0 flex items-center gap-1 shadow-xl`}>
                             <Tooltip content={lockedRegionIds.has(seg.id) ? 'Unlock duration' : 'Lock duration'}>
                               <button
                                 onMouseDown={e => e.preventDefault()}
@@ -5418,7 +5466,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                 <Trash2 size={9} />
                               </button>
                             </Tooltip>
-                          </div>
+                          </RegionAttachedPill>
                         </div>
                         {/* Merge button — shown when this seg is exactly touching the next */}
                         {showMerge && nextSeg.inPoint >= vStart && nextSeg.inPoint <= vEnd && (
