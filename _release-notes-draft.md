@@ -18,7 +18,8 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 ## App-wide
 
-- Zooming the UI now flashes a small percentage overlay in the corner so you can see where you landed, the zoom level survives restarts, and an exact zoom control lives in Settings under Appearance. The shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) step through browser-style zoom levels.
+- Zooming the UI now shows a percentage overlay (with odometer-rolling digits) so you can see where you landed, the zoom level survives restarts, and an exact zoom control lives in Settings under Appearance. The shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) step through browser-style zoom levels.
+- The About window lists the open source libraries the app is built with, each linking to its project page.
 
 ## Cloud sync
 

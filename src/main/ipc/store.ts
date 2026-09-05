@@ -285,8 +285,12 @@ export function applyUiZoomToWindows(percent: number, announce: boolean): void {
   const clamped = Math.max(UI_ZOOM_MIN, Math.min(UI_ZOOM_MAX, Math.round(percent)))
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue
-    win.webContents.setZoomFactor(clamped / 100)
+    // Announce BEFORE applying: changing the zoom factor relayouts the
+    // whole page (expensive on the streams list), and the overlay's
+    // render would otherwise queue behind that jank — the zoom looked
+    // instant while the number lagged it by up to a second.
     if (announce) win.webContents.send('app:zoomChanged', { percent: clamped })
+    win.webContents.setZoomFactor(clamped / 100)
   }
 }
 

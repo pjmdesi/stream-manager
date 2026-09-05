@@ -337,7 +337,7 @@
     a. App.tsx's global Ctrl+Shift+Z `editRedo()` handler (~line 562) fires on ANY focused editable; it must stand down for thumbnails property fields or one keystroke triggers native redo AND canvas redo.
     b. Decide what happens to an in-progress hex DRAFT when canvas undo fires underneath it (the draft owns the field's display while focused; probably drop the draft so the undone value shows).
 
-- **APP-12** [ui]
+- **APP-12** [ui] [done]
   Expose the UI zoom level as a setting in the settings page (probably the Appearance section) to complement the Ctrl+= / Ctrl+- / Ctrl+0 shortcuts with a more exact control. Likely a stepper or a percentage dropdown that reads and writes the same zoom level the shortcuts adjust. Needs a check on persistence: verify whether Electron already persists the shortcut-driven zoom across restarts, and decide whether the setting becomes the single source of truth for it.
 
 - **APP-13** [bug] [ui] [done]

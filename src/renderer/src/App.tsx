@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, Component } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
 import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, Bot, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
@@ -82,6 +82,147 @@ interface PendingConverterFile {
    *  in the converter and the click-to-open-its-sidebar navigation back. All
    *  paths in one send share the same origin (they come from one folder). */
   stream?: { folderPath: string; label: string }
+}
+
+/** Odometer strip-position math for the zoom overlay (APP-12). Called
+ *  exactly ONCE per zoom event (from the event handler — never during
+ *  render, so re-renders and double-renders can't corrupt the
+ *  bookkeeping). Columns align by PLACE VALUE (100 → 90 rolls the tens
+ *  column, never remaps), and each column keeps a continuous strip
+ *  position (≡ digit mod 10). Digits roll the SHORTEST wrapped path, at
+ *  most 5 ticks, with ties broken toward the zoom direction — carries
+ *  stay single ticks (0 → 9 on a decrease is one tick down) and nothing
+ *  ever spins most of the strip. */
+/** Third-party libraries listed in the About modal (APP-17) — the set
+ *  that actually SHIPS in the product (build-time tooling excluded).
+ *  Update alongside dependency changes. */
+const THIRD_PARTY_LIBS: { name: string; url: string; role: string }[] = [
+  { name: 'Electron', url: 'https://www.electronjs.org', role: 'Desktop app framework' },
+  { name: 'React', url: 'https://react.dev', role: 'UI framework' },
+  { name: 'FFmpeg', url: 'https://ffmpeg.org', role: 'All video processing: conversion, probing, and the stream relay (bundled build)' },
+  { name: 'Konva', url: 'https://konvajs.org', role: 'The thumbnail editor canvas (with react-konva)' },
+  { name: 'Tailwind CSS', url: 'https://tailwindcss.com', role: 'Styling' },
+  { name: 'Lucide', url: 'https://lucide.dev', role: 'Icons' },
+  { name: 'Motion', url: 'https://motion.dev', role: 'Animation' },
+  { name: 'Recursive', url: 'https://www.recursive.design', role: 'The app typeface (bundled)' },
+  { name: 'chokidar', url: 'https://github.com/paulmillr/chokidar', role: 'File watching for auto-rules and the streams library' },
+  { name: 'electron-store', url: 'https://github.com/sindresorhus/electron-store', role: 'Settings storage' },
+  { name: 'fluent-ffmpeg', url: 'https://github.com/fluent-ffmpeg/node-fluent-ffmpeg', role: 'ffmpeg command plumbing' },
+  { name: 'glob', url: 'https://github.com/isaacs/node-glob', role: 'File matching' },
+  { name: 'micromatch', url: 'https://github.com/micromatch/micromatch', role: 'Glob pattern matching for auto-rules' },
+  { name: 'image-size', url: 'https://github.com/image-size/image-size', role: 'Image dimension probing' },
+  { name: 'use-image', url: 'https://github.com/konvajs/use-image', role: 'Canvas image loading' },
+  { name: 'uuid', url: 'https://github.com/uuidjs/uuid', role: 'Unique ids' },
+]
+
+/** One odometer transition: from/to strip positions per column plus the
+ *  blank-zero flags. Rules, tuned by eye with PJ (2026-09-05):
+ *  - TRUE odometer direction: a changed digit rolls the way the VALUE
+ *    moved, wrapping the long way when it must (75 → 67 rolls the ones
+ *    down through 0 like a real borrow). Shortest-path read as wrong.
+ *  - An UNCHANGED digit with a changed digit anywhere to its LEFT fakes
+ *    ONE full revolution in the value direction (80 → 90 spins the ones;
+ *    200 → 250 spins them once, not five times). Unchanged digits with
+ *    nothing changed to the left (110 → 125's hundreds) never move.
+ *  - When the digit COUNT changes (90 ↔ 100), the transition keeps the
+ *    padded leading column and its strip renders zeros as BLANKS, so the
+ *    1 rolls into/out of an invisible 0 instead of popping. */
+function odometerStep(
+  prev: { percent: number; pos: number[] } | null,
+  percent: number,
+): { from: number[]; to: number[]; blankZero: boolean[] } {
+  const SEED = 150
+  const digits = String(percent).split('').map(Number) // most-significant first
+  if (!prev) {
+    const pos = digits.map(d => SEED + d)
+    return { from: pos, to: pos, blankZero: digits.map(() => false) }
+  }
+  const prevDigits = String(prev.percent).split('').map(Number)
+  const maxLen = Math.max(digits.length, prevDigits.length)
+  const padCount = maxLen - Math.min(digits.length, prevDigits.length)
+  const padDigits = (arr: number[]) => Array(maxLen - arr.length).fill(0).concat(arr)
+  const dNew = padDigits(digits)
+  const dOld = padDigits(prevDigits)
+  // Right-align the previous positions; a column absent last time seeds
+  // at its old (padded) digit so it can roll into view.
+  const from = prev.pos.length >= maxLen
+    ? prev.pos.slice(prev.pos.length - maxLen)
+    : (Array(maxLen - prev.pos.length).fill(NaN) as number[]).concat(prev.pos).map((p, i) => (Number.isNaN(p) ? SEED + dOld[i] : p))
+  const dir = percent >= prev.percent ? 1 : -1
+  const changed = dNew.map((d, i) => d !== dOld[i])
+  const to = from.map((p, i) => {
+    if (changed[i]) {
+      const pd = ((p % 10) + 10) % 10
+      const d = dNew[i]
+      return p + (dir >= 0 ? (d - pd + 10) % 10 : -((pd - d + 10) % 10))
+    }
+    if (changed.slice(0, i).some(Boolean)) return p + dir * 10
+    return p
+  })
+  return { from, to, blankZero: dNew.map((_, i) => i < padCount) }
+}
+
+/** Odometer renderer with EXPLICIT two-frame animation: paints the
+ *  from-positions first, then flips to the targets on the next frame so
+ *  the CSS transition owns exactly that delta. This is deliberate
+ *  belt-and-braces — relying on React diffing to preserve transition
+ *  start values across updates proved flaky (columns rolled on mount and
+ *  overshot single-tick changes). align-top everywhere because an
+ *  inline-block with overflow hidden baselines on its BOTTOM MARGIN EDGE
+ *  while a plain span baselines on its text — the % sign can never line
+ *  up with the digit columns on the default baseline. */
+function ZoomOdometer({ from, to, blankZero, animate }: { from: number[]; to: number[]; blankZero: boolean[]; animate: boolean }) {
+  // Wide strip + high seed (odometerStep's SEED = 150): faked full
+  // revolutions move positions ±10 per step, so a long hold up or down
+  // the ladder needs the headroom in both directions.
+  const STRIP = 300
+  const colRefs = useRef<(HTMLSpanElement | null)[]>([])
+  useLayoutEffect(() => {
+    // Fully imperative FLIP per column, synchronous end to end: snap to
+    // the start with transition:none, FORCE a reflow so the snap commits
+    // as its own frame, then arm the transition and set the target. No
+    // React state, no rAF chain — the earlier state/frame-based versions
+    // kept producing ghost rolls whenever renders or events interleaved
+    // mid-animation.
+    colRefs.current.length = to.length
+    to.forEach((t, i) => {
+      const el = colRefs.current[i]
+      if (!el) return
+      const f = from[i] ?? t
+      el.style.transition = 'none'
+      el.style.transform = `translateY(${-f}em)`
+      if (animate && f !== t) {
+        void el.offsetHeight
+        el.style.transition = 'transform 300ms linear'
+        el.style.transform = `translateY(${-t}em)`
+      } else if (f !== t) {
+        el.style.transform = `translateY(${-t}em)`
+      }
+    })
+  }, [from, to, animate])
+  return (
+    <>
+      {to.map((t, i) => (
+        <span key={to.length - 1 - i} className="inline-block align-top h-[1em] overflow-hidden">
+          {/* Initial inline transform targets the settled position so a
+              freshly mounted column appears in place; the layout effect
+              owns every subsequent move. */}
+          <span
+            ref={el => { colRefs.current[i] = el }}
+            className="block"
+            style={{ transform: `translateY(${-t}em)` }}
+          >
+            {Array.from({ length: STRIP }, (_, k) => (
+              <span key={k} className="block h-[1em] leading-[1em]">
+                {blankZero[i] && k % 10 === 0 ? '' : k % 10}
+              </span>
+            ))}
+          </span>
+        </span>
+      ))}
+      <span className="inline-block align-top h-[1em] leading-[1em]">%</span>
+    </>
+  )
 }
 
 /** ETA formatter for the conversion widget. Uses `h m` for ≥ 1 minute and
@@ -632,18 +773,6 @@ function AppInner() {
   // Alt+F4) lives there and would otherwise discard the draft silently.
   useEffect(() => { window.api.setSettingsDirty(settingsDirty) }, [settingsDirty])
   const [aboutOpen, setAboutOpen] = useState(false)
-  // UI zoom overlay state (APP-12): the percent currently flashed in the
-  // corner chip, cleared 1.5s after the last zoom change.
-  const [zoomOsd, setZoomOsd] = useState<number | null>(null)
-  const zoomOsdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    const unsub = window.api.onZoomChanged(({ percent }) => {
-      setZoomOsd(percent)
-      if (zoomOsdTimer.current) clearTimeout(zoomOsdTimer.current)
-      zoomOsdTimer.current = setTimeout(() => setZoomOsd(null), 1500)
-    })
-    return () => { unsub(); if (zoomOsdTimer.current) clearTimeout(zoomOsdTimer.current) }
-  }, [])
   // Two independent "not the release" signals badge the sidebar version:
   // - branchBadge (accent-colored, GitBranch icon): the git BRANCH the code came
   //   from — .git/HEAD in dev runs, the dev-branch.txt marker in packaged
@@ -712,6 +841,33 @@ function AppInner() {
   // launchGroup calls (each repeat opened another browser tab per URL item).
   const launchHotkeyBusyRef = useRef(false)
   const { config, loading, updateConfig, refreshConfig } = useStore()
+  // UI zoom overlay state (APP-12): the strip positions flashed
+  // center-screen on a zoom change. Holds ~1.2s, then fades out (fade
+  // skipped when animations are disabled). Re-zooming mid-fade snaps back
+  // to fully visible; the odometer bookkeeping resets when the overlay
+  // finally clears, so each visible burst starts mid-strip.
+  const [zoomOsd, setZoomOsd] = useState<{ from: number[]; to: number[]; blankZero: boolean[] } | null>(null)
+  const [zoomOsdFading, setZoomOsdFading] = useState(false)
+  const zoomOsdTimers = useRef<ReturnType<typeof setTimeout>[]>([])
+  const zoomOdoRef = useRef<{ percent: number; pos: number[] } | null>(null)
+  useEffect(() => {
+    const unsub = window.api.onZoomChanged(({ percent }) => {
+      for (const t of zoomOsdTimers.current) clearTimeout(t)
+      zoomOsdTimers.current = []
+      const step = odometerStep(zoomOdoRef.current, percent)
+      zoomOdoRef.current = { percent, pos: step.to }
+      setZoomOsd(step)
+      setZoomOsdFading(false)
+      const clear = () => { setZoomOsd(null); setZoomOsdFading(false); zoomOdoRef.current = null }
+      if (config.disableAnimations) {
+        zoomOsdTimers.current.push(setTimeout(clear, 1500))
+      } else {
+        zoomOsdTimers.current.push(setTimeout(() => setZoomOsdFading(true), 1200))
+        zoomOsdTimers.current.push(setTimeout(clear, 1700))
+      }
+    })
+    return () => { unsub(); for (const t of zoomOsdTimers.current) clearTimeout(t) }
+  }, [config.disableAnimations])
   const { refreshRules } = useWatcher()
   const { _setNavigate } = useThumbnailEditor()
   // Per-page "has activity" signals, used to drive the nav rail's
@@ -1570,14 +1726,21 @@ function AppInner() {
 
       <PostStreamTwitchModal />
 
-      {/* UI zoom overlay (APP-12) — a corner chip flashing the percent when
-          the zoom shortcuts (or a Settings save) change it. Direct feedback
-          to the user's own action, not a notification; the no-toast rule is
-          about SM speaking unprompted. top-12 keeps it clear of the
-          frameless titlebar controls (top-10 rule). */}
+      {/* UI zoom overlay (APP-12) — flashed center-screen on a zoom change
+          (shortcuts or a Settings save), then fades out. Direct feedback to
+          the user's own action, not a notification; the no-toast rule is
+          about SM speaking unprompted. pointer-events-none throughout so it
+          never intercepts a click; the wrapper starts at top-10 to stay
+          honest with the frameless titlebar rule even though the chip sits
+          nowhere near the window controls. */}
       {zoomOsd !== null && (
-        <div className="fixed top-12 right-4 z-[10000] pointer-events-none px-3 py-1.5 rounded-lg bg-navy-800 border border-white/10 shadow-xl text-sm text-gray-200 tabular-nums">
-          {zoomOsd}%
+        <div className="fixed inset-x-0 bottom-0 top-10 z-[10000] pointer-events-none flex items-center justify-center">
+          {/* The transition class rides ONLY the fading state: appearing
+              (and snapping back on a re-zoom mid-fade) must be instant,
+              only the exit fades. */}
+          <div className={`px-6 py-3 rounded-xl bg-black/70 shadow-lg shadow-black/50 text-3xl leading-none text-gray-100 tabular-nums ${zoomOsdFading ? 'transition-opacity duration-500 opacity-0' : 'opacity-100'}`}>
+            <ZoomOdometer from={zoomOsd.from} to={zoomOsd.to} blankZero={zoomOsd.blankZero} animate={!config.disableAnimations} />
+          </div>
         </div>
       )}
 
@@ -1608,6 +1771,24 @@ function AppInner() {
           >
             github.com/pjmdesi/stream-manager
           </a>
+          {/* Third-party libraries (APP-17): what ships in the product,
+              each chip opening the project's own page. */}
+          <div className="w-full flex flex-col gap-2">
+            <p className="text-[10px] uppercase tracking-wide text-gray-400">Built with open source</p>
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {THIRD_PARTY_LIBS.map(lib => (
+                <Tooltip key={lib.name} content={lib.role} side="top">
+                  <button
+                    type="button"
+                    onClick={() => window.api.openUrl(lib.url)}
+                    className="px-2 py-0.5 rounded bg-navy-900 border border-white/10 text-[11px] text-gray-300 hover:text-accent-200 hover:border-white/25 hover:bg-white/5 transition-colors"
+                  >
+                    {lib.name}
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
+          </div>
           <a
             href="https://buymeacoffee.com/pjm"
             onClick={e => { e.preventDefault(); window.api.openUrl('https://buymeacoffee.com/pjm') }}
