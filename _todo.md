@@ -222,6 +222,9 @@
 - **CONV-6** [blocked:CONV-4]
   History panel for past conversions based on the logging system in the todo item above. This would provide a historical list of the conversions and clip exports a user has done. Each history item should include links to the output file and input file (if they exist), the stream item they are associated with (if applicable), a final status icon (completed, cancelled, errored out, etc.), and an accordion element which will expose the other details of the item when opened (Conversion time, encoding preset/settings, etc.). Not sure how we should handle duplicate entries like if a conversion process errors out for some reason and then the user tries again and it is then successful... probably show both.
 
+- **CONV-7** [investigate]
+  Plan the exit from fluent-ffmpeg. Its repo went readonly with a "no longer maintained, no longer works properly with recent ffmpeg versions" warning (noticed 2026-09-05). Risk today is LOW: ffmpeg-static pins the exact ffmpeg binary the wrapper talks to, so the pairing is frozen and tested together, and the library has no network surface. The exposure is the future ffmpeg-static or Electron bump where an abandoned wrapper becomes the blocker. SM already builds raw ffmpeg argument strings for presets; fluent's remaining value is spawn lifecycle, progress parsing, and the kill/pause plumbing, all ownable in ffmpegService with direct child_process spawning. Do the migration assessment BEFORE the next ffmpeg-static bump, and treat any ffmpeg upgrade as blocked on it.
+
 ### Combine
 
 - **COMB-1** [needs-design]

@@ -110,7 +110,9 @@ const THIRD_PARTY_LIBS: { name: string; url: string; role: string }[] = [
   { name: 'fluent-ffmpeg', url: 'https://github.com/fluent-ffmpeg/node-fluent-ffmpeg', role: 'ffmpeg command plumbing' },
   { name: 'glob', url: 'https://github.com/isaacs/node-glob', role: 'File matching' },
   { name: 'micromatch', url: 'https://github.com/micromatch/micromatch', role: 'Glob pattern matching for auto-rules' },
-  { name: 'image-size', url: 'https://github.com/image-size/image-size', role: 'Image dimension probing' },
+  // image-size's GitHub repo is archived-in-spirit; the README says the
+  // project's future home is Codeberg, so link there.
+  { name: 'image-size', url: 'https://codeberg.org/image-size/image-size', role: 'Image dimension probing' },
   { name: 'use-image', url: 'https://github.com/konvajs/use-image', role: 'Canvas image loading' },
   { name: 'uuid', url: 'https://github.com/uuidjs/uuid', role: 'Unique ids' },
 ]
@@ -1749,7 +1751,7 @@ function AppInner() {
           <img src={logoUrl} alt="" className="w-12 h-12 opacity-90" />
           <div className="flex flex-col gap-1">
             <p className="text-sm text-gray-300 leading-relaxed">
-              A desktop app for streamers to manage, review, and process local recording files.
+              A desktop app for streamers to manage their workflow and files from stream to VOD.
             </p>
             <p className="text-xs text-gray-400 mt-1">Version {appVersion}{branchBadge ? ` — ${branchBadge} branch` : ''}{isDevServer ? ' — dev server' : ''}</p>
           </div>
