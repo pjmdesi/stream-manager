@@ -170,11 +170,11 @@ function CloudOpsSection({ direction, items, active, cancelling, onCancel }: Sec
           <Tooltip
             content={isOffload
               ? 'Skips the files still waiting. A file already being offloaded finishes first.'
-              : 'Skips the files still waiting. A file already downloading finishes its transfer first (downloads can’t be interrupted mid-transfer), then goes back to the cloud.'}
+              : 'Skips the files still waiting. A file already downloading finishes and stays on this PC (downloads can’t be interrupted mid-transfer); offload it again if you don’t want it kept local.'}
             side="top"
           >
             <Button variant="ghost" size="sm" onClick={onCancel} disabled={cancelling}>
-              {cancelling ? 'Cancelling…' : 'Cancel'}
+              {cancelling ? 'Cancelling…' : 'Cancel pending'}
             </Button>
           </Tooltip>
         )}

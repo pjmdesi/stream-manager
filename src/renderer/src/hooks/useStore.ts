@@ -22,6 +22,7 @@ const defaultConfig: AppConfig = {
   checkEpisodeIteration: true,
   audioCacheLimit: 1_073_741_824,
   maxConcurrentConversions: 2,
+  uiZoomPercent: 100,
   youtubeClientId: '',
   youtubeClientSecret: '',
   twitchClientId: '',

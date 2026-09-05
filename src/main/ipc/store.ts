@@ -31,9 +31,15 @@ export interface AppConfig {
   defaultThumbnailTemplate: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number
-  /** Max conversions the auto-scheduler runs at once (archive batches).
-   *  Manual "Start" on a queued job always bypasses this. Min 1, default 2. */
+  /** Max conversions the scheduler runs at once — enforced on EVERY start
+   *  path since CONV-2 (manual starts wait for a slot too). Min 1,
+   *  default 2. */
   maxConcurrentConversions: number
+  /** UI zoom as a percent (100 = normal). Single source of truth for the
+   *  app's zoom (APP-12): the Ctrl+= / Ctrl+- / Ctrl+0 shortcuts write it,
+   *  the Settings Appearance field edits it, and did-finish-load re-applies
+   *  it via setZoomFactor. */
+  uiZoomPercent: number
   defaultBleepVolume: number
   youtubeClientId: string
   youtubeClientSecret: string
@@ -159,6 +165,7 @@ function getDefaultConfig(): AppConfig {
     checkEpisodeIteration: true,
     audioCacheLimit: 1_073_741_824,  // 1 GB
     maxConcurrentConversions: 2,
+    uiZoomPercent: 100,
     defaultBleepVolume: 0.25,
     youtubeClientId: '',
     youtubeClientSecret: '',
@@ -267,6 +274,22 @@ export function getStore(): Store<StoreShape> {
  *  reverted it. The event carries no payload on purpose: receivers re-invoke
  *  store:getConfig so the defaults-merge + legacy migrations there stay the
  *  single source of truth for the config's shape. */
+// ── UI zoom (APP-12) ────────────────────────────────────────────────────────
+// config.uiZoomPercent is the app's single zoom authority, applied through
+// setZoomFactor (percent in, percent out — no log-level float drift).
+// Electron's own per-origin zoom memory is deliberately overridden on every
+// load so the config stays the truth.
+export const UI_ZOOM_MIN = 33
+export const UI_ZOOM_MAX = 400
+export function applyUiZoomToWindows(percent: number, announce: boolean): void {
+  const clamped = Math.max(UI_ZOOM_MIN, Math.min(UI_ZOOM_MAX, Math.round(percent)))
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue
+    win.webContents.setZoomFactor(clamped / 100)
+    if (announce) win.webContents.send('app:zoomChanged', { percent: clamped })
+  }
+}
+
 export function setConfigPartial(partial: Partial<AppConfig>): void {
   const s = getStore()
   const current = s.get('config', getDefaultConfig())
@@ -303,6 +326,8 @@ export function registerStoreIPC(): void {
       const { invalidateCloudSyncCache } = await import('./cloudSync')
       invalidateCloudSyncCache()
     }
+    // A saved zoom edit applies immediately (with the overlay as feedback).
+    if (partial.uiZoomPercent !== undefined) applyUiZoomToWindows(partial.uiZoomPercent, true)
   })
 
   ipcMain.handle('store:getWatchRules', async () => {

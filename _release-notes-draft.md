@@ -16,9 +16,13 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - Conversions that need to download their file from the cloud now announce it the same way pinning files locally does: per-file rows in the cloud sync widget, live cloud-status icons and spinners in the files grid, and converter row thumbnails appearing as soon as the file lands. The widget's Cancel stops converter downloads too.
 - The link back to the source stream on conversion rows now shows for every job whose file lives in a stream folder, including archive jobs, clip exports, and jobs restored after a restart, and it displays the stream's title (falling back to the folder date when there is none). Files from outside the library still show no link, as intended.
 
+## App-wide
+
+- Zooming the UI now flashes a small percentage overlay in the corner so you can see where you landed, the zoom level survives restarts, and an exact zoom control lives in Settings under Appearance. The shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) step through browser-style zoom levels.
+
 ## Cloud sync
 
-- Cancelling downloads now does what it says for every file: waiting files are skipped, and a file already mid-transfer finishes downloading (transfers can't be interrupted) and is then returned to the cloud, with its row marked cancelled instead of done. The Cancel button's tooltip explains this. Previously a small batch could be entirely in flight the moment Cancel was clicked, making the cancel a visible no-op.
+- Cancelling downloads is honest now: waiting files are skipped, and a file already mid-transfer finishes and stays on your PC, since transfers can't be interrupted and throwing away a completed download would waste the bandwidth already spent. The Cancel button's tooltip explains exactly what it does.
 - Cloud status icons in the files grid no longer get stuck on a stale state after opposite operations on the same file (like offloading a file that was downloaded earlier in the session).
 - Quitting while a conversion is running now cleans up the partial output file it leaves behind; if the sync client briefly locks the file, the cleanup finishes on the next launch instead of leaving a corrupt file in the stream folder.
 

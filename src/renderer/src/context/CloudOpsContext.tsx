@@ -141,7 +141,6 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
                   ev.status === 'failed' ? 'failed' :
                   ev.status === 'already-offline' ? 'already-offline' :
                   ev.status === 'already-local' ? 'already-local' :
-                  ev.status === 'cancelled' ? 'cancelled' :
                   'running',
                 reason: ev.reason,
               }

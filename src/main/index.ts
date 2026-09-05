@@ -105,7 +105,7 @@ import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
 import { registerConverterIPC, getConverterStatus, getActiveConversionCounts, prepareConverterForQuit } from './ipc/converter'
-import { registerStoreIPC, getStore, setConfigPartial } from './ipc/store'
+import { registerStoreIPC, getStore, setConfigPartial, applyUiZoomToWindows } from './ipc/store'
 import { registerStreamsIPC, backupMetaOnQuit } from './ipc/streams'
 import { registerCombineIPC } from './ipc/combine'
 import { registerYouTubeIPC } from './ipc/youtube'
@@ -166,23 +166,44 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
-  // Ctrl+= acts as zoom-in (Bugs #3). Electron's default menu — invisible
-  // behind the frameless window, but its accelerators still fire — binds
-  // zoom-out to Ctrl+- and reset to Ctrl+0, while zoom-in is literally
-  // "Ctrl+Plus", which on a US layout only matches Ctrl+Shift+=. Plain
-  // Ctrl+= (the key everyone presses, and what browsers accept) matched
-  // nothing, so users could zoom out and never back in without knowing
-  // Ctrl+0. Mirror browser behavior: both Ctrl+= and Ctrl+Shift+= (and
-  // numpad +) zoom in. preventDefault also swallows the default menu's
-  // accelerator, so the shifted form can't double-fire.
+  // ── UI zoom shortcuts (Bugs #3, APP-12) ──────────────────────────────────
+  // ALL zoom handling lives here now. Electron's invisible default menu
+  // previously owned Ctrl+- / Ctrl+0 while the Bugs #3 fix owned only
+  // zoom-in (the menu's own zoom-in accelerator "Ctrl+Plus" matches just
+  // Ctrl+Shift+= on US layouts) — which left zoom changes split across two
+  // authorities, unobservable and unpersisted. The shortcuts walk a
+  // browser-style percent ladder; config.uiZoomPercent is the single
+  // source of truth (also editable from Settings → Appearance) and every
+  // change is announced to the renderer for the zoom overlay.
+  // preventDefault swallows the default menu's accelerators so nothing
+  // double-fires.
+  const ZOOM_LADDER = [33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400]
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return
-    if (input.key !== '=' && input.key !== '+') return
+    const zoomIn = input.key === '=' || input.key === '+'
+    const zoomOut = input.key === '-' || input.key === '_'
+    const zoomReset = input.key === '0'
+    if (!zoomIn && !zoomOut && !zoomReset) return
     event.preventDefault()
-    const wc = mainWindow.webContents
-    // +0.5 per press = the default menu's own step; cap near the browser
-    // ceiling (level 8 ≈ 430%) so key repeat can't zoom into absurdity.
-    wc.setZoomLevel(Math.min(wc.getZoomLevel() + 0.5, 8))
+    const cfg = getStore().get('config') as { uiZoomPercent?: number }
+    const cur = typeof cfg?.uiZoomPercent === 'number' ? cfg.uiZoomPercent : 100
+    const next = zoomReset ? 100
+      : zoomIn ? (ZOOM_LADDER.find(p => p > cur) ?? ZOOM_LADDER[ZOOM_LADDER.length - 1])
+      : ([...ZOOM_LADDER].reverse().find(p => p < cur) ?? ZOOM_LADDER[0])
+    if (next === cur) {
+      // At the ladder's edge (or already 100% on reset) — still flash the
+      // overlay so the keypress visibly registered.
+      mainWindow.webContents.send('app:zoomChanged', { percent: cur })
+      return
+    }
+    setConfigPartial({ uiZoomPercent: next })
+    applyUiZoomToWindows(next, true)
+  })
+  // Re-apply on every load (startup and Ctrl+R) — overrides Electron's own
+  // per-origin zoom memory so the config stays the truth.
+  mainWindow.webContents.on('did-finish-load', () => {
+    const cfg = getStore().get('config') as { uiZoomPercent?: number }
+    applyUiZoomToWindows(typeof cfg?.uiZoomPercent === 'number' ? cfg.uiZoomPercent : 100, false)
   })
 
   mainWindow.webContents.on('context-menu', (_event, params) => {

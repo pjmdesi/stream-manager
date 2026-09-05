@@ -1,5 +1,5 @@
 import { ipcMain, WebContents } from 'electron'
-import { dehydrateOnePath, dehydratePaths, hydrateOnePath, isCfApiSyncRoot, DEHYDRATE_CONCURRENCY, HYDRATE_CONCURRENCY } from '../services/cfapi'
+import { dehydrateOnePath, hydrateOnePath, isCfApiSyncRoot, DEHYDRATE_CONCURRENCY, HYDRATE_CONCURRENCY } from '../services/cfapi'
 import { getProtectedPaths, pauseStreamsWatcher } from './streams'
 import { getStore } from './store'
 
@@ -72,31 +72,13 @@ const unitQueue: Record<Direction, Unit[]> = { offload: [], hydrate: [] }
 const activeWorkers: Record<Direction, number> = { offload: 0, hydrate: 0 }
 const liveBatches: Record<Direction, Set<BatchState>> = { offload: new Set(), hydrate: new Set() }
 
-/** Cancel semantics for a hydration already in flight. Neither CFAPI nor
- *  Synology interrupts a transfer in progress (verified 2026-09-04: the
- *  provider downloads to completion regardless, and a dehydrate issued
- *  DURING the blocking recall call is rejected as in-use), so the honest
- *  cancel is: let the call land, then send the file straight back to the
- *  cloud. Watcher paused around the dehydrate — Synology rejects
- *  CfDehydratePlaceholder while the streams watcher's directory handles
- *  are open; short retries cover the transfer's own transient handles. */
-async function dehydrateCancelledUnit(path: string): Promise<void> {
-  try {
-    const restartWatcher = await pauseStreamsWatcher()
-    try {
-      for (const delay of [0, 1000, 3000]) {
-        if (delay) await new Promise(r => setTimeout(r, delay))
-        const res = await dehydratePaths([path], () => {}, () => false)
-        if (res.ok.length > 0 || res.skippedAlreadyOffline.length > 0) return
-      }
-      console.warn('[cloud-sync] could not return cancelled download to the cloud:', path)
-    } finally {
-      restartWatcher()
-    }
-  } catch (err) {
-    console.warn('[cloud-sync] cancel dehydrate failed:', err)
-  }
-}
+// Cancel semantics for hydrations already in flight (settled 2026-09-04):
+// transfers cannot be interrupted (neither CFAPI nor Synology aborts a
+// recall in progress), and auto-dehydrating a finished download would
+// throw away bandwidth already spent on SM's own initiative. So a cancel
+// skips the WAITING files only; a file mid-transfer completes, stays
+// local, and reports done — offloading it again is the user's explicit
+// choice. The Cancel button's tooltip states this.
 
 function safeSend(sender: WebContents, channel: string, payload: unknown): void {
   // The sender's window may have closed between events. Guard so a stale
@@ -171,21 +153,10 @@ async function worker(direction: Direction): Promise<void> {
         ? await dehydrateOnePath(unit.path)
         : await hydrateOnePath(unit.path)
       if (res.outcome === 'ok') {
-        if (b.cancelled && direction === 'hydrate') {
-          // Cancel landed while this file's blocking recall was in
-          // flight — the transfer finished anyway (see
-          // dehydrateCancelledUnit), so honor the cancel by returning
-          // the file to the cloud and reporting the row cancelled.
-          await dehydrateCancelledUnit(unit.path)
-          safeSend(b.sender, 'cloud-sync:progress', {
-            type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'cancelled',
-          })
-        } else {
-          b.ok += 1
-          safeSend(b.sender, 'cloud-sync:progress', {
-            type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'done',
-          })
-        }
+        b.ok += 1
+        safeSend(b.sender, 'cloud-sync:progress', {
+          type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'done',
+        })
       } else if (res.outcome === 'already-offline' || res.outcome === 'already-local') {
         b.alreadySkipped += 1
         safeSend(b.sender, 'cloud-sync:progress', {
@@ -261,9 +232,8 @@ export function registerCloudSyncIPC(): void {
     for (const b of liveBatches.offload) b.cancelled = true
   })
   ipcMain.handle('cloud-sync:cancel-pin', () => {
-    // Stamping skips the queued units; units already in flight are handled
-    // at completion by the worker (transfer finishes, file returns to the
-    // cloud, row reports cancelled — see dehydrateCancelledUnit).
+    // Stamping skips the queued units; units already in flight complete
+    // and stay local by design (see the cancel-semantics note above).
     for (const b of liveBatches.hydrate) b.cancelled = true
     // Converter-triggered hydrations show in the same widget list, so the
     // cancel covers them too (their batches are synthetic, not in

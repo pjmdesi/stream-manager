@@ -189,6 +189,9 @@ export interface AppConfig {
   /** Max conversions the auto-scheduler runs at once (archive batches).
    *  Manual "Start" on a queued job always bypasses this. Min 1, default 2. */
   maxConcurrentConversions: number
+  /** UI zoom as a percent (100 = normal). Single zoom authority (APP-12):
+   *  the Ctrl shortcuts and the Settings Appearance field both edit it. */
+  uiZoomPercent: number
   defaultBleepVolume: number
   youtubeClientId: string
   youtubeClientSecret: string

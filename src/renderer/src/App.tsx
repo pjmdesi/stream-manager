@@ -632,6 +632,18 @@ function AppInner() {
   // Alt+F4) lives there and would otherwise discard the draft silently.
   useEffect(() => { window.api.setSettingsDirty(settingsDirty) }, [settingsDirty])
   const [aboutOpen, setAboutOpen] = useState(false)
+  // UI zoom overlay state (APP-12): the percent currently flashed in the
+  // corner chip, cleared 1.5s after the last zoom change.
+  const [zoomOsd, setZoomOsd] = useState<number | null>(null)
+  const zoomOsdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    const unsub = window.api.onZoomChanged(({ percent }) => {
+      setZoomOsd(percent)
+      if (zoomOsdTimer.current) clearTimeout(zoomOsdTimer.current)
+      zoomOsdTimer.current = setTimeout(() => setZoomOsd(null), 1500)
+    })
+    return () => { unsub(); if (zoomOsdTimer.current) clearTimeout(zoomOsdTimer.current) }
+  }, [])
   // Two independent "not the release" signals badge the sidebar version:
   // - branchBadge (accent-colored, GitBranch icon): the git BRANCH the code came
   //   from — .git/HEAD in dev runs, the dev-branch.txt marker in packaged
@@ -1557,6 +1569,17 @@ function AppInner() {
       <CloudOpsModal />
 
       <PostStreamTwitchModal />
+
+      {/* UI zoom overlay (APP-12) — a corner chip flashing the percent when
+          the zoom shortcuts (or a Settings save) change it. Direct feedback
+          to the user's own action, not a notification; the no-toast rule is
+          about SM speaking unprompted. top-12 keeps it clear of the
+          frameless titlebar controls (top-10 rule). */}
+      {zoomOsd !== null && (
+        <div className="fixed top-12 right-4 z-[10000] pointer-events-none px-3 py-1.5 rounded-lg bg-navy-800 border border-white/10 shadow-xl text-sm text-gray-200 tabular-nums">
+          {zoomOsd}%
+        </div>
+      )}
 
       <Modal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} title="About Stream Manager" width="sm">
         <div className="flex flex-col items-center gap-4 py-2 text-center">

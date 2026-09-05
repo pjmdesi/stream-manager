@@ -129,7 +129,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: 'streams', label: 'Streams', icon: <Radio size={14} />, keys: ['useBuiltinThumbnailByDefault', 'defaultBuiltinThumbnailTemplate', 'defaultThumbnailTemplate', 'archivePresetId', 'checkEpisodeIteration', 'defaultBroadcastTime', 'defaultYouTubeCategoryId', 'twitchSkipCategoryRenamePrompt'] },
   { id: 'player', label: 'Video Player', icon: <Film size={14} />, keys: ['clipPresetId', 'defaultBleepVolume', 'skipClipMergeWarning'] },
   { id: 'converter', label: 'Converter', icon: <Zap size={14} />, keys: ['maxConcurrentConversions', 'autoDeletePartialOnCancel'] },
-  { id: 'appearance', label: 'Appearance', icon: <Palette size={14} />, keys: ['disableAnimations', 'calendarFirstDayOfWeek'] },
+  { id: 'appearance', label: 'Appearance', icon: <Palette size={14} />, keys: ['disableAnimations', 'calendarFirstDayOfWeek', 'uiZoomPercent'] },
   { id: 'autorules', label: 'Auto-rules', icon: <Shuffle size={14} />, keys: ['autoStartWatcher'] },
   // Only rendered (nav chip + section body) when a Claude API key is
   // connected via Integrations — see the `sections` filter.
@@ -787,7 +787,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               className="w-28"
               aria-label="Max simultaneous conversions"
             />
-            <p className="text-xs text-gray-400">How many conversions auto-start at once when archiving in bulk. 2 is usually fastest on a GPU — one encode often leaves the encoder half-idle and a second fills it; higher can hit GPU encoder-session limits, and CPU-only presets don't benefit from running in parallel. Manually starting a queued job always runs it immediately, regardless of this limit.</p>
+            <p className="text-xs text-gray-400">How many conversions run at once — every start waits for a free slot, including manual starts and clip exports. 2 is usually fastest on a GPU — one encode often leaves the encoder half-idle and a second fills it; higher can hit GPU encoder-session limits, and CPU-only presets don't benefit from running in parallel.</p>
           </div>
           <Checkbox
             checked={!!local.autoDeletePartialOnCancel}
@@ -825,6 +825,19 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                 )
               })}
             </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">UI zoom (%) {dirtyDot('uiZoomPercent')}</label>
+            <NumberInput
+              value={local.uiZoomPercent ?? 100}
+              onChange={v => set('uiZoomPercent', v)}
+              min={33}
+              max={400}
+              step={5}
+              className="w-28"
+              aria-label="UI zoom percent"
+            />
+            <p className="text-xs text-gray-400">Applies when you save. The Ctrl+= and Ctrl+- shortcuts zoom in steps at any time, and Ctrl+0 resets to 100%.</p>
           </div>
         </Section>
 

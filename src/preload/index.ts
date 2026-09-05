@@ -649,6 +649,11 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('app:confirmQuit', handler)
   },
   proceedQuit: () => ipcRenderer.send('app:proceedQuit'),
+  onZoomChanged: (cb: (data: { percent: number }) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, data: { percent: number }) => cb(data)
+    ipcRenderer.on('app:zoomChanged', handler)
+    return () => ipcRenderer.removeListener('app:zoomChanged', handler)
+  },
 
   // Mirrors the Settings draft's dirty state to main so the window-close
   // guard can warn about discarding it (window X / tray Quit / Alt+F4).
