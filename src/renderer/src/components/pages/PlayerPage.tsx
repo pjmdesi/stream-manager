@@ -334,7 +334,7 @@ const speedLabel = (r: number): string => (r === 0.25 ? '¼×' : r === 0.5 ? '½
 // `gmax`. That way a quiet mic track renders shorter peaks than a loud
 // game track instead of each one being normalised to its own peak.
 function TrackWaveformStrip({
-  path, peakCount, loading, dimmed, volume, fillClass, onSeek, onHover, onHoverLeave, onMiddleDown,
+  path, peakCount, loading, dimmed, volume, fillClass, onScrubStart, onHover, onHoverLeave,
 }: {
   /** Pre-built SVG path. Empty string while the source's raw samples load. */
   path: string
@@ -350,16 +350,17 @@ function TrackWaveformStrip({
   /** Tailwind `fill-…/70` class derived from the track's chosen color
    *  (or the index-based default). Ignored when `dimmed` is true. */
   fillClass: string
-  onSeek: (clientX: number, rect: DOMRect) => void
+  /** Mousedown on the strip — the parent starts the place-then-scrub
+   *  gesture (left) or a pan (middle); a plain click is just a scrub
+   *  that never moved (PLR-6). */
+  onScrubStart: (e: React.MouseEvent) => void
   onHover: (clientX: number, rect: DOMRect) => void
   onHoverLeave: () => void
-  onMiddleDown: (e: React.MouseEvent) => void
 }) {
   return (
     <div
       className="relative h-8 w-full cursor-crosshair bg-black/60"
-      onClick={e => onSeek(e.clientX, e.currentTarget.getBoundingClientRect())}
-      onMouseDown={onMiddleDown}
+      onMouseDown={onScrubStart}
       onMouseMove={e => onHover(e.clientX, e.currentTarget.getBoundingClientRect())}
       onMouseLeave={onHoverLeave}
     >
@@ -446,11 +447,12 @@ function ModeCloseIcon({ icon }: { icon: React.ReactNode }) {
 
 // ── Region-attached pill (clip region timecode/duration tags) ───────────────
 
-/** Pill that visually attaches to a clip region's edge: flat on the touching
- *  side while narrower than the region, fully rounded once WIDER than it (a
- *  flat edge sticking out past the region it touches read as detached).
- *  Measures itself after every render since its content (live timecodes) and
- *  the region's on-screen width both change during drags and zooms. */
+/** Pill that visually attaches to a clip region's edge: its touching
+ *  corners are square while it's narrower than the region and round off
+ *  CONTINUOUSLY (radius = overhang, capped at 4px) as it grows past the
+ *  region, so the transition reads as a morph rather than a snap. Measures
+ *  itself after every render since its content (live timecodes) and the
+ *  region's on-screen width both change during drags and zooms. */
 function RegionAttachedPill({ regionPx, position, corner, className, children, onMouseDown }: {
   /** The region's current on-screen width in px (visible portion). */
   regionPx: number
@@ -469,22 +471,33 @@ function RegionAttachedPill({ regionPx, position, corner, className, children, o
   onMouseDown?: (e: React.MouseEvent) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [detached, setDetached] = useState(false)
+  const [selfW, setSelfW] = useState(0)
   useLayoutEffect(() => {
     // setState bails out when the value is unchanged, so measuring every
     // render doesn't loop.
-    const w = ref.current?.offsetWidth ?? 0
-    setDetached((corner ? w / 2 : w) > regionPx)
+    setSelfW(ref.current?.offsetWidth ?? 0)
   })
-  const rounding = detached
-    ? 'rounded'
-    : corner
-      ? position === 'above'
-        ? (corner === 'right' ? 'rounded rounded-br-none' : 'rounded rounded-bl-none')
-        : (corner === 'right' ? 'rounded rounded-tr-none' : 'rounded rounded-tl-none')
-      : position === 'above' ? 'rounded-t' : 'rounded-b'
+  // Continuous attachment: a touching corner's radius EQUALS the pill's
+  // per-side overhang past the region, capped at the standard 4px, so the
+  // corner morphs smoothly from square to fully rounded as the widths
+  // cross instead of snapping at a threshold. A centered pill splits its
+  // overhang between its two touching corners; an edge pill (corner set)
+  // overlaps the region with one half of itself.
+  const MAX_R = 4
+  const overhang = corner ? selfW / 2 - regionPx : (selfW - regionPx) / 2
+  const touchR = `${Math.max(0, Math.min(MAX_R, overhang))}px`
+  const max = `${MAX_R}px`
+  // borderRadius shorthand order: top-left, top-right, bottom-right, bottom-left.
+  const touchesBottom = position === 'above'
+  const borderRadius = corner
+    ? touchesBottom
+      ? (corner === 'right' ? `${max} ${max} ${touchR} ${max}` : `${max} ${max} ${max} ${touchR}`)
+      : (corner === 'right' ? `${max} ${touchR} ${max} ${max}` : `${touchR} ${max} ${max} ${max}`)
+    : touchesBottom
+      ? `${max} ${max} ${touchR} ${touchR}`
+      : `${touchR} ${touchR} ${max} ${max}`
   return (
-    <div ref={ref} className={`${rounding} ${className}`} onMouseDown={onMouseDown}>
+    <div ref={ref} className={className} style={{ borderRadius }} onMouseDown={onMouseDown}>
       {children}
     </div>
   )
@@ -4798,16 +4811,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
               <div
                 ref={setFilmstripEl}
                 className="relative h-8 w-full cursor-crosshair select-none"
-                onClick={e => {
-                  // Deselect like the waveform strips do (PLR-11) — clicking
-                  // anywhere in the timeline outside a region deselects; the
-                  // region hit areas sit above this and re-select instead.
-                  setSelectedRegionId(null)
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  const ratio = (e.clientX - rect.left) / rect.width
-                  seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
+                // Place-then-scrub (PLR-6): mousedown seeks immediately and
+                // keeps scrubbing until release — a plain click is just a
+                // scrub that never moved. startPlayheadDrag also owns the
+                // middle-click pan branch. Deselect like the waveform strips
+                // do (PLR-11); the region hit areas sit above this and
+                // re-select instead.
+                onMouseDown={e => {
+                  if (e.button === 0) setSelectedRegionId(null)
+                  startPlayheadDrag(e)
                 }}
-                onMouseDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
                 onMouseMove={e => {
                   if (isPlayheadDraggingRef.current) return
                   const rect = e.currentTarget.getBoundingClientRect()
@@ -4874,13 +4887,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   <div
                     ref={waveformStripRef}
                     className="relative h-10 w-full cursor-crosshair bg-black/30"
-                    onClick={e => {
-                      setSelectedRegionId(null)
-                      const rect = e.currentTarget.getBoundingClientRect()
-                      const ratio = (e.clientX - rect.left) / rect.width
-                      seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
+                    onMouseDown={e => {
+                      if (e.button === 0) setSelectedRegionId(null)
+                      startPlayheadDrag(e)
                     }}
-                    onMouseDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
                     onMouseMove={e => {
                       if (isPlayheadDraggingRef.current) return
                       const rect = e.currentTarget.getBoundingClientRect()
@@ -4920,11 +4930,6 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   <div className="relative z-30">
                   {(() => {
                     const anySolo = tracks.some(t => t.solo)
-                    const onTrackSeek = (clientX: number, rect: DOMRect) => {
-                      setSelectedRegionId(null)
-                      const ratio = (clientX - rect.left) / rect.width
-                      seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
-                    }
                     const onTrackHover = (clientX: number, rect: DOMRect) => {
                       if (isPlayheadDraggingRef.current) return
                       setHoverRatio((clientX - rect.left) / rect.width)
@@ -5157,10 +5162,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                                 dimmed={effectivelyMuted}
                                 volume={track.volume}
                                 fillClass={fillClass}
-                                onSeek={onTrackSeek}
+                                onScrubStart={e => {
+                                  if (e.button === 0) setSelectedRegionId(null)
+                                  startPlayheadDrag(e)
+                                }}
                                 onHover={onTrackHover}
                                 onHoverLeave={onTrackHoverLeave}
-                                onMiddleDown={e => startMiddleClickPan(e, e.currentTarget.getBoundingClientRect().width)}
                               />
                             </div>
                           )}
@@ -5295,20 +5302,18 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     return (
                       <React.Fragment key={seg.id}>
                         {/* Transparent hit area — z-[2] so bleeps (z-[4]) take
-                            priority. Clicking inside a region SEEKS (and
-                            selects the region); moving the whole region now
-                            lives on the timecode pill above it (PLR-11), so
-                            the most common interaction, click-to-place the
+                            priority. Mousedown inside a region places-then-
+                            scrubs the playhead like the strips do (PLR-6) and
+                            selects the region; moving the whole region lives
+                            on the timecode pill above it (PLR-11), so the
+                            most common interaction, click-to-place the
                             playhead, works inside regions too. */}
                         <div
                           className="absolute inset-y-0 z-[2] cursor-crosshair"
                           style={{ left: `${lPct}%`, right: `${rPct}%` }}
-                          onClick={e => {
-                            const rect = stripsWrapperRef.current?.getBoundingClientRect()
-                            if (!rect) return
-                            const ratio = (e.clientX - rect.left) / rect.width
-                            seekRef.current(Math.max(0, Math.min(duration, vStart + ratio * vSpan)))
-                            setSelectedRegionId(seg.id)
+                          onMouseDown={e => {
+                            if (e.button === 0) setSelectedRegionId(seg.id)
+                            startPlayheadDrag(e)
                           }}
                           onMouseEnter={() => setHoveredRegionId(seg.id)}
                           onMouseLeave={() => setHoveredRegionId(null)}
