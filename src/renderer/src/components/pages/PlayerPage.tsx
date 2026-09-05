@@ -432,6 +432,54 @@ function TrackColorPicker({
   )
 }
 
+// ── Crop controls panel (on-video, attached to the crop region) ─────────────
+
+/** Positions the crop controls against the crop region the way the region
+ *  pills attach to clip regions: centered under the region's bottom edge,
+ *  flipping INSIDE the region when the container has no room below it, and
+ *  clamping fully into the container when the region's edges run out of
+ *  view. Measures itself after every render — its content and the region
+ *  both move (drags, aspect changes, stage zoom/pan). */
+function CropControlsPanel({ anchor, boundsW, boundsH, children }: {
+  /** The crop region's rect in CONTAINER coordinates (already mapped
+   *  through the stage's zoom/pan transform). */
+  anchor: { x: number; y: number; w: number; h: number }
+  boundsW: number
+  boundsH: number
+  children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: 8, top: 8 })
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const gw = el.offsetWidth
+    const gh = el.offsetHeight
+    const GAP = 6
+    const PAD = 8
+    // X: centered on the region, clamped into the container.
+    let left = anchor.x + anchor.w / 2 - gw / 2
+    left = Math.max(PAD, Math.min(left, boundsW - gw - PAD))
+    // Y: below the region's bottom edge; flip to INSIDE the region when
+    // the container has no room below; the final clamp snaps it to the
+    // container's bottom (still region-centered in X) when the region's
+    // bottom edge itself is out of view.
+    let top = anchor.y + anchor.h + GAP
+    if (top + gh > boundsH - PAD) top = anchor.y + anchor.h - GAP - gh
+    top = Math.max(PAD, Math.min(top, boundsH - gh - PAD))
+    setPos(p => (Math.abs(p.left - left) < 0.5 && Math.abs(p.top - top) < 0.5 ? p : { left, top }))
+  })
+  return (
+    <div
+      ref={ref}
+      className="absolute z-20 flex items-center gap-1.5 px-1.5 py-1 rounded-lg bg-navy-800/95 border border-blue-500/30 shadow-xl"
+      style={{ left: pos.left, top: pos.top }}
+    >
+      {children}
+    </div>
+  )
+}
+
 // ── Crop toolbar number field ────────────────────────────────────────────────
 
 /** Micro number field for the clip toolbar's crop x/y/w/h. Deliberately NOT
@@ -1273,8 +1321,10 @@ function CropAspectSelector({ value, onChange, videoW, videoH }: {
     Math.abs(nativeRatio - 1) < 0.01 ||
     Math.abs(nativeRatio - 9/16) < 0.01
   )
+  // No 'Off' entry: since the controls moved onto the video (attached to
+  // the crop region), on/off belongs to the clip toolbar's Crop toggle —
+  // this dropdown only picks the shape and is only rendered while on.
   const options: Array<{ value: import('../../types').CropAspect; label: string }> = [
-    { value: 'off', label: 'Off' },
     ...(!matchesPreset ? [{ value: 'original' as const, label: 'Original' }] : []),
     { value: '16:9', label: '16:9 Widescreen' },
     { value: '1:1', label: '1:1 Square' },
@@ -1296,13 +1346,10 @@ function CropAspectSelector({ value, onChange, videoW, videoH }: {
   }, [open])
 
   // Short label: preset value without the descriptive word ("16:9", not
-  // "16:9 Widescreen"). Collapses to icon-only below @2xl like the rest of
-  // the clip toolbar; the chevron stays as the dropdown affordance.
-  const label = (
-    <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">
-      {isOn ? current.label.replace(/ .*$/, '') : 'Crop'}
-    </CollapsibleLabel>
-  )
+  // "16:9 Widescreen"). Plain text (no CollapsibleLabel): the on-video
+  // panel has no @container ancestor, so container variants would never
+  // expand there — and it has the room anyway.
+  const label = <>{isOn ? current.label.replace(/ .*$/, '') : 'Crop'}</>
   return (
     // flex (not block): the closed state's Tooltip trigger is inline-flex,
     // and on a block wrapper its text baseline added a 1px line-height
@@ -2463,6 +2510,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
   useEffect(() => { lockedRegionIdsRef.current = lockedRegionIds }, [lockedRegionIds])
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null)
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null)
+  // Last non-off crop aspect — the toolbar's Crop toggle restores it on
+  // re-enable (16:9 before any choice this session).
+  const lastCropAspectRef = useRef<Exclude<CropAspect, 'off'>>('16:9')
+  useEffect(() => {
+    if (clipState.cropAspect !== 'off') lastCropAspectRef.current = clipState.cropAspect
+  }, [clipState.cropAspect])
   const selectedRegionIdRef = useRef<string | null>(null)
   useEffect(() => { selectedRegionIdRef.current = selectedRegionId }, [selectedRegionId])
 
@@ -4504,6 +4557,112 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     )
                   })()}
                 </div>
+
+                {/* Crop controls — attached to the crop region like the clip
+                    pills attach to regions. Rendered OUTSIDE the zoom/pan
+                    wrapper so the controls never scale with stage zoom; the
+                    region's rect is mapped through the transform instead.
+                    Hidden while the video is popped out (the placeholder
+                    covers the stage, and editing an invisible crop is
+                    meaningless). */}
+                {isClipMode && clipState.cropAspect !== 'off' && videoInfo && vcSize.w > 0 && !isPopupOpen && (() => {
+                  const rCropX = activeCropRegion?.cropX ?? DEFAULT_CROP_X
+                  const rCropY = activeCropRegion?.cropY ?? DEFAULT_CROP_Y
+                  const rCropScale = activeCropRegion?.cropScale ?? DEFAULT_CROP_SCALE
+                  const arP = aspectRatio(clipState.cropAspect, videoInfo.width, videoInfo.height)
+                  const geom = getCropGeometry(
+                    vcSize.w, vcSize.h, videoInfo.width, videoInfo.height, rCropX, rCropY, rCropScale, arP
+                  )
+                  const anchor = {
+                    x: videoPan.x + videoZoom * geom.cropLeft,
+                    y: videoPan.y + videoZoom * geom.cropTop,
+                    w: videoZoom * geom.cropW,
+                    h: videoZoom * geom.cropH,
+                  }
+                  const videoAspect = videoInfo.width / videoInfo.height
+                  const maxW = arP > videoAspect ? videoInfo.width : videoInfo.height * arP
+                  const maxH = arP > videoAspect ? videoInfo.width / arP : videoInfo.height
+                  const cropW = maxW * rCropScale
+                  const cropH = maxH * rCropScale
+                  const offsetX = Math.round((rCropX - 0.5) * (videoInfo.width - cropW))
+                  const offsetY = Math.round((rCropY - 0.5) * (videoInfo.height - cropH))
+                  const dispW = Math.round(cropW)
+                  const dispH = Math.round(cropH)
+                  const disabled = !activeCropRegion
+                  const apply = (patch: { cropX?: number; cropY?: number; cropScale?: number }) => {
+                    if (!activeCropRegion) return
+                    updateRegionCrop(activeCropRegion.id, patch)
+                  }
+                  const setOffsetX = (px: number) => {
+                    const range = videoInfo.width - cropW
+                    if (range <= 0) return
+                    const clamped = Math.max(-range / 2, Math.min(range / 2, px))
+                    apply({ cropX: clamped / range + 0.5 })
+                  }
+                  const setOffsetY = (px: number) => {
+                    const range = videoInfo.height - cropH
+                    if (range <= 0) return
+                    const clamped = Math.max(-range / 2, Math.min(range / 2, px))
+                    apply({ cropY: clamped / range + 0.5 })
+                  }
+                  const setWidth = (px: number) => {
+                    const newScale = Math.max(MIN_CROP_SCALE, Math.min(1, px / maxW))
+                    // Re-clamp position to keep crop inside the frame at the new size
+                    const newCropW = maxW * newScale
+                    const newCropH = maxH * newScale
+                    const rangeX = videoInfo.width - newCropW
+                    const rangeY = videoInfo.height - newCropH
+                    const newCx = rangeX > 0 ? Math.max(0, Math.min(1, (offsetX + rangeX / 2) / rangeX)) : 0.5
+                    const newCy = rangeY > 0 ? Math.max(0, Math.min(1, (offsetY + rangeY / 2) / rangeY)) : 0.5
+                    apply({ cropScale: newScale, cropX: newCx, cropY: newCy })
+                  }
+                  const setHeight = (px: number) => setWidth((px / maxH) * maxW)
+                  const reset = () => apply({ cropX: DEFAULT_CROP_X, cropY: DEFAULT_CROP_Y, cropScale: DEFAULT_CROP_SCALE })
+                  const labelCls = 'text-[10px] text-gray-400 select-none w-2'
+                  return (
+                    <CropControlsPanel anchor={anchor} boundsW={vcSize.w} boundsH={vcSize.h}>
+                      <CropAspectSelector
+                        value={clipState.cropAspect}
+                        onChange={a => setClipState(s => ({ ...s, cropAspect: a }))}
+                        videoW={videoInfo.width}
+                        videoH={videoInfo.height}
+                      />
+                      <Tooltip content={disabled ? 'Move the playhead inside a clip region to edit its crop' : 'Crop position (offset from center) and dimensions, in source pixels'}>
+                        <div className={`flex items-center gap-1 ${disabled ? 'opacity-50' : ''}`}>
+                          {/* 2×2 grid: x/y on top, w/h below. CropNumberInput:
+                              the micro spinner variant of the NumberInput
+                              behavior (see its comment); setters clamp
+                              internally, so no min except the >0 floor on
+                              dimensions. */}
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1">
+                              <span className={labelCls}>x</span>
+                              <CropNumberInput value={offsetX} onChange={setOffsetX} disabled={disabled} ariaLabel="Crop offset X" />
+                              <span className={labelCls}>y</span>
+                              <CropNumberInput value={offsetY} onChange={setOffsetY} disabled={disabled} ariaLabel="Crop offset Y" />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className={labelCls}>w</span>
+                              <CropNumberInput value={dispW} onChange={setWidth} min={1} disabled={disabled} ariaLabel="Crop width" />
+                              <span className={labelCls}>h</span>
+                              <CropNumberInput value={dispH} onChange={setHeight} min={1} disabled={disabled} ariaLabel="Crop height" />
+                            </div>
+                          </div>
+                          <Tooltip content="Reset crop position and size">
+                            <button
+                              type="button"
+                              disabled={disabled}
+                              onClick={reset}
+                              className="flex items-center px-1 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-center"
+                            >
+                              <RotateCcw size={11} />
+                            </button>
+                          </Tooltip>
+                        </div>
+                      </Tooltip>
+                    </CropControlsPanel>
+                  )
+                })()}
               </div>
 
               {/* Zoom level indicator — click to reset */}
@@ -4566,9 +4725,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                 (672px), skip buttons shed outside-in below @3xl/@2xl/@xl. */}
             <div className="bg-navy-800 border-t border-white/5 py-2 px-3 flex flex-col gap-2 shrink-0 @container">
 
-              {/* Clip mode toolbar */}
+              {/* Clip mode toolbar. mb-2 adds 8px of breathing room between
+                  the toolbar and the timeline strips on top of the column's
+                  gap-2. */}
               {isClipMode && (
-                <div className="flex flex-col gap-0 -mx-1">
+                <div className="flex flex-col gap-0 -mx-1 mb-2">
                   {/* No Stop Clipping button here — it lives in the sidebar,
                       in the same slot as Start Clipping (style-guide rule:
                       close buttons render where their open buttons were). */}
@@ -4662,92 +4823,23 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
 
                     <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
 
-                    <CropAspectSelector
-                      value={clipState.cropAspect}
-                      onChange={a => setClipState(s => ({ ...s, cropAspect: a }))}
-                      videoW={videoInfo?.width}
-                      videoH={videoInfo?.height}
-                    />
-                    {clipState.cropAspect !== 'off' && videoInfo && (() => {
-                      const ar = aspectRatio(clipState.cropAspect, videoInfo.width, videoInfo.height)
-                      const videoAspect = videoInfo.width / videoInfo.height
-                      const maxW = ar > videoAspect ? videoInfo.width : videoInfo.height * ar
-                      const maxH = ar > videoAspect ? videoInfo.width / ar : videoInfo.height
-                      const cx = activeCropRegion?.cropX ?? DEFAULT_CROP_X
-                      const cy = activeCropRegion?.cropY ?? DEFAULT_CROP_Y
-                      const cs = activeCropRegion?.cropScale ?? DEFAULT_CROP_SCALE
-                      const cropW = maxW * cs
-                      const cropH = maxH * cs
-                      const offsetX = Math.round((cx - 0.5) * (videoInfo.width - cropW))
-                      const offsetY = Math.round((cy - 0.5) * (videoInfo.height - cropH))
-                      const dispW = Math.round(cropW)
-                      const dispH = Math.round(cropH)
-                      const disabled = !activeCropRegion
-                      const apply = (patch: { cropX?: number; cropY?: number; cropScale?: number }) => {
-                        if (!activeCropRegion) return
-                        updateRegionCrop(activeCropRegion.id, patch)
-                      }
-                      const setOffsetX = (px: number) => {
-                        const range = videoInfo.width - cropW
-                        if (range <= 0) return
-                        const clamped = Math.max(-range / 2, Math.min(range / 2, px))
-                        apply({ cropX: clamped / range + 0.5 })
-                      }
-                      const setOffsetY = (px: number) => {
-                        const range = videoInfo.height - cropH
-                        if (range <= 0) return
-                        const clamped = Math.max(-range / 2, Math.min(range / 2, px))
-                        apply({ cropY: clamped / range + 0.5 })
-                      }
-                      const setWidth = (px: number) => {
-                        const newScale = Math.max(MIN_CROP_SCALE, Math.min(1, px / maxW))
-                        // Re-clamp position to keep crop inside the frame at the new size
-                        const newCropW = maxW * newScale
-                        const newCropH = maxH * newScale
-                        const rangeX = videoInfo.width - newCropW
-                        const rangeY = videoInfo.height - newCropH
-                        const newCx = rangeX > 0 ? Math.max(0, Math.min(1, (offsetX + rangeX / 2) / rangeX)) : 0.5
-                        const newCy = rangeY > 0 ? Math.max(0, Math.min(1, (offsetY + rangeY / 2) / rangeY)) : 0.5
-                        apply({ cropScale: newScale, cropX: newCx, cropY: newCy })
-                      }
-                      const setHeight = (px: number) => setWidth((px / maxH) * maxW)
-                      const reset = () => apply({ cropX: DEFAULT_CROP_X, cropY: DEFAULT_CROP_Y, cropScale: DEFAULT_CROP_SCALE })
-                      const labelCls = 'text-[10px] text-gray-400 select-none w-2'
-                      return (
-                        <Tooltip content={disabled ? 'Move the playhead inside a clip region to edit its crop' : 'Crop position (offset from center) and dimensions, in source pixels'}>
-                          <div className={`flex items-center gap-1 ${disabled ? 'opacity-50' : ''}`}>
-                            {/* 2×2 grid: x/y on top, w/h below — frees up
-                                horizontal space the toolbar needs at narrow
-                                window widths. CropNumberInput: the micro
-                                spinner variant of the NumberInput behavior
-                                (see its comment); setters clamp internally,
-                                so no min except the >0 floor on dimensions. */}
-                            <div className="flex flex-col gap-0.5">
-                              <div className="flex items-center gap-1">
-                                <span className={labelCls}>x</span>
-                                <CropNumberInput value={offsetX} onChange={setOffsetX} disabled={disabled} ariaLabel="Crop offset X" />
-                                <span className={labelCls}>y</span>
-                                <CropNumberInput value={offsetY} onChange={setOffsetY} disabled={disabled} ariaLabel="Crop offset Y" />
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className={labelCls}>w</span>
-                                <CropNumberInput value={dispW} onChange={setWidth} min={1} disabled={disabled} ariaLabel="Crop width" />
-                                <span className={labelCls}>h</span>
-                                <CropNumberInput value={dispH} onChange={setHeight} min={1} disabled={disabled} ariaLabel="Crop height" />
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={disabled}
-                              onClick={reset}
-                              className="flex items-center px-1 py-0.5 rounded text-[11px] text-gray-400 border border-white/20 hover:text-blue-300 hover:border-blue-400/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed self-center"
-                            >
-                              <RotateCcw size={11} />
-                            </button>
-                          </div>
-                        </Tooltip>
-                      )
-                    })()}
+                    {/* Crop toggle — the crop region and its controls (aspect
+                        dropdown, x/y/w/h, reset) live ON the video now,
+                        attached to the region itself; this only reveals or
+                        hides them. Re-enabling restores the last-used
+                        aspect (16:9 before any choice this session). */}
+                    <Tooltip content={clipState.cropAspect !== 'off' ? 'Turn off cropping' : 'Crop the clip (the crop region and its controls appear on the video)'}>
+                      <button
+                        onClick={() => setClipState(s => ({ ...s, cropAspect: s.cropAspect !== 'off' ? 'off' : lastCropAspectRef.current }))}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors ${
+                          clipState.cropAspect !== 'off'
+                            ? 'text-blue-300 border-blue-400/60 bg-blue-950/60'
+                            : 'text-gray-400 border-white/20 hover:text-blue-300 hover:border-blue-400/40'
+                        }`}
+                      >
+                        <Crop size={11} /><CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Crop</CollapsibleLabel>
+                      </button>
+                    </Tooltip>
 
                     <div className="flex-1" />
 

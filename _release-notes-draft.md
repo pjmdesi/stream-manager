@@ -17,6 +17,8 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - Clip regions are easier to work with. Clicking inside a region now places the playhead (and selects the region) instead of being reserved for dragging; moving the whole region lives on its timecode tag, which now appears on hover with drag grips and connects visually to the region's border. Clicking the thumbnail strip deselects a region, the same as clicking the waveform always did.
 
 - Holding Shift while arrow-stepping an input jumps by 10x everywhere stepping exists: timecode inputs (10 of whatever segment the cursor is on), the crop tool's position and size fields, and the track volume, matching the number fields that already did this. Tiny-range settings like max simultaneous conversions and the relay port deliberately keep plain stepping.
+- The crop controls moved out of the clip toolbar and onto the video itself, attached to the crop region (following it as it moves, flipping inside when there's no room below, staying in view at the container edges). The toolbar keeps a simple Crop toggle that remembers your last aspect, and the position/size fields gained tiny +/- steppers.
+- The player controls now adapt to narrow windows: clip toolbar buttons collapse to icons and the transport row sheds its larger skip buttons (5m first, then 1m, then 10s) when space runs short. Keyboard shortcuts are unaffected. In clipping mode, hovering a track row also lifts it out of the out-of-region dimming so its controls read as usable.
 
 ## Converter
 
