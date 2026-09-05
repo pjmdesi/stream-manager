@@ -451,12 +451,19 @@ function ModeCloseIcon({ icon }: { icon: React.ReactNode }) {
  *  flat edge sticking out past the region it touches read as detached).
  *  Measures itself after every render since its content (live timecodes) and
  *  the region's on-screen width both change during drags and zooms. */
-function RegionAttachedPill({ regionPx, position, className, children, onMouseDown }: {
+function RegionAttachedPill({ regionPx, position, corner, className, children, onMouseDown }: {
   /** The region's current on-screen width in px (visible portion). */
   regionPx: number
   /** Where the pill sits relative to the region: 'above' is flat on its
    *  bottom, 'below' flat on its top. */
   position: 'above' | 'below'
+  /** Set when only ONE corner touches the region because the pill is
+   *  centered on a region EDGE rather than on the region (the handle
+   *  timecode popup): 'right' = the region extends to the pill's right (a
+   *  start handle), 'left' = to its left (an end handle). Attachment then
+   *  compares half the pill's width (the overlapping half) against the
+   *  region. Omitted = the whole touching edge is flat. */
+  corner?: 'left' | 'right'
   className: string
   children: React.ReactNode
   onMouseDown?: (e: React.MouseEvent) => void
@@ -466,9 +473,16 @@ function RegionAttachedPill({ regionPx, position, className, children, onMouseDo
   useLayoutEffect(() => {
     // setState bails out when the value is unchanged, so measuring every
     // render doesn't loop.
-    setDetached((ref.current?.offsetWidth ?? 0) > regionPx)
+    const w = ref.current?.offsetWidth ?? 0
+    setDetached((corner ? w / 2 : w) > regionPx)
   })
-  const rounding = detached ? 'rounded' : position === 'above' ? 'rounded-t' : 'rounded-b'
+  const rounding = detached
+    ? 'rounded'
+    : corner
+      ? position === 'above'
+        ? (corner === 'right' ? 'rounded rounded-br-none' : 'rounded rounded-bl-none')
+        : (corner === 'right' ? 'rounded rounded-tr-none' : 'rounded rounded-tl-none')
+      : position === 'above' ? 'rounded-t' : 'rounded-b'
   return (
     <div ref={ref} className={`${rounding} ${className}`} onMouseDown={onMouseDown}>
       {children}
@@ -5514,9 +5528,20 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                     const maxT = handlePopup.which === 'in'
                       ? seg.outPoint - frameTime
                       : (popupRightWall === Infinity  ? duration : popupRightWall - frameTime)
+                    // Visible region width for the attachment check; the popup
+                    // is centered on a handle, so only its inward half
+                    // overlaps the region (corner prop).
+                    const segLPct = Math.max(0, Math.min(100, ((seg.inPoint - vStart) / vSpan) * 100))
+                    const segRPct = Math.max(0, Math.min(100, ((vEnd - seg.outPoint) / vSpan) * 100))
+                    const segRegionPx = ((100 - segLPct - segRPct) / 100) * stripWidth
                     return (
-                      <div className="absolute flex -translate-x-1/2 z-50" style={{ left: `${leftPct}%`, bottom: '100%', marginBottom: 3 }}>
-                        <div className="bg-blue-950 border border-blue-400 rounded px-1 pt-0.5 pb-0 flex items-center shadow-xl">
+                      <div className="absolute flex -translate-x-1/2 z-50" style={{ left: `${leftPct}%`, bottom: '100%', marginBottom: '-1px' }}>
+                        <RegionAttachedPill
+                          regionPx={segRegionPx}
+                          position="above"
+                          corner={handlePopup.which === 'in' ? 'right' : 'left'}
+                          className={`bg-blue-950 border ${selectedRegionId === seg.id ? 'border-blue-300' : 'border-blue-400'} px-1 pt-0 pb-0.5 flex items-center shadow-xl`}
+                        >
                           <input
                             ref={handlePopupInputRef}
                             value={handlePopup.value}
@@ -5551,7 +5576,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                             className="text-[11px] text-blue-200 tabular-nums bg-transparent focus:outline-none min-w-0 text-center"
                             style={{ width: `${Math.max(8, handlePopup.value.length)}ch` }}
                           />
-                        </div>
+                        </RegionAttachedPill>
                       </div>
                     )
                   })()}
@@ -5670,10 +5695,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                   underneath keeps working. Single click seeks, double click
                   opens the edit popup (the popup renders in this layer too,
                   above the strips, tracking zoom/pan like the handle popups).
-                  z-[46] clears the clip-region shading (z-[40]) and the hover
-                  line (z-[45]) so markers stay clickable in clip mode. */}
+                  z-[65] keeps markers on top of ALL region chrome — pills and
+                  handle popups (z-50) and the selected labels (z-60) — as
+                  well as the clip shading (z-[40]) and hover line (z-[45]);
+                  only the hover timecode tooltip and the marker edit popup
+                  (z-[70]) sit above them. */}
               {duration > 0 && (
-                <div className="absolute inset-x-0 top-0 z-[46] pointer-events-none">
+                <div className="absolute inset-x-0 top-0 z-[65] pointer-events-none">
                   {displayMarkers.list.map(({ marker: m, kind }) => {
                     const pct = ((m.time - vStart) / vSpan) * 100
                     if (pct < 0 || pct > 100) return null
