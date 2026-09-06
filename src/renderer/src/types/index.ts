@@ -208,6 +208,9 @@ export interface AppConfig {
   twitchClientSecret: string
   startWithWindows: boolean
   startMinimized: boolean
+  /** Sub-option of startMinimized: hide to tray only for launches made by
+   *  the Windows login item; manual launches open the window. */
+  startMinimizedOnlyAtStartup: boolean
   disableAnimations: boolean
   slowAnimations: boolean
   autoDeletePartialOnCancel: boolean

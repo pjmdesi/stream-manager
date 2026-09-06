@@ -345,7 +345,7 @@
   Add proper logging for the YouTube, Twitch, and Claude API calls. These will be log files located in the config directory in a logs folder. The logs should record every interaction with the APIs, including the request and response data, timestamps, and any errors that occur. Not sure what the best timeframe is for log rotation, perhaps monthly? We don't need to expose these in the UI, it's purely for advanced troubleshooting.
   Note (2026-09-03): the logs folder location and rotation live in the shared logging infrastructure, APP-20; this item's files go there like every other SM log.
 
-- **APP-3**
+- **APP-3** [done]
   CODEBASE change: add linting rules to enforce specific design decisions for this app because Claude sometimes struggles with remembering certain things. Most of the rules should be in the Claude memory files or the style guide. Rules to include: ban raw `<input type="number">` in pages/components — all number fields go through the `NumberInput` component (`ui/Input.tsx`), same shape as the existing `title=` ban. Allowed exceptions live inside `ui/` primitives themselves and the player crop fields (deliberately compact; the 2026-08 number-input sweep already converted everything else).
 
 - **APP-4**

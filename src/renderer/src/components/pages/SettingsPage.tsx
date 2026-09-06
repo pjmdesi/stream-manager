@@ -134,7 +134,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   // Only rendered (nav chip + section body) when a Claude API key is
   // connected via Integrations — see the `sections` filter.
   { id: 'ai', label: 'AI Suggestions', icon: <Bot size={14} />, keys: ['aiPreventRepeatSuggestions'] },
-  { id: 'system', label: 'System', icon: <MonitorCog size={14} />, keys: ['checkForUpdates', 'startWithWindows', 'startMinimized'] },
+  { id: 'system', label: 'System', icon: <MonitorCog size={14} />, keys: ['checkForUpdates', 'startWithWindows', 'startMinimized', 'startMinimizedOnlyAtStartup'] },
   { id: 'devtools', label: 'Dev Tools', icon: <FlaskConical size={14} />, keys: ['slowAnimations', 'devForceYouTubeQuotaExceeded'], dev: true },
 ]
 
@@ -890,6 +890,16 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
             disabled={import.meta.env.DEV || !local.startWithWindows}
             label={<div><div className="text-sm font-medium text-gray-200">Start Minimized {dirtyDot('startMinimized')}</div><div className="text-xs text-gray-400">Hide to tray on launch instead of opening the window.</div></div>}
           />
+          {/* Sub-option: indented under Start Minimized, disabled (but
+              remembered) whenever its parent is off. */}
+          <div className="pl-6">
+            <Checkbox
+              checked={!!local.startMinimizedOnlyAtStartup}
+              onChange={v => set('startMinimizedOnlyAtStartup', v)}
+              disabled={import.meta.env.DEV || !local.startWithWindows || !local.startMinimized}
+              label={<div><div className="text-sm font-medium text-gray-200">Only when launched at startup {dirtyDot('startMinimizedOnlyAtStartup')}</div><div className="text-xs text-gray-400">Hide to tray only when Windows launched the app at startup. Launching it manually opens the window as usual.</div></div>}
+            />
+          </div>
         </Section>
 
         {import.meta.env.DEV && (

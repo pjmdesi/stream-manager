@@ -361,7 +361,7 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
       enabled: app.isPackaged,
       click: (item) => {
         const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
-        app.setLoginItemSettings({ openAtLogin: item.checked, path: exePath })
+        app.setLoginItemSettings({ openAtLogin: item.checked, path: exePath, args: ['--from-autostart'] })
         // Through the broadcasting helper so an open Settings page (and any
         // other consumer of the shared config state) sees the change live.
         setConfigPartial({ startWithWindows: item.checked })
@@ -449,7 +449,8 @@ app.whenReady().then(() => {
     const config = getStore().get('config') as any
     const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
     if (config?.startWithWindows) {
-      app.setLoginItemSettings({ openAtLogin: true, path: exePath })
+      // --from-autostart marks login-item launches (see APP-9 sub-option).
+      app.setLoginItemSettings({ openAtLogin: true, path: exePath, args: ['--from-autostart'] })
     }
   }
 
@@ -552,10 +553,17 @@ app.whenReady().then(() => {
     mainWindow.close()
   })
 
-  // Start minimized: hide the window before it's shown if both flags are set
+  // Start minimized: hide the window before it's shown if both flags are
+  // set. With the only-at-startup sub-option on, this applies solely to
+  // launches the Windows login item made (it passes --from-autostart);
+  // manual launches open the window normally (APP-9).
   if (app.isPackaged) {
     const config = getStore().get('config') as any
-    if (config?.startWithWindows && config?.startMinimized) {
+    const launchedAtStartup = process.argv.includes('--from-autostart')
+    if (
+      config?.startWithWindows && config?.startMinimized &&
+      (!config?.startMinimizedOnlyAtStartup || launchedAtStartup)
+    ) {
       mainWindow.once('ready-to-show', () => mainWindow.hide())
     }
   }

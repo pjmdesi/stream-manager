@@ -29,6 +29,7 @@ const defaultConfig: AppConfig = {
   twitchClientSecret: '',
   startWithWindows: false,
   startMinimized: false,
+  startMinimizedOnlyAtStartup: false,
   disableAnimations: false,
   slowAnimations: false,
   autoDeletePartialOnCancel: false,

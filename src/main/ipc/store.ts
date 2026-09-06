@@ -48,6 +48,10 @@ export interface AppConfig {
   twitchClientSecret: string
   startWithWindows: boolean
   startMinimized: boolean
+  /** Sub-option of startMinimized: hide to tray only when the launch came
+   *  from the Windows login item (detected via the --from-autostart arg the
+   *  login-item registration passes); manual launches open the window. */
+  startMinimizedOnlyAtStartup: boolean
   disableAnimations: boolean
   slowAnimations: boolean
   autoDeletePartialOnCancel: boolean
@@ -174,6 +178,7 @@ function getDefaultConfig(): AppConfig {
     twitchClientSecret: '',
     startWithWindows: false,
     startMinimized: false,
+    startMinimizedOnlyAtStartup: false,
     disableAnimations: false,
     slowAnimations: false,
     autoDeletePartialOnCancel: false,
@@ -410,7 +415,9 @@ export function registerStoreIPC(): void {
     if (app.isPackaged) {
       // For portable builds, PORTABLE_EXECUTABLE_FILE is the actual .exe on disk (not the temp-extracted copy).
       const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
-      app.setLoginItemSettings({ openAtLogin: startWithWindows, path: exePath })
+      // --from-autostart marks login-item launches so "start minimized only
+      // at startup" can tell them apart from manual launches (APP-9).
+      app.setLoginItemSettings({ openAtLogin: startWithWindows, path: exePath, args: ['--from-autostart'] })
     }
   })
 

@@ -24,5 +24,6 @@
       "name": "cleanup",
       "color": "#009980"
     }
-  ]
+  ],
+  "accent": "#d400ff"
 }
