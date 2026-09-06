@@ -507,6 +507,7 @@ function CropNumberInput({ value, onChange, min, disabled, ariaLabel }: {
   return (
     <div className="flex items-stretch">
       <input
+        // eslint-disable-next-line no-restricted-syntax -- sanctioned: CropNumberInput is the micro-scale primitive variant (see its header comment)
         type="number"
         value={value}
         disabled={disabled}

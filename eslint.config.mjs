@@ -33,6 +33,16 @@ export default [
           selector: "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name='title']",
           message: 'Native title= tooltips are banned (app rule). Use <Tooltip content={…}> — or <TruncatedText> for truncated one-line labels.',
         },
+        {
+          // App rule (APP-3): ALL number fields go through the NumberInput
+          // primitive (ui/Input.tsx) — consistent spinners, Shift = ×10,
+          // clamping, canonical display — never a raw native number input.
+          // The two sanctioned raw inputs (inside NumberInput itself, and
+          // the deliberately-compact CropNumberInput in PlayerPage) carry
+          // inline eslint-disable comments naming this rule.
+          selector: "JSXOpeningElement[name.name='input'] > JSXAttribute[name.name='type'][value.value='number']",
+          message: 'Raw <input type="number"> is banned (app rule). Use the NumberInput primitive (ui/Input.tsx); for the player crop toolbar use CropNumberInput.',
+        },
       ],
     },
   },

@@ -346,6 +346,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         </span>
       )}
       <input
+        // eslint-disable-next-line no-restricted-syntax -- the one sanctioned raw number input: this IS the NumberInput primitive the app rule points everyone at
         type="number"
         value={Number.isFinite(value) ? value : ''}
         onChange={e => {

@@ -18,6 +18,15 @@
 14. IDEA-11
 15. APP-23
 16. IDEA-4
+17. APP-3
+18. APP-9
+19. PLR-7
+20. PLR-1
+21. PLR-5
+22. THU-6
+23. STR-12
+24. STR-10
+25. LNCH-2
 
 ## Improvement ideas
 
@@ -269,7 +278,7 @@
   Add the ability for the launcher to track which of the apps in each launch group are still open and allow the user to quit them from the launcher. Need to discuss design. We could also add more options to the launcher group items after this such as 2 boolean options: Close with group (checked by default, unchecked means it won't quit when the user clicks the "Quit Group", for example, an app that the user would like to keep open after streaming), and Allow multiple instances (unchecked by default, checked means the app could be attempted to be launched multiple times when the group or individual launch buttons are clicked. Might need to check if it's possible to know if an app can have multiple instances so there's a smaller chance of conflict. If we can, the checkbox would not appear for those apps).
 
 - **LNCH-2**
-  Add a button in the header of an open launch group to duplicate the group. This would create a new launcher group with the exact same items and icon. The name should also be the same but with " — Copy" appended.
+  Add a button in the header of an open launch group to duplicate the group. This would create a new launcher group with the exact same items and icon. The name should also be the same but with " — Copy" appended. Might be worth adding a rule to the style guide to handle duplicates consistently. The only exception I can think of are the thumbnail variants, who get a fixed name regardless of whether it is a duplicate or not.
 
 ### Integrations
 
@@ -416,6 +425,9 @@
 
 - **APP-24** [cleanup]
   Go over the style guide to look for any inconsistencies, conflicts, or out-of-date or no longer relevant rules.
+
+- **APP-26** [ui]
+  Let the Help modal pop out into its own window (2026-09-06). The modal is the default, but a modal covering the exact UI the user is trying to understand defeats the purpose: add a button (footer candidate) that breaks the Help content out into a separate window the user can place beside the app. No state passes between Help and the rest of the app, so the content is fully self-contained. Implementation notes: the player's pop-out video window is the precedent (own BrowserWindow + dedicated preload, see out/preload/popup.js); the pop-out should preserve the section the user was reading, remember its size/position, and reopening Help while the window is open should focus the window instead of showing the modal. Close buttons follow the style guide's same-slot rule.
 
 - **APP-25**
   Extend _meta.json's corruption recovery to the app-config and templates stores (from the website-side audit, 2026-09-06). Writes are already safe (electron-store 8.2.0 writes through conf 10.2.0's atomic writer) and a corrupt store correctly throws instead of silently resetting (clearInvalidConfig stays false); the gap is recovery: a damaged app-config.json has no backup to restore from, and since getStore() throws, the likely user experience is an app that will not start with no explanation.
