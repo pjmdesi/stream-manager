@@ -2739,10 +2739,27 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   }, [segmentCount > 0]) // eslint-disable-line react-hooks/exhaustive-deps
   // Every explicit playhead action (skips, frame steps, marker jumps,
   // Home/End, timecode entry, timeline clicks, drags) funnels through these
-  // wrappers — an action releases the paused manual-view pin so the
-  // auto-scroll below re-engages and brings the playhead back into view.
-  useEffect(() => { seekRef.current     = (t) => { pausedViewPinRef.current = false; seek(t) }     }, [seek])
-  useEffect(() => { fastSeekRef.current = (t) => { pausedViewPinRef.current = false; fastSeek(t) } }, [fastSeek])
+  // wrappers. A seek to an OFF-VIEW target releases the manual-view pin so
+  // the auto-scroll below pages the playhead into view; a seek to a spot
+  // that's already visible SETS the pin instead — there is nothing to bring
+  // into view, and paging would yank the viewport out from under the click
+  // when the target sits inside the auto-scroll padding (PLR-5). The pin
+  // self-releases once the playhead actually leaves the viewport (see the
+  // auto-scroll effect), so playback follow still works.
+  useEffect(() => {
+    seekRef.current = (t) => {
+      const { viewStart, viewEnd } = viewportRef.current
+      pausedViewPinRef.current = t >= viewStart && t <= viewEnd
+      seek(t)
+    }
+  }, [seek])
+  useEffect(() => {
+    fastSeekRef.current = (t) => {
+      const { viewStart, viewEnd } = viewportRef.current
+      pausedViewPinRef.current = t >= viewStart && t <= viewEnd
+      fastSeek(t)
+    }
+  }, [fastSeek])
   useEffect(() => { if (isPlaying) pausedViewPinRef.current = false }, [isPlaying])
   useEffect(() => {
     if (duration > 0) setViewport({ viewStart: 0, viewEnd: duration })
@@ -2770,8 +2787,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     // viewport drives the tracks in both modes; span < duration is the
     // real "zoomed" test.
     if (duration <= 0) return
-    if (isPlayheadDraggingRef.current || pausedViewPinRef.current) return
+    if (isPlayheadDraggingRef.current) return
     const { viewStart, viewEnd } = viewportRef.current
+    // The pin holds only while the playhead stays VISIBLE (a click inside
+    // the view, incl. the pad zone, must not page — PLR-5). The moment
+    // playback or anything else carries it past a view edge, release and
+    // fall through so the pager brings it back.
+    if (pausedViewPinRef.current) {
+      if (currentTime >= viewStart && currentTime <= viewEnd) return
+      pausedViewPinRef.current = false
+    }
     const span = viewEnd - viewStart
     if (span <= 0 || span >= duration - 0.001) return // not zoomed
     const pad = span * 0.1

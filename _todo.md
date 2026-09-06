@@ -110,7 +110,7 @@
 
 ### Player
 
-- **PLR-1**
+- **PLR-1** [done]
   Add a button in the multi-track audio mode (on the right in the same row as the disable button) which says "Setup tips" with a circle question icon. It would open the help modal to a specific section that explains how to use the multi-track audio mode and how to best set up their OBS/Xsplit/StreamLabs to get the best results (which we also need to create). This would be useful for users who are new to multi-track audio and may not know how to set it up properly. The general advice would be to use track 1 as the full audio mix (the same way they send it to the stream platform), and then use the other tracks for specific audio sources (like game audio, music, microphone, etc.) so that they can be extracted and used in the clips. The help modal would also explain how to use the multi-track audio mode in SM to extract the specific tracks they want to use for their clips.
 
 - **PLR-2** [needs-design]
