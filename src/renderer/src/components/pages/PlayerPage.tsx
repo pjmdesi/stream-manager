@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward, Bookmark, TriangleAlert, GripVertical } from 'lucide-react'
+import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward, Bookmark, TriangleAlert, GripVertical, CircleHelp } from 'lucide-react'
 import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass, getMarkerFillClass, DEFAULT_MARKER_COLOR } from '../../constants/tagColors'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
@@ -1423,10 +1423,13 @@ function CropAspectSelector({ value, onChange, videoW, videoH }: {
   )
 }
 
-export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
+export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOpenHelp }: {
   isVisible: boolean
   initialFile?: PendingFile | null
   onNavigateToConverter?: () => void
+  /** Open the Help modal deep-linked to the Player section, scrolled to the
+   *  given ElementSection anchor (PLR-1). */
+  onOpenHelp?: (anchor: string) => void
 }) {
   const { config, updateConfig } = useStore()
   const {
@@ -6899,33 +6902,57 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                           </button>
                         </Tooltip>
                       )}
-                      {/* Multi-track audio mode toggle — same-slot rule. */}
-                      {multiTrack && !multiTrackEnabled && (
-                        <Tooltip
-                          content={`Splits the audio into one row per track (${videoInfo?.audioTracks.length ?? 0} tracks${cachedTrackCount > 0 ? `, ${cachedTrackCount} cached`  : ''}), so you can pick which tracks to listen to and extract from the video.`}
-                          shortcut="Ctrl+Shift+M"
-                          side="left"
-                        >
-                          <button
-                            onClick={enableMultiTrack}
-                            className={`${btnBase} bg-accent-600/15 border border-accent-500/30 text-accent-200 hover:bg-accent-600/25`}
+                      {/* Multi-track audio mode toggle — same-slot rule — plus
+                          the setup-tips button (PLR-1): attached square in the
+                          expanded row, its own stacked icon when collapsed. */}
+                      {multiTrack && (() => {
+                        const toggle = !multiTrackEnabled ? (
+                          <Tooltip
+                            content={`Splits the audio into one row per track (${videoInfo?.audioTracks.length ?? 0} tracks${cachedTrackCount > 0 ? `, ${cachedTrackCount} cached`  : ''}), so you can pick which tracks to listen to and extract from the video.`}
+                            shortcut="Ctrl+Shift+M"
+                            side="left"
+                            triggerClassName={panelCollapsed ? undefined : 'flex-1 min-w-0 flex'}
                           >
-                            <Layers size={14} className="shrink-0" />
-                            {!panelCollapsed && <span className="truncate">Open Multi-track Audio</span>}
-                          </button>
-                        </Tooltip>
-                      )}
-                      {multiTrack && multiTrackEnabled && (
-                        <Tooltip content="Collapse the tracks back into the single mixed waveform" shortcut="Ctrl+Shift+M" side="left">
-                          <button
-                            onClick={disableMultiTrack}
-                            className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
+                            <button
+                              onClick={enableMultiTrack}
+                              className={`${btnBase} bg-accent-600/15 border border-accent-500/30 text-accent-200 hover:bg-accent-600/25`}
+                            >
+                              <Layers size={14} className="shrink-0" />
+                              {!panelCollapsed && <span className="truncate">Open Multi-track Audio</span>}
+                            </button>
+                          </Tooltip>
+                        ) : (
+                          <Tooltip
+                            content="Collapse the tracks back into the single mixed waveform"
+                            shortcut="Ctrl+Shift+M"
+                            side="left"
+                            triggerClassName={panelCollapsed ? undefined : 'flex-1 min-w-0 flex'}
                           >
-                            <ModeCloseIcon icon={<Layers size={14} />} />
-                            {!panelCollapsed && <span className="truncate">Close Multi-track Audio</span>}
-                          </button>
-                        </Tooltip>
-                      )}
+                            <button
+                              onClick={disableMultiTrack}
+                              className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
+                            >
+                              <ModeCloseIcon icon={<Layers size={14} />} />
+                              {!panelCollapsed && <span className="truncate">Close Multi-track Audio</span>}
+                            </button>
+                          </Tooltip>
+                        )
+                        const tips = (
+                          <Tooltip content="How to set up your recording software for multi-track" side="left" triggerClassName={panelCollapsed ? undefined : 'shrink-0 flex'}>
+                            <button
+                              onClick={() => onOpenHelp?.('multitrack-setup')}
+                              className={panelCollapsed
+                                ? 'flex items-center justify-center h-8 w-8 rounded transition-colors shrink-0 text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                                : 'flex items-center justify-center w-8 rounded border border-white/10 text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors'}
+                            >
+                              <CircleHelp size={14} className="shrink-0" />
+                            </button>
+                          </Tooltip>
+                        )
+                        return panelCollapsed
+                          ? <>{toggle}{tips}</>
+                          : <div className="flex items-stretch gap-1 w-full">{toggle}{tips}</div>
+                      })()}
                       {videoInfo && (
                         <Tooltip
                           content={

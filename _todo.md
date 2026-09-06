@@ -128,7 +128,7 @@
 - **PLR-6** [done]
   We need to make it so that if the user left clicks on the timeline track and holds down and drags, it should place then scrub the playhead. Currently, if the user clicks and drags, it does nothing.
 
-- **PLR-7**
+- **PLR-7** [done]
   Add a keyboard shortcut for toggling the multi-track audio mode (split out of the multi-track tooltip item, which shipped with the 2026-08 UI-polish batch). Candidate: ctrl+shift+m. The button's tooltip gains the shortcut hint when this ships.
 
 - **PLR-8** [investigate]

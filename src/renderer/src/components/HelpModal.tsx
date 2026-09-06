@@ -1,13 +1,13 @@
-import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Keyboard, PanelRight, Layers, AlertTriangle, Upload, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Bot, Palette, Bookmark } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Keyboard, PanelRight, Layers, AlertTriangle, Upload, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Bot, Palette, Bookmark, CircleHelp } from 'lucide-react'
 import { Youtube, Twitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { MERGE_FIELD_CHIP_CLASS, MERGE_FIELD_CHIP_CLASS_INAPPLICABLE } from './ui/TemplateBodyEditor'
 import { useStore } from '../hooks/useStore'
 
-function ElementSection({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+function ElementSection({ icon, title, anchorId, children }: { icon: React.ReactNode; title: string; anchorId?: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div id={anchorId} className="flex flex-col gap-1.5 scroll-mt-2">
       <div className="flex items-center gap-2 text-gray-200">
         <span className="text-accent-300 shrink-0">{icon}</span>
         <h4 className="text-sm font-semibold">{title}</h4>
@@ -60,9 +60,16 @@ function ShortcutGroup({ title, rows }: { title: string; rows: { keys: React.Rea
   )
 }
 
-type HelpKey =
+export type HelpKey =
   | 'streams' | 'shortcuts' | 'player' | 'converter' | 'combine'
   | 'thumbnails' | 'launcher' | 'integrations' | 'rules' | 'relay'
+
+/** Deep-link target for opening the modal at a specific place: the section
+ *  tab, and optionally an ElementSection's anchorId to scroll to. */
+export interface HelpTarget {
+  section: HelpKey
+  anchor?: string
+}
 
 interface HelpItem {
   id: HelpKey
@@ -303,6 +310,12 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           <p>Exporting a clip preserves every audio track in the output by default. The export dialog has checkboxes to pick which tracks to include in the mix, and each track's volume setting applies to that mix.</p>
         </ElementSection>
 
+        <ElementSection icon={<CircleHelp size={14} />} title="Recording setup for multi-track" anchorId="multitrack-setup">
+          <p>The layout that works best: <strong className="text-gray-300">Track 1 carries the full mix</strong> (everything, exactly as your stream sounds), and each source gets its own track after it (game, microphone, music, friends). SM plays Track 1 by default, and the per-source tracks are what make clips flexible later: keep the mic, drop the music, and so on.</p>
+          <p>In OBS: set Settings &gt; Output to <em>Advanced</em>, then under <em>Recording</em> tick the audio tracks your recordings should include (the <em>Audio</em> tab there names each track; those names show up on SM's track rows). Finally, open <em>Advanced Audio Properties</em> from the mixer and set each source's Tracks: everything checked on 1, and each source also checked on its own number. Other tools (Streamlabs, XSplit) offer the same per-track routing under different menus; the same layout applies.</p>
+          <p>Both MP4 and MKV recordings carry multiple tracks. OBS's Hybrid MP4 output additionally supports the chapter markers SM reads (see Markers above).</p>
+        </ElementSection>
+
         <ElementSection icon={<Scissors size={14} />} title="Clip mode">
           <p>Toggle clip mode with <Kbd>C</Kbd> or the <em>Start Clipping</em> sidebar button. A toolbar appears above the timeline with controls for segments, bleeps, and cropping.</p>
           <ul className="list-none pl-0 flex flex-col gap-1.5">
@@ -486,8 +499,22 @@ function getItems(isDumpMode: boolean): HelpItem[] {
   ]
 }
 
-export function HelpModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export function HelpModal({ isOpen, onClose, openTo }: { isOpen: boolean; onClose: () => void; openTo?: HelpTarget | null }) {
   const [active, setActive] = useState<HelpKey>('streams')
+
+  // Deep-link support (PLR-1): contextual help buttons open the modal at a
+  // specific section, optionally scrolled to an ElementSection anchor. Two
+  // rAFs so the section's content exists and is laid out before scrolling.
+  useEffect(() => {
+    if (!isOpen || !openTo) return
+    setActive(openTo.section)
+    const anchor = openTo.anchor
+    if (anchor) {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        document.getElementById(anchor)?.scrollIntoView({ block: 'start' })
+      }))
+    }
+  }, [isOpen, openTo])
   const { config } = useStore()
   const isDumpMode = config.streamMode === 'dump-folder'
   const items = getItems(isDumpMode)

@@ -29,7 +29,7 @@ import { StreamRelayWidget } from './components/StreamRelayWidget'
 import { useStore } from './hooks/useStore'
 import { useAnimationConfig } from './hooks/useAnimationConfig'
 import { OnboardingModal } from './components/OnboardingModal'
-import { HelpModal } from './components/HelpModal'
+import { HelpModal, type HelpTarget } from './components/HelpModal'
 import { isAnyModalOpen, isTypingTarget } from './lib/shortcuts'
 import { PostStreamTwitchModal } from './components/PostStreamTwitchModal'
 import { ThumbnailEditorProvider, useThumbnailEditor } from './context/ThumbnailEditorContext'
@@ -824,6 +824,9 @@ function AppInner() {
     return () => { cancelled = true; clearInterval(timer) }
   }, [])
   const [helpOpen, setHelpOpen] = useState(false)
+  // Deep-link target for contextual help buttons (PLR-1). Null = the modal
+  // opens wherever it last was, exactly as before.
+  const [helpTarget, setHelpTarget] = useState<HelpTarget | null>(null)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   // Per-service integration state for the Integrations nav indicator (nav
   // redesign Pass C sub-item m). setUp = the user connected it; healthy =
@@ -1547,7 +1550,16 @@ function AppInner() {
         <PageErrorBoundary>
           {/* Persistent pages — must live outside ErrorBoundary so key={page} doesn't remount them */}
           <div className={`h-full ${page === 'player' ? '' : 'hidden'}`}>
-            <PlayerPage isVisible={page === 'player'} initialFile={pendingPlayer} onNavigateToConverter={() => setPage('converter')} />
+            <PlayerPage
+              isVisible={page === 'player'}
+              initialFile={pendingPlayer}
+              onNavigateToConverter={() => setPage('converter')}
+              onOpenHelp={anchor => {
+                setHelpTarget({ section: 'player', anchor })
+                setHelpOpen(true)
+                if (!config.hasOpenedHelp) updateConfig({ hasOpenedHelp: true })
+              }}
+            />
           </div>
           <div className={`h-full ${page === 'converter' ? '' : 'hidden'}`}>
             <ConverterPage pending={pendingConverter} onNavigateToStream={navigateToStream} />
@@ -1704,7 +1716,7 @@ function AppInner() {
         )}
       </Modal>
 
-      <HelpModal isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
+      <HelpModal isOpen={helpOpen} onClose={() => { setHelpOpen(false); setHelpTarget(null) }} openTo={helpTarget} />
 
       <Modal
         isOpen={secondInstanceOpen}
