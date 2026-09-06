@@ -14,6 +14,10 @@ interface FileDropZoneProps {
   /** Slim single-row variant (icon + short label, no supported-types line) for
    *  embedding inside a list as an inline "add more" affordance. */
   compact?: boolean
+  /** Name shown for the extension filter in the browse dialog. Defaults to
+   *  "Media Files" — pass the honest name when the zone accepts something
+   *  else (e.g. "OAuth client JSON"). */
+  browseFilterName?: string
 }
 
 export const FileDropZone: React.FC<FileDropZoneProps> = ({
@@ -23,7 +27,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   children,
   label = 'Drop files here or click to browse',
   overlayLabel = 'Drop files here',
-  compact = false
+  compact = false,
+  browseFilterName = 'Media Files'
 }) => {
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -57,7 +62,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     const extensions = accept?.map(ext => ext.replace('.', ''))
     const paths = await window.api.openFileDialog({
       filters: extensions
-        ? [{ name: 'Media Files', extensions }]
+        ? [{ name: browseFilterName, extensions }]
         : [{ name: 'All Files', extensions: ['*'] }],
       properties: ['openFile', 'multiSelections']
     })

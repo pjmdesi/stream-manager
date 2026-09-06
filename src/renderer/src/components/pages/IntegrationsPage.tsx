@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, TrendingUpDown, Copy, Check, WifiOff } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, TrendingUpDown, Copy, Check, WifiOff, ListChecks } from 'lucide-react'
 import type { RelayStatus, RelayStats, OrchestratorEvent } from '../../types'
 import { Youtube, Twitch } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
@@ -12,6 +12,7 @@ import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { quotaColor } from '../../lib/quotaColor'
 import { cleanIpcError } from '../../lib/ipcError'
 import { YouTubeImportModal } from '../streams/YouTubeImportModal'
+import { YouTubeSetupWizard } from '../YouTubeSetupWizard'
 import { YouTubeLinkModal } from '../streams/YouTubeLinkModal'
 
 
@@ -246,7 +247,7 @@ export function IntegrationsPage({ initialStatus }: {
   }, [])
 
   // ── YouTube instructions toggle ───────────────────────────────────────────
-  const [ytInstructionsExpanded, setYtInstructionsExpanded] = useState(false)
+  const [ytWizardOpen, setYtWizardOpen] = useState(false)
 
   // ── Secret reveal ─────────────────────────────────────────────────────────
   type RevealField = 'yt-secret' | 'tw-secret' | 'claude-key' | 'sr-key'
@@ -332,15 +333,18 @@ export function IntegrationsPage({ initialStatus }: {
   }, [])
 
   // ── YouTube actions ───────────────────────────────────────────────────────
+  // Core connect THROWS so the setup wizard can map Google's error to a
+  // specific fix; the card's own button wraps it with the inline error state.
+  const connectYtCore = async () => {
+    await window.api.youtubeConnect()
+    setYtConnected(true)
+    setYtTokenValid(true)
+    setYtTokenError(null)
+    setYtTokenIssue(null)
+  }
   const connectYt = async () => {
     setYtConnecting(true); setYtError(null)
-    try {
-      await window.api.youtubeConnect()
-      setYtConnected(true)
-      setYtTokenValid(true)
-      setYtTokenError(null)
-      setYtTokenIssue(null)
-    }
+    try { await connectYtCore() }
     catch (e: any) { setYtError(e.message) }
     finally { setYtConnecting(false) }
   }
@@ -510,53 +514,23 @@ export function IntegrationsPage({ initialStatus }: {
             <div className="px-4 py-4 flex flex-col gap-4">
               <div className="flex flex-col gap-2.5 text-xs text-gray-400 leading-relaxed">
                 <p>
-                  To connect YouTube, you need OAuth 2.0 credentials from the{' '}
-                  <button onClick={() => window.api.openUrl('https://console.cloud.google.com')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">Google Cloud Console</button>.
-                  Credentials are stored locally only and never shared.
-                  See Google's{' '}
-                  <button onClick={() => window.api.openUrl('https://developers.google.com/youtube/registering_an_application')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">registration guide</button>
-                  {' '}for more detail.
+                  SM connects to YouTube with OAuth credentials you create yourself in the{' '}
+                  <button onClick={() => window.api.openUrl('https://console.cloud.google.com')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">Google Cloud Console</button>:
+                  you get your own private API allowance, and the credentials are stored on this PC only,
+                  never shared with anyone.
                 </p>
-                {(!ytConnected || !ytTokenValid || ytInstructionsExpanded) && (
-                  <ol className="flex flex-col gap-1.5 list-decimal list-inside marker:text-gray-500">
-                    <li>In the Cloud Console, create a new project (or select an existing one).</li>
-                    <li>
-                      Go to{' '}
-                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/library/youtube.googleapis.com')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">APIs &amp; Services → Library</button>
-                      , search for <span className="text-gray-300">YouTube Data API v3</span>, and enable it.
-                    </li>
-                    <li>
-                      Go to{' '}
-                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/credentials/consent')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">OAuth consent screen</button>.
-                      Set User Type to <span className="text-gray-300">External</span>, fill in the required app name and email fields, then add your Google account as a <span className="text-gray-300">Test user</span>. You do not need to submit for verification.
-                    </li>
-                    <li>
-                      Go to{' '}
-                      <button onClick={() => window.api.openUrl('https://console.cloud.google.com/apis/credentials')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">Credentials</button>
-                      {' '}→ <span className="text-gray-300">Create Credentials → OAuth client ID</span>. Set Application type to <span className="text-gray-300">Web application</span>.
-                    </li>
-                    <li>
-                      Under <span className="text-gray-300">Authorised redirect URIs</span>, add:{' '}
-                      <span className="font-mono text-gray-300 select-all">http://localhost:42813/oauth2callback</span>
-                    </li>
-                    <li>Copy the generated Client ID and Client Secret into the fields below.</li>
-                    <li>
-                      Click Connect below. If Google asks you to <span className="text-gray-300">choose an account</span>,
-                      make sure you pick the one for the <span className="text-gray-300">channel you stream on</span> —
-                      accounts with multiple channels (or a brand account) will see more than one entry here.
-                      If the wrong videos show up in Stream Manager, disconnect and reconnect with a different entry.
-                    </li>
-                  </ol>
-                )}
-                {ytConnected && ytTokenValid && (
-                  <button
-                    onClick={() => setYtInstructionsExpanded(v => !v)}
-                    className="flex items-center gap-1.5 text-gray-400 hover:text-gray-300 transition-colors self-start"
-                  >
-                    <ChevronDown size={13} className={`transition-transform duration-150 ${ytInstructionsExpanded ? 'rotate-180' : ''}`} />
-                    {ytInstructionsExpanded ? 'Hide setup instructions' : 'Show setup instructions'}
-                  </button>
-                )}
+                <div>
+                  <Tooltip content={ytConnected ? 'Reopen the step-by-step connection guide' : 'Step-by-step guide with links and checks for every part of the Google setup'}>
+                    <Button
+                      size="sm"
+                      variant={ytConnected ? 'secondary' : 'primary'}
+                      icon={<ListChecks size={13} />}
+                      onClick={() => setYtWizardOpen(true)}
+                    >
+                      {ytConnected ? 'Open the setup guide' : 'Set up with the guided walkthrough'}
+                    </Button>
+                  </Tooltip>
+                </div>
               </div>
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
@@ -602,6 +576,16 @@ export function IntegrationsPage({ initialStatus }: {
               {ytError && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{ytError}</p>}
             </div>
           </div>
+
+          <YouTubeSetupWizard
+            isOpen={ytWizardOpen}
+            onClose={() => setYtWizardOpen(false)}
+            clientId={config.youtubeClientId ?? ''}
+            clientSecret={config.youtubeClientSecret ?? ''}
+            connected={ytConnected && ytTokenValid}
+            onCredentials={(id, secret) => updateConfig({ youtubeClientId: id, youtubeClientSecret: secret })}
+            onConnect={connectYtCore}
+          />
 
           {/* ── Stream Relay ─────────────────────────────────────────────────
               Sub-card under YouTube because the relay is YouTube-specific.

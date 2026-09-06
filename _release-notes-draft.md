@@ -38,6 +38,10 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - Gradients have a Style option: Smooth (the usual blend) or Hard, which renders each stop as a solid band with crisp edges halfway to its neighbors, the easy way to build striped and split-color effects without stacking extra layers.
 - Gradients now take any number of color stops. Click the preview bar to add a stop exactly where you clicked (it picks up the gradient's existing color at that spot, so the ramp doesn't jump), drag the arrow markers to reposition stops directly, and remove stops from their rows (a gradient keeps at least two). Works in both blend modes and records into gradient swatches like before.
 
+## Integrations
+
+- Connecting YouTube got a guided setup. A walkthrough opens from the Integrations page with one step per Google Cloud task, each with a direct link, plain-language explanation, and a progress checklist that remembers where you left off. Credentials can be imported straight from Google's downloaded JSON file instead of copy-pasting two values (with clear guidance on keeping that file private), and when Google rejects a step, SM explains the actual fix instead of showing a raw error code. The guide also covers publishing your Google app, without which Google silently expires the connection every 7 days, and recommends the Desktop app credential type, which removes the redirect-URI step from the old instructions entirely. Existing connections are untouched.
+
 ## Cloud sync
 
 - Cancelling downloads is honest now: waiting files are skipped, and a file already mid-transfer finishes and stays on your PC, since transfers can't be interrupted and throwing away a completed download would waste the bandwidth already spent. The Cancel button's tooltip explains exactly what it does.

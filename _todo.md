@@ -396,7 +396,7 @@
 - **APP-20**
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
 
-- **APP-22** [ui]
+- **APP-22** [ui] [done]
   Shift = 10x arrow stepping in steppable numeric and timecode inputs, app-wide rule (2026-09-05). The NumberInput primitive already does Shift = x10 on its spinners; extend the same convention to the hand-rolled inputs that step with arrow keys:
   - The player page's timecode inputs (playhead, viewport range start/end, segment duration, handle popups, marker edit popup): Shift multiplies the segment under the cursor, so 10 frames / 10 seconds / 10 minutes / 10 hours. Central change in applyTimecodeArrow.
   - The clipping mode crop tool's x/y/w/h fields (these currently rely on native number-input stepping; give them proper arrow handling with the 10x shift).
