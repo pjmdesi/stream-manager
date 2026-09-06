@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Keyboard, PanelRight, Layers, AlertTriangle, Upload, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Bot, Palette } from 'lucide-react'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Keyboard, PanelRight, Layers, AlertTriangle, Upload, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Bot, Palette, Bookmark } from 'lucide-react'
 import { Youtube, Twitch } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { MERGE_FIELD_CHIP_CLASS, MERGE_FIELD_CHIP_CLASS_INAPPLICABLE } from './ui/TemplateBodyEditor'
@@ -223,6 +223,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           ]} />
           <ShortcutGroup title="Timeline & view" rows={[
             { keys: ['T'], label: 'Edit playhead timecode' },
+            { keys: ['M'], label: 'Add marker at playhead (on an existing marker: edit it)' },
             { keys: ['0'], label: 'Reset zoom' },
             { keys: ['Numpad +'], label: 'Zoom in (anchored on playhead)' },
             { keys: ['Numpad -'], label: 'Zoom out (anchored on playhead)' },
@@ -290,6 +291,11 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           <p><strong className="text-gray-300">Zoom controls</strong>: use the toolbar above the timeline, <Kbd>Numpad +</Kbd>/<Kbd>Numpad -</Kbd>, or the mouse wheel.</p>
         </ElementSection>
 
+        <ElementSection icon={<Bookmark size={14} />} title="Markers">
+          <p>Press <Kbd>M</Kbd> or the bookmark button next to the playhead timecode to drop a marker at the playhead. Click a marker to jump to it; double-click it to set its name, color, and exact timecode.</p>
+          <p>Chapters embedded in the video file appear as markers automatically, including the ones OBS's Hybrid MP4 chapter hotkey writes while you stream. Edits to a file's chapter are saved alongside the file; the video file itself is never modified.</p>
+        </ElementSection>
+
         <ElementSection icon={<Layers size={14} />} title="Multi-track audio">
           <p>When a source has multiple audio tracks (e.g. game + microphone + Discord), an <em>Open Multi-track Audio</em> button appears in the player sidebar, above the clipping button. Click it to split the waveform track in the timeline into per-track rows; the same spot then offers <em>Close Multi-track Audio</em> to collapse them again.</p>
           <p>Track 0 is the source's built-in audio and is always available immediately. Other tracks decode on demand: click <em>Add track to playback</em> on a row to extract the audio to a temporary file (stored in the app's cache) and start hearing it during playback.</p>
@@ -303,7 +309,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             <li>When segments are bumped against each other, a button to merge them into a single segment will appear over the touching edges.</li>
             <li className="border border-navy-500 px-2 py-1 bg-navy-600 rounded leading-4 text-gray-200"><small>Tip: If you want a segment to <i>start</i> at the playhead, place a segment normally, then leave the playhead where it is and split the segment. Then delete the left-hand segment.</small></li>
             <li><strong className="text-gray-300">Bleeps</strong>: add a bleep with <Kbd>B</Kbd>. Drag horizontally to move it, drag its edges to resize, and drag the volume marker up/down to set its loudness. The volume setting is shared across every bleep in the session.</li>
-            <li><strong className="text-gray-300">Crop</strong>: pick an aspect ratio (16:9, 1:1, 9:16) and the player overlays a draggable crop rectangle. Drag inside to pan, drag the corners to resize. Each clip region can have its own crop position.</li>
+            <li><strong className="text-gray-300">Crop</strong>: turn on the <em>Crop</em> toggle in the clip toolbar and a crop rectangle appears on the video with its controls (aspect ratio, position, size) attached to it. Drag inside the rectangle to pan, drag the corners to resize. Each clip region can have its own crop position.</li>
             <li><strong className="text-gray-300">Drafts</strong>: clipping work autosaves per source video. Multiple drafts can be added to the same source video file. Clip drafts can be renamed in the Session Videos panel.</li>
             <li><strong className="text-gray-300">Export</strong>: <Kbd>Ctrl</Kbd>+<Kbd>E</Kbd> opens the export dialog. Clips are re-encoded with whatever encoding preset you pick, defaulting to the default encoder preset in the app settings. "Copy only" encoders are not available for clip exporting due to the complexity of the available features.</li>
 
