@@ -40,6 +40,7 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 ## Thumbnail editor
 
+- A "Last used" link under the font dropdown applies the font you last picked, no scrolling through the list. It remembers across sessions and hides while the layer already uses that font.
 - Gradients have a Style option: Smooth (the usual blend) or Hard, which renders each stop as a solid band with crisp edges halfway to its neighbors, the easy way to build striped and split-color effects without stacking extra layers.
 - Gradients now take any number of color stops. Click the preview bar to add a stop exactly where you clicked (it picks up the gradient's existing color at that spot, so the ramp doesn't jump), drag the arrow markers to reposition stops directly, and remove stops from their rows (a gradient keeps at least two). Works in both blend modes and records into gradient swatches like before.
 

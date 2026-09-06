@@ -2842,6 +2842,11 @@ function FilterToggle({ label, checked, onChange }: {
 }
 
 function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, fontsLoaded, fontQueryFailed, standalone }: PropsPanelProps) {
+  // Last-used font family (THU-6): persisted app-wide via IPC so it
+  // survives sessions. Rendered as a quick-pick link under the font
+  // dropdown whenever it differs from the selected layer's family.
+  const [lastUsedFont, setLastUsedFont] = useState('')
+  useEffect(() => { window.api.thumbnailGetLastFont().then(setLastUsedFont).catch(() => {}) }, [])
   // Chip-editor wiring for the text-layer body. Hooks must run
   // unconditionally (the editor only renders for text layers), so they
   // live above the early return. Stable sets keep TemplateBodyEditor from
@@ -3134,22 +3139,27 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
               {(() => {
                 const fam = layer.fontFamily ?? 'Arial'
                 const famMissing = fontsLoaded && !systemFonts.includes(fam)
+                const applyFontFamily = (next: string) => {
+                  const variants = fontVariantMap[next]
+                  if (variants && variants.length > 0) {
+                    // Try to preserve current weight; fall back to first variant
+                    const cur = layer.fontStyle ?? 'normal'
+                    const match = variants.find(v => v.css === cur) ?? variants.find(v => v.css === 'normal') ?? variants[0]
+                    update({ fontFamily: next, fontStyle: match.css })
+                  } else {
+                    update({ fontFamily: next })
+                  }
+                  // Any pick becomes the new last-used; the quick-pick link
+                  // hides by itself since last-used now equals the layer's
+                  // family (THU-6).
+                  window.api.thumbnailSetLastFont(next).catch(() => {})
+                  setLastUsedFont(next)
+                }
                 return (
                   <>
                     <select
                       value={fam}
-                      onChange={e => {
-                        const next = e.target.value
-                        const variants = fontVariantMap[next]
-                        if (variants && variants.length > 0) {
-                          // Try to preserve current weight; fall back to first variant
-                          const cur = layer.fontStyle ?? 'normal'
-                          const match = variants.find(v => v.css === cur) ?? variants.find(v => v.css === 'normal') ?? variants[0]
-                          update({ fontFamily: next, fontStyle: match.css })
-                        } else {
-                          update({ fontFamily: next })
-                        }
-                      }}
+                      onChange={e => applyFontFamily(e.target.value)}
                       className={`bg-navy-900 border rounded-lg px-2 py-1 text-xs w-full ${famMissing ? 'border-amber-500/60 text-amber-300' : 'border-white/10 text-gray-200'}`}
                       style={{ fontFamily: fam }}
                     >
@@ -3174,6 +3184,19 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                         <AlertTriangle size={10} className="shrink-0" />
                         Couldn’t read installed fonts — showing a minimal list; missing-font checks are off
                       </p>
+                    )}
+                    {/* Quick-pick for the last-used family (THU-6). Hidden
+                        when it IS the current family, and never offers a
+                        font that isn't installed. */}
+                    {lastUsedFont && lastUsedFont !== fam && systemFonts.includes(lastUsedFont) && (
+                      <Tooltip content={`Switch to ${lastUsedFont}`} triggerClassName="self-start">
+                        <button
+                          onClick={() => applyFontFamily(lastUsedFont)}
+                          className="text-[10px] text-gray-400 hover:text-accent-300 transition-colors"
+                        >
+                          Last used: <span className="text-gray-300" style={{ fontFamily: lastUsedFont }}>{lastUsedFont}</span>
+                        </button>
+                      </Tooltip>
                     )}
                   </>
                 )
