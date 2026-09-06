@@ -338,7 +338,7 @@ const MARKER_FILL: Record<string, string> = {
  *  'purple' — the app's accent slate; see KEY-NAME HISTORY): neutral until
  *  the user gives a marker meaning, stands out better than Slate on the
  *  dark strip, and is distinct from the clip feature's blue so markers
- *  never read as clip UI (PJ's pick, 2026-09-05). */
+ *  never read as clip UI (chosen 2026-09-05). */
 export const DEFAULT_MARKER_COLOR = 'purple'
 
 export function getMarkerFillClass(colorKey: string | undefined): string {

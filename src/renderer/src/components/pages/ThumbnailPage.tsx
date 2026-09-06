@@ -2563,7 +2563,7 @@ function GradientFillControl({ layer, update, fallback }: {
               const GAP = 6
               const trackH = stops.length * ROW + (stops.length - 1) * GAP
               // Triangle occupies 0..6; the link line gets the remaining
-              // 3px (halved from 6 — PJ).
+              // 3px (halved from 6, tuned by eye).
               const TRACK_W = 9
               return (
                 <svg
@@ -2664,8 +2664,8 @@ function GradientFillControl({ layer, update, fallback }: {
                   // synchronous commits (opacity spinner, hex blur, Esc)
                   // this closure predates the update that triggered them,
                   // so the closed-over `stops` is one edit stale — ten
-                  // spinner clicks recorded as nine (the off-by-one PJ
-                  // caught, 2026-08-04). Only the native picker's change
+                  // spinner clicks recorded as nine (the off-by-one caught
+                  // in live testing, 2026-08-04). Only the native picker's change
                   // event fires late enough to see a fresh render.
                   onCommitColor={c => recordGradient({
                     stops: stops.map((s2, k) => (k === origIdx ? { ...s2, color: c } : s2)),
@@ -2702,7 +2702,7 @@ function GradientFillControl({ layer, update, fallback }: {
           </Tooltip>
           {/* Angle only ever holds 1-3 digits — fixed narrow column so the
               Style select and the Blend pair get the room they need
-              (widths hand-tuned by PJ). */}
+              (widths hand-tuned in devtools). */}
           <div className="grid grid-cols-[3.1rem_minmax(0,1.3fr)_minmax(0,1.3fr)] gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Angle °</span>
@@ -7298,7 +7298,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             <RotateCcw size={12} />
                           </button>
                         </Tooltip>
-                        {/* Icon semantics (PJ): the tray is the APP — arrow
+                        {/* Icon semantics (deliberate): the tray is the APP — arrow
                             up/out of it = export, arrow down/into it =
                             import. (The web convention is the reverse;
                             deliberate choice for a local desktop app.) */}

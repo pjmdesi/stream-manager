@@ -118,7 +118,7 @@ const THIRD_PARTY_LIBS: { name: string; url: string; role: string }[] = [
 ]
 
 /** One odometer transition: from/to strip positions per column plus the
- *  blank-zero flags. Rules, tuned by eye with PJ (2026-09-05):
+ *  blank-zero flags. Rules, tuned by eye (2026-09-05):
  *  - TRUE odometer direction: a changed digit rolls the way the VALUE
  *    moved, wrapping the long way when it must (75 → 67 rolls the ones
  *    down through 0 like a real borrow). Shortest-path read as wrong.
