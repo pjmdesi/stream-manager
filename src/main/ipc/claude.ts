@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { getStore } from './store'
+import { getStore, getConfigDecrypted } from './store'
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_MODELS_API = 'https://api.anthropic.com/v1/models'
@@ -86,7 +86,9 @@ async function callAnthropic(apiKey: string, model: string, system: string, user
 
 export function registerClaudeIPC() {
   ipcMain.handle('claude:generate', async (_, { field, context }: { field: string; context: Record<string, unknown> }) => {
-    const config = getStore().get('config')
+    // getConfigDecrypted, not a raw store read — the API key is encrypted
+    // at rest and only that path decrypts it.
+    const config = getConfigDecrypted()
     const apiKey = config.claudeApiKey?.trim()
     if (!apiKey) throw new Error('No Claude API key configured')
 

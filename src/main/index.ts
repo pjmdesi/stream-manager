@@ -105,7 +105,9 @@ import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
 import { registerConverterIPC, getConverterStatus, getActiveConversionCounts, prepareConverterForQuit } from './ipc/converter'
-import { registerStoreIPC, getStore, setConfigPartial, applyUiZoomToWindows } from './ipc/store'
+import { registerStoreIPC, getStore, setConfigPartial, applyUiZoomToWindows, migrateConfigSecrets } from './ipc/store'
+import { getTokens as getYouTubeTokens } from './services/youtubeAuth'
+import { getTokens as getTwitchTokens } from './services/twitchAuth'
 import { registerStreamsIPC, backupMetaOnQuit } from './ipc/streams'
 import { registerCombineIPC } from './ipc/combine'
 import { registerYouTubeIPC } from './ipc/youtube'
@@ -424,6 +426,18 @@ app.whenReady().then(() => {
 
   // Register handlers needed immediately on startup
   registerStoreIPC()    // useStore calls getConfig on mount
+  // Encrypt-at-rest migration for stored secrets (safeStorage needs app
+  // ready, which is why this runs here): plaintext config secrets from
+  // pre-encryption builds are re-written encrypted, and reading the two
+  // token stores once triggers their own migrate-on-read the same way.
+  // Idempotent and cheap on every later launch.
+  try {
+    migrateConfigSecrets()
+    getYouTubeTokens()
+    getTwitchTokens()
+  } catch (e) {
+    console.error('[main] Secret-at-rest migration failed (non-fatal):', e)
+  }
   registerStreamsIPC()  // default page — calls listStreams + watchStreamsDir on first render
   registerFilesIPC()   // WatcherContext may autostart the watcher on mount
   registerCloudSyncIPC()  // streams page probes cloud-sync:is-active on mount

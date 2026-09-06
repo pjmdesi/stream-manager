@@ -50,4 +50,6 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 ## Under the hood
 
+- Stored credentials are now encrypted at rest. The YouTube and Twitch tokens, both client secrets, and the Claude API key were previously plain text in SM's settings files; they are now encrypted with Windows' user-profile encryption (DPAPI, via Electron's safeStorage). Existing values migrate silently on first launch with no reconnect needed. If the OS ever can't decrypt them (for example a settings folder copied from another machine), SM treats the service as disconnected and offers a normal reconnect instead of failing.
+
 - The app's accent color classes are named honestly now: the internal "purple" class family (which actually rendered the slate accent) is renamed accent-*, and Tailwind's real purple is back for things that are genuinely purple, like the Purple tag color. No visual change anywhere.

@@ -1,6 +1,7 @@
 import http from 'http'
 import { shell } from 'electron'
 import Store from 'electron-store'
+import { canEncryptSecrets, encryptSecret, readSecret } from './secretStorage'
 
 const REDIRECT_PORT = 42813
 export const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`
@@ -19,11 +20,33 @@ const tokenStore = new Store<{ tokens: YouTubeTokens | null }>({
 })
 
 export function getTokens(): YouTubeTokens | null {
-  return tokenStore.get('tokens', null)
+  const raw = tokenStore.get('tokens', null)
+  if (!raw) return null
+  const access = readSecret(raw.accessToken ?? '')
+  const refresh = readSecret(raw.refreshToken ?? '')
+  if (!access.ok || !refresh.ok) {
+    // Honest, non-destructive failure: DPAPI decryption breaks when the
+    // Windows profile changed or the file came from another machine. Treat
+    // as not connected (the UI offers a normal reconnect) and leave the
+    // stored value untouched.
+    console.error('[youtubeAuth] Stored YouTube tokens could not be decrypted ' +
+      `(${(!access.ok && access.error) || (!refresh.ok && refresh.error)}). ` +
+      'Treating YouTube as not connected — reconnect from Integrations.')
+    return null
+  }
+  const tokens: YouTubeTokens = { ...raw, accessToken: access.value, refreshToken: refresh.value }
+  // Transparent migration: a plaintext token from a pre-encryption build is
+  // used as-is and immediately re-written encrypted — no re-auth, no gap.
+  if ((access.wasPlaintext || refresh.wasPlaintext) && canEncryptSecrets()) setTokens(tokens)
+  return tokens
 }
 
 export function setTokens(tokens: YouTubeTokens): void {
-  tokenStore.set('tokens', tokens)
+  tokenStore.set('tokens', {
+    ...tokens,
+    accessToken: encryptSecret(tokens.accessToken),
+    refreshToken: encryptSecret(tokens.refreshToken),
+  })
 }
 
 export function clearTokens(): void {

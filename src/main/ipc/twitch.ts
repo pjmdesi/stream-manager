@@ -1,13 +1,15 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected } from '../services/twitchAuth'
 import { getChannelInfo, updateChannelInfo } from '../services/twitchApi'
-import { getStore } from './store'
+import { getConfigDecrypted } from './store'
 
 function getCreds() {
-  const config = getStore().get('config') as any
+  // getConfigDecrypted, not a raw store read — the client secret is
+  // encrypted at rest and only that path decrypts it.
+  const config = getConfigDecrypted()
   return {
-    clientId: (config.twitchClientId ?? '') as string,
-    clientSecret: (config.twitchClientSecret ?? '') as string,
+    clientId: config.twitchClientId ?? '',
+    clientSecret: config.twitchClientSecret ?? '',
   }
 }
 

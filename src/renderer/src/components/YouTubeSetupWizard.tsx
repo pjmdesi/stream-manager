@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Check, ChevronRight, ExternalLink, Loader2, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { Check, ChevronRight, Copy, ExternalLink, Loader2, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { Youtube } from './ui/BrandIcons'
 import { Button } from './ui/Button'
 import { FileDropZone } from './ui/FileDropZone'
@@ -25,6 +25,31 @@ import { Tooltip } from './ui/Tooltip'
 
 const PROGRESS_KEY = 'ytSetupWizardDone'
 
+/** Inline monospace value with a copy button — same interaction as the
+ *  stream relay's Server URL / stream key rows. */
+function CopyValue({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="font-mono text-gray-300 select-all">{value}</span>
+      <Tooltip content={copied ? 'Copied' : 'Copy'}>
+        <button
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(value)
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            } catch { /* clipboard refused — ignore */ }
+          }}
+          className="text-gray-400 hover:text-gray-200 transition-colors"
+        >
+          {copied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+        </button>
+      </Tooltip>
+    </span>
+  )
+}
+
 /** Console steps (1-5) are tasks done in the browser; steps 6-7 are
  *  interactive inside the wizard. */
 const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: string; body: React.ReactNode }[] = [
@@ -35,10 +60,14 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
     url: 'https://console.cloud.google.com/projectcreate',
     body: (
       <>
-        A project of your own is what gives you a private API allowance: Stream Manager talks to
-        YouTube as <span className="text-gray-300">your</span> app, and nobody else shares your limits.
-        Sign in with the Google account you stream with, create a project, and name it anything
-        (&ldquo;Stream Manager&rdquo; works). If you made one for SM before, select it instead of creating another.
+        <p>
+          A project of your own is what gives you a private API allowance: SM talks to YouTube
+          as <span className="text-gray-300">your</span> app, and nobody else shares your limits.
+        </p>
+        <p>
+          Sign in with the Google account you stream with and create a project. Any name works
+          (&ldquo;Stream Manager&rdquo; is fine).
+        </p>
       </>
     ),
   },
@@ -48,11 +77,11 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
     linkLabel: 'Open the API page',
     url: 'https://console.cloud.google.com/apis/library/youtube.googleapis.com',
     body: (
-      <>
+      <p>
         This switches on the YouTube API for your project. The link lands directly on
-        <span className="text-gray-300"> YouTube Data API v3</span>: click <span className="text-gray-300">Enable</span>.
-        Everything else in Google&rsquo;s API library can be ignored.
-      </>
+        <span className="text-gray-300"> YouTube Data API v3</span>: click{' '}
+        <span className="text-gray-300">Enable</span>, and that&rsquo;s the whole step.
+      </p>
     ),
   },
   {
@@ -62,10 +91,21 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
     url: 'https://console.cloud.google.com/auth/overview',
     body: (
       <>
-        The consent screen is what Google shows <span className="text-gray-300">you</span> when SM connects.
-        Choose <span className="text-gray-300">External</span> for the user type, enter an app name
-        (&ldquo;Stream Manager&rdquo; works) and your email wherever one is required, and skip every optional
-        field. Do <span className="text-gray-300">not</span> submit for verification: a personal app never needs it.
+        <p>
+          This screen is what Google shows <span className="text-gray-300">you</span> when SM connects
+          (it may appear as a &ldquo;Get started&rdquo; flow or a Branding page). Fill exactly these fields:
+        </p>
+        <ul className="list-disc list-inside flex flex-col gap-1 marker:text-gray-500">
+          <li>App name: &ldquo;Stream Manager&rdquo; works</li>
+          <li>Both email fields: your own email</li>
+          <li>Application home page: <CopyValue value="https://stream-manager.app" /></li>
+          <li>Privacy policy link: <CopyValue value="https://stream-manager.app/app-privacy" /></li>
+        </ul>
+        <p>
+          The two links describe what a personal app like yours is and how it handles data. Pick{' '}
+          <span className="text-gray-300">External</span> for the user type, skip everything optional,
+          and don&rsquo;t submit for verification.
+        </p>
       </>
     ),
   },
@@ -76,12 +116,21 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
     url: 'https://console.cloud.google.com/auth/audience',
     body: (
       <>
-        <span className="text-gray-300">This step matters most.</span> New apps start in Testing status, and
-        Google expires Testing-mode connections after 7 days, which would force you to reconnect weekly.
-        Find the <span className="text-gray-300">Publishing status</span> (under Audience) and click{' '}
-        <span className="text-gray-300">Publish app</span>. No review is needed and nothing is submitted to anyone.
-        Later, when you connect, Google shows a one-time &ldquo;Google hasn&rsquo;t verified this app&rdquo; warning:
-        that is expected for a personal app. Click <span className="text-gray-300">Advanced</span>, then continue.
+        <p>
+          New apps start in Testing status, which Google disconnects every 7 days. Publishing makes your
+          connection permanent; nothing is reviewed or sent to anyone.
+        </p>
+        <p>
+          Under <span className="text-gray-300">Publishing status</span>, click{' '}
+          <span className="text-gray-300">Publish app</span>.
+        </p>
+        <p>
+          Greyed out behind an &ldquo;incomplete configuration&rdquo; banner? A field from the previous step
+          is still empty. Open{' '}
+          <button onClick={() => window.api.openUrl('https://console.cloud.google.com/auth/branding')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">Branding</button>
+          {' '}and check the list again (the two links are the easiest to miss: Google doesn&rsquo;t star them,
+          but publishing demands them). Save and come back.
+        </p>
       </>
     ),
   },
@@ -92,11 +141,15 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
     url: 'https://console.cloud.google.com/auth/clients/create',
     body: (
       <>
-        Create an <span className="text-gray-300">OAuth client ID</span> with the application type{' '}
-        <span className="text-gray-300">Desktop app</span> (the name doesn&rsquo;t matter). Desktop is important:
-        it lets SM receive Google&rsquo;s sign-in answer on this PC without extra configuration. When Google
-        shows the created client, choose <span className="text-gray-300">Download JSON</span>: that file is
-        what you hand to SM in the next step.
+        <p>
+          Create an <span className="text-gray-300">OAuth client ID</span> with the application type{' '}
+          <span className="text-gray-300">Desktop app</span> (the name doesn&rsquo;t matter). Desktop is
+          the type that lets SM receive Google&rsquo;s sign-in answer on this PC with no extra setup.
+        </p>
+        <p>
+          When Google shows the new client, click <span className="text-gray-300">Download JSON</span>.
+          That file is the next step.
+        </p>
       </>
     ),
   },
@@ -268,11 +321,11 @@ export function YouTubeSetupWizard({
     kind === 'ok' ? 'text-green-400' : kind === 'warn' ? 'text-amber-300' : 'text-red-400'
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Connect YouTube — setup guide" width="lg" autoFocus="none">
+    <Modal isOpen={isOpen} onClose={onClose} title="Connect YouTube — setup guide" width="xl" autoFocus="none">
       <div className="flex flex-col gap-1">
         <p className="text-xs text-gray-400 leading-relaxed mb-2">
-          One-time setup, all copy-paste. You&rsquo;ll create your own private Google credentials, which
-          means your own private API allowance and no third party between SM and your channel.
+          Don&rsquo;t worry: this looks like a lot, but it&rsquo;s all copy-paste and you only ever do it once.
+          You&rsquo;re creating your own private Google credentials, so nobody sits between SM and your channel.
           Progress is saved: leave and come back anytime.
         </p>
 
@@ -281,7 +334,8 @@ export function YouTubeSetupWizard({
             {stepHeader(step.key, i, step.title)}
             {effectiveActive === step.key && (
               <div className="pl-[30px] pb-3 flex flex-col gap-2.5">
-                <p className="text-xs text-gray-400 leading-relaxed">{step.body}</p>
+                {/* div, not p — step bodies hold their own paragraphs/lists */}
+                <div className="text-xs text-gray-400 leading-relaxed flex flex-col gap-1.5">{step.body}</div>
                 <div className="flex items-center gap-2">
                   <Tooltip content="Opens in your browser">
                     <Button size="sm" variant="secondary" icon={<ExternalLink size={12} />} onClick={() => window.api.openUrl(step.url)}>
@@ -312,16 +366,15 @@ export function YouTubeSetupWizard({
           {effectiveActive === 'import' && (
             <div className="pl-[30px] pb-3 flex flex-col gap-2.5">
               <p className="text-xs text-gray-400 leading-relaxed">
-                Drop the JSON you downloaded below. SM reads exactly two values from it (the client ID
-                and client secret), stores them <span className="text-gray-300">on this PC only</span>, and
-                sends them nowhere except Google when connecting.
+                Drop the downloaded JSON below. SM reads two values from it (the client ID and secret),
+                stores them <span className="text-gray-300">on this PC only</span>, and sends them nowhere
+                except Google.
               </p>
               <p className="text-xs text-amber-300/90 leading-relaxed flex items-start gap-1.5">
                 <ShieldCheck size={13} className="shrink-0 mt-0.5" />
                 <span>
-                  That file identifies <span className="font-medium">your</span> app to Google: treat it like a
-                  password. Never share or post it, and never import one you didn&rsquo;t download from your own
-                  Google account yourself. After importing you can delete the download or keep it somewhere private.
+                  Treat the file like a password: never share it, and never import one you didn&rsquo;t
+                  download yourself. Afterwards, keep it somewhere private or delete it.
                 </span>
               </p>
               <FileDropZone
@@ -341,8 +394,8 @@ export function YouTubeSetupWizard({
                 <p className="text-xs text-red-400 flex items-center gap-1.5"><TriangleAlert size={12} className="shrink-0" />{manualIssue}</p>
               )}
               <p className="text-xs text-gray-400">
-                Prefer typing? The Client ID and Client Secret fields on the Integrations page accept the
-                two values directly; this step completes on its own once both look right.
+                Prefer typing? The fields on the Integrations page accept the two values directly, and
+                this step checks itself off once both look right.
               </p>
             </div>
           )}
@@ -354,10 +407,13 @@ export function YouTubeSetupWizard({
           {effectiveActive === 'connect' && (
             <div className="pl-[30px] pb-1 flex flex-col gap-2.5">
               <p className="text-xs text-gray-400 leading-relaxed">
-                This opens Google&rsquo;s sign-in in your browser. Pick the account (or brand account) for the
-                channel you stream on: accounts with several channels list more than one entry. Expect the
-                one-time &ldquo;Google hasn&rsquo;t verified this app&rdquo; screen from step 4: Advanced, then continue.
-                Afterwards SM makes one tiny API call to prove the whole chain works.
+                This opens Google&rsquo;s sign-in in your browser. Pick the account (or brand account) for
+                the channel you stream on.
+              </p>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                Google shows a one-time &ldquo;Google hasn&rsquo;t verified this app&rdquo; screen: expected
+                for a personal app. Click <span className="text-gray-300">Advanced</span>, then continue.
+                Back in SM, one tiny API call proves the whole chain works.
               </p>
               <div className="flex items-center gap-2">
                 <Tooltip content={credsPresent ? 'Opens Google sign-in in your browser' : 'Import or enter the credentials first (previous step)'}>

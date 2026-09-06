@@ -30,7 +30,7 @@ import { EventEmitter } from 'events'
 import { relayManager } from './relayManager'
 import { activeBroadcastService } from './activeBroadcast'
 import { bindBroadcast, unbindBroadcast, transitionBroadcast, findStreamIdByName, getStreamStatus, getBroadcastContentDetails, getBroadcastLifeCycleStatus } from '../youtubeApi'
-import { getStore, setConfigPartial } from '../../ipc/store'
+import { getStore, setConfigPartial, getConfigDecrypted } from '../../ipc/store'
 
 /** Stages the renderer can observe via the lifecycle event. Pure information —
  *  the orchestrator's behavior doesn't branch on which stage the UI shows. */
@@ -521,10 +521,12 @@ class RelayOrchestrator extends EventEmitter {
   }
 
   private getCreds(): { clientId: string; clientSecret: string } {
-    const cfg = getStore().get('config') as any
+    // getConfigDecrypted, not a raw store read — the client secret is
+    // encrypted at rest and only that path decrypts it.
+    const cfg = getConfigDecrypted()
     return {
-      clientId: cfg?.youtubeClientId ?? '',
-      clientSecret: cfg?.youtubeClientSecret ?? '',
+      clientId: cfg.youtubeClientId ?? '',
+      clientSecret: cfg.youtubeClientSecret ?? '',
     }
   }
 }

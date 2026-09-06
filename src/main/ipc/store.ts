@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import Store from 'electron-store'
 import { app } from 'electron'
 import path from 'path'
+import { canEncryptSecrets, encryptSecret, isEncryptedSecret, readSecretOrEmpty } from '../services/secretStorage'
 
 export interface YTTitleTemplate { id: string; name: string; template: string }
 export interface YTDescriptionTemplate { id: string; name: string; description: string }
@@ -294,33 +295,75 @@ export function applyUiZoomToWindows(percent: number, announce: boolean): void {
   }
 }
 
+// The config fields holding secrets — encrypted at rest via safeStorage
+// (see services/secretStorage). Only these fields are touched: the rest of
+// app-config stays readable, hand-editable JSON.
+const SECRET_CONFIG_KEYS = ['youtubeClientSecret', 'twitchClientSecret', 'claudeApiKey'] as const
+
 export function setConfigPartial(partial: Partial<AppConfig>): void {
   const s = getStore()
   const current = s.get('config', getDefaultConfig())
-  s.set('config', { ...current, ...partial })
+  // Encrypt incoming secret values at the write boundary. encryptSecret
+  // passes through empty, already-encrypted, and encryption-unavailable
+  // values, so this is safe on every write path.
+  const secured = { ...partial }
+  for (const key of SECRET_CONFIG_KEYS) {
+    if (typeof secured[key] === 'string') secured[key] = encryptSecret(secured[key] as string)
+  }
+  s.set('config', { ...current, ...secured })
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('config:changed')
   }
 }
 
+/** The config with defaults merged, legacy shapes migrated, and secret
+ *  fields DECRYPTED — the single read path for anything that consumes a
+ *  secret (IPC to the renderer, getCreds in the youtube/twitch/claude/relay
+ *  modules). A raw getStore().get('config') keeps working for every
+ *  non-secret field but returns ciphertext for these three. */
+export function getConfigDecrypted(): AppConfig {
+  // Merge defaults so the returned config always has every key. Older
+  // persisted configs predating a setting leave that key `undefined`,
+  // which makes the Settings page's dirty-check misfire (toggling a
+  // checkbox to its default value `false` would read as different from
+  // the absent/`undefined` original and keep Save enabled forever).
+  // Spread order: defaults first, stored second → explicit values win.
+  const stored = { ...getDefaultConfig(), ...getStore().get('config', {} as AppConfig) }
+  // Migrate the legacy boolean shape of autoUpdateTwitchAfterStream to the
+  // new tri-state. Users with `true` previously meant "always"; everyone
+  // else (default or `false`) gets the new 'ask' default so they discover
+  // the modal next time a stream ends.
+  const raw = stored.autoUpdateTwitchAfterStream as unknown
+  if (raw === true) stored.autoUpdateTwitchAfterStream = 'always'
+  else if (raw === false) stored.autoUpdateTwitchAfterStream = 'ask'
+  else if (raw !== 'always' && raw !== 'ask' && raw !== 'never') stored.autoUpdateTwitchAfterStream = 'ask'
+  for (const key of SECRET_CONFIG_KEYS) {
+    stored[key] = readSecretOrEmpty(stored[key], `config.${key}`)
+  }
+  return stored
+}
+
+/** One-time (idempotent) migration of plaintext config secrets to
+ *  encrypted-at-rest. Called after app.ready — safeStorage needs it — and
+ *  cheap enough to run every launch: it only writes when a non-empty
+ *  plaintext secret exists AND encryption is actually available. */
+export function migrateConfigSecrets(): void {
+  if (!canEncryptSecrets()) return
+  const current = getStore().get('config', getDefaultConfig())
+  const partial: Partial<AppConfig> = {}
+  for (const key of SECRET_CONFIG_KEYS) {
+    const v = current[key]
+    if (typeof v === 'string' && v && !isEncryptedSecret(v)) partial[key] = v
+  }
+  if (Object.keys(partial).length > 0) setConfigPartial(partial)
+}
+
 export function registerStoreIPC(): void {
   ipcMain.handle('store:getConfig', async () => {
-    // Merge defaults so the returned config always has every key. Older
-    // persisted configs predating a setting leave that key `undefined`,
-    // which makes the Settings page's dirty-check misfire (toggling a
-    // checkbox to its default value `false` would read as different from
-    // the absent/`undefined` original and keep Save enabled forever).
-    // Spread order: defaults first, stored second → explicit values win.
-    const stored = { ...getDefaultConfig(), ...getStore().get('config', {} as AppConfig) }
-    // Migrate the legacy boolean shape of autoUpdateTwitchAfterStream to the
-    // new tri-state. Users with `true` previously meant "always"; everyone
-    // else (default or `false`) gets the new 'ask' default so they discover
-    // the modal next time a stream ends.
-    const raw = stored.autoUpdateTwitchAfterStream as unknown
-    if (raw === true) stored.autoUpdateTwitchAfterStream = 'always'
-    else if (raw === false) stored.autoUpdateTwitchAfterStream = 'ask'
-    else if (raw !== 'always' && raw !== 'ask' && raw !== 'never') stored.autoUpdateTwitchAfterStream = 'ask'
-    return stored
+    // Defaults-merge + legacy migrations + secret decryption all live in
+    // getConfigDecrypted so main-side consumers and the renderer see the
+    // exact same shape.
+    return getConfigDecrypted()
   })
 
   ipcMain.handle('store:setConfig', async (_event, partial: Partial<AppConfig>) => {

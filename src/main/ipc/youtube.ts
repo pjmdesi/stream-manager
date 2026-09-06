@@ -6,13 +6,15 @@ import Store from 'electron-store'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
 import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos } from '../services/youtubeApi'
 import * as ytQuotaState from '../services/ytQuotaState'
-import { getStore } from './store'
+import { getStore, getConfigDecrypted } from './store'
 
 function getCreds() {
-  const config = getStore().get('config') as any
+  // getConfigDecrypted, not a raw store read — the client secret is
+  // encrypted at rest and only that path decrypts it.
+  const config = getConfigDecrypted()
   return {
-    clientId: (config.youtubeClientId ?? '') as string,
-    clientSecret: (config.youtubeClientSecret ?? '') as string,
+    clientId: config.youtubeClientId ?? '',
+    clientSecret: config.youtubeClientSecret ?? '',
   }
 }
 

@@ -20,7 +20,7 @@
 import { EventEmitter } from 'events'
 import { getLiveBroadcasts } from '../youtubeApi'
 import type { LiveBroadcast } from '../youtubeApi'
-import { getStore, setConfigPartial } from '../../ipc/store'
+import { getStore, setConfigPartial, getConfigDecrypted } from '../../ipc/store'
 
 export interface ActivePickResult {
   /** The broadcast that the relay should bind to on next stream-start. */
@@ -122,9 +122,11 @@ class ActiveBroadcastService extends EventEmitter {
   }
 
   private async doFetch(): Promise<LiveBroadcast[]> {
-    const cfg = getStore().get('config') as any
-    const clientId: string = cfg?.youtubeClientId ?? ''
-    const clientSecret: string = cfg?.youtubeClientSecret ?? ''
+    // getConfigDecrypted, not a raw store read — the client secret is
+    // encrypted at rest and only that path decrypts it.
+    const cfg = getConfigDecrypted()
+    const clientId: string = cfg.youtubeClientId ?? ''
+    const clientSecret: string = cfg.youtubeClientSecret ?? ''
     if (!clientId || !clientSecret) {
       this.upcoming = []
       this.lastFetchAt = Date.now()

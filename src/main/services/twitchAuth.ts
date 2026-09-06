@@ -1,6 +1,7 @@
 import http from 'http'
 import { shell } from 'electron'
 import Store from 'electron-store'
+import { canEncryptSecrets, encryptSecret, readSecret } from './secretStorage'
 
 const REDIRECT_PORT = 42814
 export const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`
@@ -20,11 +21,30 @@ const tokenStore = new Store<{ tokens: TwitchTokens | null }>({
 })
 
 export function getTokens(): TwitchTokens | null {
-  return tokenStore.get('tokens', null)
+  const raw = tokenStore.get('tokens', null)
+  if (!raw) return null
+  const access = readSecret(raw.accessToken ?? '')
+  const refresh = readSecret(raw.refreshToken ?? '')
+  if (!access.ok || !refresh.ok) {
+    // Mirror of youtubeAuth: honest, non-destructive — degrade to "not
+    // connected" and never touch the stored value on a failed read.
+    console.error('[twitchAuth] Stored Twitch tokens could not be decrypted ' +
+      `(${(!access.ok && access.error) || (!refresh.ok && refresh.error)}). ` +
+      'Treating Twitch as not connected — reconnect from Integrations.')
+    return null
+  }
+  const tokens: TwitchTokens = { ...raw, accessToken: access.value, refreshToken: refresh.value }
+  // Transparent migration of pre-encryption plaintext tokens (see youtubeAuth).
+  if ((access.wasPlaintext || refresh.wasPlaintext) && canEncryptSecrets()) setTokens(tokens)
+  return tokens
 }
 
 export function setTokens(tokens: TwitchTokens): void {
-  tokenStore.set('tokens', tokens)
+  tokenStore.set('tokens', {
+    ...tokens,
+    accessToken: encryptSecret(tokens.accessToken),
+    refreshToken: encryptSecret(tokens.refreshToken),
+  })
 }
 
 export function clearTokens(): void {
