@@ -443,6 +443,28 @@ export function YouTubeSetupWizard({
             </div>
           )}
         </div>
+
+        {/* Dev-only: reset the checklist for clean walkthrough runs. The
+            import/connect steps still reflect reality (saved credentials /
+            an active connection keep them checked) — this only clears the
+            clicked-through console steps. */}
+        {import.meta.env.DEV && (
+          <Tooltip content="Dev only: clear the checklist and start from step 1">
+            <button
+              onClick={() => {
+                setDone(new Set())
+                saveProgress(new Set())
+                setActiveKey(STEP_KEYS[0])
+                setImportNote(null)
+                setConnectError(null)
+                setProbeResult(null)
+              }}
+              className="self-start mt-2 text-[11px] text-gray-400 hover:text-amber-300 transition-colors"
+            >
+              Start over (dev)
+            </button>
+          </Tooltip>
+        )}
       </div>
     </Modal>
   )
