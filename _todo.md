@@ -365,7 +365,7 @@
 - **APP-8** [big]
   Add the ability for the app to update on its own without having to send the user to the GitHub releases page to download the new version. This would be a big improvement for user experience. Maybe there's a library that can handle this. We would need to set up a system for hosting the updates, and then the app would need to check for updates on startup and prompt the user to download and install (or skip) the new version if one is available (would show the release notes for the new version and any versions in between the newest, suggested version and their current version).
 
-- **APP-9**
+- **APP-9** [done]
   Add a new settings option as a sub-option under the "Start minimized" option in the settings page. This new option will be called "start Minimized only when launched at startup" with description "The app will start minimized to tray only when launched at startup, but will start opened when launched manually." This would be useful for users who want the app to start minimized when they boot up their computer, but want it to start normally when they launch it manually. This would be a boolean option that is only enabled when the "Start minimized" option is enabled. If the user disables the "Start minimized" option, this new option will also be disabled and grayed out. It should be indented under the "Start minimized" option to show that it is a sub-option. It should default to unchecked, but remember the last setting when its parent is disabled.
 
 - **APP-11** [bug]

@@ -232,6 +232,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             { keys: ['F'], label: 'Toggle clip-region focus' },
             { keys: ['P'], label: 'Toggle pop-out video' },
             { keys: ['C'], label: 'Toggle clip mode' },
+            { keys: ['Ctrl', 'Shift', 'M'], label: 'Open / close multi-track audio' },
           ]} />
           <ShortcutGroup title="File & capture" rows={[
             { keys: ['Ctrl', 'O'], label: 'Open video file' },
@@ -297,7 +298,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
         </ElementSection>
 
         <ElementSection icon={<Layers size={14} />} title="Multi-track audio">
-          <p>When a source has multiple audio tracks (e.g. game + microphone + Discord), an <em>Open Multi-track Audio</em> button appears in the player sidebar, above the clipping button. Click it to split the waveform track in the timeline into per-track rows; the same spot then offers <em>Close Multi-track Audio</em> to collapse them again.</p>
+          <p>When a source has multiple audio tracks (e.g. game + microphone + Discord), an <em>Open Multi-track Audio</em> button appears in the player sidebar, above the clipping button. Click it (or press <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>M</Kbd>) to split the waveform track in the timeline into per-track rows; the same spot and shortcut then close multi-track to collapse them again.</p>
           <p>Track 0 is the source's built-in audio and is always available immediately. Other tracks decode on demand: click <em>Add track to playback</em> on a row to extract the audio to a temporary file (stored in the app's cache) and start hearing it during playback.</p>
           <p>Exporting a clip preserves every audio track in the output by default. The export dialog has checkboxes to pick which tracks to include in the mix, and each track's volume setting applies to that mix.</p>
         </ElementSection>

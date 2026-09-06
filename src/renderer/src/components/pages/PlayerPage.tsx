@@ -4253,6 +4253,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
         e.preventDefault(); captureScreenshot(); return
       }
 
+      // Ctrl+Shift+M — toggle multi-track audio, mirroring the sidebar
+      // toggle exactly (PLR-7). No-op on single-track sources, where the
+      // toggle doesn't render either.
+      if (ctrl && shift && !alt && (k === 'm' || k === 'M')) {
+        e.preventDefault()
+        if (!multiTrack) return
+        if (multiTrackEnabled) disableMultiTrack()
+        else enableMultiTrack()
+        return
+      }
+
       // 0 — reset zoom
       if (!ctrl && !alt && !shift && k === '0') {
         e.preventDefault()
@@ -4404,6 +4415,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
     config.skipClipMergeWarning, exitClipMode,
     setClipFocus, isPopupOpen, openVideoPopup, handleBrowse, captureScreenshot,
     state.filePath, addSegment, splitSegment, jumpToMarker, addMarkerAtPlayhead,
+    enableMultiTrack, disableMultiTrack,
     activeBleepId, flatSessionItems, guardedLoadFile, loadDraft, activeDraftId,
   ])
 
@@ -6891,6 +6903,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                       {multiTrack && !multiTrackEnabled && (
                         <Tooltip
                           content={`Splits the audio into one row per track (${videoInfo?.audioTracks.length ?? 0} tracks${cachedTrackCount > 0 ? `, ${cachedTrackCount} cached`  : ''}), so you can pick which tracks to listen to and extract from the video.`}
+                          shortcut="Ctrl+Shift+M"
                           side="left"
                         >
                           <button
@@ -6903,7 +6916,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter }: {
                         </Tooltip>
                       )}
                       {multiTrack && multiTrackEnabled && (
-                        <Tooltip content="Collapse the tracks back into the single mixed waveform" side="left">
+                        <Tooltip content="Collapse the tracks back into the single mixed waveform" shortcut="Ctrl+Shift+M" side="left">
                           <button
                             onClick={disableMultiTrack}
                             className={`${btnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
