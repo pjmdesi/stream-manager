@@ -1100,7 +1100,7 @@ export function IntegrationsPage({ initialStatus }: {
               ? 'These values are sensitive and should be kept private.'
               : 'This value is sensitive and should be kept private.'}
           </p>
-          <ul className="flex flex-col gap-1.5 text-xs text-gray-400 leading-relaxed list-disc list-inside marker:text-gray-600">
+          <ul className="flex flex-col gap-1.5 text-xs text-gray-400 leading-relaxed list-disc list-outside ps-4 marker:text-gray-600">
             <li>Never share this with anyone.</li>
             <li>Make sure you are not currently streaming or recording your screen.</li>
             <li>Close this view when you are done.</li>

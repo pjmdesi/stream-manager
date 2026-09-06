@@ -42,6 +42,8 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - Connecting YouTube got a guided setup. A walkthrough opens from the Integrations page with one step per Google Cloud task, each with a direct link, plain-language explanation, and a progress checklist that remembers where you left off. Credentials can be imported straight from Google's downloaded JSON file instead of copy-pasting two values (with clear guidance on keeping that file private), and when Google rejects a step, SM explains the actual fix instead of showing a raw error code. The guide also covers publishing your Google app, without which Google silently expires the connection every 7 days, and recommends the Desktop app credential type, which removes the redirect-URI step from the old instructions entirely. Existing connections are untouched.
 
+- The browser page shown after a YouTube or Twitch sign-in matches SM's design now (a proper card instead of bare text with a garbled character) and explains what happens next.
+
 ## Cloud sync
 
 - Cancelling downloads is honest now: waiting files are skipped, and a file already mid-transfer finishes and stays on your PC, since transfers can't be interrupted and throwing away a completed download would waste the bandwidth already spent. The Cancel button's tooltip explains exactly what it does.

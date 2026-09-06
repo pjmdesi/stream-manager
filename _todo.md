@@ -402,7 +402,7 @@
   - The clipping mode crop tool's x/y/w/h fields (these currently rely on native number-input stepping; give them proper arrow handling with the 10x shift).
   Exceptions, keep plain 1x stepping: decided case-by-case at build time rather than by a hard rule; known examples are tiny-range inputs where a 10x jump is most or all of the range, like the max simultaneous conversions setting and the integrations port number. No tooltip hints advertising the shift behavior (PJ's call: it stays an unadvertised power-user convention, tooltips would add noise to dense toolbars). Codify in the style guide when built.
 
-- **IDEA-11**
+- **IDEA-11** [done]
   Investigate better ways to allow users to connect to their YouTube channel without needing to create a google dev account and generate custom OAuth credentials. There's too many steps and it's too technical for most users. Either 3rd party OAuth credentials or something google themselves provide.
   Investigation resolved 2026-09-03. The governing fact: YouTube Data API quota is per PROJECT (10,000 free units/day, no official paid tier), so a shared SM OAuth client would pool every user into one project's quota: dead past a handful of users without a YouTube quota-extension audit plus Google OAuth app verification, and it would make the project operationally responsible for a revocable credential. (Apps that offer token-based connection, like ChatPlex behind a subscription, are funding exactly that shared-infrastructure burden.) Third-party credential brokers are ruled out on principle: SM has no server of its own and only talks to services the user connects. Bring-your-own is actually the better deal for users (a private 10k units/day each, maximum privacy); its only cost is onboarding pain. Direction therefore: make the BYO flow wizard-grade instead of replacing it: exact deep links into the Google Cloud console in order, per-step validation of pasted values with honest errors (detect a client secret pasted into the client ID field, etc.), and a visible progress checklist, so a non-technical user succeeds by copy-paste. The shared-client route stays on record as a someday option with its prerequisites named, worth revisiting only if the user base ever justifies the audit paperwork.
 
@@ -413,6 +413,18 @@
 
 - **APP-24** [cleanup]
   Go over the style guide to look for any inconsistencies, conflicts, or out-of-date or no longer relevant rules.
+
+- **APP-25**
+  Extend _meta.json's corruption recovery to the app-config and templates stores (from the website-side audit, 2026-09-06). Writes are already safe (electron-store 8.2.0 writes through conf 10.2.0's atomic writer) and a corrupt store correctly throws instead of silently resetting (clearInvalidConfig stays false); the gap is recovery: a damaged app-config.json has no backup to restore from, and since getStore() throws, the likely user experience is an app that will not start with no explanation.
+  Scope: the "app-config" store and the templates it holds only (watch rules, title/description/tag templates, imported presets, stream type tags and textures: user-authored work). Deliberately NOT youtube-auth or twitch-auth (reconnecting is trivial, restoring a stale token is worse than failing clean, and encrypted values are meant to be undecryptable when AppData moves between machines), and not window state or caches, where regenerating is correct.
+  Port the whole recovery design from writeAllMeta/readAllMeta in src/main/ipc/streams.ts:
+  - rotating backups plus a backup on quit
+  - auto-restore from the newest usable backup when a read fails to parse
+  - preserve the unrecoverable file (the _meta.corrupt-*.json equivalent) rather than overwriting it
+  - the failed-read write guard: refuse to write while the last read failed, so a transient error cannot be committed as permanent loss (the subtlest piece and the one most likely to be left out)
+  - an honest in-app error when recovery is impossible, never a raw startup crash
+  First task: confirm what actually happens today when getStore() throws at startup. If that is an unhandled crash, fixing it is the highest-value part of the work: it is the difference between "the app healed itself" and "the app is bricked with no explanation".
+  Coordination: when this lands, PRINCIPLES.md's crash-safe entry drops its caveat that backups are specific to library metadata, and its "what would break it" line updates in the same commit (tell the website instance).
 
 ### Onboarding & Setup
 

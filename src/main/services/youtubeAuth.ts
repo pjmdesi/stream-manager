@@ -2,6 +2,7 @@ import http from 'http'
 import { shell } from 'electron'
 import Store from 'electron-store'
 import { canEncryptSecrets, encryptSecret, readSecret } from './secretStorage'
+import { oauthResultPage } from './oauthCallbackPage'
 
 const REDIRECT_PORT = 42813
 export const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`
@@ -79,16 +80,13 @@ export async function startOAuthFlow(clientId: string): Promise<string> {
       const code = url.searchParams.get('code')
       const error = url.searchParams.get('error')
 
-      const html = (msg: string) =>
-        `<html><body style="font-family:sans-serif;padding:2rem;background:#0d0d1a;color:#e2e8f0"><h2>${msg}</h2><p>You can close this tab.</p></body></html>`
-
-      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       if (code) {
-        res.end(html('Connected to YouTube! ✓'))
+        res.end(oauthResultPage({ ok: true, service: 'YouTube' }))
         server.close()
         resolve(code)
       } else {
-        res.end(html('Authentication failed.'))
+        res.end(oauthResultPage({ ok: false, service: 'YouTube' }))
         server.close()
         reject(new Error(error || 'Authentication failed'))
       }

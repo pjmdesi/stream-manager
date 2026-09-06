@@ -143,6 +143,7 @@ Any floating popup anchored to a point in the UI (marker edit popup, track color
 ## Recurring patterns
 
 - **Page header** — match the streams page: `text-lg font-semibold` title + `text-xs text-gray-400` subtitle, `px-6 py-4 border-b border-white/5`. `TODO:` paste the canonical header JSX here as the reference snippet.
+- **Bulleted/numbered lists** — `list-disc list-outside ps-4` (plus a `marker:` color), never `list-inside`: inside markers make wrapped lines return flush left instead of hanging under the text (codified 2026-09-06 from the setup wizard's lists).
 - **Loading states** — spinner (`Loader2 animate-spin`) + reserved height (min-height to prevent content jump), never a bare "Loading…" text node.
 - **Empty states** — `TODO:` document the standard (icon + message + optional CTA) once the thumbnail/launcher/streams empty states are unified.
 - **AI suggestion hint line** — `text-[10px] text-gray-400`, states: idle "Ctrl+Space for AI suggestion" / loading spinner+"Generating…" / "Tab to accept · Esc to dismiss" / error (red, `AlertTriangle` + message). Pattern lives in `useFieldSuggestion` + `TemplateBodyEditor`.

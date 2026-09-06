@@ -50,8 +50,8 @@ function CopyValue({ value }: { value: string }) {
   )
 }
 
-/** Console steps (1-5) are tasks done in the browser; steps 6-7 are
- *  interactive inside the wizard. */
+/** Console steps are tasks done in the browser; the final two steps
+ *  (import + connect) are interactive inside the wizard. */
 const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: string; body: React.ReactNode }[] = [
   {
     key: 'project',
@@ -61,11 +61,11 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
     body: (
       <>
         <p>
-          A project of your own is what gives you a private API allowance: SM talks to YouTube
+          A cloud project of your own is what gives you a private API allowance: SM talks to YouTube
           as <span className="text-gray-300">your</span> app, and nobody else shares your limits.
         </p>
         <p>
-          Sign in with the Google account you stream with and create a project. Any name works
+          Sign in with the Google account connected to the YouTube account you <b>stream with</b> and create a project. Any name works
           (&ldquo;Stream Manager&rdquo; is fine).
         </p>
       </>
@@ -77,11 +77,18 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
     linkLabel: 'Open the API page',
     url: 'https://console.cloud.google.com/apis/library/youtube.googleapis.com',
     body: (
-      <p>
-        This switches on the YouTube API for your project. The link lands directly on
-        <span className="text-gray-300"> YouTube Data API v3</span>: click{' '}
-        <span className="text-gray-300">Enable</span>, and that&rsquo;s the whole step.
-      </p>
+      <>
+        <p>
+          First, check the project selector in the console&rsquo;s header: Google doesn&rsquo;t always
+          switch to a freshly created project on its own, and this and every later step must land in
+          the new one.
+        </p>
+        <p>
+          This switches on the YouTube API for your project. The link lands directly on
+          <span className="text-gray-300"> YouTube Data API v3</span>: click{' '}
+          <span className="text-gray-300">Enable</span>, and that&rsquo;s the whole step.
+        </p>
+      </>
     ),
   },
   {
@@ -92,19 +99,46 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
     body: (
       <>
         <p>
-          This screen is what Google shows <span className="text-gray-300">you</span> when SM connects
-          (it may appear as a &ldquo;Get started&rdquo; flow or a Branding page). Fill exactly these fields:
+          This screen is what Google shows <span className="text-gray-300">you</span> when SM connects.
+          The page usually opens with a lone <span className="text-gray-300">Get started</span> button:
+          click it and walk the short form (an already-configured project shows a Branding page
+          instead).<br></br>
+          The form&rsquo;s wording and order drift over time, but it only ever needs these,
+          and everything else is optional:
         </p>
-        <ul className="list-disc list-inside flex flex-col gap-1 marker:text-gray-500">
+        <ul className="list-disc list-outside ps-4 flex flex-col gap-1 marker:text-gray-500">
           <li>App name: &ldquo;Stream Manager&rdquo; works</li>
-          <li>Both email fields: your own email</li>
+          <li>Every email field (support and contact): your own email</li>
+          <li>Audience / user type: <span className="text-gray-300">External</span></li>
+          <li>Read and Agree to Google&rsquo;s user data policy, then click create. No verification submission is ever needed.</li>
+        </ul>
+      </>
+    ),
+  },
+  {
+    key: 'branding',
+    title: 'Add the two required links',
+    linkLabel: 'Open Branding',
+    url: 'https://console.cloud.google.com/auth/branding',
+    body: (
+      <>
+        <p>
+          The quick setup form skips two fields that publishing (the next step) requires. On the
+          Branding page, fill these:
+        </p>
+        <ul className="list-disc list-outside ps-4 flex flex-col gap-1 marker:text-gray-500">
           <li>Application home page: <CopyValue value="https://stream-manager.app" /></li>
           <li>Privacy policy link: <CopyValue value="https://stream-manager.app/app-privacy" /></li>
         </ul>
         <p>
-          The two links describe what a personal app like yours is and how it handles data. Pick{' '}
-          <span className="text-gray-300">External</span> for the user type, skip everything optional,
-          and don&rsquo;t submit for verification.
+          Google then flags the links&rsquo; domain as missing under{' '}
+          <span className="text-gray-300">Authorized domains</span>: click{' '}
+          <span className="text-gray-300">Add domain</span>, enter{' '}
+          <CopyValue value="stream-manager.app" />, and{' '}
+          <span className="text-gray-300">Save</span>.
+        </p>
+        <p>
+          The pages the links point to describe what a personal app like yours is and how it handles data.
         </p>
       </>
     ),
@@ -147,8 +181,10 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
           the type that lets SM receive Google&rsquo;s sign-in answer on this PC with no extra setup.
         </p>
         <p>
-          When Google shows the new client, click <span className="text-gray-300">Download JSON</span>.
-          That file is the next step.
+          A popup confirms the client was created. Click{' '}
+          <span className="text-gray-300">Download JSON</span> in it{' '}
+          <span className="text-gray-300">before closing it</span>: Google never shows the secret
+          again afterwards. (Closed it anyway? Just create another client.) That file is the next step.
         </p>
       </>
     ),
@@ -321,11 +357,19 @@ export function YouTubeSetupWizard({
     kind === 'ok' ? 'text-green-400' : kind === 'warn' ? 'text-amber-300' : 'text-red-400'
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Connect YouTube — setup guide" width="xl" autoFocus="none">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Connect YouTube — setup guide"
+      width="xl"
+      autoFocus="none"
+      headerExtra={<span className="text-[11px] text-gray-400 select-none">Progress is saved</span>}
+    >
       <div className="flex flex-col gap-1">
         <p className="text-xs text-gray-400 leading-relaxed mb-2">
-          Don&rsquo;t worry: this looks like a lot, but it&rsquo;s all copy-paste and you only ever do it once.
-          You&rsquo;re creating your own private Google credentials, so nobody sits between SM and your channel.
+          Don&rsquo;t worry: this looks like a lot, but it&rsquo;s mostly copy-paste and you only ever do it once.<br></br>
+          This wizard will guide you through creating your own <b>private Google credentials</b>, so nobody sits between SM and your channel.<br></br>
+          Each step&rsquo;s button opens a new browser tab; there&rsquo;s no need to close finished tabs as you go.
           Progress is saved: leave and come back anytime.
         </p>
 
