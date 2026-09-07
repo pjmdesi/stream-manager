@@ -5473,7 +5473,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   Pixel-snapped via stripWidth so the 1px line lands on an integer pixel —
                   without snapping, translateX(-50%) on a 1px element shifts by 0.5px and
                   subpixel-blurs the line into invisibility. Hit area keeps the
-                  translateX(-50%) since it's 12px wide and pixel-aligns cleanly at -6px. */}
+                  translateX(-50%) since it's 12px wide and pixel-aligns cleanly at -6px.
+                  The LINE sits at z-[44]: above the out-of-region clip shading
+                  (z-[40]), hover-lifted track rows (z-41) and bleeps (z-42), so
+                  the dim never washes it out; below the hover line (z-[45]) and
+                  region chrome (z-50+). The hit area stays low (z-10) so it
+                  yields to handles and pills as before. */}
               {duration > 0 && (handleDragDisplayTime ?? currentTime) >= vStart && (handleDragDisplayTime ?? currentTime) <= vEnd && (() => {
                 const t = handleDragDisplayTime ?? currentTime
                 const ratio = (t - vStart) / vSpan
@@ -5486,7 +5491,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                 return (
                   <>
                     <div
-                      className="playhead-line absolute top-0 bottom-0 w-px pointer-events-none z-20"
+                      className="playhead-line absolute top-0 bottom-0 w-px pointer-events-none z-[44]"
                       style={{ left: `${px}px` }}
                     />
                     {/* Draggable hit area — z-10 beats region drag (no z-index), yields to handles (z-20) */}
@@ -5992,7 +5997,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   above the strips, tracking zoom/pan like the handle popups).
                   z-[65] keeps markers on top of ALL region chrome — pills and
                   handle popups (z-50) and the selected labels (z-60) — as
-                  well as the clip shading (z-[40]) and hover line (z-[45]);
+                  well as the clip shading (z-[40]), playhead line (z-[44]) and
+                  hover line (z-[45]);
                   only the hover timecode tooltip and the marker edit popup
                   (z-[70]) sit above them. */}
               {duration > 0 && (

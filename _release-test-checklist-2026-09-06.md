@@ -1,6 +1,6 @@
 # Release test checklist — v2.6.0 (2026-09-06)
 
-Build: Stream Manager 2.5.0_DEV.exe from dev @ 0b85f96 (rebuilt 2026-09-07 with the three marker fixes; the packaged exe matches this commit). Previous build @ c806c17 ran the 2026-09-06 stream night clean.
+Build: Stream Manager 2.5.0_DEV.exe from dev @ b3e7b7a (rebuilt 2026-09-07 with the marker popup fix on reset; the packaged exe matches this commit). Previous build @ c806c17 ran the 2026-09-06 stream night clean.
 
 FROZEN 2026-09-06: no further feature work on dev for this release. Code changes from here are limited to bugs and other fixes found during this sweep; each one gets a fresh build and an updated hash above.
 
@@ -16,10 +16,10 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [x] Popup closes on any click outside it, including the timeline strips (the click still places the playhead); Escape closes it too. (Fix found during the sweep 2026-09-07: seek surfaces stopped propagation, so only clicks on the controls row or video used to close it.)
 - [x] Click a marker, move the playhead, press M: the focus ring is on the NEW marker (not the clicked one) and Enter seeks to the new one; M on an existing marker's spot opens its popup with focus on that marker. (Sweep fix 2026-09-07.)
 - [x] In the popup, step the timecode's seconds/frames segment with the timeline fully zoomed out: the popup and its swatch circles stay pixel-stable, no shimmer; the popup still centers on the marker and clamps at the ends. (Sweep fix 2026-09-07; device-pixel snapping rule added to the style guide.)
-- [ ] Edit a file chapter: reopening the file shows the edit persisted and the popup offers Reset (back to the file's version); an M-added marker offers Delete instead.
-- [ ] Reset on an edited chapter keeps the popup open showing the file's original name/time/color (no Reset button anymore, since nothing is overridden); Delete on an SM marker still closes it. (Sweep fix 2026-09-07.)
-- [ ] Markers survive closing/reopening the file and the app; the video file's own bytes are untouched.
-- [ ] In clip mode zoomed in: markers track the viewport, render above region chrome, and stay clickable; marker layer never pokes through a modal backdrop (open the delete-draft confirm with markers visible).
+- [x] Edit a file chapter: reopening the file shows the edit persisted and the popup offers Reset (back to the file's version); an M-added marker offers Delete instead.
+- [x] Reset on an edited chapter keeps the popup open showing the file's original name/time/color (no Reset button anymore, since nothing is overridden); Delete on an SM marker still closes it. (Sweep fix 2026-09-07.)
+- [x] Markers survive closing/reopening the file and the app; the video file's own bytes are untouched.
+- [x] In clip mode zoomed in: markers track the viewport, render above region chrome, and stay clickable; marker layer never pokes through a modal backdrop (open the delete-draft confirm with markers visible).
 
 ### Player interactions & layout (PLR-6/11/12/13, APP-22, crop move)
 
@@ -30,6 +30,7 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [ ] Sidebar mode toggles: Start Clipping ↔ red Stop Clipping in the same slot; Open ↔ Close Multi-track Audio above it; collapsed rail shows the X badge on both close states; order is Clipping, Multi-track, Info.
 - [ ] Clip toolbar: labels collapse to icon-only below ~672px of player width; transport row sheds ±5m, then ±1m, then ±10s as it narrows; nothing wraps at 718px with both sidebars open.
 - [ ] Multi-track + clip mode: hovering a track row lifts it out of the out-of-region dimming; bleeps on top of rows stay clickable.
+- [ ] Clip mode: the playhead line stays full-brightness inside the dimmed out-of-region areas and over bleeps; it still passes under region pills/handle popups, and dragging it works as before. (Sweep fix 2026-09-07.)
 - [ ] Crop: toolbar Crop toggle reveals the region with its control panel attached (flips inside near the bottom, pins at container edges, tracks stage zoom/pan without scaling); micro spinners step (Shift = x10); middle-click pans from anywhere including the panel; toggle off/on restores the last aspect.
 - [ ] Timecode inputs: frames segment arrow-steps up AND down everywhere (playhead, marker popup, viewport, duration, handles); Shift = x10 steps the segment under the cursor; playhead readout shows every place value for the video's duration (hours only on 1h+ videos).
 - [ ] Track volume %: Shift+arrows step 10; crosshair cursor on seek surfaces only.
