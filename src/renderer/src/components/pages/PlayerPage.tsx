@@ -3531,8 +3531,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   // Delete an SM marker — or, for a chapter override, discard SM's edits so
   // the file's chapter shows as read again. Raw chapters have no remove:
   // they live in the video file, which SM never edits.
+  // Reset keeps the popup OPEN, re-targeted at the file's chapter (its
+  // display id is derived from the raw chapter start), so the user sees
+  // what the reset restored without reopening. Delete closes: the marker
+  // is gone, there is nothing left to show.
   const removeMarker = useCallback((displayId: string) => {
+    const removed = markersRef.current.find(m => m.id === displayId)
     applyMarkers(markersRef.current.filter(m => m.id !== displayId))
+    if (removed?.chapterOf !== undefined) {
+      const chapter = (videoInfoRef.current?.chapters ?? []).find(c => Math.abs(c.start - removed.chapterOf!) < 0.01)
+      if (chapter) { setMarkerPopupId(`chapter-${chapter.start}`); return }
+    }
     setMarkerPopupId(null)
   }, [applyMarkers])
 
