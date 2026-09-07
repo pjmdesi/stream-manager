@@ -27,7 +27,6 @@
 23. LNCH-2
 24. STR-12
 25. STR-10
-26. STR-17
 
 ## Improvement ideas
 
@@ -111,6 +110,7 @@
 
 - **STR-17** [perf]
   Stream item rows render their thumbnails as full-size images (usually 1280x720) scaled down by CSS to the thumbnail column width (85-170px), so Chromium keeps re-interpolating a large bitmap, including during the row hover zoom animation. Likely a contributor to slowness and hitching while the streams page is open. Reuse the canvas downscaler that already serves the recents rows on the player and thumbnail overview pages (SmoothThumb in RecentRow.tsx): resample once into a canvas at the displayed size times devicePixelRatio so the compositor works with a small texture from then on. Constraints: it must sit behind ThumbImage's cloud-aware state machine (placeholder/syncing states unchanged), and the live thumbnail-column resize drag must not trigger a full resample per frame per row (debounce the redraw; the canvas can CSS-stretch during the drag and re-sharpen on settle).
+  2026-09-06: attempted as a v2.6.0 ride-along, shipped, and reverted the same day. The swap itself worked (a downscale mode on ThumbImage rendering through SmoothThumb, with debounced resize redraws) and the animation gain was marginal at best, but it introduced a worse problem: on app start the thumbnail column sat blank for a few seconds, because 200+ rows each decode the full image and run the resample chain on the main thread before anything paints, where the old img tags painted progressively from cache. A future pass must make the resample non-blocking: paint the raw img immediately and swap in the resampled canvas when it is ready, stagger the work over idle time (or only for rows near the viewport, which pairs with STR-4), or persist resampled versions to disk. The reverted implementation is in git history (the STR-17 commit and its revert).
 
 ### Player
 

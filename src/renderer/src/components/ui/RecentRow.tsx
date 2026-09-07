@@ -8,16 +8,7 @@ import { Tooltip } from './Tooltip'
  *  we resample ourselves: crop to cover, then repeated HALVING with
  *  high-quality smoothing down to ~2× target, then the final draw. Quality
  *  holds at any ratio. Renders at devicePixelRatio for crisp HiDPI. */
-export function SmoothThumb({ src, className, style, onLoad, onError }: {
-  src: string
-  className?: string
-  style?: React.CSSProperties
-  /** Fires once per src when the source image decodes, with its natural
-   *  dimensions — lets cloud-aware wrappers (ThumbImage) drive their
-   *  loading-state machine off this component like they do off <img>. */
-  onLoad?: (dims: { width: number; height: number }) => void
-  onError?: () => void
-}) {
+export function SmoothThumb({ src, className, onError }: { src: string; className?: string; onError?: () => void }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
@@ -25,7 +16,6 @@ export function SmoothThumb({ src, className, style, onLoad, onError }: {
     let loaded: HTMLImageElement | null = null
     let drawnW = 0
     let drawnH = 0
-    let debounceId: number | undefined
     const draw = () => {
       const img = loaded
       const wrap = wrapRef.current
@@ -72,7 +62,6 @@ export function SmoothThumb({ src, className, style, onLoad, onError }: {
     img.onload = () => {
       if (cancelled) return
       loaded = img
-      onLoad?.({ width: img.width, height: img.height })
       draw()
     }
     img.onerror = () => { if (!cancelled) onError?.() }
@@ -82,24 +71,12 @@ export function SmoothThumb({ src, className, style, onLoad, onError }: {
     // stays blank forever. The observer fires when the wrapper gains real
     // dimensions (page shown, layout change) and draw() redoes the resample
     // at the new size; the drawnW/drawnH guard skips no-op repeats.
-    // Resizes after the first draw are DEBOUNCED: a live drag (the streams
-    // list thumbnail-column handle) fires the observer every frame for
-    // every row, and a full resample chain per frame per row would hitch
-    // far worse than the CSS stretch it replaces. The canvas is w-full
-    // h-full so it stretches with the box between redraws (slightly soft),
-    // then re-sharpens when the size settles. The first real layout still
-    // draws immediately so hidden-page reveals don't lag.
-    const ro = new ResizeObserver(() => {
-      if (cancelled) return
-      if (drawnW === 0) { draw(); return }
-      clearTimeout(debounceId)
-      debounceId = window.setTimeout(() => { if (!cancelled) draw() }, 150)
-    })
+    const ro = new ResizeObserver(() => { if (!cancelled) draw() })
     if (wrapRef.current) ro.observe(wrapRef.current)
-    return () => { cancelled = true; clearTimeout(debounceId); ro.disconnect() }
+    return () => { cancelled = true; ro.disconnect() }
   }, [src]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div ref={wrapRef} className={className} style={style}>
+    <div ref={wrapRef} className={className}>
       <canvas ref={canvasRef} className="w-full h-full" />
     </div>
   )

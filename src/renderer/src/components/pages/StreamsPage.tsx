@@ -5106,8 +5106,7 @@ const StreamListItem = memo(function StreamListItem({
                 path={firstThumb}
                 thumbsKey={thumbsKey}
                 isLocal={firstThumbLocal}
-                downscale
-                className="w-full h-full transition-transform duration-200 group-hover:scale-105"
+                className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                 draggable={false}
                 iconSize={12}
               />

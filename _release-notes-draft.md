@@ -12,8 +12,6 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - The set-as-thumbnail option in the files grid now only appears on images that fit YouTube's thumbnail requirements (a thumbnail-shaped aspect at 720p or larger, JPG, PNG, GIF, or WebP, 2 MB max), so every image it offers is one YouTube will take well. If a stream's current thumbnail wouldn't upload at all (wrong format or over 2 MB), the sidebar's YouTube thumbnail row warns about it before a push fails.
 
-- Stream row thumbnails render lighter now. The list used to hand Chromium the full-size images (usually 1280x720) and scale them down with CSS, so it kept re-interpolating large bitmaps while the page was open, especially during the row hover zoom. Rows now resample each thumbnail once at its displayed size (the same technique the recents rows on the player and thumbnail pages already used), which should reduce hitching in animations on the streams page.
-
 ## Player
 
 - Ctrl+Shift+M opens and closes multi-track audio, and the sidebar toggle's tooltip shows the shortcut.
