@@ -4873,7 +4873,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                       if (insideSeg) {
                         const canSplit = playheadTime > insideSeg.inPoint + frameTime && playheadTime < insideSeg.outPoint - frameTime
                         return (
-                          <div className="relative group">
+                          // `flex` on the wrapper: the Tooltip trigger is
+                          // inline-flex, and inside a plain block div it sits
+                          // on a line box whose strut made this button 1px
+                          // taller than Add Segment, nudging the toolbar
+                          // height whenever the playhead entered a region
+                          // (same trap as the old crop dropdown).
+                          <div className="relative group flex">
                             <Tooltip content="Split the current segment into 2 at the playhead" side="top">
                               <button
                                 onClick={splitSegment}
