@@ -52,7 +52,7 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 ## Launcher
 
-- Launch groups can be duplicated from the open group's header: same apps and icon, with " — Copy" appended to the name, placed right after the original.
+- Launch groups can be duplicated from the open group's header: same apps and icon, with " - Copy" appended to the name, placed right after the original.
 
 ## Cloud sync
 

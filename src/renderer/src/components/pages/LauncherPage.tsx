@@ -842,16 +842,16 @@ export function LauncherPage() {
 
   // Duplicate = same apps and icon, fresh ids (per-app launch-failure chips
   // key off app ids, so shared ids would cross-link original and copy),
-  // " — Copy" appended to the name (style guide's duplicate convention),
-  // inserted right after its source. The sidebar-widget pin is deliberately
-  // not copied.
+  // " - Copy" appended to the name (style guide's duplicate convention,
+  // matching Windows), inserted right after its source. The sidebar-widget
+  // pin is deliberately not copied.
   const duplicateGroup = (id: string) => {
     const src = groups.find(g => g.id === id)
     if (!src) return
     const copy: LauncherGroup = {
       ...src,
       id: uuidv4(),
-      name: `${src.name} — Copy`,
+      name: `${src.name} - Copy`,
       apps: src.apps.map(a => ({ ...a, id: uuidv4() })),
     }
     const idx = groups.findIndex(g => g.id === id)
