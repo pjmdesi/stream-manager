@@ -77,6 +77,7 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [ ] STR-10: ineligible image can't be set as thumbnail; existing ineligible primary warns inline on the YouTube thumbnail row.
 - [ ] PLR-1: multi-track Setup tips button opens Help to the new OBS setup section.
 - [ ] PLR-5: retest clicking near the playhead's auto-scroll margin (may already be fixed by the scrub rework); fix if it survives.
+- [ ] STR-17: row thumbnails stay sharp (HiDPI included), hover zoom smoother with many rows; cloud placeholder/syncing states unchanged; thumbnail-column resize drag stretches then re-sharpens on release; thumbnail editor save refreshes the row image.
 - [ ] APP-24: style-guide audit (doc-only, no runtime check).
 
 ## Core regression (every release)

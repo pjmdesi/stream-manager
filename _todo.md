@@ -27,6 +27,7 @@
 23. LNCH-2
 24. STR-12
 25. STR-10
+26. STR-17
 
 ## Improvement ideas
 
@@ -73,7 +74,7 @@
 - **STR-9** [ui]
   Replace the native time picker on the broadcast time field with a custom one that matches the app's design; the native Chromium dropdown clashes with the rest of the UI. Model it on the DatePicker approach: keep the native input for segment typing and arrow-key editing, suppress the built-in dropdown, and render a custom popup (probably hour/minute columns plus AM/PM, honoring the locale's 12/24-hour format). The 2026-08 polish pass already made the native clock indicator read as a button (pointer + hover tint); this item replaces the dropdown it opens.
 
-- **STR-10**
+- **STR-10** [done]
   Guard the set-as-thumbnail affordance in the files grid so it is only offered for images that meet YouTube's thumbnail requirements (JPG/PNG/GIF/WebP, 2MB max, reasonable aspect and resolution). This matters more now that the per-push thumbnail override picker is gone (2026-08-30): the primary thumbnail is the only image the YouTube push can upload, so an ineligible primary means no thumbnail upload at all. Check whether any filtering already happens (youtubeGetQualifyingThumbnails in the main process was the old picker's filter and could be reused). If a primary ends up ineligible anyway (set before this guard existed, or the file changed on disk), surface an inline warning on the YouTube thumbnail row in the sidebar instead of failing silently.
 
 - **STR-11**
@@ -107,6 +108,9 @@
   - Surfaces: a warning badge on the file card in the files grid with a tooltip explaining what happened (recording was interrupted before finalizing; data intact, index missing); the same indicator rolled up in the stream list's video-count column popup so it is visible without opening the item; an honest banner if such a file is opened in the player.
   - One-click repair: clicking the warning adds the file to the converter with the Lossless Copy preset pre-selected. Output is a new file; the original stays until the user verifies, per the usual ethos.
   - Copy: extend the Lossless Copy preset's description (and possibly name) to include repair as one of its functions, in the preset UI and the Help modal's converter entry (currently framed only as container compatibility / OBS Remux Recordings equivalent).
+
+- **STR-17** [perf]
+  Stream item rows render their thumbnails as full-size images (usually 1280x720) scaled down by CSS to the thumbnail column width (85-170px), so Chromium keeps re-interpolating a large bitmap, including during the row hover zoom animation. Likely a contributor to slowness and hitching while the streams page is open. Reuse the canvas downscaler that already serves the recents rows on the player and thumbnail overview pages (SmoothThumb in RecentRow.tsx): resample once into a canvas at the displayed size times devicePixelRatio so the compositor works with a small texture from then on. Constraints: it must sit behind ThumbImage's cloud-aware state machine (placeholder/syncing states unchanged), and the live thumbnail-column resize drag must not trigger a full resample per frame per row (debounce the redraw; the canvas can CSS-stretch during the drag and re-sharpen on settle).
 
 ### Player
 

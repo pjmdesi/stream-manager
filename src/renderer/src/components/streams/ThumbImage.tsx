@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, Cloud, AlertTriangle } from 'lucide-react'
 import { Tooltip } from '../ui/Tooltip'
+import { SmoothThumb } from '../ui/RecentRow'
 import { getCachedHydration, subscribeHydration } from '../../lib/hydrationCache'
 
 /** Tooltip text for stream date labels: weekday plus the full date
@@ -28,13 +29,20 @@ export function toFileUrl(absPath: string): string {
  *     was supposedly local but isn't), falls back to the cloud-download flow.
  */
 export function ThumbImage({
-  path, thumbsKey, isLocal = true, hydrate = false, className, style,
+  path, thumbsKey, isLocal = true, hydrate = false, downscale = false, className, style,
   placeholderClassName, placeholderStyle, draggable, iconSize = 14, onLoad,
 }: {
   path: string
   thumbsKey: number
   isLocal?: boolean
   hydrate?: boolean
+  /** STR-17: render through SmoothThumb (canvas resampled once at the
+   *  displayed size × devicePixelRatio) instead of a raw <img>. For
+   *  surfaces that show a large source image tiny and animate over it
+   *  (the stream rows' hover zoom): the compositor then works with a
+   *  small texture instead of re-interpolating the full bitmap every
+   *  frame. The cloud/hydration state machine is unaffected. */
+  downscale?: boolean
   className?: string
   style?: React.CSSProperties
   placeholderClassName?: string
@@ -124,6 +132,23 @@ export function ThumbImage({
   }
 
   const src = `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
+
+  if (downscale) {
+    return (
+      <>
+        <SmoothThumb
+          src={src}
+          className={className}
+          style={style}
+          onLoad={dims => { setStatus('loaded'); onLoad?.(dims) }}
+          onError={() => setStatus('syncing')}
+        />
+        {status !== 'loaded' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-navy-900" />
+        )}
+      </>
+    )
+  }
 
   return (
     <>
