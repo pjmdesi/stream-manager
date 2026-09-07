@@ -113,7 +113,7 @@
   2026-09-06: attempted as a v2.6.0 ride-along, shipped, and reverted the same day. The swap itself worked (a downscale mode on ThumbImage rendering through SmoothThumb, with debounced resize redraws) and the animation gain was marginal at best, but it introduced a worse problem: on app start the thumbnail column sat blank for a few seconds, because 200+ rows each decode the full image and run the resample chain on the main thread before anything paints, where the old img tags painted progressively from cache. A future pass must make the resample non-blocking: paint the raw img immediately and swap in the resampled canvas when it is ready, stagger the work over idle time (or only for rows near the viewport, which pairs with STR-4), or persist resampled versions to disk. The reverted implementation is in git history (the STR-17 commit and its revert).
 
 - **STR-18**
-  Extend the functionality of the closed detail sidebar to also show what the user's twitch channel is currently displaying. This can help them know what their channel is set to without having to check the actual stream item is should be. It should sync on startup like the youtube sync panel does and it should also trigger to update whenever anything is pushed to twitch. I'm not sure if we should add the ability for users to use this new panel to also manually change the twitch details (to that which does not match a stream item). That would have other implications especially when it comes to the auto-update functionality of SM.
+  Extend the functionality of the closed detail sidebar to also show what the user's twitch channel is currently displaying. This can help them know what their channel is set to without having to check the actual stream item is should be. It should sync on startup like the youtube sync panel does and it should also trigger to update whenever anything is pushed to twitch. I'm not sure if we should add the ability for users to use this new panel to also manually change the twitch details (to that which does not match a stream item). That would have other implications especially when it comes to the auto-update functionality of SM. We could also add a tag to the stream item rows info column (similar to the YouTube one) that marks the stream item as the source of the current twitch details.
 
 ### Player
 
@@ -477,6 +477,12 @@
 - **APP-27** [cleanup] [ui]
   Flip the Tooltip trigger's default display so a Tooltip never introduces a line box on its own (filed 2026-09-07 after the third sighting of the same bug: the old crop dropdown, the marker triangles, and the Split Segment button all rendered taller than their siblings because the inline-flex trigger sat on a line box inside a block parent and inherited its line-height strut). The style guide's Tooltip section carries the rule for now; this item retires it.
   Plan: change the default trigger class from inline-flex to flex, then sweep every Tooltip that passes no triggerClassName (about 325 of roughly 440 usages at filing time) and pass inline-flex explicitly at the genuinely inline sites: chips and words inside prose (Help modal, merge-field chips, template previews), the truncated-text wrapper, icon-beside-text spans. Most of the rest are buttons that are already flex items, where the flip is a no-op. Verification is visual: a pass through every page and modal at 100% and a zoomed UI level, watching for anything that broke onto its own line or moved vertically. Not freeze material; pairs with APP-24 at the top of the next cycle.
+
+- **APP-28** [ui]
+  Maybe add a tooltip to the blue "changed" dots in the settings that tells users they must save for settings to apply.
+
+- **APP-29** [ui]
+  Dropdown input elements have padding that doesn't match the padding that other inputs have, they need to be updated app-wide to match the others like number inputs and text inputs.
 
 ### Onboarding & Setup
 

@@ -36,57 +36,58 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [x] Timecode inputs: frames segment arrow-steps up AND down everywhere (playhead, marker popup, viewport, duration, handles); Shift = x10 steps the segment under the cursor; playhead readout shows every place value for the video's duration (hours only on 1h+ videos).
 - [x] Track volume %: Shift+arrows step 10; crosshair cursor on seek surfaces only.
 - [x] Multi-track on a Hybrid MP4 recording: tracks read "Track 1" through "Track N" (no more Game/Mic/Discord/Music/SFX placeholders); a file WITH embedded track titles (an MKV recording) still shows them. (Sweep fix 2026-09-07.)
-- [ ] Clip toolbar keeps a constant height as the playhead moves in and out of a region (Add Segment / Split Segment swap without a 1px jump). (Sweep fix 2026-09-07, NOT yet in a packaged build: test on the next rebuild.)
+- [x] Clip toolbar keeps a constant height as the playhead moves in and out of a region (Add Segment / Split Segment swap without a 1px jump). (Sweep fix 2026-09-07.)
 
 ### YouTube setup guide (IDEA-11) & OAuth polish
 
 - [x] Integrations card: slim intro + "Open the setup guide" button (reads "Set up with the guided walkthrough" when disconnected); old instruction list gone.
-- [ ] Wizard on an existing connection: steps 1, 2, 3, 6, 7, 8 are green (proven by the connection); steps 4 and 5 show an amber ellipsis with a tooltip and an in-step note, since SM can't verify publishing; clicking Done on each turns them green and it persists across reopen. "Progress is saved" sits by the close button; copy buttons in steps 3-4 copy the right URLs. (Sweep fix 2026-09-07: previously only 7 and 8 were checked; NOT yet in a packaged build.)
-- [ ] Connect/reconnect once: Google flow completes against the Desktop-type client, the new callback page shows the styled card (no garbled character), and SM's end-to-end probe reports success in step 8.
-- [ ] Settings max-conversions and relay port step by 1 even with Shift, tooltips without the Shift note.
+- [x] Wizard on an existing connection: steps 1, 2, 3, 6, 7, 8 are green (proven by the connection); steps 4 and 5 show an amber ellipsis with a tooltip and an in-step note, since SM can't verify publishing; clicking Done on each turns them green and it persists across reopen. "Progress is saved" sits by the close button; copy buttons in steps 3-4 copy the right URLs. (Sweep fix 2026-09-07: previously only 7 and 8 were checked.)
+- [x] Connect/reconnect once: Google flow completes against the Desktop-type client, the new callback page shows the styled card (no garbled character), and SM's end-to-end probe reports success in step 8.
+- [x] Settings max-conversions and relay port step by 1 even with Shift, tooltips without the Shift note.
 
 ### Encryption at rest
 
-- [ ] After first launch of the packaged build: app-config.json shows enc1: values for both client secrets + the Claude key; youtube-auth.json and twitch-auth.json tokens are enc1:; expiresAt stays readable.
-- [ ] YouTube and Twitch work without any re-auth (push or pull something small); AI suggestion works (Claude key decrypts).
-- [ ] Quit/relaunch: connections persist.
+- [x] After first launch of the packaged build: app-config.json shows enc1: values for both client secrets + the Claude key; youtube-auth.json and twitch-auth.json tokens are enc1:; expiresAt stays readable.
+- [x] YouTube and Twitch work without any re-auth (push or pull something small); AI suggestion works (Claude key decrypts).
+- [x] Quit/relaunch: connections persist.
 
 ### Converter & cloud (CONV-1/2 + quit behavior)
 
-- [ ] Max simultaneous conversions is enforced on every start path: queue 4+ jobs with the cap at 2 (manual starts + an archive batch); excess shows Waiting and starts in order as slots free.
-- [ ] Converter-triggered downloads appear in the cloud sync widget with per-file rows; files grid cloud icons update live; row thumbnails appear once local.
-- [ ] Cancel pending: waiting files skip, an in-flight file finishes and stays local; no stuck cloud icons afterward.
-- [ ] Quit mid-conversion: dialog says what comes back; on relaunch the running job returns parked (nothing auto-starts), partial output file is gone.
-- [ ] Stream-link on converter rows shows the stream title for archive jobs, clip exports, and restored jobs.
+- [x] Max simultaneous conversions is enforced on every start path: queue 4+ jobs with the cap at 2 (manual starts + an archive batch); excess shows Waiting and starts in order as slots free.
+- [x] Converter-triggered downloads appear in the cloud sync widget with per-file rows; files grid cloud icons update live; row thumbnails appear once local.
+- [x] Cancel pending: waiting files skip, an in-flight file finishes and stays local; no stuck cloud icons afterward.
+- [x] Quit mid-conversion: dialog says what comes back; on relaunch the running job returns parked (nothing auto-starts), partial output file is gone.
+- [x] Stream-link on converter rows shows the stream title for archive jobs, clip exports, and restored jobs.
+- [ ] Clip export from a Hybrid MP4 recording (chapter data track present) succeeds, including with multi-track audio selected and while another conversion of the same file is running; the exported clip plays and carries no stray chapters. (Sweep fix 2026-09-07: the segment copy mapped the data track into MKV and failed at "Could not write header".)
 
 ### Streams (STR-14) & app-wide (APP-12/16/17, APP-9)
 
-- [ ] Push a Gaming-category video: reminder appears in the sidebar a few minutes later, persists across restarts, clears when marked done, never returns for that video.
-- [ ] UI zoom: Ctrl+= / Ctrl+- / Ctrl+0 show the odometer overlay; level survives restart; exact control in Settings > Appearance matches.
-- [ ] Colors sanity: Purple tag is true purple, Gray tag is the slate accent, Twitch UI purple, no odd accents anywhere (APP-16 fallout check).
-- [ ] About window lists third-party libraries with working links; tagline is the new one.
-- [ ] Start Minimized sub-option: with all three toggles on, launching the exe manually opens the window; launching with --from-autostart (or a real reboot) goes to tray; sub-option grays but keeps its checkmark when the parent is off.
+- [x] Push a Gaming-category video: reminder appears in the sidebar a few minutes later, persists across restarts, clears when marked done, never returns for that video.
+- [x] UI zoom: Ctrl+= / Ctrl+- / Ctrl+0 show the odometer overlay; level survives restart; exact control in Settings > Appearance matches.
+- [x] Colors sanity: Purple tag is true purple, Gray tag is the slate accent, Twitch UI purple, no odd accents anywhere (APP-16 fallout check).
+- [x] About window lists third-party libraries with working links; tagline is the new one.
+- [x] Start Minimized sub-option: with all three toggles on, launching the exe manually opens the window; launching with --from-autostart (or a real reboot) goes to tray; sub-option grays but keeps its checkmark when the parent is off.
 
 ### Thumbnail editor (THU-7/11)
 
-- [ ] Gradients: click the preview bar to add a stop (picks up the ramp's color), drag markers directly, remove stops (2-stop floor), rows stay sorted with the swap animation, Add stop button between rows and angle/style/blend.
-- [ ] Style dropdown: Hard renders crisp bands (canvas + preview + swatches agree); Blend disables in Hard mode; swatches record and reapply both styles.
+- [x] Gradients: click the preview bar to add a stop (picks up the ramp's color), drag markers directly, remove stops (2-stop floor), rows stay sorted with the swap animation, Add stop button between rows and angle/style/blend.
+- [x] Style dropdown: Hard renders crisp bands (canvas + preview + swatches agree); Blend disables in Hard mode; swatches record and reapply both styles.
 
 ### Help modal
 
-- [ ] Player section: Markers entry present, M in the shortcut list, Crop bullet describes the on-video controls, Multi-track entry points at the sidebar toggle.
+- [x] Player section: Markers entry present, M in the shortcut list, Crop bullet describes the on-video controls, Multi-track entry points at the sidebar toggle.
 
 ## Ride-alongs (check off as each lands, then test)
 
-- [ ] APP-3: lint rule (build-gate only, no runtime check).
+- [x] APP-3: lint rule (build-gate only, no runtime check).
 - [x] APP-9: covered in app-wide above.
-- [ ] PLR-7: Ctrl+Shift+M toggles multi-track; tooltip shows the shortcut.
-- [ ] THU-6: "Last used: [font]" link under the font dropdown applies it; hides after using the dropdown.
-- [ ] STR-12: duplicate buttons on template and tag items.
-- [ ] LNCH-2: duplicate launch group (plus its added task).
-- [ ] STR-10: ineligible image can't be set as thumbnail; existing ineligible primary warns inline on the YouTube thumbnail row.
-- [ ] PLR-1: multi-track Setup tips button opens Help to the new OBS setup section.
-- [ ] PLR-5: retest clicking near the playhead's auto-scroll margin (may already be fixed by the scrub rework); fix if it survives.
+- [x] PLR-7: Ctrl+Shift+M toggles multi-track; tooltip shows the shortcut.
+- [x] THU-6: "Last used: [font]" link under the font dropdown applies it; hides after using the dropdown.
+- [x] STR-12: duplicate buttons on template and tag items.
+- [x] LNCH-2: duplicate launch group (plus its added task).
+- [x] STR-10: ineligible image can't be set as thumbnail; existing ineligible primary warns inline on the YouTube thumbnail row.
+- [x] PLR-1: multi-track Setup tips button opens Help to the new OBS setup section.
+- [x] PLR-5: retest clicking near the playhead's auto-scroll margin (may already be fixed by the scrub rework); fix if it survives.
 
 Not in this release: APP-24 (style-guide audit) deferred to lead the next cycle; STR-17 (row thumbnail resampling) shipped and reverted the same day (blank thumbnail column on startup), stays open with notes.
 
@@ -94,8 +95,8 @@ Not in this release: APP-24 (style-guide audit) deferred to lead the next cycle;
 
 - [x] Relay: full lifecycle on a real or test stream — bind → ingest → live → complete; post-stream Twitch auto-update fires (60s delay)
 - [x] Watcher/auto-rules: drop a recording into the watch folder → lands in the right stream item
-- [ ] New stream + New episode: correct season/episode, templates render
-- [ ] YouTube: push + pull a stream's details; thumbnail push; out-of-sync panel clean afterward
+- [x] New stream + New episode: correct season/episode, templates render
+- [x] YouTube: push + pull a stream's details; thumbnail push; out-of-sync panel clean afterward
 - [ ] Converter: one job start→finish; pause/resume; output plays
 - [ ] Player: open a video, clip draft → export
 - [ ] Thumbnail editor: open, edit, export; variant creation

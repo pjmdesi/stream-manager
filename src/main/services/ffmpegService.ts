@@ -710,6 +710,17 @@ export function extractSegmentToFile(
       '-t',  duration.toFixed(3),
       '-i',  inputFile,
       '-map', '0',      // copy ALL streams (default only picks "best" audio)
+      // ...except data and attachment streams: OBS's Hybrid MP4 carries a
+      // chapter DATA track ("OBS Chapter Handler"), and Matroska only takes
+      // audio, video and subtitles, so `-map 0` alone made every clip
+      // export from such a recording fail at "Could not write header".
+      '-map', '-0:d',
+      '-map', '-0:t',
+      // No chapter metadata in the intermediates either: with -copyts the
+      // source's chapters would ride into the final clip at nonsense
+      // offsets. Markers/chapters reach clips deliberately or not at all
+      // (PLR-17).
+      '-map_chapters', '-1',
       '-c',  'copy',
       '-copyts',        // preserve original PTS so trim= timestamps still match
       '-y',
