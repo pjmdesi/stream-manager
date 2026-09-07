@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import * as LucideIcons from 'lucide-react'
-import { Plus, Trash2, FolderOpen, Rocket, Pencil, Check, X, GripVertical, ChevronDown, Upload, Star, Play, Globe } from 'lucide-react'
+import { Plus, Trash2, FolderOpen, Rocket, Pencil, Check, X, GripVertical, ChevronDown, Upload, Star, Play, Globe, Copy } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { LauncherGroup, LauncherApp } from '../../types'
 import { Button } from '../ui/Button'
@@ -840,6 +840,26 @@ export function LauncherPage() {
     save(groups.map(g => g.id === id ? { ...g, ...patch } : g))
   }
 
+  // Duplicate = same apps and icon, fresh ids (per-app launch-failure chips
+  // key off app ids, so shared ids would cross-link original and copy),
+  // " — Copy" appended to the name (style guide's duplicate convention),
+  // inserted right after its source. The sidebar-widget pin is deliberately
+  // not copied.
+  const duplicateGroup = (id: string) => {
+    const src = groups.find(g => g.id === id)
+    if (!src) return
+    const copy: LauncherGroup = {
+      ...src,
+      id: uuidv4(),
+      name: `${src.name} — Copy`,
+      apps: src.apps.map(a => ({ ...a, id: uuidv4() })),
+    }
+    const idx = groups.findIndex(g => g.id === id)
+    const updated = [...groups.slice(0, idx + 1), copy, ...groups.slice(idx + 1)]
+    save(updated)
+    setSelectedId(copy.id)
+  }
+
   const removeGroup = (id: string) => {
     const updated = groups.filter(g => g.id !== id)
     save(updated)
@@ -1066,6 +1086,14 @@ export function LauncherPage() {
                     }`}
                   >
                     <Star size={15} className={widgetGroupId === sidebarGroup.id ? 'fill-yellow-400' : ''} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Duplicate this group" side="bottom">
+                  <button
+                    onClick={() => duplicateGroup(sidebarGroup.id)}
+                    className="p-1.5 text-gray-400 hover:text-gray-200 transition-colors"
+                  >
+                    <Copy size={15} />
                   </button>
                 </Tooltip>
                 <Tooltip content="Remove this group" side="bottom">

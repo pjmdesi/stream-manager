@@ -24,9 +24,9 @@
 20. PLR-1
 21. PLR-5
 22. THU-6
-23. STR-12
-24. STR-10
-25. LNCH-2
+23. LNCH-2
+24. STR-12
+25. STR-10
 
 ## Improvement ideas
 
@@ -191,7 +191,7 @@
 - **THU-5**
   Layer locking. A lock toggle on layer rows (and maybe the canvas context menu) that makes a layer immovable/unselectable on the canvas — for anchor elements that live in the same spot in every thumbnail and must never be nudged (e.g. a standing logo/frame). Locked layers still render normally and stay editable from the layers panel (unlock to move). Needs: lock state persisted in the canvas JSON, canvas hit-testing disabled while locked (listening off), Transformer refuses to attach, and a subtle lock icon on the layer row. Decide whether locked layers should still hover-highlight (probably yes — knowing what a thing is matters even when you can't move it).
 
-- **THU-6** [ui]
+- **THU-6** [ui] [done]
   Add a subtle text link below the font family dropdown in the properties panel for text layers which will show the last used font family in the thumbnail editor. This will allow the user to easily pick the last used font family without having to scroll through the list of fonts. The link should say "Last used: [font family]" and when clicked, it will set the font family of the selected text layer to the last used font family. The last used font family should be stored in the app's settings so that it persists across sessions. If the user uses the dropdown and picks any font family, the link will hide and that font will then be the last used font family.
 
 - **THU-7** [done]

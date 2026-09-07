@@ -50,6 +50,10 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - The browser page shown after a YouTube or Twitch sign-in matches SM's design now (a proper card instead of bare text with a garbled character) and explains what happens next.
 
+## Launcher
+
+- Launch groups can be duplicated from the open group's header: same apps and icon, with " — Copy" appended to the name, placed right after the original.
+
 ## Cloud sync
 
 - Cancelling downloads is honest now: waiting files are skipped, and a file already mid-transfer finishes and stays on your PC, since transfers can't be interrupted and throwing away a completed download would waste the bandwidth already spent. The Cancel button's tooltip explains exactly what it does.
