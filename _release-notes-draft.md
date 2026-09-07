@@ -15,6 +15,7 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 ## Player
 
 - Ctrl+Shift+M opens and closes multi-track audio, and the sidebar toggle's tooltip shows the shortcut.
+- Multi-track rows now label unnamed audio tracks "Track 1", "Track 2", and so on, the same numbering OBS shows. They used to fall back to a fixed set of guessed names (Game, Mic, Discord, Music, SFX) that could mislabel real recordings. MP4 files can't carry track names, so recordings in that container (including OBS's Hybrid MP4) will always show numbers; MKV recordings keep the names set in OBS.
 - A setup-tips button next to the multi-track toggle opens the Help guide directly at a new section on configuring recording software for multi-track (full mix on Track 1, one track per source).
 - The player timeline now shows markers. Press M (or the bookmark button in the playback controls) to add one at the playhead, click a marker to jump to it, and double-click to name it, change its color, or move it to an exact timecode. Chapters embedded in video files show up as markers too, including the ones OBS's Hybrid MP4 chapter hotkey writes during a stream. SM-added markers are saved in the stream's metadata next to the file; video files are never modified.
 - Fixed the frames segment of timecode inputs getting stuck when stepping up with the arrow keys (a floating-point rounding issue could display a frame value one frame low, so each up-step was read back and cancelled out).

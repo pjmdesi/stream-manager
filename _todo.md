@@ -187,6 +187,19 @@
 - **PLR-19** [ui]
   Add a new small pop-out child window that follows the pop-out player window. It will contain a copy of the player controls and a simplified playback position track. This should follow the video pop-out window (centered underneath), with its position changing based on the position/size of the video playback pop-out window on the user's screen (It should basically match the rules for the crop region size/position controls panel). This will allow the user to be able to control the playback for the pop-out window without having to keep the main app window open or nearby. The controls should be in a *separate* window so that capture software does not capture it, even if it appears overlayed on top of the video playback pop-out window on the user's screen. Maybe the simplified playback position track could have the markers, which may help the user skip to certain marked sections of the video they are playing.
 
+- **PLR-20**
+  Add a new tool in the clipping mode to toggle snapping to makers/playhead/other clip regions' markers. This will work like in other apps, when snapping is on, it will move dragged items to the location of the snappable elements when they fall within a certain threshold. Not sure what that threshold should be, perhaps by visual pixels instead of timecode difference values so it can change based on the zoom level of the timeline? Or maybe we add an option so the user can choose between those. Also maybe an option to choose the snapping threshold.
+
+- **PLR-21**
+  The previous/next episode button tooltips in the player sidebar need to show the title of the respective stream items, not just the date.
+
+- **PLR-22**
+  Add buttons & keyboard shortcuts to be able to skip to next/previous markers in an open video.
+
+- **PLR-23**
+  Audio track naming for files that carry no track names. Found 2026-09-07: MP4 has no per-track title field, so OBS's Hybrid MP4 output (the recommended container since the chapter hotkey) tags every audio stream only with a generic "OBS Audio Handler"; the names set in OBS's Audio tab never reach the file (MKV recordings do keep them). The player showed a hardcoded placeholder list (Game, Mic, Discord, Music, SFX) in that case, which mislabeled real recordings; that list is gone as of the v2.6.0 sweep and unnamed tracks read "Track N".
+  Design decided: a setting with an ordered list of default track names (Track 1..N) that SM applies to any file whose tracks are unnamed, since a streamer's OBS track layout is stable per setup; plus a per-file override editable from the multi-track rows (rename in place), saved in the stream's _meta.json keyed like videoMap/videoMarkers. Embedded names, when a file has them, always win over the defaults; the per-file override wins over both. Multi-track setup tips in Help (the PLR-1 section) should mention the MP4 limitation and point at this setting.
+
 ### Thumbnail editor
 
 - **THU-1**

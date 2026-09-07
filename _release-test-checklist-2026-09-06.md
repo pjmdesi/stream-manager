@@ -1,6 +1,6 @@
 # Release test checklist — v2.6.0 (2026-09-06)
 
-Build: Stream Manager 2.5.0_DEV.exe from dev @ b3e7b7a (rebuilt 2026-09-07 with the marker popup fix on reset; the packaged exe matches this commit). Previous build @ c806c17 ran the 2026-09-06 stream night clean.
+Build: Stream Manager 2.5.0_DEV.exe from dev @ a4e3895 (rebuilt 2026-09-07 with the playhead-over-region hover fix; the packaged exe matches this commit). Previous build @ c806c17 ran the 2026-09-06 stream night clean.
 
 FROZEN 2026-09-06: no further feature work on dev for this release. Code changes from here are limited to bugs and other fixes found during this sweep; each one gets a fresh build and an updated hash above.
 
@@ -23,18 +23,19 @@ Batch: the completions release (finishing touches on features) plus the marker s
 
 ### Player interactions & layout (PLR-6/11/12/13, APP-22, crop move)
 
-- [ ] Press-and-hold anywhere on the timeline (thumbnails, waveform, multi-track rows, inside regions) places then scrubs the playhead; plain click still places precisely; middle-drag still pans.
-- [ ] Regions: hover shows the timecode pill (grips) attached to the region; dragging the pill moves the region with snapping; clicking inside a region seeks + selects; thumbnail-strip clicks deselect.
-- [ ] Region pills and handle popups: borders match selection state (light blue selected), 1px overlaps top/bottom, corners round continuously as a pill gets wider than its region.
-- [ ] Edge handles: consistent 2px width at your zoom/scaling, glow only outside the region.
-- [ ] Sidebar mode toggles: Start Clipping ↔ red Stop Clipping in the same slot; Open ↔ Close Multi-track Audio above it; collapsed rail shows the X badge on both close states; order is Clipping, Multi-track, Info.
-- [ ] Clip toolbar: labels collapse to icon-only below ~672px of player width; transport row sheds ±5m, then ±1m, then ±10s as it narrows; nothing wraps at 718px with both sidebars open.
+- [x] Press-and-hold anywhere on the timeline (thumbnails, waveform, multi-track rows, inside regions) places then scrubs the playhead; plain click still places precisely; middle-drag still pans.
+- [x] Regions: hover shows the timecode pill (grips) attached to the region; dragging the pill moves the region with snapping; clicking inside a region seeks + selects; thumbnail-strip clicks deselect.
+- [x] Region pills and handle popups: borders match selection state (light blue selected), 1px overlaps top/bottom, corners round continuously as a pill gets wider than its region.
+- [x] Edge handles: consistent 2px width at your zoom/scaling, glow only outside the region.
+- [x] Sidebar mode toggles: Start Clipping ↔ red Stop Clipping in the same slot; Open ↔ Close Multi-track Audio above it; collapsed rail shows the X badge on both close states; order is Clipping, Multi-track, Info.
+- [x] Clip toolbar: labels collapse to icon-only below ~672px of player width; transport row sheds ±5m, then ±1m, then ±10s as it narrows; nothing wraps at 718px with both sidebars open.
 - [ ] Multi-track + clip mode: hovering a track row lifts it out of the out-of-region dimming; bleeps on top of rows stay clickable.
 - [ ] Clip mode: the playhead line stays full-brightness inside the dimmed out-of-region areas and over bleeps; it still passes under region pills/handle popups, and dragging it works as before. (Sweep fix 2026-09-07.)
 - [ ] Scrub the playhead quickly back and forth through an unselected region: its timecode pill does not flash during the drag; after release, hovering the region shows the pill normally and a selected region keeps its pill throughout. (Sweep fix 2026-09-07.)
 - [ ] Crop: toolbar Crop toggle reveals the region with its control panel attached (flips inside near the bottom, pins at container edges, tracks stage zoom/pan without scaling); micro spinners step (Shift = x10); middle-click pans from anywhere including the panel; toggle off/on restores the last aspect.
 - [ ] Timecode inputs: frames segment arrow-steps up AND down everywhere (playhead, marker popup, viewport, duration, handles); Shift = x10 steps the segment under the cursor; playhead readout shows every place value for the video's duration (hours only on 1h+ videos).
 - [ ] Track volume %: Shift+arrows step 10; crosshair cursor on seek surfaces only.
+- [ ] Multi-track on a Hybrid MP4 recording: tracks read "Track 1" through "Track N" (no more Game/Mic/Discord/Music/SFX placeholders); a file WITH embedded track titles (an MKV recording) still shows them. (Sweep fix 2026-09-07.)
 
 ### YouTube setup guide (IDEA-11) & OAuth polish
 

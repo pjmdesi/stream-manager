@@ -323,7 +323,11 @@ function clampVideoPan(x: number, y: number, zoom: number, w: number, h: number)
   }
 }
 
-const TRACK_LABELS = ['Game', 'Mic', 'Discord', 'Music', 'SFX']
+// Unnamed audio tracks are labeled "Track N", matching OBS's own Tracks
+// column. A placeholder name list ("Game", "Mic", ...) used to stand in
+// here; it invented authoritative-looking names for files that carry none
+// (MP4 has no per-track title field, so OBS's Hybrid MP4 writes none) and
+// mislabeled real recordings. Proper naming for such files is PLR-23.
 
 // Playback-speed options for the play-button speed menu. ≤1 fans out left of
 // the play button, >1 right — near-center = near-normal, edges = extremes.
@@ -1004,7 +1008,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
               {audioTracks.map((t, i) => {
                 const checked = selectedTrackIndices.has(i)
                 const st = tracksState.find(s => s.index === i)
-                const label = t.title || TRACK_LABELS[i] || `Track ${i + 1}`
+                const label = t.title || `Track ${i + 1}`
                 const detail = `${t.codec ?? 'audio'}${t.channels ? ` · ${t.channels}ch` : ''}${t.language ? ` · ${t.language}` : ''}`
                 const isUnextracted = st?.status === 'unextracted'
                 // Volume shown to the user as a sanity check. Tracks the
@@ -5225,7 +5229,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                     // fit the longest variant — the unextracted button.
                     const CTRL_COL = '220px'
                     return tracks.map(track => {
-                      const label = track.title || TRACK_LABELS[track.index] || `Track ${track.index + 1}`
+                      const label = track.title || `Track ${track.index + 1}`
                       const effectivelyMuted = anySolo ? !track.solo : track.muted
                       const wfPath = trackPathByIndex.get(track.index) ?? ''
                       const collapsed = collapsedTracks.has(track.index)
