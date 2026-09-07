@@ -5675,10 +5675,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                             drag sweeps the cursor in and out of the region's
                             hit area, and the pill flashing along with that
                             hover churn looked broken (the handle's own
-                            timecode popup is up anyway). Reading the ref at
-                            render time is safe here because the drag re-
-                            renders continuously through setClipState. */}
-                        {(selectedRegionId === seg.id || (hoveredRegionId === seg.id && !isDraggingHandleRef.current)) && (
+                            timecode popup is up anyway). The same applies to
+                            a playhead scrub through the region: the cursor
+                            outruns the 12px hit area and grazes the region's
+                            hover zone, so the pill flickered mid-drag. Reading
+                            the refs at render time is safe here because both
+                            drags re-render continuously (setClipState /
+                            fastSeek + setHoverRatio). */}
+                        {(selectedRegionId === seg.id || (hoveredRegionId === seg.id && !isDraggingHandleRef.current && !isPlayheadDraggingRef.current)) && (
                           <div
                             className="absolute flex -translate-x-1/2 z-50"
                             style={{ left: `${centerPct}%`, bottom: '100%', marginBottom: '-1px' }}
