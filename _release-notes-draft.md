@@ -10,6 +10,8 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - Title, description, and tag templates (YouTube and Twitch) can be duplicated from their rows in the Templates modal. The copy opens for editing right away, so an existing template can be the starting point for a new one.
 
+- The set-as-thumbnail option in the files grid now only appears on images that fit YouTube's thumbnail requirements (a thumbnail-shaped aspect at 720p or larger, JPG, PNG, GIF, or WebP, 2 MB max), so every image it offers is one YouTube will take well. If a stream's current thumbnail wouldn't upload at all (wrong format or over 2 MB), the sidebar's YouTube thumbnail row warns about it before a push fails.
+
 ## Player
 
 - Ctrl+Shift+M opens and closes multi-track audio, and the sidebar toggle's tooltip shows the shortcut.

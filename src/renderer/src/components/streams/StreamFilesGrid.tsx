@@ -425,7 +425,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   )
 }
 
-function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin, blockReason, staleReason, onModifierSelect }: {
+function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, busy, thumbsKey, isPreferred, eligibleForThumbnail, size, selectMode, selected, onSelectToggle, onDragStart, onDragEnter, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onOffload, onPin, blockReason, staleReason, onModifierSelect }: {
   path: string
   thumbIndex: number
   /** Scan-flag-based local hint for rendering the image (immediate). */
@@ -436,6 +436,10 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
   busy: boolean
   thumbsKey: number
   isPreferred: boolean
+  /** STR-10: whether this image meets the YouTube thumbnail bar (format,
+   *  size, aspect, resolution). Gates the set-as-thumbnail affordance;
+   *  true when the verdict is unknown (fail open). */
+  eligibleForThumbnail: boolean
   size?: number
   selectMode: boolean
   selected: boolean
@@ -524,8 +528,15 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
             ? { color: 'teal', label: 'Thumbnail', icon: <Bookmark size={9} className="text-amber-300" fill="currentColor" />, tooltip: 'Stream item thumbnail' }
             // SM-made alternates keep their tag ALWAYS visible so they read
             // as app files, not stray images; non-SM images keep the
-            // hover-only set-as-thumbnail affordance.
-            : { color: 'neutral', label: 'Thumbnail', icon: <Bookmark size={9} />, hoverOnly: !isSm, tooltip: 'Set as stream item thumbnail', onClick: () => onSetThumbnail(path) }
+            // hover-only set-as-thumbnail affordance. STR-10: images that
+            // don't meet the YouTube thumbnail bar lose the affordance —
+            // hidden entirely for regular images, kept but unclickable for
+            // SM alternates (the tag doubles as their app-file identity).
+            : eligibleForThumbnail
+              ? { color: 'neutral', label: 'Thumbnail', icon: <Bookmark size={9} />, hoverOnly: !isSm, tooltip: 'Set as stream item thumbnail', onClick: () => onSetThumbnail(path) }
+              : isSm
+                ? { color: 'neutral', label: 'Thumbnail', icon: <Bookmark size={9} />, tooltip: "Can't be set as the stream item thumbnail: this image doesn't fit YouTube's thumbnail requirements (thumbnail-shaped aspect at 720p or larger, JPG, PNG, GIF, or WebP, 2 MB max)." }
+                : null
           }
           suppressHover={selectMode}
         />
@@ -661,6 +672,24 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
 
   const [showVideo, setShowVideo] = useState(true)
   const [showImage, setShowImage] = useState(true)
+
+  // STR-10: only images that meet the YouTube thumbnail bar offer the
+  // set-as-thumbnail affordance. Reuses the old picker's categorizer:
+  // bestFit = accepted format + ≤2 MB + a thumbnail-shaped aspect at
+  // ≥720px (cloud-only files are included since probing would hydrate
+  // them). null = verdict unknown (still loading, or the check failed) —
+  // fail OPEN so a hiccup can never lock the affordance away.
+  const [thumbEligible, setThumbEligible] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    let stale = false
+    if (folder.thumbnails.length === 0) { setThumbEligible(new Set()); return }
+    window.api.youtubeGetQualifyingThumbnails(folder.thumbnails)
+      .then(q => { if (!stale) setThumbEligible(new Set(q.bestFit)) })
+      .catch(() => { if (!stale) setThumbEligible(null) })
+    return () => { stale = true }
+    // thumbsKey re-runs the check when file bytes change (e.g. an SM
+    // thumbnail re-render could cross the 2 MB line either way).
+  }, [folder.thumbnails, thumbsKey])
 
   // Shared by the on-open IPC effects below to defer their work past the
   // sidebar slide (0 when animations are off — a no-op delay then).
@@ -1311,6 +1340,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               busy={busyPaths.has(path)}
               thumbsKey={thumbsKey}
               isPreferred={isPreferred}
+              eligibleForThumbnail={thumbEligible === null || thumbEligible.has(path)}
               size={imageSizes[path]}
               selectMode={selectMode}
               selected={selected.has(path)}

@@ -7031,6 +7031,23 @@ function SidebarDetail({
   }, [folder.thumbnails, meta?.preferredThumbnail])
   const effectiveYtThumb = resolvedStreamItemThumb
 
+  // STR-10: warn when the primary thumbnail would fail YouTube's upload
+  // rules outright (wrong format or over 2 MB = in neither qualifying
+  // bucket). Off-aspect/small images stay warning-free: YouTube accepts
+  // them, the grid's affordance filter just doesn't recommend them.
+  // null = unknown (loading or check failed) — no warning, fail open.
+  const [primaryThumbUploadable, setPrimaryThumbUploadable] = useState<boolean | null>(null)
+  useEffect(() => {
+    let stale = false
+    const path = resolvedStreamItemThumb
+    if (!path) { setPrimaryThumbUploadable(null); return }
+    window.api.youtubeGetQualifyingThumbnails([path])
+      .then(q => { if (!stale) setPrimaryThumbUploadable(q.bestFit.includes(path) || q.rest.includes(path)) })
+      .catch(() => { if (!stale) setPrimaryThumbUploadable(null) })
+    return () => { stale = true }
+    // thumbsKey: re-check when the file's bytes change (editor saves).
+  }, [resolvedStreamItemThumb, thumbsKey])
+
   // Thumbnail-change detection for the YT push button. SHA-1 the
   // currently-selected thumbnail's bytes; compare against
   // meta.ytThumbnailPushedHash (set after every successful push). A
@@ -7725,8 +7742,10 @@ function SidebarDetail({
                 choosing it lives in the files grid (set-as-thumbnail,
                 variants, the editor). The old per-push override picker
                 was transient state (deliberately never persisted) that
-                the primary-thumbnail workflow made redundant. Eligibility
-                guard for the set-as-thumbnail affordance is a todo. */}
+                the primary-thumbnail workflow made redundant. The files
+                grid guards the affordance (STR-10: only best-fit images
+                offer it); the warning below covers the leftover case of
+                a primary that predates the guard or lost eligibility. */}
             <MetaRow label="YouTube thumbnail" mismatched={!!selectedBroadcast && thumbnailNeedsPush ? 'local' : undefined}>
               {folder.thumbnails.length === 0 ? (
                 <p className="text-xs text-gray-400 italic">No images found in this stream folder.</p>
@@ -7736,6 +7755,12 @@ function SidebarDetail({
                     {resolvedStreamItemThumb?.split(/[\\/]/).pop() ?? '(none)'}
                   </p>
                   <p className="text-[10px] text-gray-400">The stream item thumbnail. Uploads alongside the YouTube push from the footer; change it from the files grid above.</p>
+                  {primaryThumbUploadable === false && (
+                    <p className="flex items-start gap-1 text-[10px] text-amber-300">
+                      <AlertTriangle size={10} className="shrink-0 mt-0.5" />
+                      <span>This image doesn't meet YouTube's thumbnail rules (JPG, PNG, GIF, or WebP, 2 MB max), so the upload part of a push will fail. Pick another image in the files grid.</span>
+                    </p>
+                  )}
                 </div>
               )}
             </MetaRow>
