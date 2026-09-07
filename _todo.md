@@ -277,7 +277,7 @@
 - **LNCH-1** [needs-design]
   Add the ability for the launcher to track which of the apps in each launch group are still open and allow the user to quit them from the launcher. Need to discuss design. We could also add more options to the launcher group items after this such as 2 boolean options: Close with group (checked by default, unchecked means it won't quit when the user clicks the "Quit Group", for example, an app that the user would like to keep open after streaming), and Allow multiple instances (unchecked by default, checked means the app could be attempted to be launched multiple times when the group or individual launch buttons are clicked. Might need to check if it's possible to know if an app can have multiple instances so there's a smaller chance of conflict. If we can, the checkbox would not appear for those apps).
 
-- **LNCH-2**
+- **LNCH-2** [done]
   Add a button in the header of an open launch group to duplicate the group. This would create a new launcher group with the exact same items and icon. The name should also be the same but with " — Copy" appended. Might be worth adding a rule to the style guide to handle duplicates consistently. The only exception I can think of are the thumbnail variants, who get a fixed name regardless of whether it is a duplicate or not.
 
 ### Integrations

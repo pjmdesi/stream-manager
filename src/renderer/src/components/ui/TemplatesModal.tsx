@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Plus, Trash2, Star } from 'lucide-react'
+import { Plus, Trash2, Star, Copy } from 'lucide-react'
 import { v4 as uuid } from 'uuid'
 import { Modal } from './Modal'
 import { Button } from './Button'
@@ -209,12 +209,15 @@ function TwitchTagForm({ initial, onSave, onCancel }: {
 // ─── Template list with inline editing ───────────────────────────────────────
 
 function TemplateList<T extends { id: string; name: string }>({
-  items, subtitle, onSave, onDelete, newLabel, renderForm, defaultId, onSetDefault,
+  items, subtitle, onSave, onDelete, onInsertAfter, newLabel, renderForm, defaultId, onSetDefault,
 }: {
   items: T[]
   subtitle: (t: T) => React.ReactNode
   onSave: (t: T) => void
   onDelete: (id: string) => void
+  /** Persist a new item positioned immediately after the given source id —
+   *  the duplicate button's storage hook (STR-12). */
+  onInsertAfter: (sourceId: string, item: T) => void
   newLabel: string
   renderForm: (initial: Partial<T>, onSave: (t: T) => void, onCancel: () => void) => React.ReactNode
   /** Optional — when supplied, renders a star toggle next to each item.
@@ -230,6 +233,20 @@ function TemplateList<T extends { id: string; name: string }>({
   const handleSave = (t: T) => {
     onSave(t)
     setEditingId(null)
+  }
+
+  // Style guide's duplicate convention: exact content, fresh id, " - Copy"
+  // appended, inserted right after its source, opened for editing. A
+  // default star never follows the copy (it points at the source's id).
+  const duplicate = (t: T) => {
+    const copy = { ...t, id: uuid(), name: `${t.name} - Copy` }
+    // Tag templates carry an array — clone it so editing the copy can
+    // never mutate the original's tags through a shared reference.
+    if (Array.isArray((copy as Record<string, unknown>).tags)) {
+      (copy as Record<string, unknown>).tags = [...(t as Record<string, unknown>).tags as unknown[]]
+    }
+    onInsertAfter(t.id, copy)
+    setEditingId(copy.id)
   }
 
   return (
@@ -267,6 +284,11 @@ function TemplateList<T extends { id: string; name: string }>({
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <Button variant="ghost" size="sm" onClick={() => setEditingId(t.id)}>Edit</Button>
+              <Tooltip content="Duplicate" side="top">
+                <button onClick={() => duplicate(t)} className="p-1.5 rounded text-gray-400 hover:text-gray-200 transition-colors">
+                  <Copy size={13} />
+                </button>
+              </Tooltip>
               <button onClick={() => onDelete(t.id)} className="p-1.5 rounded text-gray-400 hover:text-red-400 transition-colors">
                 <Trash2 size={13} />
               </button>
@@ -433,6 +455,13 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
     return next
   }
 
+  // Duplicates land right after their source (style guide's duplicate
+  // convention); a vanished source appends at the end as the safe fallback.
+  const insertAfter = <T extends { id: string }>(list: T[], sourceId: string, item: T): T[] => {
+    const idx = list.findIndex(x => x.id === sourceId)
+    return idx < 0 ? [...list, item] : [...list.slice(0, idx + 1), item, ...list.slice(idx + 1)]
+  }
+
   const saveTitles = useCallback(async (v: YTTitleTemplate[]) => {
     setTitleTemplates(v); await window.api.setYTTitleTemplates(v); onSaved?.()
   }, [onSaved])
@@ -497,6 +526,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
             subtitle={t => <p className="text-xs text-gray-400 truncate"><TemplateBodyPreview body={t.template} /></p>}
             onSave={t => saveTitles(upsert(titleTemplates, t))}
             onDelete={id => saveTitles(titleTemplates.filter(t => t.id !== id))}
+            onInsertAfter={(srcId, t) => saveTitles(insertAfter(titleTemplates, srcId, t))}
             newLabel="New title template"
             renderForm={(initial, onSave, onCancel) => (
               <TitleForm initial={initial} onSave={onSave} onCancel={onCancel} />
@@ -519,6 +549,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
             subtitle={t => <p className="text-xs text-gray-400 line-clamp-2 whitespace-pre-wrap">{t.description ? <TemplateBodyPreview body={t.description} /> : <em className="text-gray-400">No description</em>}</p>}
             onSave={t => saveDescs(upsert(descTemplates, t))}
             onDelete={id => saveDescs(descTemplates.filter(t => t.id !== id))}
+            onInsertAfter={(srcId, t) => saveDescs(insertAfter(descTemplates, srcId, t))}
             newLabel="New description template"
             renderForm={(initial, onSave, onCancel) => (
               <DescriptionForm initial={initial} onSave={onSave} onCancel={onCancel} />
@@ -542,6 +573,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
             subtitle={t => <p className="text-xs text-gray-400">{t.tags.length} tags — <span className="text-gray-400 font-mono">{t.tags.slice(0, 5).join(', ')}{t.tags.length > 5 ? '…' : ''}</span></p>}
             onSave={t => saveTags(upsert(tagTemplates, t))}
             onDelete={id => saveTags(tagTemplates.filter(t => t.id !== id))}
+            onInsertAfter={(srcId, t) => saveTags(insertAfter(tagTemplates, srcId, t))}
             newLabel="New tag template"
             renderForm={(initial, onSave, onCancel) => (
               <TagForm initial={initial} onSave={onSave} onCancel={onCancel} />
@@ -564,6 +596,7 @@ export function TemplatesModal({ isOpen, onClose, onSaved, folders, onBulkBindYt
             subtitle={t => <p className="text-xs text-gray-400">{t.tags.length} tags — <span className="text-gray-400 font-mono">{t.tags.slice(0, 5).join(', ')}{t.tags.length > 5 ? '…' : ''}</span></p>}
             onSave={t => saveTwitchTags(upsert(twitchTagTemplates, t))}
             onDelete={id => saveTwitchTags(twitchTagTemplates.filter(t => t.id !== id))}
+            onInsertAfter={(srcId, t) => saveTwitchTags(insertAfter(twitchTagTemplates, srcId, t))}
             newLabel="New Twitch tag template"
             renderForm={(initial, onSave, onCancel) => (
               <TwitchTagForm initial={initial} onSave={onSave} onCancel={onCancel} />

@@ -8,6 +8,8 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 
 - After pushing a video in a category with a Studio-only field (like Gaming's Game), a reminder now stays in the sidebar until it's marked done, instead of only the brief banner that was easy to miss. It appears a few minutes after the push (no nag if the field gets set right away) and never returns once marked done for that video.
 
+- Title, description, and tag templates (YouTube and Twitch) can be duplicated from their rows in the Templates modal. The copy opens for editing right away, so an existing template can be the starting point for a new one.
+
 ## Player
 
 - Ctrl+Shift+M opens and closes multi-track audio, and the sidebar toggle's tooltip shows the shortcut.
