@@ -98,7 +98,7 @@ Not in this release: APP-24 (style-guide audit) deferred to lead the next cycle;
 - [x] New stream + New episode: correct season/episode, templates render
 - [x] YouTube: push + pull a stream's details; thumbnail push; out-of-sync panel clean afterward
 - [ ] Converter: one job start→finish; pause/resume; output plays
-- [ ] Player: open a video, clip draft → export
+- [ ] Player: open a video, clip draft → export. Run it on a recording in the CURRENT recording container (Hybrid MP4 as of 2026-09; name it here if it changes), since the exporter's intermediate step is sensitive to what streams the container carries (2026-09-07: the chapter data track broke every export until this sweep).
 - [ ] Thumbnail editor: open, edit, export; variant creation
 - [ ] Cloud: pin local + offload one item; statuses update everywhere
 - [ ] Launcher: run a launch group (window + tray)
