@@ -14,6 +14,8 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [ ] M drops a marker at the playhead (default gray); M again on the same spot opens its popup instead of duplicating; the bookmark button next to the playhead timecode does the same.
 - [ ] Single click seeks to the marker; double click opens the edit popup: recolor, rename, move via timecode (arrows step, Shift = x10); popup clamps inside the timeline at the first/last markers.
 - [ ] Popup closes on any click outside it, including the timeline strips (the click still places the playhead); Escape closes it too. (Fix found during the sweep 2026-09-07: seek surfaces stopped propagation, so only clicks on the controls row or video used to close it.)
+- [ ] Click a marker, move the playhead, press M: the focus ring is on the NEW marker (not the clicked one) and Enter seeks to the new one; M on an existing marker's spot opens its popup with focus on that marker. (Sweep fix 2026-09-07.)
+- [ ] In the popup, step the timecode's seconds/frames segment with the timeline fully zoomed out: the popup and its swatch circles stay pixel-stable, no shimmer; the popup still centers on the marker and clamps at the ends. (Sweep fix 2026-09-07; device-pixel snapping rule added to the style guide.)
 - [ ] Edit a file chapter: reopening the file shows the edit persisted and the popup offers Reset (back to the file's version); an M-added marker offers Delete instead.
 - [ ] Markers survive closing/reopening the file and the app; the video file's own bytes are untouched.
 - [ ] In clip mode zoomed in: markers track the viewport, render above region chrome, and stay clickable; marker layer never pokes through a modal backdrop (open the delete-draft confirm with markers visible).

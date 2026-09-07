@@ -655,20 +655,29 @@ function MarkerEditPopup({
 }) {
   const popupRef = useRef<HTMLDivElement>(null)
   const timeInputRef = useRef<HTMLInputElement>(null)
-  // Horizontal shift (px) that keeps the centered popup inside the bounds.
-  // Measured before paint; re-measured whenever the anchor moves (zoom,
-  // pan, timecode edits).
-  const [shift, setShift] = useState(0)
+  // Resolved left edge in CSS px, centered on the anchor, clamped inside
+  // the bounds, and snapped to whole DEVICE pixels. Measured before paint;
+  // re-measured whenever the anchor moves (zoom, pan, timecode edits). The
+  // snap matters: a percent left with translateX(-50%) lands on arbitrary
+  // sub-pixel offsets, so stepping the timecode by a frame at full zoom-out
+  // nudged the popup by fractions of a pixel and its contents (the swatch
+  // circles most visibly) shimmered as anti-aliasing re-rasterized them.
+  // Same rule as the region edge handles: snap timeline-anchored chrome
+  // through devicePixelRatio (style guide, anchored popovers). null until
+  // the first measurement (a single pre-paint frame).
+  const [leftPx, setLeftPx] = useState<number | null>(null)
   useLayoutEffect(() => {
     const el = popupRef.current
     const bounds = boundsRef.current
     if (!el || !bounds) return
     const br = bounds.getBoundingClientRect()
+    const parentLeft = (el.offsetParent as HTMLElement | null)?.getBoundingClientRect().left ?? br.left
     const w = el.offsetWidth
     const anchorX = br.left + (leftPct / 100) * br.width
     const idealLeft = anchorX - w / 2
     const clampedLeft = Math.max(br.left, Math.min(idealLeft, br.right - w))
-    setShift(Math.round(clampedLeft - idealLeft))
+    const dpr = window.devicePixelRatio || 1
+    setLeftPx(Math.round((clampedLeft - parentLeft) * dpr) / dpr)
   }, [leftPct, boundsRef])
   const [nameInput, setNameInput] = useState(marker.name ?? '')
   const [timeInput, setTimeInput] = useState(formatViewTime(marker.time, fps))
@@ -708,7 +717,9 @@ function MarkerEditPopup({
     <div
       ref={popupRef}
       className="absolute z-[70] pointer-events-auto"
-      style={{ left: `${leftPct}%`, bottom: '100%', marginBottom: 6, transform: `translateX(calc(-50% + ${shift}px))` }}
+      style={leftPx === null
+        ? { left: `${leftPct}%`, bottom: '100%', marginBottom: 6, transform: 'translateX(-50%)' }
+        : { left: leftPx, bottom: '100%', marginBottom: 6 }}
       onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}
       onMouseDown={e => e.stopPropagation()}
       onClick={e => e.stopPropagation()}
@@ -1647,6 +1658,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   const [markerPopupId, setMarkerPopupId] = useState<string | null>(null)
   const markerPopupIdRef = useRef<string | null>(null)
   useEffect(() => { markerPopupIdRef.current = markerPopupId }, [markerPopupId])
+  // Marker whose triangle button should take keyboard focus once it renders
+  // (set by M). Without this, M left focus on whichever marker was clicked
+  // last: the keypress flips Chromium into keyboard modality, that stale
+  // marker lit up with a focus ring, and Enter seeked to IT instead of the
+  // marker just placed.
+  const pendingFocusMarkerIdRef = useRef<string | null>(null)
+  const focusMarkerButton = useCallback((id: string) => {
+    const el = stripsWrapperRef.current?.querySelector<HTMLElement>(`[data-marker-id="${CSS.escape(id)}"] button`)
+    el?.focus({ preventScroll: true })
+  }, [])
   // Close the popup when the loaded file changes — chapter display ids are
   // synthesized from start times, so one could collide across files and
   // leave the popup editing the wrong video's chapter.
@@ -3444,6 +3465,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   }, [markers, videoInfo, duration])
   const displayMarkersRef = useRef(displayMarkers)
   useEffect(() => { displayMarkersRef.current = displayMarkers }, [displayMarkers])
+  // Focus the marker M just placed, now that its button exists.
+  useEffect(() => {
+    const id = pendingFocusMarkerIdRef.current
+    if (!id) return
+    pendingFocusMarkerIdRef.current = null
+    focusMarkerButton(id)
+  }, [displayMarkers, focusMarkerButton])
 
   // Replace the current file's marker list in state and persist it. Fire and
   // forget: mutations are individual user actions and the server-side merge
@@ -3465,10 +3493,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     const t = Math.max(0, Math.min(dur, currentTimeRef.current))
     const eps = 1 / (videoInfoRef.current?.fps ?? 30)
     const existing = displayMarkersRef.current.list.find(d => Math.abs(d.marker.time - t) <= eps)
-    if (existing) { setMarkerPopupId(existing.marker.id); return }
+    // Either way the marker at the playhead becomes the focused one, so
+    // Enter acts on it rather than on a previously clicked marker.
+    if (existing) { focusMarkerButton(existing.marker.id); setMarkerPopupId(existing.marker.id); return }
     const now = Date.now()
-    applyMarkers([...markersRef.current, { id: `marker-${uuidv4()}`, time: t, createdAt: now, updatedAt: now }])
-  }, [applyMarkers])
+    const id = `marker-${uuidv4()}`
+    pendingFocusMarkerIdRef.current = id
+    applyMarkers([...markersRef.current, { id, time: t, createdAt: now, updatedAt: now }])
+  }, [applyMarkers, focusMarkerButton])
 
   // Edit-popup mutations, addressed by DISPLAY id. Editing a raw chapter
   // creates its SM override (chapterOf = the chapter's original start) and
@@ -5966,7 +5998,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                     // the wrapper a 24px line-height strut and let the
                     // triangle settle fully inside the strip.
                     return (
-                      <div key={m.id} className="absolute -translate-x-1/2 pointer-events-auto flex" style={{ left: `${pct}%`, top: '-7px' }}>
+                      <div key={m.id} data-marker-id={m.id} className="absolute -translate-x-1/2 pointer-events-auto flex" style={{ left: `${pct}%`, top: '-7px' }}>
                         <Tooltip content={kind === 'chapter' ? `${tip} (from file)` : tip} triggerClassName="block">
                           <button
                             type="button"
