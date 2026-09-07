@@ -457,6 +457,7 @@
 - **APP-24** [cleanup]
   Go over the style guide to look for any inconsistencies, conflicts, or out-of-date or no longer relevant rules.
   2026-09-06: was the last v2.6.0 ride-along but the release froze before it started. Decided: first item of the next release cycle (queue it at position 1 when the queue is cleared after the v2.6.0 promotion).
+  Companion: APP-27 (Tooltip trigger default flip) retires the Tooltip line-box rule added 2026-09-07; if it ships in the same cycle, trim that rule to a one-line history note during this audit.
 
 - **APP-26** [ui]
   Let the Help modal pop out into its own window (2026-09-06). The modal is the default, but a modal covering the exact UI the user is trying to understand defeats the purpose: add a button (footer candidate) that breaks the Help content out into a separate window the user can place beside the app. No state passes between Help and the rest of the app, so the content is fully self-contained. Implementation notes: the player's pop-out video window is the precedent (own BrowserWindow + dedicated preload, see out/preload/popup.js); the pop-out should preserve the section the user was reading, remember its size/position, and reopening Help while the window is open should focus the window instead of showing the modal. Close buttons follow the style guide's same-slot rule.
@@ -472,6 +473,10 @@
   - an honest in-app error when recovery is impossible, never a raw startup crash
   First task: confirm what actually happens today when getStore() throws at startup. If that is an unhandled crash, fixing it is the highest-value part of the work: it is the difference between "the app healed itself" and "the app is bricked with no explanation".
   Coordination: when this lands, PRINCIPLES.md's crash-safe entry drops its caveat that backups are specific to library metadata, and its "what would break it" line updates in the same commit (tell the website instance).
+
+- **APP-27** [cleanup] [ui]
+  Flip the Tooltip trigger's default display so a Tooltip never introduces a line box on its own (filed 2026-09-07 after the third sighting of the same bug: the old crop dropdown, the marker triangles, and the Split Segment button all rendered taller than their siblings because the inline-flex trigger sat on a line box inside a block parent and inherited its line-height strut). The style guide's Tooltip section carries the rule for now; this item retires it.
+  Plan: change the default trigger class from inline-flex to flex, then sweep every Tooltip that passes no triggerClassName (about 325 of roughly 440 usages at filing time) and pass inline-flex explicitly at the genuinely inline sites: chips and words inside prose (Help modal, merge-field chips, template previews), the truncated-text wrapper, icon-beside-text spans. Most of the rest are buttons that are already flex items, where the flip is a no-op. Verification is visual: a pass through every page and modal at 100% and a zoomed UI level, watching for anything that broke onto its own line or moved vertically. Not freeze material; pairs with APP-24 at the top of the next cycle.
 
 ### Onboarding & Setup
 

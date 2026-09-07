@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Check, ChevronRight, Copy, ExternalLink, Loader2, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { Check, ChevronRight, Copy, Ellipsis, ExternalLink, Loader2, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { Youtube } from './ui/BrandIcons'
 import { Button } from './ui/Button'
 import { FileDropZone } from './ui/FileDropZone'
@@ -230,6 +230,18 @@ function saveProgress(done: Set<string>): void {
 
 const STEP_KEYS = [...CONSOLE_STEPS.map(s => s.key), 'import', 'connect']
 
+/** Console steps a working connection PROVES: Google's OAuth flow plus the
+ *  channel probe cannot succeed without a project, the Data API enabled, a
+ *  consent screen, and a credential. Inferring these from `connected` is
+ *  truthful, so users who connected before the wizard existed don't see
+ *  six unchecked steps. */
+const PROVEN_BY_CONNECTION = new Set(['project', 'api', 'consent', 'credentials'])
+/** Console steps a connection does NOT prove: the two links and publishing
+ *  only matter for leaving Testing mode, and a Testing-mode app connects
+ *  fine and then expires after 7 days (the trap the wizard exists to
+ *  prevent). Never inferred; they get the ellipsis treatment instead. */
+const UNVERIFIABLE = new Set(['branding', 'publish'])
+
 export function YouTubeSetupWizard({
   isOpen, onClose, clientId, clientSecret, connected, onCredentials, onConnect,
 }: {
@@ -302,15 +314,24 @@ export function YouTubeSetupWizard({
     return null
   }, [clientId, clientSecret])
 
-  // The two in-app steps also complete from OUTSIDE the wizard: credentials
-  // typed into the Integrations fields satisfy 'import', and an existing
-  // connection satisfies 'connect' — the checklist reflects reality, not
-  // just clicks made inside it.
+  // Steps also complete from OUTSIDE the wizard: credentials typed into the
+  // Integrations fields satisfy 'import', an existing connection satisfies
+  // 'connect' and the console steps it proves (PROVEN_BY_CONNECTION) — the
+  // checklist reflects reality, not just clicks made inside it. The two
+  // UNVERIFIABLE steps only ever complete by the user's own confirmation.
   const isStepDone = (key: string): boolean => {
     if (key === 'import') return done.has('import') || (credsPresent && !manualIssue)
     if (key === 'connect') return done.has('connect') || connected
+    if (connected && PROVEN_BY_CONNECTION.has(key)) return true
     return done.has(key)
   }
+  // "Unverified": an UNVERIFIABLE step the user hasn't confirmed while every
+  // step SM can vouch for is done. Shown with an ellipsis instead of a
+  // number or check, meaning "SM can't see this one; confirm it yourself".
+  // Only meaningful once everything else is green: mid-setup it is just an
+  // ordinary upcoming step.
+  const provableStepsDone = STEP_KEYS.filter(k => !UNVERIFIABLE.has(k)).every(isStepDone)
+  const isStepUnverified = (key: string): boolean => UNVERIFIABLE.has(key) && !done.has(key) && provableStepsDone
   const effectiveActive = activeKey ?? STEP_KEYS.find(k => !isStepDone(k)) ?? 'connect'
 
   // ── Connect + end-to-end probe ─────────────────────────────────────────────
@@ -336,20 +357,33 @@ export function YouTubeSetupWizard({
   // ── Step chrome ────────────────────────────────────────────────────────────
   const stepHeader = (key: string, index: number, title: string) => {
     const isDone = isStepDone(key)
+    const isUnverified = isStepUnverified(key)
     const isActive = effectiveActive === key
-    return (
+    const header = (
       <button
         onClick={() => setActiveKey(key)}
         className={`flex items-center gap-2.5 w-full text-left py-1.5 transition-colors ${isActive ? 'text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
       >
         <span className={`w-5 h-5 rounded-full border flex items-center justify-center text-[10px] tabular-nums shrink-0 transition-colors ${
-          isDone ? 'bg-green-600/25 border-green-500/50 text-green-300' : isActive ? 'border-accent-400 text-accent-300' : 'border-white/20 text-gray-400'
+          isDone ? 'bg-green-600/25 border-green-500/50 text-green-300'
+            : isUnverified ? 'bg-amber-600/15 border-amber-500/50 text-amber-300'
+            : isActive ? 'border-accent-400 text-accent-300' : 'border-white/20 text-gray-400'
         }`}>
-          {isDone ? <Check size={11} strokeWidth={3} /> : index + 1}
+          {isDone ? <Check size={11} strokeWidth={3} /> : isUnverified ? <Ellipsis size={12} strokeWidth={2.5} /> : index + 1}
         </span>
         <span className="text-sm flex-1">{title}</span>
         <ChevronRight size={13} className={`shrink-0 transition-transform ${isActive ? 'rotate-90 text-gray-300' : 'text-gray-500'}`} />
       </button>
+    )
+    if (!isUnverified) return header
+    // Tooltip only in the unverified state (the plain header explains
+    // itself). flex trigger: the header is a block-level row, and the
+    // default inline-flex trigger would add a line-box strut (style guide,
+    // Tooltip line-box gotcha).
+    return (
+      <Tooltip content="SM can't check this step on Google's side. Open it and click Done if it's already taken care of." side="top" triggerClassName="flex w-full">
+        {header}
+      </Tooltip>
     )
   }
 
@@ -380,6 +414,16 @@ export function YouTubeSetupWizard({
               <div className="pl-[30px] pb-3 flex flex-col gap-2.5">
                 {/* div, not p — step bodies hold their own paragraphs/lists */}
                 <div className="text-xs text-gray-400 leading-relaxed flex flex-col gap-1.5">{step.body}</div>
+                {isStepUnverified(step.key) && (
+                  <p className="text-xs text-amber-300/90 leading-relaxed flex items-start gap-1.5">
+                    <Ellipsis size={13} className="shrink-0 mt-0.5" />
+                    <span>
+                      You&rsquo;re connected, but SM can&rsquo;t see whether this step is done on Google&rsquo;s side.
+                      If it is, click Done to confirm. If you&rsquo;re not sure, follow the step: an app left
+                      in Testing mode disconnects every 7 days.
+                    </span>
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <Tooltip content="Opens in your browser">
                     <Button size="sm" variant="secondary" icon={<ExternalLink size={12} />} onClick={() => window.api.openUrl(step.url)}>

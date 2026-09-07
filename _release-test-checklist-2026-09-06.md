@@ -32,16 +32,16 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [x] Multi-track + clip mode: hovering a track row lifts it out of the out-of-region dimming; bleeps on top of rows stay clickable.
 - [x] Clip mode: the playhead line stays full-brightness inside the dimmed out-of-region areas and over bleeps; it still passes under region pills/handle popups, and dragging it works as before. (Sweep fix 2026-09-07.)
 - [x] Scrub the playhead quickly back and forth through an unselected region: its timecode pill does not flash during the drag; after release, hovering the region shows the pill normally and a selected region keeps its pill throughout. (Sweep fix 2026-09-07.)
-- [ ] Crop: toolbar Crop toggle reveals the region with its control panel attached (flips inside near the bottom, pins at container edges, tracks stage zoom/pan without scaling); micro spinners step (Shift = x10); middle-click pans from anywhere including the panel; toggle off/on restores the last aspect.
-- [ ] Timecode inputs: frames segment arrow-steps up AND down everywhere (playhead, marker popup, viewport, duration, handles); Shift = x10 steps the segment under the cursor; playhead readout shows every place value for the video's duration (hours only on 1h+ videos).
-- [ ] Track volume %: Shift+arrows step 10; crosshair cursor on seek surfaces only.
-- [ ] Multi-track on a Hybrid MP4 recording: tracks read "Track 1" through "Track N" (no more Game/Mic/Discord/Music/SFX placeholders); a file WITH embedded track titles (an MKV recording) still shows them. (Sweep fix 2026-09-07.)
+- [x] Crop: toolbar Crop toggle reveals the region with its control panel attached (flips inside near the bottom, pins at container edges, tracks stage zoom/pan without scaling); micro spinners step (Shift = x10); middle-click pans from anywhere including the panel; toggle off/on restores the last aspect.
+- [x] Timecode inputs: frames segment arrow-steps up AND down everywhere (playhead, marker popup, viewport, duration, handles); Shift = x10 steps the segment under the cursor; playhead readout shows every place value for the video's duration (hours only on 1h+ videos).
+- [x] Track volume %: Shift+arrows step 10; crosshair cursor on seek surfaces only.
+- [x] Multi-track on a Hybrid MP4 recording: tracks read "Track 1" through "Track N" (no more Game/Mic/Discord/Music/SFX placeholders); a file WITH embedded track titles (an MKV recording) still shows them. (Sweep fix 2026-09-07.)
 - [ ] Clip toolbar keeps a constant height as the playhead moves in and out of a region (Add Segment / Split Segment swap without a 1px jump). (Sweep fix 2026-09-07, NOT yet in a packaged build: test on the next rebuild.)
 
 ### YouTube setup guide (IDEA-11) & OAuth polish
 
-- [ ] Integrations card: slim intro + "Open the setup guide" button (reads "Set up with the guided walkthrough" when disconnected); old instruction list gone.
-- [ ] Wizard opens with all steps checked for the existing connection; "Progress is saved" sits by the close button; copy buttons in steps 3-4 copy the right URLs.
+- [x] Integrations card: slim intro + "Open the setup guide" button (reads "Set up with the guided walkthrough" when disconnected); old instruction list gone.
+- [ ] Wizard on an existing connection: steps 1, 2, 3, 6, 7, 8 are green (proven by the connection); steps 4 and 5 show an amber ellipsis with a tooltip and an in-step note, since SM can't verify publishing; clicking Done on each turns them green and it persists across reopen. "Progress is saved" sits by the close button; copy buttons in steps 3-4 copy the right URLs. (Sweep fix 2026-09-07: previously only 7 and 8 were checked; NOT yet in a packaged build.)
 - [ ] Connect/reconnect once: Google flow completes against the Desktop-type client, the new callback page shows the styled card (no garbled character), and SM's end-to-end probe reports success in step 8.
 - [ ] Settings max-conversions and relay port step by 1 even with Shift, tooltips without the Shift note.
 
