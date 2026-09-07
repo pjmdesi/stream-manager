@@ -681,12 +681,18 @@ function MarkerEditPopup({
     setTimeInput(formatViewTime(marker.time, fps))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markerId])
+  // Outside-click close listens in the CAPTURE phase: the timeline's seek
+  // surfaces route mousedown through startPlayheadDrag, which stops
+  // propagation (React handlers sit at the app root, below document), so a
+  // bubble-phase listener never heard clicks on the strips and the popup
+  // only closed from the controls row or the video. Capture runs before
+  // any target handler, so the popup closes first and the seek proceeds.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) onClose()
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('mousedown', handler, true)
+    return () => document.removeEventListener('mousedown', handler, true)
   }, [onClose])
 
   const commitName = () => {

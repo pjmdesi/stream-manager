@@ -1,6 +1,8 @@
 # Release test checklist — v2.6.0 (2026-09-06)
 
-Build: Stream Manager X.X.X_DEV.exe from dev @ <fill hash after final build>
+Build: Stream Manager 2.5.0_DEV.exe from dev @ c806c17 plus the marker-popup close fix (rebuilt 2026-09-07 before that fix was committed; replace with the fix's commit hash once it lands). Previous build @ c806c17 ran the 2026-09-06 stream night clean.
+
+FROZEN 2026-09-06: no further feature work on dev for this release. Code changes from here are limited to bugs and other fixes found during this sweep; each one gets a fresh build and an updated hash above.
 
 Batch: the completions release (finishing touches on features) plus the marker system, the YouTube setup guide, and encryption at rest. All checks run against the PACKAGED build, not the dev server. Several player/marker checks pair naturally with a real stream night (OBS chapter hotkey on a Hybrid MP4 recording).
 
@@ -8,9 +10,10 @@ Batch: the completions release (finishing touches on features) plus the marker s
 
 ### Player markers (IDEA-4)
 
-- [ ] Open a Hybrid MP4 recording with hotkey chapters: triangles appear at the right times (Start at 0:00), hover shows name + timecode with "(from file)".
+- [x] Open a Hybrid MP4 recording with hotkey chapters: triangles appear at the right times (Start at 0:00), hover shows name + timecode with "(from file)".
 - [ ] M drops a marker at the playhead (default gray); M again on the same spot opens its popup instead of duplicating; the bookmark button next to the playhead timecode does the same.
 - [ ] Single click seeks to the marker; double click opens the edit popup: recolor, rename, move via timecode (arrows step, Shift = x10); popup clamps inside the timeline at the first/last markers.
+- [ ] Popup closes on any click outside it, including the timeline strips (the click still places the playhead); Escape closes it too. (Fix found during the sweep 2026-09-07: seek surfaces stopped propagation, so only clicks on the controls row or video used to close it.)
 - [ ] Edit a file chapter: reopening the file shows the edit persisted and the popup offers Reset (back to the file's version); an M-added marker offers Delete instead.
 - [ ] Markers survive closing/reopening the file and the app; the video file's own bytes are untouched.
 - [ ] In clip mode zoomed in: markers track the viewport, render above region chrome, and stay clickable; marker layer never pokes through a modal backdrop (open the delete-draft confirm with markers visible).
@@ -77,12 +80,13 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [ ] STR-10: ineligible image can't be set as thumbnail; existing ineligible primary warns inline on the YouTube thumbnail row.
 - [ ] PLR-1: multi-track Setup tips button opens Help to the new OBS setup section.
 - [ ] PLR-5: retest clicking near the playhead's auto-scroll margin (may already be fixed by the scrub rework); fix if it survives.
-- [ ] APP-24: style-guide audit (doc-only, no runtime check).
+
+Not in this release: APP-24 (style-guide audit) deferred to lead the next cycle; STR-17 (row thumbnail resampling) shipped and reverted the same day (blank thumbnail column on startup), stays open with notes.
 
 ## Core regression (every release)
 
-- [ ] Relay: full lifecycle on a real or test stream — bind → ingest → live → complete; post-stream Twitch auto-update fires (60s delay)
-- [ ] Watcher/auto-rules: drop a recording into the watch folder → lands in the right stream item
+- [x] Relay: full lifecycle on a real or test stream — bind → ingest → live → complete; post-stream Twitch auto-update fires (60s delay)
+- [x] Watcher/auto-rules: drop a recording into the watch folder → lands in the right stream item
 - [ ] New stream + New episode: correct season/episode, templates render
 - [ ] YouTube: push + pull a stream's details; thumbnail push; out-of-sync panel clean afterward
 - [ ] Converter: one job start→finish; pause/resume; output plays
