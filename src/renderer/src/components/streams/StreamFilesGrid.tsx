@@ -483,7 +483,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
         <TaggedThumb
           thumb={
             <div
-              className={`group/thumb relative w-[104px] h-[58px] overflow-hidden cursor-pointer ${isPreferred || isSm ? 'rounded-t-md' : 'rounded-md group-hover/file:rounded-b-none'}`}
+              className={`group/thumb relative w-[104px] h-[58px] overflow-hidden cursor-pointer ${isPreferred || isSm ? 'rounded-t-md' : eligibleForThumbnail ? 'rounded-md group-hover/file:rounded-b-none' : 'rounded-md'}`}
               style={CHECKER}
               // Modifier-clicks bubble to the card's select-mode entry
               // instead of opening the lightbox.
