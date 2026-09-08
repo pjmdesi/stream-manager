@@ -369,6 +369,7 @@
 
 - **APP-1** [big]
   Electron 34 → 43 bump (34 is EOL since 2026-06-24 — security motivation, not just features). Gains: Chromium 150 (native alpha color picker → enable the alpha attribute in ColorAlphaField), Node 24. Audit items: dialog defaultPath behavior changed in 43 (pickers now default to Downloads); confirm electron-vite/electron-builder version compat; full shakedown (watcher, relay, converter, thumbnail editor, PowerShell/cfapi paths). No SM-used APIs are removed in 35–44 per the breaking-changes doc (clipboard use is web-API only).
+  If electron-builder gets bumped alongside: re-verify the portable second-launch behavior (checklist item from the v2.6.0 sweep, 2026-09-08). `portable.unpackDirName: true` relies on NsisTarget skipping the UNPACK_DIR_NAME define for `true` (and, counter-intuitively, still generating a fixed per-build id for `false`, electron-builder issue 5764); a builder release that "fixes" that inversion would silently bring back the shared folder. The test: run the exe twice, then confirm the first instance still opens videos and that Temp holds a per-process ns*.tmp\app folder rather than a fixed-name one.
 
 - **APP-2**
   Add proper logging for the YouTube, Twitch, and Claude API calls. These will be log files located in the config directory in a logs folder. The logs should record every interaction with the APIs, including the request and response data, timestamps, and any errors that occur. Not sure what the best timeframe is for log rotation, perhaps monthly? We don't need to expose these in the UI, it's purely for advanced troubleshooting.
@@ -483,6 +484,10 @@
 
 - **APP-29** [ui]
   Dropdown input elements have padding that doesn't match the padding that other inputs have, they need to be updated app-wide to match the others like number inputs and text inputs.
+
+- **APP-30** [cleanup]
+  Startup sweep for orphaned portable-launcher folders in Temp. Background (2026-09-08): the portable exe unpacks itself into Temp on every launch, and until the v2.6.0 sweep every launch of the same build shared ONE fixed folder, so a second launch (double-clicking the exe while SM sat in the tray) deleted the running instance's files out from under it (ffprobe went missing mid-session; the symptom was "video:probe ... ENOENT"). Fixed by `portable.unpackDirName: true` in the build config, which gives each launch a private per-process folder ($PLUGINSDIR\app) that its own launcher removes on exit.
+  The trade-off that motivates this item: after a HARD kill (power loss, or the small launcher process itself being killed rather than the app), a private folder is orphaned, and unlike the old fixed name it is never reclaimed by the next launch; it sits in Temp (about 190 MB each) until Windows' temp cleanup takes it. Rare, and Storage Sense handles it for most users, but SM can be tidier: on startup, look for sibling launcher folders in Temp that hold a Stream Manager layout (resources/app.asar plus the SM exe) and are not backed by a live process, and delete them. Must be conservative: never touch the CURRENT extraction (compare against process.resourcesPath), never delete a folder whose exe is running (another build may legitimately run alongside, e.g. a _DEV build next to a release build), and log what was removed. Packaged portable builds only (PORTABLE_EXECUTABLE_FILE set).
 
 ### Onboarding & Setup
 

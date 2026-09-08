@@ -43,6 +43,7 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - The About window lists the open source libraries the app is built with, each linking to its project page.
 
 - Start Minimized gained a sub-option: hide to tray only when Windows launched the app at startup, so manual launches open the window normally.
+- Launching the exe while Stream Manager is already running no longer damages the running copy. The portable exe unpacks itself into a temporary folder on launch, and every launch of the same version used to share one folder, so a second launch (for example double-clicking the exe while SM sat in the tray) deleted files the running copy still needed, which surfaced later as odd errors like a missing ffprobe. Each launch now gets its own private folder, cleaned up when that copy exits.
 
 ## Thumbnail editor
 
