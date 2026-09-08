@@ -36,6 +36,86 @@ if (branch === 'HEAD' && process.env.GITHUB_REF_TYPE === 'branch' && process.env
 
 const isDevBuild = !isTagBuild && branch !== '' && branch !== 'master'
 
+// ── Portable launcher pre-check (APP-32) ──────────────────────────────────
+// electron-builder's portable target reads its NSIS launcher script from a
+// fixed template inside app-builder-lib and ignores the `script`/`include`
+// options, so the only way to change the launcher is to patch that template
+// before electron-builder runs. Why: the stock launcher deletes and
+// re-extracts the whole unpack folder on EVERY launch and deletes it again
+// when its app instance exits. The unpack folder is fixed per build, so a
+// second launch while SM is already running (double-clicking the exe with
+// SM in the tray) spent ~10 s re-extracting, hit the single-instance lock,
+// exited, and its launcher then deleted the running instance's unlocked
+// files (ffprobe went missing mid-session). The injected block runs before
+// the launcher's first delete: if this build's unpacked exe is already
+// running (a running executable refuses a write-mode open), hand the launch
+// to it (its single-instance lock focuses the primary window, measured at
+// 0.09 s) and quit the launcher before it touches the folder.
+// Idempotent (marker comment). Fails the build loudly if the anchor lines
+// are missing, so an app-builder-lib bump that reshapes the template is
+// noticed instead of silently shipping an unpatched launcher. CI runs this
+// too: `npm ci` restores the pristine template and this re-patches it.
+// A local node_modules stays patched between builds, which is harmless.
+function patchPortableLauncher() {
+  const templatePath = path.join(__dirname, '..', 'node_modules', 'app-builder-lib', 'templates', 'nsis', 'portable.nsi')
+  const marker = '; --- stream-manager launcher pre-check (APP-32) ---'
+  let src
+  try {
+    src = fs.readFileSync(templatePath, 'utf8')
+  } catch (err) {
+    console.error(`[dist] cannot read the portable launcher template at ${templatePath}: ${err.message}`)
+    process.exit(1)
+  }
+  const endMarker = '; --- end stream-manager launcher pre-check ---'
+  const eol = src.includes('\r\n') ? '\r\n' : '\n'
+  if (src.includes(marker)) {
+    // Already patched (local node_modules persists between builds): strip
+    // the old block so the version in THIS script is what ships, then
+    // re-inject below.
+    const start = src.indexOf(marker)
+    const lineStart = src.lastIndexOf(eol, start) + eol.length
+    const endIdx = src.indexOf(endMarker, start)
+    if (endIdx < 0) {
+      console.error('[dist] portable launcher template has a pre-check start marker but no end marker; restore node_modules/app-builder-lib/templates/nsis/portable.nsi (npm ci) and rebuild.')
+      process.exit(1)
+    }
+    const lineEnd = src.indexOf(eol, endIdx) + eol.length
+    src = src.slice(0, lineStart) + src.slice(lineEnd)
+  }
+  const anchor = new RegExp(`^([ \\t]*)RMDir /r \\$INSTDIR\\r?\\n[ \\t]*SetOutPath \\$INSTDIR\\r?\\n`, 'm')
+  const m = anchor.exec(src)
+  if (!m) {
+    console.error('[dist] portable launcher template changed: the "RMDir /r $INSTDIR" / "SetOutPath $INSTDIR" anchor was not found. Review node_modules/app-builder-lib/templates/nsis/portable.nsi and update patchPortableLauncher() in scripts/dist.cjs (APP-32) before building.')
+    process.exit(1)
+  }
+  const indent = m[1]
+  const block = [
+    `${indent}${marker}`,
+    `${indent}; If this build's unpacked exe is already running, hand the launch to it`,
+    `${indent}; (its single-instance lock focuses the primary window) and quit before`,
+    `${indent}; touching the shared unpack folder: no re-extract, no delete-on-exit.`,
+    `${indent}; A running executable refuses a write-mode open (sharing violation).`,
+    `${indent}IfFileExists "$INSTDIR\\\${APP_EXECUTABLE_FILENAME}" 0 sm_not_running`,
+    `${indent}ClearErrors`,
+    `${indent}FileOpen $1 "$INSTDIR\\\${APP_EXECUTABLE_FILENAME}" a`,
+    `${indent}IfErrors sm_running`,
+    `${indent}FileClose $1`,
+    `${indent}Goto sm_not_running`,
+    `sm_running:`,
+    `${indent}\${StdUtils.GetAllParameters} $R0 0`,
+    `${indent}Exec '"$INSTDIR\\\${APP_EXECUTABLE_FILENAME}" $R0'`,
+    `${indent}SetErrorLevel 0`,
+    `${indent}Quit`,
+    `sm_not_running:`,
+    `${indent}${endMarker}`,
+    '',
+  ].join(eol)
+  const patched = src.slice(0, m.index) + block + src.slice(m.index)
+  fs.writeFileSync(templatePath, patched)
+  console.log('[dist] portable launcher pre-check injected into app-builder-lib portable.nsi')
+}
+patchPortableLauncher()
+
 let cmd = 'npx electron-builder'
 if (isDevBuild) {
   console.log(`[dist] building from branch "${branch}" - _DEV artifact name + dev icon`)

@@ -43,7 +43,7 @@ Target: TBD · emptied 2026-09-01 after the v2.5.0 release.
 - The About window lists the open source libraries the app is built with, each linking to its project page.
 
 - Start Minimized gained a sub-option: hide to tray only when Windows launched the app at startup, so manual launches open the window normally.
-- Launching the exe while Stream Manager is already running now just brings the running window forward. The second copy used to get far enough through startup to flash its own window, add a second tray icon and start the stream relay (which re-asked for firewall permission) before shutting itself down.
+- Launching the exe while Stream Manager is already running now just brings the running window forward, within about a second. It used to spend around ten seconds unpacking a second copy, which then flashed its own window, added a second tray icon and started the stream relay (re-asking for firewall permission) before shutting itself down. Worse, on its way out that second copy removed files the running app still needed, so features like video previews could stop working later in the session with an odd error. The launcher now checks for a running copy before it unpacks anything.
 
 ## Thumbnail editor
 
