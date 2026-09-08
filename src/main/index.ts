@@ -301,7 +301,15 @@ function createWindow(): BrowserWindow {
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
-  app.quit()
+  // Hard exit, not app.quit(): quit is asynchronous and the module keeps
+  // executing, so the redundant instance reached the ready handler and
+  // briefly became a full second app (its own window with the open
+  // animation, a second tray icon, the relay spawning ffmpeg and
+  // re-triggering the firewall prompt) before the quit landed. The
+  // primary has already been notified (second-instance fires inside
+  // requestSingleInstanceLock), so there is nothing left to do here.
+  // Found during the v2.6.0 sweep, 2026-09-08.
+  app.exit(0)
 }
 
 app.on('second-instance', () => {
@@ -419,6 +427,10 @@ process.on('unhandledRejection', (reason) => {
 })
 
 app.whenReady().then(() => {
+  // Belt and braces for the single-instance exit above: should the hard
+  // exit ever be deferred past ready, the redundant instance must still
+  // never build a window, tray or relay.
+  if (!gotLock) return
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

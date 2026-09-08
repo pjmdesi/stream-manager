@@ -34,9 +34,6 @@
                 }
             ]
         },
-        "portable": {
-            "unpackDirName": true
-        },
         "mac": {
             "icon": "resources/icon.png",
             "target": [

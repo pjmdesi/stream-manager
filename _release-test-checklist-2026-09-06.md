@@ -67,7 +67,8 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [x] Colors sanity: Purple tag is true purple, Gray tag is the slate accent, Twitch UI purple, no odd accents anywhere (APP-16 fallout check).
 - [x] About window lists third-party libraries with working links; tagline is the new one.
 - [x] Start Minimized sub-option: with all three toggles on, launching the exe manually opens the window; launching with --from-autostart (or a real reboot) goes to tray; sub-option grays but keeps its checkmark when the parent is off.
-- [ ] Second launch is harmless: with SM running (minimize it to the tray first), double-click the exe again. The existing window comes forward, and afterwards opening a video, generating a waveform and running a conversion all still work (the running instance's unpack folder is intact; check that Temp now holds a per-process ns*.tmp\app folder instead of a fixed-name one, and that it disappears after quitting). (Sweep fix 2026-09-08: a second launch used to delete the shared unpack folder under the running instance.)
+- [ ] Second launch only focuses: with SM running (hidden to the tray), double-click the exe again. The existing window comes forward with NO new-window open animation, no second tray icon, and no ffmpeg firewall prompt (the redundant instance used to run its whole startup before its quit landed). Then quit and relaunch normally: the firewall prompt still appears at most once per build, not per launch. (Sweep fix 2026-09-08.)
+  KNOWN, not fixed in this release (APP-31): the portable launcher deletes the shared unpack folder when the redundant instance exits, so files the running instance has not locked (ffprobe first) go missing afterwards. After a second launch, expect "video:probe ... ENOENT" until SM is quit and relaunched. Workaround: use the tray icon to bring SM back; don't relaunch the exe while it runs.
 
 ### Thumbnail editor (THU-7/11)
 
