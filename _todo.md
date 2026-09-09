@@ -2,31 +2,11 @@
 
 ## Queue
 
-1. APP-16
-2. STR-14
-3. CONV-1
-4. CONV-2
-5. APP-12
-6. APP-17
-7. THU-7
-8. THU-11
-9. PLR-12
-10. PLR-13
-11. PLR-11
-12. PLR-6
-13. APP-22
-14. IDEA-11
-15. APP-23
-16. IDEA-4
-17. APP-3
-18. APP-9
-19. PLR-7
-20. PLR-1
-21. PLR-5
-22. THU-6
-23. LNCH-2
-24. STR-12
-25. STR-10
+1. APP-1
+2. STR-2
+3. STR-3
+4. STR-18
+5. PLR-2
 
 ## Improvement ideas
 
@@ -48,10 +28,10 @@
   Add a new organization element to the files grid. Not sure what to call it... maybe "advanced" or "nested" or "structured". It will show files which are inside of sub folders within the stream item folder grouped inside an accordion element inside the files grid. The accordion will be a narrow full-width row that shows the folder name and a count of the files inside and the cloud/delete action buttons which will affect all items inside the subfolder. When the user clicks on the accordion, it will expand to show all the files inside that folder as normal file items with a wrapper around the group. Folder accordions should start collapsed by default. This will only be used to view the structure that a user may have, and will most likely be used for items that were imported from their library before the use of SM (or for stream item folders that required organization beyond what SM currently offers, for example, a charity stream I did required that I download a bunch of assets from the organizers. The best place to put these were in the stream folder, but I only used a few of them. Currently all these assets show up in the files grid and clutter it up). When the accordion is collapsed, we can skip rendering of these file item elements, their thumbnails, metadata, cloud status, etc. Only when the accordion is opened would we pull that info. We may extend this functionality to allow users to create subfolder directories within SM, but considering the simplicity of SM's functionalities, I'm not sure that will be useful. It would require adding drag-and-drop/cut-and-paste functionality. At that point we're rendering a lot of the automatic "magic" of SM useless, and it would be better to just use a file manager for that. So for now, this will be a read-only view of the subfolder structure within the stream item folder.
 
 - **STR-6**
-  Bulk editing of stream items. For instance, let's say the streamer has finished a game and they want to now add the "{total_episodes}" merge tag to all the stream items in that season. They could select all the items for that season and then have the option to bulk edit the title template for all those items at once. SM would swap the templates for all those streams, update the titles, and then offer to push the changes to YouTube for all those streams at once as well.
+  Bulk editing of stream items. For instance, let's say the streamer has finished a game and they want to now add the "{total_episodes}" merge tag to all the stream items in that season. They could select all the items for that season and then have the option to bulk edit the selected title template for all those items at once. SM would swap the templates for all those streams, update the titles, and then offer to push the changes to YouTube for all those streams at once as well.
 
-- **STR-7**
-  Extend the new-episode thumbnail re-render (shipped for the created episode) to the rest of a series: when a merge field that affects sibling episodes changes (like {total_episodes} growing as episodes are added, or edits to {topic} or {title}), re-render the SM thumbnails of the other affected episodes so they stay accurate too. Considerations:
+- **STR-7** [blocked:STR-6]
+  Extend the new-episode thumbnail re-render (shipped for the created episode) to the rest of a series: when a merge field that affects sibling episodes changes (like {total_episodes} growing as episodes are added, or edits to {topic} or {title}), re-render the SM thumbnails of the other affected episodes so they stay accurate too. This would probably mean bringing a new template system to the text elements in the thumbnail editor with the STR-6 feature as part of it. Considerations:
     a. This can be a lot of processing for large libraries, so it should probably be a settings toggle or an explicit prompt rather than automatic.
     b. Re-rendered thumbnails for episodes already uploaded would also need a bulk thumbnail push to YouTube.
 
@@ -73,20 +53,8 @@
 - **STR-9** [ui]
   Replace the native time picker on the broadcast time field with a custom one that matches the app's design; the native Chromium dropdown clashes with the rest of the UI. Model it on the DatePicker approach: keep the native input for segment typing and arrow-key editing, suppress the built-in dropdown, and render a custom popup (probably hour/minute columns plus AM/PM, honoring the locale's 12/24-hour format). The 2026-08 polish pass already made the native clock indicator read as a button (pointer + hover tint); this item replaces the dropdown it opens.
 
-- **STR-10** [done]
-  Guard the set-as-thumbnail affordance in the files grid so it is only offered for images that meet YouTube's thumbnail requirements (JPG/PNG/GIF/WebP, 2MB max, reasonable aspect and resolution). This matters more now that the per-push thumbnail override picker is gone (2026-08-30): the primary thumbnail is the only image the YouTube push can upload, so an ineligible primary means no thumbnail upload at all. Check whether any filtering already happens (youtubeGetQualifyingThumbnails in the main process was the old picker's filter and could be reused). If a primary ends up ineligible anyway (set before this guard existed, or the file changed on disk), surface an inline warning on the YouTube thumbnail row in the sidebar instead of failing silently.
-
 - **STR-11**
   Add a hover/focus interaction to the inline stream type and topics/games tags in each stream item row on the streams page. This interaction will animate the tags so their width increases to reveal an icon-only button. This button will be a "filter by this tag" action which will allow the user to quickly filter the stream item list based on the tag whose button was clicked. The icon should be a filter icon and the tooltip should read "Filter stream items by this tag". When the list is filtered, this icon will switch to a clear filter button with tooltip reading "Clear this tag from filters." When filters are applied, all tags in stream items which are matched with the filters list will have this button revealed already without needing to hover/focus. That way the user also has an easy way to identify and clear the filters from the using the tag chip elements. The filter status will need to sync with the actual column filter menu. So if the user filters by a tag using the column filters menu, all the tags which match a checked tag field in the menu will reveal the "clear this tag" version of the button.
-
-- **STR-12** [done]
-  Add duplicate buttons to the template and tag items so that they can easily be copied and the user can have a starting point on new items instead of having to manually copy the items or starting from scratch.
-
-- **STR-13** [bug] [ui] [done]
-  Stream tites in the stream item row info column are conditionally rendering spaces as the first character of a new line when wrapping occurs. Seems to happen when the space immediately follows a "|" character. We fixed this for the stream item detail sidebar title, and I thought we had fixed it for these elements as well, but I might be misrememebering.
-
-- **STR-14** [done]
-  For the game category: even with the reminder to edit the game title in the banner after a push to YouTube, I still missed doing this for 3 streams in a row. I think I got used to the banner. I know we can't push this info through SM, but would it be possible to read it? We could see if it has been properly filled, and if not show a persistent (but dismissable) message in the same place as the reminder (it would have to wait a little bit, so it doesn't show immediately).
 
 - **IDEA-1** [needs-design]
   Stream stats surface (location TBD — probably NOT the streams page sidebar; that's high-visibility real estate better used for workflow surfaces). Stream count, total hours streamed, top games/topics per month/year, longest stream, most-streamed game of all time, etc. Could live in its own page, a stats modal accessible from the streams page header, or a small "year in review" type card on the dashboard/launcher page.
@@ -117,9 +85,6 @@
 
 ### Player
 
-- **PLR-1** [done]
-  Add a button in the multi-track audio mode (on the right in the same row as the disable button) which says "Setup tips" with a circle question icon. It would open the help modal to a specific section that explains how to use the multi-track audio mode and how to best set up their OBS/Xsplit/StreamLabs to get the best results (which we also need to create). This would be useful for users who are new to multi-track audio and may not know how to set it up properly. The general advice would be to use track 1 as the full audio mix (the same way they send it to the stream platform), and then use the other tracks for specific audio sources (like game audio, music, microphone, etc.) so that they can be extracted and used in the clips. The help modal would also explain how to use the multi-track audio mode in SM to extract the specific tracks they want to use for their clips.
-
 - **PLR-2** [needs-design]
   Add shortcut options to the remaining default skip buttons. This was skipped at first because I was unsure which ones to use. Alt is obviously available, but what's the correct combination? alt+ ->/<- for 1m and alt+shift+ ->/<- for 10m? Or alt+ctrl+ ->/<- for 1m and alt+shift+ ->/<- for 5m? Or something else? Whatever we choose, the tooltips and animation will need to be updated to include these new shortcuts.
 
@@ -129,15 +94,6 @@
 - **PLR-4**
   Detect empty (silent) audio tracks for the player's multi-track feature, so the track picker can flag tracks with no audio before the user extracts them. My OBS recordings always mux every configured audio channel, but several are use-case-specific channels that usually stay unused, so they exist in the file as full-length encoded silence. ffprobe metadata can't reveal this (a silent track looks identical: same duration, channel count, packets throughout), and sampling a few points won't work either, since a track might carry one brief but important sound (e.g. a single subscribe alert lasting a few seconds in a 4-hour stream) that any partial scan would miss. So detection has to cover the whole track. Two-tier approach: (1) Primary, cheap pre-check, no decode: scan compressed packet sizes across the entire track via `ffprobe -show_entries packet=stream_index,size` (one pass classifies every audio track at once). Encoded digital silence compresses to almost nothing (which is exactly why empty tracks already extract ~3x faster), while real audio, including a one-time loud alert, shows up as a spike in the per-packet sizes. Key: threshold on the MAX (or a high percentile) packet size, NOT the average/total, because a 3-second sound averaged over hours would otherwise be invisible. Caveat: it's a heuristic, defeated by a CBR encoder that pads every frame to a constant size regardless of content, but the observed 3x extraction speedup is direct evidence this OBS encoder doesn't pad, so silence is genuinely lighter in these files. (2) Certainty upgrade, piggybacked on a decode we're already doing: when a track does get extracted, run `volumedetect`/`astats` during that same decode (`max_volume` of about -91 dB / -inf means silence) and overwrite the heuristic verdict in the cache. Cache the per-file+track result mirroring the existing audioCacheManager pattern, surface an "empty / no audio" badge in the multi-track picker so empties can be skipped at a glance, and keep the flag ADVISORY (still allow a manual extract) so a heuristic miss can never hide real audio. Fits next to `probeFile` in `ffmpegService` as a `probeTrackLevels` plus a small cache and IPC, without touching the extraction path.
 
-- **PLR-5** [bug] [done]
-  Clicking on the timeline track within some distance from the edges seems to auto-scroll the track instead of placing the playhead. It seems to be whenever the click happens within the auto-scroll margin of the playhead. This needs to be fixed.
-
-- **PLR-6** [done]
-  We need to make it so that if the user left clicks on the timeline track and holds down and drags, it should place then scrub the playhead. Currently, if the user clicks and drags, it does nothing.
-
-- **PLR-7** [done]
-  Add a keyboard shortcut for toggling the multi-track audio mode (split out of the multi-track tooltip item, which shipped with the 2026-08 UI-polish batch). Candidate: ctrl+shift+m. The button's tooltip gains the shortcut hint when this ships.
-
 - **PLR-8** [investigate]
   Not really a bug, but an item that is working as designed, but may need to be updated. Worth investigating: When the user creates a clip from a video and exports it, the exported clip is now the thing that "holds" the specifics about the clip (like the start and end timecodes, the source video, etc.). This means that if the user deletes the clip, they would not be able to retrieve that clip from the source video again, because SM no longer has a record of that clip. This is working as designed, but it may be worth considering if this is the best approach. Maybe we should keep a record of the clips that have been created from a source video, so that if the user deletes a clip video file, they can still recreate it from the source video. This would require some changes to how clips are stored and managed in SM, but it may be worth considering for the user experience.
 
@@ -146,25 +102,6 @@
 
 - **PLR-10**
   Currently, the crop tool in the clipping mode has no undo functionality. The user should be able to move/resize the crop region and then undo/redo it. The only option right now is to reset it with th ebutton in the toolbar.
-
-- **IDEA-4** [differentiator] [done]
-  Player timeline markers, phase 1 — SHIPPED in the v2.6.0 cycle. DaVinci-style markers on the player timeline: M or the transport button drops one at the playhead, single click seeks, double click opens the edit popup (shared tag palette color, name, exact timecode). Chapters embedded in video files merge in at display time (the OBS Hybrid MP4 hotkey synergy, verified on real recordings); editing a file chapter stores an override in the stream's metadata, and video files are never written. Out-of-range file chapters are dropped with an honest note. Markers live in StreamMeta.videoMarkers beside the file. Verified at build time that Lossless Copy remuxes preserve embedded chapters.
-  The remaining phases from the original idea are split out so this item can close: PLR-16 (the {markers} merge field, blocked on IDEA-12) and PLR-17 (carry-through: user-prompted bake, converter bake-in, combine merge).
-
-- **PLR-11** [done]
-  Clip region interaction refinement:
-  - Currently, clicking and dragging inside a clip region will drag that clip region. Since that is a lesser-used interaction (it's more common to drag the end handles), let's move that interaction to the [start timecode] -> [end timecode] label popup that appears above the clip region when that region is selected. Clicking and dragging that element will be what drags the whole region. Currently, that element has no interaction, so it is a good place for it. That will leave the actual area inside the clip region accessible to place the playhead marker (which is unavailable right now. To get the playhead marker inside a clip region, one must click outside a clip region and drag it inside, manually edit the playhead timecode, or use keyboard shortcuts. This change allows the obvious and most comming click-to-place interaciton to be available inside clip regions). We can add some drag handle icons to either side of the timecode text to make it clear.
-  - Additional to this change: the [start timecode] -> [end timecode] label popup should appear on clip region hover now instead of it having to be selected (and moving the cursor up to that label should keep it opened, allowing for selection and drag). Selecting a clip region should still allow it to stay opened until clicked off of (clicked somewhere else in the timeline or on another clip region).
-  - Lastly, the method to deselect a clip region is a bit awkward. One must click on the timeline track, but not on the part where the thumbnails are. Only clicking on the timeline audio waveform part will deselect the clip region (any audio waveform in multi-track mode). We just need to extend this functionality to include the thumbnails track, so it's not confusing why clicking away from a clip region does not deselect it.
-
-- **PLR-12** [bug] [done]
-  There seems to be a bug in the timecode inputs on the player page. I happened to land the playhead on 1:45:32:30. When I clicked on the playhead timecode input and tried to increase the timecode on the frame vaule with the arrow keys, the up arrow didn't work. I could increment down to 29, 28, etc. And I could increment *back* up, but it would stop working again at 30. I was able to replicate this in the new marker popup timecode input as well, same position (same timecode value), could iterate down on the frames value with arrow keys, but not up past 30. All the other values seem to work still. This was the initial discovery. I then clicked the playhead around and discovered that the frames value gets stuck pretty much anywhere. one can only increment the frames value down.
-
-- **PLR-13** [done]
-  Some design/layout refinements for the player page:
-  - When in clipping mode, we should show a stop clipping button in the place of the start clipping button in the sidebar to close clipping mode, that way the user can look back to where they were to turn it on instead of having to find the stop clipping button in case this is their first time and they don't know where it is. We can then remove the stop clipping button from the clip mode toolbar. This should be a new rule in the style guide: "Close buttons should be location in the same place (or as near as possble) as their respective open buttons."
-  - Let's move the "enable multi-track audio" and its disable button to the sidebar. The disable button should then be styled more like a close button (red, button size/style). The text for each should then change to open/close instead of enable/disable. That way it is more of a mode toggle like the clipping mode is. It should go right above the clipping mode button.
-  - If possible, for the clip region start/end markers, if possible, the glow should only show on the outside of the markers, so it's not glowing inside the region. So for the start marker, the glow would only show on the left (and maybe top/bottom), and for the end marker, it would be on the right.
 
 - **PLR-15** [maybe]
   Zoom and pan inside the pop-out video window (scroll wheel to zoom at the cursor, drag to pan), so a streamer can zoom in on something they want to show on stream directly in the capture window. Context (2026-09-06): the MAIN stage already has wheel zoom + middle-drag pan, but the crop controls moved onto the stage and are hidden while the video is popped out, so the popup itself is the right home for "zoom in on this for the viewers". The popup is its own BrowserWindow, so it needs its own input handling rather than reusing the stage's.
@@ -220,17 +157,6 @@
 - **THU-5**
   Layer locking. A lock toggle on layer rows (and maybe the canvas context menu) that makes a layer immovable/unselectable on the canvas — for anchor elements that live in the same spot in every thumbnail and must never be nudged (e.g. a standing logo/frame). Locked layers still render normally and stay editable from the layers panel (unlock to move). Needs: lock state persisted in the canvas JSON, canvas hit-testing disabled while locked (listening off), Transformer refuses to attach, and a subtle lock icon on the layer row. Decide whether locked layers should still hover-highlight (probably yes — knowing what a thing is matters even when you can't move it).
 
-- **THU-6** [ui] [done]
-  Add a subtle text link below the font family dropdown in the properties panel for text layers which will show the last used font family in the thumbnail editor. This will allow the user to easily pick the last used font family without having to scroll through the list of fonts. The link should say "Last used: [font family]" and when clicked, it will set the font family of the selected text layer to the last used font family. The last used font family should be stored in the app's settings so that it persists across sessions. If the user uses the dropdown and picks any font family, the link will hide and that font will then be the last used font family.
-
-- **THU-7** [done]
-  Multi-stop gradients (3+ stops): extends the 2-stop gradient shipped 2026-08-01. Most of the groundwork already generalizes: `gradientStops` is an array, `buildKonvaColorStops` (lib/gradient.ts) samples every consecutive pair, `cssGradientPreview` maps all stops, and the preview bar's SVG arrow track derives its height from `stops.length`. What's missing is purely the editing UI in `GradientFillControl`:
-    a. An add-stop affordance. Clicking the preview bar is the natural one; the click's Y gives the new stop's position directly.
-    b. A per-row remove button (floor of 2 stops).
-    c. A sensible color for a new stop: sample the existing gradient at that position (`mixOklch` already does exactly this, it just isn't exported).
-    d. Bundle with drag-the-marker-directly-on-the-bar: typing coordinates is the weak part of the current editor, and direct manipulation is what makes 3+ stops actually pleasant.
-    Design decision to keep: rows stay in ARRAY order and don't re-sort live as positions change (re-sorting makes rows jump under the cursor mid-edit); the arrows already point at true positions regardless of row order, and both the renderer and the CSS preview sort internally. Note the SVG track's ROW/GAP constants (24px / 6px) are tied to the color-row height; update them together if the row styling changes.
-
 - **THU-8**
   Gradient strokes for shapes & text: noticed right after the 2026-08-01 gradient-swatch freeze; scoped out only because the shipped gradient feature was specced as gradient *fills*. No engine blocker: `strokeLinearGradientStartPoint`/`EndPoint`/`ColorStops` live on Konva's `Shape` base class (Text included), and the existing pipeline is direction-agnostic; `buildKonvaColorStops` (oklch pre-sampling) and `gradientLinePoints` (angle geometry) drive a stroke identically to a fill. Work needed:
     a. Parallel layer fields (`strokeType`, `strokeGradientStops`, `strokeGradientAngle`, `strokeGradientColorSpace`).
@@ -247,9 +173,6 @@
 - **THU-10** [ui]
   Allow swatches from the recent list to be dragged into the saved palette list. When the user drags, they should be able to drop the swatch in between any two existing swatches in the palette list, and the new swatch should be inserted at that position. The palette list should update immediately to reflect the new order of swatches. It should be removed from the recents list just as clicking the swatch to add does today.
 
-- **THU-11** [done]
-  Add a "hard" option to the gradients in the thumbnail editor. This would allow the user to create a gradient where the colors hard transition from one to the next instead of blending together. This is a common way to do certain effects an easier way than having to create multiple objects, especially for text. We'll only have the 2 modes for now: "soft" (the current mode) and "hard".
-
 - **THU-12** [ui]
   Add stroke corner options to all stroke fields that can support them. It should be easy to add as a radio style button group in the properties panel for the layer as a combined input like the color field input groups. We should use icons to represent the different corner options (miter, round, bevel). And if possible, a radio style group that controls the stroke alignment (inside, center, outside) should be added as well.
 
@@ -263,13 +186,6 @@
   Might not be worth the trouble, but when the UI of the whole app has been zoomed in, the thumbnail canvas seems to render at a lower quality. My guess is that it's rendering at the pixel level and then th UI is scaling up what it rasterizes.
 
 ### Converter
-
-- **CONV-1** [investigate] [done]
-  Not explicitly a converter item... When the user sends a file to the converter via the archive path, the conversions start immediately (this is fine), however if files were not hydrated beforehand, they begin to hydrate (also fine). The issue is the only feedback the user has for this is the "waiting on download" message in the converter nav item extra details section (and the actual rows on the converter page). This is probably enough for most users, but I'm wondering if it would be more consistent to make sure the cloud sync widget also shows for these items. Since that is the way SM tells the user that it triggered cloud-based actions for SM-related files.
-  2026-09-04 scope addition, from CONV-2 testing: the root cause is that the converter runs its OWN hydration loop (touch the placeholder, poll checkLocalFiles) that the rest of the app never hears about, and two more symptoms share it: (a) converter row thumbnails stay the placeholder graphic forever because the post-hydration VideoThumb fill-in never learns the file became local; (b) the files grid's cloud status for the hydrated file stays stale while the stream is open in the sidebar. Fix direction: route converter-triggered hydration through (or at least announce it to) the same cloud-sync machinery that pin-local uses, so the widget appears, per-file cloud statuses refresh, and thumbnails generate as soon as the file is local, even while the job waits for an encode slot.
-
-- **CONV-2** [bug] [done]
-  I recently ran a bulk archive process on 5 stream items. All the stream recording files started dehydrated and the hydration process ran well. However, as the 4th and 5th items completed hydration, the conversion process for them started. This goes against my SM "Max simultaneous conversions" setting of 3. When items become available in the converter for any reason (new ones added, hydration finishes, etc.), they should not begin the actual conversion process unless a max conversion slot is freed (a running conversion process finishes, is stopped by the user, or errors out) or unless the user manually starts it. After discovering this, I also added stream items one at a time (go to stream item, find recording file, press convert button, press start on the individual item in the queue, item starts converting) and the same issue happened. The converter page is not respecting the max setting. I do see the waiting icon appear briefly, so it may actually be checking, but for some reason it is failing to actually set the conversion items to pending. We need to make the max conversion slot system more robust kind of like what we did with the cloud sync functionality (maybe look into that for reference).
 
 - **CONV-3** [perf] [investigate]
   While conversions are running, the app gets slower and less responsive. Need to investigate to see if there's any way to prevent the conversions from affecting the app. No other apps on my machine seem to run slower while multiple conversions are happening, so it may be something in SM itself that is causing the slowness (maybe a background process that is continuously checking something while conversions run, like maybe the ETA calculations?).
@@ -305,9 +221,6 @@
 
 - **LNCH-1** [needs-design]
   Add the ability for the launcher to track which of the apps in each launch group are still open and allow the user to quit them from the launcher. Need to discuss design. We could also add more options to the launcher group items after this such as 2 boolean options: Close with group (checked by default, unchecked means it won't quit when the user clicks the "Quit Group", for example, an app that the user would like to keep open after streaming), and Allow multiple instances (unchecked by default, checked means the app could be attempted to be launched multiple times when the group or individual launch buttons are clicked. Might need to check if it's possible to know if an app can have multiple instances so there's a smaller chance of conflict. If we can, the checkbox would not appear for those apps).
-
-- **LNCH-2** [done]
-  Add a button in the header of an open launch group to duplicate the group. This would create a new launcher group with the exact same items and icon. The name should also be the same but with " — Copy" appended. Might be worth adding a rule to the style guide to handle duplicates consistently. The only exception I can think of are the thumbnail variants, who get a fixed name regardless of whether it is a duplicate or not.
 
 ### Integrations
 
@@ -378,9 +291,6 @@
   Add proper logging for the YouTube, Twitch, and Claude API calls. These will be log files located in the config directory in a logs folder. The logs should record every interaction with the APIs, including the request and response data, timestamps, and any errors that occur. Not sure what the best timeframe is for log rotation, perhaps monthly? We don't need to expose these in the UI, it's purely for advanced troubleshooting.
   Note (2026-09-03): the logs folder location and rotation live in the shared logging infrastructure, APP-20; this item's files go there like every other SM log.
 
-- **APP-3** [done]
-  CODEBASE change: add linting rules to enforce specific design decisions for this app because Claude sometimes struggles with remembering certain things. Most of the rules should be in the Claude memory files or the style guide. Rules to include: ban raw `<input type="number">` in pages/components — all number fields go through the `NumberInput` component (`ui/Input.tsx`), same shape as the existing `title=` ban. Allowed exceptions live inside `ui/` primitives themselves and the player crop fields (deliberately compact; the 2026-08 number-input sweep already converted everything else).
-
 - **APP-4**
   Add the ability to move and hide menu items in the main nav. This would help users customize the app to their liking and remove clutter (items they don't use) from the main nav. We can add a small, subtle "edit" button to the main nav that opens an "edit" modal where the user can drag and drop the menu items to reorder them, and click on a small "eye" icon to hide/show items. The changes would be saved in the user's settings so that they persist across sessions. The edit button would only be visible when the user hovers over the main nav, and the edit modal would have a "reset to default" button to restore the default order and visibility of the menu items. Note (2026-08-08): this item is the accepted answer to nav crowding from niche pages. Merging Combine into the Converter behind a mode checkbox was considered and rejected (the tools have opposite data models: one-input-one-output rows vs ordered many-input sets), so Combine stays its own page and users who rarely combine can hide it here instead.
 
@@ -400,22 +310,10 @@
 - **APP-8** [big]
   Add the ability for the app to update on its own without having to send the user to the GitHub releases page to download the new version. This would be a big improvement for user experience. Maybe there's a library that can handle this. We would need to set up a system for hosting the updates, and then the app would need to check for updates on startup and prompt the user to download and install (or skip) the new version if one is available (would show the release notes for the new version and any versions in between the newest, suggested version and their current version).
 
-- **APP-9** [done]
-  Add a new settings option as a sub-option under the "Start minimized" option in the settings page. This new option will be called "start Minimized only when launched at startup" with description "The app will start minimized to tray only when launched at startup, but will start opened when launched manually." This would be useful for users who want the app to start minimized when they boot up their computer, but want it to start normally when they launch it manually. This would be a boolean option that is only enabled when the "Start minimized" option is enabled. If the user disables the "Start minimized" option, this new option will also be disabled and grayed out. It should be indented under the "Start minimized" option to show that it is a sub-option. It should default to unchecked, but remember the last setting when its parent is disabled.
-
 - **APP-11** [bug]
   Ctrl+Z appears dead while an input is focused on the THUMBNAILS page (spotted during the v2.2.0 sweep, 2026-08-04). NOT a swallowed shortcut: the editor's undo handler correctly bails on typing targets (ThumbnailPage keyboard-shortcuts effect, the `tag === 'INPUT'` guard), so the keystroke reaches Chromium's NATIVE text undo, which is unreliable in React-controlled inputs (state round-trips plus direct DOM writes like NumberInput's onBlur canonicalization wipe or fight the input's undo stack), so it often does nothing visible. DESIGN DECIDED: scope is the thumbnails page only (streams-page fields are fine with native behavior). Property fields directly drive canvas items and every other undo is canvas-tied, so Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z in a focused property field should route to the CANVAS undo stack, i.e. hoist the undo/redo matches ABOVE the typing-target bail in the shortcuts handler. EXCEPTION: the text layer's text editor (the contenteditable chip editor, the `isContentEditable` part of the guard) keeps native granular text undo, since finer undo is needed while writing. Implementation gotchas:
     a. App.tsx's global Ctrl+Shift+Z `editRedo()` handler (~line 562) fires on ANY focused editable; it must stand down for thumbnails property fields or one keystroke triggers native redo AND canvas redo.
     b. Decide what happens to an in-progress hex DRAFT when canvas undo fires underneath it (the draft owns the field's display while focused; probably drop the draft so the undone value shows).
-
-- **APP-12** [ui] [done]
-  Expose the UI zoom level as a setting in the settings page (probably the Appearance section) to complement the Ctrl+= / Ctrl+- / Ctrl+0 shortcuts with a more exact control. Likely a stepper or a percentage dropdown that reads and writes the same zoom level the shortcuts adjust. Needs a check on persistence: verify whether Electron already persists the shortcut-driven zoom across restarts, and decide whether the setting becomes the single source of truth for it.
-
-- **APP-13** [bug] [ui] [done]
-  The Stream Relay picker popup is getting clipped by the bottom of the app window. It needs to be moved up dynamically so it is always fully visible.
-
-- **APP-16** [ui] [done]
-  Fix the hack for the tailwind purple color assignment. We need to go through the app and replace all instances of the class usage of the default tailwind purple color because it was modified at a high level to be a slate gray instead.
 
 - **APP-15** [ui]
   Catalog colors across SM. Find and record all uses of color in the app and catalog based on how they are used. Background variants, accents, borders, warnings, text variants. Only need to exclude things that are already UI customization elements such as the tag color picker and various thumbnail editor items. This will be used to build the themes in the APP-14 task.
@@ -428,12 +326,6 @@
     - Clown Vomit (stupid/silly theme)
   Eventually, allow users to create their own theme. This would probably be a modal in the settings page which lists all the editable colors in the app. It would need to change them on the fly, have dummy versions of commin elements, and warn against hard-to-read combinations using accessibility standards.
 
-- **APP-17** [done]
-  List 3rd-party libraries with links to their respective web pages in the about modal.
-
-- **APP-18** [done]
-  Ship the design principles with the next release. PRINCIPLES.md exists at the repo root (canonical copy, claims verified 2026-09-02) but is temporarily gitignored so the public repo never shows a file pointing at a 404: the website's /principles page (already built in the website repo) goes live alongside the next SM release. At promotion time: delete the two PRINCIPLES.md lines from .gitignore, commit the file with the release, and confirm the website deploy is out. The style guide carries the ongoing duties (citation upkeep, principle check before shipping).
-
 - **APP-19**
   Promote the tag color palette to a shared app-level palette module. constants/tagColors.ts is already the de-facto shared content-color palette (tag chips, audio track colors, waveform fills, and future consumers like player markers and milestone cards), so rename and reshape it as the app's reusable palette (e.g. constants/palette.ts) with the color KEYS byte-stable, since they are persisted in users' tag and track color data. Pure refactor, no visual change. Deliberately NOT part of the theming chain (APP-16/15/14): this palette is user-content color choice, which the APP-15 catalog explicitly excludes. Two coordination notes: the Gray entry's purple-* utility classes will be renamed by APP-16's sweep, so whichever of these lands second touches that file; and when APP-14 themes land, give this palette a quick contrast check on Light and OLED. No blockers either direction: marker or card work landing first simply imports tagColors and this refactor updates the import later.
 
@@ -442,21 +334,6 @@
 
 - **APP-20**
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
-
-- **APP-22** [ui] [done]
-  Shift = 10x arrow stepping in steppable numeric and timecode inputs, app-wide rule (2026-09-05). The NumberInput primitive already does Shift = x10 on its spinners; extend the same convention to the hand-rolled inputs that step with arrow keys:
-  - The player page's timecode inputs (playhead, viewport range start/end, segment duration, handle popups, marker edit popup): Shift multiplies the segment under the cursor, so 10 frames / 10 seconds / 10 minutes / 10 hours. Central change in applyTimecodeArrow.
-  - The clipping mode crop tool's x/y/w/h fields (these currently rely on native number-input stepping; give them proper arrow handling with the 10x shift).
-  Exceptions, keep plain 1x stepping: decided case-by-case at build time rather than by a hard rule; known examples are tiny-range inputs where a 10x jump is most or all of the range, like the max simultaneous conversions setting and the integrations port number. No tooltip hints advertising the shift behavior (deliberate: it stays an unadvertised power-user convention, tooltips would add noise to dense toolbars). Codify in the style guide when built.
-
-- **IDEA-11** [done]
-  Investigate better ways to allow users to connect to their YouTube channel without needing to create a google dev account and generate custom OAuth credentials. There's too many steps and it's too technical for most users. Either 3rd party OAuth credentials or something google themselves provide.
-  Investigation resolved 2026-09-03. The governing fact: YouTube Data API quota is per PROJECT (10,000 free units/day, no official paid tier), so a shared SM OAuth client would pool every user into one project's quota: dead past a handful of users without a YouTube quota-extension audit plus Google OAuth app verification, and it would make the project operationally responsible for a revocable credential. (Apps that offer token-based connection, like ChatPlex behind a subscription, are funding exactly that shared-infrastructure burden.) Third-party credential brokers are ruled out on principle: SM has no server of its own and only talks to services the user connects. Bring-your-own is actually the better deal for users (a private 10k units/day each, maximum privacy); its only cost is onboarding pain. Direction therefore: make the BYO flow wizard-grade instead of replacing it: exact deep links into the Google Cloud console in order, per-step validation of pasted values with honest errors (detect a client secret pasted into the client ID field, etc.), and a visible progress checklist, so a non-technical user succeeds by copy-paste. The shared-client route stays on record as a someday option with its prerequisites named, worth revisiting only if the user base ever justifies the audit paperwork.
-
-- **APP-23** [done]
-  Remove all mentions of my name in any comments in any files in the app's code. My name should not appear anywhere. For example: tagColors.ts line 341. Comments can describe desicions that were made and why, but they should not elude to discussions or attribute anything to a named person ("so-and-so's decision", "per so-and-so"), just that it was decided.
-
-  This is a hard rule that must be remembered. This also applies to files like this very todo. My name should just not appear in any files for this project. Local user storage is fine.
 
 - **APP-24** [cleanup]
   Go over the style guide to look for any inconsistencies, conflicts, or out-of-date or no longer relevant rules.
@@ -496,13 +373,6 @@
   A second launch of the portable exe destroys the running instance's files. Found 2026-09-08 during the v2.6.0 sweep: the portable launcher (electron-builder's NSIS portable script) unpacks every launch of the same build into ONE fixed Temp folder (name = a per-build id) and runs `RMDir /r` on it both before unpacking and after its app instance exits. Double-clicking the exe while SM sits in the tray therefore hits the single-instance lock, exits, and its launcher deletes everything the running instance has not locked; ffprobe goes first (it is not held open), and the symptom is "video:probe ... ENOENT" hours later. Present in every portable build to date. The v2.6.0 sweep only fixed the redundant instance running its full startup (window flash, second tray icon, relay respawn); the deletion remains, and the checklist documents the workaround (bring SM back via the tray; quit before relaunching).
   Tried and reverted 2026-09-08: `portable.unpackDirName: true` (private per-process folder per launch, so the second launcher only deletes its own). It works, but Windows Firewall keys rules by executable path, so the relay's ffmpeg listener prompted on EVERY launch instead of once per build. Unacceptable for relay users.
   Direction, revised the same day: APP-32 (a running-instance check inside the launcher, before it touches the unpack folder) fixes the second-launch destruction outright and keeps the fixed per-build folder, so it is the preferred fix and this item is effectively blocked on trying it first. The stable-binaries idea stays here as an optional follow-up on its own merits: copy ffmpeg/ffprobe once into a per-user location keyed by the ffmpeg-static version and resolve every spawn from there (centralized in ffmpegService's ffmpegBin/ffprobeBin, plus relayManager's and combine's own imports), which would move the firewall prompt from once per BUILD to once per ffmpeg VERSION. INTG-1 (loopback bind by default) removes the prompt entirely for same-machine setups. Longer-term the installed (non-portable) distribution would remove the whole class.
-
-- **APP-32** [done]
-  SHIPPED in the v2.6.0 sweep (2026-09-08, same day as filing): scripts/dist.cjs injects the pre-check into app-builder-lib's portable.nsi before every build; measured second launch 0.07 s launcher exit, forwarded instance focuses the primary, running instance's files untouched, hard-kill fallthrough extracts normally. APP-31's destruction case is closed by this; APP-31 stays open only for the optional stable-binaries follow-up.
-  Portable launcher pre-check: if Stream Manager is already running, focus it instead of extracting. Filed 2026-09-08 after measuring the second-launch path at about 10 seconds: the NSIS portable launcher deletes and re-extracts the whole 190 MB unpack folder (with the antivirus verifying the fresh binaries) before Electron even starts, so the single-instance lock, which now exits in under a second, only gets its turn at the end. Same launch also causes APP-31's deletion on the way out.
-  Design (assumptions verified on the dev build, 2026-09-08): the launcher already knows the fixed per-build unpack folder. Before its first `RMDir /r`, test whether `<folder>\Stream Manager.exe` is currently running by opening it for write (a running executable fails with a sharing violation; verified). If it is: `Exec` that already-extracted exe once more (no re-extract) and `Quit` the launcher before it touches the folder. The new process hits the single-instance lock, the primary shows/focuses its window via the existing second-instance handler, and the extra process exits (measured: 0.09 s from launch to exit). Net: second launch goes from ~10 s to well under a second, no extraction, no deletion, so APP-31's destruction case is closed by this alone; the fixed folder stays, so the firewall prompt remains once per build. If the exe is not running (crashed leftover, or a different build), fall through to the normal path unchanged.
-  Implementation: electron-builder ignores `script`/`include` for the portable target (NsisTarget reads templates/nsis/portable.nsi verbatim), so inject the block from scripts/dist.cjs before invoking electron-builder: read the template from node_modules/app-builder-lib, anchor on the `RMDir /r $INSTDIR` / `SetOutPath $INSTDIR` pair inside `Section`, insert the check once (marker comment for idempotence), and FAIL THE BUILD loudly if the anchor is missing so a template change in a future app-builder-lib bump is noticed rather than silently unpatched. Works for CI too (npm ci restores the pristine template; dist.cjs re-patches each build). Uses only built-in NSIS (`IfFileExists`, `FileOpen` in append mode, `IfErrors`, `Exec`, `Quit`); no plugins.
-  Verification: the checklist's second-launch item, plus a stopwatch on the window reveal, plus the ffprobe-still-works check that documents APP-31 today. Also confirm a launch after a hard kill (folder present, exe NOT running) still extracts normally.
 
 ### Onboarding & Setup
 
@@ -629,3 +499,115 @@
     - Seen is seen, forever: dismissals persist and new versions never resurrect them. The ceiling for announcing a new tour-worthy feature is a passive dot or one pulse on the Help button, cleared permanently by a single interaction.
     - Audience by one honest signal, not heuristics: fresh install (went through onboarding) counts as new and gets the pulse plus any first-visit hints; an existing library counts as experienced and gets nothing unsolicited, with tours available behind Help.
     - Per-page tours from that page's Help affordance; never one grand whole-app tour.
+
+## Archive
+
+- **STR-10** [done]
+  Guard the set-as-thumbnail affordance in the files grid so it is only offered for images that meet YouTube's thumbnail requirements (JPG/PNG/GIF/WebP, 2MB max, reasonable aspect and resolution). This matters more now that the per-push thumbnail override picker is gone (2026-08-30): the primary thumbnail is the only image the YouTube push can upload, so an ineligible primary means no thumbnail upload at all. Check whether any filtering already happens (youtubeGetQualifyingThumbnails in the main process was the old picker's filter and could be reused). If a primary ends up ineligible anyway (set before this guard existed, or the file changed on disk), surface an inline warning on the YouTube thumbnail row in the sidebar instead of failing silently.
+
+- **STR-12** [done]
+  Add duplicate buttons to the template and tag items so that they can easily be copied and the user can have a starting point on new items instead of having to manually copy the items or starting from scratch.
+
+- **STR-13** [bug] [ui] [done]
+  Stream tites in the stream item row info column are conditionally rendering spaces as the first character of a new line when wrapping occurs. Seems to happen when the space immediately follows a "|" character. We fixed this for the stream item detail sidebar title, and I thought we had fixed it for these elements as well, but I might be misrememebering.
+
+- **STR-14** [done]
+  For the game category: even with the reminder to edit the game title in the banner after a push to YouTube, I still missed doing this for 3 streams in a row. I think I got used to the banner. I know we can't push this info through SM, but would it be possible to read it? We could see if it has been properly filled, and if not show a persistent (but dismissable) message in the same place as the reminder (it would have to wait a little bit, so it doesn't show immediately).
+
+- **PLR-1** [done]
+  Add a button in the multi-track audio mode (on the right in the same row as the disable button) which says "Setup tips" with a circle question icon. It would open the help modal to a specific section that explains how to use the multi-track audio mode and how to best set up their OBS/Xsplit/StreamLabs to get the best results (which we also need to create). This would be useful for users who are new to multi-track audio and may not know how to set it up properly. The general advice would be to use track 1 as the full audio mix (the same way they send it to the stream platform), and then use the other tracks for specific audio sources (like game audio, music, microphone, etc.) so that they can be extracted and used in the clips. The help modal would also explain how to use the multi-track audio mode in SM to extract the specific tracks they want to use for their clips.
+
+- **PLR-5** [bug] [done]
+  Clicking on the timeline track within some distance from the edges seems to auto-scroll the track instead of placing the playhead. It seems to be whenever the click happens within the auto-scroll margin of the playhead. This needs to be fixed.
+
+- **PLR-6** [done]
+  We need to make it so that if the user left clicks on the timeline track and holds down and drags, it should place then scrub the playhead. Currently, if the user clicks and drags, it does nothing.
+
+- **PLR-7** [done]
+  Add a keyboard shortcut for toggling the multi-track audio mode (split out of the multi-track tooltip item, which shipped with the 2026-08 UI-polish batch). Candidate: ctrl+shift+m. The button's tooltip gains the shortcut hint when this ships.
+
+- **IDEA-4** [differentiator] [done]
+  Player timeline markers, phase 1 — SHIPPED in the v2.6.0 cycle. DaVinci-style markers on the player timeline: M or the transport button drops one at the playhead, single click seeks, double click opens the edit popup (shared tag palette color, name, exact timecode). Chapters embedded in video files merge in at display time (the OBS Hybrid MP4 hotkey synergy, verified on real recordings); editing a file chapter stores an override in the stream's metadata, and video files are never written. Out-of-range file chapters are dropped with an honest note. Markers live in StreamMeta.videoMarkers beside the file. Verified at build time that Lossless Copy remuxes preserve embedded chapters.
+  The remaining phases from the original idea are split out so this item can close: PLR-16 (the {markers} merge field, blocked on IDEA-12) and PLR-17 (carry-through: user-prompted bake, converter bake-in, combine merge).
+
+- **PLR-11** [done]
+  Clip region interaction refinement:
+  - Currently, clicking and dragging inside a clip region will drag that clip region. Since that is a lesser-used interaction (it's more common to drag the end handles), let's move that interaction to the [start timecode] -> [end timecode] label popup that appears above the clip region when that region is selected. Clicking and dragging that element will be what drags the whole region. Currently, that element has no interaction, so it is a good place for it. That will leave the actual area inside the clip region accessible to place the playhead marker (which is unavailable right now. To get the playhead marker inside a clip region, one must click outside a clip region and drag it inside, manually edit the playhead timecode, or use keyboard shortcuts. This change allows the obvious and most comming click-to-place interaciton to be available inside clip regions). We can add some drag handle icons to either side of the timecode text to make it clear.
+  - Additional to this change: the [start timecode] -> [end timecode] label popup should appear on clip region hover now instead of it having to be selected (and moving the cursor up to that label should keep it opened, allowing for selection and drag). Selecting a clip region should still allow it to stay opened until clicked off of (clicked somewhere else in the timeline or on another clip region).
+  - Lastly, the method to deselect a clip region is a bit awkward. One must click on the timeline track, but not on the part where the thumbnails are. Only clicking on the timeline audio waveform part will deselect the clip region (any audio waveform in multi-track mode). We just need to extend this functionality to include the thumbnails track, so it's not confusing why clicking away from a clip region does not deselect it.
+
+- **PLR-12** [bug] [done]
+  There seems to be a bug in the timecode inputs on the player page. I happened to land the playhead on 1:45:32:30. When I clicked on the playhead timecode input and tried to increase the timecode on the frame vaule with the arrow keys, the up arrow didn't work. I could increment down to 29, 28, etc. And I could increment *back* up, but it would stop working again at 30. I was able to replicate this in the new marker popup timecode input as well, same position (same timecode value), could iterate down on the frames value with arrow keys, but not up past 30. All the other values seem to work still. This was the initial discovery. I then clicked the playhead around and discovered that the frames value gets stuck pretty much anywhere. one can only increment the frames value down.
+
+- **PLR-13** [done]
+  Some design/layout refinements for the player page:
+  - When in clipping mode, we should show a stop clipping button in the place of the start clipping button in the sidebar to close clipping mode, that way the user can look back to where they were to turn it on instead of having to find the stop clipping button in case this is their first time and they don't know where it is. We can then remove the stop clipping button from the clip mode toolbar. This should be a new rule in the style guide: "Close buttons should be location in the same place (or as near as possble) as their respective open buttons."
+  - Let's move the "enable multi-track audio" and its disable button to the sidebar. The disable button should then be styled more like a close button (red, button size/style). The text for each should then change to open/close instead of enable/disable. That way it is more of a mode toggle like the clipping mode is. It should go right above the clipping mode button.
+  - If possible, for the clip region start/end markers, if possible, the glow should only show on the outside of the markers, so it's not glowing inside the region. So for the start marker, the glow would only show on the left (and maybe top/bottom), and for the end marker, it would be on the right.
+
+- **THU-6** [ui] [done]
+  Add a subtle text link below the font family dropdown in the properties panel for text layers which will show the last used font family in the thumbnail editor. This will allow the user to easily pick the last used font family without having to scroll through the list of fonts. The link should say "Last used: [font family]" and when clicked, it will set the font family of the selected text layer to the last used font family. The last used font family should be stored in the app's settings so that it persists across sessions. If the user uses the dropdown and picks any font family, the link will hide and that font will then be the last used font family.
+
+- **THU-7** [done]
+  Multi-stop gradients (3+ stops): extends the 2-stop gradient shipped 2026-08-01. Most of the groundwork already generalizes: `gradientStops` is an array, `buildKonvaColorStops` (lib/gradient.ts) samples every consecutive pair, `cssGradientPreview` maps all stops, and the preview bar's SVG arrow track derives its height from `stops.length`. What's missing is purely the editing UI in `GradientFillControl`:
+    a. An add-stop affordance. Clicking the preview bar is the natural one; the click's Y gives the new stop's position directly.
+    b. A per-row remove button (floor of 2 stops).
+    c. A sensible color for a new stop: sample the existing gradient at that position (`mixOklch` already does exactly this, it just isn't exported).
+    d. Bundle with drag-the-marker-directly-on-the-bar: typing coordinates is the weak part of the current editor, and direct manipulation is what makes 3+ stops actually pleasant.
+    Design decision to keep: rows stay in ARRAY order and don't re-sort live as positions change (re-sorting makes rows jump under the cursor mid-edit); the arrows already point at true positions regardless of row order, and both the renderer and the CSS preview sort internally. Note the SVG track's ROW/GAP constants (24px / 6px) are tied to the color-row height; update them together if the row styling changes.
+
+- **THU-11** [done]
+  Add a "hard" option to the gradients in the thumbnail editor. This would allow the user to create a gradient where the colors hard transition from one to the next instead of blending together. This is a common way to do certain effects an easier way than having to create multiple objects, especially for text. We'll only have the 2 modes for now: "soft" (the current mode) and "hard".
+
+- **CONV-1** [investigate] [done]
+  Not explicitly a converter item... When the user sends a file to the converter via the archive path, the conversions start immediately (this is fine), however if files were not hydrated beforehand, they begin to hydrate (also fine). The issue is the only feedback the user has for this is the "waiting on download" message in the converter nav item extra details section (and the actual rows on the converter page). This is probably enough for most users, but I'm wondering if it would be more consistent to make sure the cloud sync widget also shows for these items. Since that is the way SM tells the user that it triggered cloud-based actions for SM-related files.
+  2026-09-04 scope addition, from CONV-2 testing: the root cause is that the converter runs its OWN hydration loop (touch the placeholder, poll checkLocalFiles) that the rest of the app never hears about, and two more symptoms share it: (a) converter row thumbnails stay the placeholder graphic forever because the post-hydration VideoThumb fill-in never learns the file became local; (b) the files grid's cloud status for the hydrated file stays stale while the stream is open in the sidebar. Fix direction: route converter-triggered hydration through (or at least announce it to) the same cloud-sync machinery that pin-local uses, so the widget appears, per-file cloud statuses refresh, and thumbnails generate as soon as the file is local, even while the job waits for an encode slot.
+
+- **CONV-2** [bug] [done]
+  I recently ran a bulk archive process on 5 stream items. All the stream recording files started dehydrated and the hydration process ran well. However, as the 4th and 5th items completed hydration, the conversion process for them started. This goes against my SM "Max simultaneous conversions" setting of 3. When items become available in the converter for any reason (new ones added, hydration finishes, etc.), they should not begin the actual conversion process unless a max conversion slot is freed (a running conversion process finishes, is stopped by the user, or errors out) or unless the user manually starts it. After discovering this, I also added stream items one at a time (go to stream item, find recording file, press convert button, press start on the individual item in the queue, item starts converting) and the same issue happened. The converter page is not respecting the max setting. I do see the waiting icon appear briefly, so it may actually be checking, but for some reason it is failing to actually set the conversion items to pending. We need to make the max conversion slot system more robust kind of like what we did with the cloud sync functionality (maybe look into that for reference).
+
+- **LNCH-2** [done]
+  Add a button in the header of an open launch group to duplicate the group. This would create a new launcher group with the exact same items and icon. The name should also be the same but with " — Copy" appended. Might be worth adding a rule to the style guide to handle duplicates consistently. The only exception I can think of are the thumbnail variants, who get a fixed name regardless of whether it is a duplicate or not.
+
+- **APP-3** [done]
+  CODEBASE change: add linting rules to enforce specific design decisions for this app because Claude sometimes struggles with remembering certain things. Most of the rules should be in the Claude memory files or the style guide. Rules to include: ban raw `<input type="number">` in pages/components — all number fields go through the `NumberInput` component (`ui/Input.tsx`), same shape as the existing `title=` ban. Allowed exceptions live inside `ui/` primitives themselves and the player crop fields (deliberately compact; the 2026-08 number-input sweep already converted everything else).
+
+- **APP-9** [done]
+  Add a new settings option as a sub-option under the "Start minimized" option in the settings page. This new option will be called "start Minimized only when launched at startup" with description "The app will start minimized to tray only when launched at startup, but will start opened when launched manually." This would be useful for users who want the app to start minimized when they boot up their computer, but want it to start normally when they launch it manually. This would be a boolean option that is only enabled when the "Start minimized" option is enabled. If the user disables the "Start minimized" option, this new option will also be disabled and grayed out. It should be indented under the "Start minimized" option to show that it is a sub-option. It should default to unchecked, but remember the last setting when its parent is disabled.
+
+- **APP-12** [ui] [done]
+  Expose the UI zoom level as a setting in the settings page (probably the Appearance section) to complement the Ctrl+= / Ctrl+- / Ctrl+0 shortcuts with a more exact control. Likely a stepper or a percentage dropdown that reads and writes the same zoom level the shortcuts adjust. Needs a check on persistence: verify whether Electron already persists the shortcut-driven zoom across restarts, and decide whether the setting becomes the single source of truth for it.
+
+- **APP-13** [bug] [ui] [done]
+  The Stream Relay picker popup is getting clipped by the bottom of the app window. It needs to be moved up dynamically so it is always fully visible.
+
+- **APP-16** [ui] [done]
+  Fix the hack for the tailwind purple color assignment. We need to go through the app and replace all instances of the class usage of the default tailwind purple color because it was modified at a high level to be a slate gray instead.
+
+- **APP-17** [done]
+  List 3rd-party libraries with links to their respective web pages in the about modal.
+
+- **APP-18** [done]
+  Ship the design principles with the next release. PRINCIPLES.md exists at the repo root (canonical copy, claims verified 2026-09-02) but is temporarily gitignored so the public repo never shows a file pointing at a 404: the website's /principles page (already built in the website repo) goes live alongside the next SM release. At promotion time: delete the two PRINCIPLES.md lines from .gitignore, commit the file with the release, and confirm the website deploy is out. The style guide carries the ongoing duties (citation upkeep, principle check before shipping).
+
+- **APP-22** [ui] [done]
+  Shift = 10x arrow stepping in steppable numeric and timecode inputs, app-wide rule (2026-09-05). The NumberInput primitive already does Shift = x10 on its spinners; extend the same convention to the hand-rolled inputs that step with arrow keys:
+  - The player page's timecode inputs (playhead, viewport range start/end, segment duration, handle popups, marker edit popup): Shift multiplies the segment under the cursor, so 10 frames / 10 seconds / 10 minutes / 10 hours. Central change in applyTimecodeArrow.
+  - The clipping mode crop tool's x/y/w/h fields (these currently rely on native number-input stepping; give them proper arrow handling with the 10x shift).
+  Exceptions, keep plain 1x stepping: decided case-by-case at build time rather than by a hard rule; known examples are tiny-range inputs where a 10x jump is most or all of the range, like the max simultaneous conversions setting and the integrations port number. No tooltip hints advertising the shift behavior (deliberate: it stays an unadvertised power-user convention, tooltips would add noise to dense toolbars). Codify in the style guide when built.
+
+- **IDEA-11** [done]
+  Investigate better ways to allow users to connect to their YouTube channel without needing to create a google dev account and generate custom OAuth credentials. There's too many steps and it's too technical for most users. Either 3rd party OAuth credentials or something google themselves provide.
+  Investigation resolved 2026-09-03. The governing fact: YouTube Data API quota is per PROJECT (10,000 free units/day, no official paid tier), so a shared SM OAuth client would pool every user into one project's quota: dead past a handful of users without a YouTube quota-extension audit plus Google OAuth app verification, and it would make the project operationally responsible for a revocable credential. (Apps that offer token-based connection, like ChatPlex behind a subscription, are funding exactly that shared-infrastructure burden.) Third-party credential brokers are ruled out on principle: SM has no server of its own and only talks to services the user connects. Bring-your-own is actually the better deal for users (a private 10k units/day each, maximum privacy); its only cost is onboarding pain. Direction therefore: make the BYO flow wizard-grade instead of replacing it: exact deep links into the Google Cloud console in order, per-step validation of pasted values with honest errors (detect a client secret pasted into the client ID field, etc.), and a visible progress checklist, so a non-technical user succeeds by copy-paste. The shared-client route stays on record as a someday option with its prerequisites named, worth revisiting only if the user base ever justifies the audit paperwork.
+
+- **APP-23** [done]
+  Remove all mentions of my name in any comments in any files in the app's code. My name should not appear anywhere. For example: tagColors.ts line 341. Comments can describe desicions that were made and why, but they should not elude to discussions or attribute anything to a named person ("so-and-so's decision", "per so-and-so"), just that it was decided.
+
+  This is a hard rule that must be remembered. This also applies to files like this very todo. My name should just not appear in any files for this project. Local user storage is fine.
+
+- **APP-32** [done]
+  SHIPPED in the v2.6.0 sweep (2026-09-08, same day as filing): scripts/dist.cjs injects the pre-check into app-builder-lib's portable.nsi before every build; measured second launch 0.07 s launcher exit, forwarded instance focuses the primary, running instance's files untouched, hard-kill fallthrough extracts normally. APP-31's destruction case is closed by this; APP-31 stays open only for the optional stable-binaries follow-up.
+  Portable launcher pre-check: if Stream Manager is already running, focus it instead of extracting. Filed 2026-09-08 after measuring the second-launch path at about 10 seconds: the NSIS portable launcher deletes and re-extracts the whole 190 MB unpack folder (with the antivirus verifying the fresh binaries) before Electron even starts, so the single-instance lock, which now exits in under a second, only gets its turn at the end. Same launch also causes APP-31's deletion on the way out.
+  Design (assumptions verified on the dev build, 2026-09-08): the launcher already knows the fixed per-build unpack folder. Before its first `RMDir /r`, test whether `<folder>\Stream Manager.exe` is currently running by opening it for write (a running executable fails with a sharing violation; verified). If it is: `Exec` that already-extracted exe once more (no re-extract) and `Quit` the launcher before it touches the folder. The new process hits the single-instance lock, the primary shows/focuses its window via the existing second-instance handler, and the extra process exits (measured: 0.09 s from launch to exit). Net: second launch goes from ~10 s to well under a second, no extraction, no deletion, so APP-31's destruction case is closed by this alone; the fixed folder stays, so the firewall prompt remains once per build. If the exe is not running (crashed leftover, or a different build), fall through to the normal path unchanged.
+  Implementation: electron-builder ignores `script`/`include` for the portable target (NsisTarget reads templates/nsis/portable.nsi verbatim), so inject the block from scripts/dist.cjs before invoking electron-builder: read the template from node_modules/app-builder-lib, anchor on the `RMDir /r $INSTDIR` / `SetOutPath $INSTDIR` pair inside `Section`, insert the check once (marker comment for idempotence), and FAIL THE BUILD loudly if the anchor is missing so a template change in a future app-builder-lib bump is noticed rather than silently unpatched. Works for CI too (npm ci restores the pristine template; dist.cjs re-patches each build). Uses only built-in NSIS (`IfFileExists`, `FileOpen` in append mode, `IfErrors`, `Exec`, `Quit`); no plugins.
+  Verification: the checklist's second-launch item, plus a stopwatch on the window reveal, plus the ffprobe-still-works check that documents APP-31 today. Also confirm a launch after a hard kill (folder present, exe NOT running) still extracts normally.

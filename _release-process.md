@@ -35,6 +35,8 @@ Between releases, periodically `npm run dist` on dev and use the `_DEV` exe as t
 
 When the batch is done: stop adding features, build a fresh `_DEV` exe, and run a checklist against **the packaged build** (not the dev server). Keep the checklist as a repo-root working file (`_release-test-checklist-<date>.md`), archive to `archive/` when done — same convention as v2.
 
+The sweep also reviews the public docs, because they rot silently between releases (the v2.6.0 review found a README two months stale: wrong Node requirement, an obsolete build note, a project tree missing whole modules, legacy merge-field names, and screenshots from before a redesign). Check `README.md` against the shipped app: the feature paragraphs (add one sentence for a new headline feature, never a list), prerequisites and versions, every link, the single hero screenshot (take it from the website's current shoot; the website owns screenshots), and the project-layout block. Give `CONTRIBUTING.md` and `PRINCIPLES.md` the same pass (the principles file has code citations that must still point at real files).
+
 Checklist template:
 
 ```markdown
@@ -56,6 +58,10 @@ Build: Stream Manager <version>_DEV.exe from dev @ <commit>
 - [ ] Cloud: pin local + offload one item; statuses update everywhere
 - [ ] Launcher: run a launch group (window + tray)
 - [ ] Quit/relaunch: no orphaned processes, state restored
+
+## Docs (every release)
+- [ ] README.md reviewed against the shipped app (features, prerequisites, links, hero screenshot, layout block)
+- [ ] CONTRIBUTING.md and PRINCIPLES.md still accurate (principles: code citations resolve)
 ```
 
 ## Promotion (dev → master)

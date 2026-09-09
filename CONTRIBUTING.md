@@ -19,7 +19,7 @@ Check `_todo.md` first; the feature you want may already be planned.
 
 ## Submitting code
 
-1. Fork the repo and create a branch from `master`.
+1. Fork the repo and create a branch from `dev` (the integration branch; `master` only receives releases and hotfixes).
 2. Run the dev environment (see README → Getting Started as a dev).
 3. Keep changes focused — one feature or fix per PR.
 4. Match the existing code style. TypeScript strict, functional React components, Tailwind for styling.

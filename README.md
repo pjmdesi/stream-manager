@@ -9,7 +9,7 @@
 
 A desktop app that's the central hub for your stream sessions: organize your local recordings, edit and publish your YouTube/Twitch metadata, clip and create thumbnails, and even route your broadcast live. Windows only for now; contributions welcome.
 
-**Explore:** [Feature tour](https://stream-manager.app/features) · [Getting-started guide](https://stream-manager.app/get-started) · [FAQ](https://stream-manager.app/faq) · [About the project](https://stream-manager.app/about)
+**Explore:** [Feature tour](https://stream-manager.app/features) · [Getting-started guide](https://stream-manager.app/get-started) · [FAQ](https://stream-manager.app/faq) · [Design principles](https://stream-manager.app/principles) · [Privacy](https://stream-manager.app/app-privacy) · [About the project](https://stream-manager.app/about)
 
 ## Mission
 
@@ -23,31 +23,7 @@ Stream Manager is designed to be the central hub for everything pre- and post-st
 - Streamers who want a built-in tool for clipping and thumbnail creation without needing to use separate apps like Premiere, DaVinci, HandBrake, Photoshop, Affinity, etc.
 - Streamers who want to automate parts of their workflow, like moving files from a recording folder to their main stream library, launching all their streaming apps at once, and archiving old streams with consistent encoding settings and tagging.
 
-![Stream Manager screenshot](resources/sm-streams.png)
-
----
-
-- [Stream Manager](#stream-manager)
-  - [Mission](#mission)
-  - [Who this is for](#who-this-is-for)
-  - [Quick Start](#quick-start)
-  - [How this is built](#how-this-is-built)
-  - [Features](#features)
-    - [Streams](#streams)
-    - [Stream Relay](#stream-relay)
-    - [Video Player](#video-player)
-    - [Thumbnail Editor](#thumbnail-editor)
-    - [Converter](#converter)
-    - [Auto-Rules](#auto-rules)
-    - [Launcher](#launcher)
-    - [Integrations](#integrations)
-  - [Getting Started (as a dev)](#getting-started-as-a-dev)
-    - [Prerequisites](#prerequisites)
-    - [Install \& run](#install--run)
-    - [Build portable executable (Windows)](#build-portable-executable-windows)
-  - [Tech Stack](#tech-stack)
-  - [Project Structure](#project-structure)
-  - [License](#license)
+![Stream Manager screenshot](resources/sm-hero.webp)
 
 ---
 
@@ -60,74 +36,40 @@ Stream Manager is designed to be the central hub for everything pre- and post-st
 1. Download the latest release for Windows from the [Releases](https://github.com/pjmdesi/stream-manager/releases) page.
 2. Run the portable `.exe`. No installation required, runs from anywhere. Settings live in AppData; stream item data is stored next to your stream files.
 3. Select your main "Streams" folder when prompted. The app scans it, auto-detects your folder structure, and groups your recordings, thumbnails, and related files into stream items.
-4. (Optional) Set up an auto-rule to watch your recording software's output folder, and connect YouTube/Twitch for metadata sync and the Stream Relay.
+4. (Optional) Set up an auto-rule to watch your recording software's output folder, and connect YouTube and Twitch for metadata sync and the Stream Relay. YouTube connection is a guided, in-app walkthrough (also published at [stream-manager.app/youtube-setup](https://stream-manager.app/youtube-setup)).
 
-Questions about setup, platform limits, or how the app handles your files? Check the [FAQ](https://stream-manager.app/faq).
+Questions about setup, platform limits, or how the app handles your files? Check the [FAQ](https://stream-manager.app/faq) and the [privacy page](https://stream-manager.app/app-privacy).
 
 ---
 
 ## How this is built
 
-Stream Manager is built with substantial assistance from Claude (Anthropic's AI assistant) and GitHub Copilot. I'm a front-end developer by trade with a cursory understanding of backend systems; building a full Electron desktop app with multi-track video processing, ffmpeg integration, OAuth flows, and cloud-aware file handling is outside my normal scope and would take years to learn. If you want to see an example of a fully hand-coded application of mine, see [ClpChk](https://github.com/pjmdesi/clp-chk-react).  
-Claude is used heavily for architecture, implementation, debugging, code cleanup, and documentation through months of iterative back-and-forth. The product direction, UX decisions, feature scope, testing, and final calls on what is shipped are mine. More about the project and the person behind it is on the [about page](https://stream-manager.app/about). If you're curious about my take on AI-assisted development, I'm happy to discuss in issues or Discord.
+Stream Manager is built with substantial assistance from Claude (Anthropic's AI assistant) and GitHub Copilot. I'm a front-end developer by trade with a cursory understanding of backend systems; building a full Electron desktop app with multi-track video processing, ffmpeg integration, OAuth flows, and cloud-aware file handling is outside my normal scope and would take years to learn. If you want to see an example of a fully hand-coded application of mine, see [ClpChk](https://github.com/pjmdesi/clp-chk-react).
+Claude is used heavily for architecture, implementation, debugging, code cleanup, and documentation through months of iterative back-and-forth. The product direction, UX decisions, feature scope, testing, and final calls on what is shipped are mine. I thoroughly review and test all changes made to the code.
+
+More about the project and the person behind it is on the website's [about page](https://stream-manager.app/about). If you're curious about my take on AI-assisted development, I'm happy to discuss in issues or Discord.
 
 ---
 
 ## Features
 
-Stream Manager keeps everything about your stream sessions in one place: the recording, metadata, clips, and publishing destinations all collected and organized. The summaries below cover the essentials. The [full feature tour](https://stream-manager.app/features) goes deeper on each one.
+Stream Manager keeps everything about your stream sessions in one place: the recording, metadata, clips, and publishing destinations all collected and organized. Here are some brief highlights. The [feature tour](https://stream-manager.app/features) on the website has the screenshots and more detail.
 
-### Streams
+**Streams.** The main hub for your local recordings. Video files, thumbnails, and related assets are scanned and grouped into stream items automatically, with two-way YouTube and Twitch metadata sync (per-field out-of-sync indicators show exactly what differs), import and bulk-link from your existing YouTube channel, game/topic tagging, and episode series tracking with merge-field templates (`{topic}`, `{season}`, `{episode}`, and more). Cloud-aware: files offloaded by Synology Drive, OneDrive, Dropbox, or iCloud are detected, and you can offload or pin local in bulk. Metadata lives in a single `_meta.json` beside your files, so your library can move freely.
 
-![Stream Manager screenshot - Streams](resources/sm-streams.png)
+**Stream Relay.** The app sits between your encoder (OBS, etc.) and YouTube as a local relay and manages the broadcast lifecycle: it binds your chosen (or soonest-scheduled) broadcast, takes it live when your encoder connects, and ends it when you stop, with a grace period so a momentary encoder drop doesn't kill your stream. It can also roll your Twitch title and category forward to the next scheduled broadcast after each session. The relay forwards your already-encoded stream without re-encoding.
 
-The main hub for your local stream recordings. Video files, thumbnails, and related assets are scanned and grouped into stream sessions automatically, with two-way YouTube & Twitch metadata sync (per-field out-of-sync indicators show exactly what differs), import & bulk-link from your existing YouTube channel, custom game/topic tagging, and episode series tracking with merge-field templates (`{game}`, `{season}`, `{episode}`, …). Cloud-sync aware: files offloaded by Synology Drive, OneDrive, Dropbox, or Google Drive are detected, and you can offload or pin local in bulk. Metadata lives in a single `_meta.json` beside your files, so your library moves freely. With a Claude API key connected, **Ctrl+Space** gives inline AI suggestions in any YouTube title, description, or tags field.
+**Video Player.** Review, clip, and export stream sessions with thumbnail and waveform tracks. Timeline markers (including chapters written by OBS's Hybrid MP4 chapter hotkey), per-track mute/solo/volume on multi-track recordings with your choice of tracks in the export mix, clip drafts that stay linked to their source, shape-aware cropping for widescreen, square, or vertical exports, bleep markers, and a frameless pop-out window that OBS can capture for rolling clips on stream.
 
-### Stream Relay
+**Thumbnail Editor.** A built-in canvas editor for stream and clip thumbnails. Save layouts as reusable templates, and use merge fields (`{title}`, `{topic}`, `{season}`, `{episode}`, `{date}`) in text layers that substitute live, so one template covers a whole series.
 
-![Stream Manager screenshot - Stream Relay](resources/sm-stream-relay.png)
+**Converter and Combine.** Queue video conversions using ffmpeg presets (useful presets included; HandBrake JSON presets import directly), batch-archive sessions straight from the Streams page, remux containers without re-encoding, and combine multiple recordings into one file losslessly.
 
-The app sits between your encoder (OBS, etc.) and YouTube as a local relay and manages the broadcast lifecycle for you: it binds your chosen (or soonest-scheduled) broadcast, takes it live the moment your encoder connects, and ends it when you stop (with a grace period so a momentary encoder drop doesn't kill your stream). It can also roll your Twitch title and category forward to the next scheduled broadcast after each session. The relay forwards your already-encoded stream without re-encoding, so there's no meaningful extra CPU/GPU load.
+**Auto-Rules.** File-watcher rules that move, copy, rename, or convert new files. Date-matched rules route recordings into the stream item matching the date in the filename, including sessions that run past midnight.
 
-### Video Player
+**Launcher.** Launch your full streaming setup (OBS, chat apps, Discord, game launchers, browser profiles) with a single click via named launch groups, each with its own icon and an optional pinned sidebar widget.
 
-![Stream Manager screenshot - Video Player](resources/sm-player.png)
-
-Review, clip, and export stream sessions with thumbnail and waveform tracks. Multi-track recordings get per-track mute/solo/volume with your choice of tracks in the export mix; clip drafts stay linked to their source so the original is always intact; shape-aware cropping repurposes one highlight as widescreen, square, or vertical; bleep markers censor regions with a mute or tone; and a frameless pop-out window lets OBS capture playback cleanly for rolling clips on stream.
-
-### Thumbnail Editor
-
-![Stream Manager screenshot - Thumbnail Editor](resources/sm-thumbnails.png)
-
-A built-in canvas editor for designing stream and clip thumbnails without leaving the app. Save layouts as reusable templates, and use merge fields (`{title}`, `{game}`, `{date}`, `{season}`, `{episode}`) in text layers that substitute live. One template covers a whole series with your standard branding.
-
-### Converter
-
-![Stream Manager screenshot - Converter](resources/sm-converter.png)
-
-Queue video conversions using ffmpeg presets (useful presets included; HandBrake JSON presets import directly). Batch-archive sessions straight from the Streams page, remux containers (e.g. MKV → MP4) without re-encoding, and combine multiple recordings into one file losslessly with the concat demuxer.
-
-### Auto-Rules
-
-![Stream Manager screenshot - Auto-Rules](resources/sm-auto-rules.png)
-
-File-watcher rules that automatically **move, copy, rename, or convert** new files. Date-matched rules route recordings into the stream session matching the date in the filename, including sessions that run past midnight. These land with the previous day's stream instead of a phantom new one.
-
-### Launcher
-
-![Stream Manager screenshot - Launcher](resources/sm-launcher.png)
-
-Launch your full streaming setup (OBS, chat apps, Discord, game launchers, browser profiles) with a single click via named launch groups. Each launch item has a custom icon, individual-launch buttons, and an optional pinned sidebar widget.
-
-### Integrations
-
-![Stream Manager screenshot - Integrations](resources/sm-integrations.png)
-
-- **YouTube:** powers the metadata sync, import/bulk-link, and Stream Relay. Authorize once and the app handles token refresh. _Requires your own Google Cloud project and OAuth 2.0 credentials._
-- **Twitch:** OAuth connection with automatic token refresh; update your channel title, category, and tags from the stream item metadata.
-- **Claude AI:** connect your [Anthropic API key](https://console.anthropic.com/) for inline AI-assisted YouTube details (**Ctrl+Space**, Tab to accept), with your choice of model and an optional standing system prompt. The key is stored locally and only ever sent to Anthropic.
-
-What each platform's API can and can't sync (VOD edits, categories, A/B thumbnail tests, go-live notifications) is covered in the [FAQ](https://stream-manager.app/faq).
+**Integrations.** YouTube (metadata sync, import, Stream Relay) through your own Google Cloud credentials, set up by an in-app guided walkthrough; Twitch (title, category, tags); and Claude, with your own Anthropic API key, for inline suggestions in YouTube title, description, and tag fields (**Ctrl+Space**, Tab to accept). All credentials are stored encrypted on your PC and sent only to the service they belong to. What each platform's API can and can't sync is covered in the [FAQ](https://stream-manager.app/faq); what the app does and doesn't do with your data is in the [design principles](https://stream-manager.app/principles) (canonical copy: [PRINCIPLES.md](PRINCIPLES.md)).
 
 ---
 
@@ -135,15 +77,17 @@ What each platform's API can and can't sync (VOD edits, categories, A/B thumbnai
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 22 or newer (the release pipeline builds on 24)
 - npm
 
 ### Install & run
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
+
+`npm run typecheck` and `npm run lint` are the gate every build passes through; run them before opening a PR.
 
 ### Build portable executable (Windows)
 
@@ -151,12 +95,18 @@ npm run dev
 npm run dist
 ```
 
-Outputs a single portable `.exe` to `dist/`: no installation required, runs from anywhere.
+Outputs a single portable `.exe` to `dist/`. Builds from any branch other than `master` are marked `_DEV` (name, icon, and an in-app branch badge) so test builds can't be mistaken for releases. Published releases are built by GitHub Actions from version tags; see [`_release-process.md`](_release-process.md).
 
-> **Before building:** export `src/renderer/src/assets/stream-manager-logo.svg` as a 256×256 PNG and save it to `resources/icon.png`.
+### Open dev tools in a production build
 
-### Open Dev tools in production build
 While the app is running, press **Ctrl+`** to open the Chromium dev tools.
+
+### Project docs
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to report bugs and submit changes.
+- [PRINCIPLES.md](PRINCIPLES.md): the design principles, each with where it lives in the code and what would break it.
+- [`~style_guide.md`](~style_guide.md): UI conventions and app-level rules.
+- [`_todo.md`](_todo.md): the backlog and the current release queue.
 
 ---
 
@@ -179,64 +129,20 @@ While the app is running, press **Ctrl+`** to open the Chromium dev tools.
 
 ---
 
-## Project Structure
+## Project layout
 
 ```text
 src/
-├── main/                       # Electron main process
-│   ├── ipc/
-│   │   ├── claude.ts           # Claude AI metadata generation
-│   │   ├── combine.ts          # Concat-demux pipeline
-│   │   ├── converter.ts        # ffmpeg conversion queue + clip export tagging
-│   │   ├── files.ts            # File system operations
-│   │   ├── launcher.ts         # App launch groups
-│   │   ├── store.ts            # App config persistence
-│   │   ├── streams.ts          # Stream folder management + clip drafts
-│   │   ├── templates.ts        # Folder template engine
-│   │   ├── thumbnail.ts        # Thumbnail editor templates & canvas persistence
-│   │   ├── twitch.ts           # Twitch API integration
-│   │   ├── video.ts            # Playback, waveform, thumbnails
-│   │   ├── videoPopup.ts       # OBS pop-out window (frameless, aspect-locked)
-│   │   └── youtube.ts          # YouTube API integration
-│   └── services/
-│       ├── audioCacheManager.ts      # Extracted track cache
-│       ├── ffmpegService.ts          # ffmpeg/ffprobe wrappers
-│       ├── fileWatcher.ts            # chokidar-based auto-rules watcher
-│       ├── tempManager.ts            # Temp file lifecycle
-│       ├── thumbnailCacheManager.ts  # Per-file thumbnail cache
-│       ├── twitchApi.ts / twitchAuth.ts
-│       ├── waveformCacheManager.ts   # Binary PCM waveform cache
-│       └── youtubeApi.ts / youtubeAuth.ts
-├── preload/
-│   ├── index.ts        # Context bridge: exposes typed api to renderer
-│   └── popup.ts        # Context bridge for the video pop-out window
-└── renderer/
-    ├── index.html
-    ├── popup.html              # Minimal shell for the video pop-out
-    └── src/
-        ├── popup.ts            # Pop-out player logic (vanilla TS, no React)
-        ├── components/
-        │   ├── OnboardingModal.tsx
-        │   ├── pages/
-        │   │   ├── PlayerPage.tsx        # Video player, waveform, clip mode with drafts, shape-aware crop, bleep markers, Session Videos panel
-        │   │   ├── StreamsPage.tsx       # Stream session browser
-        │   │   ├── ConverterPage.tsx
-        │   │   ├── CombinePage.tsx
-        │   │   ├── RulesPage.tsx         # Auto-rules / file watcher (move/copy/rename/convert)
-        │   │   ├── SettingsPage.tsx
-        │   │   ├── TemplatesPage.tsx
-        │   │   ├── ThumbnailPage.tsx     # Konva-based thumbnail editor w/ templates, snapping, undo/redo
-        │   │   ├── LauncherPage.tsx      # App launch groups
-        │   │   └── IntegrationsPage.tsx  # YouTube, Twitch, Claude AI
-        │   └── ui/             # Button, Modal, Slider, Tooltip, GhostTextArea, …
-        ├── context/            # ConversionContext, WatcherContext, StoreContext, ThumbnailEditorContext
-        ├── hooks/
-        │   ├── useVideoPlayer.ts       # Playback, seek throttling, multi-track sync
-        │   ├── useWaveform.ts          # PCM re-bucketing, SVG path generation
-        │   ├── useThumbnailStrip.ts
-        │   ├── useFieldSuggestion.ts   # Ctrl+Space AI suggestion for inputs
-        │   └── useStore.ts
-        └── types/              # Shared TypeScript interfaces
+├── main/            # Electron main process
+│   ├── ipc/         # One module per feature area (streams, converter, combine, youtube, twitch, claude, cloud sync, relay, ...)
+│   └── services/    # ffmpeg/ffprobe wrappers, caches, auth + API clients, secret storage, the stream relay
+├── preload/         # Context bridges (main window + the video pop-out)
+└── renderer/src/
+    ├── components/  # Pages (one per nav item), modals, widgets, and the shared ui/ primitives
+    ├── context/     # App-wide state (store, conversions, cloud ops, watcher, ...)
+    ├── hooks/       # Player, waveform, thumbnail strip, AI suggestions, ...
+    ├── lib/         # Pure helpers (merge fields, mismatch detection, clip export, ...)
+    └── types/       # Shared TypeScript interfaces
 ```
 
 ---
