@@ -63,8 +63,12 @@ Manager has no server of its own for anything to be sent to.
 
 *Where this lives:* the complete set of hosts the app contacts is
 `api.github.com` (updates), `googleapis.com` / `accounts.google.com` (YouTube,
-user's OAuth app), `api.twitch.tv` / `id.twitch.tv` (Twitch), `api.anthropic.com`
-(user's key), and the two connectivity probes above. Encryption at rest is
+user's OAuth app) plus YouTube's image servers when a video's thumbnail is
+downloaded into your library during import or linking (the URL comes from the
+YouTube API response), `api.twitch.tv` / `id.twitch.tv` (Twitch),
+`api.anthropic.com` (user's key), and the two connectivity probes above. Links
+the app offers (GitHub, YouTube Studio, the Google Cloud console) open in your
+own browser and are not requests the app makes. Encryption at rest is
 `src/main/services/secretStorage.ts` (Electron `safeStorage`, DPAPI on Windows,
 `enc1:` marker prefix), applied at the write boundary in `youtubeAuth.ts`,
 `twitchAuth.ts`, and the config store's secret fields.
@@ -98,6 +102,10 @@ the background, and nothing pretends to have succeeded.
 *Where this lives:* the "errors surface inline" rule in `~style_guide.md`; IPC
 handlers reject with real messages rather than swallowing them.
 
+*What would break it:* a catch block that swallows an error, a generic failure
+message that hides the cause when the real one is available, or a background
+task that fails without surfacing it in the app.
+
 ## Your library survives a crash
 
 Stream details (`_meta.json`) are written to a temporary file and swapped into
@@ -130,7 +138,13 @@ download, so the file you run can be matched to the code that produced it.
 *Where this lives:* `.github/workflows/release.yml` (typecheck and lint gate,
 then build, on every `v*` tag) and `_release-process.md`. The pipeline builds
 from the tag, which is what ties a download to an exact commit; the public copy
-says "the public code" deliberately, for readers who do not use GitHub.
+says "the public code" deliberately, for readers who do not use GitHub. The
+SHA-256 digest beside each download is computed and shown by GitHub for every
+release asset, not produced by the build, so the build cannot alter it.
+
+*What would break it:* publishing an exe that was built or uploaded outside the
+pipeline, since its digest would then match no public build log, or a release
+whose tag does not point at the commit the notes describe.
 
 ---
 
