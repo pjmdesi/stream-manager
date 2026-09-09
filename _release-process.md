@@ -68,6 +68,8 @@ Build: Stream Manager <version>_DEV.exe from dev @ <commit>
 
 Since v2.5.0 the SHIPPED exe is built by CI (`.github/workflows/release.yml`): pushing the release tag triggers a clean-environment build that attaches the exe to a draft GitHub release. The local build that `release:minor` produces is no longer what ships (the dist folder carries a marker saying so); it only exists as a byproduct of the version script.
 
+**Docs-only exception.** GitHub renders `README.md` and the rest of the repo page from `master`, so public-facing doc changes (README, CONTRIBUTING, PRINCIPLES, LICENSE) do not have to wait for the next release. When every commit on dev since the last tag is documentation (check with `git diff --stat v<last>..dev`: no `src/`, `scripts/`, `.github/`, or `package*.json` changes), fast-forward master to dev and push it. No version bump, no tag, no CI run, and master stays identical to the released code. The moment dev carries a code change, this door closes until the next promotion.
+
 Dev must already contain master (guaranteed by the hotfix rule). Then:
 
 ```powershell
