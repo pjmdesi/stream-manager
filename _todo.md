@@ -200,6 +200,9 @@
   Audio track naming for files that carry no track names. Found 2026-09-07: MP4 has no per-track title field, so OBS's Hybrid MP4 output (the recommended container since the chapter hotkey) tags every audio stream only with a generic "OBS Audio Handler"; the names set in OBS's Audio tab never reach the file (MKV recordings do keep them). The player showed a hardcoded placeholder list (Game, Mic, Discord, Music, SFX) in that case, which mislabeled real recordings; that list is gone as of the v2.6.0 sweep and unnamed tracks read "Track N".
   Design decided: a setting with an ordered list of default track names (Track 1..N) that SM applies to any file whose tracks are unnamed, since a streamer's OBS track layout is stable per setup; plus a per-file override editable from the multi-track rows (rename in place), saved in the stream's _meta.json keyed like videoMap/videoMarkers. Embedded names, when a file has them (and identified as such with a small icon to the left of the names), always win over the defaults; the per-file override wins over both (also needs an icon). Multi-track setup tips in Help (the PLR-1 section) should mention the MP4 limitation and point at this setting.
 
+- **PLR-24**
+  Add ability to move both markers of a clip region by holding alt while dragging either one of them (similar to transforming in the thumbnail editor). This will allow the user to basically shrink the clip region symmetrically, keeping it centered.
+
 ### Thumbnail editor
 
 - **THU-1**

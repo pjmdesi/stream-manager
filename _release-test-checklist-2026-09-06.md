@@ -1,8 +1,10 @@
 # Release test checklist — v2.6.0 (2026-09-06)
 
-Build: Stream Manager 2.5.0_DEV.exe from dev @ a4e3895 (rebuilt 2026-09-07 with the playhead-over-region hover fix; the packaged exe matches this commit). Previous build @ c806c17 ran the 2026-09-06 stream night clean.
+Build: Stream Manager 2.5.0_DEV.exe from dev @ 55c180e (rebuilt 2026-09-07 with the portable launcher instance fix; the packaged exe matches this commit). Previous build @ c806c17 ran the 2026-09-06 stream night clean.
 
 FROZEN 2026-09-06: no further feature work on dev for this release. Code changes from here are limited to bugs and other fixes found during this sweep; each one gets a fresh build and an updated hash above.
+
+SWEEP COMPLETE 2026-09-09: every test item green against the packaged build @ 55c180e (2026-09-08 build), including the 2026-09-06 stream night on c806c17 and a full re-run of the sweep fixes. Fixes landed during the sweep, all on dev: marker popup close on timeline clicks; M focuses the placed marker; popup snapped to device pixels; Reset keeps the chapter popup open; playhead above clip-mode dimming; no region-pill flicker while scrubbing; unnamed tracks read "Track N"; Split Segment button height; wizard checks the steps a connection proves; clip export from recordings with a chapter data track; second launch exits at once; portable launcher pre-check (per-launch unpack folder tried and reverted for the firewall regression). Remaining lines below are promotion steps, not tests.
 
 Batch: the completions release (finishing touches on features) plus the marker system, the YouTube setup guide, and encryption at rest. All checks run against the PACKAGED build, not the dev server. Several player/marker checks pair naturally with a real stream night (OBS chapter hotkey on a Hybrid MP4 recording).
 
@@ -58,7 +60,7 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [x] Cancel pending: waiting files skip, an in-flight file finishes and stays local; no stuck cloud icons afterward.
 - [x] Quit mid-conversion: dialog says what comes back; on relaunch the running job returns parked (nothing auto-starts), partial output file is gone.
 - [x] Stream-link on converter rows shows the stream title for archive jobs, clip exports, and restored jobs.
-- [ ] Clip export from a Hybrid MP4 recording (chapter data track present) succeeds, including with multi-track audio selected and while another conversion of the same file is running; the exported clip plays and carries no stray chapters. (Sweep fix 2026-09-07: the segment copy mapped the data track into MKV and failed at "Could not write header".)
+- [x] Clip export from a Hybrid MP4 recording (chapter data track present) succeeds, including with multi-track audio selected and while another conversion of the same file is running; the exported clip plays and carries no stray chapters. (Sweep fix 2026-09-07: the segment copy mapped the data track into MKV and failed at "Could not write header".)
 
 ### Streams (STR-14) & app-wide (APP-12/16/17, APP-9)
 
@@ -67,8 +69,8 @@ Batch: the completions release (finishing touches on features) plus the marker s
 - [x] Colors sanity: Purple tag is true purple, Gray tag is the slate accent, Twitch UI purple, no odd accents anywhere (APP-16 fallout check).
 - [x] About window lists third-party libraries with working links; tagline is the new one.
 - [x] Start Minimized sub-option: with all three toggles on, launching the exe manually opens the window; launching with --from-autostart (or a real reboot) goes to tray; sub-option grays but keeps its checkmark when the parent is off.
-- [ ] Second launch only focuses, fast: with SM running (hidden to the tray), double-click the exe again. The existing window comes forward within about a second (no 10 s wait, no new-window open animation, no second tray icon, no ffmpeg firewall prompt). Afterwards open a video, generate a waveform and run a conversion: all still work, because the launcher never re-extracted or deleted the running instance's folder. Then quit and relaunch normally: the firewall prompt still appears at most once per build. (Sweep fixes 2026-09-08: the redundant instance used to run its whole startup before quitting, and its launcher deleted the shared unpack folder under the running instance, APP-31/APP-32; the launcher now checks for a running instance before touching the folder.)
-- [ ] Launcher fallthrough: hard-kill SM (app AND the small launcher process, via Task Manager) so the unpack folder is left behind, then launch the exe: it extracts normally and starts. Quit: the folder is removed.
+- [x] Second launch only focuses, fast: with SM running (hidden to the tray), double-click the exe again. The existing window comes forward within about a second (no 10 s wait, no new-window open animation, no second tray icon, no ffmpeg firewall prompt). Afterwards open a video, generate a waveform and run a conversion: all still work, because the launcher never re-extracted or deleted the running instance's folder. Then quit and relaunch normally: the firewall prompt still appears at most once per build. (Sweep fixes 2026-09-08: the redundant instance used to run its whole startup before quitting, and its launcher deleted the shared unpack folder under the running instance, APP-31/APP-32; the launcher now checks for a running instance before touching the folder.)
+- [x] Launcher fallthrough: hard-kill SM (app AND the small launcher process, via Task Manager) so the unpack folder is left behind, then launch the exe: it extracts normally and starts. Quit: the folder is removed.
 
 ### Thumbnail editor (THU-7/11)
 
@@ -99,12 +101,12 @@ Not in this release: APP-24 (style-guide audit) deferred to lead the next cycle;
 - [x] Watcher/auto-rules: drop a recording into the watch folder → lands in the right stream item
 - [x] New stream + New episode: correct season/episode, templates render
 - [x] YouTube: push + pull a stream's details; thumbnail push; out-of-sync panel clean afterward
-- [ ] Converter: one job start→finish; pause/resume; output plays
-- [ ] Player: open a video, clip draft → export. Run it on a recording in the CURRENT recording container (Hybrid MP4 as of 2026-09; name it here if it changes), since the exporter's intermediate step is sensitive to what streams the container carries (2026-09-07: the chapter data track broke every export until this sweep).
-- [ ] Thumbnail editor: open, edit, export; variant creation
-- [ ] Cloud: pin local + offload one item; statuses update everywhere
-- [ ] Launcher: run a launch group (window + tray)
-- [ ] Quit/relaunch: no orphaned processes, state restored
+- [x] Converter: one job start→finish; pause/resume; output plays
+- [x] Player: open a video, clip draft → export. Run it on a recording in the CURRENT recording container (Hybrid MP4 as of 2026-09; name it here if it changes), since the exporter's intermediate step is sensitive to what streams the container carries (2026-09-07: the chapter data track broke every export until this sweep).
+- [x] Thumbnail editor: open, edit, export; variant creation
+- [x] Cloud: pin local + offload one item; statuses update everywhere
+- [x] Launcher: run a launch group (window + tray)
+- [x] Quit/relaunch: no orphaned processes, state restored
 
 ## Promotion coordination (this release)
 
