@@ -110,6 +110,8 @@ Not in this release: APP-24 (style-guide audit) deferred to lead the next cycle;
 
 ## Promotion coordination (this release)
 
-- [ ] APP-18: un-gitignore PRINCIPLES.md and commit it with the release.
-- [ ] Website deploy goes out WITH the release: /principles, /app-privacy, /youtube-setup, strengthened encryption wording (tell the website instance when the tag is published).
-- [ ] Rollback note is in the release notes (older builds can't read encrypted credentials).
+- [x] APP-18: un-gitignore PRINCIPLES.md and commit it with the release. (fc304ab, plus two wording/citation passes; public on master with v2.6.0.)
+- [x] Website deploy goes out WITH the release: /principles, /app-privacy, /youtube-setup, strengthened encryption wording (tell the website instance when the tag is published). (v2.6.0 published 2026-09-09 18:48 UTC; website deployed and verified live the same evening: all three pages 200, version 2.6.0 in the homepage metadata and llms.txt.)
+- [x] Rollback note is in the release notes (older builds can't read encrypted credentials).
+
+RELEASED: v2.6.0 published 2026-09-09 18:48 UTC from the CI build of tag v2.6.0 (run 34389329593, green in 5m22s); asset Stream.Manager.2.6.0.exe, sha256 38b848a8...bf8b5f (GitHub digest). Archive this file once the website line above is ticked.

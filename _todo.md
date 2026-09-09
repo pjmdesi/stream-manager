@@ -431,7 +431,7 @@
 - **APP-17** [done]
   List 3rd-party libraries with links to their respective web pages in the about modal.
 
-- **APP-18**
+- **APP-18** [done]
   Ship the design principles with the next release. PRINCIPLES.md exists at the repo root (canonical copy, claims verified 2026-09-02) but is temporarily gitignored so the public repo never shows a file pointing at a 404: the website's /principles page (already built in the website repo) goes live alongside the next SM release. At promotion time: delete the two PRINCIPLES.md lines from .gitignore, commit the file with the release, and confirm the website deploy is out. The style guide carries the ongoing duties (citation upkeep, principle check before shipping).
 
 - **APP-19**
