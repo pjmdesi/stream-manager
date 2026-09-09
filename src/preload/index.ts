@@ -57,8 +57,8 @@ contextBridge.exposeInMainWorld('api', {
   saveFileDialog: (options?: Electron.SaveDialogOptions) =>
     ipcRenderer.invoke('files:saveFileDialog', options),
 
-  openDirectoryDialog: () =>
-    ipcRenderer.invoke('files:openDirectoryDialog'),
+  openDirectoryDialog: (options?: { defaultPath?: string }) =>
+    ipcRenderer.invoke('files:openDirectoryDialog', options),
 
   moveFile: (src: string, dest: string) =>
     ipcRenderer.invoke('files:move', src, dest),

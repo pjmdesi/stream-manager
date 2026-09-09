@@ -876,7 +876,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                             onChange={async e => {
                               const v = e.target.value
                               if (v === '__choose__') {
-                                const dir = await window.api.openDirectoryDialog()
+                                const dir = await window.api.openDirectoryDialog({ defaultPath: outputDir || undefined })
                                 if (dir) setQueuedFiles(prev => prev.map(f => f.path === path ? { ...f, outputDir: dir, pickedDir: dir } : f))
                                 else setFileOutputDir(path, outputDir) // cancel → reset the controlled value
                               } else {

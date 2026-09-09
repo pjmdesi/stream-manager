@@ -52,7 +52,9 @@ declare global {
       // ── Files ────────────────────────────────────────────────────────────────
       openFileDialog(options?: Electron.OpenDialogOptions): Promise<string[]>
       saveFileDialog(options?: Electron.SaveDialogOptions): Promise<string | null>
-      openDirectoryDialog(): Promise<string | null>
+      /** Folder picker. `defaultPath` wins when it exists; otherwise the
+       *  streams root, then the Videos folder (main decides). */
+      openDirectoryDialog(options?: { defaultPath?: string }): Promise<string | null>
       moveFile(src: string, dest: string): Promise<void>
       copyFile(src: string, dest: string): Promise<void>
       renameFile(filePath: string, newName: string): Promise<string>

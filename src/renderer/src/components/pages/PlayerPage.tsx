@@ -891,7 +891,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
   }, [presets, presetId])
 
   const pickDir = async () => {
-    const picked = await window.api.openDirectoryDialog()
+    const picked = await window.api.openDirectoryDialog({ defaultPath: outputDir || undefined })
     if (picked) setOutputDir(picked)
   }
 
@@ -3558,10 +3558,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     // told no would be worse.
     if (isExtractingRef.current) { setExtractionBlocked(true); return }
     const paths = await window.api.openFileDialog({
-      filters: [{ name: 'Video Files', extensions: ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm'] }]
+      filters: [{ name: 'Video Files', extensions: ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm'] }],
+      // Electron 43+ opens dialogs in Downloads when no path is given; the
+      // library root is where a streamer's videos live.
+      defaultPath: config.streamsDir || undefined,
     })
     if (paths && paths[0]) guardedLoadFile(paths[0])
-  }, [guardedLoadFile])
+  }, [guardedLoadFile, config.streamsDir])
 
   const stepFrame = useCallback((dir: 1 | -1) => {
     const vid = videoRef.current

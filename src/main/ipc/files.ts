@@ -1,9 +1,10 @@
-import { ipcMain, dialog, BrowserWindow, shell, nativeImage } from 'electron'
+import { app, ipcMain, dialog, BrowserWindow, shell, nativeImage } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { spawnSync, spawn, ChildProcess } from 'child_process'
 import { fileWatcher, WatchRule, WatchEvent } from '../services/fileWatcher'
 import { isInFlightWrite } from '../services/inFlightWrites'
+import { getStore } from './store'
 
 // Windows attribute flags that indicate the file's data is not resident locally:
 //   0x1000   = FILE_ATTRIBUTE_OFFLINE              (data physically offline)
@@ -192,10 +193,22 @@ export function registerFilesIPC(): void {
     return result.canceled ? null : result.filePath ?? null
   })
 
-  ipcMain.handle('files:openDirectoryDialog', async (event) => {
+  // Every directory picker in the app concerns stream-related folders, so
+  // when the caller has no better starting point the dialog opens at the
+  // streams root, then the user's Videos folder. Needed since Electron 43:
+  // dialogs with no defaultPath now open in Downloads instead of the last
+  // folder Windows remembered for the app.
+  ipcMain.handle('files:openDirectoryDialog', async (event, options?: { defaultPath?: string }) => {
     const win = BrowserWindow.fromWebContents(event.sender)
+    const existingDir = (p: string | undefined): string | undefined => {
+      if (!p) return undefined
+      try { return fs.statSync(p).isDirectory() ? path.normalize(p) : undefined } catch { return undefined }
+    }
+    const streamsDir = (getStore().get('config') as { streamsDir?: string } | undefined)?.streamsDir
+    const defaultPath = existingDir(options?.defaultPath) ?? existingDir(streamsDir) ?? app.getPath('videos')
     const result = await dialog.showOpenDialog(win!, {
-      properties: ['openDirectory']
+      properties: ['openDirectory'],
+      defaultPath,
     })
     return result.filePaths[0] || null
   })

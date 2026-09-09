@@ -114,7 +114,7 @@ While the app is running, press **Ctrl+`** to open the Chromium dev tools.
 
 | Layer            | Technology                                                                     |
 | ---------------- | ------------------------------------------------------------------------------ |
-| Framework        | [Electron](https://www.electronjs.org/) 34                                     |
+| Framework        | [Electron](https://www.electronjs.org/) 44                                     |
 | UI               | [React](https://react.dev/) 18 + [TypeScript](https://www.typescriptlang.org/) |
 | Styling          | [Tailwind CSS](https://tailwindcss.com/) 3                                     |
 | Icons            | [Lucide React](https://lucide.dev/)                                            |

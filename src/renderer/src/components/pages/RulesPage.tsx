@@ -37,8 +37,8 @@ function RuleModal({
       .catch(() => {})
   }, [])
 
-  const pickDir = async (setter: (v: string) => void) => {
-    const dir = await window.api.openDirectoryDialog()
+  const pickDir = async (current: string, setter: (v: string) => void) => {
+    const dir = await window.api.openDirectoryDialog({ defaultPath: current || undefined })
     if (dir) setter(dir)
   }
 
@@ -90,7 +90,7 @@ function RuleModal({
               onChange={e => setWatchPath(e.target.value)}
               placeholder="Folder to watch…"
             />
-            <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={() => pickDir(setWatchPath)}>
+            <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={() => pickDir(watchPath, setWatchPath)}>
               Browse
             </Button>
           </div>
@@ -166,7 +166,7 @@ function RuleModal({
                   onChange={e => setDestination(e.target.value)}
                   placeholder="Destination folder…"
                 />
-                <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={() => pickDir(setDestination)}>
+                <Button variant="secondary" size="sm" icon={<FolderOpen size={14} />} onClick={() => pickDir(destination, setDestination)}>
                   Browse
                 </Button>
               </div>

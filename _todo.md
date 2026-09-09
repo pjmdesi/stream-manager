@@ -7,6 +7,9 @@
 3. STR-3
 4. STR-18
 5. PLR-2
+6. PLR-21
+7. PLR-23
+8. PLR-24
 
 ## Improvement ideas
 
@@ -88,7 +91,7 @@
 - **PLR-2** [needs-design]
   Add shortcut options to the remaining default skip buttons. This was skipped at first because I was unsure which ones to use. Alt is obviously available, but what's the correct combination? alt+ ->/<- for 1m and alt+shift+ ->/<- for 10m? Or alt+ctrl+ ->/<- for 1m and alt+shift+ ->/<- for 5m? Or something else? Whatever we choose, the tooltips and animation will need to be updated to include these new shortcuts.
 
-- **PLR-3** [perf]
+- **PLR-3** [perf] [maybe]
   Panning through a timeline in the player page hitches a bit when the user is dragging the timeline scrollbar or scrolling horizontally with a mouse wheel. I suspect this has to do with the thumbnail rendering. We should look into ways to improve the performance of the timeline rendering so that it doesn't hitch when scrolling or dragging. This could involve optimizing or deferring the thumbnail checks.
 
 - **PLR-4**
