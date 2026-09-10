@@ -204,9 +204,3 @@ Still true in the code; each needs a call, then a small alignment pass. A recomm
 7. **Canonical spacing scale** (gap-1/2/3 per layout context): not yet decided.
 8. **Empty-state standard** (icon + message + optional CTA): not yet unified across thumbnails, launcher and streams.
 9. **Tooltip trigger default** (`inline-flex`): APP-27 proposes flipping it to `flex`; when that lands, trim the line-box strut rule above to a one-line history note.
-
----
-
-## Not needed yet (revisit if the project grows)
-
-Figma source files, a Storybook component catalog, a token build pipeline, automated visual-regression tests. Markdown + disciplined tokens/components is the right weight for a solo dev. Storybook is the natural upgrade if contributors arrive.
