@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Plus, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
-import { Youtube, Twitch } from '../ui/BrandIcons'
+import { Youtube, Twitch, Claude } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
 import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
@@ -501,9 +501,9 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                 </span>
               )}
               <span className={`flex items-center gap-1.5 text-xs ${
-                !online ? 'text-amber-400' : local.claudeApiKey ? 'text-orange-400' : 'text-gray-400'
+                !online ? 'text-amber-400' : local.claudeApiKey ? 'text-claude-500' : 'text-gray-400'
               }`}>
-                <Bot size={18} />
+                <Claude size={18} />
                 {!online ? 'Offline' : local.claudeApiKey ? 'Connected' : 'Not connected'}
               </span>
               <button

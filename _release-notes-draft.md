@@ -8,3 +8,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 - Stream Manager now runs on Electron 44 (Chromium 152, Node 24), up from Electron 34, which had been out of support since mid-2025. This brings ten versions of browser engine security fixes and performance work to the app. No visible changes are intended; if something looks or behaves differently after updating, that is worth a bug report.
 - Folder pickers open somewhere sensible again: the folder you last chose for that setting, otherwise your streams folder, otherwise Videos. The new Electron would have opened them in Downloads.
+
+## Integrations
+
+- The Claude connection now shows Claude's own mark and color on the Integrations page, in Settings, in the sidebar status, and in Help, in place of a generic robot icon in orange. Orange in the app means "YouTube has a newer value" and is no longer shared with Claude.

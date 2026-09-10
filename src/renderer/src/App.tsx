@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, Component } from 'react'
 import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
-import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, Bot, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
-import { Youtube as BrandYoutube, Twitch as BrandTwitch } from './components/ui/BrandIcons'
+import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
+import { Youtube as BrandYoutube, Twitch as BrandTwitch, Claude as BrandClaude } from './components/ui/BrandIcons'
 import { SlideOpen, SlideBlock } from './components/ui/Slide'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
@@ -392,7 +392,7 @@ function IntegrationsSubline({ status }: { status: Record<'youtube' | 'twitch' |
   const services: Array<{ key: 'youtube' | 'twitch' | 'claude'; icon: React.ReactNode }> = [
     { key: 'youtube', icon: <BrandYoutube size={11} /> },
     { key: 'twitch', icon: <BrandTwitch size={11} /> },
-    { key: 'claude', icon: <Bot size={11} /> },
+    { key: 'claude', icon: <BrandClaude size={11} /> },
   ]
   const shown = services.filter(s => status[s.key].setUp)
   if (shown.length === 0) return null

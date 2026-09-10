@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { CheckCircle2, AlertCircle, Loader2, Bot, Eye, EyeOff, ChevronDown, TrendingUpDown, Copy, Check, WifiOff, ListChecks } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, Eye, EyeOff, ChevronDown, TrendingUpDown, Copy, Check, WifiOff, ListChecks } from 'lucide-react'
 import type { RelayStatus, RelayStats, OrchestratorEvent } from '../../types'
-import { Youtube, Twitch } from '../ui/BrandIcons'
+import { Youtube, Twitch, Claude } from '../ui/BrandIcons'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Textarea, NumberInput } from '../ui/Input'
@@ -975,7 +975,7 @@ export function IntegrationsPage({ initialStatus }: {
         {/* ── Claude AI ───────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 px-1">
-            <Bot size={16} className="text-orange-400 shrink-0" />
+            <Claude size={16} className="text-claude-500 shrink-0" />
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Claude AI</span>
             <span className={`ml-auto text-xs font-medium ${
               !online ? 'text-amber-400' : config.claudeApiKey ? 'text-green-400' : 'text-gray-400'

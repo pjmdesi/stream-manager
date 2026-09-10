@@ -42,10 +42,22 @@ When adding UI: reach for a primitive → if it doesn't fit, extend the primitiv
 | `accent-400` `#e0e7f0` | accent **text** |
 | `accent-300`/`200` | highlighted/active text |
 | `twitch-500/400/300` `#9146ff…` | **Twitch-only** UI, literal brand purple, never themed |
+| `claude-500/400/300` `#d97757…` | **Claude-only** UI (the logo terracotta); 400/300 are white-mixed tints for hover/text |
 
 Text ramp: `gray-200` primary · `gray-300` field labels · `gray-400` secondary · `gray-500/600` muted/placeholder. Borders: `border-white/5` (subtle) · `border-white/10` (standard).
 
-Semantic colors: red = danger **and** YouTube brand (`red-400`); green = success; the slate `accent-*` = primary accent; `twitch-*` = Twitch brand. Real `purple-*` appears in exactly two places: the true-purple tag color (`constants/tagColors.ts`) and the merge-field chip selection tint in `index.css`.
+Semantic colors: red = danger **and** YouTube brand (`red-400`); green = success; the slate `accent-*` = primary accent; `twitch-*` = Twitch brand; `claude-*` = Claude brand. Real `purple-*` appears in exactly two places: the true-purple tag color (`constants/tagColors.ts`) and the merge-field chip selection tint in `index.css`.
+
+**Third-party services wear their real brand colors and marks (rule, 2026-09-10).** A connected service is identified by its own logo (`components/ui/BrandIcons.tsx`, paths from the simple-icons project) in its own brand color token, the way YouTube and Twitch always were. Claude joined them: the `Bot` glyph in borrowed `orange-400` became the Claude mark in `claude-500` on the Integrations card, the Settings connection status, the nav subline, and the Help entry. Generic AI *features* (the Ctrl+Space hint lines, the AI Suggestions settings section) stay vendor-neutral: gray text and the plain `Bot` icon, because they describe the feature, not the provider. When AI-2 adds other providers, the Integrations card becomes a neutral container of provider rows, each row carrying its own mark and color.
+
+Orange is spoken for and none of its meanings is Claude:
+
+| `orange-*` use | Where |
+|---|---|
+| "Changed on YouTube" / pull direction | out-of-sync dots and panel, sidebar mismatch markers |
+| Locked clip region | player region lock toggle |
+| Combined-file tag | files grid |
+| The Orange tag color | tag palette |
 
 Also in the config: a `wide` breakpoint (1200px) and a `roboto` font family (thumbnail-editor YouTube preview mockups only).
 

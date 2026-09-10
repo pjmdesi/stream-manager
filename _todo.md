@@ -300,6 +300,7 @@
 
 - **AI-2** [maybe]
   Maybe add the ability to connect and use other AI services in the integrations page besides Claude.
+  Shape decided 2026-09-10 (from the style-guide audit): the Integrations card becomes a neutral "AI assistant" container of per-provider rows, each row carrying that provider's own brand mark and color token (the pattern YouTube, Twitch and now Claude already follow; see the brand-colors rule in the style guide). The Claude row keeps `claude-*` and the Claude mark. Vendor-neutral surfaces (the Ctrl+Space hint lines, the AI Suggestions settings section) stay gray with the plain Bot icon whatever the provider.
 
 - **AI-3**
   Add the option to display separate general prompt text fields for each AI-suggestion-enabled fields in the app. Currently those are: title, tagline, description, YouTube Tags, Twitch Tags. On the integrations page for the AI section, add a checkbox that enables this feature: "Use field-specific prompts". When this is checked, the UI should show 5 new fields, one for each of the AI-suggestion-enabled fields. The user can then enter a specific prompt for each of them so they can more finely tune the output of the suggestions

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Keyboard, PanelRight, Layers, AlertTriangle, Upload, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Bot, Palette, Bookmark, CircleHelp } from 'lucide-react'
-import { Youtube, Twitch } from './ui/BrandIcons'
+import { Radio, Film, Zap, Combine, Image as ImageIcon, Rocket, Plug, Shuffle, Scissors, Archive, Tag, Hash, MessageSquare, PencilLine, FolderOpen, CalendarClock, Keyboard, PanelRight, Layers, AlertTriangle, Upload, TrendingUpDown, LayoutGrid, Type, Braces, Star, Link2, SquareDashedText, Palette, Bookmark, CircleHelp } from 'lucide-react'
+import { Youtube, Twitch, Claude } from './ui/BrandIcons'
 import { Modal } from './ui/Modal'
 import { MERGE_FIELD_CHIP_CLASS, MERGE_FIELD_CHIP_CLASS_INAPPLICABLE } from './ui/TemplateBodyEditor'
 import { useStore } from '../hooks/useStore'
@@ -465,7 +465,7 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           <p>With Twitch connected, Stream Manager syncs a stream's title and category to your channel. It can automatically push the next scheduled broadcast's details or allow you to push them manually in the Streams details sidebar.</p>
         </ElementSection>
 
-        <ElementSection icon={<Bot size={14} />} title="Claude AI">
+        <ElementSection icon={<Claude size={14} />} title="Claude AI">
           <p>When Claude is connected, it can draft titles, taglines, descriptions, and tag lists. Press <Kbd>Ctrl</Kbd>+<Kbd>Space</Kbd> in those fields for a suggestion grounded in the stream's details and your preferences prompt.</p>
         </ElementSection>
       </>

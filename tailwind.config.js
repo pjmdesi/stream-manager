@@ -44,6 +44,16 @@ module.exports = {
           400: '#a970ff',
           300: '#bf94ff',
         },
+        // Claude brand terracotta (the logo color), kept literal for the same
+        // reason as twitch-*: third-party services wear their real brand
+        // colors. 500 is the brand value; 400/300 are white-mixed tints for
+        // hover and text on dark surfaces. Tailwind's orange-* stays the
+        // "changed on YouTube / pull" color and must not be used for Claude.
+        claude: {
+          500: '#d97757',
+          400: '#e19279',
+          300: '#e8ad9a',
+        },
         surface: {
           100: '#2a3447',
           200: '#243043',
