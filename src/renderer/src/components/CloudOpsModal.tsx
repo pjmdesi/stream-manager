@@ -223,7 +223,7 @@ function CloudOpsSection({ direction, items, active, cancelling, onCancel }: Sec
                 <Tooltip content={it.path} maxWidth="max-w-md" triggerClassName="block min-w-0">
                   <span className="block truncate text-gray-300">{it.name}</span>
                 </Tooltip>
-                <span className="text-right tabular-nums text-gray-400">{formatBytes(it.size)}</span>
+                <span className="text-right tabular-nums text-gray-400">{it.size > 0 ? formatBytes(it.size) : ''}</span>
                 <span className="w-32 inline-flex items-center justify-end gap-1.5">
                   {it.status === 'failed' && (
                     <Tooltip content={isOffload ? 'Retry offload' : 'Retry download'}>

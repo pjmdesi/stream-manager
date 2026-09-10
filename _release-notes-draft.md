@@ -10,6 +10,10 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 - Folder pickers open somewhere sensible again: the folder you last chose for that setting, otherwise your streams folder, otherwise Videos. The new Electron would have opened them in Downloads.
 - Buttons that carry a tooltip no longer render a pixel taller than their neighbors in a few toolbars. The tooltip wrapper is now a block-level box, which removes the stray line spacing that caused it.
 
+## Streams
+
+- Sending a cloud-offloaded video to the player no longer holds a dialog open while it downloads. Confirming starts the download in the background through the cloud sync widget, and when it finishes the video opens in the player without switching you to it (the Player item in the navigation shows what is open). The old dialog also offered to cancel the download, which was never actually possible; that option is gone.
+
 ## Integrations
 
 - The Claude connection now shows Claude's own mark and color on the Integrations page, in Settings, in the sidebar status, and in Help, in place of a generic robot icon in orange. Orange in the app means "YouTube has a newer value" and is no longer shared with Claude.

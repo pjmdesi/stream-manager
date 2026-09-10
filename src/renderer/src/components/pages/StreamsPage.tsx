@@ -24,7 +24,8 @@ import { useOpenItems, blockReasonText, type OpenSource } from '../../context/Op
 import { useInUse } from '../../hooks/useInUse'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
 import { usePageActivity } from '../../context/PageActivityContext'
-import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, DisplayTagChip, CloudDownloadModal, ClampedComment } from '../streams/legacyStreamsShared'
+import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, DisplayTagChip, ClampedComment } from '../streams/legacyStreamsShared'
+import { CloudDownloadModal, type CloudDownloadDestination } from '../streams/CloudDownloadModal'
 import { YouTubeImportModal } from '../streams/YouTubeImportModal'
 import { pickColorForNewTag } from '../../constants/tagColors'
 import { ManageTagsModal } from '../ui/ManageTagsModal'
@@ -430,7 +431,7 @@ export function StreamsPage({
   onOpenIntegrations,
 }: {
   isVisible: boolean
-  onSendToPlayer: (file: string) => void
+  onSendToPlayer: (file: string, opts?: { navigate?: boolean }) => void
   onSendToConverter: (files: string[], stream?: { folderPath: string; label: string }) => void
   onSendToCombine: (files: string[], stream?: { folderPath: string; label: string; date?: string }) => void
   /** When the token bumps, select/open this stream's detail sidebar — by
@@ -711,14 +712,16 @@ export function StreamsPage({
   }, [])
   const [newStreamOpen, setNewStreamOpen] = useState(false)
   // Cloud-download prompt for send-to-player when the chosen video is a cloud
-  // placeholder. `stage` flips confirm → downloading; the file is sent on once
-  // the cloud-download-done event fires for its path (effect below).
+  // placeholder. Confirming hands the download to the cloud-ops pin queue
+  // and closes the prompt; the file is routed to its destination when the
+  // queue reports it landed (effect below), without navigating (STR-19).
   const [cloudDownload, setCloudDownload] = useState<{
     filePath: string
     fileName: string
-    action: 'player' | 'converter' | 'combine'
-    stage: 'confirm' | 'downloading'
+    action: CloudDownloadDestination
   } | null>(null)
+  // Files whose download the user confirmed and that still owe a hand-off.
+  const pendingCloudOpensRef = useRef<Map<string, CloudDownloadDestination>>(new Map())
   // When set, the New Stream modal opens in "New episode" mode with this
   // folder as the source. Cleared on close. The path-based key (not the
   // folder object) survives folder-list refreshes without going stale.
@@ -1588,7 +1591,7 @@ export function StreamsPage({
       const localVideos = folder.videos.filter((_, i) => localFlags[i])
       if (localVideos.length === 0) {
         const filePath = folder.videos[0]
-        setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'player', stage: 'confirm' })
+        setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'player' })
         return
       }
       const file = pickPrimaryFrom(folder, localVideos)
@@ -1605,11 +1608,21 @@ export function StreamsPage({
   const handleSendFileToPlayer = useCallback(async (filePath: string) => {
     const [isLocal] = await window.api.checkLocalFiles([filePath])
     if (!isLocal) {
-      setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'player', stage: 'confirm' })
+      setCloudDownload({ filePath, fileName: filePath.split(/[\\/]/).pop() ?? 'video file', action: 'player' })
       return
     }
     onSendToPlayer(filePath)
   }, [onSendToPlayer])
+  // Size for the cloud widget row: the owning stream's video map when it has
+  // one, else a stat (placeholders report their full size without
+  // hydrating). 0 renders as no size rather than a wrong one.
+  const cloudSizeFor = useCallback(async (filePath: string): Promise<number> => {
+    const owner = folders.find(f => f.videos.includes(filePath))
+    const mapped = owner?.meta?.videoMap?.[videoMapKey(owner.folderPath, filePath)]?.size
+    if (mapped) return mapped
+    const [size] = await window.api.getFileSizes([filePath]).catch(() => [null])
+    return size ?? 0
+  }, [folders])
 
   const handleSendToConverter = useCallback((folder: StreamFolder) => {
     // More than one video → let the user pick which file(s) to send. A single
@@ -1619,22 +1632,23 @@ export function StreamsPage({
     if (file) onSendToConverter([file], { folderPath: folder.folderPath, label: renderStreamTitle(folder, folders) || folder.folderName })
   }, [onSendToConverter, folders])
 
-  // When a prompted cloud download finishes, route the now-local file to its
-  // pending action and dismiss the modal. The pending download is read from a
-  // ref (not the state updater) so the routing call — which navigates via a
-  // parent setState — runs in this event callback rather than inside a render-
-  // phase updater (which would warn "setState while rendering another
-  // component").
-  const cloudDownloadRef = useRef(cloudDownload)
-  useEffect(() => { cloudDownloadRef.current = cloudDownload }, [cloudDownload])
+  // When a confirmed cloud download lands (reported by the pin queue, the
+  // same events the cloud widget draws from), route the now-local file to
+  // the destination the user chose. The player hand-off is QUIET: the file
+  // loads into the always-mounted player without switching pages (STR-19).
+  // A failed download drops the hand-off; the cloud modal owns the failure
+  // and its retry, and a retried file goes through the grid's normal path.
   useEffect(() => {
-    const unsub = window.api.onCloudDownloadDone((filePath: string) => {
-      const pending = cloudDownloadRef.current
-      if (!pending || pending.filePath !== filePath) return
-      setCloudDownload(null)
-      if (pending.action === 'player') onSendToPlayer(filePath)
-      else if (pending.action === 'converter') onSendToConverter([filePath])
-      else onSendToCombine([filePath])
+    const unsub = window.api.onCloudSyncProgress(ev => {
+      if (ev.direction !== 'hydrate' || ev.type !== 'item') return
+      const action = pendingCloudOpensRef.current.get(ev.path)
+      if (!action) return
+      if (ev.status === 'failed') { pendingCloudOpensRef.current.delete(ev.path); return }
+      if (ev.status !== 'done' && ev.status !== 'already-local') return
+      pendingCloudOpensRef.current.delete(ev.path)
+      if (action === 'player') onSendToPlayer(ev.path, { navigate: false })
+      else if (action === 'converter') onSendToConverter([ev.path])
+      else onSendToCombine([ev.path])
     })
     return unsub
   }, [onSendToPlayer, onSendToConverter, onSendToCombine])
@@ -4833,17 +4847,17 @@ export function StreamsPage({
         <CloudDownloadModal
           fileName={cloudDownload.fileName}
           filePath={cloudDownload.filePath}
-          stage={cloudDownload.stage}
+          destination={cloudDownload.action}
           onConfirm={async () => {
-            setCloudDownload(prev => prev ? { ...prev, stage: 'downloading' } : null)
-            await window.api.startCloudDownload(cloudDownload.filePath)
-          }}
-          onCancel={async () => {
-            if (cloudDownload.stage === 'downloading') {
-              await window.api.cancelCloudDownload(cloudDownload.filePath)
-            }
+            const { filePath, action } = cloudDownload
+            pendingCloudOpensRef.current.set(filePath, action)
             setCloudDownload(null)
+            // Through the pin queue: widget progress, retry on failure, and
+            // the completion event the hand-off effect listens for. No
+            // modal pop (openModal=false); the widget is the feedback.
+            enqueueHydrate([{ path: filePath, size: await cloudSizeFor(filePath) }], false)
           }}
+          onDismiss={() => setCloudDownload(null)}
         />
       )}
 

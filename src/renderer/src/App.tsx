@@ -1143,9 +1143,13 @@ function AppInner() {
   // cleared on selection, so the unattended path was effectively silent.)
   const [autoPushError, setAutoPushError] = useState<{ streamKey: string; title: string; game: string } | null>(null)
 
-  const sendToPlayer = (filePath: string) => {
+  // `navigate: false` loads the file into the (always-mounted) player
+  // without switching pages: used when a cloud download the user asked for
+  // earlier finally lands (STR-19). The Player nav item's subline shows
+  // what is open, so the hand-off is visible without yanking them there.
+  const sendToPlayer = (filePath: string, opts?: { navigate?: boolean }) => {
     setPendingPlayer(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1 }))
-    setPage('player')
+    if (opts?.navigate !== false) setPage('player')
   }
   const sendToConverter = (filePaths: string[], stream?: { folderPath: string; label: string }) => {
     setPendingConverter(prev => ({ paths: filePaths, token: (prev?.token ?? 0) + 1, stream }))

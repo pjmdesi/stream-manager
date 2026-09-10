@@ -12,7 +12,7 @@ import { useStore } from '../../hooks/useStore'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry, VideoMarker } from '../../types'
 import { ThumbImage } from '../streams/ThumbImage'
 import { RecentRow } from '../ui/RecentRow'
-import { CloudDownloadModal } from '../streams/legacyStreamsShared'
+import { CloudDownloadModal } from '../streams/CloudDownloadModal'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useVideoPlayer } from '../../hooks/useVideoPlayer'
 import { useThumbnailStrip } from '../../hooks/useThumbnailStrip'
@@ -1916,22 +1916,31 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   const clearRecents = useCallback(() => {
     window.api.playerClearRecents().then(setRecents).catch(() => setRecents([]))
   }, [])
-  // Cloud-download prompt for recents whose target file is a placeholder —
-  // same modal + auto-open-when-done flow as the streams page's
-  // send-to-player gate. Without it, clicking such a recent silently
-  // kicked off a hydration with no feedback beyond the Windows toast.
-  const [cloudDownload, setCloudDownload] = useState<{ filePath: string; fileName: string; stage: 'confirm' | 'downloading' } | null>(null)
-  const cloudDownloadRef = useRef(cloudDownload)
-  useEffect(() => { cloudDownloadRef.current = cloudDownload }, [cloudDownload])
+  // Cloud-download prompt for recents whose target file is a placeholder,
+  // the same confirm-then-queue flow as the streams page's send-to-player
+  // gate (STR-19): confirming enqueues the pin, closes the prompt, and the
+  // file opens here when the queue reports it landed. Without the prompt,
+  // clicking such a recent silently kicked off a hydration with no feedback
+  // beyond the Windows toast.
+  const [cloudDownload, setCloudDownload] = useState<{ filePath: string; fileName: string } | null>(null)
+  const pendingRecentOpensRef = useRef<Set<string>>(new Set())
+  // State twin of the ref, for the recents row: its cloud icon becomes a
+  // spinner while the download the user confirmed is in flight.
+  const [hydratingRecentPaths, setHydratingRecentPaths] = useState<Set<string>>(new Set())
+  const dropPendingRecent = (path: string) => {
+    pendingRecentOpensRef.current.delete(path)
+    setHydratingRecentPaths(prev => { if (!prev.has(path)) return prev; const next = new Set(prev); next.delete(path); return next })
+  }
   useEffect(() => {
-    const unsub = window.api.onCloudDownloadDone((filePath: string) => {
-      const pending = cloudDownloadRef.current
-      if (!pending || pending.filePath !== filePath) return
-      setCloudDownload(null)
-      guardedLoadFile(filePath)
+    return window.api.onCloudSyncProgress(ev => {
+      if (ev.direction !== 'hydrate' || ev.type !== 'item') return
+      if (!pendingRecentOpensRef.current.has(ev.path)) return
+      if (ev.status === 'failed') { dropPendingRecent(ev.path); return }
+      if (ev.status !== 'done' && ev.status !== 'already-local') return
+      dropPendingRecent(ev.path)
+      guardedLoadFile(ev.path)
     })
-    return () => unsub()
-  }, [guardedLoadFile])
+  }, [guardedLoadFile]) // eslint-disable-line react-hooks/exhaustive-deps
   // Session-panel hydration UX: clicking an offloaded row starts its
   // download (row spinner via `hydrating`); when it lands, the row gets the
   // pulsing ready-ring and WAITS to be clicked — never auto-switching the
@@ -1992,7 +2001,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     if (cloudSyncActive) {
       const [isLocal] = await window.api.checkLocalFiles([entry.filePath]).catch(() => [true])
       if (!isLocal) {
-        setCloudDownload({ filePath: entry.filePath, fileName: entry.filePath.split(/[\\/]/).pop() ?? 'video file', stage: 'confirm' })
+        setCloudDownload({ filePath: entry.filePath, fileName: entry.filePath.split(/[\\/]/).pop() ?? 'video file' })
         return
       }
     }
@@ -4557,7 +4566,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                               ? `${r.folder.videoCount} video${r.folder.videoCount === 1 ? '' : 's'}`
                               : r.filePath}
                           </span>
-                          {r.folder && offlineRecentKeys.has(r.folder.relativePath) && (
+                          {hydratingRecentPaths.has(r.filePath) ? (
+                            <Tooltip content="Downloading from the cloud. It opens here when it lands; progress is in the cloud sync widget.">
+                              <Loader2 size={10} className="shrink-0 text-gray-400 animate-spin" />
+                            </Tooltip>
+                          ) : r.folder && offlineRecentKeys.has(r.folder.relativePath) && (
                             <Tooltip content="All of this stream's videos are in the cloud — clicking will prompt a download">
                               <Cloud size={10} className="shrink-0 text-gray-400" />
                             </Tooltip>
@@ -7161,23 +7174,24 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         </p>
       </Modal>
 
-      {/* Cloud-download prompt for a recent whose file is a placeholder —
-          the file auto-opens here once the download lands. */}
+      {/* Cloud-download prompt for a recent whose file is a placeholder;
+          the file opens here once the queued download lands. */}
       {cloudDownload && (
         <CloudDownloadModal
           fileName={cloudDownload.fileName}
           filePath={cloudDownload.filePath}
-          stage={cloudDownload.stage}
+          destination="player"
           onConfirm={async () => {
-            setCloudDownload(prev => prev ? { ...prev, stage: 'downloading' } : null)
-            await window.api.startCloudDownload(cloudDownload.filePath)
-          }}
-          onCancel={async () => {
-            if (cloudDownload.stage === 'downloading') {
-              await window.api.cancelCloudDownload(cloudDownload.filePath)
-            }
+            const path = cloudDownload.filePath
+            pendingRecentOpensRef.current.add(path)
+            setHydratingRecentPaths(prev => new Set(prev).add(path))
             setCloudDownload(null)
+            // Placeholders report their full size from a stat without
+            // hydrating, so the widget row can show it.
+            const [size] = await window.api.getFileSizes([path]).catch(() => [null])
+            enqueueHydrate([{ path, size: size ?? 0 }], false)
           }}
+          onDismiss={() => setCloudDownload(null)}
         />
       )}
 
