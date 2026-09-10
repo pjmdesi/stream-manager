@@ -1625,6 +1625,15 @@ export function registerStreamsIPC(): void {
         if (touched) {
           allMeta[key] = { ...existing, videoMap }
           writeAllMeta(streamsDir, allMeta)
+          // Tell the renderer so its in-memory stream picks up the flags;
+          // otherwise every visit would find them undetermined and probe
+          // again. Scoped to this stream in folder mode (the key IS the
+          // stream key); dump mode has no per-stream key, so a full reload.
+          const cfg = getStore().get('config') as { streamMode?: string }
+          const payload = cfg.streamMode !== 'dump-folder' ? { streamKeys: [key] } : undefined
+          for (const w of BrowserWindow.getAllWindows()) {
+            if (!w.isDestroyed()) w.webContents.send('streams:changed', payload)
+          }
         }
       }
     } catch (err) {

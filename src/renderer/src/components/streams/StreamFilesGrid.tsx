@@ -343,7 +343,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
                 label: 'Recording',
                 // Archived marker lives in the tray (same layout as the
                 // thumbnail tag's bookmark), not next to the filename.
-                icon: archived ? <Archive size={9} className="text-emerald-400" /> : undefined,
+                // strokeWidth 3: at 9px the default 2px stroke rasterizes
+                // into sub-pixel smudge and the glyph stops reading as a box.
+                icon: archived ? <Archive size={9} strokeWidth={3} className="text-emerald-400" /> : undefined,
                 tooltip: archived ? 'Archived by Stream Manager' : undefined,
               }
             : null}
@@ -356,7 +358,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
               whose category shifted) — recordings carry it in their tag tray. */}
           {archived && !isRecording && (
             <Tooltip content="Archived by Stream Manager" side="top">
-              <Archive size={11} className="shrink-0 text-emerald-400" />
+              <Archive size={11} strokeWidth={2.5} className="shrink-0 text-emerald-400" />
             </Tooltip>
           )}
         </div>
