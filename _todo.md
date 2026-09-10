@@ -212,6 +212,9 @@
 - **THU-16**
   Add an "open folder" button to the headers of the stream item groups in the asset panel which opens the folder for that stream item so the user has easy access to the files inside in case they want to do something iwth them in an external app.
 
+- **THU-17** [ui]
+  Native alpha in the color picker. Split out of APP-1 (2026-09-10): the Electron 44 bump brought Chromium 152, whose `<input type="color">` supports the `alpha` attribute (and `colorspace`), so the picker popup can carry an opacity slider instead of SM's separate opacity field next to the swatch. Not a one-attribute change: with `alpha` set the input's value stops being a 6-digit hex and becomes a CSS color string (rgb()/color() with a slash-alpha), which touches `splitColorAlpha` and `joinColorAlpha` in ThumbnailPage and every ColorAlphaField call site (about a dozen), plus the recent-colors and swatch recording that key on the hex form. First step is the runtime check in dev tools, `'alpha' in document.createElement('input')`, on the shipped 44 build (not yet run as of filing; the checklist tick was premature). If supported: decide whether the opacity field stays as a typed-value companion to the native slider or goes away, keep the stored color format unchanged (convert at the input boundary only) so canvases and templates on disk are untouched, and check the gradient-stop editor, which shares the field. If Chromium's picker UI for alpha turns out poor, keep the current field and drop this ticket.
+
 ### Converter
 
 - **CONV-3** [perf] [investigate]
@@ -319,7 +322,8 @@
 
 ### App-wide & foundation
 
-- **APP-1** [big]
+- **APP-1** [big] [done]
+  DONE 2026-09-10: Electron 34 -> 44.3.0 (Chromium 152, Node 24.20). Committed 438914c; full packaged shakedown green (record archived as `archive/_electron-upgrade-checklist.md`). Fallout handled: dialog defaults (Electron 43 forces Downloads; fixed with a main-side fallback chain, follow-up audit APP-34), stale `allowScripts` entry, `@types/node` 24. One unexplained black-window episode on the first packaged build, not reproduced, tracked as APP-33. The alpha color picker is THU-17.
   Electron 34 → 43 bump (34 is EOL since 2026-06-24 — security motivation, not just features). Gains: Chromium 150 (native alpha color picker → enable the alpha attribute in ColorAlphaField), Node 24. Audit items: dialog defaultPath behavior changed in 43 (pickers now default to Downloads); confirm electron-vite/electron-builder version compat; full shakedown (watcher, relay, converter, thumbnail editor, PowerShell/cfapi paths). No SM-used APIs are removed in 35–44 per the breaking-changes doc (clipboard use is web-API only).
   If electron-builder gets bumped alongside: re-check the portable unpack behavior against APP-31's findings (the launcher's fixed per-build unpack folder and its delete-on-exit are what make a second launch destructive; `portable.unpackDirName` semantics are inverted in 26.x, electron-builder issue 5764, so verify rather than assume after any builder change).
 

@@ -1,6 +1,8 @@
 # Electron upgrade checklist (APP-1)
 
-Working file for the Electron 34 to 43/44 bump. Research done 2026-09-09; the ticket is APP-1 in `_todo.md`. Archive to `archive/` when the upgrade has shipped in a release.
+COMPLETE 2026-09-10: upgrade to 44.3.0 committed (438914c) and the packaged shakedown below is fully green. Open threads live in the todo: APP-33 (one black-window episode, watching), APP-34 (picker start-folder audit), THU-17 (native alpha color input; that upgrade-step tick was premature, the runtime check moved into the ticket). Archived here; ships with the next release.
+
+Working file for the Electron 34 to 43/44 bump. Research done 2026-09-09; the ticket is APP-1 in `_todo.md`.
 
 ## Where we are and where we're going
 
@@ -82,9 +84,9 @@ Everything that crosses the Electron boundary. Tick against the new build.
 - [x] Thumbnail editor: open, edit, save, export PNG; fonts enumerate; palette import/export dialogs.
 - [x] Launcher: launch a group; icons resolve (`createThumbnailFromPath`, `readShortcutLink`); open folder actions.
 - [x] Dialogs: every picker opens in a sensible folder, not Downloads (the 43 change).
-- [ ] Integrations page: YouTube wizard opens links in the browser (`shell.openExternal` via the open handler); OAuth callback page renders.
-- [ ] Update check: the About/update path reaches GitHub (`net`/fetch under the new Chromium).
-- [ ] Quit: no orphaned processes; relaunch restores state.
+- [x] Integrations page: YouTube wizard opens links in the browser (`shell.openExternal` via the open handler); OAuth callback page renders.
+- [x] Update check: the About/update path reaches GitHub (`net`/fetch under the new Chromium).
+- [x] Quit: no orphaned processes; relaunch restores state.
 
 Watch item from the first packaged 44 build (2026-09-09): one black-window episode after an Explorer window covered the app (repaint on resize, blank on click, self-recovered; no crash, all processes alive). Not reproduced since. Tracked as APP-33 with the diagnosis steps; not treated as a blocker for the bump unless it recurs.
 
