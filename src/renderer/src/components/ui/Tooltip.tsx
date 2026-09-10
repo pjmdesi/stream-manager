@@ -11,7 +11,12 @@ interface TooltipProps {
    *  'max-w-md' or 'max-w-[480px]' for tooltips that need to fit longer
    *  prose (e.g. full stream descriptions). */
   maxWidth?: string
-  /** Extra classes applied to the trigger wrapper div (e.g. 'w-full block' for full-width triggers) */
+  /** Classes for the trigger wrapper div, REPLACING the default `flex`.
+   *  Pass `flex w-fit` when the parent is a plain block (so the bubble
+   *  anchors to the control, not the row), `inline-flex` when the trigger
+   *  sits inside running text, `flex-1 min-w-0 flex` and friends when the
+   *  trigger must be the flex item, or absolute-positioning classes when
+   *  the wrapped control is a positioned badge. */
   triggerClassName?: string
   /** Inline style for the trigger wrapper. Used together with
    *  `triggerClassName="fixed pointer-events-none"` + an externally
@@ -202,7 +207,17 @@ export function Tooltip({ content, side = 'top', width = 'w-max', maxWidth = 'ma
     <>
       <div
         ref={triggerRef}
-        className={triggerClassName ?? 'inline-flex'}
+        // `flex`, not `inline-flex` (APP-27): an inline-flex trigger inside a
+        // plain block parent sat on a line box and inherited the parent's
+        // line-height, so wrapped controls rendered 1px taller than their
+        // unwrapped siblings (three separate sightings). A block-level
+        // trigger creates no line box. Inside flex/grid parents, where most
+        // Tooltips live, both values blockify identically, so nothing moves
+        // there. In a block parent the trigger now spans the row, which
+        // would re-anchor the bubble to the row's center; those sites pass
+        // `triggerClassName="flex w-fit"` (or carry the absolute
+        // positioning themselves). Inline contexts pass `inline-flex`.
+        className={triggerClassName ?? 'flex'}
         style={triggerStyle}
         onMouseEnter={wantsInternalHover ? show : undefined}
         onMouseLeave={wantsInternalHover ? close : undefined}

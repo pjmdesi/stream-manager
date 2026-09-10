@@ -520,7 +520,7 @@ export function IntegrationsPage({ initialStatus }: {
                   never shared with anyone.
                 </p>
                 <div>
-                  <Tooltip content={ytConnected ? 'Reopen the step-by-step connection guide' : 'Step-by-step guide with links and checks for every part of the Google setup'}>
+                  <Tooltip triggerClassName="flex w-fit" content={ytConnected ? 'Reopen the step-by-step connection guide' : 'Step-by-step guide with links and checks for every part of the Google setup'}>
                     <Button
                       size="sm"
                       variant={ytConnected ? 'secondary' : 'primary'}

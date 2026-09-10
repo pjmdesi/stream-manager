@@ -8,6 +8,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 - Stream Manager now runs on Electron 44 (Chromium 152, Node 24), up from Electron 34, which had been out of support since mid-2025. This brings ten versions of browser engine security fixes and performance work to the app. No visible changes are intended; if something looks or behaves differently after updating, that is worth a bug report.
 - Folder pickers open somewhere sensible again: the folder you last chose for that setting, otherwise your streams folder, otherwise Videos. The new Electron would have opened them in Downloads.
+- Buttons that carry a tooltip no longer render a pixel taller than their neighbors in a few toolbars. The tooltip wrapper is now a block-level box, which removes the stray line spacing that caused it.
 
 ## Integrations
 

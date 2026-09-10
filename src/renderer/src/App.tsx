@@ -464,7 +464,9 @@ function AutoRulesNavAction({ collapsed, active, onNavigate }: { collapsed: bool
       </div>
     )
   }
-  return <Tooltip content={tooltip} side="right">{button}</Tooltip>
+  // Expanded: the host is a plain w-52 block, so shrink-wrap the trigger or
+  // the bubble would anchor to the right edge of the whole row.
+  return <Tooltip content={tooltip} side="right" triggerClassName="flex w-fit">{button}</Tooltip>
 }
 
 /** Animated appearance for a nav item's subtitle line (nav redesign): the

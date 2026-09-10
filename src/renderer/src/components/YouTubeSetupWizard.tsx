@@ -541,7 +541,7 @@ export function YouTubeSetupWizard({
             an active connection keep them checked) — this only clears the
             clicked-through console steps. */}
         {import.meta.env.DEV && (
-          <Tooltip content="Dev only: clear the checklist and start from step 1">
+          <Tooltip content="Dev only: clear the checklist and start from step 1" triggerClassName="flex w-fit">
             <button
               onClick={() => {
                 setDone(new Set())

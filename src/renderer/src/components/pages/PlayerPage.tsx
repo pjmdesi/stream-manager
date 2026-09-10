@@ -4798,13 +4798,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
 
               {/* Zoom level indicator — click to reset */}
               {videoZoom !== 1 && (
-                <Tooltip content="Click to reset zoom (scroll wheel to zoom, middle-click drag to pan)">
+                // The TRIGGER carries the absolute placement so the bubble
+                // anchors to the badge; a positioned child inside an
+                // in-flow trigger left the trigger a zero-size box elsewhere.
+                <Tooltip content="Click to reset zoom (scroll wheel to zoom, middle-click drag to pan)" triggerClassName="absolute top-3 left-3 z-10 flex">
                   <button
                     onClick={() => {
                       setVideoZoom(1); setVideoPan({ x: 0, y: 0 })
                       videoZoomRef.current = 1; videoPanRef.current = { x: 0, y: 0 }
                     }}
-                    className="absolute top-3 left-3 z-10 text-xs font-mono bg-black/70 text-white/80 hover:text-white hover:bg-black/90 px-2 py-1 rounded transition-colors"
+                    className="text-xs font-mono bg-black/70 text-white/80 hover:text-white hover:bg-black/90 px-2 py-1 rounded transition-colors"
                   >
                     {Math.round(videoZoom * 100)}%
                   </button>

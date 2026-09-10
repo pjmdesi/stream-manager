@@ -5124,8 +5124,8 @@ const StreamListItem = memo(function StreamListItem({
                 const stale = ord != null ? meta?.smThumbnailStale?.[String(ord)] : undefined
                 if (!stale) return null
                 return (
-                  <Tooltip content="Could not load references — this thumbnail could not be re-rendered and shows outdated content. Open it in the thumbnail editor to fix.">
-                    <span className="absolute top-0.5 left-0.5 bg-black/70 rounded p-0.5">
+                  <Tooltip content="Could not load references — this thumbnail could not be re-rendered and shows outdated content. Open it in the thumbnail editor to fix." triggerClassName="absolute top-0.5 left-0.5 flex">
+                    <span className="bg-black/70 rounded p-0.5">
                       <AlertTriangle size={10} className="text-amber-300" />
                     </span>
                   </Tooltip>
