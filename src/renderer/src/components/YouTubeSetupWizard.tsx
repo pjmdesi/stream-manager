@@ -369,7 +369,10 @@ export function YouTubeSetupWizard({
             : isUnverified ? 'bg-amber-600/15 border-amber-500/50 text-amber-300'
             : isActive ? 'border-accent-400 text-accent-300' : 'border-white/20 text-gray-400'
         }`}>
-          {isDone ? <Check size={11} strokeWidth={3} /> : isUnverified ? <Ellipsis size={12} strokeWidth={2.5} /> : index + 1}
+          {/* The check glyph's ink sits up-left of its box (the stroke's
+              tail reaches the top-right corner), so mathematical centering
+              reads as off. Nudged 1px right and down, tuned by eye. */}
+          {isDone ? <Check size={11} strokeWidth={3} className="relative left-px top-px" /> : isUnverified ? <Ellipsis size={12} strokeWidth={2.5} /> : index + 1}
         </span>
         <span className="text-sm flex-1">{title}</span>
         <ChevronRight size={13} className={`shrink-0 transition-transform ${isActive ? 'rotate-90 text-gray-300' : 'text-gray-500'}`} />

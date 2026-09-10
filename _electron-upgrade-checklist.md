@@ -81,7 +81,7 @@ Everything that crosses the Electron boundary. Tick against the new build.
 - [x] Relay: bind, ingest, live, complete on a test stream (ffmpeg child process handling under Node 24).
 - [x] Thumbnail editor: open, edit, save, export PNG; fonts enumerate; palette import/export dialogs.
 - [x] Launcher: launch a group; icons resolve (`createThumbnailFromPath`, `readShortcutLink`); open folder actions.
-- [ ] Dialogs: every picker opens in a sensible folder, not Downloads (the 43 change).
+- [x] Dialogs: every picker opens in a sensible folder, not Downloads (the 43 change).
 - [ ] Integrations page: YouTube wizard opens links in the browser (`shell.openExternal` via the open handler); OAuth callback page renders.
 - [ ] Update check: the About/update path reaches GitHub (`net`/fetch under the new Chromium).
 - [ ] Quit: no orphaned processes; relaunch restores state.
