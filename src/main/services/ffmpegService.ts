@@ -58,6 +58,9 @@ export interface VideoInfo {
   /** Format-level `comment` container tag, if present. Carries the SM clip
    *  provenance marker on app-exported clips (see clipProvenanceComment). */
   comment?: string
+  /** Format-level `encoded_by` container tag, if present. The archive
+   *  preset stamps the SM archive marker here (see isArchiveTag). */
+  encodedBy?: string
   /** Chapters embedded in the container (e.g. OBS Hybrid MP4 hotkey
    *  chapters). Times in seconds from video start. Read-only — SM never
    *  writes chapters into files. */
@@ -127,10 +130,18 @@ export async function probeFile(filePath: string): Promise<VideoInfo> {
         fps,
         videoBitrate,
         comment: fmtTags?.comment ?? fmtTags?.COMMENT,
+        encodedBy: fmtTags?.encoded_by ?? fmtTags?.ENCODED_BY,
         chapters: chapters.length > 0 ? chapters : undefined,
       })
     })
   })
+}
+
+/** The archive preset writes `encoded_by="Archived Stream — Stream Manager
+ *  vX"`; this is the substring every reader tests for. */
+export const ARCHIVE_TAG_MARKER = 'Archived Stream'
+export function isArchiveTag(tag: string | undefined | null): boolean {
+  return !!tag && tag.includes(ARCHIVE_TAG_MARKER)
 }
 
 /** Read the `encoded_by` container tag from a file. Returns the raw string

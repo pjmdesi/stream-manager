@@ -7522,6 +7522,7 @@ function SidebarDetail({
                 <MetaRow label="Files">
                   <StreamFilesGrid
                     folder={folder}
+                    metaKey={streamMetaKey(folder.folderPath, folder.date, appConfig.streamsDir)}
                     allowImport={allowFileImport}
                     thumbsKey={thumbsKey}
                     preferredThumbnail={meta?.preferredThumbnail}

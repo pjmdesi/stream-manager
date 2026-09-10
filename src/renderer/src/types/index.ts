@@ -323,6 +323,9 @@ export interface VideoEntry {
   // user can re-open the source video with the same clip state via the Session Videos panel.
   clipOf?: string       // source filename (same folder)
   clipState?: ClipState // snapshot of the clip state at export time
+  /** SM's archive marker was found in the file's container tags. Undefined =
+   *  not determined yet (cloud placeholder, or entry predates the field). */
+  archived?: boolean
 }
 
 /** In-progress clip work. Saved per-stream-folder under `StreamMeta.clipDrafts`, keyed by draft id. */

@@ -355,6 +355,9 @@ contextBridge.exposeInMainWorld('api', {
   saveVideoMarkers: (folderPath: string, videoKey: string, markers: any[], metaKey?: string) =>
     ipcRenderer.invoke('videoMarkers:save', folderPath, videoKey, markers, metaKey),
 
+  backfillVideoArchived: (folderPath: string, videoPaths: string[], metaKey?: string): Promise<Array<{ path: string; archived: boolean }>> =>
+    ipcRenderer.invoke('videoMap:backfillArchived', folderPath, videoPaths, metaKey),
+
   clipTagExport: (folderPath: string, outputFilename: string, sourceName: string, clipState: any, draftId?: string | null, metaKey?: string) =>
     ipcRenderer.invoke('clip:tagExport', folderPath, outputFilename, sourceName, clipState, draftId, metaKey),
 

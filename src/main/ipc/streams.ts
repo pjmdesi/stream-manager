@@ -8,7 +8,7 @@ import chokidar, { FSWatcher } from 'chokidar'
 import { getStore } from './store'
 import type { ConversionPreset } from './converter'
 import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './files'
-import { probeFile, parseClipProvenance } from '../services/ffmpegService'
+import { probeFile, parseClipProvenance, probeArchiveTag, isArchiveTag } from '../services/ffmpegService'
 import { isInFlightWrite } from '../services/inFlightWrites'
 import { consumeSelfWrite } from '../services/selfWrites'
 
@@ -26,6 +26,12 @@ export interface VideoEntry {
   // Set when this file was produced by the clip exporter. Enables "reopen in clip editor".
   clipOf?: string
   clipState?: unknown
+  /** True when the file carries SM's archive marker (`encoded_by` tag written
+   *  by the archive preset). Recorded at probe time so the files grid's
+   *  archived badge reads from metadata instead of re-probing on every visit
+   *  (STR-20). Undefined = not determined yet (never probed, or a cloud
+   *  placeholder that cannot be probed without hydrating). */
+  archived?: boolean
 }
 
 export interface ClipDraft {
@@ -894,6 +900,9 @@ async function refreshVideoMaps(
           // Preserve clip-export tagging across re-probes
           clipOf: prev?.clipOf,
           clipState: prev?.clipState,
+          // The probe read the container tags, so this is a definite answer
+          // either way (an archived file that gets re-encoded loses it).
+          archived: isArchiveTag(info.encodedBy),
         }
         const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
         if (!meta.videoMap) meta.videoMap = {}
@@ -1573,6 +1582,57 @@ export function registerStreamsIPC(): void {
     else delete all[videoKey]
     allMeta[key] = { ...existing, videoMarkers: all }
     writeAllMeta(streamsDir, allMeta)
+  })
+
+  // Backfill the per-file `archived` flag for videoMap entries that predate
+  // it (STR-20). New probes record the flag as part of refreshVideoMaps;
+  // this covers entries the scan will not re-probe (mtime unchanged) and
+  // files that just hydrated. Only local files are probed, never
+  // placeholders, so a cloud file stays undetermined until it lands.
+  // Returns one verdict per PROBED path; the renderer merges them in.
+  ipcMain.handle('videoMap:backfillArchived', async (_event, folderPath: string, videoPaths: string[], metaKeyOverride?: string): Promise<Array<{ path: string; archived: boolean }>> => {
+    if (!Array.isArray(videoPaths) || videoPaths.length === 0) return []
+    const localFlags = await checkLocalFiles(videoPaths)
+    const eligible = videoPaths.filter((_, i) => localFlags[i])
+    if (eligible.length === 0) return []
+    const verdicts: Array<{ path: string; archived: boolean }> = []
+    const CONCURRENCY = 4
+    let cursor = 0
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, eligible.length) }, async () => {
+      while (cursor < eligible.length) {
+        const p = eligible[cursor++]
+        const tag = await probeArchiveTag(p)
+        // A failed probe returns undefined, indistinguishable from "no
+        // tag"; the entry stays undetermined rather than recording false.
+        if (tag === undefined) continue
+        verdicts.push({ path: p, archived: isArchiveTag(tag) })
+      }
+    }))
+    if (verdicts.length === 0) return []
+    const streamsDir = getStreamsDir() || path.dirname(folderPath)
+    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    try {
+      const allMeta = readAllMeta(streamsDir)
+      const existing = allMeta[key]
+      if (existing?.videoMap) {
+        const videoMap = { ...existing.videoMap }
+        let touched = false
+        for (const v of verdicts) {
+          const relKey = videoRelKey(folderPath, v.path)
+          const entry = videoMap[relKey]
+          if (entry && entry.archived !== v.archived) { videoMap[relKey] = { ...entry, archived: v.archived }; touched = true }
+        }
+        if (touched) {
+          allMeta[key] = { ...existing, videoMap }
+          writeAllMeta(streamsDir, allMeta)
+        }
+      }
+    } catch (err) {
+      // The verdicts still go back to the renderer for this session; the
+      // next backfill retries the write.
+      console.warn('[videoMap:backfillArchived] meta write skipped:', err)
+    }
+    return verdicts
   })
 
   // Tag an exported clip's videoMap entry with clipOf + clipState so the user can reopen it

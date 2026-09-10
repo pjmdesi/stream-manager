@@ -586,6 +586,10 @@ interface Props {
   thumbsKey: number
   preferredThumbnail?: string
   cloudSyncActive: boolean
+  /** The stream's _meta.json key when it differs from the folder-derived
+   *  one (dump mode keys by date). Passed through to per-file meta writes
+   *  such as the archived-flag backfill. */
+  metaKey?: string
   onSendToPlayer: (path: string) => void
   onSendToConverter: (path: string) => void
   /** Bulk send the selected videos to the converter (one batch). */
@@ -636,7 +640,7 @@ export interface FilesGridHandle {
 export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function StreamFilesGrid({
   folder, thumbsKey, preferredThumbnail, cloudSyncActive,
   onSendToPlayer, onSendToConverter, onSendFilesToConverter, onSendFilesToCombine, allowImport, onSetThumbnail, onDeleteThumbnail, onEditThumbnail, onOpenLightbox, onFilesDeleted,
-  highlightFile, onOpenFolder, onOffloadAll, onPinAllLocal,
+  highlightFile, onOpenFolder, onOffloadAll, onPinAllLocal, metaKey,
 }, ref) {
   const videoMap = folder.meta?.videoMap ?? {}
   const hasVideos = folder.videos.length > 0
@@ -818,27 +822,41 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
       window.api.probeFile(it.path)
         .then(info => setProbedMeta(prev => ({ ...prev, [it.path]: info })))
         .catch(() => {})
-      window.api.checkAlreadyArchived([it.path])
-        .then(paths => { if (paths.length > 0) setArchivedSet(prev => { const next = new Set(prev); next.add(it.path); return next }) })
+      // The placeholder's videoMap entry had no archived verdict (it could
+      // not be probed); now that the bytes are here, record one.
+      window.api.backfillVideoArchived(folder.folderPath, [it.path], metaKey)
+        .then(verdicts => { for (const v of verdicts) if (v.archived) setArchivedSet(prev => { const next = new Set(prev); next.add(v.path); return next }) })
         .catch(() => {})
     }
-  }, [hydrateItems, folder.videos])
+  }, [hydrateItems, folder.videos, folder.folderPath, metaKey])
 
-  // Archived = SM stamped the encoded_by tag. checkAlreadyArchived does its own
-  // local-file gating in main, so probe immediately rather than waiting on the
-  // renderer's hydration check first (re-checked per file as it hydrates above).
+  // Archived badge (STR-20): the truth is the per-file `archived` flag on
+  // the videoMap entry, recorded by the scan's probe. It was a live
+  // ffprobe on every visit before, which was flaky: deferred, local files
+  // only, silent on probe failure, and never re-run after an archive
+  // finished because the path list it keyed on did not change. Now only
+  // entries with NO verdict yet (predating the flag, or cloud placeholders)
+  // get probed, and the verdict is written back so it is a one-time cost.
   useEffect(() => {
-    if (folder.videos.length === 0) { setArchivedSet(new Set()); return }
+    const undetermined = folder.videos.filter(p => videoMap[videoMapKey(folder.folderPath, p)]?.archived === undefined)
+    if (undetermined.length === 0) return
     let cancelled = false
-    // Deferred past the slide too — the archived badge isn't needed during the
-    // open animation, and its reply would otherwise re-render the grid mid-slide.
+    // Deferred past the slide: the reply would otherwise re-render the grid
+    // mid-open-animation.
     const timer = setTimeout(() => {
-      window.api.checkAlreadyArchived(folder.videos)
-        .then(paths => { if (!cancelled) setArchivedSet(new Set(paths)) })
+      window.api.backfillVideoArchived(folder.folderPath, undetermined, metaKey)
+        .then(verdicts => {
+          if (cancelled) return
+          const hits = verdicts.filter(v => v.archived).map(v => v.path)
+          if (hits.length > 0) setArchivedSet(prev => new Set([...prev, ...hits]))
+        })
         .catch(() => {})
     }, anim.duration(230))
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [folder.videos.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [folder.videos.join('|'), folder.folderPath, metaKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Reset the session overlay when the stream changes so one stream's
+  // hits never bleed into the next.
+  useEffect(() => { setArchivedSet(new Set()) }, [folder.folderPath])
 
   const sizeOf = (path: string): number => {
     return videoMap[videoMapKey(folder.folderPath, path)]?.size ?? imageSizes[path] ?? 0
@@ -1287,7 +1305,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               isLocal={localStatus[path]}
               cloudSyncActive={cloudSyncActive}
               busy={busyPaths.has(path)}
-              archived={archivedSet.has(path)}
+              archived={!!entry?.archived || archivedSet.has(path)}
               selectMode={selectMode}
               selected={selected.has(path)}
               highlighted={ringPath === path}
