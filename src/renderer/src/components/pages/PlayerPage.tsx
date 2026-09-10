@@ -4906,7 +4906,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                       const { lo, hi } = getSegmentFreeInterval(clipState.clipRegions, playheadTime, duration)
                       const noRoom = (hi - lo) < 2 * frameTime
                       return (
-                        <div className="relative group">
+                        <div className="relative group flex">
+                          <Tooltip content="Add a clip segment centered at the playhead" side="top">
                           <button
                             onClick={addSegment}
                             disabled={noRoom}
@@ -4914,6 +4915,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                           >
                             <PlusSquare size={11} /><CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Add Segment</CollapsibleLabel>
                           </button>
+                          </Tooltip>
                           {(noRoom || addSegmentError) && (
                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[10px] text-yellow-200 bg-yellow-950 border border-yellow-600/40 rounded whitespace-nowrap pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity">
                               {addSegmentError ?? 'No room at playhead'}
@@ -6363,8 +6365,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   const hasNextMarker = isClipMode && clipState.clipRegions.some(r =>
                     r.inPoint > currentTime + eps || r.outPoint > currentTime + eps,
                   )
-                  // Speed option button — options are self-labeling ("½×"),
-                  // so no tooltips except the 8× performance warning.
+                  // Speed option button. Every button gets a tooltip (style
+                  // guide); 8× carries the performance warning instead.
                   const speedBtn = (s: number) => {
                     const sel = playbackRate === s
                     const btn = (
@@ -6380,7 +6382,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                         {speedLabel(s)}
                       </button>
                     )
-                    return s === 8 ? <Tooltip key={s} content="8× may stutter or drop frames on large files">{btn}</Tooltip> : btn
+                    const base = sel ? `Playing at ${speedLabel(s)}` : `Play at ${speedLabel(s)}`
+                    const tip = s === 8 ? `${base} (may stutter or drop frames on large files)` : base
+                    return <Tooltip key={s} content={tip}>{btn}</Tooltip>
                   }
                   // While the speed menu is open the transport buttons FADE IN
                   // PLACE (opacity, not unmount) so the row's layout is
@@ -7021,7 +7025,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                           </Tooltip>
                         ) : (
                           <Tooltip
-                            content="Collapse the tracks back into the single mixed waveform"
+                            content="Hide every audio track except track 1 (which then plays alone)"
                             shortcut="Ctrl+Shift+M"
                             side="left"
                             triggerClassName={panelCollapsed ? undefined : 'flex-1 min-w-0 flex'}

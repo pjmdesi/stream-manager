@@ -166,6 +166,9 @@
 - **PLR-24**
   Add ability to move both markers of a clip region by holding alt while dragging either one of them (similar to transforming in the thumbnail editor). This will allow the user to basically shrink the clip region symmetrically, keeping it centered.
 
+- **PLR-25** [ui]
+  Replace the player's video zoom indicator with the thumbnail editor's zoom control. Today the video stage shows a lone percentage badge top-left when zoomed (click to reset), while the thumbnail canvas has a proper control: quick zoom presets as small percent buttons, Fit, and a reset button, in the black/50 chip styling, bottom-left of the canvas. Rebuild the player's as the same control in the same place (bottom-left of the video stage, over the video, hidden until the video is zoomed or on hover of the stage), with presets that make sense for video (100%, 150%, 200%, 400% plus Fit), and keep the existing wheel zoom and middle-drag pan. Share the control between the two pages if the thumbnail one can be lifted out cleanly; if not, mirror the classes and note both sites in the style guide. Filed 2026-09-10 during the APP-27 sweep.
+
 ### Thumbnail editor
 
 - **THU-1**

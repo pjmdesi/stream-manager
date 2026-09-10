@@ -271,6 +271,9 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             { keys: ['G'], label: 'Toggle grid snap' },
             { keys: ['Ctrl', ']'], label: 'Bring layer forward (Shift = to front)' },
             { keys: ['Ctrl', '['], label: 'Send layer backward (Shift = to back)' },
+            { keys: ['Mouse wheel'], label: 'Zoom the canvas at the cursor' },
+            { keys: ['Middle-click drag'], label: 'Pan the canvas' },
+            { keys: ['Double middle-click'], label: 'Fit the artboard in view and re-center' },
           ]} />
         </ElementSection>
       </>

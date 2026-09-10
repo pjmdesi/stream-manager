@@ -7030,8 +7030,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   {([0.5, 0.75, 1] as const).map(z => {
                     const active = Math.abs(viewZoom - z) < 0.001
                     return (
+                      <Tooltip key={z} content={`Zoom to ${Math.round(z * 100)}%`}>
                       <button
-                        key={z}
                         onClick={() => setZoomCentered(z)}
                         className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded transition-colors ${
                           active ? 'bg-accent-600/30 text-accent-200' : 'bg-black/50 text-gray-400 hover:text-gray-200'
@@ -7039,8 +7039,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       >
                         {Math.round(z * 100)}%
                       </button>
+                      </Tooltip>
                     )
                   })}
+                  <Tooltip content="Fit the whole artboard in view" shortcut="Double middle-click">
                   <button
                     onClick={() => setZoomCentered(fitScale)}
                     className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
@@ -7049,6 +7051,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   >
                     Fit
                   </button>
+                  </Tooltip>
                   <Tooltip content="Reset zoom to 100% and re-center">
                   <button
                     onClick={() => setZoomCentered(1)}
