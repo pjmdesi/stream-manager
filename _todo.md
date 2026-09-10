@@ -3,25 +3,27 @@
 ## Queue
 
 1. APP-1
-2. STR-19
-3. STR-20
-4. CONV-8
-5. STR-2
-6. STR-3
-7. STR-18
-8. PLR-2
-9. PLR-21
-10. PLR-23
-11. PLR-24
-12. STR-21
-13. COMB-3
-14. COMB-4
-15. THU-1
-16. THU-8
-17. THU-9
-18. THU-10
-19. THU-12
-20. THU-16
+2. APP-24
+3. APP-27
+4. STR-19
+5. STR-20
+6. CONV-8
+7. STR-2
+8. STR-3
+9. STR-18
+10. PLR-2
+11. PLR-21
+12. PLR-23
+13. PLR-24
+14. STR-21
+15. COMB-3
+16. COMB-4
+17. THU-1
+18. THU-8
+19. THU-9
+20. THU-10
+21. THU-12
+22. THU-16
 
 ## Improvement ideas
 
@@ -376,12 +378,10 @@
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
 
 - **APP-24** [cleanup]
+  Audit pass complete 2026-09-10, awaiting review. Every concrete claim in `~style_guide.md` was checked against the code. Corrected: PRINCIPLES citation list (secretStorage, backupMetaOnQuit, package.json, the host list, plus a new duty for new hosts/credentials/dependencies); token table (navy-600/500 and surface hex values, accent-950/900/700, real-purple's two sites, the `wide` breakpoint, `roboto`, all six CSS vars); two attention keyframes, not one; streams-list column rule (thumbnail is user-resizable 85-170px, date 220px, container-query columns) and the mounted-pages rule (five pages stay mounted with `isVisible`, not two); TogglePill class typos and its stale thumbnail-upload example; the `top-10` rule now exempts transparent click-away layers (six sites); the "never hand-roll a button" claim softened to match reality (icon-only chrome buttons are raw but need a Tooltip). Added: a directory of all `components/ui` primitives (GhostTextArea and Slider flagged as effectively retired, Kbd lives in HelpModal), Button `labelCollapsed`, NumberInput extras, `useAnimationConfig`. Audits recorded as clean: zero native `title` attributes, zero contrast-floor violations, zero `list-inside`. All em-dashes purged (48). Open decisions consolidated into the last section with recommendations (placeholder color, focus treatment, label color, Select consolidation tied to APP-29, spacing scale, empty states; items 3 and 6 recommended closed). Code follow-ups noted in the guide, not done here: stale `accent-600` comment in tailwind.config.js, unused `pulse-slow` animation.
   Go over the style guide to look for any inconsistencies, conflicts, or out-of-date or no longer relevant rules.
   2026-09-06: was the last v2.6.0 ride-along but the release froze before it started. Decided: first item of the next release cycle (queue it at position 1 when the queue is cleared after the v2.6.0 promotion).
   Companion: APP-27 (Tooltip trigger default flip) retires the Tooltip line-box rule added 2026-09-07; if it ships in the same cycle, trim that rule to a one-line history note during this audit.
-
-- **APP-26** [ui]
-  Let the Help modal pop out into its own window (2026-09-06). The modal is the default, but a modal covering the exact UI the user is trying to understand defeats the purpose: add a button (footer candidate) that breaks the Help content out into a separate window the user can place beside the app. No state passes between Help and the rest of the app, so the content is fully self-contained. Implementation notes: the player's pop-out video window is the precedent (own BrowserWindow + dedicated preload, see out/preload/popup.js); the pop-out should preserve the section the user was reading, remember its size/position, and reopening Help while the window is open should focus the window instead of showing the modal. Close buttons follow the style guide's same-slot rule.
 
 - **APP-25**
   Extend _meta.json's corruption recovery to the app-config and templates stores (from the website-side audit, 2026-09-06). Writes are already safe (electron-store 8.2.0 writes through conf 10.2.0's atomic writer) and a corrupt store correctly throws instead of silently resetting (clearInvalidConfig stays false); the gap is recovery: a damaged app-config.json has no backup to restore from, and since getStore() throws, the likely user experience is an app that will not start with no explanation.
@@ -394,6 +394,9 @@
   - an honest in-app error when recovery is impossible, never a raw startup crash
   First task: confirm what actually happens today when getStore() throws at startup. If that is an unhandled crash, fixing it is the highest-value part of the work: it is the difference between "the app healed itself" and "the app is bricked with no explanation".
   Coordination: when this lands, PRINCIPLES.md's crash-safe entry drops its caveat that backups are specific to library metadata, and its "what would break it" line updates in the same commit (tell the website instance).
+
+- **APP-26** [ui]
+  Let the Help modal pop out into its own window (2026-09-06). The modal is the default, but a modal covering the exact UI the user is trying to understand defeats the purpose: add a button (footer candidate) that breaks the Help content out into a separate window the user can place beside the app. No state passes between Help and the rest of the app, so the content is fully self-contained. Implementation notes: the player's pop-out video window is the precedent (own BrowserWindow + dedicated preload, see out/preload/popup.js); the pop-out should preserve the section the user was reading, remember its size/position, and reopening Help while the window is open should focus the window instead of showing the modal. Close buttons follow the style guide's same-slot rule.
 
 - **APP-27** [cleanup] [ui]
   Flip the Tooltip trigger's default display so a Tooltip never introduces a line box on its own (filed 2026-09-07 after the third sighting of the same bug: the old crop dropdown, the marker triangles, and the Split Segment button all rendered taller than their siblings because the inline-flex trigger sat on a line box inside a block parent and inherited its line-height strut). The style guide's Tooltip section carries the rule for now; this item retires it.

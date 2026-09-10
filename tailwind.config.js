@@ -27,10 +27,10 @@ module.exports = {
         accent: {
           950: '#1b273c',
           900: '#30415a',
-          800: '#44566f',
+          800: '#44566f', // primary button bg (hover: 700)
           700: '#5f7491',
-          600: '#8fa2bc', // primary button bg
-          500: '#c9d5e3', // hover (lighter)
+          600: '#8fa2bc', // accent fill
+          500: '#c9d5e3', // hover / slider thumb (--color-accent)
           400: '#e0e7f0', // accent text
           300: '#f1f5fa', // lightest
           200: '#f7f9fc', // near-white with cool tint — for active/highlighted text
@@ -57,9 +57,6 @@ module.exports = {
         // YouTube's UI stack — used by the thumbnail editor's preview
         // mockups so badges/chrome match the real site.
         roboto: ['Roboto', 'Arial', 'sans-serif'],
-      },
-      animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
       },
       // App-wide default timing function for transitions. App preference
       // is linear — eased transitions caused visible drift when multiple
