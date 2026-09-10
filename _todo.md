@@ -3,13 +3,25 @@
 ## Queue
 
 1. APP-1
-2. STR-2
-3. STR-3
-4. STR-18
-5. PLR-2
-6. PLR-21
-7. PLR-23
-8. PLR-24
+2. STR-19
+3. STR-20
+4. CONV-8
+5. STR-2
+6. STR-3
+7. STR-18
+8. PLR-2
+9. PLR-21
+10. PLR-23
+11. PLR-24
+12. STR-21
+13. COMB-3
+14. COMB-4
+15. THU-1
+16. THU-8
+17. THU-9
+18. THU-10
+19. THU-12
+20. THU-16
 
 ## Improvement ideas
 
@@ -85,6 +97,15 @@
 
 - **STR-18**
   Extend the functionality of the closed detail sidebar to also show what the user's twitch channel is currently displaying. This can help them know what their channel is set to without having to check the actual stream item is should be. It should sync on startup like the youtube sync panel does and it should also trigger to update whenever anything is pushed to twitch. I'm not sure if we should add the ability for users to use this new panel to also manually change the twitch details (to that which does not match a stream item). That would have other implications especially when it comes to the auto-update functionality of SM. We could also add a tag to the stream item rows info column (similar to the YouTube one) that marks the stream item as the source of the current twitch details.
+
+- **STR-19** [bug]
+  When sending an individual dehydrated file to the player, a modal pops up that asks the user if they want to downlowd the file so it can be opened. This modal also says that the user can cancel the download, which is not correct. We investigated this cancel functionality and found that it's not possible to cancel a hydration process in progress. We need to update this modal to trigger a regular cloud download and remove the cancel button/wording.
+
+- **STR-20** [bug]
+  The archive icon in the recording tray label in the files grid is glitchy. It sometimes shows, but not always. I think it's detecting the metadata that SM adds to render the archive icon. If we're not already, the archive status of the recording file needs to be saved to the _meta.json entry for that file and use that to render the archive icon.
+
+- **STR-21**
+  When deleting a stream item. I'd like to improve the timing of the stream item row deletion. Currently, it takes a few seconds for the actual stream item row to disappear, and it just pops out of existence. I'd like it to animate out, and do so immediately upon the user confirming the delete. A slide up with a smooth transition to a solid red would be nice (it would probably need to be a red overlay element that covers the whole row, fading in to solid, maybe reaching full opacity slightly before the slide up completes).
 
 ### Player
 
@@ -188,6 +209,9 @@
 - **THU-15** [maybe] [ui] [investigate]
   Might not be worth the trouble, but when the UI of the whole app has been zoomed in, the thumbnail canvas seems to render at a lower quality. My guess is that it's rendering at the pixel level and then th UI is scaling up what it rasterizes.
 
+- **THU-16**
+  Add an "open folder" button to the headers of the stream item groups in the asset panel which opens the folder for that stream item so the user has easy access to the files inside in case they want to do something iwth them in an external app.
+
 ### Converter
 
 - **CONV-3** [perf] [investigate]
@@ -206,6 +230,9 @@
 - **CONV-7** [investigate]
   Plan the exit from fluent-ffmpeg. Its repo went readonly with a "no longer maintained, no longer works properly with recent ffmpeg versions" warning (noticed 2026-09-05). Risk today is LOW: ffmpeg-static pins the exact ffmpeg binary the wrapper talks to, so the pairing is frozen and tested together, and the library has no network surface. The exposure is the future ffmpeg-static or Electron bump where an abandoned wrapper becomes the blocker. SM already builds raw ffmpeg argument strings for presets; fluent's remaining value is spawn lifecycle, progress parsing, and the kill/pause plumbing, all ownable in ffmpegService with direct child_process spawning. Do the migration assessment BEFORE the next ffmpeg-static bump, and treat any ffmpeg upgrade as blocked on it.
 
+- **CONV-8** [bug]
+  The conversion total progress bar and stats in the nav menu button extra details is not calculating correctly. It *is* counting completed items, but not counting pending items. This is the opposite of what it should be doing. Pending items should count as 0% complete, so the bar can tell the user that there are more conversions yet to run. So if there's 10 conversion items (with 3 running), the total progress should include the 7 that are waiting at 0%. Additinally, after the 10 items are complete, when I added a new conversion item and kept the complete ones, the total progress bar counted the complete items as 100% in the total, which is not helpful for the user. These need to be swapped. Completed items should not count toward the total completion, but pending items should.
+
 ### Combine
 
 - **COMB-1** [needs-design]
@@ -219,6 +246,12 @@
     a. Main keeps ffmpeg's stderr tail: surfaced in failure messages, console-logged on cancel (dev-server visible only, until the main-console-viewer item ships).
     b. The in-progress row flips to an amber "No progress from ffmpeg yet" notice after 15 seconds at 0%.
     If it recurs: BEFORE cancelling, check Task Manager. ffmpeg.exe at ~0% CPU with no disk reads means blocked I/O; busy CPU/disk means the progress math is lying. Then cancel and grab the stderr tail.
+
+- **COMB-3** [bug]
+  Same issue previously seen in the converter: once a file is hydrated, the thumbnail never renders and just disaplys the placeholder graphic indefinitely untul removed and re-added after hydration.
+
+- **COMB-4** [bug]
+  When the combiner must hydrate file before the combine process actually starts, we need to stop the auto start of the combine process if any warning would be displayed to the user if the files had been hydrated already. I just tested this on 2 files that were dehydrated. It downloaded them and immediately started the combine process, but the files had different framerates. It should have stopped after the hydration, checked the files for compatibility and prevented the auto-start to show the user the warning.
 
 ### Launcher
 
@@ -376,6 +409,11 @@
   A second launch of the portable exe destroys the running instance's files. Found 2026-09-08 during the v2.6.0 sweep: the portable launcher (electron-builder's NSIS portable script) unpacks every launch of the same build into ONE fixed Temp folder (name = a per-build id) and runs `RMDir /r` on it both before unpacking and after its app instance exits. Double-clicking the exe while SM sits in the tray therefore hits the single-instance lock, exits, and its launcher deletes everything the running instance has not locked; ffprobe goes first (it is not held open), and the symptom is "video:probe ... ENOENT" hours later. Present in every portable build to date. The v2.6.0 sweep only fixed the redundant instance running its full startup (window flash, second tray icon, relay respawn); the deletion remains, and the checklist documents the workaround (bring SM back via the tray; quit before relaunching).
   Tried and reverted 2026-09-08: `portable.unpackDirName: true` (private per-process folder per launch, so the second launcher only deletes its own). It works, but Windows Firewall keys rules by executable path, so the relay's ffmpeg listener prompted on EVERY launch instead of once per build. Unacceptable for relay users.
   Direction, revised the same day: APP-32 (a running-instance check inside the launcher, before it touches the unpack folder) fixes the second-launch destruction outright and keeps the fixed per-build folder, so it is the preferred fix and this item is effectively blocked on trying it first. The stable-binaries idea stays here as an optional follow-up on its own merits: copy ffmpeg/ffprobe once into a per-user location keyed by the ffmpeg-static version and resolve every spawn from there (centralized in ffmpegService's ffmpegBin/ffprobeBin, plus relayManager's and combine's own imports), which would move the firewall prompt from once per BUILD to once per ffmpeg VERSION. INTG-1 (loopback bind by default) removes the prompt entirely for same-machine setups. Longer-term the installed (non-portable) distribution would remove the whole class.
+
+- **APP-33** [bug] [investigate]
+  WATCHING, seen once (2026-09-09), on the first packaged Electron 44 build: after running a conversion, opening the output in Explorer over the app, and coming back, the whole window painted black. Elements still responded to clicks; resizing repainted the UI, and the next click blanked it again; it recovered on its own a minute or so later. No renderer errors, no terminal output, no Windows crash events, and the process table showed every process (main, renderer, GPU, network) alive with original start times, so nothing crashed or restarted. Not reproduced since, including a normal session on the dev server.
+  Read: compositor-level, not app code. The trigger and the repaint-on-resize match Chromium's native window occlusion tracking on Windows misjudging an un-covered window, which multi-adapter machines are prone to (this one has an RTX 5080, an integrated Radeon, and the Meta virtual monitor adapter). Chromium 132 to 152 is a big enough jump for that heuristic to change; falling back to Electron 43 (Chromium 150) would very likely not help.
+  If it recurs: (1) note what was on screen just before and whether another window covered SM; (2) try relaunching with `--disable-features=CalculateNativeWinOcclusion` (the portable launcher forwards arguments) and see whether it stops; if that switch cures it, bake it into the main process (mind Electron 36's lowercasing of `app.commandLine` values; `process.argv` or the switch in package scripts avoids that); if not, next suspect is DirectComposition on the multi-GPU setup (`--disable-direct-composition`). (3) Ship the APP-20 log helper with a `main.log` that records Electron/Chromium/Node versions and `app.getGPUFeatureStatus()` at startup plus `child-process-gone`, `render-process-gone` and window `unresponsive`/`responsive`, so the next episode leaves evidence: today `%APPDATA%\stream-manager\logs` does not exist even though CONTRIBUTING points bug reporters there.
 
 ### Onboarding & Setup
 

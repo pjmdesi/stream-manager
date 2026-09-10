@@ -17,6 +17,20 @@ const OFFLINE_MASK = 0x1000 | 0x40000 | 0x400000
 
 const activeDownloadPollers = new Map<string, ReturnType<typeof setInterval>>()
 
+/** The path if it names an existing directory, else undefined. */
+function existingDir(p: string | undefined): string | undefined {
+  if (!p) return undefined
+  try { return fs.statSync(p).isDirectory() ? path.normalize(p) : undefined } catch { return undefined }
+}
+
+/** Where a picker opens when its caller has no better idea: the streams
+ *  root, then the user's Videos folder. Shared by the open-file and
+ *  open-directory dialogs (see the Electron 43 note on openFileDialog). */
+function defaultDialogDir(): string {
+  const streamsDir = (getStore().get('config') as { streamsDir?: string } | undefined)?.streamsDir
+  return existingDir(streamsDir) ?? app.getPath('videos')
+}
+
 /**
  * Like checkLocalFiles but returns false (not local) on any error or uncertainty.
  * Used in download polling where a false-positive "file is ready" would be harmful.
@@ -175,14 +189,24 @@ export function registerFilesIPC(): void {
     return { imported, failed, skipped }
   })
 
-  ipcMain.handle('files:openFileDialog', async (event, options: Electron.OpenDialogOptions) => {
+  // Since Electron 43 an open dialog with no defaultPath is forced to the
+  // Downloads folder (Windows' own last-folder memory no longer applies),
+  // which is wrong for almost every picker in this app. Callers that know a
+  // better folder pass defaultPath; the rest fall back to the streams root,
+  // then Videos. `startIn: 'downloads'` is the explicit opt-in for pickers
+  // whose file genuinely lives there (a JSON the user just downloaded).
+  // Save dialogs are unaffected: they always pass a file name, which counts
+  // as a defaultPath, so Windows keeps remembering the last folder for them.
+  ipcMain.handle('files:openFileDialog', async (event, options?: Electron.OpenDialogOptions & { startIn?: 'downloads' }) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const normalizedOptions = options?.defaultPath
-      ? { ...options, defaultPath: path.normalize(options.defaultPath) }
-      : options
+    const { startIn, ...rest } = options ?? {}
+    const defaultPath = rest.defaultPath
+      ? path.normalize(rest.defaultPath)
+      : startIn === 'downloads' ? app.getPath('downloads') : defaultDialogDir()
     const result = await dialog.showOpenDialog(win!, {
       properties: ['openFile'],
-      ...normalizedOptions
+      ...rest,
+      defaultPath,
     })
     return result.filePaths
   })
@@ -200,12 +224,7 @@ export function registerFilesIPC(): void {
   // folder Windows remembered for the app.
   ipcMain.handle('files:openDirectoryDialog', async (event, options?: { defaultPath?: string }) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const existingDir = (p: string | undefined): string | undefined => {
-      if (!p) return undefined
-      try { return fs.statSync(p).isDirectory() ? path.normalize(p) : undefined } catch { return undefined }
-    }
-    const streamsDir = (getStore().get('config') as { streamsDir?: string } | undefined)?.streamsDir
-    const defaultPath = existingDir(options?.defaultPath) ?? existingDir(streamsDir) ?? app.getPath('videos')
+    const defaultPath = existingDir(options?.defaultPath) ?? defaultDialogDir()
     const result = await dialog.showOpenDialog(win!, {
       properties: ['openDirectory'],
       defaultPath,

@@ -50,7 +50,10 @@ declare global {
       onExtractProgress(cb: (data: { trackIndex: number; percent: number }) => void): () => void
 
       // ── Files ────────────────────────────────────────────────────────────────
-      openFileDialog(options?: Electron.OpenDialogOptions): Promise<string[]>
+      /** File picker. Opens at `defaultPath` when given; otherwise the streams
+       *  root, then Videos. `startIn: 'downloads'` for files the user just
+       *  downloaded (credential JSON, presets, palettes). */
+      openFileDialog(options?: Electron.OpenDialogOptions & { startIn?: 'downloads' }): Promise<string[]>
       saveFileDialog(options?: Electron.SaveDialogOptions): Promise<string | null>
       /** Folder picker. `defaultPath` wins when it exists; otherwise the
        *  streams root, then the Videos folder (main decides). */

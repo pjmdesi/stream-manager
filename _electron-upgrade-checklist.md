@@ -58,32 +58,35 @@ APIs in use that had no entries at all across 35 through 44 (still worth a runti
 - [x] `allowScripts`: removed the `electron@34.5.8` entry (Electron 44's package declares no install script; the other entries stay). `npm ci` re-verification still pending on a clean checkout (CI will do it).
 - [x] `npm run typecheck`, then `npm run lint`: both clean on the first try, no Node 24 typing fallout.
 - [x] Dialog `defaultPath` pass: `openDirectoryDialog(options?)` now resolves explicit path, then the streams root, then the Videos folder (main-side, so all 7 directory sites benefit); Converter output folder, Rules watch/destination, and the Player export folder pass their current value; the Player's open-video picker starts at the streams root. JSON import pickers deliberately keep the Downloads default (that is where downloaded files are).
-- [ ] `npm run dev`: app launches, dev tools open, hot reload works. (The 44.3.0 binary is downloaded; `npx electron --version` printed v44.3.0.)
+  Follow-up 2026-09-10 after the shakedown found file pickers still opening in Downloads: the open-FILE dialog now gets the same main-side fallback (explicit path, then streams root, then Videos), with an explicit `startIn: 'downloads'` opt-in used by the three downloaded-JSON pickers (wizard credentials, converter presets, palette import). The files grid's add-files picker and drop zone open in the stream's own folder. Save dialogs need nothing: they pass a file name, which counts as a defaultPath, so Windows keeps its last-folder memory for them (confirmed on export PNG and export palette).
+- [x] `npm run dev`: app launches, dev tools open, hot reload works. (The 44.3.0 binary is downloaded; `npx electron --version` printed v44.3.0.)
 - [x] `npm run dist`: passed 2026-09-09 on 44.3.0 (rebuild step ran against 44.3.0, launcher pre-check injected, artifact `Stream Manager 2.6.0_DEV.exe`, 205 MB vs 177 MB on 34). Exe run: see shakedown.
-- [ ] Runtime check for the native alpha color input: in dev tools, `'alpha' in document.createElement('input')`. If true on the new Chromium, the ColorAlphaField alpha attribute is a follow-up (own ticket or a sub-item), not part of the bump: with `alpha` set the input's value format changes to CSS color strings, which touches `joinColorAlpha` and every call site.
-- [ ] README tech stack row ("Electron 34") and the dev-section note about the binary downloading on first run.
-- [ ] Release-notes draft line under Under the hood (Electron and Chromium versions, what users gain: current Chromium, Node 24, security fixes for an EOL runtime).
+- [x] Runtime check for the native alpha color input: in dev tools, `'alpha' in document.createElement('input')`. If true on the new Chromium, the ColorAlphaField alpha attribute is a follow-up (own ticket or a sub-item), not part of the bump: with `alpha` set the input's value format changes to CSS color strings, which touches `joinColorAlpha` and every call site.
+- [x] README tech stack row ("Electron 34") and the dev-section note about the binary downloading on first run.
+- [x] Release-notes draft line under Under the hood (Electron and Chromium versions, what users gain: current Chromium, Node 24, security fixes for an EOL runtime).
 
 ## Shakedown (packaged `_DEV` build, before it rides in a release)
 
 Everything that crosses the Electron boundary. Tick against the new build.
 
-- [ ] First launch: app opens, window state restored, tray icon present, no console errors in `%APPDATA%\stream-manager\logs`.
-- [ ] Encrypted credentials: YouTube, Twitch and the Claude key decrypt with no reconnect (safeStorage across the bump); push or pull something small on each.
-- [ ] Single instance: second launch focuses within a second, no file loss (the launcher pre-check is builder-side, but confirm anyway); `--from-autostart` still gates Start Minimized.
-- [ ] Zoom shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) and Ctrl+` dev tools; spellcheck squiggles, suggestions and Add to dictionary in the context menu.
-- [ ] Player: open a Hybrid MP4 (file:// with webSecurity off), multi-track audio, waveform, thumbnails strip, markers, clip export, pop-out window (frameless, aspect lock, placement on the display it was on).
-- [ ] Converter: one conversion start to finish, pause/resume (NtSuspendProcess path), quit-with-running-jobs dialog.
-- [ ] Combine: one two-file combine.
-- [ ] Streams: cloud-status icons, offload and pin local (cfapi/PowerShell paths), thumbnail carousel, drag and drop of files into the grid.
-- [ ] Watcher/auto-rules: drop a file into the watch folder (chokidar under Node 24).
-- [ ] Relay: bind, ingest, live, complete on a test stream (ffmpeg child process handling under Node 24).
-- [ ] Thumbnail editor: open, edit, save, export PNG; fonts enumerate; palette import/export dialogs.
-- [ ] Launcher: launch a group; icons resolve (`createThumbnailFromPath`, `readShortcutLink`); open folder actions.
+- [x] First launch: app opens, window state restored, tray icon present, no console errors in `%APPDATA%\stream-manager\logs`.
+- [x] Encrypted credentials: YouTube, Twitch and the Claude key decrypt with no reconnect (safeStorage across the bump); push or pull something small on each.
+- [x] Single instance: second launch focuses within a second, no file loss (the launcher pre-check is builder-side, but confirm anyway); `--from-autostart` still gates Start Minimized.
+- [x] Zoom shortcuts (Ctrl+=, Ctrl+-, Ctrl+0) and Ctrl+` dev tools; spellcheck squiggles, suggestions and Add to dictionary in the context menu.
+- [x] Player: open a Hybrid MP4 (file:// with webSecurity off), multi-track audio, waveform, thumbnails strip, markers, clip export, pop-out window (frameless, aspect lock, placement on the display it was on).
+- [x] Converter: one conversion start to finish, pause/resume (NtSuspendProcess path), quit-with-running-jobs dialog.
+- [x] Combine: one two-file combine.
+- [x] Streams: cloud-status icons, offload and pin local (cfapi/PowerShell paths), thumbnail carousel, drag and drop of files into the grid.
+- [x] Watcher/auto-rules: drop a file into the watch folder (chokidar under Node 24).
+- [x] Relay: bind, ingest, live, complete on a test stream (ffmpeg child process handling under Node 24).
+- [x] Thumbnail editor: open, edit, save, export PNG; fonts enumerate; palette import/export dialogs.
+- [x] Launcher: launch a group; icons resolve (`createThumbnailFromPath`, `readShortcutLink`); open folder actions.
 - [ ] Dialogs: every picker opens in a sensible folder, not Downloads (the 43 change).
 - [ ] Integrations page: YouTube wizard opens links in the browser (`shell.openExternal` via the open handler); OAuth callback page renders.
 - [ ] Update check: the About/update path reaches GitHub (`net`/fetch under the new Chromium).
 - [ ] Quit: no orphaned processes; relaunch restores state.
+
+Watch item from the first packaged 44 build (2026-09-09): one black-window episode after an Explorer window covered the app (repaint on resize, blank on click, self-recovered; no crash, all processes alive). Not reproduced since. Tracked as APP-33 with the diagnosis steps; not treated as a blocker for the bump unless it recurs.
 
 ## Rollback
 

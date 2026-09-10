@@ -365,7 +365,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
   const importPreset = async () => {
     setImportError('')
-    const paths = await window.api.openFileDialog({ filters: [{ name: 'JSON Preset', extensions: ['json'] }] })
+    const paths = await window.api.openFileDialog({ filters: [{ name: 'JSON Preset', extensions: ['json'] }], startIn: 'downloads' })
     if (!paths?.length) return
     setImporting(true)
     try {

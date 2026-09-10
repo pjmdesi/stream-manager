@@ -470,6 +470,7 @@ export function YouTubeSetupWizard({
                 accept={['json']}
                 label="Drop the client_secret….json here or click to browse"
                 browseFilterName="OAuth client JSON"
+                browseStartIn="downloads"
                 compact
               />
               {importNote && (

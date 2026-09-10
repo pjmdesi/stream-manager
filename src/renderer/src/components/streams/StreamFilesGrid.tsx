@@ -1073,6 +1073,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     const paths = await window.api.openFileDialog({
       filters: [{ name: 'All Files', extensions: ['*'] }],
       properties: ['openFile', 'multiSelections'],
+      defaultPath: folder.folderPath,
     })
     if (paths && paths.length > 0) void handleImportFiles(paths)
   }
@@ -1403,6 +1404,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
     <FileDropZone
       onFiles={(paths, opts) => void handleImportFiles(paths, opts)}
       overlayLabel="Drop to move into this stream's folder — hold Ctrl to copy"
+      browseStartIn={folder.folderPath}
     >
       {gridBody}
     </FileDropZone>

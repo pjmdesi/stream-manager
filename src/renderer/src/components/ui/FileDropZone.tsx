@@ -18,6 +18,10 @@ interface FileDropZoneProps {
    *  "Media Files" — pass the honest name when the zone accepts something
    *  else (e.g. "OAuth client JSON"). */
   browseFilterName?: string
+  /** Folder the browse dialog opens in. Omit for the app default (streams
+   *  root, then Videos); pass `'downloads'` when the expected file was just
+   *  downloaded. */
+  browseStartIn?: string | 'downloads'
 }
 
 export const FileDropZone: React.FC<FileDropZoneProps> = ({
@@ -28,7 +32,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   label = 'Drop files here or click to browse',
   overlayLabel = 'Drop files here',
   compact = false,
-  browseFilterName = 'Media Files'
+  browseFilterName = 'Media Files',
+  browseStartIn,
 }) => {
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -64,7 +69,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       filters: extensions
         ? [{ name: browseFilterName, extensions }]
         : [{ name: 'All Files', extensions: ['*'] }],
-      properties: ['openFile', 'multiSelections']
+      properties: ['openFile', 'multiSelections'],
+      ...(browseStartIn === 'downloads' ? { startIn: 'downloads' as const } : browseStartIn ? { defaultPath: browseStartIn } : {}),
     })
     if (paths && paths.length > 0) {
       onFiles(paths)

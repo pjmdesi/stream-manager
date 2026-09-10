@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // ── Files ──────────────────────────────────────────────────────────────────
-  openFileDialog: (options?: Electron.OpenDialogOptions) =>
+  openFileDialog: (options?: Electron.OpenDialogOptions & { startIn?: 'downloads' }) =>
     ipcRenderer.invoke('files:openFileDialog', options),
 
   saveFileDialog: (options?: Electron.SaveDialogOptions) =>

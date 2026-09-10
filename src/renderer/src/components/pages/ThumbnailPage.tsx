@@ -3822,6 +3822,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         title: 'Import palette',
         filters: [{ name: 'Palette JSON', extensions: ['json'] }],
         properties: ['openFile'],
+        startIn: 'downloads',
       })
       const file = picked?.[0]
       if (!file) return
