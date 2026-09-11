@@ -261,11 +261,19 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
   // hydrating — otherwise queueing an archive against cloud placeholders
   // looked like "nothing happened" until the first file finished
   // downloading and started encoding.
-  const relevant = jobs.filter(j => j.status === 'running' || j.status === 'paused' || j.status === 'error' || j.status === 'done')
   const active = jobs.filter(j =>
     j.status === 'running' || j.status === 'paused' || j.status === 'error' ||
     j.status === 'downloading' || j.status === 'replacing'
   )
+  // Aggregate progress covers the work still ahead: every active job plus
+  // the queued ones waiting for a slot (they sit at 0% and pull the total
+  // down, which is the honest reading of "how far along is this batch").
+  // Finished jobs are left out; counting them at 100% inflated the total
+  // whenever new work was queued after an earlier batch completed, and
+  // the outstanding batch then showed e.g. 80% before its first job
+  // had started encoding.
+  const queued = jobs.filter(j => j.status === 'queued')
+  const relevant = [...active, ...queued]
   // No early null — the SlideBlock below animates the appearance and
   // disappearance of the info, so it must stay mounted while quiet.
   const hasContent = active.length > 0
@@ -282,7 +290,7 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
     allDownloading ? 'Waiting on Download' :
     'In Progress'
   const totalProgress = relevant.length > 0
-    ? relevant.reduce((sum, j) => sum + j.progress, 0) / relevant.length
+    ? relevant.reduce((sum, j) => sum + (j.status === 'queued' ? 0 : j.progress), 0) / relevant.length
     : 0
 
   // ETA = max of all currently-running job ETAs (jobs run in parallel, so
@@ -296,7 +304,7 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
     .map(j => jobEtas.get(j.id))
     .filter((e): e is number => typeof e === 'number' && e > 0)
   const maxEta = runningEtas.length > 0 ? Math.max(...runningEtas) : null
-  const hasIndeterminate = active.some(j => j.status !== 'running') || runningEtas.length < running.length
+  const hasIndeterminate = queued.length > 0 || active.some(j => j.status !== 'running') || runningEtas.length < running.length
   const etaText = maxEta !== null ? `${formatEta(maxEta)}${hasIndeterminate ? '+' : ''}` : ''
   const etaTitle = etaText
     ? 'Time remaining for active conversions. Paused, queued, and downloading tasks are not included.'
@@ -345,7 +353,7 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
           <span className="text-gray-400">
             {allDownloading
               ? ` · ${active.length} downloading`
-              : ` · ${totalProgress.toFixed(1)}% · ${active.length} job${active.length !== 1 ? 's' : ''}`}
+              : ` · ${totalProgress.toFixed(1)}% · ${relevant.length} job${relevant.length !== 1 ? 's' : ''}`}
           </span>
         </span>
         {etaText && <Tooltip content={etaTitle}><span className="text-gray-400 shrink-0">{etaText}</span></Tooltip>}

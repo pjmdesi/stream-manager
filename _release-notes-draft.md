@@ -15,6 +15,10 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 - The archived marker on files in the files grid is reliable now. It is recorded with the file's other details when Stream Manager reads the file, instead of being re-checked every time the grid opens, which sometimes missed it (and never noticed a freshly finished archive until the stream was reopened).
 - Sending a cloud-offloaded video to the player no longer holds a dialog open while it downloads. Confirming starts the download in the background through the cloud sync widget, and when it finishes the video opens in the player without switching you to it (the Player item in the navigation shows what is open). The old dialog also offered to cancel the download, which was never actually possible; that option is gone.
 
+## Converter
+
+- The combined progress shown under the Converter item in the navigation now reflects the whole batch. Jobs still waiting for a slot count at zero, and jobs that already finished no longer count at all, so the bar does not jump to a high number the moment a new conversion is added after an earlier batch completed. The job count next to it includes the waiting jobs too.
+
 ## Integrations
 
 - The Claude connection now shows Claude's own mark and color on the Integrations page, in Settings, in the sidebar status, and in Help, in place of a generic robot icon in orange. Orange in the app means "YouTube has a newer value" and is no longer shared with Claude.
