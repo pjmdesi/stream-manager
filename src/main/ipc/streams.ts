@@ -1891,6 +1891,101 @@ export function registerStreamsIPC(): void {
     return filesForDate(dir, date)
   })
 
+  // Library size summary for the streams page header (STR-2). Walks every
+  // stream folder (or the dump folder's dated files), sizes each file, and
+  // buckets it: videos (full, combined), clips (clip, short), images, and
+  // everything else. Video categories come from the videoMap when known,
+  // else the same size heuristic the scanner uses for unprobed files. With
+  // a cloud sync root, one attribute pass marks which files are local so
+  // the on-disk figure can be reported beside the logical one. Async stats
+  // in chunks so a large library does not stall the main thread.
+  ipcMain.handle('streams:librarySize', async (
+    _event,
+    dir: string,
+    mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream',
+    cloud = false,
+  ): Promise<{
+    cloud: boolean
+    total: { count: number; bytes: number; onDisk: number }
+    videos: { count: number; bytes: number; onDisk: number }
+    clips: { count: number; bytes: number; onDisk: number }
+    images: { count: number; bytes: number; onDisk: number }
+    other: { count: number; bytes: number; onDisk: number }
+  }> => {
+    const bucket = () => ({ count: 0, bytes: 0, onDisk: 0 })
+    const out = { cloud, total: bucket(), videos: bucket(), clips: bucket(), images: bucket(), other: bucket() }
+    if (!dir || !fs.existsSync(dir)) return out
+
+    const allMeta = readAllMeta(dir)
+    // Every file with the stream key and folder that owns it (for the
+    // videoMap lookup).
+    const files: Array<{ path: string; key: string; folderPath: string }> = []
+
+    if (mode === 'dump-folder') {
+      let entries: fs.Dirent[] = []
+      try { entries = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { return out }
+      for (const entry of entries) {
+        if (entry.isDirectory()) continue
+        if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue
+        const match = entry.name.match(DATE_IN_FILENAME_RE)
+        if (!match) continue
+        const full = path.join(dir, entry.name)
+        if (isInFlightWrite(full)) continue
+        files.push({ path: full, key: match[1], folderPath: dir })
+      }
+    } else {
+      for (const folderPath of findStreamFolders(dir)) {
+        const key = metaKey(dir, folderPath)
+        const walk = async (d: string, depth: number) => {
+          if (depth > 4) return
+          let entries: fs.Dirent[] = []
+          try { entries = await fs.promises.readdir(d, { withFileTypes: true }) } catch { return }
+          for (const e of entries) {
+            if (e.name.startsWith('.') || e.name.startsWith('_')) continue
+            const full = path.join(d, e.name)
+            if (e.isDirectory()) { await walk(full, depth + 1); continue }
+            if (isInFlightWrite(full)) continue
+            files.push({ path: full, key, folderPath })
+          }
+        }
+        await walk(folderPath, 0)
+      }
+    }
+    if (files.length === 0) return out
+
+    const sizes = new Array<number>(files.length).fill(0)
+    const CHUNK = 64
+    for (let i = 0; i < files.length; i += CHUNK) {
+      await Promise.all(files.slice(i, i + CHUNK).map(async (f, j) => {
+        try { sizes[i + j] = (await fs.promises.stat(f.path)).size } catch { sizes[i + j] = 0 }
+      }))
+    }
+    // One batched attribute pass; outside a sync root every file is local.
+    const localFlags = cloud ? await checkLocalFiles(files.map(f => f.path)) : files.map(() => true)
+
+    files.forEach((f, i) => {
+      const size = sizes[i]
+      const local = localFlags[i]
+      const ext = path.extname(f.path).toLowerCase()
+      let slot: 'videos' | 'clips' | 'images' | 'other'
+      if (VIDEO_EXTS.has(ext)) {
+        const known = allMeta[f.key]?.videoMap?.[videoRelKey(f.folderPath, f.path)]?.category
+        const category = known ?? classifyVideo(undefined, undefined, size, false)
+        slot = (category === 'clip' || category === 'short') ? 'clips' : 'videos'
+      } else if (IMAGE_EXTS.has(ext)) {
+        slot = 'images'
+      } else {
+        slot = 'other'
+      }
+      for (const b of [out[slot], out.total]) {
+        b.count++
+        b.bytes += size
+        if (local) b.onDisk += size
+      }
+    })
+    return out
+  })
+
   ipcMain.handle('streams:deleteStreamFiles', async (_event, dir: string, date: string): Promise<void> => {
     // Trash FIRST, metadata second — the same order streams:deleteFolder
     // uses. The old order wrote the meta removal up front and swallowed

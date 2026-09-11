@@ -371,6 +371,9 @@ contextBridge.exposeInMainWorld('api', {
   listFilesForDate: (dir: string, date: string) =>
     ipcRenderer.invoke('streams:listFilesForDate', dir, date),
 
+  getLibrarySize: (dir: string, mode?: 'folder-per-stream' | 'dump-folder', cloud?: boolean) =>
+    ipcRenderer.invoke('streams:librarySize', dir, mode, cloud),
+
   deleteStreamFiles: (dir: string, date: string) =>
     ipcRenderer.invoke('streams:deleteStreamFiles', dir, date),
 

@@ -621,6 +621,30 @@ export interface FileInfo {
   extension: string
 }
 
+/** One slice of the library size summary (STR-2). `bytes` is the logical
+ *  size of every file; `onDisk` counts only files whose data is local,
+ *  which equals `bytes` when no cloud sync client is involved. */
+export interface LibrarySizeBucket {
+  count: number
+  bytes: number
+  onDisk: number
+}
+
+export interface LibrarySize {
+  /** True when the library sits in a cloud sync root, so on-disk figures
+   *  can differ from logical ones. */
+  cloud: boolean
+  total: LibrarySizeBucket
+  /** Full-length videos (categories full and combined). */
+  videos: LibrarySizeBucket
+  /** Clips and Shorts. */
+  clips: LibrarySizeBucket
+  /** Thumbnails and other image files. */
+  images: LibrarySizeBucket
+  /** Anything else inside stream folders (project files, subtitles, ...). */
+  other: LibrarySizeBucket
+}
+
 export interface YTTitleTemplate {
   id: string
   name: string

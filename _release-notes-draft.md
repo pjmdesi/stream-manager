@@ -12,6 +12,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 ## Streams
 
+- The streams page header shows the size of the whole library next to the item count. Hover it for a breakdown by videos, clips, and images. With a cloud sync client the figure reads as space used on this PC out of the library's full size.
 - The archived marker on files in the files grid is reliable now. It is recorded with the file's other details when Stream Manager reads the file, instead of being re-checked every time the grid opens, which sometimes missed it (and never noticed a freshly finished archive until the stream was reopened).
 - Sending a cloud-offloaded video to the player no longer holds a dialog open while it downloads. Confirming starts the download in the background through the cloud sync widget, and when it finishes the video opens in the player without switching you to it (the Player item in the navigation shows what is open). The old dialog also offered to cancel the download, which was never actually possible; that option is gone.
 

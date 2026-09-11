@@ -28,6 +28,7 @@ import type {
   PlayerRecentEntry,
   PaletteSwatch,
   StoredRecentSwatch,
+  LibrarySize,
 } from './types'
 
 declare global {
@@ -193,6 +194,7 @@ declare global {
       createStreamFolder(parentDir: string, date: string, meta?: StreamMeta, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder', sourceThumbName?: string): Promise<string>
 
       listFilesForDate(dir: string, date: string): Promise<string[]>
+      getLibrarySize(dir: string, mode?: 'folder-per-stream' | 'dump-folder', cloud?: boolean): Promise<LibrarySize>
       deleteStreamFiles(dir: string, date: string): Promise<void>
       watchStreamsDir(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<void>
       unwatchStreamsDir(): Promise<void>

@@ -51,7 +51,61 @@ import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber } from '../../lib/streamTitle'
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
-import type { StreamFolder, StreamMeta, AiSuggestField } from '../../types'
+import type { StreamFolder, StreamMeta, AiSuggestField, LibrarySize, LibrarySizeBucket } from '../../types'
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2)} TB`
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
+  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`
+  return `${bytes} B`
+}
+
+/** "412 GB / 1.2 TB" when the library is cloud-synced (on disk / total),
+ *  else just the total. */
+function formatBucketSize(b: LibrarySizeBucket, cloud: boolean): string {
+  return cloud ? `${formatBytes(b.onDisk)} / ${formatBytes(b.bytes)}` : formatBytes(b.bytes)
+}
+
+/** Header stat for the library's size (STR-2): the total beside the item
+ *  count, with a per-type breakdown in the tooltip. */
+function LibrarySizeStat({ size }: { size: LibrarySize }) {
+  const rows: Array<[string, LibrarySizeBucket]> = [
+    ['Videos', size.videos],
+    ['Clips', size.clips],
+    ['Images', size.images],
+  ]
+  if (size.other.count > 0) rows.push(['Other', size.other])
+  return (
+    <Tooltip
+      side="bottom"
+      maxWidth="max-w-sm"
+      content={
+        <div className="flex flex-col gap-1.5">
+          <div className="text-gray-400">
+            {size.cloud
+              ? 'Space used on this PC / full size of the library. Offloaded files count toward the full size only.'
+              : 'Disk space used by every file in the stream library.'}
+          </div>
+          <table className="tabular-nums">
+            <tbody>
+              {rows.map(([label, b]) => (
+                <tr key={label}>
+                  <td className="pr-3 text-gray-300">{label}</td>
+                  <td className="pr-3 text-right text-gray-400">{b.count} file{b.count === 1 ? '' : 's'}</td>
+                  <td className="text-right">{formatBucketSize(b, size.cloud)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      }
+      triggerClassName="inline-flex"
+    >
+      <span className="tabular-nums">{formatBucketSize(size.total, size.cloud)}</span>
+    </Tooltip>
+  )
+}
 
 /** How long the out-of-sync check trusts just-pushed values over what the
  *  YouTube API returns (its read-after-write lag is usually seconds, but
@@ -1473,6 +1527,23 @@ export function StreamsPage({
     window.api.cloudSyncIsActive(config.streamsDir).then(setCloudSyncActive).catch(() => setCloudSyncActive(false))
   }, [config.streamsDir])
   const { enqueueOffload, enqueueHydrate } = useCloudOps()
+
+  // Library size for the header (STR-2). Recomputed a second after the
+  // folder list settles (initial load, reloads, scoped splices) and when
+  // the cloud flag flips, since that decides whether on-disk figures are
+  // worth reading. Debounced because a splice burst re-renders folders
+  // several times and the walk stats every file in the library.
+  const [librarySize, setLibrarySize] = useState<LibrarySize | null>(null)
+  useEffect(() => {
+    if (!config.streamsDir || loading) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      window.api.getLibrarySize(config.streamsDir, streamMode, cloudSyncActive)
+        .then(size => { if (!cancelled) setLibrarySize(size) })
+        .catch(() => {})
+    }, 1000)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [config.streamsDir, streamMode, cloudSyncActive, loading, folders])
 
   // Conversion-jobs context — used to detect when an archive is in
   // flight for a given folder so the action button can be disabled (and
@@ -3556,7 +3627,14 @@ export function StreamsPage({
                     ? `${selectedFolderList.length} selected`
                     : searchQuery
                       ? `${visibleFolders.length} of ${folders.length} match`
-                      : `${folders.length} item${folders.length === 1 ? '' : 's'}`}
+                      : (
+                        <>
+                          {folders.length} item{folders.length === 1 ? '' : 's'}
+                          {librarySize && librarySize.total.count > 0 && (
+                            <> · <LibrarySizeStat size={librarySize} /></>
+                          )}
+                        </>
+                      )}
               </p>
             </div>
             {selectMode ? (
