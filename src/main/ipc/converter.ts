@@ -320,14 +320,6 @@ function converterHydrateEvents(jobId: string, filePath: string, size?: number) 
   }
 }
 
-/** The cloud widget's "Cancel downloads" also aborts converter-triggered
- *  hydrations — their rows sit in the same list, so a cancel that skipped
- *  them would look ignored. Flipping the flags routes each job through
- *  its normal cancelled path (status, events, scheduler kick). */
-export function cancelAllConverterHydrations(): void {
-  for (const flag of downloadCancelFlags.values()) flag.cancelled = true
-}
-
 // Deferred clip-export pipelines keyed by job id — registered 'queued' and
 // invoked by scheduleNext() when an encode slot frees, so exports obey the
 // concurrency cap like every other job. Their parameters (regions, crop,

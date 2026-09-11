@@ -162,11 +162,11 @@ async function worker(direction: Direction): Promise<void> {
         safeSend(b.sender, 'cloud-sync:progress', {
           type: 'item', direction, batchId: b.batchId, path: unit.path, status: res.outcome,
         })
-      } else if (b.cancelled) {
-        // Aborted mid-hydrate by the cancel's dehydrate — not a real
-        // failure. No item event; the batch's complete(cancelled) promotes
-        // the row to 'cancelled'.
       } else {
+        // A failure is a failure even inside a cancelled batch: cancel only
+        // skips waiting units, so an in-flight unit that fails did so on
+        // its own (sync client paused or stopped) and the row should say
+        // so rather than be promoted to 'cancelled' by the batch complete.
         b.failed += 1
         safeSend(b.sender, 'cloud-sync:progress', {
           type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'failed', reason: res.reason,
@@ -234,11 +234,12 @@ export function registerCloudSyncIPC(): void {
   ipcMain.handle('cloud-sync:cancel-pin', () => {
     // Stamping skips the queued units; units already in flight complete
     // and stay local by design (see the cancel-semantics note above).
+    // Converter-triggered downloads share the widget list but are NOT
+    // touched here: they only appear once they are in flight (a converter
+    // job waiting for a hydrate slot has no row), and the converter's own
+    // Cancel is the way to stop one, with its dehydrate abort. An earlier
+    // bridge cancelled them from here, which contradicted the
+    // waiting-only rule for every other row in the list.
     for (const b of liveBatches.hydrate) b.cancelled = true
-    // Converter-triggered hydrations show in the same widget list, so the
-    // cancel covers them too (their batches are synthetic, not in
-    // liveBatches — the converter routes each job through its own
-    // cancelled path). Lazy import: the converter module registers later.
-    void import('./converter').then(m => m.cancelAllConverterHydrations()).catch(() => {})
   })
 }
