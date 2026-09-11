@@ -52,6 +52,72 @@ function shortenDir(dir: string): string {
   return `${drive}\\…${rest.slice(rest.length - MAX)}`
 }
 
+// The ready list's two per-file dropdowns, shared with the header's
+// "Set all" group so the header reads as the same controls applied to
+// every row. Raw themed selects rather than the Select primitive: the
+// preset list needs optgroups and both need the compact row size, which
+// the primitive does not offer yet (style guide, open decision 5).
+const ROW_SELECT = 'appearance-none bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/50'
+
+function PresetSelect({ value, onChange, builtinPresets, importedPresets }: {
+  value: string
+  onChange: (presetId: string) => void
+  builtinPresets: ConversionPreset[]
+  importedPresets: ConversionPreset[]
+}) {
+  return (
+    <div className="relative shrink-0">
+      <select value={value} onChange={e => onChange(e.target.value)} className={`${ROW_SELECT} max-w-[180px]`}>
+        <optgroup label="Built-in">
+          {builtinPresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </optgroup>
+        {importedPresets.length > 0 && (
+          <optgroup label="Custom &amp; imported">
+            {importedPresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </optgroup>
+        )}
+      </select>
+      <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+    </div>
+  )
+}
+
+/** Output directory dropdown. '' = next to the original. `pickedDir` is the
+ *  last directory chosen through the picker, kept as an option so it stays
+ *  selectable after switching back to "Next to original". "Choose location"
+ *  opens the picker; cancelling it leaves the current value in place. */
+function OutputDirSelect({ value, pickedDir, onChange }: {
+  value: string
+  pickedDir: string
+  /** `picked` is true when the value came from the picker (so the caller
+   *  can remember it as the row's pickedDir). */
+  onChange: (dir: string, picked: boolean) => void
+}) {
+  return (
+    <div className="relative shrink-0">
+      <select
+        value={value || ''}
+        onChange={async e => {
+          const v = e.target.value
+          if (v === '__choose__') {
+            const dir = await window.api.openDirectoryDialog({ defaultPath: value || undefined })
+            if (dir) onChange(dir, true)
+            else onChange(value, false) // cancel: reset the controlled value
+          } else {
+            onChange(v, false)
+          }
+        }}
+        className={`${ROW_SELECT} max-w-[220px]`}
+      >
+        <option value="">Next to original</option>
+        {pickedDir && <option value={pickedDir}>{shortenDir(pickedDir)}</option>}
+        <option value="__choose__">Choose location…</option>
+      </select>
+      <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+    </div>
+  )
+}
+
 /** A single-line text span that shows a Tooltip (above) with the full text
  *  only when the text is actually truncated. Re-measures on resize. */
 function TruncText({ text, className = '' }: { text: string; className?: string }) {
@@ -407,6 +473,28 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     setQueuedFiles(prev => prev.map(f => f.path === p ? { ...f, outputDir } : f))
   const setFileAudioTrack = (p: string, audioTrackIndex: number) =>
     setQueuedFiles(prev => prev.map(f => f.path === p ? { ...f, audioTrackIndex } : f))
+
+  // "Set all" group in the ready-list header (CONV-9): one preset and one
+  // output location that Apply writes into every listed file. Rows keep
+  // their own controls for per-file overrides afterwards, and files added
+  // later take the normal defaults, not these values. The preset id stays
+  // '' until the user picks one so the control tracks the default preset
+  // while presets are still loading.
+  const [setAllPresetId, setSetAllPresetId] = useState('')
+  const [setAllOutputDir, setSetAllOutputDir] = useState('')
+  const [setAllPickedDir, setSetAllPickedDir] = useState('')
+  const setAllPreset = presetForId(setAllPresetId)
+  const applyToAll = () => {
+    const presetId = setAllPreset?.id ?? ''
+    setQueuedFiles(prev => prev.map(f => ({
+      ...f,
+      presetId,
+      outputDir: setAllOutputDir,
+      // A picked directory must also become the row's remembered option,
+      // or the row's controlled select would have no option to show it.
+      pickedDir: setAllOutputDir || f.pickedDir,
+    })))
+  }
 
   /** Collision-proof output path. `<base>_<preset>.<ext>` collides whenever
    *  the output already exists on disk (silently overwritten via -y) or
@@ -797,17 +885,54 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
         <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto p-4 flex flex-col gap-4">
           <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden shrink-0">
-              <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 gap-2">
+              <div className="flex items-center flex-wrap gap-x-3 gap-y-2 px-4 py-2 border-b border-white/5">
                 <span className="text-xs font-medium text-gray-400">{queuedFiles.length} file(s) ready</span>
-                <Button
-                  variant="success"
-                  size="sm"
-                  icon={<Zap size={12} />}
-                  onClick={startAll}
-                  disabled={!defaultPreset || queuedFiles.length === 0}
-                >
-                  Start all
-                </Button>
+                {/* Set all: left-aligned after the count so its dropdowns line
+                    up over the rows' own; wraps under the count when the
+                    panel is narrow. */}
+                <div className="w-px h-4 bg-white/10 shrink-0" />
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-gray-500">Set all</span>
+                  <Tooltip content="Encode preset to apply to every file in the list" side="top">
+                    <PresetSelect
+                      value={setAllPreset?.id ?? ''}
+                      onChange={setSetAllPresetId}
+                      builtinPresets={builtinPresets}
+                      importedPresets={importedPresets}
+                    />
+                  </Tooltip>
+                  <Tooltip content="Output location to apply to every file in the list" side="top">
+                    <OutputDirSelect
+                      value={setAllOutputDir}
+                      pickedDir={setAllPickedDir}
+                      onChange={(dir, picked) => {
+                        setSetAllOutputDir(dir)
+                        if (picked) setSetAllPickedDir(dir)
+                      }}
+                    />
+                  </Tooltip>
+                  <Tooltip content="Apply this preset and output location to every file in the list. Each row can still be changed afterwards." side="top">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={applyToAll}
+                      disabled={!setAllPreset || queuedFiles.length === 0}
+                    >
+                      Apply
+                    </Button>
+                  </Tooltip>
+                </div>
+                <Tooltip content="Queue every ready file for conversion" side="top" triggerClassName="ml-auto flex">
+                  <Button
+                    variant="success"
+                    size="sm"
+                    icon={<Zap size={12} />}
+                    onClick={startAll}
+                    disabled={!defaultPreset || queuedFiles.length === 0}
+                  >
+                    Start all
+                  </Button>
+                </Tooltip>
               </div>
               {queuedFiles.length === 0 && jobs.length === 0 && (
                 <div className="px-4 py-6 text-center text-xs text-gray-400">No files queued</div>
@@ -850,47 +975,20 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                         </Tooltip>
                       )}
                       <div className="flex items-center gap-2 min-w-0">
-                        {/* Encode preset */}
-                        <div className="relative shrink-0">
-                          <select
-                            value={preset?.id ?? ''}
-                            onChange={e => setFilePreset(path, e.target.value)}
-                            className="appearance-none max-w-[180px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
-                          >
-                            <optgroup label="Built-in">
-                              {builtinPresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </optgroup>
-                            {importedPresets.length > 0 && (
-                              <optgroup label="Custom &amp; imported">
-                                {importedPresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                              </optgroup>
-                            )}
-                          </select>
-                          <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                        </div>
-                        {/* Output directory — keeps the last picked path as an
-                            option even after switching back to "Next to original". */}
-                        <div className="relative shrink-0">
-                          <select
-                            value={outputDir || ''}
-                            onChange={async e => {
-                              const v = e.target.value
-                              if (v === '__choose__') {
-                                const dir = await window.api.openDirectoryDialog({ defaultPath: outputDir || undefined })
-                                if (dir) setQueuedFiles(prev => prev.map(f => f.path === path ? { ...f, outputDir: dir, pickedDir: dir } : f))
-                                else setFileOutputDir(path, outputDir) // cancel → reset the controlled value
-                              } else {
-                                setFileOutputDir(path, v)
-                              }
-                            }}
-                            className="appearance-none max-w-[220px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
-                          >
-                            <option value="">Next to original</option>
-                            {pickedDir && <option value={pickedDir}>{shortenDir(pickedDir)}</option>}
-                            <option value="__choose__">Choose location…</option>
-                          </select>
-                          <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                        </div>
+                        <PresetSelect
+                          value={preset?.id ?? ''}
+                          onChange={id => setFilePreset(path, id)}
+                          builtinPresets={builtinPresets}
+                          importedPresets={importedPresets}
+                        />
+                        <OutputDirSelect
+                          value={outputDir}
+                          pickedDir={pickedDir}
+                          onChange={(dir, picked) => {
+                            if (picked) setQueuedFiles(prev => prev.map(f => f.path === path ? { ...f, outputDir: dir, pickedDir: dir } : f))
+                            else setFileOutputDir(path, dir)
+                          }}
+                        />
                         {/* Cloud file + Extract Audio: hydration in flight —
                             the track picker (and this row's Start) unlock
                             once the file lands. The disabled placeholder

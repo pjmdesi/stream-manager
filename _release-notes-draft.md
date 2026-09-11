@@ -18,6 +18,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 ## Converter
 
 - The combined progress shown under the Converter item in the navigation now reflects the whole batch. Jobs still waiting for a slot count at zero and finished jobs count as complete, so the bar climbs steadily from the first job to the last instead of only tracking whatever happens to be encoding. The job count next to it now reads as completed out of total.
+- The ready list has a Set all group in its header: pick an encode preset and an output location once, click Apply, and every file in the list takes them. Each row can still be changed on its own afterwards.
 
 ## Integrations
 
