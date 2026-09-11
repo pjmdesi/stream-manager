@@ -268,9 +268,6 @@ contextBridge.exposeInMainWorld('api', {
   removeJob: (jobId: string) =>
     ipcRenderer.invoke('converter:removeJob', jobId),
 
-  reorderJobs: (orderedIds: string[]) =>
-    ipcRenderer.invoke('converter:reorderJobs', orderedIds),
-
   isPathInUseByConverter: (filePath: string) =>
     ipcRenderer.invoke('converter:isPathInUse', filePath),
   isFolderInUseByConverter: (folderPath: string) =>

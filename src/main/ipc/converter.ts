@@ -1897,23 +1897,6 @@ export function registerConverterIPC(): void {
 
   ipcMain.handle('converter:getJobs', async () => Array.from(jobs.values()))
 
-  // Re-sequence the job registry (CONV-11). Map iteration order is the
-  // scheduler's tiebreak among queued jobs and the order getJobs hands the
-  // renderer, so a drag-reorder on the converter page lands here. Listed
-  // ids take the given order; anything unlisted (finished jobs, jobs added
-  // mid-drag) keeps its relative order after them. Nothing about a job's
-  // state changes, only its position.
-  ipcMain.handle('converter:reorderJobs', async (_event, orderedIds: string[]) => {
-    if (!Array.isArray(orderedIds)) return
-    const listed = orderedIds.filter(id => typeof id === 'string' && jobs.has(id))
-    const listedSet = new Set(listed)
-    const rest = [...jobs.keys()].filter(id => !listedSet.has(id))
-    const entries = [...listed, ...rest].map(id => [id, jobs.get(id)!] as const)
-    jobs.clear()
-    for (const [id, j] of entries) jobs.set(id, j)
-    persistPendingJobs()
-  })
-
   // Delete guards: report whether a file (or anything under a stream folder) is
   // currently held by an in-flight conversion job, so the Streams page can block
   // its deletion the way the OS refuses to delete an open file. The main-process

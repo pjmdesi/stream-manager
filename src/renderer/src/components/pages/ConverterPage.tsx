@@ -118,12 +118,11 @@ function OutputDirSelect({ value, pickedDir, onChange }: {
   )
 }
 
-// Drag-to-reorder for the ready list and the Converting card (CONV-11),
-// the Combine page's pattern: native HTML drag with a private MIME type
-// so file drops from Explorer never read as a reorder, a half-row
-// threshold to pick the insertion slot, and a marker line drawn inside
-// the row the slot precedes. One hook instance per list; a drag started
-// in one list is ignored by the other (its dragRef is null there).
+// Drag-to-reorder for the ready list (CONV-11), the Combine page's
+// pattern: native HTML drag with a private MIME type so file drops from
+// Explorer never read as a reorder, a half-row threshold to pick the
+// insertion slot, and a marker line drawn inside the row the slot
+// precedes.
 const CONVERTER_ROW_MIME = 'application/x-sm-converter-row'
 
 function useRowReorder(onMove: (from: number, to: number) => void) {
@@ -544,21 +543,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   // later take the normal defaults, not these values. The preset id stays
   // '' until the user picks one so the control tracks the default preset
   // while presets are still loading.
-  // Reorder (CONV-11). The ready list is renderer state, and its order is
-  // the order Start all submits jobs in. The Converting card reorders the
-  // main-process registry (the scheduler's tiebreak among queued jobs) and
-  // mirrors it locally so the rows do not wait for a round trip.
+  // Reorder (CONV-11). The ready list is the place to set the order: it is
+  // renderer state, and its order is the order Start all submits jobs in.
+  // The Converting card deliberately does not reorder; with running,
+  // downloading, and grouped rows in the same list it read as noise.
   const readyReorder = useRowReorder((from, to) => setQueuedFiles(prev => moveItem(prev, from, to)))
-  const convertingReorder = useRowReorder((from, to) => {
-    const units = convertingUnits()
-    const ordered = moveItem(units, from, to).flat().map(j => j.id)
-    const rank = new Map(ordered.map((id, i) => [id, i]))
-    setJobs(prev => {
-      const listed = prev.filter(j => rank.has(j.id)).sort((a, b) => rank.get(a.id)! - rank.get(b.id)!)
-      return [...listed, ...prev.filter(j => !rank.has(j.id))]
-    })
-    window.api.reorderJobs(ordered).catch(() => {})
-  })
 
   const [setAllPresetId, setSetAllPresetId] = useState('')
   const [setAllOutputDir, setSetAllOutputDir] = useState('')
@@ -737,23 +726,6 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   const hasEnded = (j: ConversionJob) => j.groupId ? !liveGroupIds.has(j.groupId) : isTerminal(j)
   const convertingJobs = jobs.filter(j => !hasEnded(j))
   const finishedJobs = jobs.filter(hasEnded)
-  /** The Converting card as ordered units: an archive group is one unit
-   *  (all its members, at the position of the first), a standalone job is
-   *  its own. Reordering works on these so a group always moves whole. */
-  const convertingUnits = (): ConversionJob[][] => {
-    const units: ConversionJob[][] = []
-    const seen = new Set<string>()
-    for (const j of convertingJobs) {
-      if (!j.groupId) { units.push([j]); continue }
-      if (seen.has(j.groupId)) continue
-      seen.add(j.groupId)
-      units.push(convertingJobs.filter(g => g.groupId === j.groupId))
-    }
-    return units
-  }
-  /** A unit can be dragged while any of it is still queued; running,
-   *  paused, downloading, and replacing rows stay where they are. */
-  const unitMovable = (unit: ConversionJob[]) => unit.some(j => j.status === 'queued')
 
   const clearFinished = () => {
     // Clears exactly what the Finished card shows: whole ended units. A
@@ -775,7 +747,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   /** Render a single job row — extracted so both the ungrouped queue and
    *  group-block bodies use the same markup. `indented=true` adds a left
    *  inset so grouped rows visually attach to the group header above. */
-  const renderJobRow = (job: ConversionJob, indented: boolean, withHandle = false) => {
+  const renderJobRow = (job: ConversionJob, indented: boolean) => {
     const isActive = job.status === 'running' || job.status === 'paused'
     const isDone = job.status === 'done'
     const isCancelled = job.status === 'cancelled'
@@ -810,7 +782,6 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         {/* Progress paints as the row background — the app's accent tint,
             growing behind the content. */}
         <RowProgressFill percent={job.progress} status={job.status} tint="bg-accent-500/10" />
-        {withHandle && <DragHandle className="-ms-2" />}
         {/* Thumbnail — pulled toward the left/top/bottom edges, keeps the
             gap to the right content. */}
         <div className="self-center shrink-0 -my-1 -ms-2">
@@ -1234,7 +1205,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                   })()}
                 </div>
               </div>
-              {renderJobList(convertingJobs, convertingReorder)}
+              {renderJobList(convertingJobs)}
             </div>
           )}
 
@@ -1333,41 +1304,14 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
    *  renders all members itself). Ungrouped jobs render as plain rows. The
    *  list always holds whole groups (see hasEnded), so member lookups stay
    *  within it. */
-  function renderJobList(list: ConversionJob[], reorder?: ReturnType<typeof useRowReorder>): React.ReactNode {
+  function renderJobList(list: ConversionJob[]): React.ReactNode {
     const seenGroups = new Set<string>()
     const items: React.ReactNode[] = []
-    // Unit index for the reorder hook: counts groups once (see
-    // convertingUnits), so it matches what its onMove callback receives.
-    let unitIndex = -1
-    const unitCount = reorder ? convertingUnits().length : 0
-    /** Wrap one unit (group block or standalone row) with the drag wiring
-     *  when this list reorders. Non-movable units still take drops so a
-     *  queued row can be placed around them. */
-    const asUnit = (key: string, movable: boolean, node: React.ReactNode) => {
-      if (!reorder) return node
-      const index = unitIndex
-      return (
-        <div
-          key={key}
-          draggable={movable}
-          onDragStart={e => reorder.onDragStart(e, index)}
-          onDragOver={e => reorder.onDragOver(e, index)}
-          onDrop={reorder.onDrop}
-          onDragEnd={reorder.onDragEnd}
-          className="relative"
-        >
-          {reorder.markers(index, unitCount)}
-          {node}
-        </div>
-      )
-    }
     for (const job of list) {
       if (job.groupId) {
         if (seenGroups.has(job.groupId)) continue
         seenGroups.add(job.groupId)
-        unitIndex++
         const groupJobs = list.filter(j => j.groupId === job.groupId)
-        const groupMovable = !!reorder && unitMovable(groupJobs)
         const total = groupJobs.length
         const doneN = groupJobs.filter(j => j.status === 'done').length
         const errN = groupJobs.filter(j => j.status === 'error').length
@@ -1382,7 +1326,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           finishedN === total
             ? `${doneN}/${total} complete${errN > 0 ? `, ${errN} failed` : ''}${cancelledN > 0 ? `, ${cancelledN} cancelled` : ''}`
             : `${finishedN}/${total} done`
-        items.push(asUnit(`u:${job.groupId}`, groupMovable,
+        items.push(
           <div key={`g:${job.groupId}`} className="border-b border-white/5 last:border-0">
             <div className="relative isolate overflow-hidden flex items-center gap-2 px-4 py-2 bg-green-500/5 border-l-2 border-green-500/40">
               {/* Aggregate progress as the header background — a
@@ -1395,7 +1339,6 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                   style={{ width: `${aggregatePct}%` }}
                 />
               )}
-              {groupMovable && <DragHandle className="-ms-1" />}
               <Archive size={13} className="text-green-400 shrink-0" />
               <span className="text-xs font-semibold text-gray-200 shrink-0">{job.groupLabel ?? 'Group'}</span>
               <span className="text-[11px] text-gray-400 shrink-0 tabular-nums">· {groupSummary}</span>
@@ -1415,11 +1358,9 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               {groupJobs.map(gj => renderJobRow(gj, true))}
             </div>
           </div>
-        ))
+        )
       } else {
-        unitIndex++
-        const movable = !!reorder && unitMovable([job])
-        items.push(asUnit(`u:${job.id}`, movable, renderJobRow(job, false, movable)))
+        items.push(renderJobRow(job, false))
       }
     }
     return items

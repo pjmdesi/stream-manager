@@ -155,7 +155,6 @@ declare global {
       startQueuedJob(jobId: string): Promise<void>
       getJobs(): Promise<ConversionJob[]>
       removeJob(jobId: string): Promise<void>
-      reorderJobs(orderedIds: string[]): Promise<void>
       isPathInUseByConverter(filePath: string): Promise<boolean>
       isFolderInUseByConverter(folderPath: string): Promise<boolean>
       onJobProgress(cb: (data: { jobId: string; percent: number; status?: string }) => void): () => void
