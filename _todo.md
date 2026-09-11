@@ -9,24 +9,26 @@
 5. STR-20
 6. CONV-8
 7. CONV-9
-8. CONV-10
-9. CONV-11
-10. STR-2
-11. STR-3
-12. STR-18
-13. PLR-2
-14. PLR-21
-15. PLR-23
-16. PLR-24
-17. STR-21
-18. COMB-3
-19. COMB-4
-20. THU-1
-21. THU-8
-22. THU-9
-23. THU-10
-24. THU-12
-25. THU-16
+8. CONV-12
+9. CONV-10
+10. CONV-11
+11. APP-36
+12. STR-2
+13. STR-3
+14. STR-18
+15. PLR-2
+16. PLR-21
+17. PLR-23
+18. PLR-24
+19. STR-21
+20. COMB-3
+21. COMB-4
+22. THU-1
+23. THU-8
+24. THU-9
+25. THU-10
+26. THU-12
+27. THU-16
 
 ## Improvement ideas
 
@@ -257,12 +259,16 @@
   There is no quick way to give every file in the ready list the same settings. With a large batch, the encode preset and output location have to be set row by row. Add a "set all" field group to the ready list header (the row that shows "N file(s) ready" and Start all): the same preset dropdown and output location dropdown the rows carry today (Next to original, the last picked path, Choose location), plus an Apply button that writes both values into every file currently in the list. Rows keep their own controls, so individual files can be overridden afterwards. Files added after applying should take the current defaults, not the set-all values, to avoid surprising the user with a stale choice. The audio track picker is per file and stays out of this group. Everything in the group gets a tooltip, and Apply is disabled while the list is empty.
   Built 2026-09-11, awaiting review. The row's preset and output-location dropdowns were extracted into shared PresetSelect and OutputDirSelect components, and the header's Set all group reuses them, left-aligned after the file count behind a short divider so the dropdowns sit over the rows' own (wrapping under the count when the panel is narrow); Start all stays at the right edge. Apply writes the preset and output location into every listed file; a picked directory also becomes each row's remembered option so the row dropdown can show it. Files added afterwards take the normal defaults. Start all gained the tooltip it was missing.
 
-- **CONV-10** [ui]
+- **CONV-10** [ui] [blocked:CONV-12]
   Split the Converting panel into two: Converting keeps the jobs that are still moving (queued, downloading, running, replacing, paused) and a new Finished panel below it collects done, errored, and cancelled jobs. Errored and cancelled jobs belong in Finished because nothing happens to them without the user acting; the row keeps its error styling and Retry so failures still stand out, and the Finished header carries the counts ("Finished (8) · 1 failed"). Clear done moves to the Finished header. Archive group blocks stay whole and move to Finished once every member has ended. This also makes the nav item's completed-versus-total stat (CONV-8) match what the page shows. Consider a short slide when a row changes panels, honoring the reduced-motion setting.
   Built 2026-09-11, awaiting review. Jobs are partitioned into Converting and Finished cards with archive groups treated as one unit (a group is finished only when every member has ended, otherwise it stays whole in Converting). The Finished header shows the count plus failed and cancelled counts when non-zero; its Clear all button replaces Clear done and removes exactly what that card shows, so a finished member of a still-running group is no longer cleared out from under its group. Converting hides when nothing is moving. Pause all and Resume all gained tooltips. The slide between cards was not built: rows move between two separate cards, which would need a cross-container animation; can revisit if the jump feels harsh.
 
 - **CONV-11** [ui] [blocked:CONV-10]
   Let the user choose the order files convert in, using the drag-to-reorder pattern from the Combine page (grip handle, drop marker, same MIME-tagged drag). Two lists take part. The ready list (files not yet started) is renderer state, and its order is the order Start all submits jobs in. The queued jobs in the Converting panel need a small main-process IPC that re-sequences the jobs map, since the scheduler starts queued jobs in that order; the persisted pending queue should follow the new order too. Only queued rows get a handle: running, paused, downloading, and finished rows do not move, and an archive group moves as one block because its members already run one at a time. Blocked on CONV-10 because the Converting/Finished split is what keeps the movable rows visually together.
+
+- **CONV-12** [bug]
+  A converter job whose cloud download is cancelled outside SM (through Windows or the sync client) stays on "Downloading from cloud" forever instead of failing, and pausing and resuming the sync client never restarts the download. Cause: the converter's hydrate wait (ensureHydrated for archive groups, the inline wait in startConversionJob for standalone jobs) nudges the file with a single one-byte read and then polls file attributes every two seconds. Attributes cannot distinguish a cancelled recall from a slow one, the nudge's own error result is discarded, nothing re-issues it, and the archive-group path has no timeout at all (the standalone path has six hours). The cloud widget's downloads use CfHydratePlaceholder (hydrateOnePath in cfapi.ts), which blocks until the recall ends and returns an error code on failure. Fix: move the converter's wait onto that same call so both paths share one implementation and a dead download becomes a job error with a readable reason; SM's own Cancel keeps working because the abort-by-dehydrate makes the blocking call return, and the cancelled flag is checked before treating that as a failure (as the widget's worker does). Verified 2026-09-11 with the widget: pausing the sync client fails the in-flight files (the API returns an error), files requested while it is paused sit on "working" and complete normally once it is unpaused (the request is held by the OS, which is correct), and a cancel from the Windows notification does NOT make the row fail (the request stays pending, and the same resume completes it). So the shared call fixes the hang on provider-side aborts and gives the archive path an end state, but a Windows-side cancel is indistinguishable from a paused provider on both paths. Handle that with visibility rather than guessing: show how long the row has been waiting once it passes a few minutes with no completion, with a hint that the sync client may be paused or the download cancelled, and leave Cancel (and Requeue) as the user's exit.
+  Built 2026-09-11, awaiting review. New shared wait in `services/cloudHydrateWait.ts`, used by both converter hydrate paths (the old touch-and-poll and the flat 6-hour timeout are gone). It runs three things side by side: a live CfHydratePlaceholder request in a child process (`startHydrateRequest` in cfapi.ts) that hears provider errors, the existing attribute poll that sees completion, and a watch on the file's on-disk allocation (fs.stat blocks) as the progress pulse. No growth for 3 minutes issues a second request beside the first (a fresh request restarts a transfer the user cancelled from Windows; overlapping requests for an active transfer are coalesced), capped at two live requests per file; no growth for 30 minutes fails the job with a plain reason so it gets an end state. A provider error (pausing the sync client aborts in-flight transfers, a stopped client rejects requests) fails the job immediately with the provider's reason; archive-group failures go through the same error path as encode failures (red row, group hook short-circuited, siblings continue). Also in this pass: the cloud sync modal no longer duplicates a row when a second request arrives for a file already downloading (the later batch attaches to the existing row, both for converter-triggered and user-initiated requests), and a queued archive row's Waiting tooltip now says when it is waiting on the file ahead of it in its own group rather than on a global slot. To watch in testing: the stall logic assumes the sync client writes recalled data into the placeholder as it goes, so size on disk grows during a download; if a download on this setup shows no growth until the end, the 30-minute rule would fail long downloads and needs revisiting.
 
 ### Combine
 
@@ -461,6 +467,9 @@
   - Keep it visible for about 30 seconds after the last operation completes, so the user can still open the cloud modal to see results or retry a failure without racing it; then slide out. A new operation during the linger cancels the countdown.
   - After the open animation finishes, pulse the widget's background twice (a gentle tint, not the outline-pulse attention ring; a short one-off keyframe) to draw the eye the first times it appears and remind users where cloud activity shows up. Every appearance, not just the first; it is two pulses, not a loop.
   Context: STR-19 made this widget the only feedback for a confirmed cloud download once the prompt closes, which is why it needs to be findable.
+
+- **APP-36** [ui]
+  Cloud sync modal: add a Retry all button to each direction card's header, next to Cancel pending and styled the same way (ghost, small, with a tooltip). It re-enqueues every failed row in that card in one go, the same way the per-row retry icon does for one file, and shows only while the card has at least one failed row. Filed 2026-09-11 after a batch download where pausing the sync client failed the four in-flight files at once and each had to be retried by hand.
 
 ### Onboarding & Setup
 

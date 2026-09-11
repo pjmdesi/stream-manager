@@ -75,6 +75,31 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
   // look like SM silently refused the command. Popping once per batch keeps
   // the error visible while respecting a user who closes the modal mid-batch.
   const failurePoppedBatches = useRef<Set<string>>(new Set())
+  // One row per file per direction. A second request for a file that is
+  // already downloading (a pin followed by an archive of the same file, or
+  // the reverse) used to add a duplicate row that then completed in step
+  // with the first. Instead the later batch attaches to the existing row:
+  // its id maps here to the row's batch id, and item events route through
+  // the map. Keyed "batchId|path" since a batch can cover many files.
+  const rowAlias = useRef<Map<string, string>>(new Map())
+  const aliasKey = (batchId: string, path: string) => `${batchId}|${path}`
+  /** Add rows for a new batch, attaching any file that already has a live
+   *  row in this direction instead of duplicating it. Returns the rows
+   *  that were actually added. */
+  const addOrAttachRows = useCallback((direction: CloudOpDirection, rows: CloudOpItem[]) => {
+    const setter = direction === 'offload' ? setOffloadItems : setHydrateItems
+    setter(prev => {
+      const stillActive = prev.filter(it => !isTerminal(it.status))
+      const fresh: CloudOpItem[] = []
+      for (const row of rows) {
+        const existing = stillActive.find(it => it.path === row.path)
+        if (existing) rowAlias.current.set(aliasKey(row.batchId, row.path), existing.batchId)
+        else fresh.push(row)
+      }
+      return [...stillActive, ...fresh]
+    })
+  }, [])
+  const targetBatch = (batchId: string, path: string) => rowAlias.current.get(aliasKey(batchId, path)) ?? batchId
 
   // Starting an op on a path drops that path's TERMINAL rows from the
   // OPPOSITE direction's list. The files grid derives its icons from both
@@ -113,10 +138,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
             direction: ev.direction,
             batchId: ev.batchId,
           }))
-          setter(prev => {
-            const stillActive = prev.filter(it => !isTerminal(it.status))
-            return [...stillActive, ...rows]
-          })
+          addOrAttachRows(ev.direction, rows)
           return
         }
         // Mark protected paths as skipped (offload only — hydrate sends [] here).
@@ -132,20 +154,24 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
           failurePoppedBatches.current.add(ev.batchId)
           setModalOpen(true)
         }
-        setter(prev => prev.map(it =>
-          it.batchId === ev.batchId && it.path === ev.path
-            ? {
-                ...it,
-                status:
-                  ev.status === 'done' ? 'done' :
-                  ev.status === 'failed' ? 'failed' :
-                  ev.status === 'already-offline' ? 'already-offline' :
-                  ev.status === 'already-local' ? 'already-local' :
-                  'running',
-                reason: ev.reason,
-              }
-            : it
-        ))
+        // Route through the alias map so a batch attached to an existing
+        // row updates that row. A 'running' from the later batch must not
+        // regress a row the first batch already settled.
+        const target = targetBatch(ev.batchId, ev.path)
+        setter(prev => prev.map(it => {
+          if (it.batchId !== target || it.path !== ev.path) return it
+          if (target !== ev.batchId && ev.status === 'running' && isTerminal(it.status)) return it
+          return {
+            ...it,
+            status:
+              ev.status === 'done' ? 'done' :
+              ev.status === 'failed' ? 'failed' :
+              ev.status === 'already-offline' ? 'already-offline' :
+              ev.status === 'already-local' ? 'already-local' :
+              'running',
+            reason: ev.reason,
+          }
+        }))
       } else if (ev.type === 'complete') {
         // Promote any pending/running rows in this batch to 'cancelled'
         // when the batch was cancelled. Otherwise leave them — the per-item
@@ -160,7 +186,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
       }
     })
     return () => unsub()
-  }, [purgeOppositeRows])
+  }, [purgeOppositeRows, addOrAttachRows])
 
   // Derive active flags from queue contents. A direction is "active" iff it
   // has any row not yet in a terminal state.
@@ -202,13 +228,10 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
       direction: 'offload',
       batchId,
     }))
-    setOffloadItems(prev => {
-      // Drop terminal rows from prior batches when the user starts a new one;
-      // keep anything still pending/running so concurrent batches stay
-      // visible together.
-      const stillActive = prev.filter(it => !isTerminal(it.status))
-      return [...stillActive, ...newRows]
-    })
+    // Drops terminal rows from prior batches when the user starts a new one
+    // and keeps anything still pending/running so concurrent batches stay
+    // visible together; a file already in flight attaches to its row.
+    addOrAttachRows('offload', newRows)
     if (openModal) setModalOpen(true)
     window.api.cloudSyncOffload(files.map(f => f.path), batchId).catch(() => {
       // The enqueue IPC itself rejected — no per-item events will ever
@@ -219,7 +242,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
           : it))
       setModalOpen(true)
     })
-  }, [purgeOppositeRows])
+  }, [purgeOppositeRows, addOrAttachRows])
 
   const enqueueHydrate = useCallback((files: { path: string; size: number }[], openModal = true) => {
     if (files.length === 0) return
@@ -233,10 +256,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
       direction: 'hydrate',
       batchId,
     }))
-    setHydrateItems(prev => {
-      const stillActive = prev.filter(it => !isTerminal(it.status))
-      return [...stillActive, ...newRows]
-    })
+    addOrAttachRows('hydrate', newRows)
     if (openModal) setModalOpen(true)
     window.api.cloudSyncPin(files.map(f => f.path), batchId).catch(() => {
       setHydrateItems(prev => prev.map(it =>
@@ -245,7 +265,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
           : it))
       setModalOpen(true)
     })
-  }, [purgeOppositeRows])
+  }, [purgeOppositeRows, addOrAttachRows])
 
   const retryItem = useCallback((item: CloudOpItem) => {
     if (item.status !== 'failed') return

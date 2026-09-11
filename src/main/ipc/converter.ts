@@ -288,10 +288,10 @@ function settleJobError(id: string, err: Error): void {
 }
 
 // ── Cloud-sync event bridge (CONV-1) ─────────────────────────────────────
-// Converter hydrations keep their own touch-and-poll mechanics (cancel-
-// friendly, timeout-guarded — the pin pipeline's blocking CfHydrate call
-// offers neither) but SPEAK the same cloud-sync event protocol the pin
-// flow uses: a synthetic single-file batch on 'cloud-sync:progress' (the
+// Converter hydrations run through the shared wait in cloudHydrateWait.ts
+// (cancel-friendly, hears provider errors, re-nudges stalls) but SPEAK the
+// same cloud-sync event protocol the pin flow uses: a synthetic
+// single-file batch on 'cloud-sync:progress' (the
 // CloudOps context creates rows for externally-initiated batches, which
 // lights the widget, the files grid icons/spinners, and the shared
 // hydration cache), plus 'files:cloudDownloadDone' on success (the
@@ -356,9 +356,9 @@ async function ensureHydrated(jobId: string): Promise<void> {
   if (hydrateInFlight.has(jobId)) return
   hydrateInFlight.add(jobId)
   try {
-    const { isFileConfirmedLocal, checkLocalFiles } = await import('./files')
+    const { checkLocalFiles } = await import('./files')
     // Cheap upfront check — if the file is already local, no work to do.
-    if (isFileConfirmedLocal(job.inputFile)) return
+    if ((await checkLocalFiles([job.inputFile]))[0]) return
     // Don't kick off if the job has already been advanced past 'queued'
     // (e.g. cancelled before this task got scheduled).
     const cur = jobs.get(jobId)
@@ -370,27 +370,31 @@ async function ensureHydrated(jobId: string): Promise<void> {
     cancellers.set(jobId, () => { flag.cancelled = true })
     const hydEv = converterHydrateEvents(jobId, job.inputFile, jobs.get(jobId)?.inputSize)
 
-    // Touching the file is what nudges the OS sync provider to start
-    // hydrating. Reading 1 byte is enough; the actual content streams in
-    // afterward as the provider downloads it.
-    fs.open(job.inputFile, 'r', (err, fd) => {
-      if (err) return
-      const buf = Buffer.alloc(1)
-      fs.read(fd, buf, 0, 1, 0, () => fs.close(fd, () => {}))
-    })
-
-    // Async batch poll — non-blocking PowerShell call, won't tie up the
-    // main thread when many parallel hydrates are running concurrently.
-    while (!flag.cancelled) {
-      const [local] = await checkLocalFiles([job.inputFile])
-      if (local) break
-      await new Promise(r => setTimeout(r, 2000))
-    }
+    // Shared wait (see cloudHydrateWait.ts): a live hydrate request hears
+    // provider errors, an attribute poll sees completion, and an on-disk
+    // growth watch re-nudges a stalled transfer and ends a dead one.
+    const { waitForCloudFile } = await import('../services/cloudHydrateWait')
+    const waited = await waitForCloudFile(job.inputFile, { isCancelled: () => flag.cancelled })
 
     downloadCancelFlags.delete(jobId)
     cancellers.delete(jobId)
 
-    if (flag.cancelled) {
+    if (waited.outcome === 'failed') {
+      // The download itself failed (provider error or no progress). Fail
+      // the job the way an encode failure would: red row with the reason,
+      // group hook short-circuited, scheduler kicked so siblings continue.
+      const cur2 = jobs.get(jobId)
+      if (cur2) {
+        jobs.set(jobId, { ...cur2, status: 'error', error: `Cloud download failed: ${waited.reason}` })
+        notifyAll('converter:jobError', { jobId, error: `Cloud download failed: ${waited.reason}` })
+      }
+      hydEv.failed(waited.reason)
+      maybeFireGroupHook(jobId)
+      scheduleNext()
+      return
+    }
+
+    if (waited.outcome === 'cancelled') {
       // Cancelled mid-hydrate. Mark the job and let the group orchestrator
       // pick the next one (cancel doesn't short-circuit the rest of the
       // group, matching the "errors don't abort the whole batch" pattern).
@@ -1039,28 +1043,21 @@ export async function startConversionJob(
           // Synology offer one).
           cancellers.set(id, () => { flag.cancelled = true })
           const hydEv = converterHydrateEvents(id, job.inputFile, jobs.get(id)?.inputSize)
-          fs.open(job.inputFile, 'r', (err, fd) => {
-            if (err) return
-            const buf = Buffer.alloc(1)
-            fs.read(fd, buf, 0, 1, 0, () => fs.close(fd, () => {}))
-          })
-          // Timeout guards a download that will never finish (sync client
-          // stopped or offline) — the job used to sit "downloading"
-          // forever. Generous: a slow NAS recalling several large files
-          // can legitimately run for hours.
-          const DOWNLOAD_TIMEOUT_MS = 6 * 60 * 60 * 1000
-          const downloadStart = Date.now()
-          while (!flag.cancelled && !(await inputIsLocal())) {
-            if (Date.now() - downloadStart > DOWNLOAD_TIMEOUT_MS) {
-              downloadCancelFlags.delete(id)
-              hydEv.failed('Cloud download timed out after 6 hours.')
-              handleError(new Error('Cloud download timed out after 6 hours. Check that the sync client is running and the file is available, then requeue.'))
-              return
-            }
-            await new Promise(r => setTimeout(r, 2000))
-          }
+          // Shared wait (see cloudHydrateWait.ts). It replaces the old
+          // touch-and-poll plus a flat 6-hour timeout: a live hydrate
+          // request hears provider errors, an attribute poll sees
+          // completion, and an on-disk growth watch re-nudges a stalled
+          // transfer and fails a dead one, so a slow multi-hour recall
+          // still passes while a cancelled one no longer sits forever.
+          const { waitForCloudFile } = await import('../services/cloudHydrateWait')
+          const waited = await waitForCloudFile(job.inputFile, { isCancelled: () => flag.cancelled })
           downloadCancelFlags.delete(id)
-          if (flag.cancelled) {
+          if (waited.outcome === 'failed') {
+            hydEv.failed(waited.reason)
+            handleError(new Error(`Cloud download failed: ${waited.reason}`))
+            return
+          }
+          if (waited.outcome === 'cancelled') {
             // Cancelled is a user action, not an error — handleError painted
             // the row red and lost the Requeue affordance.
             jobs.set(id, { ...jobs.get(id)!, status: 'cancelled' })

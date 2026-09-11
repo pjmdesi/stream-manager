@@ -277,17 +277,41 @@ function getHydrateScriptPath(): string {
 
 export type HydrateOutcome = 'ok' | 'already-local' | 'failed'
 
-function runOneHydrate(scriptPath: string, filePath: string): Promise<{ outcome: HydrateOutcome; reason?: string }> {
-  return new Promise(resolve => {
-    let stdout = ''
-    let stderr = ''
-    const proc = spawn('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', scriptPath, filePath
-    ])
+export interface HydrateRequest {
+  /** Settles when the child exits: 'ok' once the file is fully local,
+   *  'failed' with a reason when the provider reported an error, or
+   *  'killed' when kill() ended it. */
+  result: Promise<{ outcome: HydrateOutcome | 'killed'; reason?: string }>
+  /** End the request. The provider's transfer is not interrupted by this
+   *  (only a dehydrate aborts one), so it is safe to drop a request whose
+   *  answer is no longer needed. */
+  kill(): void
+  readonly alive: boolean
+}
+
+/** Issue one CfHydratePlaceholder request for a file in a child process
+ *  and hand back a handle to it. The call blocks inside the child until
+ *  the provider has streamed the whole file (or refused), so a request
+ *  can stay alive for hours; the handle lets callers watch it, drop it,
+ *  or run a poll beside it. */
+export function startHydrateRequest(filePath: string): HydrateRequest {
+  if (process.platform !== 'win32') {
+    return { result: Promise.resolve({ outcome: 'failed', reason: 'not-windows' }), kill() {}, alive: false }
+  }
+  let alive = true
+  let killed = false
+  let stdout = ''
+  let stderr = ''
+  const proc = spawn('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', getHydrateScriptPath(), filePath
+  ])
+  const result = new Promise<{ outcome: HydrateOutcome | 'killed'; reason?: string }>(resolve => {
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
     proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
     proc.on('close', () => {
+      alive = false
+      if (killed) { resolve({ outcome: 'killed' }); return }
       const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
       const last = lines[lines.length - 1] ?? ''
       if (last === 'OK') { resolve({ outcome: 'ok' }); return }
@@ -295,16 +319,27 @@ function runOneHydrate(scriptPath: string, filePath: string): Promise<{ outcome:
       if (last.startsWith('ERR|||')) { resolve({ outcome: 'failed', reason: friendlyCloudReason(last.slice(6)) }); return }
       resolve({ outcome: 'failed', reason: stderr.trim() || 'no-output' })
     })
-    proc.on('error', err => resolve({ outcome: 'failed', reason: err.message }))
+    proc.on('error', err => { alive = false; resolve(killed ? { outcome: 'killed' } : { outcome: 'failed', reason: err.message }) })
   })
+  return {
+    result,
+    kill() {
+      if (!alive || killed) return
+      killed = true
+      try { proc.kill() } catch { /* already gone */ }
+    },
+    get alive() { return alive },
+  }
 }
 
 /** Pin + hydrate a single file. Building block for cloudSync's shared
  *  per-direction worker pool — the old batch-level helper
  *  (hydratePathsWithProgress) is gone; the pool owns concurrency now. */
-export function hydrateOnePath(filePath: string): Promise<{ outcome: HydrateOutcome; reason?: string }> {
-  if (process.platform !== 'win32') return Promise.resolve({ outcome: 'failed', reason: 'not-windows' })
-  return runOneHydrate(getHydrateScriptPath(), filePath)
+export async function hydrateOnePath(filePath: string): Promise<{ outcome: HydrateOutcome; reason?: string }> {
+  const res = await startHydrateRequest(filePath).result
+  // Nothing kills a request issued through this path, so 'killed' cannot
+  // occur; the narrowing keeps the worker pool's contract unchanged.
+  return res.outcome === 'killed' ? { outcome: 'failed', reason: 'request ended' } : { outcome: res.outcome, reason: res.reason }
 }
 
 /**
