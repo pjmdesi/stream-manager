@@ -129,8 +129,9 @@ interface SectionProps {
 }
 
 function CloudOpsSection({ direction, items, active, hasPending, cancelling, onCancel }: SectionProps) {
-  const { retryItem } = useCloudOps()
+  const { retryItem, retryFailed } = useCloudOps()
   const totals = useMemo(() => computeTotals(items), [items])
+  const failedCount = totals.failed
   const isOffload = direction === 'offload'
   const title = isOffload ? 'Offload to cloud' : 'Download from cloud'
   const Icon = isOffload ? Cloud : CloudDownload
@@ -172,6 +173,19 @@ function CloudOpsSection({ direction, items, active, hasPending, cancelling, onC
           <span className="font-medium">{title}</span>
           {active && <Loader2 size={11} className="text-blue-300 animate-spin" />}
         </div>
+        <div className="flex items-center gap-1">
+        {failedCount > 0 && (
+          <Tooltip
+            content={isOffload
+              ? `Offload the ${failedCount === 1 ? 'file' : `${failedCount} files`} that failed again. Most failures are the sync client being busy, so a retry usually lands.`
+              : `Download the ${failedCount === 1 ? 'file' : `${failedCount} files`} that failed again. Most failures are the sync client being busy, so a retry usually lands.`}
+            side="top"
+          >
+            <Button variant="ghost" size="sm" icon={<RotateCw size={12} />} onClick={() => retryFailed(direction)}>
+              Retry all
+            </Button>
+          </Tooltip>
+        )}
         {(hasPending || cancelling) && (
           <Tooltip
             content={isOffload
@@ -184,6 +198,7 @@ function CloudOpsSection({ direction, items, active, hasPending, cancelling, onC
             </Button>
           </Tooltip>
         )}
+        </div>
       </div>
       <div className="px-3 py-3 space-y-3">
         {!isOffload && (
