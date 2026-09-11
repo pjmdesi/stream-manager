@@ -27,6 +27,10 @@ interface CloudOpsContextValue {
   hydrateItems: CloudOpItem[]
   offloadActive: boolean
   hydrateActive: boolean
+  /** True while a direction has rows still waiting for a worker, which
+   *  is the only thing Cancel can act on. */
+  offloadHasPending: boolean
+  hydrateHasPending: boolean
   offloadCancelling: boolean
   hydrateCancelling: boolean
   /** True iff the user has any cloud op (running or just-completed) worth
@@ -168,6 +172,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
               ev.status === 'failed' ? 'failed' :
               ev.status === 'already-offline' ? 'already-offline' :
               ev.status === 'already-local' ? 'already-local' :
+              ev.status === 'cancelled' ? 'cancelled' :
               'running',
             reason: ev.reason,
           }
@@ -199,15 +204,24 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
     [hydrateItems],
   )
 
-  // Auto-clear "cancelling" flags once the queue drains. The cancel button
-  // shows "Cancelling…" until the in-flight file finishes and the queue
-  // empties out, at which point the flag returns to false.
+  // Cancel only ever affects rows still waiting, so the button exists only
+  // while there are some, and "Cancelling…" clears as soon as the last
+  // waiting row has flipped (not when the in-flight files finish, which
+  // left the button spinning for the length of a download).
+  const offloadHasPending = useMemo(
+    () => offloadItems.some(it => it.status === 'pending'),
+    [offloadItems],
+  )
+  const hydrateHasPending = useMemo(
+    () => hydrateItems.some(it => it.status === 'pending'),
+    [hydrateItems],
+  )
   useEffect(() => {
-    if (offloadCancelling && !offloadActive) setOffloadCancelling(false)
-  }, [offloadCancelling, offloadActive])
+    if (offloadCancelling && !offloadHasPending) setOffloadCancelling(false)
+  }, [offloadCancelling, offloadHasPending])
   useEffect(() => {
-    if (hydrateCancelling && !hydrateActive) setHydrateCancelling(false)
-  }, [hydrateCancelling, hydrateActive])
+    if (hydrateCancelling && !hydrateHasPending) setHydrateCancelling(false)
+  }, [hydrateCancelling, hydrateHasPending])
 
   // The widget is interested in anything still in flight; the modal cares
   // about "anything at all" (so completed rows can still be reviewed). We
@@ -288,16 +302,16 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
   }, [purgeOppositeRows])
 
   const cancelOffload = useCallback(() => {
-    if (!offloadActive || offloadCancelling) return
+    if (!offloadHasPending || offloadCancelling) return
     setOffloadCancelling(true)
     window.api.cloudSyncCancelOffload().catch(() => {})
-  }, [offloadActive, offloadCancelling])
+  }, [offloadHasPending, offloadCancelling])
 
   const cancelHydrate = useCallback(() => {
-    if (!hydrateActive || hydrateCancelling) return
+    if (!hydrateHasPending || hydrateCancelling) return
     setHydrateCancelling(true)
     window.api.cloudSyncCancelPin().catch(() => {})
-  }, [hydrateActive, hydrateCancelling])
+  }, [hydrateHasPending, hydrateCancelling])
 
   const openModal = useCallback(() => setModalOpen(true), [])
 
@@ -315,6 +329,8 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
     hydrateItems,
     offloadActive,
     hydrateActive,
+    offloadHasPending,
+    hydrateHasPending,
     offloadCancelling,
     hydrateCancelling,
     hasActivity,
@@ -329,6 +345,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
   }), [
     offloadItems, hydrateItems,
     offloadActive, hydrateActive,
+    offloadHasPending, hydrateHasPending,
     offloadCancelling, hydrateCancelling,
     hasActivity, modalOpen,
     enqueueOffload, enqueueHydrate, retryItem,

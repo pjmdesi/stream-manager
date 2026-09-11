@@ -26,7 +26,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 ## Cloud sync
 
 - The cloud sync list no longer shows the same file twice when it is requested a second time while already downloading, such as pinning a file and then archiving it. The second request joins the existing row.
-- Cancel pending in the cloud sync panel now does only what it says for every row. Downloads the converter started were still being aborted by it; they now finish like any other download in flight, and the Converter page's own Cancel remains the way to stop one.
+- Cancel pending in the cloud sync panel now does only what it says for every row. Downloads the converter started were still being aborted by it; they now finish like any other download in flight, and the Converter page's own Cancel remains the way to stop one. The button also appears only while there are waiting files to cancel, the waiting rows flip to cancelled the moment it is clicked, and it no longer reads "Cancelling" for the rest of a download.
 
 ## Integrations
 

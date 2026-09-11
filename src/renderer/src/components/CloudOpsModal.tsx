@@ -69,6 +69,7 @@ export function CloudOpsModal() {
   const {
     offloadItems, hydrateItems,
     offloadActive, hydrateActive,
+    offloadHasPending, hydrateHasPending,
     offloadCancelling, hydrateCancelling,
     modalOpen, closeModal,
     cancelOffload, cancelHydrate,
@@ -95,6 +96,7 @@ export function CloudOpsModal() {
               direction="offload"
               items={offloadItems}
               active={offloadActive}
+              hasPending={offloadHasPending}
               cancelling={offloadCancelling}
               onCancel={cancelOffload}
             />
@@ -104,6 +106,7 @@ export function CloudOpsModal() {
               direction="hydrate"
               items={hydrateItems}
               active={hydrateActive}
+              hasPending={hydrateHasPending}
               cancelling={hydrateCancelling}
               onCancel={cancelHydrate}
             />
@@ -118,11 +121,14 @@ interface SectionProps {
   direction: CloudOpDirection
   items: CloudOpItem[]
   active: boolean
+  /** Rows still waiting for a worker: the only ones Cancel can skip, so
+   *  the button shows only while there are some. */
+  hasPending: boolean
   cancelling: boolean
   onCancel: () => void
 }
 
-function CloudOpsSection({ direction, items, active, cancelling, onCancel }: SectionProps) {
+function CloudOpsSection({ direction, items, active, hasPending, cancelling, onCancel }: SectionProps) {
   const { retryItem } = useCloudOps()
   const totals = useMemo(() => computeTotals(items), [items])
   const isOffload = direction === 'offload'
@@ -166,7 +172,7 @@ function CloudOpsSection({ direction, items, active, cancelling, onCancel }: Sec
           <span className="font-medium">{title}</span>
           {active && <Loader2 size={11} className="text-blue-300 animate-spin" />}
         </div>
-        {active && (
+        {(hasPending || cancelling) && (
           <Tooltip
             content={isOffload
               ? 'Skips the files still waiting. A file already being offloaded finishes first.'

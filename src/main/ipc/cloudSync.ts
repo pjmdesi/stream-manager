@@ -226,20 +226,31 @@ export function registerCloudSyncIPC(): void {
     enqueue('hydrate', event.sender, paths, batchId)
   })
 
-  // Per-direction cancels stamp every live batch. Subsequent enqueues are
-  // NOT auto-cancelled (their cancelled flag stays false).
-  ipcMain.handle('cloud-sync:cancel-offload', () => {
-    for (const b of liveBatches.offload) b.cancelled = true
-  })
-  ipcMain.handle('cloud-sync:cancel-pin', () => {
-    // Stamping skips the queued units; units already in flight complete
-    // and stay local by design (see the cancel-semantics note above).
-    // Converter-triggered downloads share the widget list but are NOT
-    // touched here: they only appear once they are in flight (a converter
-    // job waiting for a hydrate slot has no row), and the converter's own
-    // Cancel is the way to stop one, with its dehydrate abort. An earlier
-    // bridge cancelled them from here, which contradicted the
-    // waiting-only rule for every other row in the list.
-    for (const b of liveBatches.hydrate) b.cancelled = true
-  })
+  // Per-direction cancels stamp every live batch and drop its waiting units
+  // right away (each gets a 'cancelled' item event, so the rows flip at
+  // click time instead of when a worker eventually dequeues them). Units
+  // already in flight complete and stay local by design (see the
+  // cancel-semantics note above). Subsequent enqueues are NOT
+  // auto-cancelled (their cancelled flag stays false).
+  const cancelDirection = (direction: Direction) => {
+    for (const b of liveBatches[direction]) b.cancelled = true
+    const keep: Unit[] = []
+    for (const unit of unitQueue[direction]) {
+      if (!unit.batch.cancelled) { keep.push(unit); continue }
+      safeSend(unit.batch.sender, 'cloud-sync:progress', {
+        type: 'item', direction, batchId: unit.batch.batchId, path: unit.path, status: 'cancelled',
+      })
+      settleUnit(unit.batch)
+    }
+    unitQueue[direction] = keep
+    if (direction === 'offload') maybeResumeOffloadWatcher()
+  }
+  ipcMain.handle('cloud-sync:cancel-offload', () => cancelDirection('offload'))
+  // Converter-triggered downloads share the widget list but are NOT
+  // touched here: they only appear once they are in flight (a converter
+  // job waiting for a hydrate slot has no row), and the converter's own
+  // Cancel is the way to stop one, with its dehydrate abort. An earlier
+  // bridge cancelled them from here, which contradicted the waiting-only
+  // rule for every other row in the list.
+  ipcMain.handle('cloud-sync:cancel-pin', () => cancelDirection('hydrate'))
 }
