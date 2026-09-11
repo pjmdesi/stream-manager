@@ -13,6 +13,7 @@ import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { VideoThumb } from '../ui/VideoThumb'
 import { displayPath } from '../../lib/displayPath'
 import { renderStreamTitle } from '../../lib/streamTitle'
+import { CLOUD_WAIT_HINT, CLOUD_WAIT_HINT_MS, formatWait } from '../CloudOpsModal'
 
 // Row action buttons — neutral at rest, colored only on hover, with a label
 // that collapses to icon-only as the row narrows. Mirrors the stream detail
@@ -827,13 +828,25 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             </Tooltip>
           )}
 
-          {isDownloading && (
-            <div className="flex items-center gap-3 text-xs text-blue-300 tabular-nums">
-              {/* No Elapsed here — that clock measures the CONVERSION and
-                  doesn't tick during the cloud download. */}
-              <span>Downloading from cloud…</span>
-            </div>
-          )}
+          {isDownloading && (() => {
+            // No Elapsed here — that clock measures the CONVERSION and
+            // doesn't tick during the cloud download. Past the wait
+            // threshold the row shows how long it has waited instead,
+            // with the shared hint (APP-37): a request made while the
+            // sync client is paused is held silently by the OS.
+            const waited = job.downloadingSince ? Date.now() - job.downloadingSince : 0
+            return (
+              <div className="flex items-center gap-3 text-xs text-blue-300 tabular-nums">
+                {waited >= CLOUD_WAIT_HINT_MS
+                  ? (
+                    <Tooltip content={`Waiting on the cloud download for ${formatWait(waited)}. ${CLOUD_WAIT_HINT}`} side="top" triggerClassName="flex w-fit">
+                      <span>Downloading from cloud… · {formatWait(waited)}</span>
+                    </Tooltip>
+                  )
+                  : <span>Downloading from cloud…</span>}
+              </div>
+            )
+          })()}
 
           {isReplacing && (
             <div className="flex items-center gap-3 text-xs text-accent-200 tabular-nums">

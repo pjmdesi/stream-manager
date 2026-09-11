@@ -13,22 +13,23 @@
 9. CONV-10
 10. CONV-11
 11. APP-36
-12. STR-2
-13. STR-3
-14. STR-18
-15. PLR-2
-16. PLR-21
-17. PLR-23
-18. PLR-24
-19. STR-21
-20. COMB-3
-21. COMB-4
-22. THU-1
-23. THU-8
-24. THU-9
-25. THU-10
-26. THU-12
-27. THU-16
+12. APP-37
+13. STR-2
+14. STR-3
+15. STR-18
+16. PLR-2
+17. PLR-21
+18. PLR-23
+19. PLR-24
+20. STR-21
+21. COMB-3
+22. COMB-4
+23. THU-1
+24. THU-8
+25. THU-9
+26. THU-10
+27. THU-12
+28. THU-16
 
 ## Improvement ideas
 
@@ -472,6 +473,10 @@
 - **APP-36** [ui]
   Cloud sync modal: add a Retry all button to each direction card's header, next to Cancel pending and styled the same way (ghost, small, with a tooltip). It re-enqueues every failed row in that card in one go, the same way the per-row retry icon does for one file, and shows only while the card has at least one failed row. Filed 2026-09-11 after a batch download where pausing the sync client failed the four in-flight files at once and each had to be retried by hand.
   Built 2026-09-11, awaiting review. `retryFailed(direction)` in CloudOpsContext resets every failed row of that direction in place under one fresh batch id (same shape as the per-row retry, so rows keep their list position) and sends all the paths in a single call. The button sits left of Cancel pending in the card header, ghost and small with the retry icon, appears only while the card has a failed row, and its tooltip names the count.
+
+- **APP-37** [ui]
+  Cloud sync: say when a download is only being held. When the sync client is paused, downloads requested after the pause sit on "working" indefinitely (the OS accepts the request and holds it; the provider never answers) and then complete on their own when the client is unpaused. SM cannot detect the pause: the in-flight failures only say "aborted", and the Cloud Files sync-root provider status stays IDLE throughout a pause (probed 2026-09-11 with CfGetSyncRootInfoByPath, 120 samples across a paused window, every one IDLE). So do not fail those rows (they finish on unpause) and do not pretend to know why. After a working row has waited a few minutes with no completion, change its status text to something like "Still waiting on the sync client" with a tooltip that says the client may be paused, and that the download continues on its own when it resumes. Same treatment for a converter job sitting on "Downloading from cloud" past the same threshold. Threshold and wording to be decided when built.
+  Built 2026-09-11, awaiting review. Threshold 3 minutes (`CLOUD_WAIT_HINT_MS` in CloudOpsModal.tsx, shared with the converter). Cloud rows record when they entered working; past the threshold the badge reads "Working · 5 min" with a tooltip: "Working for 5 minutes. Stream Manager cannot see download progress. If the sync client is paused, this download continues on its own when it resumes; if it is stopped, the download fails." The card re-renders every 30 s while rows are working so the hint appears and its minutes advance. Converter jobs record when they entered downloading; past the threshold the row reads "Downloading from cloud… · 5 min" with the same hint, and the context's one-second tick now also runs while jobs are downloading. Rows are never failed by the wait, since a held request completes on unpause; the 6-hour limit in the converter wait remains the end state.
 
 ### Onboarding & Setup
 

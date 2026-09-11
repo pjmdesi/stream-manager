@@ -80,7 +80,14 @@ export function ConversionProvider({ children }: { children: React.ReactNode }) 
       // with no free slot, a hydrated job re-queued at the cap) so the row
       // can swap its Start button for the waiting state.
       setJobs(prev => prev.map(j => j.id === jobId
-        ? { ...j, status, ...(autoStart !== undefined ? { autoStart } : {}) }
+        ? {
+            ...j,
+            status,
+            ...(autoStart !== undefined ? { autoStart } : {}),
+            // Stamp the start of a download wait once per entry into the
+            // state (a re-notified 'downloading' keeps the original).
+            ...(status === 'downloading' && j.status !== 'downloading' ? { downloadingSince: Date.now() } : {}),
+          }
         : j))
     })
     const unsubComplete = window.api.onJobComplete(({ jobId }: { jobId: string }) => {
@@ -106,7 +113,9 @@ export function ConversionProvider({ children }: { children: React.ReactNode }) 
       const now = Date.now()
       const delta = now - lastTickAt.current
       lastTickAt.current = now
-      if (!jobsRef.current.some(j => j.status === 'running')) return
+      // Downloading jobs have no ETA to compute, but their rows show how
+      // long they have waited (APP-37), which needs the same re-render.
+      if (!jobsRef.current.some(j => j.status === 'running' || j.status === 'downloading')) return
       jobsRef.current.forEach(j => {
         if (j.status !== 'running') return
         const elapsed = (jobElapsed.current.get(j.id) ?? 0) + delta

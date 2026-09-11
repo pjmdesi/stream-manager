@@ -142,6 +142,10 @@ export interface ConversionJob {
   status: 'queued' | 'downloading' | 'running' | 'replacing' | 'paused' | 'done' | 'error' | 'cancelled'
   progress: number
   error?: string
+  /** Renderer-only: when the job entered 'downloading'. Drives the row's
+   *  "still waiting" hint (APP-37), since a held cloud request gives no
+   *  other signal. */
+  downloadingSince?: number
   /** Logical size of the input file in bytes, captured when the job was
    *  first queued/started. Stable for the lifetime of the job (cloud
    *  placeholders return the full size, not the on-disk footprint). */

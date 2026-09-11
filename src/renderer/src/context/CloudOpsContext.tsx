@@ -20,6 +20,10 @@ export interface CloudOpItem {
   reason?: string
   direction: CloudOpDirection
   batchId: string
+  /** When the row entered 'running'. Drives the "still waiting" hint
+   *  (APP-37): a request made while the sync client is paused is held by
+   *  the OS with no signal at all, so time is the only thing to show. */
+  runningSince?: number
 }
 
 interface CloudOpsContextValue {
@@ -170,6 +174,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
           if (target !== ev.batchId && ev.status === 'running' && isTerminal(it.status)) return it
           return {
             ...it,
+            runningSince: ev.status === 'running' ? (it.status === 'running' ? it.runningSince : Date.now()) : it.runningSince,
             status:
               ev.status === 'done' ? 'done' :
               ev.status === 'failed' ? 'failed' :

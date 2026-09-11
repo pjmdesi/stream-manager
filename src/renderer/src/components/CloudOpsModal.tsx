@@ -1,9 +1,25 @@
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import { Tooltip } from './ui/Tooltip'
 import { Loader2, CheckCircle2, XCircle, Cloud, CloudCheck, CloudDownload, Pin, Ban, Info, RotateCw } from 'lucide-react'
 import { useCloudOps, type CloudOpItem, type CloudOpItemStatus, type CloudOpDirection } from '../context/CloudOpsContext'
+
+// A working row that has run this long shows how long, with a hint that
+// the sync client may be paused (APP-37). SM cannot see download progress
+// or the client's state, so the wait itself is the only honest signal;
+// the row is not failed because a held request completes on unpause.
+export const CLOUD_WAIT_HINT_MS = 3 * 60 * 1000
+
+export function formatWait(ms: number): string {
+  const mins = Math.floor(ms / 60000)
+  if (mins < 60) return `${mins} min`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m > 0 ? `${h} h ${m} min` : `${h} h`
+}
+
+export const CLOUD_WAIT_HINT = 'Stream Manager cannot see download progress. If the sync client is paused, this download continues on its own when it resumes; if it is stopped, the download fails.'
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
@@ -132,6 +148,15 @@ function CloudOpsSection({ direction, items, active, hasPending, cancelling, onC
   const { retryItem, retryFailed } = useCloudOps()
   const totals = useMemo(() => computeTotals(items), [items])
   const failedCount = totals.failed
+  // Re-render every 30 s while rows are working so the wait hint can
+  // appear and its minutes can advance without any event arriving.
+  const [, setWaitTick] = useState(0)
+  const anyRunning = items.some(it => it.status === 'running')
+  useEffect(() => {
+    if (!anyRunning) return
+    const id = setInterval(() => setWaitTick(t => t + 1), 30_000)
+    return () => clearInterval(id)
+  }, [anyRunning])
   const isOffload = direction === 'offload'
   const title = isOffload ? 'Offload to cloud' : 'Download from cloud'
   const Icon = isOffload ? Cloud : CloudDownload
@@ -256,7 +281,7 @@ function CloudOpsSection({ direction, items, active, hasPending, cancelling, onC
                       </button>
                     </Tooltip>
                   )}
-                  <StatusBadge status={it.status} reason={it.reason} />
+                  <StatusBadge status={it.status} reason={it.reason} runningSince={it.runningSince} />
                 </span>
               </div>
             ))}
@@ -280,7 +305,7 @@ function SummaryStat({ label, value, sub, tone }: { label: string; value: string
   )
 }
 
-function StatusBadge({ status, reason }: { status: CloudOpItemStatus; reason?: string }) {
+function StatusBadge({ status, reason, runningSince }: { status: CloudOpItemStatus; reason?: string; runningSince?: number }) {
   // Fixed-height wrapper + leading-none so icons (which lucide renders as
   // inline SVGs with implicit baseline whitespace) can't push the row
   // taller than text-only states like "Pending".
@@ -292,8 +317,13 @@ function StatusBadge({ status, reason }: { status: CloudOpItemStatus; reason?: s
   switch (status) {
     case 'pending':
       return wrap('text-gray-400', 'Pending')
-    case 'running':
+    case 'running': {
+      const waited = runningSince ? Date.now() - runningSince : 0
+      if (waited >= CLOUD_WAIT_HINT_MS) {
+        return wrap('text-blue-300', <><Loader2 size={11} className={`${iconCls} animate-spin`} /> Working · {formatWait(waited)}</>, `Working for ${formatWait(waited)}. ${CLOUD_WAIT_HINT}`)
+      }
       return wrap('text-blue-300', <><Loader2 size={11} className={`${iconCls} animate-spin`} /> Working</>)
+    }
     case 'done':
       return wrap('text-green-300', <><CheckCircle2 size={11} className={iconCls} /> Done</>)
     case 'already-offline':
