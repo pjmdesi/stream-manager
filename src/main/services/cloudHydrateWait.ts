@@ -1,38 +1,30 @@
-import fs from 'fs'
 import { startHydrateRequest, type HydrateRequest } from './cfapi'
 import { checkLocalFiles } from '../ipc/files'
 
 // Shared "wait for a cloud placeholder to become local" used by the
 // converter's two hydrate paths (archive groups and standalone jobs).
 //
-// Why not just poll attributes: a placeholder's attributes say "offline"
-// until the whole file has landed, and nothing more. A recall the provider
-// aborted, one the user cancelled from the Windows notification, and one
-// that is slowly progressing all look the same to a poll, so a job could
-// sit on "downloading" forever. Why not just block on CfHydratePlaceholder:
-// the cloud widget does, and it learns about provider-side aborts (pausing
-// the sync client fails the in-flight transfers), but a request the user
-// cancelled from Windows simply stays pending inside the OS until the
-// provider is nudged again.
+// What the stack lets us observe (verified against Synology Drive):
+//   - A placeholder's attributes say "offline" until the whole file has
+//     landed, and nothing more. The sync client downloads to a temporary
+//     location and moves the finished file into place, so size on disk
+//     shows nothing until the very end either. There is no progress to
+//     read from the file.
+//   - A live CfHydratePlaceholder request hears provider-side failures:
+//     pausing the sync client fails the in-flight transfers, a stopped
+//     client rejects requests outright. A request the user cancelled from
+//     the Windows notification does not fail; it stays pending inside the
+//     OS, and only a fresh request restarts the transfer.
+//   - Overlapping requests for one file are coalesced by the platform, so a
+//     duplicate request is harmless while a transfer is active.
+//   - Only a dehydrate aborts a transfer; dropping a request does not.
 //
-// So this does both, plus a progress watch:
-//   - A live CfHydratePlaceholder request (child process) is the ear for
-//     provider errors: when it reports a failure the wait fails with the
-//     provider's reason.
-//   - An attribute poll is the eye for completion, independent of the
-//     request (the poll settles the wait the moment the file is local).
-//   - The file's on-disk allocation (fs.stat blocks, which libuv fills from
-//     AllocationSize on Windows) is the pulse. The provider writes recalled
-//     data into the placeholder, so allocation grows while a transfer is
-//     alive. When it has not grown for STALL_MS a fresh request is issued
-//     beside the live one (a second request restarts a transfer the user
-//     cancelled from Windows; overlapping requests for an active transfer
-//     are coalesced by the platform). When it has not grown for
-//     DEAD_MS the wait fails so the job gets an end state instead of an
-//     open-ended "downloading".
-// Requests are never killed to force a restart: only a dehydrate aborts a
-// transfer, so a dropped request would not stop anything, and a live one
-// is what carries the provider's error back to us.
+// So this keeps a live request as the ear for provider errors, polls
+// attributes as the eye for completion, and re-issues a request on a
+// timer as the restart nudge for a Windows-side cancel (a rolling window
+// of two live requests, so a long wait cannot stack idle processes). An
+// absolute timeout is the only end state left for a transfer the provider
+// is holding without error, such as a client paused for hours.
 
 export type HydrateWaitResult =
   | { outcome: 'local' }
@@ -43,52 +35,44 @@ export interface HydrateWaitOptions {
   /** Checked every poll tick; true ends the wait with 'cancelled'. */
   isCancelled: () => boolean
   pollMs?: number
-  stallMs?: number
-  deadMs?: number
+  renudgeMs?: number
+  timeoutMs?: number
 }
 
 const POLL_MS = 2000
-/** No on-disk growth for this long: issue another request. */
-const STALL_MS = 3 * 60 * 1000
-/** No on-disk growth for this long: give up. */
-const DEAD_MS = 30 * 60 * 1000
-/** Live requests per file. One is the ear; a second is the restart nudge.
- *  More would only stack idle PowerShell processes. */
+/** How often a fresh request is issued while the file is still offline. */
+const RENUDGE_MS = 5 * 60 * 1000
+/** Give up after this long. Generous: a slow NAS recalling several large
+ *  files can legitimately run for hours. */
+const TIMEOUT_MS = 6 * 60 * 60 * 1000
+/** Live requests per file: the oldest is dropped when a new one is issued
+ *  beyond this. Dropping a request does not touch the transfer. */
 const MAX_LIVE_REQUESTS = 2
-
-async function allocatedBytes(filePath: string): Promise<number> {
-  try {
-    const st = await fs.promises.stat(filePath)
-    return typeof st.blocks === 'number' ? st.blocks * 512 : 0
-  } catch {
-    return 0
-  }
-}
 
 export async function waitForCloudFile(filePath: string, opts: HydrateWaitOptions): Promise<HydrateWaitResult> {
   const pollMs = opts.pollMs ?? POLL_MS
-  const stallMs = opts.stallMs ?? STALL_MS
-  const deadMs = opts.deadMs ?? DEAD_MS
+  const renudgeMs = opts.renudgeMs ?? RENUDGE_MS
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS
 
   const requests: HydrateRequest[] = []
   let providerFailure: string | null = null
   const issueRequest = () => {
+    const live = requests.filter(r => r.alive)
+    while (live.length >= MAX_LIVE_REQUESTS) live.shift()!.kill()
     const req = startHydrateRequest(filePath)
     requests.push(req)
     void req.result.then(res => {
       if (res.outcome === 'failed' && providerFailure === null) providerFailure = res.reason ?? 'unknown'
     })
   }
-  const liveCount = () => requests.filter(r => r.alive).length
   const finish = (result: HydrateWaitResult): HydrateWaitResult => {
     for (const r of requests) r.kill()
     return result
   }
 
+  const startedAt = Date.now()
+  let lastRequestAt = startedAt
   issueRequest()
-  let lastAllocated = await allocatedBytes(filePath)
-  let lastGrowthAt = Date.now()
-  let lastStallNudgeAt = lastGrowthAt
 
   while (true) {
     if (opts.isCancelled()) return finish({ outcome: 'cancelled' })
@@ -104,22 +88,15 @@ export async function waitForCloudFile(filePath: string, opts: HydrateWaitOption
     }
 
     const now = Date.now()
-    const allocated = await allocatedBytes(filePath)
-    if (allocated > lastAllocated) {
-      lastAllocated = allocated
-      lastGrowthAt = now
-      lastStallNudgeAt = now
-    } else if (now - lastGrowthAt >= deadMs) {
+    if (now - startedAt >= timeoutMs) {
       return finish({
         outcome: 'failed',
-        reason: `No download progress for ${Math.round(deadMs / 60000)} minutes. The sync client may be paused or the download was cancelled; check it, then requeue.`,
+        reason: `The download did not finish within ${Math.round(timeoutMs / 3600000)} hours. Check that the sync client is running and not paused, then requeue.`,
       })
-    } else if (now - lastStallNudgeAt >= stallMs) {
-      lastStallNudgeAt = now
-      // Every request has exited without a verdict (nothing to hear) or the
-      // live one is stuck: ask again. Capped so a long stall cannot stack
-      // processes; the dead timer is the end state.
-      if (liveCount() < MAX_LIVE_REQUESTS) issueRequest()
+    }
+    if (now - lastRequestAt >= renudgeMs) {
+      lastRequestAt = now
+      issueRequest()
     }
 
     await new Promise(r => setTimeout(r, pollMs))

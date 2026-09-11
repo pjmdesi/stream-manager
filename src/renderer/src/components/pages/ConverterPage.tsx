@@ -841,15 +841,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             </button>
           )}
           {job.status === 'queued' && job.autoStart && (
-            <Tooltip
-              content={job.groupId && jobs.some(j => j.groupId === job.groupId && j.id !== job.id && (j.status === 'running' || j.status === 'paused' || j.status === 'replacing'))
-                // Archive groups encode one file at a time (the scheduler's
-                // per-group rule), which is not the same wait as a full
-                // global cap; say which one this is.
-                ? 'Waiting for the file ahead of it in this archive (one file at a time per archive). Start it now to run it alongside.'
-                : 'Waiting for a free conversion slot (max simultaneous conversions in Settings). Starts automatically when one frees up.'}
-              side="top"
-            >
+            <Tooltip content="Waiting for a free conversion slot (max simultaneous conversions in Settings). Starts automatically when one frees up." side="top">
               <span className="inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-400 cursor-default">
                 <Clock size={13} />
                 <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Waiting</CollapsibleLabel>

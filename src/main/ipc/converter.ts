@@ -341,8 +341,8 @@ const clipRunners = new Map<string, () => void>()
  * second/third/etc. files don't sit idle as 'queued' while the first one
  * downloads — they all start hydrating at the same time (capped via the
  * hydrate queue). The encode phase is governed by the global scheduleNext()
- * scheduler: at most one encode per group, and at most the configured cap
- * across all groups.
+ * scheduler: at most the configured cap across all groups, with the next
+ * slot going to the group that has the fewest encodes in flight.
  *
  * Lifecycle:
  *   queued → 'downloading' → (poll) → 'queued' (hydrated, ready to encode)
@@ -747,8 +747,12 @@ function getMaxConcurrentConversions(): number {
 /** Global encode scheduler — the ONE place encodes are allowed to start
  *  (CONV-2). Starts queued jobs up to the configured concurrency cap:
  *
- *  - GROUP jobs (archive batches) auto-schedule with at most one active
- *    encode per group (a multi-file folder still serializes internally).
+ *  - GROUP jobs (archive batches) auto-schedule. Groups used to be held
+ *    to one active encode each, which left slots idle whenever a single
+ *    multi-file archive was the only work; now a group may use every
+ *    free slot. Fairness across groups comes from the pick order instead:
+ *    the next job comes from the group with the fewest encodes in flight,
+ *    so bulk-archiving several streams still advances all of them.
  *  - STANDALONE jobs are schedulable only once flagged autoStart (set by
  *    the converter page's Start, manual Start on a queued row, and
  *    auto-rules with "start immediately"). Un-flagged standalone jobs
@@ -765,23 +769,21 @@ function scheduleNext(): void {
   const all = [...jobs.values()]
   let free = getMaxConcurrentConversions() - all.filter(isActiveJob).length
   if (free <= 0) return
-  // Groups that already have an in-flight encode — never start a second from
-  // the same group automatically (per-group serialization).
-  const activeGroups = new Set(all.filter(j => isActiveJob(j) && j.groupId).map(j => j.groupId as string))
-  const claimedGroups = new Set<string>()
-  // Map iteration preserves submission order, so first-queued-first-started.
-  for (const j of all) {
-    if (free <= 0) break
-    if (j.status !== 'queued') continue
-    if (j.groupId) {
-      // A manual Start on a grouped row (autoStart) overrides the group's
-      // internal one-at-a-time rule — the user explicitly picked it — but
-      // never the global cap.
-      if (!j.autoStart && (activeGroups.has(j.groupId) || claimedGroups.has(j.groupId))) continue
-      claimedGroups.add(j.groupId)
-    } else if (!j.autoStart) {
-      continue
+  // Encodes in flight per group, so the pick below can favor the group
+  // with the fewest. Standalone jobs each count as their own group.
+  const laneOf = (j: ConversionJob) => j.groupId ?? `job:${j.id}`
+  const inFlight = new Map<string, number>()
+  for (const j of all) if (isActiveJob(j)) inFlight.set(laneOf(j), (inFlight.get(laneOf(j)) ?? 0) + 1)
+  // Map iteration preserves submission order, so within a group (and
+  // among ties) it is first-queued-first-started.
+  const eligible = all.filter(j => j.status === 'queued' && (j.groupId || j.autoStart))
+  while (free > 0 && eligible.length > 0) {
+    let pick = 0
+    for (let i = 1; i < eligible.length; i++) {
+      if ((inFlight.get(laneOf(eligible[i])) ?? 0) < (inFlight.get(laneOf(eligible[pick])) ?? 0)) pick = i
     }
+    const [j] = eligible.splice(pick, 1)
+    inFlight.set(laneOf(j), (inFlight.get(laneOf(j)) ?? 0) + 1)
     const clipRunner = clipRunners.get(j.id)
     if (clipRunner) {
       // Clip exports carry their own deferred pipeline (parameters live
