@@ -8,22 +8,25 @@
 4. STR-19
 5. STR-20
 6. CONV-8
-7. STR-2
-8. STR-3
-9. STR-18
-10. PLR-2
-11. PLR-21
-12. PLR-23
-13. PLR-24
-14. STR-21
-15. COMB-3
-16. COMB-4
-17. THU-1
-18. THU-8
-19. THU-9
-20. THU-10
-21. THU-12
-22. THU-16
+7. CONV-9
+8. CONV-10
+9. CONV-11
+10. STR-2
+11. STR-3
+12. STR-18
+13. PLR-2
+14. PLR-21
+15. PLR-23
+16. PLR-24
+17. STR-21
+18. COMB-3
+19. COMB-4
+20. THU-1
+21. THU-8
+22. THU-9
+23. THU-10
+24. THU-12
+25. THU-16
 
 ## Improvement ideas
 
@@ -248,7 +251,16 @@
 
 - **CONV-8** [bug]
   The conversion total progress bar and stats in the nav menu button extra details is not calculating correctly. It *is* counting completed items, but not counting pending items. This is the opposite of what it should be doing. Pending items should count as 0% complete, so the bar can tell the user that there are more conversions yet to run. So if there's 10 conversion items (with 3 running), the total progress should include the 7 that are waiting at 0%. Additinally, after the 10 items are complete, when I added a new conversion item and kept the complete ones, the total progress bar counted the complete items as 100% in the total, which is not helpful for the user. These need to be swapped. Completed items should not count toward the total completion, but pending items should.
-  Built 2026-09-10, awaiting review. The nav extra's aggregate set is now every active job (running, paused, error, downloading, replacing) plus every queued job, with queued jobs contributing 0%. Done jobs are excluded, so queueing new work after a finished batch starts the bar from the new batch's real progress. The job count in the status line now includes queued jobs (10 queued with 3 running reads "10 jobs" instead of "3 jobs"), and the ETA gets its "+" suffix while anything is still queued.
+  Built 2026-09-11, awaiting review. Revised after testing: completed jobs DO belong in the total (dropping them made the bar jump backwards each time a job finished). The nav extra's aggregate set is now every active job (running, paused, error, downloading, replacing), every queued job at 0%, and every done job at 100%, so the bar reads as the progress of the whole batch. Cancelled jobs are not counted. The status line's job count is replaced by a completed-versus-total stat ("3/10 done"), and the ETA gets its "+" suffix while anything is still queued.
+
+- **CONV-9** [ui]
+  There is no quick way to give every file in the ready list the same settings. With a large batch, the encode preset and output location have to be set row by row. Add a "set all" field group to the ready list header (the row that shows "N file(s) ready" and Start all): the same preset dropdown and output location dropdown the rows carry today (Next to original, the last picked path, Choose location), plus an Apply button that writes both values into every file currently in the list. Rows keep their own controls, so individual files can be overridden afterwards. Files added after applying should take the current defaults, not the set-all values, to avoid surprising the user with a stale choice. The audio track picker is per file and stays out of this group. Everything in the group gets a tooltip, and Apply is disabled while the list is empty.
+
+- **CONV-10** [ui]
+  Split the Converting panel into two: Converting keeps the jobs that are still moving (queued, downloading, running, replacing, paused) and a new Finished panel below it collects done, errored, and cancelled jobs. Errored and cancelled jobs belong in Finished because nothing happens to them without the user acting; the row keeps its error styling and Retry so failures still stand out, and the Finished header carries the counts ("Finished (8) · 1 failed"). Clear done moves to the Finished header. Archive group blocks stay whole and move to Finished once every member has ended. This also makes the nav item's completed-versus-total stat (CONV-8) match what the page shows. Consider a short slide when a row changes panels, honoring the reduced-motion setting.
+
+- **CONV-11** [ui] [blocked:CONV-10]
+  Let the user choose the order files convert in, using the drag-to-reorder pattern from the Combine page (grip handle, drop marker, same MIME-tagged drag). Two lists take part. The ready list (files not yet started) is renderer state, and its order is the order Start all submits jobs in. The queued jobs in the Converting panel need a small main-process IPC that re-sequences the jobs map, since the scheduler starts queued jobs in that order; the persisted pending queue should follow the new order too. Only queued rows get a handle: running, paused, downloading, and finished rows do not move, and an archive group moves as one block because its members already run one at a time. Blocked on CONV-10 because the Converting/Finished split is what keeps the movable rows visually together.
 
 ### Combine
 

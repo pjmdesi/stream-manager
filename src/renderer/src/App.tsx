@@ -265,15 +265,14 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
     j.status === 'running' || j.status === 'paused' || j.status === 'error' ||
     j.status === 'downloading' || j.status === 'replacing'
   )
-  // Aggregate progress covers the work still ahead: every active job plus
-  // the queued ones waiting for a slot (they sit at 0% and pull the total
-  // down, which is the honest reading of "how far along is this batch").
-  // Finished jobs are left out; counting them at 100% inflated the total
-  // whenever new work was queued after an earlier batch completed, and
-  // the outstanding batch then showed e.g. 80% before its first job
-  // had started encoding.
+  // Aggregate progress answers "how far along is the whole batch": every
+  // active job, every queued job waiting for a slot (counted at 0%, so the
+  // bar shows there is more to come), and every finished job at 100% (so
+  // the bar does not jump backwards when a job completes and leaves the
+  // active set). Cancelled jobs are not part of the batch.
   const queued = jobs.filter(j => j.status === 'queued')
-  const relevant = [...active, ...queued]
+  const done = jobs.filter(j => j.status === 'done')
+  const relevant = [...active, ...queued, ...done]
   // No early null — the SlideBlock below animates the appearance and
   // disappearance of the info, so it must stay mounted while quiet.
   const hasContent = active.length > 0
@@ -290,7 +289,7 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
     allDownloading ? 'Waiting on Download' :
     'In Progress'
   const totalProgress = relevant.length > 0
-    ? relevant.reduce((sum, j) => sum + (j.status === 'queued' ? 0 : j.progress), 0) / relevant.length
+    ? relevant.reduce((sum, j) => sum + (j.status === 'queued' ? 0 : j.status === 'done' ? 100 : j.progress), 0) / relevant.length
     : 0
 
   // ETA = max of all currently-running job ETAs (jobs run in parallel, so
@@ -353,7 +352,7 @@ function ConverterNavExtra({ collapsed }: { collapsed: boolean }) {
           <span className="text-gray-400">
             {allDownloading
               ? ` · ${active.length} downloading`
-              : ` · ${totalProgress.toFixed(1)}% · ${relevant.length} job${relevant.length !== 1 ? 's' : ''}`}
+              : ` · ${totalProgress.toFixed(1)}% · ${done.length}/${relevant.length} done`}
           </span>
         </span>
         {etaText && <Tooltip content={etaTitle}><span className="text-gray-400 shrink-0">{etaText}</span></Tooltip>}

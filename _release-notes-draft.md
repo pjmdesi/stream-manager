@@ -17,7 +17,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 ## Converter
 
-- The combined progress shown under the Converter item in the navigation now reflects the whole batch. Jobs still waiting for a slot count at zero, and jobs that already finished no longer count at all, so the bar does not jump to a high number the moment a new conversion is added after an earlier batch completed. The job count next to it includes the waiting jobs too.
+- The combined progress shown under the Converter item in the navigation now reflects the whole batch. Jobs still waiting for a slot count at zero and finished jobs count as complete, so the bar climbs steadily from the first job to the last instead of only tracking whatever happens to be encoding. The job count next to it now reads as completed out of total.
 
 ## Integrations
 
