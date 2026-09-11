@@ -19,6 +19,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 - The combined progress shown under the Converter item in the navigation now reflects the whole batch. Jobs still waiting for a slot count at zero and finished jobs count as complete, so the bar climbs steadily from the first job to the last instead of only tracking whatever happens to be encoding. The job count next to it now reads as completed out of total.
 - The ready list has a Set all group in its header: pick an encode preset and an output location once, click Apply, and every file in the list takes them. Each row can still be changed on its own afterwards.
+- Finished conversions move to their own Finished card below Converting, so the jobs still running stay at the top of the page during a long batch. Failed and cancelled jobs land there too, with their counts in the header. An archive group stays in Converting, whole, until its last file has finished. Clear all in the Finished header removes everything in that card.
 
 ## Integrations
 

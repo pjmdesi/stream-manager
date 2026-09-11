@@ -647,19 +647,27 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     setJobs(prev => prev.map(j => j.id === id ? { ...j, status: 'running' } : j))
   }
 
-  const clearDone = () => {
-    // Explicitly drop only terminal states. Earlier this kept an allow-list
-    // (running / paused / queued) and cleared everything else — which
-    // wrongly included transient states like 'downloading' (cloud hydrate
-    // wait) and 'replacing' (atomic swap), causing in-flight cloud archives
-    // to disappear from the queue mid-wait.
-    const cleared = jobs.filter(j =>
-      j.status === 'done' || j.status === 'error' || j.status === 'cancelled')
-    setJobs(prev => prev.filter(j =>
-      j.status !== 'done' && j.status !== 'error' && j.status !== 'cancelled'
-    ))
+  // Ended jobs get their own Finished card below Converting (CONV-10). A
+  // job has ended in a terminal state (done, error, cancelled); an archive
+  // group is one unit and counts as ended only when every member has, so
+  // a group with one finished and one encoding member stays whole in
+  // Converting with the finished member checked off inside it.
+  const isTerminal = (j: ConversionJob) => j.status === 'done' || j.status === 'error' || j.status === 'cancelled'
+  const liveGroupIds = new Set(jobs.filter(j => j.groupId && !isTerminal(j)).map(j => j.groupId as string))
+  const hasEnded = (j: ConversionJob) => j.groupId ? !liveGroupIds.has(j.groupId) : isTerminal(j)
+  const convertingJobs = jobs.filter(j => !hasEnded(j))
+  const finishedJobs = jobs.filter(hasEnded)
+
+  const clearFinished = () => {
+    // Clears exactly what the Finished card shows: whole ended units. A
+    // finished member of a still-running group stays put with its group.
+    // (Transient states like 'downloading' and 'replacing' were once
+    // cleared by an allow-list mistake, which made in-flight cloud
+    // archives vanish mid-wait; the terminal-state test avoids that.)
+    const clearedIds = new Set(finishedJobs.map(j => j.id))
+    setJobs(prev => prev.filter(j => !clearedIds.has(j.id)))
     // Evict from the main process too, or getJobs re-hydrates them on reload.
-    cleared.forEach(j => {
+    finishedJobs.forEach(j => {
       jobEtas.delete(j.id)
       jobElapsed.delete(j.id)
       jobFinalElapsed.delete(j.id)
@@ -1071,10 +1079,10 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               )}
           </div>
 
-          {jobs.length > 0 && (
+          {convertingJobs.length > 0 && (
             <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden shrink-0">
               <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/5">
-                <span className="text-xs font-medium text-gray-400">Converting ({jobs.length})</span>
+                <span className="text-xs font-medium text-gray-400">Converting ({convertingJobs.length})</span>
                 <div className="flex items-center gap-1">
                   {(() => {
                     // Both buttons can show at once (mixed running + paused),
@@ -1086,100 +1094,63 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                     return (
                       <>
                         {anyRunning && (
-                          <button
-                            onClick={async () => {
-                              const targets = jobs.filter(j => j.status === 'running')
-                              await Promise.all(targets.map(j => window.api.pauseJob(j.id).catch(() => {})))
-                            }}
-                            className={ROW_ACTION_YELLOW}
-                          >
-                            <Pause size={13} />
-                            Pause all
-                          </button>
+                          <Tooltip content="Pause every running conversion" side="top">
+                            <button
+                              onClick={async () => {
+                                const targets = jobs.filter(j => j.status === 'running')
+                                await Promise.all(targets.map(j => window.api.pauseJob(j.id).catch(() => {})))
+                              }}
+                              className={ROW_ACTION_YELLOW}
+                            >
+                              <Pause size={13} />
+                              Pause all
+                            </button>
+                          </Tooltip>
                         )}
                         {anyPaused && (
-                          <button
-                            onClick={async () => {
-                              const targets = jobs.filter(j => j.status === 'paused')
-                              await Promise.all(targets.map(j => window.api.resumeJob(j.id).catch(() => {})))
-                            }}
-                            className={ROW_ACTION_BLUE}
-                          >
-                            <Play size={13} />
-                            Resume all
-                          </button>
+                          <Tooltip content="Resume every paused conversion" side="top">
+                            <button
+                              onClick={async () => {
+                                const targets = jobs.filter(j => j.status === 'paused')
+                                await Promise.all(targets.map(j => window.api.resumeJob(j.id).catch(() => {})))
+                              }}
+                              className={ROW_ACTION_BLUE}
+                            >
+                              <Play size={13} />
+                              Resume all
+                            </button>
+                          </Tooltip>
                         )}
                       </>
                     )
                   })()}
-                  <Button variant="ghost" size="sm" onClick={clearDone} disabled={!jobs.some(j => j.status === 'done' || j.status === 'cancelled' || j.status === 'error')}>Clear done</Button>
                 </div>
               </div>
-              {/* Build a render list: group rows are emitted at the position of
-                  their first member; subsequent members are skipped (the group
-                  block renders all members itself). Ungrouped jobs render as
-                  before. */}
-              {(() => {
-                const seenGroups = new Set<string>()
-                const items: React.ReactNode[] = []
-                for (const job of jobs) {
-                  if (job.groupId) {
-                    if (seenGroups.has(job.groupId)) continue
-                    seenGroups.add(job.groupId)
-                    const groupJobs = jobs.filter(j => j.groupId === job.groupId)
-                    const total = groupJobs.length
-                    const doneN = groupJobs.filter(j => j.status === 'done').length
-                    const errN = groupJobs.filter(j => j.status === 'error').length
-                    const cancelledN = groupJobs.filter(j => j.status === 'cancelled').length
-                    const finishedN = doneN + errN + cancelledN
-                    const aggregatePct = (groupJobs.reduce((sum, j) =>
-                      sum + (j.status === 'done' ? 100 : (j.status === 'cancelled' || j.status === 'error') ? 0 : (j.progress ?? 0)), 0) / total)
-                    const groupActive = groupJobs.some(j =>
-                      j.status === 'queued' || j.status === 'downloading' || j.status === 'running' ||
-                      j.status === 'replacing' || j.status === 'paused')
-                    const groupSummary =
-                      finishedN === total
-                        ? `${doneN}/${total} complete${errN > 0 ? `, ${errN} failed` : ''}${cancelledN > 0 ? `, ${cancelledN} cancelled` : ''}`
-                        : `${finishedN}/${total} done`
-                    items.push(
-                      <div key={`g:${job.groupId}`} className="border-b border-white/5 last:border-0">
-                        <div className="relative isolate overflow-hidden flex items-center gap-2 px-4 py-2 bg-green-500/5 border-l-2 border-green-500/40">
-                          {/* Aggregate progress as the header background — a
-                              stronger green fill over the resting green tint.
-                              Gone once the group settles, like the job rows. */}
-                          {groupActive && (
-                            <div
-                              aria-hidden
-                              className="absolute inset-y-0 left-0 -z-10 pointer-events-none transition-[width] duration-300 bg-green-500/15"
-                              style={{ width: `${aggregatePct}%` }}
-                            />
-                          )}
-                          <Archive size={13} className="text-green-400 shrink-0" />
-                          <span className="text-xs font-semibold text-gray-200 shrink-0">{job.groupLabel ?? 'Group'}</span>
-                          <span className="text-[11px] text-gray-400 shrink-0 tabular-nums">· {groupSummary}</span>
-                          <div className="flex-1" />
-                          {groupActive && (
-                            <Tooltip content="Cancel all jobs in this group">
-                              <button
-                                onClick={() => window.api.cancelJobGroup(job.groupId!)}
-                                className="p-1 text-gray-400 hover:text-red-400 transition-colors shrink-0"
-                              >
-                                <Ban size={13} />
-                              </button>
-                            </Tooltip>
-                          )}
-                        </div>
-                        <div className="border-l-2 border-green-500/20">
-                          {groupJobs.map(gj => renderJobRow(gj, true))}
-                        </div>
-                      </div>
+              {renderJobList(convertingJobs)}
+            </div>
+          )}
+
+          {finishedJobs.length > 0 && (
+            <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden shrink-0">
+              <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/5">
+                <span className="text-xs font-medium text-gray-400">
+                  Finished ({finishedJobs.length})
+                  {(() => {
+                    const failed = finishedJobs.filter(j => j.status === 'error').length
+                    const cancelled = finishedJobs.filter(j => j.status === 'cancelled').length
+                    return (
+                      <>
+                        {failed > 0 && <span className="text-red-400 font-normal tabular-nums"> · {failed} failed</span>}
+                        {cancelled > 0 && <span className="font-normal tabular-nums"> · {cancelled} cancelled</span>}
+                      </>
                     )
-                  } else {
-                    items.push(renderJobRow(job, false))
-                  }
-                }
-                return items
-              })()}
+                  })()}
+                </span>
+                <Tooltip content="Remove every finished job from this list. Files on disk are not touched." side="top">
+                  <Button variant="ghost" size="sm" onClick={clearFinished}>Clear all</Button>
+                </Tooltip>
+              </div>
+              {renderJobList(finishedJobs)}
             </div>
           )}
 
@@ -1248,4 +1219,71 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     />
     </>
   )
+
+  /** Render a job list for one card. Group rows are emitted at the position
+   *  of their first member; subsequent members are skipped (the group block
+   *  renders all members itself). Ungrouped jobs render as plain rows. The
+   *  list always holds whole groups (see hasEnded), so member lookups stay
+   *  within it. */
+  function renderJobList(list: ConversionJob[]): React.ReactNode {
+    const seenGroups = new Set<string>()
+    const items: React.ReactNode[] = []
+    for (const job of list) {
+      if (job.groupId) {
+        if (seenGroups.has(job.groupId)) continue
+        seenGroups.add(job.groupId)
+        const groupJobs = list.filter(j => j.groupId === job.groupId)
+        const total = groupJobs.length
+        const doneN = groupJobs.filter(j => j.status === 'done').length
+        const errN = groupJobs.filter(j => j.status === 'error').length
+        const cancelledN = groupJobs.filter(j => j.status === 'cancelled').length
+        const finishedN = doneN + errN + cancelledN
+        const aggregatePct = (groupJobs.reduce((sum, j) =>
+          sum + (j.status === 'done' ? 100 : (j.status === 'cancelled' || j.status === 'error') ? 0 : (j.progress ?? 0)), 0) / total)
+        const groupActive = groupJobs.some(j =>
+          j.status === 'queued' || j.status === 'downloading' || j.status === 'running' ||
+          j.status === 'replacing' || j.status === 'paused')
+        const groupSummary =
+          finishedN === total
+            ? `${doneN}/${total} complete${errN > 0 ? `, ${errN} failed` : ''}${cancelledN > 0 ? `, ${cancelledN} cancelled` : ''}`
+            : `${finishedN}/${total} done`
+        items.push(
+          <div key={`g:${job.groupId}`} className="border-b border-white/5 last:border-0">
+            <div className="relative isolate overflow-hidden flex items-center gap-2 px-4 py-2 bg-green-500/5 border-l-2 border-green-500/40">
+              {/* Aggregate progress as the header background — a
+                  stronger green fill over the resting green tint.
+                  Gone once the group settles, like the job rows. */}
+              {groupActive && (
+                <div
+                  aria-hidden
+                  className="absolute inset-y-0 left-0 -z-10 pointer-events-none transition-[width] duration-300 bg-green-500/15"
+                  style={{ width: `${aggregatePct}%` }}
+                />
+              )}
+              <Archive size={13} className="text-green-400 shrink-0" />
+              <span className="text-xs font-semibold text-gray-200 shrink-0">{job.groupLabel ?? 'Group'}</span>
+              <span className="text-[11px] text-gray-400 shrink-0 tabular-nums">· {groupSummary}</span>
+              <div className="flex-1" />
+              {groupActive && (
+                <Tooltip content="Cancel all jobs in this group">
+                  <button
+                    onClick={() => window.api.cancelJobGroup(job.groupId!)}
+                    className="p-1 text-gray-400 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Ban size={13} />
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+            <div className="border-l-2 border-green-500/20">
+              {groupJobs.map(gj => renderJobRow(gj, true))}
+            </div>
+          </div>
+        )
+      } else {
+        items.push(renderJobRow(job, false))
+      }
+    }
+    return items
+  }
 }
