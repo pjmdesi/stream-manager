@@ -5,6 +5,10 @@ import { Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { renderStreamTitle } from '../../lib/streamTitle'
 import type { StreamFolder } from '../../types'
 
+/** Same chip the stream-detail sidebar's tag editors use (TagChipEditor),
+ *  so the tags read as the same objects here. */
+const TAG_CHIP_CLASS = 'inline-flex items-center gap-1 text-[10px] text-accent-300/80 bg-accent-500/10 border border-accent-500/25 rounded px-1.5 py-0.5 max-w-full'
+
 /**
  * Sidebar empty-state panel (STR-18): what the Twitch channel currently
  * shows (title, category, tags) and which stream item those details came
@@ -13,7 +17,8 @@ import type { StreamFolder } from '../../types'
  * info is one global blob that SM's post-stream auto-update also writes, and
  * a manual edit here would have to reconcile with that; pushes stay on the
  * stream items. Sits above the YouTube out-of-sync panel, whose height
- * varies with its list.
+ * varies with its list, and mirrors its header (label left, icon button
+ * right, the checked time in the button's tooltip).
  */
 export function TwitchChannelPanel({
   channel, checkedAt, loading, error, offline, sourceFolder, folders,
@@ -38,23 +43,24 @@ export function TwitchChannelPanel({
   const heading = channel === null
     ? (offline ? 'Can’t check Twitch' : error ? 'Twitch check failed' : 'Checking Twitch…')
     : 'Twitch channel'
+  const tagCount = channel?.tags.length ?? 0
 
   return (
     <div className="border-t border-white/5">
       <div className="flex items-center justify-between gap-2 px-3 py-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 truncate">
-          {heading}
-          {checkedLabel && <span className="ml-1.5 normal-case tracking-normal font-normal text-gray-500">{checkedLabel}</span>}
-        </span>
-        <Tooltip content={offline ? 'Can’t check Twitch while offline' : 'Re-check what your Twitch channel currently shows'} side="left">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 truncate">{heading}</span>
+        <Tooltip
+          content={offline ? 'No internet connection.' : checkedLabel ? `Re-check Twitch (${checkedLabel})` : 'Re-check Twitch'}
+          side="top"
+        >
           <button
             type="button"
             onClick={onRefresh}
             disabled={loading || offline}
             className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-50"
-            aria-label="Re-check Twitch channel"
+            aria-label="Re-check Twitch"
           >
-            {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
           </button>
         </Tooltip>
       </div>
@@ -65,22 +71,31 @@ export function TwitchChannelPanel({
             : null
         ) : (
           <>
-            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-twitch-400/10 border border-twitch-400/30">
-              <LucideTwitch size={14} className="text-twitch-400 shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1">
-                <div className={`text-sm leading-snug break-words ${channel.title ? 'text-gray-100' : 'text-gray-500 italic'}`}>
+            <div className="flex items-start gap-2">
+              <LucideTwitch size={11} className="text-twitch-400/70 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1 flex flex-col gap-1">
+                <div className={`text-xs leading-snug break-words ${channel.title ? 'text-gray-200' : 'text-gray-500 italic'}`}>
                   {channel.title || 'No title'}
                 </div>
-                <div className={`text-xs truncate ${channel.gameName ? 'text-gray-400' : 'text-gray-500 italic'}`}>
-                  {channel.gameName || 'No category'}
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`text-[11px] truncate ${channel.gameName ? 'text-gray-400' : 'text-gray-500 italic'}`}>
+                    {channel.gameName || 'No category'}
+                  </span>
+                  {tagCount > 0 && (
+                    <Tooltip
+                      side="top"
+                      maxWidth="max-w-sm"
+                      content={
+                        <div className="flex flex-wrap gap-1">
+                          {channel.tags.map(t => <span key={t} className={TAG_CHIP_CLASS}>{t}</span>)}
+                        </div>
+                      }
+                      triggerClassName="inline-flex shrink-0"
+                    >
+                      <span className={`${TAG_CHIP_CLASS} cursor-default tabular-nums`}>{tagCount} tag{tagCount === 1 ? '' : 's'}</span>
+                    </Tooltip>
+                  )}
                 </div>
-                {channel.tags.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {channel.tags.map(t => (
-                      <span key={t} className="px-1.5 py-0.5 rounded bg-twitch-400/15 text-[10px] text-twitch-200">{t}</span>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
             {/* Which stream item these details came from. Matched the same
