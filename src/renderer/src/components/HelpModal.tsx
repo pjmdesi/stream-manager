@@ -225,6 +225,8 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             { keys: ['Shift', '←/→'], label: 'Skip ±1s' },
             { keys: ['Ctrl', '←/→'], label: 'Skip ±5s' },
             { keys: ['Ctrl', 'Shift', '←/→'], label: 'Skip ±10s' },
+            { keys: ['Alt', '←/→'], label: 'Skip ±1m' },
+            { keys: ['Alt', 'Shift', '←/→'], label: 'Skip ±5m' },
             { keys: ['Home'], label: 'Seek to start' },
             { keys: ['End'], label: 'Seek to end' },
           ]} />

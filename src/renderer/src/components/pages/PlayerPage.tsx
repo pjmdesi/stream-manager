@@ -4277,10 +4277,18 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
 
       // Arrow keys — frame step / skip (skips repeat at 100ms while held)
       if (k === 'ArrowLeft' || k === 'ArrowRight') {
-        if (ctrl && alt) return // reserve Ctrl+Alt for other future combos
+        // Ctrl+Alt stays the navigation family (Ctrl+Alt+Up/Down moves
+        // between session videos) and is also the Intel display-rotation
+        // hotkey on many Windows machines.
+        if (ctrl && alt) return
         const dir = k === 'ArrowRight' ? 1 : -1
         e.preventDefault()
-        const amount = ctrl && shift ? dir * 10 : ctrl ? dir * 5 : shift ? dir * 1 : 0
+        // Skip ladder (PLR-2): Shift 1s, Ctrl 5s, Ctrl+Shift 10s, then the
+        // Alt tier for minutes: Alt 1m, Alt+Shift 5m. Shift is the small
+        // step within each tier; a new base modifier opens the next tier.
+        const amount = alt
+          ? (shift ? dir * 300 : dir * 60)
+          : ctrl && shift ? dir * 10 : ctrl ? dir * 5 : shift ? dir * 1 : 0
         if (amount === 0) {
           // Solid ring while the arrow is held (native auto-repeat drives
           // the stepping, so the ring has its own press/keyup tracker).
@@ -6351,11 +6359,18 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                     const unit = abs >= 60 ? `${abs / 60}m` : `${abs}s`
                     return `${unit} ${s < 0 ? 'back' : 'forward'}`
                   }
-                  // Keyboard chip for the skips that have shortcuts (±1/5/10s).
+                  // Keyboard chip per skip. Mirrors the arrow-key ladder in
+                  // the keydown handler (seconds on Shift/Ctrl, minutes on
+                  // Alt); a shown shortcut must never be wrong.
                   const skipShortcut = (s: number): string | undefined => {
                     const arrow = s < 0 ? '←' : '→'
                     const abs = Math.abs(s)
-                    return abs === 1 ? `Shift+${arrow}` : abs === 5 ? `Ctrl+${arrow}` : abs === 10 ? `Ctrl+Shift+${arrow}` : undefined
+                    return abs === 1 ? `Shift+${arrow}`
+                      : abs === 5 ? `Ctrl+${arrow}`
+                      : abs === 10 ? `Ctrl+Shift+${arrow}`
+                      : abs === 60 ? `Alt+${arrow}`
+                      : abs === 300 ? `Alt+Shift+${arrow}`
+                      : undefined
                   }
                   // Narrow-player shedding (container query on the controls
                   // column): skip increments drop outside-in as room runs
