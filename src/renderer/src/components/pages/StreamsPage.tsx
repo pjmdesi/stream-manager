@@ -1106,6 +1106,9 @@ export function StreamsPage({
       setYtVideoStatusMap(prev => ({ ...cached, ...prev }))
     }).catch(() => {})
   }, [])
+  // When the per-video status fetch last started, whatever triggered it;
+  // the periodic poll below reads it to avoid doubling up.
+  const lastStatusFetchAtRef = useRef(0)
   useEffect(() => {
     if (!ytConnected || !linkedYtIdsKey) return
     const allIds = linkedYtIdsKey.split(',')
@@ -1125,6 +1128,7 @@ export function StreamsPage({
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const attempt = (ids: string[], rung: number) => {
+      lastStatusFetchAtRef.current = Date.now()
       window.api.youtubeGetVideoStatuses(ids)
         .then(res => {
           if (cancelled) return
@@ -1159,6 +1163,23 @@ export function StreamsPage({
     attempt(allIds, 0)
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [ytConnected, linkedYtIdsKey, netRetryToken, classifyNetFailure])
+  // Periodic re-run of that fetch (STR-3) so privacy badges and the view /
+  // like counts track YouTube during a session, not just at launch. Slow
+  // and presence-aware: 15 min while the user is active, 30 min idle, an
+  // hour minimized. The poll hook also fires on mount and on every return
+  // to the window, so a five-minute floor since the last fetch (whatever
+  // triggered it) keeps launch and alt-tabbing from doubling requests.
+  // One quota unit per 50 linked videos per run.
+  useAdaptivePoll(() => {
+    if (Date.now() - lastStatusFetchAtRef.current < 5 * 60_000) return
+    setNetRetryToken(t => t + 1)
+  }, {
+    activeMs: 15 * 60_000,
+    idleMs: 30 * 60_000,
+    hiddenMs: 60 * 60_000,
+    idleAfterMs: 15 * 60_000,
+    enabled: ytConnected && !!linkedYtIdsKey && !ytQuota.exceeded,
+  })
   // Recovery paths. The strongest "we're back" signal is a successful
   // YouTube fetch, so poke the status ladder; when no such fetch can
   // run (nothing linked, or YT not connected) fall back to the probe
@@ -3600,7 +3621,7 @@ export function StreamsPage({
                 <Tooltip content={ytConnected
                   ? (ytQuota.exceeded
                     ? 'Reload streams from disk (YouTube refresh skipped — quota exceeded)'
-                    : 'Reload streams from disk + bulk-refresh YouTube broadcasts')
+                    : 'Reload streams from disk + refresh YouTube broadcasts, video status, and view counts')
                   : 'Reload streams from disk'}>
                   <button
                     type="button"
@@ -3612,6 +3633,11 @@ export function StreamsPage({
                       // already-exceeded user quota.
                       await loadFolders()
                       if (ytConnected && !ytQuota.exceeded) {
+                        // Re-run the per-video status fetch too (privacy,
+                        // processing, and the STR-3 statistics): the
+                        // token re-arms that effect the same way network
+                        // recovery does. One quota unit per 50 videos.
+                        setNetRetryToken(t => t + 1)
                         try {
                           const fresh = await window.api.youtubeGetBroadcasts()
                           setYtBroadcasts(fresh)
