@@ -2954,6 +2954,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     setHandleDragDisplayTime(currentTimeRef.current)
     seekRef.current(handleTime)
 
+    // Alt-drag (PLR-24): resize from the center, both handles moving by
+    // the same amount in opposite directions, like centered scaling in
+    // the thumbnail editor. Alt is read on every move so it can be pressed
+    // or released mid-drag; the region is re-based at each toggle so the
+    // handle under the cursor never jumps. A locked region keeps its
+    // duration by definition, so the lock wins over Alt there.
+    let altBase: { inPoint: number; outPoint: number } | null = null
     const onMove = (me: MouseEvent) => {
       if (!hasMoved && Math.abs(me.clientX - startX) > 2) hasMoved = true
       const ratio = Math.max(0, Math.min(1, (me.clientX - rect.left) / rect.width))
@@ -2963,6 +2970,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       const moveFps = videoInfoRef.current?.fps
       const frameTime = 1 / (moveFps ?? 30)
       const locked = lockedRegionIdsRef.current.has(regionId)
+      const symmetric = me.altKey && !locked
       setClipState(s => {
         const r = s.clipRegions.find(c => c.id === regionId)
         if (!r) return s
@@ -2975,6 +2983,26 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         // Stop 1 frame from a neighbour so the merge button can appear; use full extent at video boundary.
         const lo = leftWall  === -Infinity ? 0   : leftWall  + frameTime
         const hi = rightWall === Infinity  ? dur : rightWall - frameTime
+        if (symmetric) {
+          if (!altBase) altBase = { inPoint: r.inPoint, outPoint: r.outPoint }
+          const base = altBase
+          // d = how far the dragged handle has moved inward from the base
+          // (negative = growing). The same d applies to the far handle in
+          // the opposite direction, clamped so neither side passes its
+          // wall and at least one frame stays between them; when either
+          // side hits a limit both stop, so the center holds.
+          let d = which === 'in' ? t - base.inPoint : base.outPoint - t
+          const dMax = (base.outPoint - base.inPoint - frameTime) / 2
+          const dMin = Math.max(lo - base.inPoint, base.outPoint - hi)
+          d = Math.max(dMin, Math.min(dMax, d))
+          const newIn = base.inPoint + d
+          const newOut = base.outPoint - d
+          const shown = which === 'in' ? newIn : newOut
+          setHandlePopup(p => p ? { ...p, value: formatViewTime(shown, moveFps) } : p)
+          seekRef.current(shown)
+          return { ...s, clipRegions: s.clipRegions.map(c => c.id === regionId ? { ...c, inPoint: newIn, outPoint: newOut } : c) }
+        }
+        altBase = null
         if (which === 'in') {
           const clamped = Math.max(lo, Math.min(t, r.outPoint - frameTime))
           setHandlePopup(p => p ? { ...p, value: formatViewTime(clamped, moveFps) } : p)

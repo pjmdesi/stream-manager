@@ -38,6 +38,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 - Stream and episode navigation is the same in both places now. The stream detail sidebar gains previous and next stream buttons beside its episode buttons, and the player's Selected Stream block gains previous and next episode buttons with a jump-to-episode list, in place of its old list of every stream. The player also takes the streams page's shortcuts: Ctrl with the up and down arrows walks streams, Ctrl+Shift walks episodes. Every button's tooltip names the stream it leads to.
 - Audio tracks get proper names even when the recording cannot carry them. MP4 has no track-name field, so OBS's Hybrid MP4 output always arrives with unnamed tracks; a new Settings entry (Video Player, Default audio track names) lets you name Tracks 1 through 6 once to match your OBS layout, and the player, the clip export dialog, and the converter's track picker all use them. Names stored in a recording (MKV) still win, and any track can be renamed for a single file by double-clicking its name in the track row. A small icon beside each name says where it came from.
+- Hold Alt while dragging a clip segment's handle to move both ends at once, shrinking or growing the segment around its center.
 - The minute skips have keyboard shortcuts now: Alt with the arrow keys skips one minute, Alt+Shift skips five. They repeat while held like the second skips, and the buttons' tooltips and the Help panel show them.
 
 ## Integrations
