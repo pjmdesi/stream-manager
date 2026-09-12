@@ -837,6 +837,7 @@ export function StreamsPage({
   // to edit mode.
   const [rescheduleDateDirection, setRescheduleDateDirection] = useState<'local' | 'remote' | 'both' | 'unknown' | undefined>(undefined)
   const [deleteTargetKey, setDeleteTargetKey] = useState<string | null>(null)
+  const deleteTargetSnapshotRef = useRef<StreamFolder | null>(null)
   // After-push rename prompt state. Set when a Twitch push's canonical
   // game name differs from what we sent — surfaces the
   // TwitchCategoryRenamePrompt modal. Gated against
@@ -2738,6 +2739,33 @@ export function StreamsPage({
   // reconcile at window close, never dropped — see the listener above.
   const selfDeleteUntilRef = useRef(0)
 
+  // Stream delete exit (STR-21). The row starts leaving the moment the
+  // user confirms (before the recycle-bin move resolves), the sidebar
+  // closes so the row is in view, and the watcher stands down for the
+  // delete's own echoes. The folder leaves state when the row's exit
+  // animation ends, not after a full reload, which is what made the old
+  // row linger for seconds and then pop out. A failed local delete
+  // reverses the exit and the row comes back.
+  const [leavingKeys, setLeavingKeys] = useState<Set<string>>(new Set())
+  const handleDeleteConfirmStart = useCallback((key: string) => {
+    selfDeleteUntilRef.current = Date.now() + 5000
+    setSelectedStreamKey(null)
+    setLeavingKeys(prev => new Set(prev).add(key))
+  }, [])
+  const handleDeleteFailed = useCallback((key: string) => {
+    setLeavingKeys(prev => {
+      if (!prev.has(key)) return prev
+      const next = new Set(prev); next.delete(key); return next
+    })
+  }, [])
+  const handleLeaveEnd = useCallback((key: string) => {
+    setFolders(prev => prev.filter(f => f.relativePath !== key))
+    setLeavingKeys(prev => {
+      if (!prev.has(key)) return prev
+      const next = new Set(prev); next.delete(key); return next
+    })
+  }, [])
+
   // SM-initiated file deletion (files grid single/bulk trash): remove the
   // paths from folder state in place — no reload, no flash. The next natural
   // listStreams (page events after the stand-down window) reconciles meta.
@@ -4231,6 +4259,8 @@ export function StreamsPage({
                         isLivestream={status?.isLivestream ?? null}
                         stats={status && !status.missing ? { views: status.viewCount, likes: status.likeCount, dislikes: status.dislikeCount } : null}
                         isTwitchSource={f.relativePath === twitchSourceKey}
+                        leaving={leavingKeys.has(f.relativePath)}
+                        onLeaveEnd={handleLeaveEnd}
                         isProcessing={isProcessing}
                         linkMissing={status?.missing === true}
                         onTagSelect={handleTagSelect}
@@ -4577,7 +4607,12 @@ export function StreamsPage({
       })()}
 
       {deleteTargetKey && (() => {
-        const target = folders.find(f => f.relativePath === deleteTargetKey)
+        // The row's exit (STR-21) can drop the folder from state while the
+        // modal is still reporting (a YouTube delete after the local one,
+        // or animations off), so the modal keeps the last seen snapshot.
+        const found = folders.find(f => f.relativePath === deleteTargetKey)
+        if (found) deleteTargetSnapshotRef.current = found
+        const target = found ?? deleteTargetSnapshotRef.current
         if (!target) return null
         return (
           <DeleteModal
@@ -4585,10 +4620,15 @@ export function StreamsPage({
             isDumpMode={isDumpMode}
             linkedVideoMissing={!!target.meta?.ytVideoId && effectiveYtVideoStatusMap[target.meta.ytVideoId]?.missing === true}
             onClose={() => setDeleteTargetKey(null)}
+            onConfirmStart={() => handleDeleteConfirmStart(target.relativePath)}
+            onDeleteFailed={() => handleDeleteFailed(target.relativePath)}
             onSuccess={() => {
               setDeleteTargetKey(null)
-              setSelectedStreamKey(null)
-              void loadFolders()
+              // Reconcile after the row's exit has finished, so a fast
+              // recycle-bin move cannot yank the row mid-animation. The
+              // folder-mode delete pauses the watcher around the trash, so
+              // no streams:changed event ever covers this.
+              window.setTimeout(() => { void loadFolders() }, animDurationMs * 2 + 120)
             }}
           />
         )
@@ -5115,6 +5155,7 @@ const StreamListItem = memo(function StreamListItem({
   folder, folders, selected, compact, selectMode, multiSelected, index, onToggleMultiSelect, onModifierEnterSelect,
   onDragStart, onDragEnter, dragMovedRef,
   isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing, stats, isTwitchSource,
+  leaving, onLeaveEnd,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   isSendingToPlayer, onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
   animDurationMs, onTagSelect, onVideoFileClick,
@@ -5188,6 +5229,11 @@ const StreamListItem = memo(function StreamListItem({
   /** True when the Twitch channel currently shows this stream's title,
    *  category, and tags (STR-18). Adds a Twitch badge to the date row. */
   isTwitchSource: boolean
+  /** True from the moment this stream's delete is confirmed (STR-21):
+   *  the row plays its exit (red overlay, then collapse) and calls
+   *  onLeaveEnd when done. Flips back to false if the delete fails. */
+  leaving: boolean
+  onLeaveEnd: (relativePath: string) => void
   /** "#2", "#3" suffix when multiple streams share a date. */
   sameDayIndex?: number
   thumbsKey: number
@@ -5224,6 +5270,58 @@ const StreamListItem = memo(function StreamListItem({
     const t = window.setTimeout(() => setIndicatorVisible(true), animDurationMs)
     return () => clearTimeout(t)
   }, [selected, animDurationMs])
+
+  // Delete exit (STR-21): the row leaves the instant the delete is
+  // confirmed, in two phases. 'fade': a solid red overlay fades in over
+  // the intact row (the tr turns position:relative for the duration so
+  // the overlay spans the whole row). 'collapse': the cells are swapped
+  // for one full-width red cell whose height animates to zero, since a
+  // table row cannot animate its own height while its cells hold content.
+  // onLeaveEnd then drops the folder from state. Both phases run for
+  // animDurationMs, so the disable and slow animation settings apply; with
+  // animations off the row is dropped at once.
+  const rowRef = useRef<HTMLTableRowElement>(null)
+  const [leavePhase, setLeavePhase] = useState<'idle' | 'fade' | 'collapse'>('idle')
+  const [leaveOverlayOn, setLeaveOverlayOn] = useState(false)
+  const [collapseHeight, setCollapseHeight] = useState<number | null>(null)
+  const onLeaveEndRef = useRef(onLeaveEnd)
+  useEffect(() => { onLeaveEndRef.current = onLeaveEnd })
+  useEffect(() => {
+    if (!leaving) {
+      setLeavePhase('idle')
+      setLeaveOverlayOn(false)
+      setCollapseHeight(null)
+      return
+    }
+    const ms = animDurationMs
+    const measured = rowRef.current?.getBoundingClientRect().height ?? 0
+    if (ms <= 0) { onLeaveEndRef.current(folder.relativePath); return }
+    setLeavePhase('fade')
+    const raf = requestAnimationFrame(() => setLeaveOverlayOn(true))
+    let raf2 = 0
+    const t1 = window.setTimeout(() => {
+      setLeavePhase('collapse')
+      setCollapseHeight(measured)
+      // Two frames so the measured height paints before the transition
+      // to zero starts.
+      raf2 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setCollapseHeight(0)) })
+    }, ms)
+    const t2 = window.setTimeout(() => onLeaveEndRef.current(folder.relativePath), ms * 2 + 40)
+    return () => { cancelAnimationFrame(raf); cancelAnimationFrame(raf2); clearTimeout(t1); clearTimeout(t2) }
+  }, [leaving, animDurationMs, folder.relativePath])
+
+  if (leavePhase === 'collapse') {
+    return (
+      <tr data-stream-key={folder.relativePath}>
+        <td colSpan={20} className="p-0 border-0">
+          <div
+            className="bg-red-500 overflow-hidden"
+            style={{ height: collapseHeight ?? 0, transition: `height ${animDurationMs}ms ease-in` }}
+          />
+        </td>
+      </tr>
+    )
+  }
 
   if (folder.isMissing) {
     // Count, date, statistics, then the three wide columns.
@@ -5299,12 +5397,13 @@ const StreamListItem = memo(function StreamListItem({
 
   return (
     <tr
+      ref={rowRef}
       data-stream-key={folder.relativePath}
       onClick={handleRowClick}
       onMouseDown={selectMode ? (e) => { if (e.button !== 0) return; e.preventDefault(); onDragStart(index) } : undefined}
       onMouseEnter={selectMode ? () => onDragEnter(index) : undefined}
       style={selectMode ? { userSelect: 'none' } : undefined}
-      className={`group transition-colors cursor-pointer ${
+      className={`group transition-colors cursor-pointer ${leavePhase === 'fade' ? 'relative pointer-events-none' : ''} ${
         isPending
           ? (isToday
               ? 'border-b border-blue-900/30 bg-blue-900/15 hover:bg-blue-900/30'
@@ -5559,6 +5658,17 @@ const StreamListItem = memo(function StreamListItem({
           withholds are skipped rather than shown as zero. Sits right of
           the date column, so an open sidebar covers it. */}
       <td className={`px-2 align-middle w-[52px] ${statsRoomy ? 'py-2' : 'py-1'}`}>
+        {/* Delete exit overlay (STR-21). Absolutely positioned against the
+            tr (relative while fading), so it covers every cell of the row;
+            this cell is only its host because it is never position:relative
+            itself. */}
+        {leavePhase === 'fade' && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-20 bg-red-500"
+            style={{ opacity: leaveOverlayOn ? 1 : 0, transition: `opacity ${animDurationMs}ms ease-in` }}
+          />
+        )}
         {/* Two size tiers keyed off the thumbnail height (which sets the
             row height): compact at three 12px lines with 2px gaps and 4px
             cell padding, fitting the thumbnail column's 48px minimum so
@@ -10654,6 +10764,8 @@ function DeleteModal({
   isDumpMode,
   linkedVideoMissing,
   onClose,
+  onConfirmStart,
+  onDeleteFailed,
   onSuccess,
 }: {
   target: StreamFolder
@@ -10662,6 +10774,11 @@ function DeleteModal({
    *  on YouTube" option is pointless (and fails) so it's suppressed. */
   linkedVideoMissing: boolean
   onClose: () => void
+  /** Fired the moment the confirm passes its in-use check, before the
+   *  recycle-bin move; the page starts the row's exit here (STR-21). */
+  onConfirmStart: () => void
+  /** The local delete threw: the page reverses the row's exit. */
+  onDeleteFailed: () => void
   onSuccess: () => void
 }) {
   const [alsoDeleteYt, setAlsoDeleteYt] = useState(false)
@@ -10775,6 +10892,7 @@ function DeleteModal({
     // first — their <video> handles block the recycle-bin move (deleting a
     // stream while a thumbnail was still rendering failed as "in use").
     releaseThumbDecodes(filesInFolder ?? target.videos)
+    onConfirmStart()
     try {
       if (isDumpMode) {
         await window.api.deleteStreamFiles(target.folderPath, target.date)
@@ -10782,6 +10900,7 @@ function DeleteModal({
         await window.api.deleteStreamFolder(target.folderPath)
       }
     } catch (err: any) {
+      onDeleteFailed()
       setBusy(false)
       setError(`Local delete failed: ${err?.message ?? String(err)}`)
       return
