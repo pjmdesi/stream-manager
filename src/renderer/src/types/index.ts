@@ -229,6 +229,10 @@ export interface AppConfig {
   listThumbWidth: number
   checkForUpdates: boolean
   skipClipMergeWarning: boolean
+  /** Default audio track names by track number (PLR-23), applied to
+   *  tracks a recording leaves unnamed (MP4 cannot store track names).
+   *  Six slots to match OBS; blank means "Track N". */
+  defaultAudioTrackNames: string[]
   // Stream Relay — see main-side AppConfig for full context. Mirror kept here
   // so the renderer's useStore types match what the main process persists.
   streamRelayEnabled: boolean
@@ -312,6 +316,9 @@ export interface AudioTrackSetting {
    *  the swatch dot in the track-control row. Omitted = use the index-
    *  based default rotation. */
   color?: string
+  /** Per-file rename (PLR-23). Wins over the recording's own track name
+   *  and the Settings default; omitted = no rename. */
+  name?: string
 }
 
 export interface VideoEntry {

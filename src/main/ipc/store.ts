@@ -71,6 +71,8 @@ export interface AppConfig {
   defaultBroadcastTime: string
   checkForUpdates: boolean
   skipClipMergeWarning: boolean
+  /** Default audio track names by track number (PLR-23); blank = "Track N". */
+  defaultAudioTrackNames: string[]
   // ── Stream Relay ──────────────────────────────────────────────────────────
   // Localhost RTMP server that forwards OBS/Aitum to YouTube while letting SM
   // orchestrate bind+transition lifecycle. enabled flag gates the whole feature
@@ -193,6 +195,7 @@ function getDefaultConfig(): AppConfig {
     defaultBroadcastTime: '19:00',
     checkForUpdates: true,
     skipClipMergeWarning: false,
+    defaultAudioTrackNames: [],
     streamRelayEnabled: false,
     streamRelayPort: 1935,
     streamRelayInboundKey: 'live',

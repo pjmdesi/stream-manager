@@ -23,6 +23,10 @@ export interface TrackState {
   /** Tag-color key for the swatch dot + waveform fill. Undefined =
    *  fall back to the index-based default rotation in tagColors. */
   color?: string
+  /** Per-file rename (PLR-23); undefined = none. Display resolution
+   *  (rename, embedded title, Settings default, "Track N") happens in
+   *  lib/trackNames, not here. */
+  name?: string
 }
 
 export interface VideoPlayerState {
@@ -95,6 +99,7 @@ function makeDefaultTrackState(
     solo: saved?.solo ?? false,
     volume: saved?.volume ?? 1,
     color: saved?.color,
+    name: saved?.name,
   }
 }
 
@@ -415,6 +420,16 @@ export function useVideoPlayer() {
     }))
   }, [])
 
+  /** Per-file rename (PLR-23). Pass undefined (or an empty string) to
+   *  clear it and fall back to the embedded or default name. */
+  const setTrackName = useCallback((index: number, name: string | undefined) => {
+    const next = name?.trim() || undefined
+    setState(prev => ({
+      ...prev,
+      tracks: prev.tracks.map(t => t.index === index ? { ...t, name: next } : t),
+    }))
+  }, [])
+
   // ── Video element wiring ───────────────────────────────────────────────
 
   useEffect(() => {
@@ -660,6 +675,7 @@ export function useVideoPlayer() {
     setTrackSolo,
     setTrackVolume,
     setTrackColor,
+    setTrackName,
     recomputeAudibility,
     seek,
     fastSeek,

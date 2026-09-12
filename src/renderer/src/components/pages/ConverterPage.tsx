@@ -14,6 +14,8 @@ import { VideoThumb } from '../ui/VideoThumb'
 import { displayPath } from '../../lib/displayPath'
 import { renderStreamTitle } from '../../lib/streamTitle'
 import { CLOUD_WAIT_HINT, CLOUD_WAIT_HINT_MS, formatWait } from '../CloudOpsModal'
+import { resolveTrackName } from '../../lib/trackNames'
+import type { AudioTrackSetting } from '../../types'
 
 // Row action buttons — neutral at rest, colored only on hover, with a label
 // that collapses to icon-only as the row narrows. Mirrors the stream detail
@@ -212,9 +214,13 @@ const AUDIO_OUTPUT_EXTS = new Set(['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'o
 function isAudioPreset(preset: ConversionPreset | null | undefined): boolean {
   return !!preset && AUDIO_OUTPUT_EXTS.has(preset.outputExtension.toLowerCase())
 }
-/** Compact label for an audio track in the picker, e.g. "Track 1 — English · aac · 2ch". */
-function audioTrackLabel(t: AudioTrackInfo): string {
-  const desc = t.title || t.language
+/** Compact label for an audio track in the picker, e.g. "Track 1 — Mic · aac · 2ch".
+ *  The name follows the shared resolution (PLR-23): per-file rename, the
+ *  recording's own title, the Settings default; with none of those the
+ *  language tag stands in when the file has one. */
+function audioTrackLabel(t: AudioTrackInfo, defaults: readonly string[] | undefined, override: string | undefined): string {
+  const resolved = resolveTrackName(t.index, t.title, override, defaults)
+  const desc = resolved.source === 'fallback' ? t.language : resolved.name
   const meta = [t.codec, t.channels ? `${t.channels}ch` : ''].filter(Boolean).join(' · ')
   return `Track ${t.index + 1}${desc ? ` — ${desc}` : ''}${meta ? ` · ${meta}` : ''}`
 }
@@ -278,11 +284,15 @@ function audioTrackOutputSuffix(
   preset: ConversionPreset | null | undefined,
   tracks: AudioTrackInfo[] | undefined,
   audioTrackIndex: number | undefined,
+  defaults: readonly string[] | undefined,
+  override: string | undefined,
 ): string {
   if (!isAudioPreset(preset) || (tracks?.length ?? 0) <= 1) return ''
   const idx = audioTrackIndex ?? 0
   const t = tracks!.find(x => x.index === idx) ?? tracks![0]
-  const name = (t.title || t.language || '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
+  const resolved = resolveTrackName(t.index, t.title, override, defaults)
+  const raw = resolved.source === 'fallback' ? (t.language || '') : resolved.name
+  const name = raw.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
   return name ? ` - Track ${t.index + 1} - ${name}` : ` - Track ${t.index + 1}`
 }
 
@@ -347,6 +357,19 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   // a debounce on streams:changed — this page stays mounted for the app's
   // lifetime, so the reload must not run per-event.
   const [streamTitles, setStreamTitles] = useState<Record<string, string>>({})
+  // Per-file track renames from each stream's metadata (PLR-23), keyed by
+  // normalized folder path, then filename, then track index. Lets the
+  // audio-track picker and the output file name show the same names the
+  // player shows for files that live in a stream folder.
+  const [trackNameOverrides, setTrackNameOverrides] = useState<Record<string, Record<string, Record<number, AudioTrackSetting>>>>({})
+  const trackOverrideFor = (filePath: string, index: number): string | undefined => {
+    const norm = filePath.replace(/\\/g, '/')
+    const cut = norm.lastIndexOf('/')
+    if (cut < 0) return undefined
+    const dir = norm.slice(0, cut).toLowerCase()
+    const name = norm.slice(cut + 1)
+    return trackNameOverrides[dir]?.[name]?.[index]?.name
+  }
   useEffect(() => {
     const dir = config.streamsDir
     if (!dir || config.streamMode === 'dump-folder') return
@@ -356,12 +379,16 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
       window.api.listStreams(dir, 'folder-per-stream').then(folders => {
         if (disposed) return
         const map: Record<string, string> = {}
+        const overrides: Record<string, Record<string, Record<number, AudioTrackSetting>>> = {}
         for (const f of folders) {
+          const key = f.folderPath.replace(/\\/g, '/').toLowerCase()
+          if (f.meta?.audioSettings) overrides[key] = f.meta.audioSettings
           if (!(f.meta?.ytTitle?.trim() || f.meta?.twitchTitle?.trim())) continue
           const title = renderStreamTitle(f, folders).trim()
-          if (title) map[f.folderPath.replace(/\\/g, '/').toLowerCase()] = title
+          if (title) map[key] = title
         }
         setStreamTitles(map)
+        setTrackNameOverrides(overrides)
       }).catch(() => {})
     }
     load()
@@ -600,7 +627,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     const preset = presetForId(file.presetId)
     if (!preset) return
     const outputFile = await uniqueOutputPath(
-      getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex)),
+      getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex, config.defaultAudioTrackNames, trackOverrideFor(file.path, file.audioTrackIndex ?? 0))),
       claimedOutputs(),
     )
     const job: ConversionJob = {
@@ -647,7 +674,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         id: uuidv4(),
         inputFile: file.path,
         outputFile: await uniqueOutputPath(
-          getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex)),
+          getOutputPath(file.path, preset, file.outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[file.path], file.audioTrackIndex, config.defaultAudioTrackNames, trackOverrideFor(file.path, file.audioTrackIndex ?? 0))),
           claimed,
         ),
         preset,
@@ -1031,7 +1058,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                 const { path, outputDir, pickedDir, stream } = file
                 const preset = presetForId(file.presetId)
                 const sourceName = path.split(/[\\/]/).pop() ?? path
-                const destName = preset ? getOutputPath(path, preset, outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[path], file.audioTrackIndex)).split(/[\\/]/).pop() ?? '' : ''
+                const destName = preset ? getOutputPath(path, preset, outputDir, audioTrackOutputSuffix(preset, audioTracksByPath[path], file.audioTrackIndex, config.defaultAudioTrackNames, trackOverrideFor(path, file.audioTrackIndex ?? 0))).split(/[\\/]/).pop() ?? '' : ''
                 return (
                   <div
                     key={path}
@@ -1123,7 +1150,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                               className="appearance-none max-w-[200px] bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
                             >
                               {audioTracksByPath[path].map(t => (
-                                <option key={t.index} value={String(t.index)}>{audioTrackLabel(t)}</option>
+                                <option key={t.index} value={String(t.index)}>{audioTrackLabel(t, config.defaultAudioTrackNames, trackOverrideFor(path, t.index))}</option>
                               ))}
                             </select>
                             <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />

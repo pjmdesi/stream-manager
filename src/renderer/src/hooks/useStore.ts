@@ -41,6 +41,7 @@ const defaultConfig: AppConfig = {
   listThumbWidth: 85,
   checkForUpdates: true,
   skipClipMergeWarning: false,
+  defaultAudioTrackNames: [],
   streamRelayEnabled: false,
   streamRelayPort: 1935,
   streamRelayInboundKey: 'live',

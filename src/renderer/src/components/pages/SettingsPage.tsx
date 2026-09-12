@@ -11,6 +11,7 @@ import { Modal } from '../ui/Modal'
 import { DumpConvertExplainer } from '../DumpConvertExplainer'
 import type { ConversionPreset, ThumbnailTemplate, Page } from '../../types'
 import { isClipExportCompatible } from '../../lib/clipExport'
+import { DEFAULT_TRACK_NAME_SLOTS } from '../../lib/trackNames'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -127,7 +128,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: 'directories', label: 'Directories', icon: <FolderTree size={14} />, keys: ['streamsDir', 'defaultWatchDir', 'tempDir'] },
   { id: 'cache', label: 'Cache', icon: <HardDrive size={14} />, keys: ['audioCacheLimit'] },
   { id: 'streams', label: 'Streams', icon: <Radio size={14} />, keys: ['useBuiltinThumbnailByDefault', 'defaultBuiltinThumbnailTemplate', 'defaultThumbnailTemplate', 'archivePresetId', 'checkEpisodeIteration', 'defaultBroadcastTime', 'defaultYouTubeCategoryId', 'twitchSkipCategoryRenamePrompt'] },
-  { id: 'player', label: 'Video Player', icon: <Film size={14} />, keys: ['clipPresetId', 'defaultBleepVolume', 'skipClipMergeWarning'] },
+  { id: 'player', label: 'Video Player', icon: <Film size={14} />, keys: ['clipPresetId', 'defaultBleepVolume', 'skipClipMergeWarning', 'defaultAudioTrackNames'] },
   { id: 'converter', label: 'Converter', icon: <Zap size={14} />, keys: ['maxConcurrentConversions', 'autoDeletePartialOnCancel'] },
   { id: 'appearance', label: 'Appearance', icon: <Palette size={14} />, keys: ['disableAnimations', 'calendarFirstDayOfWeek', 'uiZoomPercent'] },
   { id: 'autorules', label: 'Auto-rules', icon: <Shuffle size={14} />, keys: ['autoStartWatcher'] },
@@ -770,6 +771,34 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
             onChange={v => set('skipClipMergeWarning', v)}
             label={<div><div className="text-sm font-medium text-gray-200">Skip multi-track confirmation on entering clip mode {dirtyDot('skipClipMergeWarning')}</div><div className="text-xs text-gray-400">Enter clip mode immediately on videos with multiple audio tracks instead of prompting to enable multi-track mode. You can still enable multi-track mode when clip mode is active.</div></div>}
           />
+
+          {/* Default audio track names (PLR-23). Six slots to match OBS's
+              track count; blank slots read "Track N". Applied only to
+              tracks the recording leaves unnamed (MP4 cannot store names),
+              and a per-file rename in the player wins over these. */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Default audio track names {dirtyDot('defaultAudioTrackNames')}</label>
+            <div className="grid grid-cols-2 gap-2">
+              {Array.from({ length: DEFAULT_TRACK_NAME_SLOTS }, (_, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 tabular-nums w-14 shrink-0">Track {i + 1}</span>
+                  <Input
+                    value={local.defaultAudioTrackNames?.[i] ?? ''}
+                    onChange={e => {
+                      const next = Array.from({ length: DEFAULT_TRACK_NAME_SLOTS }, (_, j) => local.defaultAudioTrackNames?.[j] ?? '')
+                      next[i] = e.target.value
+                      // Trim trailing blanks so an untouched tail stays absent.
+                      while (next.length > 0 && !next[next.length - 1].trim()) next.pop()
+                      set('defaultAudioTrackNames', next)
+                    }}
+                    placeholder={`Track ${i + 1}`}
+                    className="text-xs"
+                  />
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400">Used for recordings whose tracks carry no names. MP4 cannot store track names, so OBS's Hybrid MP4 output always arrives unnamed; match this list to the track order in OBS's Audio tab. A name stored in the recording (MKV) wins over these, and any track can be renamed for one file by double-clicking its name in the player.</p>
+          </div>
         </Section>
 
         {/* Converter */}

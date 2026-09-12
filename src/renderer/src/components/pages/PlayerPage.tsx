@@ -29,6 +29,8 @@ import { isClipExportCompatible } from '../../lib/clipExport'
 import { renderStreamTitle } from '../../lib/streamTitle'
 import { seriesNavFor, EMPTY_SERIES_NAV, type SeriesNav } from '../../lib/seriesNav'
 import { StreamNavButtons } from '../streams/StreamNavButtons'
+import { resolveTrackName } from '../../lib/trackNames'
+import { TrackNameLabel } from '../ui/TrackNameLabel'
 
 /** Given an absolute file path and the streams root, find the file's stream
  *  folder and the canonical key used in _meta.json:
@@ -815,6 +817,9 @@ interface ExportClipDialogProps {
    *  check label and forwarded to the converter so the exported clip
    *  matches what the user was hearing. */
   tracksState: { index: number; status: 'unextracted' | 'extracting' | 'extracted'; muted: boolean; volume: number }[]
+  /** Display names per track index, already resolved (PLR-23: rename,
+   *  embedded title, Settings default, "Track N"). */
+  trackNames?: string[]
   /** True iff the user has enabled multi-track for this file in this
    *  session. When false AND no track has been touched, we treat the
    *  state as "pristine" and default to all tracks selected. */
@@ -839,7 +844,7 @@ export interface ExportClipOptions {
   audioTrackVolumes: Record<number, number>
 }
 
-function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsOutsideRegions, audioTracks, tracksState, multiTrackEnabled, onConfirm, onClose }: ExportClipDialogProps) {
+function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsOutsideRegions, audioTracks, tracksState, trackNames, multiTrackEnabled, onConfirm, onClose }: ExportClipDialogProps) {
   const [presets, setPresets] = useState<{ id: string; name: string; ffmpegArgs: string }[]>([])
   const [presetId, setPresetId] = useState(defaultPresetId)
   const [saveNextToSource, setSaveNextToSource] = useState(true)
@@ -1010,7 +1015,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
               {audioTracks.map((t, i) => {
                 const checked = selectedTrackIndices.has(i)
                 const st = tracksState.find(s => s.index === i)
-                const label = t.title || `Track ${i + 1}`
+                const label = trackNames?.[i] || t.title || `Track ${i + 1}`
                 const detail = `${t.codec ?? 'audio'}${t.channels ? ` · ${t.channels}ch` : ''}${t.language ? ` · ${t.language}` : ''}`
                 const isUnextracted = st?.status === 'unextracted'
                 // Volume shown to the user as a sanity check. Tracks the
@@ -1458,7 +1463,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   const {
     videoRef, state, loadFile, handleDurationChange,
     enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction, cancelTrackExtraction,
-    setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, recomputeAudibility,
+    setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, setTrackName, recomputeAudibility,
     clearError, closeVideo, seek, fastSeek, getSeekTarget, setPlaybackRate, togglePlay,
   } = useVideoPlayer()
 
@@ -1761,10 +1766,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
           if (s.solo !== undefined) setTrackSolo(i, !!s.solo)
           if (s.volume !== undefined) setTrackVolume(i, s.volume)
           if (s.color !== undefined) setTrackColor(i, s.color)
+          if (s.name !== undefined) setTrackName(i, s.name)
         }
       }
     } catch { /* swallow */ }
-  }, [config.streamsDir, setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor])
+  }, [config.streamsDir, setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, setTrackName])
 
   useEffect(() => {
     reloadSessionPanel(state.filePath)
@@ -2204,6 +2210,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
           if (t.solo) settings.solo = true
           if (t.volume !== 1) settings.volume = t.volume
           if (t.color !== undefined) settings.color = t.color
+          if (t.name) settings.name = t.name
           if (Object.keys(settings).length > 0) entry[t.index] = settings
         }
         const allAudioSettings = { ...(existing.audioSettings ?? {}) }
@@ -5272,7 +5279,20 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                     // fit the longest variant — the unextracted button.
                     const CTRL_COL = '220px'
                     return tracks.map(track => {
-                      const label = track.title || `Track ${track.index + 1}`
+                      // Name resolution (PLR-23): per-file rename, then the
+                      // recording's own title, then the Settings default,
+                      // then "Track N". The label element carries the source
+                      // icon and the double-click rename.
+                      const resolvedName = resolveTrackName(track.index, track.title, track.name, config.defaultAudioTrackNames)
+                      const label = resolvedName.name
+                      const nameEl = (textCls: string, wrapCls?: string) => (
+                        <TrackNameLabel
+                          resolved={resolvedName}
+                          className={textCls}
+                          triggerClassName={wrapCls}
+                          onRename={name => setTrackName(track.index, name)}
+                        />
+                      )
                       const effectivelyMuted = anySolo ? !track.solo : track.muted
                       const wfPath = trackPathByIndex.get(track.index) ?? ''
                       const collapsed = collapsedTracks.has(track.index)
@@ -5328,7 +5348,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                                   />
                                 </div>
                                 <span className="text-[10px] tabular-nums text-gray-400 shrink-0 w-8 text-right">{track.extractProgress}%</span>
-                                <TruncatedText text={label} className="text-[10px] text-gray-400 truncate ml-1" triggerClassName="min-w-0 flex-shrink" />
+                                {nameEl('text-[10px] text-gray-400 truncate', 'min-w-0 flex-shrink ml-1')}
                                 <Tooltip content="Cancel extraction" triggerClassName="shrink-0">
                                 <button
                                   onClick={() => cancelTrackExtraction(track.index)}
@@ -5448,7 +5468,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                                   })()}
                                 </div>
                                 <div className="flex items-center gap-1.5 min-w-0">
-                                  <TruncatedText text={label} className="truncate text-gray-300 flex-1" triggerClassName="flex-1 min-w-0" />
+                                  {nameEl('truncate text-gray-300', 'flex-1 min-w-0')}
                                   <Tooltip content={collapsed ? 'Expand waveform' : 'Collapse waveform'} triggerClassName="shrink-0">
                                   <button
                                     onClick={() => toggleTrackCollapsed(track.index)}
@@ -5477,7 +5497,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                                   </button>
                                   </Tooltip>
                                 </div>
-                                <TruncatedText text={label} className="truncate text-gray-400" />
+                                {nameEl('truncate text-gray-400', 'min-w-0')}
                               </>
                             )}
                           </div>
@@ -7180,6 +7200,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
             )}
             audioTracks={videoInfo?.audioTracks ?? []}
             tracksState={tracks.map(t => ({ index: t.index, status: t.status, muted: t.muted, volume: t.volume }))}
+            trackNames={(videoInfo?.audioTracks ?? []).map((t, i) =>
+              resolveTrackName(i, t.title, tracks.find(x => x.index === i)?.name, config.defaultAudioTrackNames).name)}
             multiTrackEnabled={multiTrackEnabled}
             onConfirm={runExport}
             onClose={() => setShowExportDialog(false)}
