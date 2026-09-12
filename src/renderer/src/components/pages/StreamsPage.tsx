@@ -51,6 +51,7 @@ import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber } from '../../lib/streamTitle'
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
+import { TwitchChannelPanel } from '../streams/TwitchChannelPanel'
 import type { StreamFolder, StreamMeta, AiSuggestField, LibrarySize, LibrarySizeBucket } from '../../types'
 
 /** 1234 → "1.2K", 1500000 → "1.5M"; below a thousand the plain number. */
@@ -322,6 +323,54 @@ function resolveTwitchTitle(
   folders: StreamFolder[],
 ): string {
   return applyMergeFields(meta?.twitchTitle ?? '', buildYtTitleMergeFields(meta, folder, folders))
+}
+
+// Twitch comparison normalizers, shared by the sidebar's Push to Twitch
+// in-sync check and the page-level "which stream does the channel show"
+// match (STR-18). Twitch canonicalizes a few fields:
+//   • Game name: the push resolves a search term to a game_id and the
+//     channel API returns the platform-canonical name, so case and
+//     whitespace may differ from the local meta.
+//   • Title whitespace: Twitch collapses non-breaking spaces and stray
+//     newlines to single spaces server-side; a byte comparison false-flags
+//     such a title forever. Case stays significant (Twitch preserves it).
+const twTitleKey = (s: string) => s.replace(/\s+/g, ' ').trim()
+const twNormalize = (s: string) => s.trim().toLowerCase()
+const twTagKey = (arr: string[]) => arr.slice().map(twNormalize).sort().join(',')
+
+/** The values a Push to Twitch would send for this stream: the YouTube
+ *  title when the sync flag is on (else the dedicated Twitch title), the
+ *  resolved category, and the Twitch-compatible tags. */
+function twitchEffectiveValues(folder: StreamFolder, folders: StreamFolder[]): { title: string; game: string; tags: string[] } {
+  const meta = folder.meta
+  const title = meta?.syncTitle !== false ? resolveYtTitle(meta, folder, folders) : resolveTwitchTitle(meta, folder, folders)
+  return { title, game: resolveTwitchGame(meta), tags: toTwitchCompatibleTags(meta?.twitchTags ?? []).compat }
+}
+
+/** True when the Twitch channel currently shows this stream's details:
+ *  the live channel values match what a push would send, or the stream's
+ *  last-pushed snapshot matches while the channel still reflects that push
+ *  (the fuzzy game-name case). Empty game or tags count as matching, the
+ *  way the push preserves them. A stream with no title never matches. */
+function streamMatchesTwitchChannel(
+  folder: StreamFolder,
+  folders: StreamFolder[],
+  channel: { title: string; gameName: string; tags: string[] },
+): boolean {
+  const meta = folder.meta
+  if (!meta) return false
+  const { title, game, tags } = twitchEffectiveValues(folder, folders)
+  if (!twTitleKey(title)) return false
+  const titleInSync = twTitleKey(title) === twTitleKey(channel.title)
+  const gameInSync = !game.trim() || twNormalize(game) === twNormalize(channel.gameName)
+  const tagsInSync = tags.length === 0 || twTagKey(tags) === twTagKey(channel.tags)
+  if (titleInSync && gameInSync && tagsInSync) return true
+  if (meta.twitchLastPushedTitle === undefined) return false
+  const snapshotStillReflectsTwitch = twTitleKey(channel.title) === twTitleKey(meta.twitchLastPushedTitle)
+  return snapshotStillReflectsTwitch
+    && twTitleKey(title) === twTitleKey(meta.twitchLastPushedTitle)
+    && game.trim() === (meta.twitchLastPushedGame ?? '').trim()
+    && twTagKey(tags) === twTagKey(meta.twitchLastPushedTags ?? [])
 }
 
 /** True when the given text contains at least one known YT title merge
@@ -703,6 +752,36 @@ export function StreamsPage({
   // optimistically after a successful push (so the button immediately
   // reflects the new in-sync state without a roundtrip).
   const [twitchChannel, setTwitchChannel] = useState<{ title: string; gameName: string; tags: string[] } | null>(null)
+  // Twitch channel panel state (STR-18). checkedAt stamps every update of
+  // the channel snapshot, whether a fetch or a push seeded it, so the panel
+  // can say how fresh its picture is.
+  const [twitchCheckedAt, setTwitchCheckedAt] = useState<number | null>(null)
+  const [twitchChannelLoading, setTwitchChannelLoading] = useState(false)
+  const [twitchChannelError, setTwitchChannelError] = useState<string | null>(null)
+  /** setTwitchChannel plus the freshness stamp. Every writer goes through
+   *  this (fetches, the sidebar push, the post-stream pushes). */
+  const updateTwitchChannel = useCallback((v: React.SetStateAction<{ title: string; gameName: string; tags: string[] } | null>) => {
+    setTwitchChannel(v)
+    setTwitchCheckedAt(Date.now())
+  }, [])
+  /** Re-read the channel from Twitch. Errors show in the panel; the
+   *  previous snapshot stays so a transient failure does not blank it. */
+  const refreshTwitchChannel = useCallback(async () => {
+    setTwitchChannelLoading(true)
+    try {
+      const info = await window.api.twitchGetChannel?.()
+      if (info) {
+        updateTwitchChannel(info)
+        setTwitchChannelError(null)
+      } else {
+        setTwitchChannelError('Twitch returned no channel details.')
+      }
+    } catch (e: any) {
+      setTwitchChannelError(e?.message ?? String(e))
+    } finally {
+      setTwitchChannelLoading(false)
+    }
+  }, [updateTwitchChannel])
   // Sidebar feedback banners — an ARRAY now, not a single slot, so a
   // YouTube success message and a Twitch success message from the same
   // "Push to all" can coexist (each platform's handler appends its own
@@ -1033,13 +1112,11 @@ export function StreamsPage({
       setTwConnected(true)
       // Same cache priming as the mount-time status fetch — the push
       // button needs a channel snapshot to compute its in-sync state.
-      window.api.twitchGetChannel?.()
-        .then(info => { if (info) setTwitchChannel(info) })
-        .catch(() => {})
+      void refreshTwitchChannel()
     })
     const offDisconnected = window.api.onTwitchDisconnected(() => setTwConnected(false))
     return () => { offConnected(); offDisconnected() }
-  }, [])
+  }, [refreshTwitchChannel])
   useEffect(() => {
     window.api.getStreamTypeTags().then(setTagColors)
     window.api.getStreamTypeTextures().then(setTagTextures)
@@ -1057,17 +1134,13 @@ export function StreamsPage({
       // can compare against actual Twitch state on first sidebar
       // open. Errors are non-fatal — the button just stays enabled
       // (which is the same behavior we had before the in-sync check).
-      if (s.connected) {
-        window.api.twitchGetChannel?.()
-          .then(info => { if (info) setTwitchChannel(info) })
-          .catch(() => {})
-      }
+      if (s.connected) void refreshTwitchChannel()
     }).catch(() => {})
     window.api.getYTTitleTemplates().then(setYtTitleTemplates).catch(() => {})
     window.api.getYTDescriptionTemplates().then(setYtDescTemplates).catch(() => {})
     window.api.getYTTagTemplates().then(setYtTagTemplates).catch(() => {})
     window.api.getTwitchTagTemplates?.().then(setTwitchTagTemplates).catch(() => {})
-  }, [])
+  }, [refreshTwitchChannel])
 
   // Lazy-load all completed VODs on first open of a past-stream picker.
   // Idempotent — guarded by ytVodsLoaded so repeat opens are no-ops.
@@ -1642,7 +1715,7 @@ export function StreamsPage({
   // was already correct. Render-phase ref assignment (same pattern as the
   // editors' localRef) keeps the closure's updateMeta fresh.
   recordTwitchPushRef.current = (streamKey, payload, categoryApplied) => {
-    setTwitchChannel(prev => ({
+    updateTwitchChannel(prev => ({
       title: payload.title,
       gameName: categoryApplied && payload.game ? payload.game : (prev?.gameName ?? ''),
       tags: [...payload.tags],
@@ -2270,6 +2343,30 @@ export function StreamsPage({
     if (netProblem === 'offline') return
     refreshOutOfSyncRef.current()
   }, [isVisible, selectedStreamKey, ytConnected, loading, folders.length, ytBroadcasts.length, ytVods.length, netProblem])
+
+  // Twitch channel panel (STR-18): re-read the channel whenever the empty
+  // state comes into view, like the out-of-sync check above, with a
+  // one-minute floor so toggling the sidebar does not hammer Twitch.
+  // Pushes seed the snapshot directly (updateTwitchChannel), so a push is
+  // reflected at once without a round trip.
+  const twitchCheckedAtRef = useRef<number | null>(null)
+  useEffect(() => { twitchCheckedAtRef.current = twitchCheckedAt }, [twitchCheckedAt])
+  useEffect(() => {
+    if (!isVisible || selectedStreamKey || !twConnected) return
+    if (netProblem === 'offline') return
+    const last = twitchCheckedAtRef.current
+    if (last !== null && Date.now() - last < 60_000) return
+    void refreshTwitchChannel()
+  }, [isVisible, selectedStreamKey, twConnected, netProblem, refreshTwitchChannel])
+
+  // The stream item whose effective Twitch details the channel currently
+  // shows (first match in list order), for the panel's "Set by" line and
+  // the row marker.
+  const twitchSourceKey = useMemo(() => {
+    if (!twConnected || !twitchChannel) return null
+    const match = folders.find(f => f.meta && streamMatchesTwitchChannel(f, folders, twitchChannel))
+    return match?.relativePath ?? null
+  }, [twConnected, twitchChannel, folders])
 
   // Eager tag-template propagation. The sidebar's lazy sync only refreshes a
   // bound stream's tags when THAT stream is opened, so editing a template
@@ -4152,6 +4249,7 @@ export function StreamsPage({
                         privacyStatus={status?.privacyStatus ?? null}
                         isLivestream={status?.isLivestream ?? null}
                         stats={status && !status.missing ? { views: status.viewCount, likes: status.likeCount, dislikes: status.dislikeCount } : null}
+                        isTwitchSource={f.relativePath === twitchSourceKey}
                         isProcessing={isProcessing}
                         linkMissing={status?.missing === true}
                         onTagSelect={handleTagSelect}
@@ -4253,6 +4351,24 @@ export function StreamsPage({
                   onSelectStream={(f) => setSelectedStreamKey(f.relativePath)}
                 />
               </div>
+              {/* Twitch channel panel (STR-18) sits above the YouTube
+                  out-of-sync panel: its height is steady, the list
+                  below grows and shrinks with what is out of sync. */}
+              {twConnected && (
+                <div className="shrink-0">
+                  <TwitchChannelPanel
+                    channel={twitchChannel}
+                    checkedAt={twitchCheckedAt}
+                    loading={twitchChannelLoading}
+                    error={twitchChannelError}
+                    offline={netProblem === 'offline'}
+                    sourceFolder={twitchSourceKey ? (folders.find(f => f.relativePath === twitchSourceKey) ?? null) : null}
+                    folders={folders}
+                    onRefresh={() => { void refreshTwitchChannel() }}
+                    onOpenStream={(f) => setSelectedStreamKey(f.relativePath)}
+                  />
+                </div>
+              )}
               {ytConnected && folders.some(f => f.meta?.ytVideoId) && (
                 <div className="flex-1 min-h-0 overflow-y-auto">
                   <OutOfSyncPanel
@@ -4367,7 +4483,7 @@ export function StreamsPage({
               ytQuota={ytQuota}
               twConnected={twConnected}
               twitchChannel={twitchChannel}
-              setTwitchChannel={setTwitchChannel}
+              setTwitchChannel={updateTwitchChannel}
               banners={banners.filter(b => b.streamKey === renderedFolder.relativePath)}
               onDismissBanner={dismissBanner}
               onMissingYtCategory={() => showBanner({
@@ -5014,7 +5130,7 @@ export function StreamsPage({
 const StreamListItem = memo(function StreamListItem({
   folder, folders, selected, compact, selectMode, multiSelected, index, onToggleMultiSelect, onModifierEnterSelect,
   onDragStart, onDragEnter, dragMovedRef,
-  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing, stats,
+  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing, stats, isTwitchSource,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   isSendingToPlayer, onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
   animDurationMs, onTagSelect, onVideoFileClick,
@@ -5085,6 +5201,9 @@ const StreamListItem = memo(function StreamListItem({
   /** Public statistics of the linked video (STR-3); null while loading or
    *  not linked. A field YouTube withholds is undefined and is skipped. */
   stats: { views?: number; likes?: number; dislikes?: number } | null
+  /** True when the Twitch channel currently shows this stream's title,
+   *  category, and tags (STR-18). Adds a Twitch badge to the date row. */
+  isTwitchSource: boolean
   /** "#2", "#3" suffix when multiple streams share a date. */
   sameDayIndex?: number
   thumbsKey: number
@@ -5351,6 +5470,16 @@ const StreamListItem = memo(function StreamListItem({
             )}
           </div>
           <div className="inline-flex gap-1">
+            {/* Twitch source marker (STR-18): the channel currently shows
+                this stream's details. Twitch brand tint, same badge
+                anatomy as the YouTube badges beside it. */}
+            {isTwitchSource && (
+              <Tooltip content="Your Twitch channel currently shows this stream’s title, category, and tags">
+                <span className="inline-flex items-center p-0.5 rounded bg-twitch-400/10 text-twitch-400 border border-twitch-400/40 shrink-0">
+                  <LucideTwitch size={12} />
+                </span>
+              </Tooltip>
+            )}
             {meta?.archived && (
               <Tooltip content="Archived">
                 <span className="inline-flex items-center p-0.5 rounded bg-green-900/30 text-green-400 border border-green-400/40 shrink-0">
@@ -8802,8 +8931,8 @@ function SidebarDetail({
           //     defensively in case Twitch strips trailing whitespace.
           //   • Tags — order is arbitrary in the response, so sort,
           //     and case-fold for the same reason as game name.
-          const twNormalize = (s: string) => s.trim().toLowerCase()
-          const twTagKey = (arr: string[]) => arr.slice().map(twNormalize).sort().join(',')
+          //   (twNormalize / twTagKey, module scope, shared with the
+          //   page-level Twitch source match.)
           //   • Title whitespace — Twitch normalizes it server-side: a
           //     pushed title containing non-breaking spaces (which the
           //     contenteditable title editor can produce) or stray
@@ -8814,8 +8943,8 @@ function SidebarDetail({
           //     pipe plus a leading newline; the channel came back
           //     with plain spaces. Collapse every whitespace run
           //     to one space on BOTH sides before comparing. Case
-          //     stays significant — Twitch preserves it.
-          const twTitleKey = (s: string) => s.replace(/\s+/g, ' ').trim()
+          //     stays significant — Twitch preserves it. (twTitleKey,
+          //     module scope.)
           // Per-field sync checks against the live Twitch channel
           // snapshot. The empty-local short-circuits on game + tags
           // mirror the push handler's actual behavior:
