@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, List, SkipBack, SkipForward, Bookmark, TriangleAlert, GripVertical, CircleHelp } from 'lucide-react'
+import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, SkipBack, SkipForward, Bookmark, TriangleAlert, GripVertical, CircleHelp } from 'lucide-react'
 import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass, getMarkerFillClass, DEFAULT_MARKER_COLOR } from '../../constants/tagColors'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
@@ -27,6 +27,8 @@ import { Checkbox } from '../ui/Checkbox'
 import { VideoRow } from '../ui/VideoRow'
 import { isClipExportCompatible } from '../../lib/clipExport'
 import { renderStreamTitle } from '../../lib/streamTitle'
+import { seriesNavFor, EMPTY_SERIES_NAV, type SeriesNav } from '../../lib/seriesNav'
+import { StreamNavButtons } from '../streams/StreamNavButtons'
 
 /** Given an absolute file path and the streams root, find the file's stream
  *  folder and the canonical key used in _meta.json:
@@ -2080,6 +2082,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       f => f.folderPath === currentStreamFolder.folderPath && f.relativePath === currentStreamFolder.relativePath,
     )
   }, [sortedStreamFolders, currentStreamFolder])
+  // Prev/next stream button tooltips (PLR-21): the date alone did not say
+  // which stream the button leads to, so the rendered title follows it.
+  const streamNavTip = (label: 'Next' | 'Previous', folder: StreamFolder | null): string => {
+    if (!folder) return `No ${label.toLowerCase()} stream`
+    const title = renderStreamTitle(folder, sortedStreamFolders).trim()
+    return title ? `${label}: ${folder.date} · ${title}` : `${label}: ${folder.date}`
+  }
   const prevStreamFolder = useMemo(() => {
     if (currentStreamIndex < 0) return null
     for (let i = currentStreamIndex - 1; i >= 0; i--) {
@@ -2094,6 +2103,23 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     }
     return null
   }, [sortedStreamFolders, currentStreamIndex])
+  // Episode neighbors within the current stream's series (PLR-27), with
+  // the same "must have a video" rule the stream pair uses: the chevrons
+  // skip episodes that have nothing to play, and the picker lists them
+  // disabled.
+  const playerSeriesNav = useMemo<SeriesNav>(() => {
+    if (!currentStreamFolder) return EMPTY_SERIES_NAV
+    const nav = seriesNavFor(currentStreamFolder, sortedStreamFolders)
+    const idx = nav.siblings.findIndex(f => f.relativePath === currentStreamFolder.relativePath)
+    if (idx < 0) return nav
+    const nearestWithVideo = (step: 1 | -1) => {
+      for (let i = idx + step; i >= 0 && i < nav.siblings.length; i += step) {
+        if (nav.siblings[i].videos.length > 0) return nav.siblings[i]
+      }
+      return null
+    }
+    return { ...nav, prev: nearestWithVideo(-1), next: nearestWithVideo(1) }
+  }, [currentStreamFolder, sortedStreamFolders])
 
   // Jump to the prev/next stream and auto-load its first audible video.
   // Prefer a 'full' recording over exported child clips/shorts (same rule
@@ -2150,42 +2176,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     if (!panelCollapsed) setSessionVideosPopupOpen(false)
   }, [panelCollapsed])
 
-  // Quick stream-jump dropdown — open this from the list-icon button in
-  // the Selected Stream header instead of clicking prev/next many times.
-  // Same anchor + dynamic max-height pattern as the Streams page filter
-  // dropdowns so it stays inside the viewport on small windows.
-  const [streamPickerOpen, setStreamPickerOpen] = useState(false)
-  // Ref is HTMLElement (not HTMLDivElement) because the anchor switches
-  // between a <div> wrapper (expanded sidebar) and a <button> (collapsed
-  // sidebar) depending on layout. We only call getBoundingClientRect on
-  // it, which is defined on HTMLElement.
-  const streamPickerAnchorRef = useRef<HTMLElement>(null)
-  const [streamPickerMaxHeight, setStreamPickerMaxHeight] = useState(600)
-  const updateStreamPickerMaxHeight = useCallback(() => {
-    if (streamPickerAnchorRef.current) {
-      const rect = streamPickerAnchorRef.current.getBoundingClientRect()
-      // Expanded mode pops the dropdown BELOW the button group, so cap
-      // by the remaining viewport height under it. Collapsed mode pops
-      // it to the LEFT of the icon button with its TOP aligned to the
-      // anchor's top — so the budget is viewport-height minus rect.top
-      // (and a small bottom margin) to keep the last row in-window.
-      setStreamPickerMaxHeight(
-        panelCollapsed
-          ? Math.max(160, window.innerHeight - rect.top - 12)
-          : window.innerHeight - rect.bottom - 12,
-      )
-    }
-  }, [panelCollapsed])
-  const openStreamPicker = useCallback(() => {
-    if (streamPickerOpen) { setStreamPickerOpen(false); return }
-    updateStreamPickerMaxHeight()
-    setStreamPickerOpen(true)
-  }, [streamPickerOpen, updateStreamPickerMaxHeight])
-  useEffect(() => {
-    if (!streamPickerOpen) return
-    window.addEventListener('resize', updateStreamPickerMaxHeight)
-    return () => window.removeEventListener('resize', updateStreamPickerMaxHeight)
-  }, [streamPickerOpen, updateStreamPickerMaxHeight])
+  // The Selected Stream block's jump list used to be every stream in the
+  // library; it is the series' episode picker now (StreamNavButtons,
+  // PLR-27). Scanning the whole library belongs on the streams page,
+  // which has thumbnails and filters for it.
 
   // Debounced save of per-track audio settings back into _meta.json. Only
   // non-default values are persisted; if every track is at defaults the
@@ -4308,6 +4302,19 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       if (k === 'Home' && !ctrl && !alt && !shift) { e.preventDefault(); flashShortcutTarget('skip-start'); seekRef.current(0); return }
       if (k === 'End'  && !ctrl && !alt && !shift) { e.preventDefault(); flashShortcutTarget('skip-end'); seekRef.current(durationRef.current); return }
 
+      // Ctrl+Up/Down — previous/next stream; Ctrl+Shift+Up/Down —
+      // previous/next episode in the series. Same keys as the streams
+      // page (PLR-27); up is next (newer), down is previous.
+      if (ctrl && !alt && (k === 'ArrowUp' || k === 'ArrowDown')) {
+        e.preventDefault()
+        const up = k === 'ArrowUp'
+        const target = shift
+          ? (up ? playerSeriesNav.next : playerSeriesNav.prev)
+          : (up ? nextStreamFolder : prevStreamFolder)
+        if (target) void navigateToStream(target)
+        return
+      }
+
       // Ctrl+Alt+Up/Down — navigate session videos
       if (ctrl && alt && !shift && (k === 'ArrowUp' || k === 'ArrowDown')) {
         e.preventDefault()
@@ -4509,6 +4516,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     }
   }, [
     isVisible,
+    prevStreamFolder, nextStreamFolder, playerSeriesNav, navigateToStream,
     clipModeModal, draftPendingDelete, showExportDialog,
     effectiveTogglePlay, skip, stepFrame, stepPlaybackRate, applyPlaybackRate, flashShortcutTarget, holdFlashTarget, startSkipRepeat, stopSkipRepeat, stopFrameRing, multiTrack, multiTrackEnabled, isExtracting,
     config.skipClipMergeWarning, exitClipMode,
@@ -6634,122 +6642,34 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   : thumbPath
                     ? <div className="w-full h-full flex items-center justify-center bg-navy-700"><Cloud size={panelCollapsed ? 12 : 16} className="text-gray-400" /></div>
                     : <div className="w-full h-full flex items-center justify-center bg-navy-700"><Film size={panelCollapsed ? 12 : 16} className="text-gray-400" /></div>
-                // Chevron convention: ▲ = next (chronologically newer),
-                // ▼ = previous (older). Expanded lays them out side-by-side
-                // with ▼ on the left and ▲ on the right; collapsed stacks
-                // them vertically with ▲ on top and ▼ on the bottom so the
-                // arrow direction matches its spatial position too.
-                // Shared stream-jump dropdown portal — same JSX for both
-                // collapsed and expanded modes; positioning differs since
-                // the anchor differs (right-edge icon vs. inline header
-                // button group). Mounted via document.body so the
-                // sidebar's overflow-hidden can't clip it.
-                const streamPickerDropdown = streamPickerOpen && streamPickerAnchorRef.current && ReactDOM.createPortal(
-                  (() => {
-                    const r = streamPickerAnchorRef.current.getBoundingClientRect()
-                    const positionStyle: React.CSSProperties = panelCollapsed
-                      ? {
-                          position: 'fixed',
-                          top: Math.max(8, r.top),
-                          right: Math.max(8, window.innerWidth - r.left + 8),
-                          zIndex: 61,
-                          maxHeight: streamPickerMaxHeight,
-                        }
-                      : {
-                          position: 'fixed',
-                          top: r.bottom + 4,
-                          right: Math.max(8, window.innerWidth - r.right),
-                          zIndex: 61,
-                          maxHeight: streamPickerMaxHeight,
-                        }
-                    return (
-                      <>
-                        <div className="fixed inset-0 z-[60]" onClick={() => setStreamPickerOpen(false)} />
-                        <div
-                          style={positionStyle}
-                          className="bg-navy-700 border border-white/10 rounded-lg shadow-xl min-w-[220px] max-w-[280px] overflow-y-auto"
-                        >
-                          {sortedStreamFolders.length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-gray-400">No streams</p>
-                          ) : sortedStreamFolders.slice().reverse().map(folder => {
-                            const fTitle = renderStreamTitle(folder, sortedStreamFolders)
-                              || folder.folderName
-                            const isCurrent = !!currentStreamFolder
-                              && folder.folderPath === currentStreamFolder.folderPath
-                              && folder.relativePath === currentStreamFolder.relativePath
-                            const empty = folder.videos.length === 0
-                            return (
-                              <Tooltip key={folder.relativePath || folder.folderPath} content={fTitle} side="left" triggerClassName="block w-full">
-                              <button
-                                onClick={() => {
-                                  if (empty || isCurrent) return
-                                  navigateToStream(folder)
-                                  setStreamPickerOpen(false)
-                                }}
-                                disabled={empty || isCurrent}
-                                className={`flex flex-col items-start w-full px-3 py-1.5 text-left transition-colors ${
-                                  isCurrent
-                                    ? 'bg-accent-600/20 text-accent-200 cursor-default'
-                                    : empty
-                                      ? 'text-gray-400 cursor-default'
-                                      : 'text-gray-300 hover:bg-white/5'
-                                }`}
-                              >
-                                <span className="text-[11px] tabular-nums leading-tight">
-                                  {folder.date}
-                                  {empty && <span className="ml-1 text-gray-400 italic">(no videos)</span>}
-                                  {isCurrent && <span className="ml-1 text-accent-400 italic">(current)</span>}
-                                </span>
-                                <span className="text-xs truncate w-full leading-tight">{fTitle}</span>
-                              </button>
-                              </Tooltip>
-                            )
-                          })}
-                        </div>
-                      </>
-                    )
-                  })(),
-                  document.body,
-                )
+                // Chevron convention: up = next (chronologically newer),
+                // down = previous (older), on both the stream and the
+                // episode pair. StreamNavButtons lays the expanded header
+                // out in a row and the collapsed rail in a column with the
+                // thumbnail between the next and previous halves, so each
+                // arrow's direction matches its place.
                 if (panelCollapsed) {
                   return (
                     <>
                       <div className="flex flex-col items-center gap-1 py-2 border-b border-white/5">
-                        <Tooltip content="Jump to stream…" side="right">
-                          <button
-                            ref={streamPickerAnchorRef as React.RefObject<HTMLButtonElement>}
-                            onClick={openStreamPicker}
-                            className={`flex items-center justify-center h-6 w-8 rounded transition-colors ${streamPickerOpen ? 'bg-white/10 text-gray-200' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
-                            aria-label="Jump to stream"
-                          >
-                            <List size={12} />
-                          </button>
-                        </Tooltip>
-                        <Tooltip content={nextStreamFolder ? `Next: ${nextStreamFolder.date}` : 'No next stream'} side="right">
-                          <button
-                            onClick={() => navigateToStream(nextStreamFolder)}
-                            disabled={!nextStreamFolder}
-                            className="flex items-center justify-center h-6 w-8 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                          >
-                            <ChevronUp size={12} />
-                          </button>
-                        </Tooltip>
-                        <Tooltip content={`${currentStreamFolder.date} — ${title}`} side="right">
-                          <div className="w-9 h-5 rounded overflow-hidden bg-navy-900 border border-white/10 shrink-0">
-                            {thumbNode}
-                          </div>
-                        </Tooltip>
-                        <Tooltip content={prevStreamFolder ? `Previous: ${prevStreamFolder.date}` : 'No previous stream'} side="right">
-                          <button
-                            onClick={() => navigateToStream(prevStreamFolder)}
-                            disabled={!prevStreamFolder}
-                            className="flex items-center justify-center h-6 w-8 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                          >
-                            <ChevronDown size={12} />
-                          </button>
-                        </Tooltip>
+                        <StreamNavButtons
+                          current={currentStreamFolder}
+                          folders={sortedStreamFolders}
+                          prevStream={prevStreamFolder}
+                          nextStream={nextStreamFolder}
+                          onPickStream={f => { void navigateToStream(f) }}
+                          series={playerSeriesNav}
+                          onPickEpisode={f => { void navigateToStream(f) }}
+                          isEpisodeUnavailable={f => f.videos.length === 0}
+                          variant="player-rail"
+                        >
+                          <Tooltip content={`${currentStreamFolder.date} · ${title}`} side="right">
+                            <div className="w-9 h-5 rounded overflow-hidden bg-navy-900 border border-white/10 shrink-0">
+                              {thumbNode}
+                            </div>
+                          </Tooltip>
+                        </StreamNavButtons>
                       </div>
-                      {streamPickerDropdown}
                     </>
                   )
                 }
@@ -6757,35 +6677,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   <div className="flex flex-col gap-1.5 p-2 border-b border-white/5">
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Selected Stream</h3>
-                      <div ref={streamPickerAnchorRef as React.RefObject<HTMLDivElement>} className="relative flex items-center gap-0.5">
-                        <Tooltip content="Jump to stream…" side="bottom">
-                          <button
-                            onClick={openStreamPicker}
-                            className={`flex items-center justify-center h-5 w-5 rounded transition-colors ${streamPickerOpen ? 'bg-white/10 text-gray-200' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
-                          >
-                            <List size={12} />
-                          </button>
-                        </Tooltip>
-                        <Tooltip content={prevStreamFolder ? `Previous: ${prevStreamFolder.date}` : 'No previous stream'} side="bottom">
-                          <button
-                            onClick={() => navigateToStream(prevStreamFolder)}
-                            disabled={!prevStreamFolder}
-                            className="flex items-center justify-center h-5 w-5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                          >
-                            <ChevronDown size={12} />
-                          </button>
-                        </Tooltip>
-                        <Tooltip content={nextStreamFolder ? `Next: ${nextStreamFolder.date}` : 'No next stream'} side="bottom">
-                          <button
-                            onClick={() => navigateToStream(nextStreamFolder)}
-                            disabled={!nextStreamFolder}
-                            className="flex items-center justify-center h-5 w-5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                          >
-                            <ChevronUp size={12} />
-                          </button>
-                        </Tooltip>
-                        {streamPickerDropdown}
-                      </div>
+                      <StreamNavButtons
+                        current={currentStreamFolder}
+                        folders={sortedStreamFolders}
+                        prevStream={prevStreamFolder}
+                        nextStream={nextStreamFolder}
+                        onPickStream={f => { void navigateToStream(f) }}
+                        series={playerSeriesNav}
+                        onPickEpisode={f => { void navigateToStream(f) }}
+                        isEpisodeUnavailable={f => f.videos.length === 0}
+                        variant="player"
+                      />
                     </div>
                     <div className="flex items-start gap-2">
                       <div className="w-16 h-9 rounded overflow-hidden bg-navy-900 border border-white/10 shrink-0">

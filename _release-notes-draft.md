@@ -36,6 +36,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 ## Player
 
+- Stream and episode navigation is the same in both places now. The stream detail sidebar gains previous and next stream buttons beside its episode buttons, and the player's Selected Stream block gains previous and next episode buttons with a jump-to-episode list, in place of its old list of every stream. The player also takes the streams page's shortcuts: Ctrl with the up and down arrows walks streams, Ctrl+Shift walks episodes. Every button's tooltip names the stream it leads to.
 - The minute skips have keyboard shortcuts now: Alt with the arrow keys skips one minute, Alt+Shift skips five. They repeat while held like the second skips, and the buttons' tooltips and the Help panel show them.
 
 ## Integrations

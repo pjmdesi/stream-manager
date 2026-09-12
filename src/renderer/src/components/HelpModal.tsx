@@ -246,6 +246,8 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           <ShortcutGroup title="File & capture" rows={[
             { keys: ['Ctrl', 'O'], label: 'Open video file' },
             { keys: ['Ctrl', 'Shift', 'S'], label: 'Capture screenshot' },
+            { keys: ['Ctrl', '↑/↓'], label: 'Next / previous stream' },
+            { keys: ['Ctrl', 'Shift', '↑/↓'], label: 'Next / previous episode in the series' },
             { keys: ['Ctrl', 'Alt', '↑/↓'], label: 'Previous / next session item' },
           ]} />
           <ShortcutGroup title="Clip mode" rows={[

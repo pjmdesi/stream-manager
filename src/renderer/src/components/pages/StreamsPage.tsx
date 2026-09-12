@@ -3,9 +3,9 @@ import { useAdaptivePoll } from '../../hooks/useAdaptivePoll'
 import ReactDOM from 'react-dom'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
-  Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ChevronsDown, ChevronsUp, X,
+  Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, X,
   Film, Zap, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
-  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon, ListRestart, Eye, WifiOff, CloudOff, ThumbsUp, ThumbsDown,
+  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon, ListRestart, Eye, WifiOff, CloudOff, ThumbsUp, ThumbsDown,
 } from 'lucide-react'
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { Tooltip } from '../ui/Tooltip'
@@ -52,6 +52,8 @@ import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisod
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import { TwitchChannelPanel } from '../streams/TwitchChannelPanel'
+import { StreamNavButtons } from '../streams/StreamNavButtons'
+import { seriesNavFor } from '../../lib/seriesNav'
 import type { StreamFolder, StreamMeta, AiSuggestField, LibrarySize, LibrarySizeBucket } from '../../types'
 
 /** 1234 → "1.2K", 1500000 → "1.5M"; below a thousand the plain number. */
@@ -3306,45 +3308,24 @@ export function StreamsPage({
   // The display-side sibling lookup (e.g. SeriesEpisodesTooltip) uses
   // reverse-chronological order, but navigation uses episode order so the
   // semantics of prev/next match user expectation.
-  const seriesNav = useMemo(() => {
-    const empty = { prev: null as StreamFolder | null, next: null as StreamFolder | null, siblings: [] as StreamFolder[] }
-    if (!selectedFolder) return empty
-    // Standalone streams have no siblings concept — short-circuit so the
-    // sidebar header renders its empty state (no prev/next arrows, no
-    // picker, New Episode button disabled).
-    if (isStandalone(selectedFolder.meta)) return empty
-    // The user-selected primary (drag-reorder / tag-field selection), not
-    // blindly games[0] — and membership is primary-only so a stream that
-    // carries this game as a secondary tag doesn't appear as an episode.
-    const primaryGame = resolvePrimaryGame(selectedFolder.meta) || selectedFolder.detectedGames?.[0]
-    if (!primaryGame) return empty
-    // `|| '1'` (not `?? '1'`) so empty strings also collapse to the first
-    // season — clearing the field via the input should still associate
-    // with siblings that have season undefined OR ''.
-    const season = selectedFolder.meta?.ytSeason || '1'
-    const list = folders
-      .filter(f =>
-        !f.isMissing &&
-        !isStandalone(f.meta) &&
-        isPrimaryGameOf(f, primaryGame) &&
-        (f.meta?.ytSeason || '1') === season
-      )
-      .sort((a, b) => {
-        const epA = parseInt(a.meta?.ytEpisode ?? '', 10)
-        const epB = parseInt(b.meta?.ytEpisode ?? '', 10)
-        return (isNaN(epA) ? Infinity : epA) - (isNaN(epB) ? Infinity : epB)
-      })
-    const idx = list.findIndex(f => f.relativePath === selectedFolder.relativePath)
+  // Episode neighbors + full sibling list for the selected stream. The
+  // logic lives in lib/seriesNav so the player's Selected Stream block
+  // computes the same thing (PLR-27).
+  const seriesNav = useMemo(() => seriesNavFor(selectedFolder, folders), [folders, selectedFolder])
+  // Stream neighbors for the sidebar header's prev/next stream buttons:
+  // the visible list in its on-screen order, exactly what Ctrl+Up/Down
+  // does below, so the button and its shortcut chip always agree. Down
+  // the list is "previous" (older under the default newest-first sort).
+  const streamNav = useMemo(() => {
+    const empty = { prev: null as StreamFolder | null, next: null as StreamFolder | null }
+    if (!selectedStreamKey) return empty
+    const idx = visibleFolders.findIndex(f => f.relativePath === selectedStreamKey)
+    if (idx === -1) return empty
     return {
-      prev: idx > 0 ? list[idx - 1] : null,
-      next: idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null,
-      // Full episode list (same game + season as the selected stream),
-      // sorted by episode number. Surfaced to the sidebar so the
-      // jump-to-episode picker can list siblings beyond the immediate
-      // prev/next pair.
-      siblings: list,
+      prev: idx < visibleFolders.length - 1 ? visibleFolders[idx + 1] : null,
+      next: idx > 0 ? visibleFolders[idx - 1] : null,
     }
-  }, [folders, selectedFolder])
+  }, [visibleFolders, selectedStreamKey])
 
   // ── Streams-page keyboard shortcuts ────────────────────────────────────────
   // Active only while the streams page is visible and no modal is open. Esc is
@@ -4419,6 +4400,9 @@ export function StreamsPage({
               nextEpisode={seriesNav.next}
               seriesEpisodes={seriesNav.siblings}
               onPickEpisode={(f) => setSelectedStreamKey(f.relativePath)}
+              prevStream={streamNav.prev}
+              nextStream={streamNav.next}
+              onPickStream={(f) => setSelectedStreamKey(f.relativePath)}
               onClose={() => setSelectedStreamKey(null)}
               onUpdateMeta={partial => updateMeta(renderedFolder.relativePath, partial)}
               onUpdateMetaFor={updateMeta}
@@ -6222,7 +6206,7 @@ const META_HISTORY_SKIP = new Set<string>([
  *  state stays cleanly separated and the metadata + action layout can
  *  evolve independently. */
 function SidebarDetail({
-  folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, onClose, onUpdateMeta: onUpdateMetaRaw, onUpdateMetaFor, cloudSyncActive,
+  folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, prevStream, nextStream, onPickStream, onClose, onUpdateMeta: onUpdateMetaRaw, onUpdateMetaFor, cloudSyncActive,
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
   ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
@@ -6242,6 +6226,11 @@ function SidebarDetail({
    *  jump-to-episode picker in the sidebar header. */
   seriesEpisodes: StreamFolder[]
   onPickEpisode: (f: StreamFolder) => void
+  /** Adjacent streams in the visible list (PLR-27), for the header's
+   *  prev/next stream buttons; null at either end. */
+  prevStream: StreamFolder | null
+  nextStream: StreamFolder | null
+  onPickStream: (f: StreamFolder) => void
   onClose: () => void
   onUpdateMeta: (partial: Partial<StreamMeta>) => Promise<void> | void
   /** Targeted meta write for ASYNC handlers, keyed by the canonical stream
@@ -6502,16 +6491,6 @@ function SidebarDetail({
   // Convenience destructure — used in the YT push/pull soft-blocks and
   // the auto-refresh skip.
   const quotaExceeded = ytQuota.exceeded
-
-  // Jump-to-episode picker (sidebar header) — click-based dropdown
-  // listing every sibling in the current series + season. Mirrors the
-  // PlayerPage's stream picker UX (click List icon → portal-rendered
-  // dropdown → click outside or pick row to close). Reset whenever the
-  // selected stream changes so a click in one stream doesn't leave the
-  // picker open in the next.
-  const [episodePickerOpen, setEpisodePickerOpen] = useState(false)
-  const episodePickerAnchorRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => { setEpisodePickerOpen(false) }, [folder.folderPath])
 
   // Title's template binding lives in meta (`ytTitleTemplateId`) so it
   // survives stream switches and app restarts. Description / tag template
@@ -7633,55 +7612,20 @@ function SidebarDetail({
               })()}
             </button>
           </Tooltip>
-          {(prevEpisode || nextEpisode || isStandalone(meta)) && (
-            <div className="flex items-center gap-0.5">
-              {/* Jump-to-episode — only meaningful when there are
-                  siblings beyond the immediate prev/next. With exactly
-                  two episodes the chevrons already cover the navigation
-                  and a picker would be redundant. Sits to the LEFT of
-                  the chevrons to match PlayerPage's [List, Prev, Next]
-                  ordering. Not rendered for standalone streams (no
-                  siblings concept) — just the disabled chevrons remain
-                  as a visible affordance. */}
-              {seriesEpisodes.length > 2 && (
-                <Tooltip content="Jump to episode…" side="bottom">
-                  <button
-                    ref={episodePickerAnchorRef}
-                    type="button"
-                    onClick={() => setEpisodePickerOpen(v => !v)}
-                    className={`p-1 rounded transition-colors ${
-                      episodePickerOpen
-                        ? 'bg-white/10 text-gray-200'
-                        : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                    }`}
-                    aria-label="Jump to episode"
-                  >
-                    <List size={13} />
-                  </button>
-                </Tooltip>
-              )}
-              <Tooltip content={prevEpisode ? `Previous episode (E${prevEpisode.meta?.ytEpisode || '?'})` : 'No previous episode'} side="bottom" shortcut={prevEpisode ? 'Ctrl+Shift+↓' : undefined}>
-                <button
-                  type="button"
-                  onClick={() => prevEpisode && onPickEpisode(prevEpisode)}
-                  disabled={!prevEpisode}
-                  className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400"
-                >
-                  <ChevronsDown size={13} />
-                </button>
-              </Tooltip>
-              <Tooltip content={nextEpisode ? `Next episode (E${nextEpisode.meta?.ytEpisode || '?'})` : 'No next episode'} side="bottom" shortcut={nextEpisode ? 'Ctrl+Shift+↑' : undefined}>
-                <button
-                  type="button"
-                  onClick={() => nextEpisode && onPickEpisode(nextEpisode)}
-                  disabled={!nextEpisode}
-                  className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400"
-                >
-                  <ChevronsUp size={13} />
-                </button>
-              </Tooltip>
-            </div>
-          )}
+          {/* Stream and episode navigation (PLR-27): the shared
+              StreamNavButtons, same buttons and keys as the player's
+              Selected Stream block. The stream pair walks the visible
+              list (what Ctrl+Up/Down does), the episode pair the series. */}
+          <StreamNavButtons
+            current={folder}
+            folders={folders}
+            prevStream={prevStream}
+            nextStream={nextStream}
+            onPickStream={onPickStream}
+            series={{ prev: prevEpisode, next: nextEpisode, siblings: seriesEpisodes }}
+            onPickEpisode={onPickEpisode}
+            variant="sidebar"
+          />
           {/* New episode — series functionality, so it lives with the episode
               navigation (sidebar-reorg phase a; moved up from the footer's
               button pile). OUTSIDE the nav group above: that group is hidden
@@ -7702,77 +7646,6 @@ function SidebarDetail({
               <CollapsibleLabel expandClass="@md:grid-cols-[1fr] @md:ms-0" collapsedMarginStart="-ms-1">New episode</CollapsibleLabel>
             </button>
           </Tooltip>
-          {/* Picker dropdown — portal-rendered so the sidebar's
-              overflow-hidden + scrolling content can't clip it.
-              Anchored to the List button's screen rect; flips to drop
-              up if the button is in the bottom half of the viewport,
-              and clamps height into the available space either way.
-              Click outside or pick a row → close. */}
-          {episodePickerOpen && episodePickerAnchorRef.current && ReactDOM.createPortal(
-            (() => {
-              const r = episodePickerAnchorRef.current.getBoundingClientRect()
-              const dropUp = r.top > window.innerHeight / 2
-              const positionStyle: React.CSSProperties = dropUp
-                ? {
-                    position: 'fixed',
-                    bottom: window.innerHeight - r.top + 4,
-                    right: Math.max(8, window.innerWidth - r.right),
-                    zIndex: 61,
-                    maxHeight: Math.max(160, r.top - 16),
-                  }
-                : {
-                    position: 'fixed',
-                    top: r.bottom + 4,
-                    right: Math.max(8, window.innerWidth - r.right),
-                    zIndex: 61,
-                    maxHeight: Math.max(160, window.innerHeight - r.bottom - 16),
-                  }
-              return (
-                <>
-                  <div className="fixed inset-0 z-[60]" onClick={() => setEpisodePickerOpen(false)} />
-                  <div
-                    style={positionStyle}
-                    className="bg-navy-700 border border-white/10 rounded-lg shadow-xl min-w-[240px] max-w-[320px] overflow-y-auto py-1"
-                  >
-                    {/* Reverse-chronological display order — newest
-                        episode at top — even though seriesEpisodes is
-                        sorted ascending by episode number for the
-                        prev/next semantics elsewhere. `.slice()` copies
-                        the array so the reverse() doesn't mutate the
-                        memoized list. */}
-                    {seriesEpisodes.slice().reverse().map(ep => {
-                      const isCurrent = ep.folderPath === folder.folderPath
-                      const epNum = ep.meta?.ytEpisode || '?'
-                      const epTitle = renderStreamTitle(ep, folders)
-                      return (
-                        <button
-                          key={ep.folderPath}
-                          type="button"
-                          onClick={() => {
-                            if (isCurrent) return
-                            onPickEpisode(ep)
-                            setEpisodePickerOpen(false)
-                          }}
-                          disabled={isCurrent}
-                          className={`flex items-baseline gap-2 w-full px-3 py-1 text-xs text-left transition-colors ${
-                            isCurrent
-                              ? 'bg-accent-900/25 text-accent-300 cursor-default'
-                              : 'text-gray-300 hover:bg-white/5'
-                          }`}
-                        >
-                          <span className={`tabular-nums shrink-0 w-6 text-right ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>{epNum}:</span>
-                          <span className={`tabular-nums shrink-0 ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>{ep.date}</span>
-                          <span className={`shrink-0 ${isCurrent ? 'text-accent-300' : 'text-gray-400'}`}>·</span>
-                          <TruncatedText text={epTitle} className={`truncate ${isCurrent ? 'text-accent-300 font-medium' : 'text-gray-200'}`} />
-                        </button>
-                      )
-                    })}
-                  </div>
-                </>
-              )
-            })(),
-            document.body,
-          )}
           {/* Archived flag — marks the stream archived (excludes it from the
               "pending" set). In normal flow after the date/nav cluster: it
               used to be absolutely centered in the header row, but at minimum

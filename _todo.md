@@ -19,17 +19,20 @@
 15. STR-18
 16. PLR-2
 17. PLR-21
-18. PLR-23
-19. PLR-24
-20. STR-21
-21. COMB-3
-22. COMB-4
-23. THU-1
-24. THU-8
-25. THU-9
-26. THU-10
-27. THU-12
-28. THU-16
+18. PLR-27
+19. PLR-23
+20. PLR-24
+21. STR-21
+22. COMB-3
+23. COMB-4
+24. THU-1
+25. THU-8
+26. THU-9
+27. THU-10
+28. THU-12
+29. THU-16
+30. STR-17
+31. STR-22
 
 ## Improvement ideas
 
@@ -102,8 +105,8 @@
   - Copy: extend the Lossless Copy preset's description (and possibly name) to include repair as one of its functions, in the preset UI and the Help modal's converter entry (currently framed only as container compatibility / OBS Remux Recordings equivalent).
 
 - **STR-17** [perf]
-  Stream item rows render their thumbnails as full-size images (usually 1280x720) scaled down by CSS to the thumbnail column width (85-170px), so Chromium keeps re-interpolating a large bitmap, including during the row hover zoom animation. Likely a contributor to slowness and hitching while the streams page is open. Reuse the canvas downscaler that already serves the recents rows on the player and thumbnail overview pages (SmoothThumb in RecentRow.tsx): resample once into a canvas at the displayed size times devicePixelRatio so the compositor works with a small texture from then on. Constraints: it must sit behind ThumbImage's cloud-aware state machine (placeholder/syncing states unchanged), and the live thumbnail-column resize drag must not trigger a full resample per frame per row (debounce the redraw; the canvas can CSS-stretch during the drag and re-sharpen on settle).
-  2026-09-06: attempted as a v2.6.0 ride-along, shipped, and reverted the same day. The swap itself worked (a downscale mode on ThumbImage rendering through SmoothThumb, with debounced resize redraws) and the animation gain was marginal at best, but it introduced a worse problem: on app start the thumbnail column sat blank for a few seconds, because 200+ rows each decode the full image and run the resample chain on the main thread before anything paints, where the old img tags painted progressively from cache. A future pass must make the resample non-blocking: paint the raw img immediately and swap in the resampled canvas when it is ready, stagger the work over idle time (or only for rows near the viewport, which pairs with STR-4), or persist resampled versions to disk. The reverted implementation is in git history (the STR-17 commit and its revert).
+  Stream item rows render their thumbnails as full-size images (usually 1280x720) scaled down by CSS to the thumbnail column width (85-170px), so Chromium keeps re-interpolating a large bitmap, including during the row hover zoom animation. Likely a contributor to slowness and hitching while the streams page is open. Reuse the canvas downscaler that already serves the recents rows on the player and thumbnail overview pages (SmoothThumb in RecentRow.tsx): resample once into a canvas at the max display size of the thumbnail column times devicePixelRatio so the compositor works with a small texture from then on. Constraints: it must sit behind ThumbImage's cloud-aware state machine (placeholder/syncing states unchanged), and the live thumbnail-column resize drag must not trigger a resample at all.
+  2026-09-06: attempted as a v2.6.0 ride-along, shipped, and reverted the same day. The swap itself worked (a downscale mode on ThumbImage rendering through SmoothThumb, with debounced resize redraws) and the animation gain was marginal at best, but it introduced a worse problem: on app start the thumbnail column sat blank for a few seconds, because 200+ rows each decode the full image and run the resample chain on the main thread before anything paints, where the old img tags painted progressively from cache. A future pass must make the resample non-blocking: paint the raw img immediately and swap in the resampled canvas when it is ready, stagger the work over idle time (or only for rows near the viewport, which pairs with STR-4), or persist resampled versions to disk. The reverted implementation is in git history (the STR-17 commit and its revert). Also save the resampled images to the cache, replaced when updated, and loaded from cache when they are needed.
 
 - **STR-18** [done]
   Extend the functionality of the closed detail sidebar to also show what the user's twitch channel is currently displaying. This can help them know what their channel is set to without having to check the actual stream item is should be. It should sync on startup like the youtube sync panel does and it should also trigger to update whenever anything is pushed to twitch. I'm not sure if we should add the ability for users to use this new panel to also manually change the twitch details (to that which does not match a stream item). That would have other implications especially when it comes to the auto-update functionality of SM. We could also add a tag to the stream item rows info column (similar to the YouTube one) that marks the stream item as the source of the current twitch details.
@@ -125,7 +128,7 @@
 
 ### Player
 
-- **PLR-2** [needs-design]
+- **PLR-2** [needs-design] [done]
   Add shortcut options to the remaining default skip buttons. This was skipped at first because I was unsure which ones to use. Alt is obviously available, but what's the correct combination? alt+ ->/<- for 1m and alt+shift+ ->/<- for 10m? Or alt+ctrl+ ->/<- for 1m and alt+shift+ ->/<- for 5m? Or something else? Whatever we choose, the tooltips and animation will need to be updated to include these new shortcuts.
   Built 2026-09-12, awaiting review. Decision: Alt+Left/Right skips 1m, Alt+Shift+Left/Right skips 5m. Reasoning: it continues the existing ladder (Shift is the small step in each tier, a new base modifier opens the next tier: Shift 1s, Ctrl 5s, Ctrl+Shift 10s, Alt 1m, Alt+Shift 5m); Ctrl+Alt stays the navigation family (Ctrl+Alt+Up/Down) and is the Intel display-rotation hotkey on many Windows machines, so it remains reserved. Known caveat: Left Alt+Shift is Windows' input-language toggle, so a user with two keyboard layouts may find the layout switched after a 5m skip; single-layout setups never see it. Wiring: the keydown ladder gained the Alt tier (hold-to-repeat and the looping button ring come for free through startSkipRepeat, which keys the flash target off the amount), the skip buttons' tooltip shortcut chips cover 1m and 5m, and Help lists both. Confirmed before building: tapping Alt does not reveal the hidden menu bar.
 
@@ -142,7 +145,7 @@
   Investigate replacing the default chromium video & audio player functionality with something more stable, compatible and feature-rich. We've hacked a lot of heavy features around chrome's limitations. While it works well, I'm not confident its sustainable nor stable on machines with less performance than mine, especially as we add new features in the future. I suspect there's no way to expose a different framework inside of a React/Electron page, but it's worth investigating anyway.
 
 - **PLR-10**
-  Currently, the crop tool in the clipping mode has no undo functionality. The user should be able to move/resize the crop region and then undo/redo it. The only option right now is to reset it with th ebutton in the toolbar.
+  Currently, the crop tool in the clipping mode has no undo functionality. The user should be able to move/resize the crop region and then undo/redo it. The only option right now is to reset it with the button in the toolbar.
 
 - **PLR-15** [maybe]
   Zoom and pan inside the pop-out video window (scroll wheel to zoom at the cursor, drag to pan), so a streamer can zoom in on something they want to show on stream directly in the capture window. Context (2026-09-06): the MAIN stage already has wheel zoom + middle-drag pan, but the crop controls moved onto the stage and are hidden while the video is popped out, so the popup itself is the right home for "zoom in on this for the viewers". The popup is its own BrowserWindow, so it needs its own input handling rather than reusing the stage's.
@@ -170,6 +173,11 @@
 
 - **PLR-21**
   The previous/next episode button tooltips in the player sidebar need to show the title of the respective stream items, not just the date.
+  Built 2026-09-12, awaiting review. The four prev/next stream tooltips in the player's Selected Stream block (expanded and collapsed sidebar variants) read "Next: 2025-03-11 · [rendered stream title]" via renderStreamTitle, falling back to the date alone when the title renders empty; tooltip width widened to max-w-sm for long titles. The disabled-state copy ("No next stream") is unchanged. Superseded the same day by PLR-27, whose shared component carries the same wording ("Next stream: date · title").
+
+- **PLR-27** [ui]
+  Unify stream and episode navigation between the stream-detail sidebar header and the player's Selected Stream block. Before: the sidebar had episode buttons (and Ctrl+Up/Down for streams as keyboard-only), the player had stream buttons and an all-streams jump list, and neither had the other pair. Build one shared component with both pairs (single chevrons for adjacent streams, double chevrons for episodes within the series, up is next on both) plus the jump-to-episode picker, use it in both places, give the player the same shortcuts as the streams page (Ctrl+Up/Down streams, Ctrl+Shift+Up/Down episodes), and drop the player's all-streams picker: it had no search or thumbnails, and scanning the whole library is what the streams page is for.
+  Built 2026-09-12, awaiting review. New `components/streams/StreamNavButtons.tsx` (row layout for the sidebar header and the player's expanded block, column layout for the player's collapsed rail with the thumbnail slotted between the next and previous halves; three size variants; episode group hidden for a single-episode series, disabled for standalone; picker once the series has more than two episodes, portal-rendered, opens left in the rail; tooltips name the target with date and title; shortcut chips from `STREAM_NAV_SHORTCUTS`). The episode-sibling logic moved from the streams page into `lib/seriesNav.ts` (`seriesNavFor`) so the player computes the same thing; `isStandalone` is exported from lib/streamTitle. Streams page: the sidebar gains prev/next stream buttons fed by the visible list in on-screen order (what Ctrl+Up/Down already does, so button and chip agree; down the list is "previous"), and the old in-sidebar episode picker state and portal are gone. Player: prev/next episode buttons and the episode picker replace the all-streams picker; episodes without a video are skipped by the chevrons and listed disabled in the picker; Ctrl+Up/Down and Ctrl+Shift+Up/Down added to the key handler; Help lists both. Known edge: with the streams list sorted oldest-first, "previous stream" still means the row below.
 
 - **PLR-22**
   Add buttons & keyboard shortcuts to be able to skip to next/previous markers in an open video.
@@ -298,7 +306,7 @@
 
 ### Launcher
 
-- **LNCH-1** [needs-design]
+- **LNCH-1** [needs-design] [investigate]
   Add the ability for the launcher to track which of the apps in each launch group are still open and allow the user to quit them from the launcher. Need to discuss design. We could also add more options to the launcher group items after this such as 2 boolean options: Close with group (checked by default, unchecked means it won't quit when the user clicks the "Quit Group", for example, an app that the user would like to keep open after streaming), and Allow multiple instances (unchecked by default, checked means the app could be attempted to be launched multiple times when the group or individual launch buttons are clicked. Might need to check if it's possible to know if an app can have multiple instances so there's a smaller chance of conflict. If we can, the checkbox would not appear for those apps).
 
 ### Integrations
@@ -309,7 +317,7 @@
 ### YouTube & Twitch sync
 
 - **SYNC-1**
-  Add support for different audio language options for stream items to sync with the field in YouTube (and possible Twitch, need to see how that works). Possibly a "default language" setting in the settings page for the user to set their default language for new stream items and an override option in the stream item details sidebar to change it for a specific stream item. This would be useful for users who stream in multiple languages or want to set a different language for a specific stream item.
+  Add support for different audio language options for stream items to sync with the field in YouTube (and possibly Twitch, need to see how that works). Possibly a "default language" setting in the settings page for the user to set their default language for new stream items and an override option in the stream item details sidebar to change it for a specific stream item. This would be useful for users who stream in multiple languages or want to set a different language for a specific stream item.
 
 - **SYNC-2**
   Perceptual image comparison for thumbnails, to suppress false-positive "thumbnail mismatched" flags. Today the thumbnail out-of-sync check is an exact sha1-of-bytes match against the last-synced hash, so it flags byte-level differences that aren't actually visual changes — e.g. re-saving the same image as PNG instead of JPEG, or YouTube's own recompression. Add a perceptual comparison between the local thumbnail and YouTube's current thumbnail, with a tuned threshold that ignores compression/format noise but still catches real edits (a changed text object, a moved element, etc.). This AUGMENTS the existing sha1 check to suppress false positives — it shouldn't replace the "did I change my local file" detection. Implementation notes: the bundled ffmpeg already has SSIM/PSNR + `blend=difference` filters, so SSIM is the cleanest path (no new dependency); pHash is too coarse to catch small text edits. Conceptually it's a local-vs-YouTube *visual* check (distinct from today's local-vs-snapshot hash). Gotchas: comparing against YouTube's served (recompressed) thumbnail means a "match" is never pure black, so the threshold must tolerate compression noise; normalize resolution first (YouTube serves several sizes); fetching the YT thumbnail is a public image (no API quota) but should be cached and only recomputed when the local thumbnail changes. Only needs to run for cases like swapping the thumbnail to a new file (e.g. PNG instead of JPG, otherwise identical) and a few other edge cases. Use case: When a stream item is not linked to a YouTube video, and the user links it using the linked video section in the detail sidebar footer, it will compare the set stream item thumbnail (if it has one) visually to the thumbnail assigned to the video in YouTube, and if they match below the threshold, the YouTube thumbnail file won't save into the stream item and the thumbnail field won't show as mismatched.

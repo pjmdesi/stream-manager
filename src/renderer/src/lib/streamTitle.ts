@@ -22,7 +22,7 @@ export function applyMergeFields(template: string, fields: Record<string, string
 /** A stream is "standalone" (not part of a series) only when explicitly
  *  flagged. Legacy `undefined` stays a series so older files keep their
  *  season/episode merge fields. */
-function isStandalone(meta: StreamMeta | null | undefined): boolean {
+export function isStandalone(meta: StreamMeta | null | undefined): boolean {
   return meta?.isSeries === false
 }
 
