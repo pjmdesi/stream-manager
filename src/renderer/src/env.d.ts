@@ -236,8 +236,8 @@ declare global {
       onYouTubeConnected(cb: () => void): () => void
       onYouTubeDisconnected(cb: () => void): () => void
       youtubeDisconnect(): Promise<void>
-      youtubeGetVideoStatuses(videoIds: string[]): Promise<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean; missing?: boolean }> | null>
-      youtubeGetVideoStatusCache(): Promise<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean }>>
+      youtubeGetVideoStatuses(videoIds: string[]): Promise<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean; missing?: boolean; viewCount?: number; likeCount?: number; dislikeCount?: number }> | null>
+      youtubeGetVideoStatusCache(): Promise<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean; viewCount?: number; likeCount?: number; dislikeCount?: number }>>
       netCheckInternet(): Promise<boolean>
       youtubeCheckBroadcastsAreLive(broadcastIds: string[]): Promise<Record<string, { isLive: boolean; privacyStatus: string | null }>>
       youtubeGetBroadcasts(): Promise<LiveBroadcast[]>

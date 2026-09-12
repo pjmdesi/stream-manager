@@ -636,11 +636,16 @@ export interface VideoStatus {
    *  visible to this account). Lets the UI flag dead links explicitly rather
    *  than leaving them indistinguishable from a not-yet-fetched status. */
   missing?: boolean
+  /** Public statistics (STR-3), absent when YouTube withholds them (the
+   *  owner always gets dislikes; view counts can be hidden per video). */
+  viewCount?: number
+  likeCount?: number
+  dislikeCount?: number
 }
 
-/** Fetch privacy + livestream-or-not status for a list of video IDs.
- *  Chunks requests to stay within the API's 50-ID-per-request limit.
- *  Returns a map of videoId → status. */
+/** Fetch privacy, livestream-or-not status, and statistics for a list of
+ *  video IDs. One videos.list call per 50 ids; the statistics part rides
+ *  in the same call at no extra quota. Returns a map of videoId → status. */
 export async function fetchVideoStatuses(
   ids: string[],
   clientId: string,
@@ -651,7 +656,7 @@ export async function fetchVideoStatuses(
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50)
     const data = await ytRequest(
-      `/videos?${new URLSearchParams({ part: 'status,liveStreamingDetails', id: chunk.join(','), maxResults: '50' })}`,
+      `/videos?${new URLSearchParams({ part: 'status,liveStreamingDetails,statistics', id: chunk.join(','), maxResults: '50' })}`,
       { method: 'GET' },
       clientId, clientSecret
     )
@@ -661,6 +666,13 @@ export async function fetchVideoStatuses(
     // should warn about) instead of being left out of the map entirely
     // (indistinguishable from "not fetched yet").
     const returned = new Set<string>()
+    // Statistics arrive as decimal strings; a field YouTube withholds is
+    // simply absent, and stays undefined here.
+    const count = (v: unknown): number | undefined => {
+      if (typeof v !== 'string' && typeof v !== 'number') return undefined
+      const n = Number(v)
+      return Number.isFinite(n) ? n : undefined
+    }
     for (const item of (data?.items ?? [])) {
       if (item.id) returned.add(item.id)
       if (!item.status?.privacyStatus) continue
@@ -669,6 +681,9 @@ export async function fetchVideoStatuses(
         isLivestream: !!item.liveStreamingDetails,
         uploadStatus: item.status.uploadStatus ?? 'processed',
         hasEnded: !!item.liveStreamingDetails?.actualEndTime,
+        viewCount: count(item.statistics?.viewCount),
+        likeCount: count(item.statistics?.likeCount),
+        dislikeCount: count(item.statistics?.dislikeCount),
       })
     }
     for (const id of chunk) {

@@ -24,7 +24,7 @@ function getCreds() {
 // file is synced, backed up user data). `missing` is never cached so a
 // stale "video deleted" warning can't resurrect from disk; a genuinely
 // missing id is also evicted, for the same reason.
-const ytStatusCache = new Store<{ statuses: Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean }> }>({
+const ytStatusCache = new Store<{ statuses: Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus: string; hasEnded?: boolean; viewCount?: number; likeCount?: number; dislikeCount?: number }> }>({
   name: 'yt-status-cache',
   defaults: { statuses: {} },
 })
@@ -157,7 +157,7 @@ export function registerYouTubeIPC(): void {
         const merged: typeof prev = { ...prev }
         for (const [id, st] of Object.entries(obj)) {
           if (st.missing) { delete merged[id]; continue }
-          merged[id] = { privacyStatus: st.privacyStatus, isLivestream: st.isLivestream, uploadStatus: st.uploadStatus ?? 'processed', hasEnded: st.hasEnded }
+          merged[id] = { privacyStatus: st.privacyStatus, isLivestream: st.isLivestream, uploadStatus: st.uploadStatus ?? 'processed', hasEnded: st.hasEnded, viewCount: st.viewCount, likeCount: st.likeCount, dislikeCount: st.dislikeCount }
         }
         // Soft cap — once unlinked videos have accumulated past this,
         // keep only the ids from the current fetch.

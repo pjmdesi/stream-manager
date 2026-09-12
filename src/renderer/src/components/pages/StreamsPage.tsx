@@ -5,7 +5,7 @@ import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import {
   Radio, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, ChevronsDown, ChevronsUp, X,
   Film, Zap, CopyPlus, Cloud, CloudDownload, FolderOpen, Archive, Trash2, PencilLine, Plus,
-  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon, ListRestart, Eye, WifiOff, CloudOff,
+  Image as ImageIcon, AlertTriangle, Loader2, ImageOff, Unlink2, List, ListFilter, GripHorizontal, Clapperboard, Square, CheckCheck, Check, ListChecks, Scissors, Tags, SquareDashedText, RefreshCw, Settings as SettingsIcon, ListRestart, Eye, WifiOff, CloudOff, ThumbsUp, ThumbsDown,
 } from 'lucide-react'
 import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIcons'
 import { Tooltip } from '../ui/Tooltip'
@@ -52,6 +52,13 @@ import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisod
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import type { StreamFolder, StreamMeta, AiSuggestField, LibrarySize, LibrarySizeBucket } from '../../types'
+
+/** 1234 → "1.2K", 1500000 → "1.5M"; below a thousand the plain number. */
+function compactCount(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '')}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, '')}K`
+  return String(n)
+}
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2)} TB`
@@ -1082,7 +1089,7 @@ export function StreamsPage({
   // Refreshed whenever the set of linked ids changes. Drives the row's
   // status badge in the date column (privacy icon + Radio/Clapperboard
   // distinguishing live broadcasts from regular video uploads).
-  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus?: string; hasEnded?: boolean; missing?: boolean }>>({})
+  const [ytVideoStatusMap, setYtVideoStatusMap] = useState<Record<string, { privacyStatus: string; isLivestream: boolean; uploadStatus?: string; hasEnded?: boolean; missing?: boolean; viewCount?: number; likeCount?: number; dislikeCount?: number }>>({})
   // Stable string key — depending on `folders` directly would re-fire the
   // batch on every loadFolders refresh, even when the linked-id set is
   // unchanged. Costly on large libraries.
@@ -3618,7 +3625,9 @@ export function StreamsPage({
                   </button>
                 </Tooltip>
               </h1>
-              <p className="text-xs text-gray-400 mt-0.5">
+              {/* A div, not a p: the library-size tooltip's trigger and
+                  content are block elements, which a p may not contain. */}
+              <div className="text-xs text-gray-400 mt-0.5">
                 {loading
                   ? 'Loading…'
                   : selectMode
@@ -3630,12 +3639,17 @@ export function StreamsPage({
                       : (
                         <>
                           {folders.length} item{folders.length === 1 ? '' : 's'}
-                          {librarySize && librarySize.total.count > 0 && (
-                            <> · <LibrarySizeStat size={librarySize} /></>
-                          )}
+                          {/* Spinner only for the first calculation after
+                              launch; later recomputes (offload, pin, add,
+                              delete) swap the numbers in place. */}
+                          {librarySize
+                            ? librarySize.total.count > 0 && <> · <LibrarySizeStat size={librarySize} /></>
+                            : folders.length > 0 && (
+                              <> · <Tooltip content="Calculating the library size" side="bottom" triggerClassName="inline-flex align-[-1px]"><Loader2 size={11} className="animate-spin text-gray-500" /></Tooltip></>
+                            )}
                         </>
                       )}
-              </p>
+              </div>
             </div>
             {selectMode ? (
               // Bulk-action toolbar — replaces the New Stream button while in
@@ -3907,6 +3921,9 @@ export function StreamsPage({
                   <th className="p-0" style={{ width: thumbWidth }}>Thumbnail</th>
                   <th className="p-1 w-[44px]" />
                   <th className="text-left p-1 w-[220px]">Date</th>
+                  {/* YouTube statistics column (STR-3); unlabeled like the
+                      video-count column, the icons carry the meaning. */}
+                  <th className="p-1 w-[52px]" />
                   {/* Extra columns stay rendered regardless of selection — the
                       sidebar overlay covers them visually but they remain in
                       layout so opening/closing the sidebar doesn't trigger a
@@ -3914,7 +3931,9 @@ export function StreamsPage({
                       queries on the list area still control which ones show
                       based on the page's actual width (window resize). */}
                   <>
-                      <th className="text-left py-1 pl-3 pr-1 min-w-[120px] hidden @xl:table-cell">
+                      {/* @2xl (672px): the statistics column (STR-3) took
+                          the room that let Type survive down to @xl. */}
+                      <th className="text-left py-1 pl-3 pr-1 min-w-[120px] hidden @2xl:table-cell">
                         <div ref={typeFilterAnchorRef} className="relative flex items-center gap-1">
                           <span>Type</span>
                           <Tooltip content="Filter by type" side="bottom">
@@ -4106,6 +4125,7 @@ export function StreamsPage({
                         isLive={isLiveNow}
                         privacyStatus={status?.privacyStatus ?? null}
                         isLivestream={status?.isLivestream ?? null}
+                        stats={status && !status.missing ? { views: status.viewCount, likes: status.likeCount, dislikes: status.dislikeCount } : null}
                         isProcessing={isProcessing}
                         linkMissing={status?.missing === true}
                         onTagSelect={handleTagSelect}
@@ -4968,7 +4988,7 @@ export function StreamsPage({
 const StreamListItem = memo(function StreamListItem({
   folder, folders, selected, compact, selectMode, multiSelected, index, onToggleMultiSelect, onModifierEnterSelect,
   onDragStart, onDragEnter, dragMovedRef,
-  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing,
+  isPending, isToday, isNextUpcoming, isLive, privacyStatus, isLivestream, isProcessing, linkMissing, stats,
   sameDayIndex, thumbsKey, thumbWidth, tagColors, tagTextures, cloudSyncActive,
   isSendingToPlayer, onClick, onSendToPlayer, onSendToConverter, onOpenThumbnails, onThumbResizeStart,
   animDurationMs, onTagSelect, onVideoFileClick,
@@ -5036,6 +5056,9 @@ const StreamListItem = memo(function StreamListItem({
    *  from videos.list — deleted on YT). Replaces the privacy badge with a
    *  yellow caution badge. */
   linkMissing: boolean
+  /** Public statistics of the linked video (STR-3); null while loading or
+   *  not linked. A field YouTube withholds is undefined and is skipped. */
+  stats: { views?: number; likes?: number; dislikes?: number } | null
   /** "#2", "#3" suffix when multiple streams share a date. */
   sameDayIndex?: number
   thumbsKey: number
@@ -5074,7 +5097,8 @@ const StreamListItem = memo(function StreamListItem({
   }, [selected, animDurationMs])
 
   if (folder.isMissing) {
-    const missingColSpan = compact ? 2 : 5
+    // Count, date, statistics, then the three wide columns.
+    const missingColSpan = compact ? 3 : 6
     return (
       <tr className="border-b border-red-900/30 bg-red-950/10">
         {selectMode && <td className="pl-3 align-middle w-[36px]" />}
@@ -5094,6 +5118,13 @@ const StreamListItem = memo(function StreamListItem({
   }
 
   const { meta, hasMeta, detectedGames, date, thumbnails, thumbnailLocalFlags, videoCount } = folder
+  // Statistics column size tier (STR-3): the thumbnail's 16:9 height is
+  // the row height, so 70px of thumbnail means room for the larger tier.
+  const statsRoomy = thumbWidth * 9 / 16 >= 70
+  const statsIconSize = statsRoomy ? 11 : 10
+  const statsLineClass = statsRoomy
+    ? 'inline-flex items-center gap-1 text-xs font-mono tabular-nums text-gray-400'
+    : 'inline-flex items-center gap-1 h-3 leading-none text-[10px] font-mono tabular-nums text-gray-400'
   // Defensive case-insensitive dedupe: metas written before the rename-merge
   // fix (2026-07-11) can carry duplicate game tags, which render duplicate
   // chips with duplicate React keys. First occurrence wins.
@@ -5382,10 +5413,47 @@ const StreamListItem = memo(function StreamListItem({
         )}
       </td>
 
+      {/* YouTube statistics (STR-3): views, likes, dislikes stacked in a
+          narrow column like the video count, compact numbers with the
+          exact figures in the tooltip. Past linked streams only; an
+          upcoming broadcast has nothing to count. Fields YouTube
+          withholds are skipped rather than shown as zero. Sits right of
+          the date column, so an open sidebar covers it. */}
+      <td className={`px-2 align-middle w-[52px] ${statsRoomy ? 'py-2' : 'py-1'}`}>
+        {/* Two size tiers keyed off the thumbnail height (which sets the
+            row height): compact at three 12px lines with 2px gaps and 4px
+            cell padding, fitting the thumbnail column's 48px minimum so
+            the stack never sets the row height; roomy (the video-count
+            column's sizes) once the thumbnails are 70px or taller. The
+            tier comes from the shared thumbWidth, not a measurement, so
+            hundreds of rows cost nothing extra. */}
+        {!isPending && meta?.ytVideoId && stats && (stats.views !== undefined || stats.likes !== undefined || stats.dislikes !== undefined) && (
+          <Tooltip
+            side="top"
+            content={[
+              stats.views !== undefined ? `${stats.views.toLocaleString()} view${stats.views === 1 ? '' : 's'}` : null,
+              stats.likes !== undefined ? `${stats.likes.toLocaleString()} like${stats.likes === 1 ? '' : 's'}` : null,
+              stats.dislikes !== undefined ? `${stats.dislikes.toLocaleString()} dislike${stats.dislikes === 1 ? '' : 's'}` : null,
+            ].filter(Boolean).join(' · ')}
+            triggerClassName="flex flex-col items-start gap-0.5 cursor-default"
+          >
+            {stats.views !== undefined && (
+              <span className={statsLineClass}><Eye size={statsIconSize} className="shrink-0" />{compactCount(stats.views)}</span>
+            )}
+            {stats.likes !== undefined && (
+              <span className={statsLineClass}><ThumbsUp size={statsIconSize} className="shrink-0" />{compactCount(stats.likes)}</span>
+            )}
+            {stats.dislikes !== undefined && (
+              <span className={statsLineClass}><ThumbsDown size={statsIconSize} className="shrink-0" />{compactCount(stats.dislikes)}</span>
+            )}
+          </Tooltip>
+        )}
+      </td>
+
       {/* Columns hidden when sidebar is showing a selected stream (compact). */}
       {!compact && (
         <>
-          <td className="px-2 py-2 align-middle hidden @xl:table-cell">
+          <td className="px-2 py-2 align-middle hidden @2xl:table-cell">
             {meta ? (
               <div className="flex flex-wrap gap-1">
                 {normalizeStreamTypes(meta.streamType).map(t => {
