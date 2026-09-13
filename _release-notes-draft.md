@@ -32,6 +32,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 ## Cloud sync
 
+- A combine whose sources had to be downloaded first no longer starts on its own when the downloaded files turn out to differ in frame rate. The files could not be checked while they were in the cloud, so the run now stops after the download, shows the usual frame-rate note, and waits for a second click.
 - Thumbnails on the Combine and Converter pages fill in as soon as a cloud file finishes downloading, whichever way the download was started. A file downloaded by a combine run, or pinned from the streams page while it sat in a queue, used to keep the placeholder until it was removed and re-added.
 - A Retry all button in the cloud sync panel re-runs every failed file in a card at once, instead of one retry click per row.
 - A download that has been working for more than a few minutes now shows how long, in the cloud sync panel and on converter rows, with a note that a paused sync client holds downloads until it resumes. Stream Manager cannot tell a paused client from a slow transfer, so the row keeps waiting rather than failing.

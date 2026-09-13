@@ -70,6 +70,11 @@ interface CombineGroup {
   completed: { path: string; elapsedMs: number } | null
   error: string | null
   cancelledNotice: boolean
+  /** A run that stopped itself after downloading its cloud sources because
+   *  the freshly probed files raised a warning the user had no chance to
+   *  see before the download (COMB-4). The warning banners render from
+   *  the probed rows; this line says why the combine did not start. */
+  holdNotice: string | null
 }
 
 interface PendingFiles {
@@ -442,7 +447,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
       id, stream, label, files,
       outputPath: defaultGroupOutput(stream, files),
       deleteAfter: false,
-      completed: null, error: null, cancelledNotice: false,
+      completed: null, error: null, cancelledNotice: false, holdNotice: null,
     }])
     void uniquifyPath(defaultGroupOutput(stream, files)).then(unique => {
       const def = defaultGroupOutput(stream, files)
@@ -485,7 +490,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
             ...g,
             files: [...base, ...fresh],
             // A finished output / notice describes the PREVIOUS content.
-            completed: null, error: null, cancelledNotice: false,
+            completed: null, error: null, cancelledNotice: false, holdNotice: null,
           }
         : g))
       // Refresh the default output unless the user typed their own (a
@@ -528,7 +533,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     patchGroup(groupId, g => ({
       ...g,
       files: [...base, ...added],
-      completed: null, error: null, cancelledNotice: false,
+      completed: null, error: null, cancelledNotice: false, holdNotice: null,
     }))
     if (group.completed || !group.outputPath || group.outputPath === defaultGroupOutput(group.stream, base)) {
       applyDefaultOutput(groupId, group.stream, [...base, ...added])
@@ -675,9 +680,14 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     setRunProgress(0)
     elapsedRef.current = 0
     setElapsedMs(0)
-    patchGroup(groupId, g => ({ ...g, completed: null, error: null, cancelledNotice: false }))
+    patchGroup(groupId, g => ({ ...g, completed: null, error: null, cancelledNotice: false, holdNotice: null }))
     setCancelling(false)
     cancelHydrateRef.current = false
+    // What the user could see when they clicked Combine. Placeholders are
+    // unprobed at that point, so a warning that only exists once they are
+    // downloaded (different frame rates) was never on screen; the run must
+    // stop after the download and let the user decide with it visible.
+    const fpsWarningWasVisible = computeCompat(group.files).fpsMismatch
 
     const unsub = window.api.onCombineProgress(({ percent }) => setRunProgress(percent))
     const sourcePaths = group.files.map(f => f.path)
@@ -733,8 +743,16 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
         }
         effectiveFiles = group.files.map(withInfo)
         patchGroup(groupId, g => ({ ...g, files: g.files.map(withInfo) }))
-        if (computeCompat(effectiveFiles).mismatchedProps.length > 0) {
+        const post = computeCompat(effectiveFiles)
+        if (post.mismatchedProps.length > 0) {
           patchGroup(groupId, g => ({ ...g, error: "The downloaded files can't be combined without re-encoding; the differences are highlighted above." }))
+          return
+        }
+        // A warning-class difference is the user's call, and they can only
+        // make it with the warning on screen. Stop here unless it was
+        // already showing when they clicked Combine (COMB-4).
+        if (post.fpsMismatch && !fpsWarningWasVisible) {
+          patchGroup(groupId, g => ({ ...g, holdNotice: 'The download finished, but the files turned out to have different frame rates, which could not be checked while they were in the cloud. Read the note above and click Combine again if that is fine.' }))
           return
         }
         setRunState({ groupId, paused: false, downloading: false })
@@ -1353,6 +1371,13 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         <span>
                           No files in this combine job belong to its stream item ({g.stream!.label}). Move one of its files back in, or remove the job and start a new one for these files.
                         </span>
+                      </div>
+                    )}
+
+                    {g.holdNotice && (
+                      <div className="flex items-start gap-2 text-sm text-amber-200">
+                        <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                        <span>{g.holdNotice}</span>
                       </div>
                     )}
 
