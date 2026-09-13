@@ -11,6 +11,7 @@ import { VideoThumb } from '../ui/VideoThumb'
 import { FileDropZone } from '../ui/FileDropZone'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { displayPath } from '../../lib/displayPath'
+import { subscribeHydration } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
 
@@ -371,7 +372,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   // file — adding a row must not cost a multi-GB download (same probe
   // convention as the files grid and the send-to-converter modal).
   // Placeholders stay unprobed until they become local: the combine run
-  // hydrates + probes them itself, and the onCloudDownloadDone listener
+  // hydrates + probes them itself, and the hydration-cache listener
   // below catches hydrations from anywhere else.
   const probeAndMeasure = useCallback((paths: string[]) => {
     const patchFiles = (patch: (f: CombineFile) => CombineFile) =>
@@ -404,10 +405,15 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   }, [])
 
   // A file listed here can be hydrated from anywhere (the streams page's
-  // pin, the cloud widget, another surface's download) — fill its row in
+  // pin, the cloud widget, another surface's download): fill its row in
   // the moment it lands instead of leaving it stuck as "in the cloud".
+  // Watched through the shared hydration cache, which every download
+  // pipeline reports to; the single-file done channel this used to watch
+  // is only raised by the converter's own downloads and the legacy poller,
+  // never by the cloud-ops queue (COMB-3).
   useEffect(() => {
-    const unsub = window.api.onCloudDownloadDone(fp => {
+    const unsub = subscribeHydration((fp, isLocal) => {
+      if (!isLocal) return
       const listed = groupsRef.current.some(g => g.files.some(f => f.path === fp && (f.local === false || f.codec === null)))
       if (!listed) return
       setGroups(prev => prev.map(g => ({ ...g, files: g.files.map(f => f.path === fp ? { ...f, local: true } : f) })))

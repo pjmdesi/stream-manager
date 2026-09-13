@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Film } from 'lucide-react'
+import { getCachedHydration, rememberHydrationOne, subscribeHydration } from '../../lib/hydrationCache'
 
 // Cache generated frames by file path so a thumbnail isn't re-decoded when the
 // same file remounts somewhere else (converter panels, the files grid, etc.).
@@ -111,16 +112,27 @@ export function VideoThumb({ path, width, height = 56, checker = false, rounded 
 
     let unsubHydrate: (() => void) | undefined
     const load = async () => {
-      // Cloud gate: never touch a non-local file — probing/decoding would
-      // hydrate it. But if something ELSE hydrates it (a combine/converter
-      // add, the files grid's download), pick the frame up the moment it
-      // lands instead of showing the placeholder until a remount.
-      let isLocal = false
-      try { isLocal = !!(await window.api.checkLocalFiles([path]))[0] } catch { /* assume cloud */ }
+      // Cloud gate: never touch a non-local file, since probing or decoding
+      // would hydrate it. But if something ELSE hydrates it (a combine or
+      // converter run, a pin from the streams page, the cloud widget), pick
+      // the frame up the moment it lands instead of showing the placeholder
+      // until a remount. The shared hydration cache is the one place every
+      // download pipeline reports to (the cloud-ops queue on the sync
+      // progress channel, the converter and the legacy poller on the
+      // single-file done channel), so it is what we watch (COMB-3: watching
+      // only the single-file channel missed every queue-driven download,
+      // which is how the combine page hydrates its sources).
+      let isLocal = getCachedHydration([path])[path] === true
+      if (!isLocal) {
+        try {
+          isLocal = !!(await window.api.checkLocalFiles([path]))[0]
+          rememberHydrationOne(path, isLocal)
+        } catch { /* assume cloud */ }
+      }
       if (cancelled) return
       if (!isLocal) {
-        unsubHydrate ??= window.api.onCloudDownloadDone(fp => {
-          if (fp === path) void load()
+        unsubHydrate ??= subscribeHydration((p, isL) => {
+          if (p === path && isL) void load()
         })
         return
       }

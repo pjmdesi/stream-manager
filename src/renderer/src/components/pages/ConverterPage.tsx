@@ -11,6 +11,7 @@ import { useStore } from '../../hooks/useStore'
 import { PresetsModal } from '../preset-editor/PresetsModal'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { VideoThumb } from '../ui/VideoThumb'
+import { subscribeHydration } from '../../lib/hydrationCache'
 import { displayPath } from '../../lib/displayPath'
 import { renderStreamTitle } from '../../lib/streamTitle'
 import { CLOUD_WAIT_HINT, CLOUD_WAIT_HINT_MS, formatWait } from '../CloudOpsModal'
@@ -499,9 +500,13 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queuedFiles, localByPath, hydratingReadyPaths])
   // Download landed: mark local, clear the row's downloading state, and
-  // probe the tracks the picker was waiting for.
+  // probe the tracks the picker was waiting for. Watched through the shared
+  // hydration cache so a download from any pipeline counts (the converter's
+  // own downloads and a pin from the streams page report on different
+  // channels; the cache hears both, see COMB-3).
   useEffect(() => {
-    const off = window.api.onCloudDownloadDone((filePath: string) => {
+    const off = subscribeHydration((filePath, isLocal) => {
+      if (!isLocal) return
       setLocalByPath(prev => (prev[filePath] === true ? prev : { ...prev, [filePath]: true }))
       setHydratingReadyPaths(prev => {
         if (!prev.has(filePath)) return prev

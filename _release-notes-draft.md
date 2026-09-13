@@ -32,6 +32,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 ## Cloud sync
 
+- Thumbnails on the Combine and Converter pages fill in as soon as a cloud file finishes downloading, whichever way the download was started. A file downloaded by a combine run, or pinned from the streams page while it sat in a queue, used to keep the placeholder until it was removed and re-added.
 - A Retry all button in the cloud sync panel re-runs every failed file in a card at once, instead of one retry click per row.
 - A download that has been working for more than a few minutes now shows how long, in the cloud sync panel and on converter rows, with a note that a paused sync client holds downloads until it resumes. Stream Manager cannot tell a paused client from a slow transfer, so the row keeps waiting rather than failing.
 - The cloud sync list no longer shows the same file twice when it is requested a second time while already downloading, such as pinning a file and then archiving it. The second request joins the existing row.
