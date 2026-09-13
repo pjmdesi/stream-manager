@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, Type, Undo2, Redo2, Download,
   BookMarked, FolderOpen, LayoutTemplate, Sliders, RotateCcw, Copy,
   Magnet, Grid3x3, Check, X, AlertTriangle, Pencil, Link2, Unlink2,
-  Square, Circle, Triangle,
+  Square, Circle, Pentagon,
   Frame, BoxSelect,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
@@ -23,6 +23,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { RecentRow, SmoothThumb } from '../ui/RecentRow'
 import { NumberInput } from '../ui/Input'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
+import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import type { PendingThumbnailStream } from '../../context/ThumbnailEditorContext'
@@ -947,11 +948,13 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
   void isSelected
   const w = layer.width ?? 200
   const h = layer.height ?? 200
-  const shapeType = layer.shapeType ?? 'rect'
-  // Ellipse and triangle are centered on x/y in Konva; we store top-left
-  const isCentered = shapeType === 'ellipse' || shapeType === 'triangle'
+  // Legacy 'triangle' layers are migrated on load; treating one as a
+  // polygon here is only a fallback for a layer that slipped past that.
+  const shapeType = layer.shapeType === 'triangle' ? 'polygon' : (layer.shapeType ?? 'rect')
+  // Ellipse and polygon are centered on x/y in Konva; we store top-left
+  const isCentered = shapeType === 'ellipse' || shapeType === 'polygon'
 
-  // Flip in place. Centered shapes (ellipse, triangle) already have
+  // Flip in place. Centered shapes (ellipse, polygon) already have
   // their origin at the center, so scale alone mirrors around the
   // shape's center. Rect is top-left anchored, so it needs the same
   // offsetX=w / offsetY=h treatment as KonvaImage to keep the
@@ -1015,44 +1018,26 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
     if (shapeType === 'ellipse') {
       return <KonvaEllipse key={key} {...props} radiusX={w / 2} radiusY={h / 2} />
     }
-    // Triangle — custom sceneFunc instead of RegularPolygon so corners can
-    // round (arcTo at each vertex). Radius 0 draws the identical sharp
-    // equilateral triangle; the radius clamps to the inradius (R/2), where
-    // the shape degenerates gracefully toward the inscribed circle. The
-    // radius is in PIXELS, independent of width/height, so corners stay
-    // perfectly circular through resizes (todo #23).
-    const R = Math.min(w, h) / 2
-    const cx = w / 2
-    const cy = h / 2
-    const rr = Math.max(0, Math.min(layer.cornerRadius ?? 0, R / 2))
-    const pts = [0, 1, 2].map(i => {
-      // Same vertex placement as Konva's RegularPolygon: first point up.
-      const a = (Math.PI * 2 * i) / 3 - Math.PI / 2
-      return { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) }
-    })
+    // Polygon (THU-2): a flat-bottomed regular polygon stretched to fill
+    // the layer box, drawn by a custom sceneFunc so corners can round
+    // (arcTo at each vertex). The radius is in PIXELS, independent of
+    // width/height, so corners stay perfectly circular through resizes,
+    // and it clamps to the largest value the shape's geometry can render
+    // (lib/polygon.ts). Three sides is the former triangle, unchanged.
+    const pts = polygonPoints(polygonSidesOf(layer), w, h)
+    const radius = layer.cornerRadius ?? 0
     return (
       <KonvaShape
         key={key}
         {...props}
         width={w}
         height={h}
-        // Center the self-rect so position/flip semantics match the old
-        // centered RegularPolygon (baseInnerProps places x/y at the center).
+        // Center the self-rect so position/flip semantics match the other
+        // centered shapes (baseInnerProps places x/y at the center).
         offsetX={w / 2}
         offsetY={h / 2}
         sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
-          ctx.beginPath()
-          if (rr <= 0) {
-            ctx.moveTo(pts[0].x, pts[0].y)
-            ctx.lineTo(pts[1].x, pts[1].y)
-            ctx.lineTo(pts[2].x, pts[2].y)
-          } else {
-            ctx.moveTo((pts[2].x + pts[0].x) / 2, (pts[2].y + pts[0].y) / 2)
-            ctx.arcTo(pts[0].x, pts[0].y, pts[1].x, pts[1].y, rr)
-            ctx.arcTo(pts[1].x, pts[1].y, pts[2].x, pts[2].y, rr)
-            ctx.arcTo(pts[2].x, pts[2].y, pts[0].x, pts[0].y, rr)
-          }
-          ctx.closePath()
+          tracePolygonPath(ctx, pts, radius)
           ctx.fillStrokeShape(shape)
         }}
       />
@@ -1426,7 +1411,7 @@ function BackgroundRerender({ request }: { request: (PendingThumbnailStream & { 
       for (const ordinal of ordinals) {
         if (cancelled) return
         const doc = await window.api.thumbnailLoadCanvas(folderPath, date, ordinal).catch(() => null)
-        const layers: ThumbnailLayer[] = ((doc?.layers ?? []) as ThumbnailLayer[]).filter(l => l.visible !== false)
+        const layers: ThumbnailLayer[] = normalizeLayers((doc?.layers ?? []) as ThumbnailLayer[]).filter(l => l.visible !== false)
         if (!doc || layers.length === 0) continue
 
         // Preflight fonts: baking a substitute font into the PNG is the
@@ -3078,10 +3063,24 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                     radius exceeds what the shape's geometry can render
                     (rect: half the short side; triangle: the inradius),
                     the ACTUAL rendered radius shows in parentheses. */}
-                {layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'triangle') && (() => {
+                {layer.type === 'shape' && layer.shapeType === 'polygon' && (
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>Sides</span>
+                    <NumberInput
+                      min={POLYGON_MIN_SIDES}
+                      max={POLYGON_MAX_SIDES}
+                      value={polygonSidesOf(layer)}
+                      onChange={sides => update({ sides: Math.max(POLYGON_MIN_SIDES, Math.min(POLYGON_MAX_SIDES, Math.round(sides))) })}
+                      className="w-full"
+                    />
+                  </label>
+                )}
+                {layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'polygon') && (() => {
                   const sw = layer.width ?? 200
                   const sh = layer.height ?? 200
-                  const maxR = layer.shapeType === 'triangle' ? Math.min(sw, sh) / 4 : Math.min(sw, sh) / 2
+                  const maxR = layer.shapeType === 'polygon'
+                    ? polygonMaxCornerRadius(polygonPoints(polygonSidesOf(layer), sw, sh))
+                    : Math.min(sw, sh) / 2
                   const entered = layer.cornerRadius ?? 0
                   return (
                     <label className="flex flex-col gap-0.5">
@@ -3996,7 +3995,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // useUndoRedo hook needs a stable callback at construction time, but the
   // body it points at can change as currentStream / template state shifts.
   const triggerAutoSaveRef = useRef<((layers: ThumbnailLayer[]) => void) | null>(null)
-  const { layers, commit, set: setLayersDirect, undo, redo, reset: resetLayers, canUndo, canRedo } = useUndoRedo(
+  const { layers, commit, set: setLayersDirect, undo, redo, reset: resetLayersRaw, canUndo, canRedo } = useUndoRedo(
     [],
     useCallback((next: ThumbnailLayer[]) => {
       // Undo/redo must repaint TRUTH. Imperative Konva mutations (drag-move
@@ -4025,6 +4024,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       triggerAutoSaveRef.current?.(next)
     }, []),
   )
+  // Every list that enters the editor (a canvas from disk, a template, a
+  // duplicate) passes through the on-load migrations in lib/polygon.ts, so
+  // the state never carries a legacy shape: saved triangles become
+  // three-sided polygons with their box refitted (THU-2). Unchanged lists
+  // come back by identity, so this is free for current files.
+  const resetLayers = useCallback((next: ThumbnailLayer[]) => resetLayersRaw(normalizeLayers(next)), [resetLayersRaw])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
@@ -4050,9 +4055,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // Transformer renders no handles when nodes() is empty (i.e. nothing
   // selected), so we don't need an isSelected gate. Single-text selection
   // gets keepRatio off but the boundBoxFunc locks height to font metrics.
-  // Single triangle gets keepRatio on so it stays equilateral.
+  // (Polygons stretch like ellipses, so they get no special case; the
+  // per-layer aspect lock in boundBoxFunc covers them.)
   //
-  // Multi-select with any rotated member ALSO forces keepRatio: a non-uniform
+  // Multi-select with any rotated member forces keepRatio: a non-uniform
   // scale on a rotated child requires a skew to fit the axis-aligned group
   // bbox, and we don't model skew anywhere else in the editor — letting it
   // happen would leave items visibly sheared (and the shear would survive
@@ -4068,9 +4074,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
     const sel = layers.filter(l => selectedIds.includes(l.id))
     const onlyText = sel.length > 0 && sel.every(l => l.type === 'text')
-    const singleTriangle = sel.length === 1 && sel[0].type === 'shape' && sel[0].shapeType === 'triangle'
     const rotatedInMulti = sel.length > 1 && sel.some(l => (l.rotation ?? 0) !== 0)
-    tr.keepRatio(singleTriangle || rotatedInMulti)
+    tr.keepRatio(rotatedInMulti)
     // Stop Konva from forcing proportional scaling when Shift is held — our
     // boundBoxFunc is the sole aspect-ratio authority (Shift inverts the
     // per-layer lock there), and Konva's default Shift behavior would
@@ -5627,13 +5632,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     setSelectedIds([layer.id])
   }, [layers, commitLayers, systemFonts])
 
-  const addShapeLayer = useCallback((shapeType: 'rect' | 'ellipse' | 'triangle') => {
-    const names = { rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle' }
+  const addShapeLayer = useCallback((shapeType: 'rect' | 'ellipse' | 'polygon') => {
+    const names = { rect: 'Rectangle', ellipse: 'Ellipse', polygon: 'Polygon' }
     const layer: ThumbnailLayer = {
       id: newId(), name: names[shapeType], type: 'shape', shapeType, visible: true, opacity: 100,
       x: Math.round(CANVAS_W / 2 - 100), y: Math.round(CANVAS_H / 2 - 100),
       rotation: 0, width: 200, height: 200,
       fill: '#6366f1', stroke: '#000000', strokeWidth: 0, cornerRadius: 0,
+      ...(shapeType === 'polygon' ? { sides: POLYGON_DEFAULT_SIDES } : {}),
     }
     commitLayers([...layers, layer])
     setSelectedIds([layer.id])
@@ -6712,9 +6718,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Circle size={16} />
                 </button>
               </Tooltip>
-              <Tooltip content="Add triangle" side="right">
-                <button onClick={() => addShapeLayer('triangle')} className="p-2 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
-                  <Triangle size={16} />
+              <Tooltip content="Add polygon" side="right">
+                <button onClick={() => addShapeLayer('polygon')} className="p-2 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
+                  <Pentagon size={16} />
                 </button>
               </Tooltip>
             </div>

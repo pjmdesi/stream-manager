@@ -848,7 +848,12 @@ export interface ThumbnailLayer {
    *  always recovers the text as typed. */
   textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
   // Shape
-  shapeType?: 'rect' | 'ellipse' | 'triangle'
+  /** 'triangle' is legacy: files written before THU-2 carry it, and the
+   *  editor migrates it to a three-sided 'polygon' on load
+   *  (lib/polygon.ts). Never written by the current app. */
+  shapeType?: 'rect' | 'ellipse' | 'polygon' | 'triangle'
+  /** Polygon side count, 3 to 12; new polygons start at 4. */
+  sides?: number
   cornerRadius?: number
   /** Gradient fill (thumbnails #2). Absent / 'solid' = flat `fill`. The
    *  `fill` field stays maintained (mirrors the start stop) so older app

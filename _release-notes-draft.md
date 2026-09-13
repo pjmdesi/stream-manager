@@ -46,6 +46,10 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 - Hold Alt while dragging a clip segment's handle to move both ends at once, shrinking or growing the segment around its center.
 - The minute skips have keyboard shortcuts now: Alt with the arrow keys skips one minute, Alt+Shift skips five. They repeat while held like the second skips, and the buttons' tooltips and the Help panel show them.
 
+## Thumbnail editor
+
+- The triangle tool is now a polygon tool. Pick the number of sides, 3 to 12, in the properties panel; new polygons start as a square. Polygons sit flat on their bottom edge, fill their selection box exactly, and take a corner radius like rectangles. Existing triangles open as three-sided polygons and look the same as before.
+
 ## Integrations
 
 - The Claude connection now shows Claude's own mark and color on the Integrations page, in Settings, in the sidebar status, and in Help, in place of a generic robot icon in orange. Orange in the app means "YouTube has a newer value" and is no longer shared with Claude.

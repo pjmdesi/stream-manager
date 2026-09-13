@@ -27,15 +27,19 @@
 23. STR-24
 24. COMB-3
 25. COMB-4
-26. THU-1
-27. THU-8
-28. THU-9
-29. THU-10
-30. THU-12
-31. THU-16
-32. STR-17
-33. STR-22
-34. INTG-1
+26. THU-19
+27. THU-2
+28. THU-18
+29. THU-21
+30. THU-1
+31. THU-8
+32. THU-9
+33. THU-10
+34. THU-12
+35. THU-16
+36. STR-17
+37. STR-22
+38. INTG-1
 
 ## Improvement ideas
 
@@ -215,11 +219,12 @@
 
 ### Thumbnail editor
 
-- **THU-1**
+- **THU-1** [blocked:THU-2] [blocked:THU-21]
   Quick-cropping and masking for images in the thumbnail editor. We'll keep it simple at first: just using the simple shape elements already available in the thumbnail editor (rectangle, circle, triangle), allow the user to apply them as a mask to other layers in the layers panel with a button in the shape row (to the left of the duplicate button) which will say "Apply as mask to the layer below" in its tooltip, then, when clicked, the mask layer will become a sub-layer of the layer it was above, and mask that layer. It will only care about the vector lines for the shape layer for now, if the pixels are inside the vectors, they show, otherwise, they do not (so the color/opacity/filters/drop shadow of the shape layer will not be taken into account).
 
-- **THU-2** [maybe]
+- **THU-2**
   Maybe... drop the triangle & square shapes and add a new "polygon" shape tool which will allow the user to create a shape with any number of sides. It will default to a square, but a new input would be available in the properties panel to change the number of sides.
+  Decided 2026-09-13: the rectangle stays (independent width and height plus corner radius make it more than a four-sided polygon); the polygon replaces the triangle only. Built 2026-09-13, awaiting review. New `lib/polygon.ts` holds the geometry: flat-bottom vertex placement (one edge centered at the bottom, so a square sits square, a pentagon points up, three sides is the old triangle), the polygon fills its bounding box (the old triangle was inscribed in a circle inside its box and left margins), a per-shape corner-radius clamp (largest radius at which adjacent arcs still fit their shared edge; equals the old inradius clamp for the triangle), and a one-time migration of saved triangles to three-sided polygons that shrinks the box to the triangle's real extent and moves the origin with the layer's rotation and flip so old thumbnails render pixel for pixel the same. Editor: "Add polygon" replaces "Add triangle" (pentagon icon), new polygons start at four sides, a Sides input (3 to 12) sits above Corner radius in the transform section, corner radius applies to polygons with the same rendered-cap note as rectangles, and the old "single triangle keeps its ratio" transformer rule is gone (polygons stretch like ellipses; the per-layer aspect lock still applies). Migration runs wherever layers enter the editor: canvas open, template open, and the background re-render. Verify: open a thumbnail with an existing triangle (unchanged rendering, rotated and flipped ones too), add a polygon and change sides, set a corner radius at several side counts, stretch a polygon, save and reopen, and run a background re-render of a stream whose canvas holds a triangle.
 
 - **THU-3** [ui]
   Add a new interactive element for the shape layers which will allow the user to change the corner radius of the shape layer by dragging a handle on the canvas. The handle would be a small circle that appears on the corner of the shape layer when it is selected. The user can click and drag the handle to change the corner radius of the shape layer. The handle would only appear when the shape layer is selected, and it would disappear when the layer is deselected. The handle would also have a tooltip that shows the current corner radius value as the user drags it. This would allow for more intuitive and interactive control over the corner radius of shape layers, rather than having to enter a value in the properties panel.
@@ -263,6 +268,22 @@
 
 - **THU-17** [ui]
   Native alpha in the color picker. Split out of APP-1 (2026-09-10): the Electron 44 bump brought Chromium 152, whose `<input type="color">` supports the `alpha` attribute (and `colorspace`), so the picker popup can carry an opacity slider instead of SM's separate opacity field next to the swatch. Not a one-attribute change: with `alpha` set the input's value stops being a 6-digit hex and becomes a CSS color string (rgb()/color() with a slash-alpha), which touches `splitColorAlpha` and `joinColorAlpha` in ThumbnailPage and every ColorAlphaField call site (about a dozen), plus the recent-colors and swatch recording that key on the hex form. First step is the runtime check in dev tools, `'alpha' in document.createElement('input')`, on the shipped 44 build (not yet run as of filing; the checklist tick was premature). If supported: decide whether the opacity field stays as a typed-value companion to the native slider or goes away, keep the stored color format unchanged (convert at the input boundary only) so canvases and templates on disk are untouched, and check the gradient-stop editor, which shares the field. If Chromium's picker UI for alpha turns out poor, keep the current field and drop this ticket.
+
+- **THU-18**
+  Allow layers to be grouped in the thumbnail editor. ctrl+g should do it via keyboard shortcut. A user should no be able to group if only a single object is selected. Groups should be resizable and rotatable, adjusting the items within proportionally.
+  Decided 2026-09-13: grouping ships in two phases, this ticket is phase one (grouping itself) and THU-21 is the mask slot, because the mask design will iterate. Konva Groups nest and transform natively; the work here is the nested layer model, the layers panel learning to nest and to drag layers in and out of a group, selection, alignment, and snapping treating a group as one object, Ctrl+Shift+G to ungroup, and baking a group resize into its children on transform end (Illustrator behaviour) so the stored layers stay scale-free.
+
+- **THU-21** [blocked:THU-18]
+  Mask slot on groups, phase two of grouping. Illustrator's model drawn our way: a group carries one optional mask shape in a slot of its own, and everything inside the group is clipped to that shape's outline; nothing else about the shape (fill, stroke, opacity, filters, shadows) takes part. Konva does this natively with a clip function on the Group: the path runs in the group's own coordinate space, so moving, rotating, or resizing the group carries the mask along, and children's drop shadows are clipped too. Geometric only: no feathering and no partial opacity (a soft or image mask would be a cached-group compositing job, its own ticket if ever wanted). Layers panel: the slot renders under the group's row, and the mask shape is selectable and editable on its own with the clip updating live. THU-1's "apply as mask to the layer below" becomes sugar for wrapping that layer in a group and putting the shape in its mask slot, so a masked single layer and a masked group are the same thing.
+
+- **THU-22** [maybe]
+  Stars in the thumbnail editor. A star is a polygon whose side midpoints are pulled inward, so it is a small addition to the polygon's properties: a checkbox that turns on an inner radius, shown as a handle at the midpoint of one side on the canvas with a matching percentage input in the panel (how far inward the midpoints sit; zero is the plain polygon). Rides on the THU-2 geometry (flat bottom, fills its box, corner radius), and the corner-radius clamp has to account for the inner vertices. Filed 2026-09-13 from the THU-2 discussion; not queued.
+
+- **THU-19**
+  Replicate the same stream/episode prev/next buttons and "current stream" section in the thumbnail editor. The sidebar is getting cramped already, so that might not be the best plcae for it, like the player page has. The header is probably the natural place since that's where the name of the stream item already lives.
+
+- **THU-20**
+  Add a new shape primitive to the thumbnail editor: arrows. These will need to have several options. Thickness of the stem, type of head, if possible, ability to curve the arrow, and change the flow of the stem (for instance having it smoothly taper to a point or not). And this arrow should have the same fill/stroke options available for the other primitive shapes. Arrows are very important to some for making thumbnails for youtube.
 
 ### Converter
 
@@ -320,7 +341,7 @@
   Same issue previously seen in the converter: once a file is hydrated, the thumbnail never renders and just disaplys the placeholder graphic indefinitely untul removed and re-added after hydration.
   Built 2026-09-12, awaiting review. Cause: two download pipelines report on two channels. The cloud-ops queue (what a combine run and a streams-page pin use) reports on the sync progress channel; the single-file done channel is raised only by the converter's own downloads and the legacy poller. The shared thumbnail component and the combine page's row listener watched the single-file channel alone, so a queue-driven download never reached them and the frame stayed on the placeholder until the row remounted. The converter only looked fixed because its own downloads happen to raise that channel; a pin from the streams page would have left its row stuck the same way. Fix: the thumbnail component, the combine row listener, and the converter row listener now watch the shared hydration cache, which already bridges both channels; the thumbnail component also seeds from the cache and records its own check there, so a file known local skips the attribute check. Verify: add offloaded files to a combine group, run the combine, and watch the thumbnails and detail chips fill in as each download lands; pin an offloaded file from the streams page while it sits in a combine group and in the converter's ready list and confirm both rows update without a remount.
 
-- **COMB-4** [bug]
+- **COMB-4** [bug] [done]
   When the combiner must hydrate file before the combine process actually starts, we need to stop the auto start of the combine process if any warning would be displayed to the user if the files had been hydrated already. I just tested this on 2 files that were dehydrated. It downloaded them and immediately started the combine process, but the files had different framerates. It should have stopped after the hydration, checked the files for compatibility and prevented the auto-start to show the user the warning.
   Built 2026-09-12, awaiting review. The post-download gate only stopped for hard incompatibilities (codec, resolution, audio layout), which already blocked the run with an error; a frame-rate difference is warning-class (the run is allowed, the user decides) and the run sailed past it because the warning only exists once the files are probed, which cannot happen while they are in the cloud. Now the run remembers whether the frame-rate warning was on screen when Combine was clicked; after the download and probe, a frame-rate difference that was not visible then stops the run, the probed rows render the usual amber warning, and an amber line under it says the download finished and why the combine did not start, with Combine re-enabled for a second click. A difference the user had already seen and accepted still runs straight through. Hard incompatibilities behave as before (red error, run stopped). Verify: two offloaded files with different frame rates (download completes, warning plus the hold line, no ffmpeg run; second click combines), two offloaded files with matching properties (runs straight through), one local and one offloaded file whose frame rates differ and the warning already showing before the click (runs straight through).
 
