@@ -836,6 +836,9 @@ export function StreamsPage({
   // when the modal closes so a subsequent normal reschedule reverts
   // to edit mode.
   const [rescheduleDateDirection, setRescheduleDateDirection] = useState<'local' | 'remote' | 'both' | 'unknown' | undefined>(undefined)
+  // Last folder the reschedule key resolved to, so the modal survives the
+  // reload that drops the old key after step one's rename (STR-24).
+  const rescheduleTargetSnapshotRef = useRef<{ key: string; folder: StreamFolder } | null>(null)
   const [deleteTargetKey, setDeleteTargetKey] = useState<string | null>(null)
   const deleteTargetSnapshotRef = useRef<StreamFolder | null>(null)
   // After-push rename prompt state. Set when a Twitch push's canonical
@@ -4553,8 +4556,24 @@ export function StreamsPage({
       {!isVisible && null}
 
       {rescheduleTargetKey && (() => {
-        const target = folders.find(f => f.relativePath === rescheduleTargetKey)
+        // Live lookup while the key still resolves; snapshot afterwards.
+        // Step one of the modal renames the stream's files and then its
+        // folder, and the watcher's events for those renames have the
+        // page splice the OLD key out of `folders` about a second later,
+        // which used to unmount the modal while step two (the platform
+        // pushes) was on screen (STR-24). The snapshot keeps the modal
+        // mounted on the pre-rename data until it closes itself; step
+        // two only needs the linked broadcast id and the chosen date.
+        const live = folders.find(f => f.relativePath === rescheduleTargetKey)
+        if (live) rescheduleTargetSnapshotRef.current = { key: rescheduleTargetKey, folder: live }
+        const snap = rescheduleTargetSnapshotRef.current
+        const target = live ?? (snap && snap.key === rescheduleTargetKey ? snap.folder : undefined)
         if (!target) return null
+        const closeReschedule = () => {
+          setRescheduleTargetKey(null)
+          setRescheduleDateDirection(undefined)
+          rescheduleTargetSnapshotRef.current = null
+        }
         return (
           <RescheduleModal
             target={target}
@@ -4563,10 +4582,9 @@ export function StreamsPage({
             twConnected={twConnected}
             ytBroadcasts={ytBroadcasts}
             dateDirection={rescheduleDateDirection}
-            onClose={() => { setRescheduleTargetKey(null); setRescheduleDateDirection(undefined) }}
+            onClose={closeReschedule}
             onSuccess={async (newFolderPath) => {
-              setRescheduleTargetKey(null)
-              setRescheduleDateDirection(undefined)
+              closeReschedule()
               // Refresh the folder list BEFORE re-selecting the renamed folder.
               // The renderedFolder fade timer keys on the *resolved* folder, so
               // selecting the new path first (while folders still holds the old
