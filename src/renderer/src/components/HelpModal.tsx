@@ -269,6 +269,9 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             { keys: ['Ctrl', 'V'], label: 'Paste' },
             { keys: ['Ctrl', 'S'], label: 'Save thumbnail' },
             { keys: ['Delete'], label: 'Delete selected layers' },
+            { keys: ['Ctrl', 'G'], label: 'Group the selected layers (two or more, in the same place)' },
+            { keys: ['Ctrl', 'Shift', 'G'], label: 'Ungroup the selected groups' },
+            { keys: ['Double-click'], label: 'Select a layer inside a group on the canvas' },
           ]} />
           <ShortcutGroup title="Layout" rows={[
             { keys: ['↑ ↓ ← →'], label: 'Nudge selection 1px (Shift = 10px)' },

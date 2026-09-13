@@ -808,7 +808,12 @@ export interface ThumbnailShadow {
 export interface ThumbnailLayer {
   id: string
   name: string
-  type: 'image' | 'text' | 'shape'
+  /** 'group' layers (THU-18) own the layers whose `parentId` names them;
+   *  they carry position, rotation, opacity, and visibility but no size. */
+  type: 'image' | 'text' | 'shape' | 'group'
+  /** Set on members of a group. Member x/y are relative to the group
+   *  (lib/layerTree.ts). Absent on top-level layers. */
+  parentId?: string
   visible: boolean
   opacity: number       // 0–100
   x: number

@@ -17,6 +17,7 @@ import {
   FlipHorizontal2, FlipVertical2,
   ChevronDown, ChevronRight, Loader2, Radio, Palette, Upload,
   Layers as LayersIcon,
+  Group as GroupIcon, Ungroup as UngroupIcon, Folder,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -24,6 +25,12 @@ import { RecentRow, SmoothThumb } from '../ui/RecentRow'
 import { NumberInput } from '../ui/Input'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
 import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
+import {
+  childrenOf, paintableLayers, selectionRoots, selectionSubtreeLayers, canGroup, canUngroup, groupLayers, ungroupLayer,
+  deleteLayers, duplicateLayer as duplicateLayerTree, clonePasteLayers, moveLayerTo, moveAmongSiblings, scaleGroupMembers,
+  needsUniformScale, panelRows, isGroup, hasHiddenAncestor,
+} from '../../lib/layerTree'
+import type { PanelRow } from '../../lib/layerTree'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import type { PendingThumbnailStream } from '../../context/ThumbnailEditorContext'
@@ -269,6 +276,46 @@ interface KonvaLayerNodeProps {
   /** Merge field values for text layers. When null, merge fields render
    *  literally ({title}, {episode}, etc.) — used for template editing. */
   mergeFields: Record<string, string> | null
+  /** Member of a group (THU-18). Nested wrappers are not snap targets and
+   *  stop their own events from bubbling to the enclosing group. */
+  nested?: boolean
+  /** A nested member that is not itself selected: it neither selects nor
+   *  drags, so its events reach the enclosing group, which is what a click
+   *  on a group member selects. */
+  inert?: boolean
+}
+
+/** The event props every layer wrapper (image, text, shape, group) puts on
+ *  its Konva Group. Inert nodes get none, so a click on a group member
+ *  bubbles up to the group's own wrapper. Nested interactive nodes (a
+ *  member selected through the panel or a double-click) stop the bubble so
+ *  the enclosing group does not also react. */
+function wrapperHandlers(p: KonvaLayerNodeProps) {
+  if (p.inert) return { draggable: false as const }
+  const stop = (e: Konva.KonvaEventObject<unknown>) => { if (p.nested) e.cancelBubble = true }
+  return {
+    draggable: true as const,
+    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button !== 0) e.target.stopDrag() },
+    onClick: (e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button === 0) { stop(e); p.onSelect(p.layer.id, e.evt.shiftKey) } },
+    onTap: (e: Konva.KonvaEventObject<TouchEvent>) => { stop(e); p.onSelect(p.layer.id, false) },
+    onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => { stop(e); p.onDragStart(e) },
+    onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => { stop(e); p.onSnapDragMove(e) },
+    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => { stop(e); p.onClearGuides(); p.onDragEnd(e) },
+    onTransformEnd: (e: Konva.KonvaEventObject<Event>) => { stop(e); p.onTransformEnd(e) },
+  }
+}
+
+/** Walk up from the Konva node under the pointer to the wrapper that is a
+ *  DIRECT member of `groupId`, and return its layer id. */
+function directChildIdUnder(target: Konva.Node, groupId: string): string | null {
+  let n: Konva.Node | null = target
+  while (n) {
+    const parent = n.getParent()
+    if (!parent) return null
+    if (parent.id() === groupId) return n.id() || null
+    n = parent
+  }
+  return null
 }
 
 /** Replace {field} markers in `text` with values from `fields`. When fields
@@ -709,12 +756,11 @@ function ImageInner({
   )
 }
 
-function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides, gridSnapEnabled }: KonvaLayerNodeProps) {
-  // isSelected is intentionally unused — the shared parent-level Transformer
-  // attaches itself to selected nodes via its own useEffect, so per-node
-  // Transformer mounts are gone. Kept in the props for symmetry across the
-  // three node components (and so a future filter-on-select etc. can reuse it).
-  void isSelected
+function ImageNode(props: KonvaLayerNodeProps) {
+  // The shared parent-level Transformer attaches itself to selected nodes
+  // via its own useEffect, so per-node Transformer mounts are gone. The
+  // wrapper's event props come from wrapperHandlers (see KonvaLayerNodeProps).
+  const { layer } = props
   const [img] = useImage(layer.src ? `file://${layer.src}` : '', 'anonymous')
 
   // Render the Konva node even before the image bitmap finishes loading.
@@ -764,20 +810,13 @@ function ImageNode({ layer, isSelected, onSelect, onChange, onDragStart, onSnapD
     // shadow per node.
     <KonvaGroup
       id={layer.id}
-      name="snap-target"
+      name={props.nested ? undefined : 'snap-target'}
       x={layer.x}
       y={layer.y}
       rotation={layer.rotation}
       opacity={layer.opacity / 100}
       visible={layer.visible}
-      draggable
-      onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
-      onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
-      onTap={() => onSelect(layer.id, false)}
-      onDragStart={onDragStart}
-      onDragMove={onSnapDragMove}
-      onDragEnd={e => { onClearGuides(); onDragEnd(e) }}
-      onTransformEnd={onTransformEnd}
+      {...wrapperHandlers(props)}
     >
       {shadows.map((s, i) => (
         <ImageInner key={`shadow-${i}`} layer={layer} imageSource={imageSource} renderW={renderW} renderH={renderH} offsetX={offX} offsetY={offY} shadow={s} />
@@ -832,8 +871,8 @@ function applyTextTransform(text: string, transform: ThumbnailLayer['textTransfo
   }
 }
 
-function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides, mergeFields }: KonvaLayerNodeProps) {
-  void isSelected
+function TextNode(props: KonvaLayerNodeProps) {
+  const { layer, mergeFields } = props
   const nodeRef = useRef<Konva.Text>(null)
 
   // Outline override: when the Outline effect is enabled and has a
@@ -921,20 +960,13 @@ function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, on
     // (on top). See ImageNode for the rationale; same pattern.
     <KonvaGroup
       id={layer.id}
-      name="snap-target"
+      name={props.nested ? undefined : 'snap-target'}
       x={layer.x}
       y={layer.y}
       rotation={layer.rotation}
       opacity={layer.opacity / 100}
       visible={layer.visible}
-      draggable
-      onMouseDown={e => { if (e.evt.button !== 0) e.target.stopDrag() }}
-      onClick={e => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
-      onTap={() => onSelect(layer.id, false)}
-      onDragStart={onDragStart}
-      onDragMove={onSnapDragMove}
-      onDragEnd={e => { onClearGuides(); onDragEnd(e) }}
-      onTransformEnd={onTransformEnd}
+      {...wrapperHandlers(props)}
     >
       {shadows.map((s, i) => (
         <KonvaText key={`shadow-${i}`} {...textProps} {...shadowPropsFor(s)} />
@@ -944,8 +976,8 @@ function TextNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, on
   )
 }
 
-function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, onDragEnd, onTransformEnd, onClearGuides }: KonvaLayerNodeProps) {
-  void isSelected
+function ShapeNode(props: KonvaLayerNodeProps) {
+  const { layer } = props
   const w = layer.width ?? 200
   const h = layer.height ?? 200
   // Legacy 'triangle' layers are migrated on load; treating one as a
@@ -1048,24 +1080,73 @@ function ShapeNode({ layer, isSelected, onSelect, onDragStart, onSnapDragMove, o
     // See ImageNode for the Group-wrap rationale + multi-shadow pattern.
     <KonvaGroup
       id={layer.id}
-      name="snap-target"
+      name={props.nested ? undefined : 'snap-target'}
       x={layer.x}
       y={layer.y}
       rotation={layer.rotation}
       opacity={layer.opacity / 100}
       visible={layer.visible}
-      draggable
-      onMouseDown={(e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button !== 0) e.target.stopDrag() }}
-      onClick={(e: Konva.KonvaEventObject<MouseEvent>) => { if (e.evt.button === 0) onSelect(layer.id, e.evt.shiftKey) }}
-      onTap={() => onSelect(layer.id, false)}
-      onDragStart={onDragStart}
-      onDragMove={onSnapDragMove}
-      onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => { onClearGuides(); onDragEnd(e) }}
-      onTransformEnd={onTransformEnd}
+      {...wrapperHandlers(props)}
     >
       {shadows.map((s, i) => renderShape(s, `shadow-${i}`))}
       {renderShape(null)}
     </KonvaGroup>
+  )
+}
+
+/** A group (THU-18): one Konva Group carrying position, rotation, opacity,
+ *  and visibility, with its members rendered inside it so every transform
+ *  composes. A click selects the group; a double-click selects the member
+ *  under the pointer (double-click again on a nested group to go deeper). */
+function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode }) {
+  const { layer, onSelect, children } = props
+  const drill = (e: Konva.KonvaEventObject<unknown>) => {
+    if (props.nested) e.cancelBubble = true
+    const childId = directChildIdUnder(e.target, layer.id)
+    if (childId) onSelect(childId, false)
+  }
+  return (
+    <KonvaGroup
+      id={layer.id}
+      name={props.nested ? undefined : 'snap-target'}
+      x={layer.x}
+      y={layer.y}
+      rotation={layer.rotation}
+      opacity={layer.opacity / 100}
+      visible={layer.visible}
+      {...wrapperHandlers(props)}
+      onDblClick={props.inert ? undefined : drill}
+      onDblTap={props.inert ? undefined : drill}
+    >
+      {children}
+    </KonvaGroup>
+  )
+}
+
+/** Renders one level of the layer tree: the members of `parentId` in paint
+ *  order, recursing into groups. Shared by the editor stage and the
+ *  background re-render so both draw nesting the same way. */
+function LayerNodes({ layers, parentId, makeProps }: {
+  layers: ThumbnailLayer[]
+  parentId: string | null
+  makeProps: (layer: ThumbnailLayer) => KonvaLayerNodeProps
+}) {
+  return (
+    <>
+      {childrenOf(layers, parentId).map(layer => {
+        const props = makeProps(layer)
+        if (layer.type === 'group') {
+          return (
+            <GroupNode key={layer.id} {...props}>
+              <LayerNodes layers={layers} parentId={layer.id} makeProps={makeProps} />
+            </GroupNode>
+          )
+        }
+        if (layer.type === 'image') return <ImageNode key={layer.id} {...props} />
+        if (layer.type === 'shape') return <ShapeNode key={layer.id} {...props} />
+        return <TextNode key={layer.id} {...props} />
+      })}
+    </>
   )
 }
 
@@ -1411,7 +1492,7 @@ function BackgroundRerender({ request }: { request: (PendingThumbnailStream & { 
       for (const ordinal of ordinals) {
         if (cancelled) return
         const doc = await window.api.thumbnailLoadCanvas(folderPath, date, ordinal).catch(() => null)
-        const layers: ThumbnailLayer[] = normalizeLayers((doc?.layers ?? []) as ThumbnailLayer[]).filter(l => l.visible !== false)
+        const layers: ThumbnailLayer[] = paintableLayers(normalizeLayers((doc?.layers ?? []) as ThumbnailLayer[]))
         if (!doc || layers.length === 0) continue
 
         // Preflight fonts: baking a substitute font into the PNG is the
@@ -1503,7 +1584,7 @@ function BackgroundRerender({ request }: { request: (PendingThumbnailStream & { 
     <div style={{ position: 'fixed', left: -100000, top: 0, width: CANVAS_W, height: CANVAS_H, pointerEvents: 'none' }} aria-hidden>
       <Stage ref={stageRef} width={CANVAS_W} height={CANVAS_H} listening={false}>
         <Layer listening={false}>
-          {job.layers.map(layer => {
+          <LayerNodes layers={job.layers} parentId={null} makeProps={layer => {
             const props: KonvaLayerNodeProps = {
               layer,
               isSelected: false,
@@ -1517,11 +1598,11 @@ function BackgroundRerender({ request }: { request: (PendingThumbnailStream & { 
               onClearGuides: noop,
               gridSnapEnabled: false,
               mergeFields: job.fields,
+              nested: !!layer.parentId,
+              inert: true,
             }
-            if (layer.type === 'image') return <ImageNode key={layer.id} {...props} />
-            if (layer.type === 'shape') return <ShapeNode key={layer.id} {...props} />
-            return <TextNode key={layer.id} {...props} />
-          })}
+            return props
+          }} />
         </Layer>
       </Stage>
     </div>
@@ -2874,6 +2955,41 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
     else onLiveChange(next)
   }
 
+  // Groups (THU-18) carry position, rotation, and opacity of their own; size
+  // follows the members and is edited on the canvas, where the group's
+  // scale is baked into them on release.
+  if (layer.type === 'group') {
+    const labelCls = 'text-[10px] text-gray-400'
+    return (
+      <div className="p-3 flex flex-col gap-3 overflow-y-auto flex-1 min-h-0">
+        <section>
+          <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Group</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>X</span>
+              <NumberInput value={Math.round(layer.x)} onChange={x => update({ x })} className="w-full" />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>Y</span>
+              <NumberInput value={Math.round(layer.y)} onChange={y => update({ y })} className="w-full" />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>Rotation °</span>
+              <NumberInput value={Math.round(layer.rotation)} onChange={rotation => update({ rotation })} className="w-full" />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>Opacity %</span>
+              <NumberInput min={0} max={100} value={Math.round(layer.opacity)} onChange={opacity => update({ opacity: Math.max(0, Math.min(100, opacity)) })} className="w-full" />
+            </label>
+          </div>
+          <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
+            Size follows the layers inside: resize the group on the canvas and its members scale with it. Double-click a member on the canvas, or pick it in the layers panel, to edit that layer on its own.
+          </p>
+        </section>
+      </div>
+    )
+  }
+
   // Aspect-ratio lock is per-layer + persisted on the layer itself.
   // Undefined defaults to `true` — newly added images/shapes start
   // locked to their natural aspect, matching every other vector
@@ -4049,11 +4165,22 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   useEffect(() => { layersRef.current = layers }, [layers])
   // Inline rename state for the layer panel. Only one layer renames at a time.
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null)
-  // Drag-and-drop reordering state. `dropTargetDisplayIdx` is the gap index
-  // (0..N inclusive) in display-order space — 0 = above the topmost row,
-  // N = below the bottommost row.
+  // Drag-and-drop reordering state: the row being dragged, and below it the
+  // computed drop target.
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null)
-  const [dropTargetDisplayIdx, setDropTargetDisplayIdx] = useState<number | null>(null)
+  // Panel drop target (THU-18): the gap the indicator draws in (row index,
+  // indented to the target depth) plus where the drop lands in the tree.
+  const [panelDrop, setPanelDrop] = useState<{ gapIdx: number; depth: number; parentId: string | null; afterId: string | null } | null>(null)
+  // Collapsed groups in the layers panel. UI state only: not saved with
+  // the canvas, so toggling a chevron never dirties the thumbnail.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
+  const toggleGroupCollapsed = useCallback((id: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }, [])
 
   // Sync the shared Transformer's nodes() to the current selection. Konva's
   // Transformer renders no handles when nodes() is empty (i.e. nothing
@@ -4079,7 +4206,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     const sel = layers.filter(l => selectedIds.includes(l.id))
     const onlyText = sel.length > 0 && sel.every(l => l.type === 'text')
     const rotatedInMulti = sel.length > 1 && sel.some(l => (l.rotation ?? 0) !== 0)
-    tr.keepRatio(rotatedInMulti)
+    // A group holding text or a rotated member resizes proportionally only:
+    // its scale is baked into the members on release, and neither has a
+    // non-uniform representation (THU-18).
+    tr.keepRatio(rotatedInMulti || needsUniformScale(layers, selectedIds))
     // Stop Konva from forcing proportional scaling when Shift is held — our
     // boundBoxFunc is the sole aspect-ratio authority (Shift inverts the
     // per-layer lock there), and Konva's default Shift behavior would
@@ -4131,6 +4261,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       if (!l || !l.visible) return
       const node = stage.findOne(`#${id}`)
       if (!node) return
+      // A group member's x/y are relative to its group, so its outline
+      // takes the stage-space box instead (axis-aligned; good enough for
+      // a hover hint, and exact when the group is unrotated).
+      if (l.parentId) {
+        const abs = node.getClientRect({ relativeTo: stage as unknown as Konva.Container, skipShadow: true, skipStroke: true })
+        next.push({ id, kind, x: 0, y: 0, rotation: 0, box: abs })
+        return
+      }
       // Self-relative client rect = the node's untransformed content box.
       // The overlay group re-applies x/y/rotation below, so the outline
       // hugs rotated elements instead of their axis-aligned bounds.
@@ -5332,7 +5470,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       const nodeMap = pendingTransformsRef.current
       pendingTransformsRef.current = new Map()
 
-      const next = layers.map(l => {
+      // Groups bake their drag scale into their members after the map
+      // (the members are other entries of the same array).
+      const groupScales: Array<{ id: string; sx: number; sy: number }> = []
+      let next = layers.map(l => {
         const node = nodeMap.get(l.id)
         if (!node) return l
         // The Transformer attaches to the Group wrapper, never to the
@@ -5347,6 +5488,10 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         const dragScaleY = node.scaleY()
         const rot = node.rotation()
         let x = node.x(), y = node.y()
+        if (l.type === 'group') {
+          groupScales.push({ id: l.id, sx: dragScaleX, sy: dragScaleY })
+          return { ...l, x, y, rotation: rot }
+        }
         if (l.type === 'image') {
           let w = Math.round((l.width ?? 0) * dragScaleX)
           let h = Math.round((l.height ?? 0) * dragScaleY)
@@ -5372,6 +5517,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         if (gridSnapEnabled) { newW = snapGrid(newW); newH = snapGrid(newH) }
         return { ...l, x: Math.round(x), y: Math.round(y), width: newW, height: newH, rotation: rot }
       })
+      for (const g of groupScales) next = scaleGroupMembers(next, g.id, g.sx, g.sy)
 
       // flushSync forces React/react-konva to commit the new widths
       // and positions to the underlying Konva nodes IMMEDIATELY,
@@ -5448,56 +5594,70 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     commitLayers(next)
   }, [selectedIds, alignMode, layers, commitLayers])
 
-  const deleteSelected = useCallback(() => {
-    if (selectedIds.length === 0) return
-    const next = layers.filter(l => !selectedIds.includes(l.id))
+  /** Delete layers with their subtrees; groups left empty go with them.
+   *  Selection keeps whatever survived. */
+  const deleteLayerIds = useCallback((ids: string[]) => {
+    if (ids.length === 0) return
+    const next = deleteLayers(layers, ids)
     commitLayers(next)
-    setSelectedIds([])
-  }, [layers, selectedIds, commitLayers])
-
-  // Reorder a layer to a specific display-order gap index.
-  // displayIdx 0 = above the topmost row; layers.length = below the bottommost.
-  // The display order is the reverse of the storage array (top = highest index).
-  const reorderLayer = useCallback((srcId: string, displayDropIdx: number) => {
-    const display = [...layers].reverse()
-    const srcDisplayIdx = display.findIndex(l => l.id === srcId)
-    if (srcDisplayIdx === -1) return
-    // No-op if dropping in the same slot or the slot immediately after self.
-    if (displayDropIdx === srcDisplayIdx || displayDropIdx === srcDisplayIdx + 1) return
-    const [item] = display.splice(srcDisplayIdx, 1)
-    const adjusted = displayDropIdx > srcDisplayIdx ? displayDropIdx - 1 : displayDropIdx
-    display.splice(adjusted, 0, item)
-    commitLayers([...display].reverse())
+    setSelectedIds(prev => prev.filter(id => next.some(l => l.id === id)))
   }, [layers, commitLayers])
 
-  // Move a single layer within the z-order. Storage array: last index =
-  // front/top (renders on top, sits at the top of the layers panel). So
-  // 'up'/'top' move toward the end of the array, 'down'/'bottom' toward the
-  // start. Used by the Photoshop-style Ctrl+[ /] keyboard shortcuts.
+  const deleteSelected = useCallback(() => { deleteLayerIds(selectedIds) }, [deleteLayerIds, selectedIds])
+
+  // Move a layer (with its subtree) among its siblings in the z-order:
+  // 'up'/'top' toward the front, 'down'/'bottom' toward the back. Used by
+  // the Photoshop-style Ctrl+[ /] keyboard shortcuts. A group moves as one;
+  // a member moves within its group.
   const moveLayer = useCallback((id: string, direction: 'up' | 'down' | 'top' | 'bottom') => {
-    const idx = layers.findIndex(l => l.id === id)
-    if (idx === -1) return
-    const target =
-      direction === 'up'   ? Math.min(idx + 1, layers.length - 1) :
-      direction === 'down' ? Math.max(idx - 1, 0) :
-      direction === 'top'  ? layers.length - 1 :
-      /* bottom */           0
-    if (target === idx) return
-    const next = [...layers]
-    const [item] = next.splice(idx, 1)
-    next.splice(target, 0, item)
-    commitLayers(next)
+    const next = moveAmongSiblings(layers, id, direction)
+    if (next) commitLayers(next)
   }, [layers, commitLayers])
 
   const duplicateLayer = useCallback((id: string) => {
-    const src = layers.find(l => l.id === id)
-    if (!src) return
-    const copy: ThumbnailLayer = { ...cloneLayer(src), id: newId(), name: src.name + ' copy', x: src.x + 20, y: src.y + 20 }
-    const idx = layers.findIndex(l => l.id === id)
-    const next = [...layers.slice(0, idx + 1), copy, ...layers.slice(idx + 1)]
-    commitLayers(next)
-    setSelectedIds([copy.id])
+    const res = duplicateLayerTree(layers, id, newId)
+    if (!res) return
+    commitLayers(res.layers)
+    setSelectedIds([res.rootId])
   }, [layers, commitLayers])
+
+  // ── Grouping (THU-18) ──────────────────────────────────────────────────
+  const groupCheck = useMemo(() => canGroup(layers, selectedIds), [layers, selectedIds])
+  const ungroupCheck = useMemo(() => canUngroup(layers, selectedIds), [layers, selectedIds])
+
+  /** Wrap the selection in a new group. The union box comes from the Konva
+   *  nodes (relative to each node's parent container) so rotated members
+   *  and measured text land exactly; the group's origin is its top-left. */
+  const groupSelected = useCallback(() => {
+    const ls = layersRef.current
+    const sel = selectedIdsRef.current
+    if (!canGroup(ls, sel).ok) return
+    const stage = stageRef.current
+    const rectOf = (id: string) => {
+      const node = stage?.findOne(`#${id}`)
+      const parent = node?.getParent()
+      if (!node || !parent) return null
+      return node.getClientRect({ relativeTo: parent as Konva.Container, skipShadow: true, skipStroke: true })
+    }
+    const res = groupLayers(ls, sel, rectOf, newId)
+    if (!res) return
+    commitLayers(res.layers)
+    setSelectedIds([res.groupId])
+  }, [commitLayers])
+
+  /** Dissolve every selected group; the freed members become the selection. */
+  const ungroupSelected = useCallback(() => {
+    let ls = layersRef.current
+    const roots = selectionRoots(ls, selectedIdsRef.current)
+    if (!canUngroup(ls, roots).ok) return
+    const freed: string[] = []
+    for (const id of roots) {
+      const r = ungroupLayer(ls, id)
+      if (r) { ls = r.layers; freed.push(...r.freed) }
+    }
+    commitLayers(ls)
+    setSelectedIds(freed)
+  }, [commitLayers])
 
   /** Toggle flipX / flipY on every selected layer. Each click on the
    *  toolbar button is a single undo entry that flips all selected
@@ -5673,7 +5833,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const panelAnchorIdRef = useRef<string | null>(null)
   const handleLayerRowClick = useCallback((id: string, e: React.MouseEvent) => {
     if (e.shiftKey && panelAnchorIdRef.current && panelAnchorIdRef.current !== id) {
-      const display = [...layersRef.current].reverse()
+      // Range over the rows as displayed (groups expanded or not), so a
+      // shift-click selects exactly what sits between the two clicks.
+      const display = panelRows(layersRef.current, collapsedGroups).map(r => r.layer)
       const a = display.findIndex(l => l.id === panelAnchorIdRef.current)
       const b = display.findIndex(l => l.id === id)
       if (a !== -1 && b !== -1) {
@@ -5684,7 +5846,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     panelAnchorIdRef.current = id
     handleLayerSelect(id, e.ctrlKey || e.metaKey)
-  }, [handleLayerSelect])
+  }, [handleLayerSelect, collapsedGroups])
 
   // ── Open editor for a stream ───────────────────────────────────────────────
   // Pull the ordinal out of a thumbnail basename, e.g.
@@ -6204,8 +6366,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       if ((e.ctrlKey || e.metaKey) && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo() }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); manualSave() }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-        const copied = layers.filter(l => selectedIds.includes(l.id)).map(cloneLayer)
+        // A selected group copies with its members; a member selected
+        // alongside its group is covered by the group.
+        const copied = selectionSubtreeLayers(layers, selectedIds).map(cloneLayer)
         if (copied.length > 0) setClipboardLayers(copied)
+      }
+      if ((e.ctrlKey || e.metaKey) && k === 'g') {
+        e.preventDefault()
+        if (e.shiftKey) ungroupSelected()
+        else groupSelected()
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         if (clipboardLayers.length > 0) {
@@ -6215,13 +6384,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           // guard sees `true`; the timeout just clears it if no paste follows.
           justPastedLayerRef.current = true
           setTimeout(() => { justPastedLayerRef.current = false }, 0)
-          const pasted = clipboardLayers.map(l => ({ ...cloneLayer(l), id: newId() }))
+          // Fresh ids with inner parent links remapped; copied roots land
+          // at the top level.
+          const pasted = clonePasteLayers(clipboardLayers.map(cloneLayer), newId)
           commitLayers([...layers, ...pasted])
-          setSelectedIds(pasted.map(l => l.id))
+          setSelectedIds(pasted.filter(l => !l.parentId).map(l => l.id))
         }
       }
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
-      if (e.key === 'g' || e.key === 'G') setGridSnapEnabled(v => !v)
+      if (!(e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) setGridSnapEnabled(v => !v)
       // Arrow-key nudge: move the selection 1px (10px with Shift). e.code keeps
       // this layout-independent and lets it co-exist with the bracket z-order
       // keys below. preventDefault stops the arrows from scrolling the panels.
@@ -6247,7 +6418,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer, nudgeSelected])
+  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer, nudgeSelected, groupSelected, ungroupSelected])
 
   // ── Selected layer ────────────────────────────────────────────────────────
   const selectedLayer = useMemo(() => {
@@ -6785,8 +6956,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 </Layer>
                 {/* Content layer */}
                 <Layer onMouseOver={handleCanvasMouseOver} onMouseOut={handleCanvasMouseOut}>
-                  {renderLayers.map(layer => {
-                    const props: KonvaLayerNodeProps = {
+                  <LayerNodes layers={renderLayers} parentId={null} makeProps={layer => {
+                    const nested = !!layer.parentId
+                    return {
                       layer,
                       isSelected: selectedIds.includes(layer.id),
                       onSelect: handleLayerSelect,
@@ -6799,11 +6971,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       onClearGuides: clearSnapGuides,
                       gridSnapEnabled,
                       mergeFields: mergeFieldValues,
+                      nested,
+                      // A group member only becomes its own interactive node
+                      // once it is selected (panel click or canvas double-click);
+                      // otherwise its events belong to the group.
+                      inert: nested && !selectedIds.includes(layer.id),
                     }
-                    if (layer.type === 'image') return <ImageNode key={layer.id} {...props} />
-                    if (layer.type === 'shape') return <ShapeNode key={layer.id} {...props} />
-                    return <TextNode key={layer.id} {...props} />
-                  })}
+                  }} />
                 </Layer>
                 {/* Off-canvas matte: darkens content that falls outside the work area.
                     Excluded from export — the matte's sceneFunc closes over
@@ -7126,79 +7300,146 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                         </button>
                       </Tooltip>
                     </div>
-                    <span className="text-[10px] text-gray-400">{layers.length}</span>
+                    {/* Group / ungroup (THU-18). Disabled state carries the
+                        reason in its tooltip so the rule is discoverable. */}
+                    <div className="flex items-center gap-0.5">
+                      <Tooltip content={groupCheck.ok ? 'Group the selected layers (Ctrl+G)' : groupCheck.reason}>
+                        <button
+                          type="button"
+                          onClick={groupSelected}
+                          disabled={!groupCheck.ok}
+                          className={`p-1 rounded-md border flex items-center justify-center transition-colors ${groupCheck.ok ? 'bg-navy-900 border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5' : 'border-transparent text-gray-600 cursor-default'}`}
+                        >
+                          <GroupIcon size={13} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content={ungroupCheck.ok ? 'Ungroup (Ctrl+Shift+G)' : ungroupCheck.reason}>
+                        <button
+                          type="button"
+                          onClick={ungroupSelected}
+                          disabled={!ungroupCheck.ok}
+                          className={`p-1 rounded-md border flex items-center justify-center transition-colors ${ungroupCheck.ok ? 'bg-navy-900 border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5' : 'border-transparent text-gray-600 cursor-default'}`}
+                        >
+                          <UngroupIcon size={13} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                    <span className="text-[10px] text-gray-400">{layers.filter(l => !isGroup(l)).length}</span>
                   </div>
                 </div>
                 {/* `hidden` (not unmount) so drag/rename state survives a
                     collapse round-trip, matching the assets panel. */}
                 <div className={`overflow-y-auto flex-1${layersCollapsed ? ' hidden' : ''}`}>
                   {(() => {
-                    const displayLayers = [...layers].reverse()
-                    return displayLayers.map((layer, displayIdx) => {
-                      const isSelected = selectedIds.includes(layer.id)
-                      const isRenaming = renamingLayerId === layer.id
-                      const isDragging = draggingLayerId === layer.id
-                      return (
-                        <React.Fragment key={layer.id}>
-                          {dropTargetDisplayIdx === displayIdx && (
-                            <div className="h-0.5 bg-accent-500" />
-                          )}
-                          <div
-                            draggable={!isRenaming}
-                            onDragStart={e => {
-                              setDraggingLayerId(layer.id)
-                              e.dataTransfer.effectAllowed = 'move'
-                              // Required for drag to work in some browsers; the
-                              // payload is unused since we track via state.
-                              e.dataTransfer.setData('text/plain', layer.id)
-                            }}
-                            onDragOver={e => {
-                              if (!draggingLayerId || draggingLayerId === layer.id) return
-                              e.preventDefault()
-                              e.dataTransfer.dropEffect = 'move'
-                              const rect = e.currentTarget.getBoundingClientRect()
-                              const above = e.clientY < rect.top + rect.height / 2
-                              setDropTargetDisplayIdx(above ? displayIdx : displayIdx + 1)
-                            }}
-                            onDragLeave={e => {
-                              // Only clear when leaving the entire row, not when
-                              // crossing into a child element.
-                              const related = e.relatedTarget as Node | null
-                              if (related && e.currentTarget.contains(related)) return
-                              // Don't clear if we're moving onto another row that
-                              // will set its own target — let onDragOver of the
-                              // next row override us.
-                            }}
-                            onDrop={e => {
-                              e.preventDefault()
-                              if (draggingLayerId && dropTargetDisplayIdx !== null) {
-                                reorderLayer(draggingLayerId, dropTargetDisplayIdx)
-                              }
-                              setDraggingLayerId(null)
-                              setDropTargetDisplayIdx(null)
-                            }}
-                            onDragEnd={() => {
-                              setDraggingLayerId(null)
-                              setDropTargetDisplayIdx(null)
-                            }}
-                            onClick={e => { if (!isRenaming) handleLayerRowClick(layer.id, e) }}
-                            // Bidirectional hover sync with the canvas
-                            // (thumbnails #3): row hover outlines the canvas
-                            // element; canvas hover highlights this row via
-                            // the same shared hoveredLayerId.
-                            onMouseEnter={() => setHoveredLayerId(layer.id)}
-                            onMouseLeave={() => setHoveredLayerId(null)}
-                            className={`flex items-center gap-1.5 px-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-accent-600/20' : hoveredLayerId === layer.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
-                          >
-                            <Tooltip content={layer.visible ? 'Hide layer' : 'Show layer'} side="top">
-                              <button
-                                onClick={e => { e.stopPropagation(); updateLayer({ ...layer, visible: !layer.visible }) }}
-                                className="text-gray-400 hover:text-gray-300 shrink-0"
+                    const rows = panelRows(layers, collapsedGroups)
+                    const indent = (depth: number) => 8 + depth * 14
+                    // Where a drop between rows lands in the tree (THU-18).
+                    // "Above row" = directly above that row in its parent.
+                    // "Below row" = above the next sibling, or the bottom of
+                    // the parent when the row is its last member, or the top
+                    // slot inside the row when it is an expanded group.
+                    const dropFor = (rowIdx: number, above: boolean) => {
+                      const row: PanelRow = rows[rowIdx]
+                      if (above) return { gapIdx: rowIdx, depth: row.depth, parentId: row.parentId, afterId: row.layer.id }
+                      if (isGroup(row.layer) && !collapsedGroups.has(row.layer.id)) {
+                        const kids = childrenOf(layers, row.layer.id)
+                        return { gapIdx: rowIdx + 1, depth: row.depth + 1, parentId: row.layer.id, afterId: kids.length ? kids[kids.length - 1].id : null }
+                      }
+                      const nextRow = rows[rowIdx + 1]
+                      if (nextRow && nextRow.parentId === row.parentId) return { gapIdx: rowIdx + 1, depth: row.depth, parentId: row.parentId, afterId: nextRow.layer.id }
+                      return { gapIdx: rowIdx + 1, depth: row.depth, parentId: row.parentId, afterId: null }
+                    }
+                    const indicator = (depth: number) => (
+                      <div className="h-0.5 bg-accent-500" style={{ marginLeft: indent(depth) }} />
+                    )
+                    return (
+                      <>
+                        {rows.map((row, rowIdx) => {
+                          const { layer, depth } = row
+                          const isSelected = selectedIds.includes(layer.id)
+                          const isRenaming = renamingLayerId === layer.id
+                          const isDragging = draggingLayerId === layer.id
+                          const group = isGroup(layer)
+                          const collapsed = collapsedGroups.has(layer.id)
+                          // Members of a hidden group read as hidden too.
+                          const dimmed = !layer.visible || hasHiddenAncestor(layers, layer.id)
+                          return (
+                            <React.Fragment key={layer.id}>
+                              {panelDrop?.gapIdx === rowIdx && indicator(panelDrop.depth)}
+                              <div
+                                draggable={!isRenaming}
+                                onDragStart={e => {
+                                  setDraggingLayerId(layer.id)
+                                  e.dataTransfer.effectAllowed = 'move'
+                                  // Required for drag to work in some browsers; the
+                                  // payload is unused since we track via state.
+                                  e.dataTransfer.setData('text/plain', layer.id)
+                                }}
+                                onDragOver={e => {
+                                  if (!draggingLayerId || draggingLayerId === layer.id) return
+                                  e.preventDefault()
+                                  e.dataTransfer.dropEffect = 'move'
+                                  const rect = e.currentTarget.getBoundingClientRect()
+                                  const above = e.clientY < rect.top + rect.height / 2
+                                  const target = dropFor(rowIdx, above)
+                                  // No indicator for a drop the tree refuses (into
+                                  // its own subtree, past the nesting limit) or one
+                                  // that would change nothing.
+                                  const valid = moveLayerTo(layers, draggingLayerId, target.parentId, target.afterId) !== null
+                                  setPanelDrop(valid ? target : null)
+                                }}
+                                onDragLeave={e => {
+                                  // Only clear when leaving the entire row, not when
+                                  // crossing into a child element.
+                                  const related = e.relatedTarget as Node | null
+                                  if (related && e.currentTarget.contains(related)) return
+                                  // Don't clear if we're moving onto another row that
+                                  // will set its own target — let onDragOver of the
+                                  // next row override us.
+                                }}
+                                onDrop={e => {
+                                  e.preventDefault()
+                                  if (draggingLayerId && panelDrop) {
+                                    const next = moveLayerTo(layers, draggingLayerId, panelDrop.parentId, panelDrop.afterId)
+                                    if (next) commitLayers(next)
+                                  }
+                                  setDraggingLayerId(null)
+                                  setPanelDrop(null)
+                                }}
+                                onDragEnd={() => {
+                                  setDraggingLayerId(null)
+                                  setPanelDrop(null)
+                                }}
+                                onClick={e => { if (!isRenaming) handleLayerRowClick(layer.id, e) }}
+                                // Bidirectional hover sync with the canvas
+                                // (thumbnails #3): row hover outlines the canvas
+                                // element; canvas hover highlights this row via
+                                // the same shared hoveredLayerId.
+                                onMouseEnter={() => setHoveredLayerId(layer.id)}
+                                onMouseLeave={() => setHoveredLayerId(null)}
+                                className={`flex items-center gap-1.5 pr-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-accent-600/20' : hoveredLayerId === layer.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
+                                style={{ paddingLeft: indent(depth) }}
                               >
-                                {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-400" />}
-                              </button>
-                            </Tooltip>
-                            {isRenaming ? (
+                                {group && (
+                                  <Tooltip content={collapsed ? 'Expand group' : 'Collapse group'} side="top">
+                                    <button
+                                      onClick={e => { e.stopPropagation(); toggleGroupCollapsed(layer.id) }}
+                                      className="text-gray-400 hover:text-gray-300 shrink-0 -ml-1"
+                                    >
+                                      {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                                    </button>
+                                  </Tooltip>
+                                )}
+                                <Tooltip content={layer.visible ? (group ? 'Hide group' : 'Hide layer') : (group ? 'Show group' : 'Show layer')} side="top">
+                                  <button
+                                    onClick={e => { e.stopPropagation(); updateLayer({ ...layer, visible: !layer.visible }) }}
+                                    className="text-gray-400 hover:text-gray-300 shrink-0"
+                                  >
+                                    {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-400" />}
+                                  </button>
+                                </Tooltip>
+                                {group && <Folder size={11} className="text-gray-400 shrink-0" />}
+                                {isRenaming ? (
                               <input
                                 autoFocus
                                 defaultValue={layer.name}
@@ -7218,7 +7459,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                             ) : (
                               <span
                                 onDoubleClick={e => { e.stopPropagation(); setRenamingLayerId(layer.id) }}
-                                className="flex-1 text-xs text-gray-400 truncate cursor-text"
+                                className={`flex-1 text-xs truncate cursor-text ${dimmed ? 'text-gray-500' : 'text-gray-400'}`}
                               >
                                 {layer.name}
                               </span>
@@ -7229,24 +7470,24 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                               </Tooltip>
                             )}
                             <div className={`flex gap-0.5 opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''} transition-opacity`}>
-                              <Tooltip content="Duplicate layer" side="top">
+                              <Tooltip content={group ? 'Duplicate group' : 'Duplicate layer'} side="top">
                                 <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300">
                                   <Copy size={10} />
                                 </button>
                               </Tooltip>
-                              <Tooltip content="Delete layer" side="top">
-                                <button onClick={e => { e.stopPropagation(); commitLayers(layers.filter(l => l.id !== layer.id)); setSelectedIds([]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400">
+                              <Tooltip content={group ? 'Delete group and its layers' : 'Delete layer'} side="top">
+                                <button onClick={e => { e.stopPropagation(); deleteLayerIds([layer.id]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400">
                                   <Trash2 size={10} />
                                 </button>
                               </Tooltip>
                             </div>
                           </div>
-                          {displayIdx === displayLayers.length - 1 && dropTargetDisplayIdx === displayLayers.length && (
-                            <div className="h-0.5 bg-accent-500" />
-                          )}
                         </React.Fragment>
                       )
-                    })
+                    })}
+                        {panelDrop?.gapIdx === rows.length && indicator(panelDrop.depth)}
+                      </>
+                    )
                   })()}
                 </div>
               </div>
