@@ -4,6 +4,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { getStore } from './store'
 import { metaKey } from './streams'
+import { checkLocalFiles } from './files'
 import { expectSelfWrite } from '../services/selfWrites'
 
 // ── Types (mirrored from renderer) ───────────────────────────────────────────
@@ -99,8 +100,17 @@ export function registerThumbnailIPC(): void {
   // thumbnail has changed since it was last pushed to YouTube — robust to
   // mtime touches from cloud-sync clients. Returns null if the file is
   // missing/unreadable (treated by the caller as "no hash → needs push").
+  // Hashing reads the whole file, and a read on a cloud placeholder is a
+  // data access that makes the sync client download it. Both hash paths
+  // check the attributes first and report null (unknown) for placeholders
+  // instead of hydrating them (STR-23: the out-of-sync sweep below pulled
+  // down every offloaded thumbnail in the library at once and, with each
+  // read parked on a thread-pool thread until its download finished, hung
+  // every file operation in the main process).
   ipcMain.handle('thumbnail:hashFile', async (_e, filePath: string): Promise<string | null> => {
     try {
+      const [local] = await checkLocalFiles([filePath])
+      if (!local) return null
       const buf = await fs.promises.readFile(filePath)
       return crypto.createHash('sha1').update(buf).digest('hex')
     } catch {
@@ -113,8 +123,12 @@ export function registerThumbnailIPC(): void {
   // detect "thumbnail changed since last push"). Hashed in parallel; missing/
   // unreadable files map to null.
   ipcMain.handle('thumbnail:hashFiles', async (_e, filePaths: string[]): Promise<Record<string, string | null>> => {
+    const paths = filePaths ?? []
+    // One batched attribute pass (a single PowerShell spawn) before any read.
+    const localFlags = await checkLocalFiles(paths)
     const entries = await Promise.all(
-      (filePaths ?? []).map(async (p): Promise<[string, string | null]> => {
+      paths.map(async (p, i): Promise<[string, string | null]> => {
+        if (!localFlags[i]) return [p, null]
         try {
           const buf = await fs.promises.readFile(p)
           return [p, crypto.createHash('sha1').update(buf).digest('hex')]

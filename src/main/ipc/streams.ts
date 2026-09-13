@@ -4,7 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { spawnSync } from 'child_process'
-import chokidar, { FSWatcher } from 'chokidar'
+import { startStreamsWatcher, type StreamsWatcher } from '../services/streamsWatcher'
 import { getStore } from './store'
 import type { ConversionPreset } from './converter'
 import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './files'
@@ -1274,8 +1274,8 @@ export function registerStreamsIPC(): void {
           }
           // Notify the renderer so it re-fetches with the freshly-written
           // videoMap entries (e.g. categories for newly-arrived files). The
-          // chokidar self-loop guard means our own _meta.json write doesn't
-          // trigger a streams:changed event automatically. Scoped to the
+          // watcher's _meta.* ignore rule means our own _meta.json write
+          // doesn't trigger a streams:changed event automatically. Scoped to the
           // touched streams (folder mode) and quiet in either mode — new
           // files have new paths, so nothing needs a thumbnail cache-bust.
           const win = BrowserWindow.fromWebContents(event.sender)
@@ -2119,11 +2119,11 @@ export function registerStreamsIPC(): void {
 
     // ── 2. Rename the stream folder (folder-per-stream only) ────────────────
     // Done BEFORE meta update so we can roll back the file renames cleanly if
-    // the folder rename fails. Pause our own chokidar watcher first — it holds
-    // a Windows ReadDirectoryChangesW handle on every watched subdirectory,
-    // which is enough on its own to make a directory rename fail with EPERM.
-    // Cloud-sync clients (Synology Drive, OneDrive) can also briefly lock the
-    // folder, so we still retry a few times.
+    // the folder rename fails. Pause our own watcher first: a Windows
+    // ReadDirectoryChangesW handle under the root has been enough on its own
+    // to make a directory rename fail with EPERM. Cloud-sync clients
+    // (Synology Drive, OneDrive) can also briefly lock the folder, so we
+    // still retry a few times.
     // Folder NAMES are basenames; meta KEYS are root-relative (metaKey —
     // the same keys listStreams hands out as relativePath). The old code
     // used basenames for both, so in nested layouts (year/month/stream)
@@ -2221,8 +2221,8 @@ export function registerStreamsIPC(): void {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
     const key = metaKey(streamsDir, folderPath)
 
-    // Pause our chokidar watcher first — its ReadDirectoryChangesW handle on
-    // this folder will make shell.trashItem fail on Windows (IFileOperation
+    // Pause our watcher first: an open ReadDirectoryChangesW handle under
+    // the root has made shell.trashItem fail on Windows (IFileOperation
     // needs exclusive access, same constraint as rename).
     const restartWatcher = await pauseDirWatcher()
     try {
@@ -2305,11 +2305,14 @@ export function registerStreamsIPC(): void {
   })
 
   // ── Directory watcher ──────────────────────────────────────────────────────
-  let dirWatcher: FSWatcher | null = null
+  let dirWatcher: StreamsWatcher | null = null
   // Captured so the watcher can be transparently restarted with the same config
-  // after operations that need exclusive folder access (e.g. reschedule renames
-  // a stream folder; chokidar holds a Windows ReadDirectoryChangesW handle on
-  // every watched subdirectory, which would block the rename).
+  // after operations that need exclusive folder access (reschedule renames a
+  // stream folder, delete moves one to the Recycle Bin, offload dehydrates
+  // files). The watcher is a single recursive handle on the root now
+  // (services/streamsWatcher, see STR-23), so a restart costs one open and
+  // touches no file; the pause is kept because the sync client has rejected
+  // dehydration while any directory handle under the root was open.
   let currentWatchConfig: { dir: string; mode: 'folder-per-stream' | 'dump-folder'; win: BrowserWindow } | null = null
   // Debounce rapid bursts (e.g. multiple files landing at once) into one event
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -2356,20 +2359,21 @@ export function registerStreamsIPC(): void {
 
   function startDirWatcher(dir: string, mode: 'folder-per-stream' | 'dump-folder', win: BrowserWindow) {
     // Never stack: close whatever is running before overwriting the ref.
-    if (dirWatcher) { void dirWatcher.close(); dirWatcher = null }
-    dirWatcher = chokidar.watch(dir, {
+    if (dirWatcher) { dirWatcher.close(); dirWatcher = null }
+    const isDump = mode === 'dump-folder'
+    dirWatcher = startStreamsWatcher({
+      dir,
       // dump: root files only. folder: deep enough to cover year/month grouping
-      // above the stream folder PLUS sub-org (clips/, recordings/, …) below it.
-      // 6 covers root → year → month → stream → sub-folder → file.
-      depth: mode === 'dump-folder' ? 0 : 6,
-      ignoreInitial: true,
-      persistent: true,
-      awaitWriteFinish: { stabilityThreshold: 1000, pollInterval: 300 },
-      // Ignore files the app writes itself, otherwise chokidar fires
+      // above the stream folder PLUS sub-org (clips/, recordings/, ...) below it.
+      // 6 covers root, year, month, stream, sub-folder, file.
+      depth: isDump ? 0 : 6,
+      stabilityMs: 1000,
+      pollMs: 300,
+      // Ignore files the app writes itself, otherwise the watcher fires
       // 'change' events for every internal write and the renderer re-runs
-      // loadFolders → refreshVideoMaps in a tight feedback loop:
+      // loadFolders and refreshVideoMaps in a tight feedback loop:
       //   - _meta.* family: the metadata store itself (saved on every edit),
-      //     writeAllMeta's atomic-swap sibling (_meta.json.tmp — written and
+      //     writeAllMeta's atomic-swap sibling (_meta.json.tmp, written and
       //     renamed away on every save, so it would fire a phantom add/unlink
       //     pair each time), and readAllMeta's preserved corrupt copies
       //     (_meta.corrupt-*.json)
@@ -2379,63 +2383,51 @@ export function registerStreamsIPC(): void {
       //     The temp file is renamed/swapped to the real file at end-of-job
       //     anyway, so the user only needs to see the final state.
       //   - in-flight converter outputs: watching a growing ffmpeg output
-      //     is churn, and chokidar's write-stability stat-polling can race
-      //     a cancelled job's file-handle release into an EPERM. The
+      //     is churn, and the write-stability stat-polling can race a
+      //     cancelled job's file-handle release into an EPERM. The
       //     completion/cancel paths fire their own explicit events, so
-      //     nothing is missed. (Via the inFlightWrites registry — a lazy
-      //     `require('./converter')` used to sit here to dodge the import
-      //     cycle, but the bundled main process has no ./converter module
-      //     at runtime, so it always threw and the catch silently disabled
-      //     this ignore. That was the thumbnail-refresh thrash during
-      //     long conversions.)
+      //     nothing is missed. (Via the inFlightWrites registry.)
       ignored: (p: string) => {
         if (path.basename(p).startsWith('_meta.') || /__arc_tmp\.[^.]+$/.test(p)) return true
         return isInFlightWrite(p)
       },
+      // File events resolve to the owning stream folder so the renderer can
+      // reload just that stream; anything else (dump mode, root-level files,
+      // paths outside a stream folder) escalates the burst to a full reload.
+      // Echoes of the app's own writes (thumbnail saves, converter outputs,
+      // announced via expectSelfWrite) are dropped outright.
+      onFile: (p) => {
+        if (consumeSelfWrite(p)) return
+        notifyChange(win, isDump ? null : streamKeyForPath(dir, p))
+      },
+      // Directory events are structural (a date-named dir appearing or
+      // vanishing is a stream create/delete/reschedule): full reload.
+      onDir: (p, kind) => {
+        // Diagnostic: surface every date-named folder appearing in or
+        // leaving the streams root, with timestamp. Helps pin down the
+        // phantom "2024-06-18" reappearance. The mkdir monkey-patch in
+        // main/index catches what the app does; this catches anything else
+        // (cloud sync, manual creation). Remove once root cause is found.
+        if (DATE_FOLDER_RE.test(path.basename(p))) {
+          console.warn(`[streams-watcher ${kind}] ${new Date().toISOString()} ${p}`)
+        }
+        notifyChange(win, null)
+      },
+      // The change buffer overflowed during a burst and events were lost:
+      // one full reload reconciles whatever landed.
+      onOverflow: () => notifyChange(win, null),
+      onError: err => console.warn('[streams:watchDir] watcher error:', err),
     })
-
-    // File events resolve to the owning stream folder so the renderer can
-    // reload just that stream; anything else (dump mode, root-level files,
-    // paths outside a stream folder) escalates the burst to a full reload.
-    // Echoes of the app's own writes (thumbnail saves, converter outputs —
-    // announced via expectSelfWrite) are dropped outright.
-    const isDump = mode === 'dump-folder'
-    const onFileEvent = (p: string) => {
-      if (consumeSelfWrite(p)) return
-      notifyChange(win, isDump ? null : streamKeyForPath(dir, p))
-    }
-    dirWatcher.on('add', onFileEvent)
-    dirWatcher.on('unlink', onFileEvent)
-    dirWatcher.on('change', onFileEvent)
-    // Directory events are structural (a date-named dir appearing or
-    // vanishing is a stream create/delete/reschedule) → full reload.
-    dirWatcher.on('addDir', (p: string) => {
-      // Diagnostic: surface every date-named folder appearing in the
-      // streams root, with timestamp. Helps pin down the phantom
-      // "2024-06-18" reappearance. The mkdir monkey-patch in main/index
-      // catches what the app does; this catches anything else (cloud
-      // sync, manual creation, etc.). Remove once root cause is found.
-      if (DATE_FOLDER_RE.test(path.basename(p))) {
-        console.warn(`[streams-watcher addDir] ${new Date().toISOString()} ${p}`)
-      }
-      notifyChange(win, null)
-    })
-    dirWatcher.on('unlinkDir', (p: string) => {
-      if (DATE_FOLDER_RE.test(path.basename(p))) {
-        console.warn(`[streams-watcher unlinkDir] ${new Date().toISOString()} ${p}`)
-      }
-      notifyChange(win, null)
-    })
-    dirWatcher.on('error', err => console.warn('[streams:watchDir] watcher error:', err))
   }
 
-  /** Briefly close the directory watcher so it doesn't hold ReadDirectoryChangesW
-   *  handles on the folder we're about to mutate. Returns a function to restart
-   *  the watcher with the original config (call it from a finally block). */
+  /** Briefly close the directory watcher so no ReadDirectoryChangesW handle
+   *  under the root is open while we mutate it. Returns a function to restart
+   *  the watcher with the original config (call it from a finally block).
+   *  Cheap now: the restart re-opens one directory handle and reads no file. */
   pauseDirWatcher = async (): Promise<() => void> => {
     if (!dirWatcher || !currentWatchConfig) return () => {}
     const config = currentWatchConfig
-    await dirWatcher.close()
+    dirWatcher.close()
     dirWatcher = null
     const gen = ++watchGeneration
     return () => {
@@ -2456,7 +2448,7 @@ export function registerStreamsIPC(): void {
 
   ipcMain.handle('streams:watchDir', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream') => {
     watchGeneration++
-    if (dirWatcher) { await dirWatcher.close(); dirWatcher = null }
+    if (dirWatcher) { dirWatcher.close(); dirWatcher = null }
     if (!dir || !fs.existsSync(dir)) { currentWatchConfig = null; return }
 
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -2468,26 +2460,26 @@ export function registerStreamsIPC(): void {
 
   ipcMain.handle('streams:unwatchDir', async () => {
     watchGeneration++
-    if (dirWatcher) { await dirWatcher.close(); dirWatcher = null }
+    if (dirWatcher) { dirWatcher.close(); dirWatcher = null }
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null }
     currentWatchConfig = null
   })
 }
 
 // Set inside registerStreamsIPC so the reschedule handler can pause its own
-// chokidar watcher around the folder rename. Module-scoped so the assignment
+// watcher around the folder rename. Module-scoped so the assignment
 // inside the closure is visible to other handlers in the same module — and
 // re-exported for outside modules (cloudSync) that need the same pause/restart
 // dance around CFAPI dehydrate calls.
 let pauseDirWatcher: () => Promise<() => void> = async () => () => {}
 
-/** Pause the streams chokidar watcher; returns a restart fn. Module-private
+/** Pause the streams watcher; returns a restart fn. Module-private
  *  module-let pattern is closed-over by registerStreamsIPC, so callers must
  *  import this wrapper rather than the variable directly. */
 export const pauseStreamsWatcher = (): Promise<() => void> => pauseDirWatcher()
 
-// The global chokidar suppression window that used to live here
+// The global suppression window that used to live here
 // (suppressNextStreamsChokidarFire) is retired: writers announce their
 // exact paths via services/selfWrites.expectSelfWrite and the watcher
-// drops those echoes per-path, instead of deferring every event —
-// including genuinely external ones — behind a shared timer.
+// drops those echoes per-path, instead of deferring every event,
+// including genuinely external ones, behind a shared timer.

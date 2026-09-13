@@ -100,8 +100,8 @@ function settleUnit(b: BatchState): void {
 }
 
 // ─── Offload watcher pause ──────────────────────────────────────────────────
-// The chokidar streams watcher must be down while ANY offload unit runs —
-// its ReadDirectoryChangesW handles cause Synology Drive to reject
+// The streams watcher must be down while ANY offload unit runs: an open
+// ReadDirectoryChangesW handle under the root made Synology Drive reject
 // CfDehydratePlaceholder with HRESULT 0x80070187 (file in use). The pause is
 // held for the lifetime of the offload pool, not per batch. State machine:
 // exactly one of {pause in flight, restart fn held, fully resumed} at a time.

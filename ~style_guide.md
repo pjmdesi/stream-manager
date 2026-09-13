@@ -84,6 +84,7 @@ CSS vars in `index.css` (`--color-bg`, `--color-bg-elevated`, `--color-panel`, `
 - **Default timing function is `linear`** (set in `tailwind.config.js`). Eased transitions caused drift when differently-sized elements animate together. Note: `transition-[prop]` classes still need explicit `ease-linear`.
 - Shared attention animation: `@keyframes outline-pulse` in `index.css` (2px outline), driven per-use by a `--pulse-color` CSS var (uses `outline`, not `box-shadow`, so it isn't clipped by `overflow:hidden`). Named users: `.save-attention`, `.help-attention`, `.survivor-pulse`. A 1px sibling, `outline-pulse-sm`, serves the tiny mismatch dots (`.mismatch-dot-pulse`). Reuse one of these two for new attention cues rather than inventing a third.
 - **Respect user settings**: `config.disableAnimations` / `config.slowAnimations` (and the OS reduced-motion preference) must gate non-trivial animation. Read them through `useAnimationConfig`, which folds all three into `noAnimation` and a duration multiplier.
+- **Judge motion on a packaged build.** The dev server (`npm run dev`) renders animations far choppier than a dist of the same code (unminified renderer, source maps, HMR), and heavy pages such as the streams list amplify it. Stutter seen only on the dev server is not a finding; cut a `_DEV` dist before changing timings or structure. (Re-learned 2026-09-12 on the delete-row exit.)
 
 ---
 

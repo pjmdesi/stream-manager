@@ -2304,8 +2304,19 @@ export function StreamsPage({
       // Hash each linked stream's thumbnail (batched) so the panel can flag
       // "thumbnail changed since last push" — local-only, always a push.
       const linkedFolders = folders.filter(f => f.meta?.ytVideoId && map[f.meta.ytVideoId])
+      // Offloaded thumbnails are left out here (the main-side hash also
+      // skips placeholders): hashing reads the file, and reading a
+      // placeholder downloads it. Their hash reads as unknown, so the
+      // panel cannot flag a thumbnail change for them, which is the honest
+      // answer while the bytes are not on this PC (STR-23).
+      const localStreamThumb = (f: StreamFolder): string | null => {
+        const p = resolveStreamThumb(f)
+        if (!p) return null
+        const i = f.thumbnails.indexOf(p)
+        return f.thumbnailLocalFlags?.[i] === false ? null : p
+      }
       const thumbPaths = Array.from(new Set(
-        linkedFolders.map(resolveStreamThumb).filter((p): p is string => !!p)
+        linkedFolders.map(localStreamThumb).filter((p): p is string => !!p)
       ))
       const hashByPath = thumbPaths.length > 0 ? await window.api.thumbnailHashFiles(thumbPaths) : {}
       const byFolder: Record<string, string | null> = {}
@@ -2747,12 +2758,25 @@ export function StreamsPage({
   // row linger for seconds and then pop out. A failed local delete
   // reverses the exit and the row comes back.
   const [leavingKeys, setLeavingKeys] = useState<Set<string>>(new Set())
+  const leaveStartTimerRef = useRef<number | null>(null)
+  // animDurationMs is derived further down (after the anim hook); mirrored
+  // into a ref so this earlier callback can read it at call time.
+  const animDurationMsRef = useRef(0)
   const handleDeleteConfirmStart = useCallback((key: string) => {
     selfDeleteUntilRef.current = Date.now() + 5000
+    const sidebarWasOpen = selectedStreamKey !== null
     setSelectedStreamKey(null)
-    setLeavingKeys(prev => new Set(prev).add(key))
-  }, [])
+    // Let the sidebar finish sliding shut before the row starts its exit:
+    // the two animations at once (a page-wide re-render under the slide
+    // plus a table re-layout per frame of the collapse) stuttered badly.
+    if (leaveStartTimerRef.current) window.clearTimeout(leaveStartTimerRef.current)
+    const start = () => { leaveStartTimerRef.current = null; setLeavingKeys(prev => new Set(prev).add(key)) }
+    const ms = animDurationMsRef.current
+    if (sidebarWasOpen && ms > 0) leaveStartTimerRef.current = window.setTimeout(start, ms + 60)
+    else start()
+  }, [selectedStreamKey])
   const handleDeleteFailed = useCallback((key: string) => {
+    if (leaveStartTimerRef.current) { window.clearTimeout(leaveStartTimerRef.current); leaveStartTimerRef.current = null }
     setLeavingKeys(prev => {
       if (!prev.has(key)) return prev
       const next = new Set(prev); next.delete(key); return next
@@ -3476,6 +3500,7 @@ export function StreamsPage({
   // dynamic value wins.
   const anim = useAnimationConfig()
   const animDurationMs = anim.duration(200)
+  animDurationMsRef.current = animDurationMs
   // Slight buffer past the slide so the renderedFolder clear lands AFTER
   // the opacity transition completes — protects against tearing down
   // content while it's still fading in slow-anim mode.
@@ -4628,7 +4653,9 @@ export function StreamsPage({
               // recycle-bin move cannot yank the row mid-animation. The
               // folder-mode delete pauses the watcher around the trash, so
               // no streams:changed event ever covers this.
-              window.setTimeout(() => { void loadFolders() }, animDurationMs * 2 + 120)
+              // Budget: sidebar close, then the two exit phases at double
+              // length each.
+              window.setTimeout(() => { void loadFolders() }, animDurationMs * 5 + 200)
             }}
           />
         )
@@ -5293,9 +5320,20 @@ const StreamListItem = memo(function StreamListItem({
       setCollapseHeight(null)
       return
     }
-    const ms = animDurationMs
+    // Overlapping phases at a deliberately slow pace (deleting a whole
+    // stream item is a major action with a lot on screen, an agreed
+    // exception to the shared timing). The red fades in over FADE_MS; the
+    // slide starts once the red is about ninety percent in, because a
+    // table cell never renders shorter than its content, so the content
+    // must be hidden the instant the row starts shrinking, and at ninety
+    // percent it is already unreadable. The red is solid shortly after
+    // and the slide runs on under it.
+    const D = animDurationMs
+    if (D <= 0) { onLeaveEndRef.current(folder.relativePath); return }
+    const FADE_MS = D * 1.5
+    const SLIDE_MS = D * 2
+    const slideStart = FADE_MS * 0.9
     const measured = rowRef.current?.getBoundingClientRect().height ?? 0
-    if (ms <= 0) { onLeaveEndRef.current(folder.relativePath); return }
     setLeavePhase('fade')
     const raf = requestAnimationFrame(() => setLeaveOverlayOn(true))
     let raf2 = 0
@@ -5305,23 +5343,24 @@ const StreamListItem = memo(function StreamListItem({
       // Two frames so the measured height paints before the transition
       // to zero starts.
       raf2 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setCollapseHeight(0)) })
-    }, ms)
-    const t2 = window.setTimeout(() => onLeaveEndRef.current(folder.relativePath), ms * 2 + 40)
+    }, slideStart)
+    const t2 = window.setTimeout(() => onLeaveEndRef.current(folder.relativePath), slideStart + SLIDE_MS + 40)
     return () => { cancelAnimationFrame(raf); cancelAnimationFrame(raf2); clearTimeout(t1); clearTimeout(t2) }
   }, [leaving, animDurationMs, folder.relativePath])
-
-  if (leavePhase === 'collapse') {
-    return (
-      <tr data-stream-key={folder.relativePath}>
-        <td colSpan={20} className="p-0 border-0">
-          <div
-            className="bg-red-500 overflow-hidden"
-            style={{ height: collapseHeight ?? 0, transition: `height ${animDurationMs}ms ease-in` }}
-          />
-        </td>
-      </tr>
-    )
-  }
+  // The tr is position:relative for the whole exit so the overlay (absolute,
+  // inset 0) spans every cell and follows the row as it shrinks. Collapse
+  // keeps the row's own cells (same classes, same visibility breakpoints)
+  // so the table's column layout does not change under the header; a
+  // single colSpan cell shifted every column width and made the header
+  // row jump. The cells lose their padding and hide their content; the
+  // overlay and a transparent height carrier (both data-row-exit, in the
+  // statistics cell) stay, and the carrier's animating height becomes the
+  // row height.
+  const leaveRowCls = leavePhase === 'fade'
+    ? 'relative pointer-events-none'
+    : leavePhase === 'collapse'
+      ? 'relative pointer-events-none [&>td]:!p-0 [&>td>*:not([data-row-exit])]:hidden'
+      : ''
 
   if (folder.isMissing) {
     // Count, date, statistics, then the three wide columns.
@@ -5403,7 +5442,7 @@ const StreamListItem = memo(function StreamListItem({
       onMouseDown={selectMode ? (e) => { if (e.button !== 0) return; e.preventDefault(); onDragStart(index) } : undefined}
       onMouseEnter={selectMode ? () => onDragEnter(index) : undefined}
       style={selectMode ? { userSelect: 'none' } : undefined}
-      className={`group transition-colors cursor-pointer ${leavePhase === 'fade' ? 'relative pointer-events-none' : ''} ${
+      className={`group transition-colors cursor-pointer ${leaveRowCls} ${
         isPending
           ? (isToday
               ? 'border-b border-blue-900/30 bg-blue-900/15 hover:bg-blue-900/30'
@@ -5662,11 +5701,20 @@ const StreamListItem = memo(function StreamListItem({
             tr (relative while fading), so it covers every cell of the row;
             this cell is only its host because it is never position:relative
             itself. */}
-        {leavePhase === 'fade' && (
+        {leavePhase !== 'idle' && (
           <div
+            data-row-exit
             aria-hidden
             className="pointer-events-none absolute inset-0 z-20 bg-red-500"
-            style={{ opacity: leaveOverlayOn ? 1 : 0, transition: `opacity ${animDurationMs}ms ease-in` }}
+            style={{ opacity: leaveOverlayOn ? 1 : 0, transition: `opacity ${animDurationMs * 1.5}ms ease-in` }}
+          />
+        )}
+        {leavePhase === 'collapse' && (
+          <div
+            data-row-exit
+            aria-hidden
+            className="block overflow-hidden"
+            style={{ height: collapseHeight ?? 0, transition: `height ${animDurationMs * 2}ms ease-in` }}
           />
         )}
         {/* Two size tiers keyed off the thumbnail height (which sets the
