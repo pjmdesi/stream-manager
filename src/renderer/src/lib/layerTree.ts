@@ -229,6 +229,45 @@ export function duplicateLayer(layers: ThumbnailLayer[], id: string, makeId: () 
   return { layers: [...layers.slice(0, lastIdx + 1), ...copies, ...layers.slice(lastIdx + 1)], rootId: map.get(id)! }
 }
 
+/** The selection as clipboard content: every selected unit with its
+ *  subtree, the units' own positions and rotations re-expressed in canvas
+ *  space (a copied group member should paste where it was seen, not at
+ *  its group-relative offset). */
+export function copySelection(layers: ThumbnailLayer[], ids: string[]): ThumbnailLayer[] {
+  const roots = new Set(selectionRoots(layers, ids))
+  return selectionSubtreeLayers(layers, ids).map(l => {
+    if (!roots.has(l.id) || !l.parentId) return l
+    const { parentId, ...rest } = l
+    return { ...rest, ...reparentTransform(layers, l, parentId, null) }
+  })
+}
+
+/**
+ * Insert freshly cloned clipboard layers above `anchorId` (THU-24): in the
+ * anchor's parent, directly above it in paint order, with the pasted units'
+ * canvas-space positions re-expressed in that parent's frame. Falls back to
+ * the anchor's top-level ancestor when a pasted group would nest past the
+ * limit, and to the top of the stack when there is no anchor.
+ */
+export function insertPastedAbove(layers: ThumbnailLayer[], pasted: ThumbnailLayer[], anchorId: string | null): { layers: ThumbnailLayer[]; rootIds: string[] } {
+  const roots = pasted.filter(l => !l.parentId)
+  const rootIds = roots.map(r => r.id)
+  const anchor = anchorId ? byId(layers, anchorId) : undefined
+  if (!anchor) return { layers: [...layers, ...pasted], rootIds }
+  let parentId = parentIdOf(anchor)
+  let after = anchor
+  if (parentId && roots.some(r => isGroup(r) && levelOf(layers, parentId!) + nestingHeight(pasted, r.id) > MAX_GROUP_LEVEL)) {
+    parentId = null
+    after = byId(layers, topLevelAncestorId(layers, anchor.id)) ?? anchor
+  }
+  const placed = parentId
+    ? pasted.map(l => roots.includes(l) ? { ...l, ...reparentTransform(layers, l, null, parentId), parentId } : l)
+    : pasted
+  const block = subtreeIds(layers, after.id)
+  const idx = layers.findIndex(l => l.id === block[block.length - 1])
+  return { layers: [...layers.slice(0, idx + 1), ...placed, ...layers.slice(idx + 1)], rootIds }
+}
+
 /** Fresh-id copies of the given subtrees for pasting: roots land at the top
  *  level; inner parent links are remapped. */
 export function clonePasteLayers(subtree: ThumbnailLayer[], makeId: () => string): ThumbnailLayer[] {

@@ -26,7 +26,7 @@ import { NumberInput } from '../ui/Input'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
 import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
 import {
-  childrenOf, paintableLayers, selectionRoots, selectionSubtreeLayers, canGroup, canUngroup, groupLayers, ungroupLayer,
+  childrenOf, paintableLayers, selectionRoots, copySelection, insertPastedAbove, canGroup, canUngroup, groupLayers, ungroupLayer,
   deleteLayers, duplicateLayer as duplicateLayerTree, clonePasteLayers, moveLayerTo, moveAmongSiblings, scaleGroupMembers,
   needsUniformScale, panelRows, isGroup, hasHiddenAncestor,
 } from '../../lib/layerTree'
@@ -6367,8 +6367,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); manualSave() }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         // A selected group copies with its members; a member selected
-        // alongside its group is covered by the group.
-        const copied = selectionSubtreeLayers(layers, selectedIds).map(cloneLayer)
+        // alongside its group is covered by the group. Copied units carry
+        // canvas-space positions so they paste where they were seen.
+        const copied = copySelection(layers, selectedIds).map(cloneLayer)
         if (copied.length > 0) setClipboardLayers(copied)
       }
       if ((e.ctrlKey || e.metaKey) && k === 'g') {
@@ -6384,11 +6385,15 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           // guard sees `true`; the timeout just clears it if no paste follows.
           justPastedLayerRef.current = true
           setTimeout(() => { justPastedLayerRef.current = false }, 0)
-          // Fresh ids with inner parent links remapped; copied roots land
-          // at the top level.
+          // Fresh ids with inner parent links remapped. The paste lands
+          // directly above the topmost selected layer, inside its group when
+          // it has one, so it appears where the user is working; with no
+          // selection it goes to the top of the stack (THU-24).
           const pasted = clonePasteLayers(clipboardLayers.map(cloneLayer), newId)
-          commitLayers([...layers, ...pasted])
-          setSelectedIds(pasted.filter(l => !l.parentId).map(l => l.id))
+          const anchorId = [...layers].reverse().find(l => selectedIds.includes(l.id))?.id ?? null
+          const res = insertPastedAbove(layers, pasted, anchorId)
+          commitLayers(res.layers)
+          setSelectedIds(res.rootIds)
         }
       }
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()

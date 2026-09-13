@@ -49,6 +49,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 ## Thumbnail editor
 
 - Layers can be grouped. Select two or more layers and press Ctrl+G (or use the new button in the layers panel); Ctrl+Shift+G ungroups. A group moves, rotates, resizes, hides, and fades as one, its members scale with it when you resize, and groups can sit inside groups up to three levels deep. Click a group on the canvas to select it, double-click to reach the layer inside. The layers panel shows groups as collapsible rows and lets you drag layers in and out of them.
+- Paste puts the copied layers directly above the layer you have selected, inside its group when it has one, instead of always at the top of the stack.
 - The triangle tool is now a polygon tool. Pick the number of sides, 3 to 12, in the properties panel; new polygons start as a triangle. Polygons arrive with all sides equal and stay that way when you change the side count, keeping any stretch you have applied. They sit flat on their bottom edge, fill their selection box exactly, and take a corner radius like rectangles. Existing triangles open as three-sided polygons and look the same as before.
 
 ## Integrations
