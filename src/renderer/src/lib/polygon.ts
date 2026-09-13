@@ -28,9 +28,13 @@ export const POLYGON_DEFAULT_SIDES = 3
 
 export interface Pt { x: number; y: number }
 
-/** Vertices of a flat-bottomed regular polygon, normalized to the 0..1 box. */
-export function polygonUnitPoints(sides: number): Pt[] {
-  const n = Math.max(POLYGON_MIN_SIDES, Math.min(POLYGON_MAX_SIDES, Math.round(sides)))
+function clampSides(sides: number): number {
+  return Math.max(POLYGON_MIN_SIDES, Math.min(POLYGON_MAX_SIDES, Math.round(sides)))
+}
+
+/** Flat-bottomed regular polygon on the unit circle, with its extents. */
+function unitCirclePolygon(sides: number): { raw: Pt[]; minX: number; maxX: number; minY: number; maxY: number } {
+  const n = clampSides(sides)
   // The bottom edge is centered on 90° (screen y grows downward), so its
   // two vertices sit at 90° ± 180°/n; start on the first and walk clockwise.
   const start = Math.PI / 2 + Math.PI / n
@@ -46,9 +50,30 @@ export function polygonUnitPoints(sides: number): Pt[] {
     if (p.y < minY) minY = p.y
     if (p.y > maxY) maxY = p.y
   }
+  return { raw, minX, maxX, minY, maxY }
+}
+
+/** Vertices of a flat-bottomed regular polygon, normalized to the 0..1 box. */
+export function polygonUnitPoints(sides: number): Pt[] {
+  const { raw, minX, maxX, minY, maxY } = unitCirclePolygon(sides)
   const sx = maxX - minX || 1
   const sy = maxY - minY || 1
   return raw.map(p => ({ x: (p.x - minX) / sx, y: (p.y - minY) / sy }))
+}
+
+/** Width divided by height of the REGULAR polygon with this many sides
+ *  (all edges equal): a triangle is 2/sqrt(3), a square is 1, a hexagon
+ *  with flat top and bottom is 2/sqrt(3) again, and the ratio tends to 1
+ *  as the sides increase. A layer whose box matches this ratio renders a
+ *  regular polygon; any other box is the user's stretch on top of it. */
+export function polygonNaturalAspect(sides: number): number {
+  const { minX, maxX, minY, maxY } = unitCirclePolygon(sides)
+  return (maxX - minX) / ((maxY - minY) || 1)
+}
+
+/** Box for a new regular polygon of the given width. */
+export function regularPolygonBox(sides: number, width: number): { width: number; height: number } {
+  return { width, height: Math.round(width / polygonNaturalAspect(sides)) }
 }
 
 /** Vertices in pixel space for a `w` by `h` box (top-left origin). */
@@ -107,8 +132,35 @@ export function tracePolygonPath(ctx: CanvasRenderingContext2D | { beginPath(): 
 /** Effective side count for a polygon layer (legacy triangles count as 3). */
 export function polygonSidesOf(layer: ThumbnailLayer): number {
   if (layer.shapeType === 'triangle') return 3
-  const s = layer.sides ?? POLYGON_DEFAULT_SIDES
-  return Math.max(POLYGON_MIN_SIDES, Math.min(POLYGON_MAX_SIDES, Math.round(s)))
+  return clampSides(layer.sides ?? POLYGON_DEFAULT_SIDES)
+}
+
+/**
+ * The layer patch for changing a polygon's side count so the shape stays
+ * as regular as it was. The user's stretch is how far the current box
+ * deviates from the old side count's natural ratio; the new box keeps the
+ * width, applies that same deviation to the new natural ratio, and moves
+ * the origin so the visual center stays put (the layer rotates about its
+ * top-left corner, so the vertical shift is rotated with it). A regular
+ * triangle becomes a regular square; a triangle squashed to half height
+ * becomes a square squashed to half height.
+ */
+export function polygonSidesPatch(layer: ThumbnailLayer, sides: number): Partial<ThumbnailLayer> {
+  const n = clampSides(sides)
+  const w = layer.width ?? 200
+  const h = layer.height ?? 200
+  const oldN = polygonSidesOf(layer)
+  if (n === oldN) return {}
+  const stretch = (w / h) / polygonNaturalAspect(oldN)
+  const newH = Math.max(1, Math.round(w / (polygonNaturalAspect(n) * stretch)))
+  const dy = (h - newH) / 2
+  const rad = ((layer.rotation ?? 0) * Math.PI) / 180
+  return {
+    sides: n,
+    height: newH,
+    x: layer.x - dy * Math.sin(rad),
+    y: layer.y + dy * Math.cos(rad),
+  }
 }
 
 /**

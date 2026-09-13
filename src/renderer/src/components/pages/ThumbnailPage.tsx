@@ -23,7 +23,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { RecentRow, SmoothThumb } from '../ui/RecentRow'
 import { NumberInput } from '../ui/Input'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
-import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
+import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import type { PendingThumbnailStream } from '../../context/ThumbnailEditorContext'
@@ -3070,7 +3070,11 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                       min={POLYGON_MIN_SIDES}
                       max={POLYGON_MAX_SIDES}
                       value={polygonSidesOf(layer)}
-                      onChange={sides => update({ sides: Math.max(POLYGON_MIN_SIDES, Math.min(POLYGON_MAX_SIDES, Math.round(sides))) })}
+                      // Keeps the shape as regular as it was: the box height
+                      // follows the new side count's natural ratio, carrying
+                      // over whatever stretch the user had applied, and the
+                      // visual center stays put (lib/polygon.ts).
+                      onChange={sides => update(polygonSidesPatch(layer, sides))}
                       className="w-full"
                     />
                   </label>
@@ -5634,10 +5638,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
 
   const addShapeLayer = useCallback((shapeType: 'rect' | 'ellipse' | 'polygon') => {
     const names = { rect: 'Rectangle', ellipse: 'Ellipse', polygon: 'Polygon' }
+    // A new polygon arrives regular (all edges equal): its box takes the
+    // natural ratio for its side count instead of a square.
+    const box = shapeType === 'polygon' ? regularPolygonBox(POLYGON_DEFAULT_SIDES, 200) : { width: 200, height: 200 }
     const layer: ThumbnailLayer = {
       id: newId(), name: names[shapeType], type: 'shape', shapeType, visible: true, opacity: 100,
-      x: Math.round(CANVAS_W / 2 - 100), y: Math.round(CANVAS_H / 2 - 100),
-      rotation: 0, width: 200, height: 200,
+      x: Math.round(CANVAS_W / 2 - box.width / 2), y: Math.round(CANVAS_H / 2 - box.height / 2),
+      rotation: 0, width: box.width, height: box.height,
       fill: '#6366f1', stroke: '#000000', strokeWidth: 0, cornerRadius: 0,
       ...(shapeType === 'polygon' ? { sides: POLYGON_DEFAULT_SIDES } : {}),
     }

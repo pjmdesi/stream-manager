@@ -27,13 +27,13 @@
 23. STR-24
 24. COMB-3
 25. COMB-4
-26. THU-19
-27. THU-2
-28. THU-18
-29. THU-21
-30. THU-1
-31. THU-8
-32. THU-9
+26. THU-2
+27. THU-18
+28. THU-21
+29. THU-1
+30. THU-8
+31. THU-9
+32. THU-19
 33. THU-10
 34. THU-12
 35. THU-16
@@ -224,7 +224,7 @@
 
 - **THU-2**
   Maybe... drop the triangle & square shapes and add a new "polygon" shape tool which will allow the user to create a shape with any number of sides. It will default to a square, but a new input would be available in the properties panel to change the number of sides.
-  Decided 2026-09-13: the rectangle stays (independent width and height plus corner radius make it more than a four-sided polygon); the polygon replaces the triangle only. Built 2026-09-13, awaiting review. New `lib/polygon.ts` holds the geometry: flat-bottom vertex placement (one edge centered at the bottom, so a square sits square, a pentagon points up, three sides is the old triangle), the polygon fills its bounding box (the old triangle was inscribed in a circle inside its box and left margins), a per-shape corner-radius clamp (largest radius at which adjacent arcs still fit their shared edge; equals the old inradius clamp for the triangle), and a one-time migration of saved triangles to three-sided polygons that shrinks the box to the triangle's real extent and moves the origin with the layer's rotation and flip so old thumbnails render pixel for pixel the same. Editor: "Add polygon" replaces "Add triangle" (pentagon icon), new polygons start at three sides (changed from four in review, so the tool is not mistaken for a second rectangle), a Sides input (3 to 12) sits above Corner radius in the transform section, corner radius applies to polygons with the same rendered-cap note as rectangles, and the old "single triangle keeps its ratio" transformer rule is gone (polygons stretch like ellipses; the per-layer aspect lock still applies). Migration runs wherever layers enter the editor: canvas open, template open, and the background re-render. Verify: open a thumbnail with an existing triangle (unchanged rendering, rotated and flipped ones too), add a polygon and change sides, set a corner radius at several side counts, stretch a polygon, save and reopen, and run a background re-render of a stream whose canvas holds a triangle.
+  Decided 2026-09-13: the rectangle stays (independent width and height plus corner radius make it more than a four-sided polygon); the polygon replaces the triangle only. Built 2026-09-13, awaiting review. New `lib/polygon.ts` holds the geometry: flat-bottom vertex placement (one edge centered at the bottom, so a square sits square, a pentagon points up, three sides is the old triangle), the polygon fills its bounding box (the old triangle was inscribed in a circle inside its box and left margins), a per-shape corner-radius clamp (largest radius at which adjacent arcs still fit their shared edge; equals the old inradius clamp for the triangle), and a one-time migration of saved triangles to three-sided polygons that shrinks the box to the triangle's real extent and moves the origin with the layer's rotation and flip so old thumbnails render pixel for pixel the same. Editor: "Add polygon" replaces "Add triangle" (pentagon icon), new polygons start at three sides (changed from four in review, so the tool is not mistaken for a second rectangle) and arrive regular: the box takes the side count's natural width-to-height ratio (triangle 2 over root 3, square 1, tending to 1 as sides grow) instead of a square, and changing the side count keeps the shape as regular as it was by holding the width, carrying the user's stretch (the box's deviation from the old natural ratio) over to the new ratio, and keeping the visual center in place under rotation (review addition, `polygonSidesPatch`), a Sides input (3 to 12) sits above Corner radius in the transform section, corner radius applies to polygons with the same rendered-cap note as rectangles, and the old "single triangle keeps its ratio" transformer rule is gone (polygons stretch like ellipses; the per-layer aspect lock still applies). Migration runs wherever layers enter the editor: canvas open, template open, and the background re-render. Verify: open a thumbnail with an existing triangle (unchanged rendering, rotated and flipped ones too), add a polygon and change sides, set a corner radius at several side counts, stretch a polygon, save and reopen, and run a background re-render of a stream whose canvas holds a triangle.
 
 - **THU-3** [ui]
   Add a new interactive element for the shape layers which will allow the user to change the corner radius of the shape layer by dragging a handle on the canvas. The handle would be a small circle that appears on the corner of the shape layer when it is selected. The user can click and drag the handle to change the corner radius of the shape layer. The handle would only appear when the shape layer is selected, and it would disappear when the layer is deselected. The handle would also have a tooltip that shows the current corner radius value as the user drags it. This would allow for more intuitive and interactive control over the corner radius of shape layers, rather than having to enter a value in the properties panel.
