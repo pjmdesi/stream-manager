@@ -21,7 +21,10 @@ import type { ThumbnailLayer } from '../types'
 
 export const POLYGON_MIN_SIDES = 3
 export const POLYGON_MAX_SIDES = 12
-export const POLYGON_DEFAULT_SIDES = 4
+/** New polygons start as a triangle so the tool reads as distinct from the
+ *  rectangle tool at a glance; a four-sided default looked like a second
+ *  rectangle button. */
+export const POLYGON_DEFAULT_SIDES = 3
 
 export interface Pt { x: number; y: number }
 

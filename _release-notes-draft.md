@@ -48,7 +48,7 @@ Target: TBD · emptied 2026-09-09 after the v2.6.0 release.
 
 ## Thumbnail editor
 
-- The triangle tool is now a polygon tool. Pick the number of sides, 3 to 12, in the properties panel; new polygons start as a square. Polygons sit flat on their bottom edge, fill their selection box exactly, and take a corner radius like rectangles. Existing triangles open as three-sided polygons and look the same as before.
+- The triangle tool is now a polygon tool. Pick the number of sides, 3 to 12, in the properties panel; new polygons start as a triangle. Polygons sit flat on their bottom edge, fill their selection box exactly, and take a corner radius like rectangles. Existing triangles open as three-sided polygons and look the same as before.
 
 ## Integrations
 

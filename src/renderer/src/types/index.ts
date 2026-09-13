@@ -852,7 +852,7 @@ export interface ThumbnailLayer {
    *  editor migrates it to a three-sided 'polygon' on load
    *  (lib/polygon.ts). Never written by the current app. */
   shapeType?: 'rect' | 'ellipse' | 'polygon' | 'triangle'
-  /** Polygon side count, 3 to 12; new polygons start at 4. */
+  /** Polygon side count, 3 to 12; new polygons start at 3. */
   sides?: number
   cornerRadius?: number
   /** Gradient fill (thumbnails #2). Absent / 'solid' = flat `fill`. The
