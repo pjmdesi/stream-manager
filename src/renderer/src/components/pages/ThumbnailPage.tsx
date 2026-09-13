@@ -2983,7 +2983,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
             </label>
           </div>
           <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
-            Size follows the layers inside: resize the group on the canvas and its members scale with it. Double-click a member on the canvas, or pick it in the layers panel, to edit that layer on its own.
+            Double-click a grouped layer on the canvas to select it.
           </p>
         </section>
       </div>
@@ -7077,14 +7077,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       const dragsTop = anchorName.includes('top')
                       const dragsBottom = anchorName.includes('bottom')
 
-                      // Not a resize (rotation / unknown handle) — pass Konva's
-                      // box straight through the per-edge snapper.
+                      // Not a resize (rotation / unknown handle): hand Konva's
+                      // box back untouched. It used to go through the per-edge
+                      // snapper, which is written for axis-aligned resizes;
+                      // fed a rotating box it nudged the box's width or height
+                      // whenever an edge crossed a snap stop, so shapes visibly
+                      // stretched during a rotation (THU-18 review). Angle
+                      // snapping proper is THU-25.
                       if (!dragsLeft && !dragsRight && !dragsTop && !dragsBottom) {
-                        return handleSnapTransformBoundBox(oldBox, {
+                        return {
                           ...newBox,
                           width: Math.max(10, newBox.width),
                           height: Math.max(10, newBox.height),
-                        })
+                        }
                       }
 
                       // Reference everything off the gesture-start box (captured

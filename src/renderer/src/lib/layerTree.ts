@@ -243,12 +243,50 @@ export function clonePasteLayers(subtree: ThumbnailLayer[], makeId: () => string
   })
 }
 
+/** The coordinate frame a member of `parentId` lives in, in canvas space:
+ *  the composition of every enclosing group's position and rotation
+ *  (groups carry no scale; it is baked into members on release). A point
+ *  p in that frame sits at origin + rotate(p, rotation) on the canvas. */
+export function frameOf(layers: ThumbnailLayer[], parentId: string | null): { x: number; y: number; rotation: number } {
+  if (!parentId) return { x: 0, y: 0, rotation: 0 }
+  const chain = [parentId, ...ancestorIds(layers, parentId)].reverse() // outermost first
+  let x = 0, y = 0, rotation = 0
+  for (const gid of chain) {
+    const g = byId(layers, gid)
+    if (!g) continue
+    const rad = (rotation * Math.PI) / 180
+    x += g.x * Math.cos(rad) - g.y * Math.sin(rad)
+    y += g.x * Math.sin(rad) + g.y * Math.cos(rad)
+    rotation += g.rotation ?? 0
+  }
+  return { x, y, rotation }
+}
+
+/** Re-express a layer's position and rotation from one parent's frame in
+ *  another's, so a move between groups leaves it where it was on screen. */
+export function reparentTransform(layers: ThumbnailLayer[], layer: ThumbnailLayer, fromParent: string | null, toParent: string | null): { x: number; y: number; rotation: number } {
+  const a = frameOf(layers, fromParent)
+  const b = frameOf(layers, toParent)
+  const ra = (a.rotation * Math.PI) / 180
+  const wx = a.x + layer.x * Math.cos(ra) - layer.y * Math.sin(ra)
+  const wy = a.y + layer.x * Math.sin(ra) + layer.y * Math.cos(ra)
+  const rb = (-b.rotation * Math.PI) / 180
+  const dx = wx - b.x, dy = wy - b.y
+  return {
+    x: dx * Math.cos(rb) - dy * Math.sin(rb),
+    y: dx * Math.sin(rb) + dy * Math.cos(rb),
+    rotation: (layer.rotation ?? 0) + a.rotation - b.rotation,
+  }
+}
+
 /**
  * Move a layer (with its subtree) under `parentId` (null = top level),
  * placed directly above `afterId` in paint order, or at the very bottom of
- * that parent when `afterId` is null. Refuses a move into its own subtree
- * and one that would nest groups past `MAX_GROUP_LEVEL`. Returns null when
- * refused or when nothing changes.
+ * that parent when `afterId` is null. A move between parents re-expresses
+ * the layer's position and rotation in the new parent's frame so it stays
+ * put on screen. Refuses a move into its own subtree and one that would
+ * nest groups past `MAX_GROUP_LEVEL`. Returns null when refused or when
+ * nothing changes.
  */
 export function moveLayerTo(layers: ThumbnailLayer[], id: string, parentId: string | null, afterId: string | null): ThumbnailLayer[] | null {
   const src = byId(layers, id)
@@ -267,7 +305,8 @@ export function moveLayerTo(layers: ThumbnailLayer[], id: string, parentId: stri
     if (l.id !== id || parentIdOf(l) === parentId) return l
     const { parentId: _old, ...rest } = l
     void _old
-    return parentId ? { ...rest, parentId } : rest
+    const placed = { ...rest, ...reparentTransform(layers, l, parentIdOf(l), parentId) }
+    return parentId ? { ...placed, parentId } : placed
   })
   const remaining = layers.filter(l => !block.has(l.id))
   let insertAt: number

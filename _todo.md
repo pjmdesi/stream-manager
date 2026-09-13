@@ -29,19 +29,21 @@
 25. COMB-4
 26. THU-2
 27. THU-18
-28. THU-21
-29. THU-1
-30. THU-8
-31. THU-9
-32. THU-19
-33. THU-10
-34. THU-12
-35. THU-16
-36. THU-23
-37. THU-20
-38. INTG-1
-39. STR-22
-40. STR-17
+28. THU-25
+29. THU-24
+30. THU-21
+31. THU-1
+32. THU-8
+33. THU-9
+34. THU-19
+35. THU-10
+36. THU-12
+37. THU-16
+38. THU-23
+39. THU-20
+40. INTG-1
+41. STR-22
+42. STR-17
 
 ## Improvement ideas
 
@@ -276,12 +278,19 @@
   Decided 2026-09-13: grouping ships in two phases, this ticket is phase one (grouping itself) and THU-21 is the mask slot, because the mask design will iterate. Konva Groups nest and transform natively; the work here is the nested layer model, the layers panel learning to nest and to drag layers in and out of a group, selection, alignment, and snapping treating a group as one object, Ctrl+Shift+G to ungroup, and baking a group resize into its children on transform end (Illustrator behaviour) so the stored layers stay scale-free.
   Design decisions 2026-09-13: a canvas click on a member selects the whole group and a double-click selects the member under the pointer (no isolation mode; double-click again on a nested group to go one level deeper); grouping and ungrouping are disabled when the selection spans different parents (the button tooltip says why); groups may nest three levels deep at most.
   Built 2026-09-13, awaiting review. Model: the layer list stays flat; a group is a layer of type `group`, its members carry `parentId`, members are stored as a contiguous block after the group, and member positions are relative to the group (new `lib/layerTree.ts` holds every tree operation, unit-tested outside the app). Canvas: a group renders as one Konva Group with its members inside (group opacity is a true composite, group visibility hides all, one snap target and one align box per group); members not selected are inert so their events reach the group; a member selected through the panel or a double-click becomes its own draggable and transformable node and stops its events from bubbling. Transformer: attaches to the group node; on release the scale is baked into the members (positions, sizes, text font size; strokes, corner radii, and shadows stay in pixels), and a group holding text or a rotated member resizes proportionally only. Operations: Ctrl+G / Ctrl+Shift+G and matching header buttons in the layers panel, group rows with a chevron (collapse state is UI-only, not saved), folder icon, rename, eye (members of a hidden group read dimmed), duplicate (deep copy), delete (with members; groups left empty are pruned), drag to reorder within a parent, drop into an expanded group's top slot or between its members to move inside, drag out to the parent level, with the indicator indented to the target depth and hidden for a refused drop; bracket keys move a group as one and a member within its group; copy and paste carry whole groups with fresh ids; ungroup composes the group's position, rotation, opacity, and visibility into the members so nothing moves. Properties panel for a group: X, Y, rotation, opacity, and a note that size follows the members. Help panel lists the shortcuts. Known limits for review: alignment and arrow-key nudges of a member inside a rotated group act along the group's axes; a canvas saved with groups opens in an older build with members at their group-relative positions (no backward promise was ever made, noted for the record). Verify: group two shapes and a text layer, move, rotate, resize (proportional with text, free without), ungroup and confirm nothing moved; double-click a member and edit it alone; nest a group in a group and try the third and fourth level; drag members in and out in the panel; hide a group; duplicate, copy and paste a group; undo through all of it; save, reopen, and run a background re-render of a canvas with a hidden group (its members must not render).
+  Review round 1 (2026-09-13): shapes stretched while rotating (any layer, not only groups) because the transformer's boundBoxFunc sent the rotating box through the per-edge resize snapper; rotation now bypasses it (angle snapping filed as THU-25). Dragging a layer into or out of a group in the panel moved it on screen because its position was kept numerically; moves between parents now re-express position and rotation in the destination frame (`reparentTransform`, tested through nested rotated groups). Group properties text trimmed to the double-click hint. Paste placement filed as THU-24.
 
 - **THU-21** [blocked:THU-18]
   Mask slot on groups, phase two of grouping. Illustrator's model drawn our way: a group carries one optional mask shape in a slot of its own, and everything inside the group is clipped to that shape's outline; nothing else about the shape (fill, stroke, opacity, filters, shadows) takes part. Konva does this natively with a clip function on the Group: the path runs in the group's own coordinate space, so moving, rotating, or resizing the group carries the mask along, and children's drop shadows are clipped too. Geometric only: no feathering and no partial opacity (a soft or image mask would be a cached-group compositing job, its own ticket if ever wanted). Layers panel: the slot renders under the group's row, and the mask shape is selectable and editable on its own with the clip updating live. THU-1's "apply as mask to the layer below" becomes sugar for wrapping that layer in a group and putting the shape in its mask slot, so a masked single layer and a masked group are the same thing.
 
 - **THU-22** [maybe]
   Stars in the thumbnail editor. A star is a polygon whose side midpoints are pulled inward, so it is a small addition to the polygon's properties: a checkbox that turns on an inner radius, shown as a handle at the midpoint of one side on the canvas with a matching percentage input in the panel (how far inward the midpoints sit; zero is the plain polygon). Rides on the THU-2 geometry (flat bottom, fills its box, corner radius), and the corner-radius clamp has to account for the inner vertices. Filed 2026-09-13 from the THU-2 discussion; not queued.
+
+- **THU-25**
+  Angle snapping while rotating in the thumbnail editor. Today the rotation handle has no angle snapping at all, and the smart-snap guides that flashed during a rotation were the resize snapper being fed the rotating box, which stretched the layer (fixed 2026-09-13 in the THU-18 review round: rotation now bypasses the edge snapper). Add snapping to fixed angle steps while a modifier is held. Proposed from review, descending step with more modifiers: Ctrl 90, Shift 45, Ctrl+Shift 30, Alt 15, Ctrl+Alt 10, Ctrl+Alt+Shift 5. Counter-proposal to weigh: Shift 15 (the Figma and Affinity convention, and the step people reach for most), Ctrl 45, Ctrl+Shift 90, with 5 and 10 dropped unless they earn a place; Alt is already spoken for by the Alt-drag duplicate on the resize handles, so it is best left out of the rotation set too. Show the snapped angle next to the handle while snapping. Filed 2026-09-13.
+
+- **THU-24**
+  Paste places the layer above the current selection. A pasted layer (from this canvas or another) lands above the topmost selected layer, inside the same group when that layer is a group member, so the paste position matches where the user is working; with nothing selected it lands at the top of the layers panel as it does today. Filed 2026-09-13 from the THU-18 review round.
 
 - **THU-19**
   Replicate the same stream/episode prev/next buttons and "current stream" section in the thumbnail editor. The sidebar is getting cramped already, so that might not be the best plcae for it, like the player page has. The header is probably the natural place since that's where the name of the stream item already lives.
