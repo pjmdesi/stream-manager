@@ -33,19 +33,20 @@
 29. THU-25
 30. THU-26
 31. THU-27
-32. THU-21
-33. THU-1
-34. THU-8
-35. THU-9
-36. THU-19
-37. THU-10
-38. THU-12
-39. THU-16
-40. THU-23
-41. THU-20
-42. INTG-1
-43. STR-22
-44. STR-17
+32. THU-28
+33. THU-21
+34. THU-1
+35. THU-8
+36. THU-9
+37. THU-19
+38. THU-10
+39. THU-12
+40. THU-16
+41. THU-23
+42. THU-20
+43. INTG-1
+44. STR-22
+45. STR-17
 
 ## Improvement ideas
 
@@ -299,6 +300,10 @@
 - **THU-27**
   Pixel snap and true precision in the thumbnail editor's transform fields. Background: Konva stores doubles and renders sub-pixel positions as anti-aliased coverage, so a layer can sit at 0.5 px; the app rounded some things on release (sizes, shape positions) and not others (image positions, drags), and the panel displayed integers over whatever was stored, which is why a layer dragged to 0.5 px read as 0 or 1. Decided 2026-09-14: a Pixel snap toggle beside grid snap and smart snap, on by default and remembered; while on, moves snap live (the node steps by whole canvas pixels, so readout, panel, and result agree) and resizes commit width, height, and position to whole pixels, except that an aspect-locked image snaps its width and derives its height from the lock ratio, fractional when it must be (derived from the previous height each time so repeated resizes do not drift); shapes and text always take whole pixels; group resizes apply the same rule to the members; arrow-key nudges land on whole pixels while on. Off: raw values. Typed values are always respected as typed, decimals included, whatever the toggle. Display: position, size, and rotation show up to two decimals everywhere. Stepping (spinner and arrow keys) follows the toggle for position and size fields: on, the step lands on the next whole pixel (10.3 to 11); off, it adds the step and keeps the fraction (10.3 to 11.3); the rotation field always steps to whole degrees. Grid snap still wins when it is on (its multiples are whole pixels). Ungroup and cross-group moves keep their exact fractional results, since those are math rather than gestures. Filed 2026-09-14.
   Built 2026-09-14, awaiting review. Toggle (SquareDot icon) after grid snap, remembered in localStorage as thumbPixelSnap. Drag: the node's x/y round each frame before smart/grid snapping (companions too); drag end commits companions rounded. Resize release: positions round, images and shapes go through `snapResizedBox` in lib/layerTree.ts (aspect-locked image: whole width, exact-ratio height), text width rounds, group members via `scaleGroupMembers(..., snapPixels)`. The readout and the live panel show the values release will commit. Nudges round the base. Panel: X/Y/W/H/rotation display two decimals; position and size fields get `snapToStep` while the toggle is on, rotation always; NumberInput gained the `snapToStep` prop (10.3 to 11, down to 10) and otherwise keeps two decimals when adding a step. Typed values pass through untouched. Aspect-locked width/height typing derives the other dimension exactly for images (rounded for shapes). Not persisted: the grid and smart snap toggles, unchanged.
+
+- **THU-28**
+  Move the alignment and flip tools out of the thumbnail editor's top toolbar into a floating panel on the canvas. The toolbar had grown past the worst-case window width (the stream title rendered as one letter and an ellipsis) and THU-19 still needs room there for stream and episode navigation. Decided 2026-09-14: a panel attached below the selection's bounding box, like the player's crop controls, showing whenever one or more layers is selected (align to artboard and flip are single-layer operations) and hiding during drags, resizes, and rotations; it holds the six align buttons and the two flips, plus the artboard/selection mode toggle once two or more layers are selected. Alongside: the stream title in the toolbar gets a tooltip with the full title and date, and becomes a link back to the stream item on the streams page, as the converter and combine pages already do. Filed 2026-09-14.
+  Built 2026-09-14, awaiting review. The crop panel's positioning moved into a shared `ui/AnchoredPanel.tsx` (centered under the anchor, flips inside when there is no room below, clamps into the container); the player's crop controls now use it unchanged. The thumbnail editor computes the selection's bounding box in container pixels from Konva's absolute client rects (union across the selection, recomputed on selection, layer, zoom, pan, and container changes) and renders the panel 12 px below it, hidden during gestures and in preview mode. Contents: mode toggle (two or more selected only), six align buttons whose tooltips name the current target, two flip buttons; no disabled states since the panel only exists with a selection. Middle-click panning works over the panel because the pan listener is on the canvas container. Toolbar keeps undo, redo, the three snaps, template, export, close. Title: tooltip with full title, date, and the open hint; clicking opens the stream item via the app's existing navigate-to-stream path (App passes `onNavigateToStream`). Verify: select one layer (panel with align and flips), two layers (mode toggle appears, dashed anchor outline still works in selection mode), drag or rotate (panel hides and returns), zoom and pan (panel follows), selection near the bottom of the viewport (panel flips inside), preview mode (no panel), the title tooltip and link, and the player's crop controls still position as before.
 
 - **THU-24** [done]
   Paste places the layer above the current selection. A pasted layer (from this canvas or another) lands above the topmost selected layer, inside the same group when that layer is a group member, so the paste position matches where the user is working; with nothing selected it lands at the top of the layers panel as it does today. Filed 2026-09-13 from the THU-18 review round.

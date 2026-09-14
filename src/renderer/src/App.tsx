@@ -1578,7 +1578,7 @@ function AppInner() {
             <ConverterPage pending={pendingConverter} onNavigateToStream={navigateToStream} />
           </div>
           <div className={`h-full ${page === 'thumbnails' ? '' : 'hidden'}`}>
-            <ThumbnailPage isVisible={page === 'thumbnails'} />
+            <ThumbnailPage isVisible={page === 'thumbnails'} onNavigateToStream={navigateToStream} />
           </div>
           <div className={`h-full ${page === 'streams' ? '' : 'hidden'}`}>
             <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} onAutoPushCategoryMiss={setAutoPushError} onOpenIntegrations={() => setPage('integrations')} />

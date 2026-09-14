@@ -9,6 +9,7 @@ import { rememberHydrationOne } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { isAnyModalOpen } from '../../lib/shortcuts'
 import { useStore } from '../../hooks/useStore'
+import { AnchoredPanel } from '../ui/AnchoredPanel'
 import type { AudioTrackSetting, BleepRegion, ClipRegion, ClipState, CropAspect, StreamMeta, StreamFolder, TimelineViewport, PlayerRecentEntry, VideoEntry, VideoMarker } from '../../types'
 import { ThumbImage } from '../streams/ThumbImage'
 import { RecentRow } from '../ui/RecentRow'
@@ -441,57 +442,9 @@ function TrackColorPicker({
 }
 
 // ── Crop controls panel (on-video, attached to the crop region) ─────────────
-
-/** Positions the crop controls against the crop region the way the region
- *  pills attach to clip regions: centered under the region's bottom edge,
- *  flipping INSIDE the region when the container has no room below it, and
- *  clamping fully into the container when the region's edges run out of
- *  view. Measures itself after every render — its content and the region
- *  both move (drags, aspect changes, stage zoom/pan). */
-function CropControlsPanel({ anchor, boundsW, boundsH, onMouseDown, children }: {
-  /** The crop region's rect in CONTAINER coordinates (already mapped
-   *  through the stage's zoom/pan transform). */
-  anchor: { x: number; y: number; w: number; h: number }
-  boundsW: number
-  boundsH: number
-  /** The panel is a SIBLING of the zoom/pan wrapper, so stage gestures
-   *  don't bubble to it naturally — the caller forwards middle-click here
-   *  to keep panning available from anywhere on the stage. */
-  onMouseDown?: (e: React.MouseEvent) => void
-  children: React.ReactNode
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ left: 8, top: 8 })
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const gw = el.offsetWidth
-    const gh = el.offsetHeight
-    const GAP = 6
-    const PAD = 8
-    // X: centered on the region, clamped into the container.
-    let left = anchor.x + anchor.w / 2 - gw / 2
-    left = Math.max(PAD, Math.min(left, boundsW - gw - PAD))
-    // Y: below the region's bottom edge; flip to INSIDE the region when
-    // the container has no room below; the final clamp snaps it to the
-    // container's bottom (still region-centered in X) when the region's
-    // bottom edge itself is out of view.
-    let top = anchor.y + anchor.h + GAP
-    if (top + gh > boundsH - PAD) top = anchor.y + anchor.h - GAP - gh
-    top = Math.max(PAD, Math.min(top, boundsH - gh - PAD))
-    setPos(p => (Math.abs(p.left - left) < 0.5 && Math.abs(p.top - top) < 0.5 ? p : { left, top }))
-  })
-  return (
-    <div
-      ref={ref}
-      className="absolute z-20 flex items-center gap-1.5 px-1.5 py-1 rounded-lg bg-navy-800/95 border border-blue-500/30 shadow-xl"
-      style={{ left: pos.left, top: pos.top }}
-      onMouseDown={onMouseDown}
-    >
-      {children}
-    </div>
-  )
-}
+// The positioning lives in ui/AnchoredPanel (shared with the thumbnail
+// editor's selection tools since THU-28); the crop controls pass the crop
+// region's container-space rect as the anchor.
 
 // ── Crop toolbar number field ────────────────────────────────────────────────
 
@@ -4803,10 +4756,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   const reset = () => apply({ cropX: DEFAULT_CROP_X, cropY: DEFAULT_CROP_Y, cropScale: DEFAULT_CROP_SCALE })
                   const labelCls = 'text-[10px] text-gray-400 select-none w-2'
                   return (
-                    <CropControlsPanel
+                    <AnchoredPanel
                       anchor={anchor}
                       boundsW={vcSize.w}
                       boundsH={vcSize.h}
+                      className="gap-1.5 px-1.5 py-1 border border-blue-500/30"
                       onMouseDown={e => { if (e.button === 1) startVideoPanDrag(e) }}
                     >
                       <CropAspectSelector
@@ -4855,7 +4809,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                           })()}
                         </div>
                       </Tooltip>
-                    </CropControlsPanel>
+                    </AnchoredPanel>
                   )
                 })()}
               </div>

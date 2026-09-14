@@ -23,6 +23,7 @@ import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { RecentRow, SmoothThumb } from '../ui/RecentRow'
 import { NumberInput } from '../ui/Input'
+import { AnchoredPanel } from '../ui/AnchoredPanel'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
 import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
 import {
@@ -3782,7 +3783,12 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
 
 // ── Main ThumbnailPage ────────────────────────────────────────────────────────
 
-export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
+export function ThumbnailPage({ isVisible, onNavigateToStream }: {
+  isVisible: boolean
+  /** Opens the stream item on the streams page; the toolbar's stream
+   *  title links there (THU-28). */
+  onNavigateToStream?: (folderPath: string) => void
+}) {
   const { pendingStream, clearPendingStream, rerenderRequest } = useThumbnailEditor()
   const { config, updateConfig } = useStore()
   const { setThumbnailHasCanvas, setNavSubtext } = usePageActivity()
@@ -4507,6 +4513,30 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // the dashed anchor outline when the user is in selection-align mode, so
   // they can see which item everything else is aligning to. Computed in an
   // effect so Konva nodes are guaranteed up-to-date before getClientRect.
+  // Selection tools panel anchor (THU-28): the selection's axis-aligned
+  // bounding box in CONTAINER pixels (Konva's absolute client rect already
+  // includes the stage's zoom and pan). Recomputed in an effect, after
+  // react-konva has committed geometry, and dropped during gestures so
+  // the panel does not chase the pointer.
+  const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage || canvasGestureActive || selectedIds.length === 0) {
+      setSelectionAnchor(null)
+      return
+    }
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
+    for (const id of selectedIds) {
+      const node = stage.findOne(`#${id}`)
+      if (!node) continue
+      const r = node.getClientRect({ skipShadow: true, skipStroke: true })
+      x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y)
+      x2 = Math.max(x2, r.x + r.width); y2 = Math.max(y2, r.y + r.height)
+    }
+    if (!Number.isFinite(x1)) { setSelectionAnchor(null); return }
+    setSelectionAnchor({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 })
+  }, [selectedIds, layers, canvasGestureActive, viewZoom, viewPan, containerSize])
+
   const [alignAnchorBbox, setAlignAnchorBbox] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   useEffect(() => {
     if (alignMode !== 'selection' || selectedIds.length < 2) {
@@ -6682,10 +6712,23 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0 bg-navy-800">
             <div className="flex-1 flex items-center gap-2 min-w-0">
               {currentStream ? (
-                <span className="text-xs text-gray-400 truncate">
-                  {currentStreamTitle ?? currentStream.date}
-                  <span className="text-gray-400 ml-2">{currentStream.date}</span>
-                </span>
+                // Title links back to the stream item (THU-28); the tooltip
+                // carries the full title since the toolbar truncates it.
+                <Tooltip
+                  content={`${currentStreamTitle ?? currentStream.date} · ${currentStream.date}${onNavigateToStream ? ' · Open on the streams page' : ''}`}
+                  side="bottom"
+                  triggerClassName="block min-w-0 max-w-full"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToStream?.(currentStream.folderPath)}
+                    disabled={!onNavigateToStream}
+                    className="block max-w-full truncate text-xs text-left text-gray-400 enabled:hover:text-accent-200 enabled:hover:underline transition-colors"
+                  >
+                    {currentStreamTitle ?? currentStream.date}
+                    <span className="ml-2">{currentStream.date}</span>
+                  </button>
+                </Tooltip>
               ) : currentTemplateId ? (
                 <span className="text-xs text-gray-400 truncate">
                   {templates.find(t => t.id === currentTemplateId)?.name ?? 'Template'}
@@ -6813,74 +6856,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <SquareDot size={14} />
                 </button>
               </Tooltip>
-              <div className="w-px h-4 bg-white/10 mx-1" />
-              {/* Alignment mode toggle */}
-              <Tooltip content="Align to artboard (canvas)" side="bottom">
-                <button
-                  onClick={() => setAlignMode('artboard')}
-                  className={`p-1.5 rounded transition-colors ${alignMode === 'artboard' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
-                >
-                  <Frame size={14} />
-                </button>
-              </Tooltip>
-              <Tooltip content={selectedIds.length < 2 ? 'Align to first selected (needs 2+ items)' : 'Align to first selected'} side="bottom">
-                <button
-                  onClick={() => setAlignMode('selection')}
-                  disabled={selectedIds.length < 2}
-                  className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${alignMode === 'selection' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
-                >
-                  <BoxSelect size={14} />
-                </button>
-              </Tooltip>
-              {/* Alignment ops */}
-              {([
-                ['left',     <AlignStartVertical size={14} />,    'Align left edges'],
-                ['h-center', <AlignCenterVertical size={14} />,   'Align horizontal centers'],
-                ['right',    <AlignEndVertical size={14} />,      'Align right edges'],
-                ['top',      <AlignStartHorizontal size={14} />,  'Align top edges'],
-                ['v-center', <AlignCenterHorizontal size={14} />, 'Align vertical centers'],
-                ['bottom',   <AlignEndHorizontal size={14} />,    'Align bottom edges'],
-              ] as const).map(([op, icon, label]) => (
-                <Tooltip key={op} content={label} side="bottom">
-                  <button
-                    onClick={() => handleAlign(op as AlignOp)}
-                    disabled={selectedIds.length === 0}
-                    className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    {icon}
-                  </button>
-                </Tooltip>
-              ))}
-              {/* Flip ops — operate on every selected layer, one undo
-                  entry per click. Lit-state styling matches the
-                  snap/alignment-mode toggles above so a flipped
-                  selection reads at a glance. */}
-              {([
-                ['x', <FlipHorizontal2 size={14} />, 'Flip horizontally', (l: ThumbnailLayer) => !!l.flipX],
-                ['y', <FlipVertical2 size={14} />,   'Flip vertically',   (l: ThumbnailLayer) => !!l.flipY],
-              ] as const).map(([axis, icon, label, isLit]) => {
-                const allSelectedAreFlipped =
-                  selectedIds.length > 0 &&
-                  selectedIds.every(id => {
-                    const l = layers.find(ll => ll.id === id)
-                    return l ? isLit(l) : false
-                  })
-                return (
-                  <Tooltip key={axis} content={label} side="bottom">
-                    <button
-                      onClick={() => handleFlip(axis)}
-                      disabled={selectedIds.length === 0}
-                      className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                        allSelectedAreFlipped
-                          ? 'bg-accent-600/30 text-accent-300'
-                          : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'
-                      }`}
-                    >
-                      {icon}
-                    </button>
-                  </Tooltip>
-                )
-              })}
+              {/* Alignment and flip tools live in the floating selection
+                  panel on the canvas (THU-28), not here. */}
               <div className="w-px h-4 bg-white/10 mx-1" />
               {saveTemplateOpen ? (
                 <div className="flex items-center gap-1">
@@ -7386,6 +7363,88 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   component, so the per-frame updates re-render only it.
                   Pointer coords are stage container coords, which is this box. */}
               <TransformHud />
+
+              {/* Selection tools (THU-28): alignment and flip, attached
+                  below the selection's bounding box like the player's crop
+                  controls. Shown from one selected layer up (align to
+                  artboard and flip act on a single layer); the mode toggle
+                  appears once two or more are selected; hidden for the
+                  length of a canvas gesture. Middle-click pans through it
+                  because the pan listener sits on this container. */}
+              {selectionAnchor && !canvasGestureActive && !previewMode && (
+                <AnchoredPanel
+                  anchor={selectionAnchor}
+                  boundsW={containerSize.w}
+                  boundsH={containerSize.h}
+                  gap={12}
+                  className="gap-0.5 px-1 py-0.5 border border-white/10"
+                >
+                  {selectedIds.length >= 2 && (
+                    <>
+                      <Tooltip content="Align to artboard (canvas)" side="bottom">
+                        <button
+                          onClick={() => setAlignMode('artboard')}
+                          className={`p-1.5 rounded transition-colors ${alignMode === 'artboard' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                        >
+                          <Frame size={14} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Align to first selected" side="bottom">
+                        <button
+                          onClick={() => setAlignMode('selection')}
+                          className={`p-1.5 rounded transition-colors ${alignMode === 'selection' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                        >
+                          <BoxSelect size={14} />
+                        </button>
+                      </Tooltip>
+                      <div className="w-px h-4 bg-white/10 mx-0.5" />
+                    </>
+                  )}
+                  {([
+                    ['left',     <AlignStartVertical size={14} />,    'Align left edges'],
+                    ['h-center', <AlignCenterVertical size={14} />,   'Align horizontal centers'],
+                    ['right',    <AlignEndVertical size={14} />,      'Align right edges'],
+                    ['top',      <AlignStartHorizontal size={14} />,  'Align top edges'],
+                    ['v-center', <AlignCenterHorizontal size={14} />, 'Align vertical centers'],
+                    ['bottom',   <AlignEndHorizontal size={14} />,    'Align bottom edges'],
+                  ] as const).map(([op, icon, label]) => (
+                    <Tooltip key={op} content={selectedIds.length >= 2 && alignMode === 'selection' ? `${label} to the first selected` : `${label} to the artboard`} side="bottom">
+                      <button
+                        onClick={() => handleAlign(op as AlignOp)}
+                        className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300 transition-colors"
+                      >
+                        {icon}
+                      </button>
+                    </Tooltip>
+                  ))}
+                  <div className="w-px h-4 bg-white/10 mx-0.5" />
+                  {/* Flip ops act on every selected layer, one undo entry
+                      per click. Lit when every selected layer is flipped. */}
+                  {([
+                    ['x', <FlipHorizontal2 size={14} />, 'Flip horizontally', (l: ThumbnailLayer) => !!l.flipX],
+                    ['y', <FlipVertical2 size={14} />,   'Flip vertically',   (l: ThumbnailLayer) => !!l.flipY],
+                  ] as const).map(([axis, icon, label, isLit]) => {
+                    const allSelectedAreFlipped = selectedIds.every(id => {
+                      const l = layers.find(ll => ll.id === id)
+                      return l ? isLit(l) : false
+                    })
+                    return (
+                      <Tooltip key={axis} content={label} side="bottom">
+                        <button
+                          onClick={() => handleFlip(axis)}
+                          className={`p-1.5 rounded transition-colors ${
+                            allSelectedAreFlipped
+                              ? 'bg-accent-600/30 text-accent-300'
+                              : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'
+                          }`}
+                        >
+                          {icon}
+                        </button>
+                      </Tooltip>
+                    )
+                  })}
+                </AnchoredPanel>
+              )}
 
               {/* Preview mode (thumbnails #8): absolute overlay above the
                   canvas AND the zoom controls (z-20 beats their auto
