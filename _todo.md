@@ -31,19 +31,20 @@
 27. THU-18
 28. THU-24
 29. THU-25
-30. THU-21
-31. THU-1
-32. THU-8
-33. THU-9
-34. THU-19
-35. THU-10
-36. THU-12
-37. THU-16
-38. THU-23
-39. THU-20
-40. INTG-1
-41. STR-22
-42. STR-17
+30. THU-26
+31. THU-21
+32. THU-1
+33. THU-8
+34. THU-9
+35. THU-19
+36. THU-10
+37. THU-12
+38. THU-16
+39. THU-23
+40. THU-20
+41. INTG-1
+42. STR-22
+43. STR-17
 
 ## Improvement ideas
 
@@ -286,9 +287,13 @@
 - **THU-22** [maybe]
   Stars in the thumbnail editor. A star is a polygon whose side midpoints are pulled inward, so it is a small addition to the polygon's properties: a checkbox that turns on an inner radius, shown as a handle at the midpoint of one side on the canvas with a matching percentage input in the panel (how far inward the midpoints sit; zero is the plain polygon). Rides on the THU-2 geometry (flat bottom, fills its box, corner radius), and the corner-radius clamp has to account for the inner vertices. Filed 2026-09-13 from the THU-2 discussion; not queued.
 
-- **THU-25**
+- **THU-25** [done]
   Angle snapping while rotating in the thumbnail editor. Today the rotation handle has no angle snapping at all, and the smart-snap guides that flashed during a rotation were the resize snapper being fed the rotating box, which stretched the layer (fixed 2026-09-13 in the THU-18 review round: rotation now bypasses the edge snapper). Add snapping to fixed angle steps while a modifier is held. Proposed from review, descending step with more modifiers: Ctrl 90, Shift 45, Ctrl+Shift 30, Alt 15, Ctrl+Alt 10, Ctrl+Alt+Shift 5. Counter-proposal to weigh: Shift 15 (the Figma and Affinity convention, and the step people reach for most), Ctrl 45, Ctrl+Shift 90, with 5 and 10 dropped unless they earn a place; Alt is already spoken for by the Alt-drag duplicate on the resize handles, so it is best left out of the rotation set too. Show the snapped angle next to the handle while snapping. Filed 2026-09-13.
   Decided 2026-09-14: keep it to two steps, Ctrl 90 degrees for the big stops and Shift 5 degrees for refinement; with both held the finer step wins; Alt stays out. Built 2026-09-14, awaiting review. The step table is one constant (`ROTATION_SNAP_STEPS`). Snaps are applied to the Konva Transformer imperatively from the existing modifier tracking, so pressing or releasing a key mid-drag takes effect on the next frame, and modifiers held before the drag count too; tolerance is half the step, so the handle always sits on a stop while a modifier is held. An angle readout follows the pointer during any rotation drag (normalized to -180..180, one decimal) and disappears with the gesture. Help panel lists both. Verify: rotate freely (no snap, readout follows), hold Ctrl (jumps in 90s), hold Shift (5s), press and release mid-drag, hold before grabbing the handle, and confirm the resize handles still behave (Ctrl centered scaling, Shift aspect inversion are untouched).
+
+- **THU-26**
+  Live transform readouts and a live properties panel in the thumbnail editor. Extend the rotation readout (THU-25) to moves (X and Y) and resizes (W and H, width only for text since its height is measured), riding beside the pointer with the node's post-snap numbers, group-relative for a group member as the panel shows them. The properties panel's transform inputs show the same live numbers during a gesture and fall back to the committed layer the instant it ends. Design constraint: live values are never written into the layer state mid-gesture (a resize carries a temporary scale that only becomes width and height on release; committing early makes React push a width onto a node that still has the scale applied). Instead a small external store (`lib/liveTransform.ts`) is written by the gesture handlers each frame and only the readout and the panel's transform section subscribe, which also fixes the THU-25 readout re-rendering the whole editor every frame. Filed 2026-09-14.
+  Built 2026-09-14, awaiting review. `lib/liveTransform.ts` is a tiny external store (useSyncExternalStore): the drag handler writes the primary node's post-snap position each frame, the transformer's transform handler writes the live box (layer size times Konva's live scale; the group's content box for a group; width only for text) or the angle when the rotate handle is active, and both the drag-end and transform-end paths clear it before the commit lands in the same microtask. `TransformHud` replaces the THU-25 state-based readout and is the only canvas subscriber; the properties panel subscribes once and swaps its X, Y, W, H, and rotation inputs to the live numbers while the gesture's primary is the selected layer (flip sign convention kept), including the group panel. Verify: drag a layer (X Y readout and panel move together, snapped values), resize an image and a shape (W H), resize text (W only), rotate (angle), resize a group (its content box), drag a group member (group-relative numbers), and confirm the panel shows the committed value the moment the mouse is released; watch that other panels do not flicker during a gesture.
 
 - **THU-24** [done]
   Paste places the layer above the current selection. A pasted layer (from this canvas or another) lands above the topmost selected layer, inside the same group when that layer is a group member, so the paste position matches where the user is working; with nothing selected it lands at the top of the layers panel as it does today. Filed 2026-09-13 from the THU-18 review round.

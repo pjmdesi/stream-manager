@@ -31,6 +31,7 @@ import {
   needsUniformScale, panelRows, isGroup, hasHiddenAncestor,
 } from '../../lib/layerTree'
 import type { PanelRow } from '../../lib/layerTree'
+import { setLiveTransform, useLiveTransform, normalizeAngle } from '../../lib/liveTransform'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import type { PendingThumbnailStream } from '../../context/ThumbnailEditorContext'
@@ -1137,6 +1138,28 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode }) {
     >
       {children}
     </KonvaGroup>
+  )
+}
+
+/** On-canvas readout for the gesture in progress (THU-25, THU-26): angle
+ *  while rotating, W and H while resizing (W alone for text), X and Y while
+ *  moving. Subscribes to the live-transform store on its own so the
+ *  per-frame updates never re-render the editor around it. */
+function TransformHud() {
+  const live = useLiveTransform()
+  if (!live || !live.pointer) return null
+  const n = (v: number) => String(Math.round(v))
+  let text: string
+  if (live.kind === 'rotate') text = `${(Math.round(normalizeAngle(live.rotation) * 10) / 10).toFixed(1)}°`
+  else if (live.kind === 'resize') text = live.height !== undefined ? `W ${n(live.width ?? 0)}   H ${n(live.height)}` : `W ${n(live.width ?? 0)}`
+  else text = `X ${n(live.x)}   Y ${n(live.y)}`
+  return (
+    <div
+      className="absolute pointer-events-none px-1.5 py-0.5 rounded bg-navy-900/90 border border-white/10 text-[10px] text-gray-200 tabular-nums whitespace-pre z-10"
+      style={{ left: live.pointer.x + 14, top: live.pointer.y + 14 }}
+    >
+      {text}
+    </div>
   )
 }
 
@@ -2952,6 +2975,11 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
   // Gesture tracker so a continuous edit (color-picker drag, held nudge,
   // typing burst) on one property collapses to a single undo entry.
   const beginsGesture = useCommitOnRelease()
+  // Live canvas gesture (THU-26): while this layer is being dragged,
+  // resized, or rotated, the transform inputs show the node's live numbers
+  // instead of the committed layer. Display only; the layer state is never
+  // written mid-gesture.
+  const liveAll = useLiveTransform()
 
   if (!layer) {
     return (
@@ -2972,6 +3000,13 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
     else onLiveChange(next)
   }
 
+  const lv = liveAll && liveAll.id === layer.id ? liveAll : null
+  const dispX = lv ? lv.x : layer.x
+  const dispY = lv ? lv.y : layer.y
+  const dispRot = lv ? normalizeAngle(lv.rotation) : layer.rotation
+  const dispW = lv?.width ?? layer.width
+  const dispH = lv?.height ?? layer.height
+
   // Groups (THU-18) carry position, rotation, and opacity of their own; size
   // follows the members and is edited on the canvas, where the group's
   // scale is baked into them on release.
@@ -2984,15 +3019,15 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           <div className="grid grid-cols-2 gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>X</span>
-              <NumberInput value={Math.round(layer.x)} onChange={x => update({ x })} className="w-full" />
+              <NumberInput value={Math.round(dispX)} onChange={x => update({ x })} className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Y</span>
-              <NumberInput value={Math.round(layer.y)} onChange={y => update({ y })} className="w-full" />
+              <NumberInput value={Math.round(dispY)} onChange={y => update({ y })} className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Rotation °</span>
-              <NumberInput value={Math.round(layer.rotation)} onChange={rotation => update({ rotation })} className="w-full" />
+              <NumberInput value={Math.round(dispRot)} onChange={rotation => update({ rotation })} className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Opacity %</span>
@@ -3111,12 +3146,12 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5 items-end">
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>X</span>
-                    <NumberInput value={Math.round(layer.x)} onChange={x => update({ x })} className="w-full" />
+                    <NumberInput value={Math.round(dispX)} onChange={x => update({ x })} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Width</span>
                     <NumberInput
-                      value={layer.flipX ? -Math.round(layer.width ?? 0) : Math.round(layer.width ?? 0)}
+                      value={layer.flipX ? -Math.round(dispW ?? 0) : Math.round(dispW ?? 0)}
                       onChange={handleWidthChange}
                       className="w-full"
                     />
@@ -3164,12 +3199,12 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                   </Tooltip>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Y</span>
-                    <NumberInput value={Math.round(layer.y)} onChange={y => update({ y })} className="w-full" />
+                    <NumberInput value={Math.round(dispY)} onChange={y => update({ y })} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Height</span>
                     <NumberInput
-                      value={layer.flipY ? -Math.round(layer.height ?? 0) : Math.round(layer.height ?? 0)}
+                      value={layer.flipY ? -Math.round(dispH ?? 0) : Math.round(dispH ?? 0)}
                       onChange={handleHeightChange}
                       className="w-full"
                     />
@@ -3180,11 +3215,11 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 <div className="grid grid-cols-2 gap-1.5">
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>X</span>
-                    <NumberInput value={Math.round(layer.x)} onChange={x => update({ x })} className="w-full" />
+                    <NumberInput value={Math.round(dispX)} onChange={x => update({ x })} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Y</span>
-                    <NumberInput value={Math.round(layer.y)} onChange={y => update({ y })} className="w-full" />
+                    <NumberInput value={Math.round(dispY)} onChange={y => update({ y })} className="w-full" />
                   </label>
                 </div>
               )}
@@ -3238,7 +3273,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 })()}
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Rotation °</span>
-                  <NumberInput value={Math.round(layer.rotation)} onChange={rotation => update({ rotation })} className="w-full" />
+                  <NumberInput value={Math.round(dispRot)} onChange={rotation => update({ rotation })} className="w-full" />
                 </label>
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Opacity %</span>
@@ -4252,9 +4287,6 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // already shows what's moving, and outlines would obscure the element
   // edges exactly when precise positioning matters most.
   const [canvasGestureActive, setCanvasGestureActive] = useState(false)
-  // Angle readout shown beside the pointer while the rotate handle is
-  // dragged (THU-25); null outside a rotation gesture.
-  const [rotationHud, setRotationHud] = useState<{ angle: number; x: number; y: number } | null>(null)
   const [boundsOverlays, setBoundsOverlays] = useState<Array<{
     id: string; x: number; y: number; rotation: number
     box: { x: number; y: number; width: number; height: number }
@@ -4636,6 +4668,16 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         }
       })
     }
+
+    // Live readout of the move (THU-26): the primary's post-snap position.
+    setLiveTransform({
+      kind: 'move',
+      id: node.id(),
+      x: node.x(),
+      y: node.y(),
+      rotation: node.rotation(),
+      pointer: stageRef.current.getPointerPosition(),
+    })
   }, [smartSnapEnabled, gridSnapEnabled])
 
   const handleSnapTransformBoundBox = useCallback((oldBox: KonvaBox, newBox: KonvaBox): KonvaBox => {
@@ -5423,6 +5465,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
     if (primaryDragIdRef.current !== null && e.target.id() !== primaryDragIdRef.current) return
     if (dragEndFlushScheduledRef.current) return
     dragEndFlushScheduledRef.current = true
+    // The readout and the panel drop back to the committed layer; the
+    // commit below lands in the same microtask, before the next paint.
+    setLiveTransform(null)
     queueMicrotask(() => {
       dragEndFlushScheduledRef.current = false
       // Before the early returns: the bounds overlays must come back even
@@ -7100,22 +7145,48 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       applyRotationSnaps()
                     }}
                     onTransform={() => {
-                      // Angle readout while rotating (THU-25): the primary
-                      // node's rotation, normalized to -180..180, pinned near
-                      // the pointer. Cleared with the gesture.
+                      // Live readout (THU-25, THU-26): the primary node's
+                      // numbers go to the live-transform store each frame;
+                      // the on-canvas readout and the properties panel
+                      // subscribe to it, nothing else re-renders. A resize
+                      // reports the layer box times Konva's live scale, which
+                      // is what release will bake into width and height.
                       const tr = transformerRef.current
                       const stage = stageRef.current
                       if (!tr || !stage) return
-                      if (tr.getActiveAnchor() !== 'rotater') { setRotationHud(prev => (prev ? null : prev)); return }
                       const node = tr.nodes()[0]
-                      const pos = stage.getPointerPosition()
-                      if (!node || !pos) return
-                      let angle = node.rotation() % 360
-                      if (angle > 180) angle -= 360
-                      if (angle <= -180) angle += 360
-                      setRotationHud({ angle, x: pos.x, y: pos.y })
+                      if (!node) return
+                      const pointer = stage.getPointerPosition()
+                      const rotating = tr.getActiveAnchor() === 'rotater'
+                      const l = layersRef.current.find(x => x.id === node.id())
+                      let width: number | undefined
+                      let height: number | undefined
+                      if (!rotating && l) {
+                        const sx = node.scaleX(), sy = node.scaleY()
+                        if (l.type === 'text') {
+                          const r = node.getClientRect({ skipTransform: true, skipShadow: true, skipStroke: true })
+                          width = (l.width ?? r.width) * sx
+                        } else if (l.type === 'group') {
+                          const r = node.getClientRect({ skipTransform: true, skipShadow: true, skipStroke: true })
+                          width = r.width * sx
+                          height = r.height * sy
+                        } else {
+                          width = (l.width ?? 0) * sx
+                          height = (l.height ?? 0) * sy
+                        }
+                      }
+                      setLiveTransform({
+                        kind: rotating ? 'rotate' : 'resize',
+                        id: node.id(),
+                        x: node.x(),
+                        y: node.y(),
+                        rotation: node.rotation(),
+                        width,
+                        height,
+                        pointer,
+                      })
                     }}
-                    onTransformEnd={() => { setCanvasGestureActive(false); setRotationHud(null) }}
+                    onTransformEnd={() => { setCanvasGestureActive(false); setLiveTransform(null) }}
                     // Disable Konva's drag-past-the-opposite-handle flip
                     // gesture. We have explicit flip buttons + signed
                     // W/H inputs, so a stray cross-over flip while
@@ -7253,17 +7324,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 <Layer ref={guideLayerRef} listening={false} />
               </Stage>
 
-              {/* Rotation readout (THU-25): rides beside the pointer for the
-                  length of a rotate-handle drag. Pointer coords are stage
-                  container coords, which is this box. */}
-              {rotationHud && (
-                <div
-                  className="absolute pointer-events-none px-1.5 py-0.5 rounded bg-navy-900/90 border border-white/10 text-[10px] text-gray-200 tabular-nums z-10"
-                  style={{ left: rotationHud.x + 14, top: rotationHud.y + 14 }}
-                >
-                  {(Math.round(rotationHud.angle * 10) / 10).toFixed(1)}°
-                </div>
-              )}
+              {/* Live readout (THU-25, THU-26): rides beside the pointer for
+                  the length of a move, resize, or rotate gesture. Its own
+                  component, so the per-frame updates re-render only it.
+                  Pointer coords are stage container coords, which is this box. */}
+              <TransformHud />
 
               {/* Preview mode (thumbnails #8): absolute overlay above the
                   canvas AND the zoom controls (z-20 beats their auto
