@@ -16,19 +16,23 @@ export const STREAM_NAV_SHORTCUTS = {
   nextEpisode: 'Ctrl+Shift+↑',
 } as const
 
-type Variant = 'sidebar' | 'player' | 'player-rail'
+type Variant = 'sidebar' | 'player' | 'player-rail' | 'toolbar'
 
 const VARIANT = {
   sidebar: { btn: 'p-1 hover:bg-white/5', icon: 13, side: 'bottom' as const },
   player: { btn: 'h-5 w-5 flex items-center justify-center hover:bg-white/10', icon: 12, side: 'bottom' as const },
   'player-rail': { btn: 'h-6 w-8 flex items-center justify-center hover:bg-white/10', icon: 12, side: 'right' as const },
+  /** The thumbnail editor's top bar (THU-19): sized like its other
+   *  icon buttons. */
+  toolbar: { btn: 'p-1.5 hover:bg-white/10', icon: 14, side: 'bottom' as const },
 }
 
 const BTN_BASE = 'rounded text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400'
 
 /**
- * Previous/next navigation shared by the stream-detail sidebar header and
- * the player's Selected Stream block (PLR-27): a stream pair (single
+ * Previous/next navigation shared by the stream-detail sidebar header, the
+ * player's Selected Stream block (PLR-27), and the thumbnail editor's top
+ * bar (THU-19): a stream pair (single
  * chevrons, adjacent streams in the caller's list order) and an episode
  * pair (double chevrons, neighbors within the series) with a jump-to-
  * episode picker once the series has more than two episodes. Up is next

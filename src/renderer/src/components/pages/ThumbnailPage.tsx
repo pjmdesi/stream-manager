@@ -24,6 +24,8 @@ import { Tooltip } from '../ui/Tooltip'
 import { RecentRow, SmoothThumb } from '../ui/RecentRow'
 import { NumberInput } from '../ui/Input'
 import { AnchoredPanel } from '../ui/AnchoredPanel'
+import { StreamNavButtons } from '../streams/StreamNavButtons'
+import { seriesNavFor, type SeriesNav } from '../../lib/seriesNav'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
 import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
 import {
@@ -4554,6 +4556,10 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     setAlignAnchorBbox({ x: r.x, y: r.y, width: r.width, height: r.height })
   }, [alignMode, selectedIds, layers])
 
+  // Every stream in the library, from the asset-library load below. Drives
+  // the toolbar's previous/next stream and episode buttons (THU-19).
+  const [allStreamFolders, setAllStreamFolders] = useState<StreamFolder[]>([])
+
   // Load asset-library data whenever the active stream changes, AND
   // whenever the streams root's chokidar watcher reports a file change
   // (so dragging in / removing thumbnails outside the app surfaces in the
@@ -4573,6 +4579,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       try {
         const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream')
         if (cancelled || myToken !== token) return
+        // The same listing feeds the toolbar's stream and episode
+        // navigation (THU-19), so it stays current with the watcher too.
+        setAllStreamFolders(all)
         const cur = all.find(s => s.folderPath === currentStream.folderPath)
         if (!cur) { setSeasonAssets(null); return }
         // Related-episode sources are user-controlled via the Assets
@@ -6137,6 +6146,45 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     window.api.thumbnailClearRecents().then(setRecents).catch(() => setRecents([]))
   }, [])
 
+  // ── Stream and episode navigation (THU-19) ────────────────────────────────
+  // Same model as the player's Selected Stream block: adjacent streams are
+  // neighbors in date order across the whole library (every stream can
+  // carry a thumbnail, so nothing is skipped), episodes come from the
+  // series helper. Switching streams goes through openStreamEditor, which
+  // flushes the current canvas's pending saves first.
+  const sortedStreamFolders = useMemo(
+    () => [...allStreamFolders].sort((a, b) => a.date.localeCompare(b.date) || a.relativePath.localeCompare(b.relativePath)),
+    [allStreamFolders],
+  )
+  const currentNavFolder = useMemo(() => {
+    if (!currentStream) return null
+    return sortedStreamFolders.find(f => f.folderPath === currentStream.folderPath && f.date === currentStream.date)
+      ?? sortedStreamFolders.find(f => f.folderPath === currentStream.folderPath)
+      ?? null
+  }, [sortedStreamFolders, currentStream])
+  const currentNavIndex = useMemo(
+    () => (currentNavFolder ? sortedStreamFolders.indexOf(currentNavFolder) : -1),
+    [sortedStreamFolders, currentNavFolder],
+  )
+  const prevNavStream = currentNavIndex > 0 ? sortedStreamFolders[currentNavIndex - 1] : null
+  const nextNavStream = currentNavIndex >= 0 && currentNavIndex < sortedStreamFolders.length - 1 ? sortedStreamFolders[currentNavIndex + 1] : null
+  const thumbSeriesNav = useMemo<SeriesNav>(
+    () => seriesNavFor(currentNavFolder, sortedStreamFolders),
+    [currentNavFolder, sortedStreamFolders],
+  )
+  const openNeighborStream = useCallback((f: StreamFolder) => {
+    // Same resolution as opening from the recents list: live meta and the
+    // series length, so merge fields render real values in the new canvas.
+    const primaryGame = resolvePrimaryGame(f.meta) || f.detectedGames?.[0] || ''
+    const totalEpisodes = f.meta?.isSeries === false
+      ? 0
+      : detectTotalEpisodes(sortedStreamFolders, primaryGame, f.meta?.ytSeason || '1')
+    const title = f.meta?.ytTitle ?? f.meta?.games?.join(', ')
+    void openStreamEditor(f.folderPath, f.date, title, f.meta ?? undefined, totalEpisodes)
+  }, [openStreamEditor, sortedStreamFolders])
+  const navRefs = useRef({ prevNavStream, nextNavStream, thumbSeriesNav, openNeighborStream })
+  navRefs.current = { prevNavStream, nextNavStream, thumbSeriesNav, openNeighborStream }
+
   // ── Confirm template picker choice ────────────────────────────────────────
   const confirmPickTemplate = useCallback(async (t: ThumbnailTemplate | null) => {
     if (!templatePickerStream) return
@@ -6554,10 +6602,23 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       }
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
       if (!(e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) setGridSnapEnabled(v => !v)
+      // Ctrl+Up/Down walks streams, Ctrl+Shift+Up/Down walks episodes in
+      // the series (THU-19), the same keys as the streams page and the
+      // player; up is next (newer), down is previous.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
+        e.preventDefault()
+        const up = e.code === 'ArrowUp'
+        const nav = navRefs.current
+        const target = e.shiftKey
+          ? (up ? nav.thumbSeriesNav.next : nav.thumbSeriesNav.prev)
+          : (up ? nav.nextNavStream : nav.prevNavStream)
+        if (target) nav.openNeighborStream(target)
+        return
+      }
       // Arrow-key nudge: move the selection 1px (10px with Shift). e.code keeps
       // this layout-independent and lets it co-exist with the bracket z-order
       // keys below. preventDefault stops the arrows from scrolling the panels.
-      if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      if (!(e.ctrlKey || e.metaKey) && (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
         if (selectedIdsRef.current.length > 0) {
           e.preventDefault()
           const step = e.shiftKey ? 10 : 1
@@ -6738,6 +6799,22 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                 <span className="text-xs text-gray-400 italic">Unsaved canvas</span>
               )}
               {isDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
+              {/* Stream and episode navigation (THU-19), once the library
+                  listing has resolved the open stream. */}
+              {currentStream && currentNavFolder && (
+                <div className="shrink-0 ml-1">
+                  <StreamNavButtons
+                    current={currentNavFolder}
+                    folders={sortedStreamFolders}
+                    prevStream={prevNavStream}
+                    nextStream={nextNavStream}
+                    onPickStream={openNeighborStream}
+                    series={thumbSeriesNav}
+                    onPickEpisode={openNeighborStream}
+                    variant="toolbar"
+                  />
+                </div>
+              )}
               {/* Variant switcher + Delete — only when editing a
                   stream (templates-only sessions don't have variants).
                   The switcher's button displays a 1-indexed position

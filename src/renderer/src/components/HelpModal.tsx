@@ -273,6 +273,10 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             { keys: ['Ctrl', 'Shift', 'G'], label: 'Ungroup the selected groups' },
             { keys: ['Double-click'], label: 'Select a layer inside a group on the canvas' },
           ]} />
+          <ShortcutGroup title="Navigate" rows={[
+            { keys: ['Ctrl', '↑ / ↓'], label: 'Next / previous stream item' },
+            { keys: ['Ctrl', 'Shift', '↑ / ↓'], label: 'Next / previous episode in the series' },
+          ]} />
           <ShortcutGroup title="Layout" rows={[
             { keys: ['↑ ↓ ← →'], label: 'Nudge selection 1px (Shift = 10px)' },
             { keys: ['G'], label: 'Toggle grid snap' },
