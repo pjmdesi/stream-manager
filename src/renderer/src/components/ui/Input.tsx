@@ -300,6 +300,12 @@ interface NumberInputProps {
    *  port). Also drops the "(Shift = ×10)" note from the spinner tooltips,
    *  since a shown hint must never be wrong. APP-22 exception list. */
   disableShiftStep?: boolean
+  /** Stepping lands on the next multiple of `step` instead of adding the
+   *  step to a fractional value: 10.3 goes to 11, then 12 (and down to 10).
+   *  The thumbnail editor's position and size fields turn this on while
+   *  pixel snap is on, and its rotation field always (THU-27). Typed values
+   *  are never altered by it. */
+  snapToStep?: boolean
   'aria-label'?: string
 }
 
@@ -318,7 +324,7 @@ interface NumberInputProps {
 export const NumberInput: React.FC<NumberInputProps> = ({
   value, onChange, min, max, step = 1, placeholder, disabled, className = '', title,
   inlineNote, frameless = false, merged = false, onEscape, disableShiftStep = false,
-  'aria-label': ariaLabel,
+  snapToStep = false, 'aria-label': ariaLabel,
 }) => {
   const clamp = (n: number) => {
     let next = n
@@ -330,10 +336,22 @@ export const NumberInput: React.FC<NumberInputProps> = ({
   // in Photoshop / Affinity / Figma's number fields. The result snaps to
   // the step's decimal precision: fractional steps (e.g. the 0.05 filter
   // nudges) would otherwise accumulate float artifacts in the field
-  // (0.30000000000000004).
+  // (0.30000000000000004). A fractional VALUE keeps its own extra decimals
+  // (two at most) unless `snapToStep` asks the step to land on the next
+  // multiple instead.
   const stepDecimals = (String(step).split('.')[1] ?? '').length
-  const stepBy = (dir: 1 | -1, shift: boolean) =>
-    onChange(clamp(Number((value + dir * step * (shift && !disableShiftStep ? 10 : 1)).toFixed(stepDecimals))))
+  const stepBy = (dir: 1 | -1, shift: boolean) => {
+    const amount = step * (shift && !disableShiftStep ? 10 : 1)
+    let next: number
+    if (snapToStep) {
+      const eps = 1e-9
+      next = dir > 0 ? Math.floor(value / amount + eps) * amount + amount : Math.ceil(value / amount - eps) * amount - amount
+      next = Number(next.toFixed(stepDecimals))
+    } else {
+      next = Number((value + dir * amount).toFixed(Math.max(stepDecimals, 2)))
+    }
+    onChange(clamp(next))
+  }
   const shiftNote = disableShiftStep ? '' : ' (Shift = ×10)'
   const atMin = min !== undefined && value <= min
   const atMax = max !== undefined && value >= max

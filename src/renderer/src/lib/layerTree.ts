@@ -383,24 +383,44 @@ export function moveAmongSiblings(layers: ThumbnailLayer[], id: string, directio
   return moveLayerTo(layers, id, parentId, afterId)
 }
 
+/**
+ * Pixel snap for a resized box (THU-27). With snapping on, width and height
+ * land on whole pixels, except that an aspect-locked image keeps its
+ * proportions exactly: width snaps and height follows the lock ratio,
+ * fractional when it must be. Derived from the previous height each time,
+ * so repeated resizes never drift the ratio. Off: the raw values.
+ */
+export function snapResizedBox(layer: ThumbnailLayer, width: number, height: number, snapPixels: boolean): { width: number; height: number } {
+  if (!snapPixels) return { width, height }
+  const w = Math.max(1, Math.round(width))
+  if (layer.type === 'image' && (layer.aspectLocked ?? true) && (layer.width ?? 0) > 0 && (layer.height ?? 0) > 0) {
+    return { width: w, height: Math.max(1, w * ((layer.height as number) / (layer.width as number))) }
+  }
+  return { width: w, height: Math.max(1, Math.round(height)) }
+}
+
 /** Bake a group's transformer scale into its members: positions and sizes
  *  scale, text scales its font size, nested groups pass the scale on.
  *  Strokes, corner radii, and shadows stay in pixels, as they do when a
- *  single layer is resized. */
-export function scaleGroupMembers(layers: ThumbnailLayer[], groupId: string, sx: number, sy: number): ThumbnailLayer[] {
+ *  single layer is resized. `snapPixels` applies the pixel-snap rule to
+ *  the members' positions and boxes (THU-27). */
+export function scaleGroupMembers(layers: ThumbnailLayer[], groupId: string, sx: number, sy: number, snapPixels = true): ThumbnailLayer[] {
   if (sx === 1 && sy === 1) return layers
   const inside = new Set(subtreeIds(layers, groupId))
   inside.delete(groupId)
+  const pos = (v: number) => (snapPixels ? Math.round(v) : v)
   return layers.map(l => {
     if (!inside.has(l.id)) return l
-    const out: ThumbnailLayer = { ...l, x: l.x * sx, y: l.y * sy }
+    const out: ThumbnailLayer = { ...l, x: pos(l.x * sx), y: pos(l.y * sy) }
     if (isGroup(l)) return out
-    if (l.width !== undefined) out.width = Math.max(1, Math.round(l.width * sx))
     if (l.type === 'text') {
+      if (l.width !== undefined) out.width = Math.max(1, snapPixels ? Math.round(l.width * sx) : l.width * sx)
       const s = (sx + sy) / 2
       out.fontSize = Math.max(1, Math.round((l.fontSize ?? 48) * s * 100) / 100)
-    } else if (l.height !== undefined) {
-      out.height = Math.max(1, Math.round(l.height * sy))
+    } else if (l.width !== undefined && l.height !== undefined) {
+      const box = snapResizedBox(l, l.width * sx, l.height * sy, snapPixels)
+      out.width = box.width
+      out.height = box.height
     }
     return out
   })

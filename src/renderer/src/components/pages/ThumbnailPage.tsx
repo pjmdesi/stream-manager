@@ -9,7 +9,7 @@ import {
   Plus, Trash2, Eye, EyeOff,
   Image as ImageIcon, Type, Undo2, Redo2, Download,
   BookMarked, FolderOpen, LayoutTemplate, Sliders, RotateCcw, Copy,
-  Magnet, Grid3x3, Check, X, AlertTriangle, Pencil, Link2, Unlink2,
+  Magnet, Grid3x3, SquareDot, Check, X, AlertTriangle, Pencil, Link2, Unlink2,
   Square, Circle, Pentagon,
   Frame, BoxSelect,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
@@ -28,7 +28,7 @@ import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf,
 import {
   childrenOf, paintableLayers, selectionRoots, copySelection, insertPastedAbove, canGroup, canUngroup, groupLayers, ungroupLayer,
   deleteLayers, duplicateLayer as duplicateLayerTree, clonePasteLayers, moveLayerTo, moveAmongSiblings, scaleGroupMembers,
-  needsUniformScale, panelRows, isGroup, hasHiddenAncestor,
+  snapResizedBox, needsUniformScale, panelRows, isGroup, hasHiddenAncestor,
 } from '../../lib/layerTree'
 import type { PanelRow } from '../../lib/layerTree'
 import { setLiveTransform, useLiveTransform, normalizeAngle } from '../../lib/liveTransform'
@@ -113,6 +113,10 @@ const GRID_SIZE = 8      // canvas pixels
  *  refinement; with both held the finer step wins. No modifier, no snap.
  *  Alt stays out of it (reserved for the Alt-drag duplicate gesture). */
 const ROTATION_SNAP_STEPS = { ctrl: 90, shift: 5 } as const
+
+/** Display precision for position, size, and angle (THU-27): two decimals,
+ *  trailing zeros dropped. Stored values keep their full precision. */
+const round2 = (v: number) => Math.round(v * 100) / 100
 function rotationSnapStep(ctrl: boolean, shift: boolean): number | null {
   if (shift) return ROTATION_SNAP_STEPS.shift
   if (ctrl) return ROTATION_SNAP_STEPS.ctrl
@@ -1148,9 +1152,9 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode }) {
 function TransformHud() {
   const live = useLiveTransform()
   if (!live || !live.pointer) return null
-  const n = (v: number) => String(Math.round(v))
+  const n = (v: number) => String(round2(v))
   let text: string
-  if (live.kind === 'rotate') text = `${(Math.round(normalizeAngle(live.rotation) * 10) / 10).toFixed(1)}°`
+  if (live.kind === 'rotate') text = `${round2(normalizeAngle(live.rotation)).toFixed(2)}°`
   else if (live.kind === 'resize') text = live.height !== undefined ? `W ${n(live.width ?? 0)}   H ${n(live.height)}` : `W ${n(live.width ?? 0)}`
   else text = `X ${n(live.x)}   Y ${n(live.y)}`
   return (
@@ -2885,6 +2889,9 @@ interface PropsPanelProps {
   /** True when queryLocalFonts failed (or is unavailable) — the Font
    *  section says so instead of silently offering the 5-font seed list. */
   fontQueryFailed: boolean
+  /** Pixel snap toggle state (THU-27). Position and size fields step to
+   *  the next whole pixel while it is on; typed values are never altered. */
+  pixelSnapEnabled: boolean
   /** True when the active stream is explicitly standalone (not a series).
    *  Flags the season/episode/total_episodes merge chips as inapplicable —
    *  mirrors the YouTube-title chip editor on the Streams page. False in
@@ -2947,7 +2954,7 @@ function FilterToggle({ label, checked, onChange }: {
   )
 }
 
-function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, fontsLoaded, fontQueryFailed, standalone }: PropsPanelProps) {
+function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, fontsLoaded, fontQueryFailed, standalone, pixelSnapEnabled }: PropsPanelProps) {
   // Last-used font family (THU-6): persisted app-wide via IPC so it
   // survives sessions. Rendered as a quick-pick link under the font
   // dropdown whenever it differs from the selected layer's family.
@@ -3019,15 +3026,15 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           <div className="grid grid-cols-2 gap-1.5">
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>X</span>
-              <NumberInput value={Math.round(dispX)} onChange={x => update({ x })} className="w-full" />
+              <NumberInput value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Y</span>
-              <NumberInput value={Math.round(dispY)} onChange={y => update({ y })} className="w-full" />
+              <NumberInput value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Rotation °</span>
-              <NumberInput value={Math.round(dispRot)} onChange={rotation => update({ rotation })} className="w-full" />
+              <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} snapToStep className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Opacity %</span>
@@ -3070,7 +3077,10 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
     const abs = Math.abs(w)
     const flipX = w < 0 ? true : (w > 0 ? false : !!layer.flipX)
     if (aspectLocked && lockedRatio > 0) {
-      update({ width: abs, height: Math.max(1, Math.round(abs / lockedRatio)), flipX })
+      // The derived dimension keeps the exact ratio (THU-27); it is
+      // rounded only for shapes and text, which always take whole pixels.
+      const h = abs / lockedRatio
+      update({ width: abs, height: Math.max(1, layer.type === 'image' ? h : Math.round(h)), flipX })
     } else {
       update({ width: abs, flipX })
     }
@@ -3079,7 +3089,8 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
     const abs = Math.abs(h)
     const flipY = h < 0 ? true : (h > 0 ? false : !!layer.flipY)
     if (aspectLocked && lockedRatio > 0) {
-      update({ height: abs, width: Math.max(1, Math.round(abs * lockedRatio)), flipY })
+      const w = abs * lockedRatio
+      update({ height: abs, width: Math.max(1, layer.type === 'image' ? w : Math.round(w)), flipY })
     } else {
       update({ height: abs, flipY })
     }
@@ -3146,13 +3157,14 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5 items-end">
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>X</span>
-                    <NumberInput value={Math.round(dispX)} onChange={x => update({ x })} className="w-full" />
+                    <NumberInput value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Width</span>
                     <NumberInput
-                      value={layer.flipX ? -Math.round(dispW ?? 0) : Math.round(dispW ?? 0)}
+                      value={layer.flipX ? -round2(dispW ?? 0) : round2(dispW ?? 0)}
                       onChange={handleWidthChange}
+                      snapToStep={pixelSnapEnabled}
                       className="w-full"
                     />
                   </label>
@@ -3199,13 +3211,14 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                   </Tooltip>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Y</span>
-                    <NumberInput value={Math.round(dispY)} onChange={y => update({ y })} className="w-full" />
+                    <NumberInput value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Height</span>
                     <NumberInput
-                      value={layer.flipY ? -Math.round(dispH ?? 0) : Math.round(dispH ?? 0)}
+                      value={layer.flipY ? -round2(dispH ?? 0) : round2(dispH ?? 0)}
                       onChange={handleHeightChange}
+                      snapToStep={pixelSnapEnabled}
                       className="w-full"
                     />
                   </label>
@@ -3215,11 +3228,11 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 <div className="grid grid-cols-2 gap-1.5">
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>X</span>
-                    <NumberInput value={Math.round(dispX)} onChange={x => update({ x })} className="w-full" />
+                    <NumberInput value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} className="w-full" />
                   </label>
                   <label className="flex flex-col gap-0.5">
                     <span className={labelCls}>Y</span>
-                    <NumberInput value={Math.round(dispY)} onChange={y => update({ y })} className="w-full" />
+                    <NumberInput value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} className="w-full" />
                   </label>
                 </div>
               )}
@@ -3273,7 +3286,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 })()}
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Rotation °</span>
-                  <NumberInput value={Math.round(dispRot)} onChange={rotation => update({ rotation })} className="w-full" />
+                  <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} snapToStep className="w-full" />
                 </label>
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Opacity %</span>
@@ -4470,6 +4483,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // ── Snapping ──────────────────────────────────────────────────────────────
   const [smartSnapEnabled, setSmartSnapEnabled] = useState(true)
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false)
+  // Pixel snap (THU-27): moves and resizes land on whole canvas pixels.
+  // On by default and remembered; off leaves Konva's raw doubles alone.
+  // Typed values in the properties panel are never touched by it.
+  const [pixelSnapEnabled, setPixelSnapEnabled] = useState(() => localStorage.getItem('thumbPixelSnap') !== 'false')
+  const pixelSnapEnabledRef = useRef(pixelSnapEnabled)
+  pixelSnapEnabledRef.current = pixelSnapEnabled
+  const togglePixelSnap = useCallback(() => {
+    setPixelSnapEnabled(v => {
+      const next = !v
+      localStorage.setItem('thumbPixelSnap', String(next))
+      return next
+    })
+  }, [])
   // Alignment toolbar mode. 'artboard' aligns to canvas edges/centers.
   // 'selection' aligns to the first-selected layer's bbox; only meaningful
   // with 2+ items so we auto-revert to 'artboard' below the threshold.
@@ -4642,6 +4668,13 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       else node.x(dragStartPosRef.current.x)
     }
 
+    // Pixel snap (THU-27) goes first so the node itself steps by whole
+    // pixels; the smart and grid snaps below still win when they engage.
+    if (pixelSnapEnabled) {
+      node.x(Math.round(node.x()))
+      node.y(Math.round(node.y()))
+    }
+
     if (smartSnapEnabled || gridSnapEnabled) {
       // Exclude the whole selection from snap stops, not just the dragged
       // node — its companions are moving with it (see getSnapResult).
@@ -4663,8 +4696,8 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       multiDragStartRef.current.forEach((start, id) => {
         const other = stage.findOne(`#${id}`)
         if (other) {
-          other.x(start.x + dx)
-          other.y(start.y + dy)
+          other.x(pixelSnapEnabled ? Math.round(start.x + dx) : start.x + dx)
+          other.y(pixelSnapEnabled ? Math.round(start.y + dy) : start.y + dy)
         }
       })
     }
@@ -4678,7 +4711,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       rotation: node.rotation(),
       pointer: stageRef.current.getPointerPosition(),
     })
-  }, [smartSnapEnabled, gridSnapEnabled])
+  }, [smartSnapEnabled, gridSnapEnabled, pixelSnapEnabled])
 
   const handleSnapTransformBoundBox = useCallback((oldBox: KonvaBox, newBox: KonvaBox): KonvaBox => {
     if (!stageRef.current || !guideLayerRef.current) return newBox
@@ -5492,9 +5525,12 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       const px = primaryNode.x(), py = primaryNode.y()
       const dx = startPos ? px - startPos.x : 0
       const dy = startPos ? py - startPos.y : 0
+      // Pixel snap (THU-27): the primary already moved by whole pixels;
+      // companions land on whole pixels too, as they did on screen.
+      const pos = (v: number) => (pixelSnapEnabledRef.current ? Math.round(v) : v)
       const positions = new Map<string, { x: number; y: number }>()
       positions.set(primaryId, { x: px, y: py })
-      companions.forEach((start, id) => positions.set(id, { x: start.x + dx, y: start.y + dy }))
+      companions.forEach((start, id) => positions.set(id, { x: pos(start.x + dx), y: pos(start.y + dy) }))
 
       // Group wrappers around every layer mean node.x/y is the layer's
       // top-left in every case — including centered shapes (the center
@@ -5527,8 +5563,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   const nudgeSelected = useCallback((dx: number, dy: number) => {
     const sel = selectedIdsRef.current
     if (sel.length === 0) return
+    // Pixel snap (THU-27): a nudge from a fractional position lands on a
+    // whole pixel rather than carrying the fraction along.
+    const base = (v: number) => (pixelSnapEnabledRef.current ? Math.round(v) : v)
     const next = layersRef.current.map(l =>
-      sel.includes(l.id) ? { ...l, x: l.x + dx, y: l.y + dy } : l
+      sel.includes(l.id) ? { ...l, x: base(l.x) + dx, y: base(l.y) + dy } : l
     )
     layersRef.current = next
     if (beginsNudge('nudge')) commitLayers(next)
@@ -5555,6 +5594,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       // Groups bake their drag scale into their members after the map
       // (the members are other entries of the same array).
       const groupScales: Array<{ id: string; sx: number; sy: number }> = []
+      // Pixel snap (THU-27): positions and boxes commit to whole pixels
+      // (an aspect-locked image keeps its ratio exactly, see
+      // snapResizedBox); off, the raw values land as they are.
+      const pixelSnap = pixelSnapEnabledRef.current
+      const pos = (v: number) => (pixelSnap ? Math.round(v) : v)
       let next = layers.map(l => {
         const node = nodeMap.get(l.id)
         if (!node) return l
@@ -5572,11 +5616,11 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
         let x = node.x(), y = node.y()
         if (l.type === 'group') {
           groupScales.push({ id: l.id, sx: dragScaleX, sy: dragScaleY })
-          return { ...l, x, y, rotation: rot }
+          return { ...l, x: pos(x), y: pos(y), rotation: rot }
         }
         if (l.type === 'image') {
-          let w = Math.round((l.width ?? 0) * dragScaleX)
-          let h = Math.round((l.height ?? 0) * dragScaleY)
+          let { width: w, height: h } = snapResizedBox(l, (l.width ?? 0) * dragScaleX, (l.height ?? 0) * dragScaleY, pixelSnap)
+          x = pos(x); y = pos(y)
           if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w = snapGrid(w); h = snapGrid(h) }
           return { ...l, x, y, width: w, height: h, rotation: rot }
         }
@@ -5587,19 +5631,19 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
           // shadows and outlines don't inflate the committed width.
           const baseW = l.width
             ?? node.getClientRect({ skipTransform: true, skipShadow: true, skipStroke: true }).width
-          let w = Math.round(baseW * dragScaleX)
+          let w = Math.max(1, pos(baseW * dragScaleX))
+          x = pos(x); y = pos(y)
           if (gridSnapEnabled) { x = snapGrid(x); y = snapGrid(y); w = snapGrid(w) }
           return { ...l, x, y, width: w, rotation: rot }
         }
         // shape: layer.width/height are authoritative.
         const w0 = l.width ?? 200
         const h0 = l.height ?? 200
-        let newW = Math.round(w0 * dragScaleX)
-        let newH = Math.round(h0 * dragScaleY)
+        let { width: newW, height: newH } = snapResizedBox(l, w0 * dragScaleX, h0 * dragScaleY, pixelSnap)
         if (gridSnapEnabled) { newW = snapGrid(newW); newH = snapGrid(newH) }
-        return { ...l, x: Math.round(x), y: Math.round(y), width: newW, height: newH, rotation: rot }
+        return { ...l, x: pos(x), y: pos(y), width: newW, height: newH, rotation: rot }
       })
-      for (const g of groupScales) next = scaleGroupMembers(next, g.id, g.sx, g.sy)
+      for (const g of groupScales) next = scaleGroupMembers(next, g.id, g.sx, g.sy, pixelSnap)
 
       // flushSync forces React/react-konva to commit the new widths
       // and positions to the underlying Konva nodes IMMEDIATELY,
@@ -6761,6 +6805,14 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Grid3x3 size={14} />
                 </button>
               </Tooltip>
+              <Tooltip content={`Pixel snap ${pixelSnapEnabled ? '(on)' : '(off)'} — moves and resizes land on whole pixels`} side="bottom">
+                <button
+                  onClick={togglePixelSnap}
+                  className={`p-1.5 rounded transition-colors ${pixelSnapEnabled ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                >
+                  <SquareDot size={14} />
+                </button>
+              </Tooltip>
               <div className="w-px h-4 bg-white/10 mx-1" />
               {/* Alignment mode toggle */}
               <Tooltip content="Align to artboard (canvas)" side="bottom">
@@ -7161,25 +7213,30 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                       const l = layersRef.current.find(x => x.id === node.id())
                       let width: number | undefined
                       let height: number | undefined
+                      // With pixel snap on (THU-27) the readout shows the
+                      // size that release will commit, not the raw scale.
+                      const pixelSnap = pixelSnapEnabledRef.current
+                      const pos = (v: number) => (pixelSnap ? Math.round(v) : v)
                       if (!rotating && l) {
                         const sx = node.scaleX(), sy = node.scaleY()
                         if (l.type === 'text') {
                           const r = node.getClientRect({ skipTransform: true, skipShadow: true, skipStroke: true })
-                          width = (l.width ?? r.width) * sx
+                          width = Math.max(1, pos((l.width ?? r.width) * sx))
                         } else if (l.type === 'group') {
                           const r = node.getClientRect({ skipTransform: true, skipShadow: true, skipStroke: true })
-                          width = r.width * sx
-                          height = r.height * sy
+                          width = pos(r.width * sx)
+                          height = pos(r.height * sy)
                         } else {
-                          width = (l.width ?? 0) * sx
-                          height = (l.height ?? 0) * sy
+                          const box = snapResizedBox(l, (l.width ?? 0) * sx, (l.height ?? 0) * sy, pixelSnap)
+                          width = box.width
+                          height = box.height
                         }
                       }
                       setLiveTransform({
                         kind: rotating ? 'rotate' : 'resize',
                         id: node.id(),
-                        x: node.x(),
-                        y: node.y(),
+                        x: rotating ? node.x() : pos(node.x()),
+                        y: rotating ? node.y() : pos(node.y()),
                         rotation: node.rotation(),
                         width,
                         height,
@@ -7986,7 +8043,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                     a collapse round-trip. */}
                 <div className={`flex flex-col flex-1 overflow-hidden min-h-0${propertiesCollapsed ? ' hidden' : ''}`}>
                   <PaletteContext.Provider value={paletteCtx}>
-                    <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} />
+                    <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} pixelSnapEnabled={pixelSnapEnabled} />
                   </PaletteContext.Provider>
                 </div>
               </div>

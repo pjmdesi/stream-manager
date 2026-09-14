@@ -32,19 +32,20 @@
 28. THU-24
 29. THU-25
 30. THU-26
-31. THU-21
-32. THU-1
-33. THU-8
-34. THU-9
-35. THU-19
-36. THU-10
-37. THU-12
-38. THU-16
-39. THU-23
-40. THU-20
-41. INTG-1
-42. STR-22
-43. STR-17
+31. THU-27
+32. THU-21
+33. THU-1
+34. THU-8
+35. THU-9
+36. THU-19
+37. THU-10
+38. THU-12
+39. THU-16
+40. THU-23
+41. THU-20
+42. INTG-1
+43. STR-22
+44. STR-17
 
 ## Improvement ideas
 
@@ -293,7 +294,11 @@
 
 - **THU-26**
   Live transform readouts and a live properties panel in the thumbnail editor. Extend the rotation readout (THU-25) to moves (X and Y) and resizes (W and H, width only for text since its height is measured), riding beside the pointer with the node's post-snap numbers, group-relative for a group member as the panel shows them. The properties panel's transform inputs show the same live numbers during a gesture and fall back to the committed layer the instant it ends. Design constraint: live values are never written into the layer state mid-gesture (a resize carries a temporary scale that only becomes width and height on release; committing early makes React push a width onto a node that still has the scale applied). Instead a small external store (`lib/liveTransform.ts`) is written by the gesture handlers each frame and only the readout and the panel's transform section subscribe, which also fixes the THU-25 readout re-rendering the whole editor every frame. Filed 2026-09-14.
-  Built 2026-09-14, awaiting review. `lib/liveTransform.ts` is a tiny external store (useSyncExternalStore): the drag handler writes the primary node's post-snap position each frame, the transformer's transform handler writes the live box (layer size times Konva's live scale; the group's content box for a group; width only for text) or the angle when the rotate handle is active, and both the drag-end and transform-end paths clear it before the commit lands in the same microtask. `TransformHud` replaces the THU-25 state-based readout and is the only canvas subscriber; the properties panel subscribes once and swaps its X, Y, W, H, and rotation inputs to the live numbers while the gesture's primary is the selected layer (flip sign convention kept), including the group panel. Verify: drag a layer (X Y readout and panel move together, snapped values), resize an image and a shape (W H), resize text (W only), rotate (angle), resize a group (its content box), drag a group member (group-relative numbers), and confirm the panel shows the committed value the moment the mouse is released; watch that other panels do not flicker during a gesture.
+  Built 2026-09-14, awaiting review. `lib/liveTransform.ts` is a tiny external store (useSyncExternalStore): the drag handler writes the primary node's post-snap position each frame, the transformer's transform handler writes the live box (layer size times Konva's live scale; the group's content box for a group; width only for text) or the angle when the rotate handle is active, and both the drag-end and transform-end paths clear it before the commit lands in the same microtask. `TransformHud` replaces the THU-25 state-based readout and is the only canvas subscriber; the properties panel subscribes once and swaps its X, Y, W, H, and rotation inputs to the live numbers while the gesture's primary is the selected layer (flip sign convention kept), including the group panel. Verify: drag a layer (X Y readout and panel move together, snapped values), resize an image and a shape (W H), resize text (W only), rotate (angle), resize a group (its content box), drag a group member (group-relative numbers), and confirm the panel shows the committed value the moment the mouse is released; watch that other panels do not flicker during a gesture. Review: the rotation input now shows one decimal (both panels) so it matches the readout; its arrow keys still step by whole degrees. Superseded by THU-27 (two decimals everywhere, pixel snap).
+
+- **THU-27**
+  Pixel snap and true precision in the thumbnail editor's transform fields. Background: Konva stores doubles and renders sub-pixel positions as anti-aliased coverage, so a layer can sit at 0.5 px; the app rounded some things on release (sizes, shape positions) and not others (image positions, drags), and the panel displayed integers over whatever was stored, which is why a layer dragged to 0.5 px read as 0 or 1. Decided 2026-09-14: a Pixel snap toggle beside grid snap and smart snap, on by default and remembered; while on, moves snap live (the node steps by whole canvas pixels, so readout, panel, and result agree) and resizes commit width, height, and position to whole pixels, except that an aspect-locked image snaps its width and derives its height from the lock ratio, fractional when it must be (derived from the previous height each time so repeated resizes do not drift); shapes and text always take whole pixels; group resizes apply the same rule to the members; arrow-key nudges land on whole pixels while on. Off: raw values. Typed values are always respected as typed, decimals included, whatever the toggle. Display: position, size, and rotation show up to two decimals everywhere. Stepping (spinner and arrow keys) follows the toggle for position and size fields: on, the step lands on the next whole pixel (10.3 to 11); off, it adds the step and keeps the fraction (10.3 to 11.3); the rotation field always steps to whole degrees. Grid snap still wins when it is on (its multiples are whole pixels). Ungroup and cross-group moves keep their exact fractional results, since those are math rather than gestures. Filed 2026-09-14.
+  Built 2026-09-14, awaiting review. Toggle (SquareDot icon) after grid snap, remembered in localStorage as thumbPixelSnap. Drag: the node's x/y round each frame before smart/grid snapping (companions too); drag end commits companions rounded. Resize release: positions round, images and shapes go through `snapResizedBox` in lib/layerTree.ts (aspect-locked image: whole width, exact-ratio height), text width rounds, group members via `scaleGroupMembers(..., snapPixels)`. The readout and the live panel show the values release will commit. Nudges round the base. Panel: X/Y/W/H/rotation display two decimals; position and size fields get `snapToStep` while the toggle is on, rotation always; NumberInput gained the `snapToStep` prop (10.3 to 11, down to 10) and otherwise keeps two decimals when adding a step. Typed values pass through untouched. Aspect-locked width/height typing derives the other dimension exactly for images (rounded for shapes). Not persisted: the grid and smart snap toggles, unchanged.
 
 - **THU-24** [done]
   Paste places the layer above the current selection. A pasted layer (from this canvas or another) lands above the topmost selected layer, inside the same group when that layer is a group member, so the paste position matches where the user is working; with nothing selected it lands at the top of the layers panel as it does today. Filed 2026-09-13 from the THU-18 review round.
