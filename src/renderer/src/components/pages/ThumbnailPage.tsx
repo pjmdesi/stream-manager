@@ -7368,8 +7368,8 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                   below the selection's bounding box like the player's crop
                   controls. Shown from one selected layer up (align to
                   artboard and flip act on a single layer); the mode toggle
-                  appears once two or more are selected; hidden for the
-                  length of a canvas gesture. Middle-click pans through it
+                  is always shown and enabled from two selected layers up;
+                  hidden for the length of a canvas gesture. Middle-click pans through it
                   because the pan listener sits on this container. */}
               {selectionAnchor && !canvasGestureActive && !previewMode && (
                 <AnchoredPanel
@@ -7379,27 +7379,29 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                   gap={12}
                   className="gap-0.5 px-1 py-0.5 border border-white/10"
                 >
-                  {selectedIds.length >= 2 && (
-                    <>
-                      <Tooltip content="Align to artboard (canvas)" side="bottom">
-                        <button
-                          onClick={() => setAlignMode('artboard')}
-                          className={`p-1.5 rounded transition-colors ${alignMode === 'artboard' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
-                        >
-                          <Frame size={14} />
-                        </button>
-                      </Tooltip>
-                      <Tooltip content="Align to first selected" side="bottom">
-                        <button
-                          onClick={() => setAlignMode('selection')}
-                          className={`p-1.5 rounded transition-colors ${alignMode === 'selection' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
-                        >
-                          <BoxSelect size={14} />
-                        </button>
-                      </Tooltip>
-                      <div className="w-px h-4 bg-white/10 mx-0.5" />
-                    </>
-                  )}
+                  {/* Mode toggle stays visible with one layer selected, lit
+                      on artboard and disabled, so the user can see which
+                      target the align buttons act on and that only one
+                      layer is selected. */}
+                  <Tooltip content={selectedIds.length < 2 ? 'Aligning to the artboard (canvas). Select two or more layers to align to a layer instead.' : 'Align to artboard (canvas)'} side="bottom">
+                    <button
+                      onClick={() => setAlignMode('artboard')}
+                      disabled={selectedIds.length < 2}
+                      className={`p-1.5 rounded transition-colors disabled:cursor-default ${alignMode === 'artboard' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                    >
+                      <Frame size={14} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content={selectedIds.length < 2 ? 'Align to first selected (needs 2+ layers)' : 'Align to first selected'} side="bottom">
+                    <button
+                      onClick={() => setAlignMode('selection')}
+                      disabled={selectedIds.length < 2}
+                      className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${alignMode === 'selection' ? 'bg-accent-600/30 text-accent-300' : 'hover:bg-white/10 text-gray-400 hover:text-gray-300'}`}
+                    >
+                      <BoxSelect size={14} />
+                    </button>
+                  </Tooltip>
+                  <div className="w-px h-4 bg-white/10 mx-0.5" />
                   {([
                     ['left',     <AlignStartVertical size={14} />,    'Align left edges'],
                     ['h-center', <AlignCenterVertical size={14} />,   'Align horizontal centers'],
