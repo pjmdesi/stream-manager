@@ -276,6 +276,8 @@ function getItems(isDumpMode: boolean): HelpItem[] {
           <ShortcutGroup title="Layout" rows={[
             { keys: ['↑ ↓ ← →'], label: 'Nudge selection 1px (Shift = 10px)' },
             { keys: ['G'], label: 'Toggle grid snap' },
+            { keys: ['Ctrl', 'Rotate handle'], label: 'Snap rotation to 90° steps' },
+            { keys: ['Shift', 'Rotate handle'], label: 'Snap rotation to 5° steps' },
             { keys: ['Ctrl', ']'], label: 'Bring layer forward (Shift = to front)' },
             { keys: ['Ctrl', '['], label: 'Send layer backward (Shift = to back)' },
             { keys: ['Mouse wheel'], label: 'Zoom the canvas at the cursor' },

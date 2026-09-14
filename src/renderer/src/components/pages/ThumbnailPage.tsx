@@ -107,6 +107,23 @@ function applyZoomSnap(zoom: number, fitScale: number): number {
 const SNAP_THRESHOLD = 5 // canvas pixels
 const GRID_SIZE = 8      // canvas pixels
 
+/** Rotation snapping (THU-25): the angle step the rotate handle snaps to
+ *  while a modifier is held. Ctrl for the coarse stops, Shift for
+ *  refinement; with both held the finer step wins. No modifier, no snap.
+ *  Alt stays out of it (reserved for the Alt-drag duplicate gesture). */
+const ROTATION_SNAP_STEPS = { ctrl: 90, shift: 5 } as const
+function rotationSnapStep(ctrl: boolean, shift: boolean): number | null {
+  if (shift) return ROTATION_SNAP_STEPS.shift
+  if (ctrl) return ROTATION_SNAP_STEPS.ctrl
+  return null
+}
+/** Every multiple of `step` in a full turn, for Konva's rotationSnaps. */
+function rotationSnapAngles(step: number): number[] {
+  const out: number[] = []
+  for (let a = 0; a < 360; a += step) out.push(a)
+  return out
+}
+
 interface SnapGuide { lineGuide: number; orientation: 'V' | 'H' }
 type KonvaBox = { x: number; y: number; width: number; height: number; rotation: number }
 
@@ -4235,6 +4252,9 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // already shows what's moving, and outlines would obscure the element
   // edges exactly when precise positioning matters most.
   const [canvasGestureActive, setCanvasGestureActive] = useState(false)
+  // Angle readout shown beside the pointer while the rotate handle is
+  // dragged (THU-25); null outside a rotation gesture.
+  const [rotationHud, setRotationHud] = useState<{ angle: number; x: number; y: number } | null>(null)
   const [boundsOverlays, setBoundsOverlays] = useState<Array<{
     id: string; x: number; y: number; rotation: number
     box: { x: number; y: number; width: number; height: number }
@@ -4379,15 +4399,32 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
   // Alt has no effect on resize (reserved for Alt+drag duplicate later).
   const shiftPressedRef = useRef(false)
   const ctrlPressedRef = useRef(false)
+  // Rotation snapping (THU-25) follows the same modifiers, applied to the
+  // Transformer imperatively so pressing or releasing a key mid-drag takes
+  // effect on the next frame. Tolerance is half the step, so while a
+  // modifier is held the handle always sits on a stop.
+  const applyRotationSnaps = useCallback(() => {
+    const tr = transformerRef.current
+    if (!tr) return
+    const step = rotationSnapStep(ctrlPressedRef.current, shiftPressedRef.current)
+    if (step) {
+      tr.rotationSnaps(rotationSnapAngles(step))
+      tr.rotationSnapTolerance(step / 2)
+    } else {
+      tr.rotationSnaps([])
+      tr.rotationSnapTolerance(0)
+    }
+  }, [])
   useEffect(() => {
     const sync = (e: KeyboardEvent) => {
       shiftPressedRef.current = e.shiftKey
       ctrlPressedRef.current = e.ctrlKey || e.metaKey
+      applyRotationSnaps()
     }
     // Some focus-shift sequences can leave the keyup unfired (e.g. user
     // alt-tabs while holding a modifier). Reset on blur to avoid a stale
     // "always held" state.
-    const onBlur = () => { shiftPressedRef.current = false; ctrlPressedRef.current = false }
+    const onBlur = () => { shiftPressedRef.current = false; ctrlPressedRef.current = false; applyRotationSnaps() }
     window.addEventListener('keydown', sync)
     window.addEventListener('keyup', sync)
     window.addEventListener('blur', onBlur)
@@ -4396,7 +4433,7 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
       window.removeEventListener('keyup', sync)
       window.removeEventListener('blur', onBlur)
     }
-  }, [])
+  }, [applyRotationSnaps])
 
   // ── Snapping ──────────────────────────────────────────────────────────────
   const [smartSnapEnabled, setSmartSnapEnabled] = useState(true)
@@ -7057,8 +7094,28 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                   <Transformer
                     ref={transformerRef}
                     rotateEnabled
-                    onTransformStart={() => setCanvasGestureActive(true)}
-                    onTransformEnd={() => setCanvasGestureActive(false)}
+                    onTransformStart={() => {
+                      setCanvasGestureActive(true)
+                      // Modifiers held before the drag started count too.
+                      applyRotationSnaps()
+                    }}
+                    onTransform={() => {
+                      // Angle readout while rotating (THU-25): the primary
+                      // node's rotation, normalized to -180..180, pinned near
+                      // the pointer. Cleared with the gesture.
+                      const tr = transformerRef.current
+                      const stage = stageRef.current
+                      if (!tr || !stage) return
+                      if (tr.getActiveAnchor() !== 'rotater') { setRotationHud(prev => (prev ? null : prev)); return }
+                      const node = tr.nodes()[0]
+                      const pos = stage.getPointerPosition()
+                      if (!node || !pos) return
+                      let angle = node.rotation() % 360
+                      if (angle > 180) angle -= 360
+                      if (angle <= -180) angle += 360
+                      setRotationHud({ angle, x: pos.x, y: pos.y })
+                    }}
+                    onTransformEnd={() => { setCanvasGestureActive(false); setRotationHud(null) }}
                     // Disable Konva's drag-past-the-opposite-handle flip
                     // gesture. We have explicit flip buttons + signed
                     // W/H inputs, so a stray cross-over flip while
@@ -7195,6 +7252,18 @@ export function ThumbnailPage({ isVisible }: { isVisible: boolean }) {
                 </Layer>
                 <Layer ref={guideLayerRef} listening={false} />
               </Stage>
+
+              {/* Rotation readout (THU-25): rides beside the pointer for the
+                  length of a rotate-handle drag. Pointer coords are stage
+                  container coords, which is this box. */}
+              {rotationHud && (
+                <div
+                  className="absolute pointer-events-none px-1.5 py-0.5 rounded bg-navy-900/90 border border-white/10 text-[10px] text-gray-200 tabular-nums z-10"
+                  style={{ left: rotationHud.x + 14, top: rotationHud.y + 14 }}
+                >
+                  {(Math.round(rotationHud.angle * 10) / 10).toFixed(1)}°
+                </div>
+              )}
 
               {/* Preview mode (thumbnails #8): absolute overlay above the
                   canvas AND the zoom controls (z-20 beats their auto
