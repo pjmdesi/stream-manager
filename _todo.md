@@ -42,14 +42,15 @@
 38. THU-31
 39. THU-8
 40. THU-9
-41. THU-10
-42. THU-12
-43. THU-16
-44. THU-23
-45. THU-20
-46. INTG-1
-47. STR-22
-48. STR-17
+41. THU-33
+42. THU-10
+43. THU-12
+44. THU-16
+45. THU-23
+46. THU-20
+47. INTG-1
+48. STR-22
+49. STR-17
 
 ## Improvement ideas
 
@@ -263,6 +264,10 @@
     c. UI: swap the Angle field for center X/Y (as a % of the layer box, so it survives resizes) and a radius control; the vertical preview bar should probably become a square radial preview instead (CSS `radial-gradient(... in oklch, ...)` previews natively, same as the linear bar does).
   Scope revised 2026-09-15: conic gradients join radial in this ticket, and the kind is NOT a third fill type. The Solid/Gradient switch stays as it is; a gradient-kind dropdown (Linear, Radial, Conic) sits in the gradient controls, directly under the switch row and above the stop list, with a small live preview square of the real geometry beside it (the spine bar stays the stop editor and previews the colors only). Fields: `gradientType`, `gradientCenterX`, `gradientCenterY`, `gradientRadius` on the fill and the `strokeGradient*` counterparts on the stroke (THU-8), so both paints take all three kinds; `fillType: 'linear'` keeps meaning "gradient on" for compatibility. Swatches carry kind, center, and radius (absent = linear). Rendering: linear stays on Konva's native props; radial and conic hand Konva a CanvasGradient object as the fill or stroke value (Konva has no radial stroke and no conic at all; the canvas accepts a gradient wherever it accepts a color, and a gradient built on one 2D context works on any other), built in the shape's local drawing space with the same ellipse origin shift, in `lib/canvasGradient.ts`. Geometry: center as fractions of the layer box (default 50/50); radial radius as a fraction of the center-to-farthest-corner distance (100% = the CSS farthest-corner default), circular (an elliptical radial would need a pattern render, left out); conic start angle reuses the angle field (0° = up, clockwise, matching CSS `from`). Tiles and the preview square use the matching CSS gradient functions, `in oklch` included.
   Built 2026-09-15, awaiting review. Controls: kind dropdown plus preview under the switch row; for radial and conic a Center X % / Center Y % row; the first cell of the bottom row is Angle for linear, Start for conic, Radius % for radial; Style and Blend unchanged. The oklch pre-sampling feeds all three kinds. Verify: radial and conic fills on a rectangle, ellipse, polygon, and text (center, radius, start angle, hard style, both blend spaces); the same on strokes; swatches captured from a radial or conic gradient show their geometry on the tile and re-apply it; older linear swatches still apply as linear; switching kinds back and forth (nothing lingers); export parity; and a radial on a filtered or masked group member.
+  Review round: the kind dropdown became a three-button radio switcher, each button rendering the current stops as that kind (the separate preview square is gone). Angle fields follow one contract now, written into the style guide ("Angle fields"): committed values wrap into 0..360, typed values wrap on entry, spinners have no bounds, and live readouts during a rotate show the raw accumulated angle with the wrap applied on release (`normalizeAngle` returns 0..360, the layer rotation field and both gradient angle fields use it, the transform commit wraps the node's rotation). A rule separates the fill and stroke controls in the shape and text sections as a stopgap until THU-33.
+
+- **THU-33** [ui]
+  Organize the thumbnail editor's properties panel. It has outgrown its flat list of sections: transform, shape fields, text, font, fill, stroke, shadows, outline, filters, and for groups all of the effects, with two tall paint controls in a row once gradients are on. Filed 2026-09-15. Ideas to weigh: (1) named, collapsible sections with one consistent header style (title, a thin rule, a collapse chevron, and where it applies a per-section reset or an enable toggle in the header), remembering collapsed state per section across layers; (2) a fixed section order shared by every layer type so the eye learns where things are, with sections simply absent when they do not apply; (3) grouping into a few super-sections, roughly Transform, Shape (sides, corner radius, and THU-12's stroke corner and alignment options), Text and Font, Fill, Stroke (color and width together), and Effects (shadows, outline, filters, with THU-32's filters rework landing inside it); (4) clear separation between Fill and Stroke, each with its own header, since both can now be gradient editors (the interim rule between them is a stopgap); (5) tightening the small numeric fields into consistent two-column rows and giving every color row the same shape; (6) a compact summary line on a collapsed section (for example "2 shadows", "Linear gradient", "Blur 12") so collapsed does not mean hidden; (7) the group panel's note lines and the mask's disabled block folding into the same system; (8) checking the panel at the worst-case window height, where the properties panel already competes with layers and assets for room, possibly with a "collapse others when opening one" option. Decide the scheme first, then apply it to every layer type in one pass so nothing is left half-migrated.
 
 - **THU-10** [ui]
   Allow swatches from the recent list to be dragged into the saved palette list. When the user drags, they should be able to drop the swatch in between any two existing swatches in the palette list, and the new swatch should be inserted at that position. The palette list should update immediately to reflect the new order of swatches. It should be removed from the recents list just as clicking the swatch to add does today.

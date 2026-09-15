@@ -1552,7 +1552,9 @@ function TransformHud() {
   if (!live || !live.pointer) return null
   const n = (v: number) => String(round2(v))
   let text: string
-  if (live.kind === 'rotate') text = `${round2(normalizeAngle(live.rotation)).toFixed(2)}°`
+  // Raw accumulated angle while rotating (spin twice, read 720°); the
+  // commit on release wraps it (style guide, "Angle fields").
+  if (live.kind === 'rotate') text = `${round2(live.rotation).toFixed(2)}°`
   else if (live.kind === 'resize') text = live.height !== undefined ? `W ${n(live.width ?? 0)}   H ${n(live.height)}` : `W ${n(live.width ?? 0)}`
   else text = `X ${n(live.x)}   Y ${n(live.y)}`
   return (
@@ -3115,33 +3117,39 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
         />
       ) : (
         <div className="flex flex-col gap-1.5 mt-0.5">
-          {/* Gradient kind (THU-9) with a live preview of the real geometry
-              beside it: the spine bar below previews the colors only. */}
-          <div className="flex items-center gap-1.5">
-            <Tooltip content="Linear runs along a line at the angle below. Radial spreads from the center out to the radius. Conic sweeps around the center from the start angle." triggerClassName="flex-1 min-w-0 flex">
-              <select
-                value={geom.kind}
-                onChange={e => {
-                  const kind = e.target.value as GradientKind
-                  update(paintPatch({ kind }))
-                  recordGradient({ kind })
-                }}
-                className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
-              >
-                <option value="linear">Linear</option>
-                <option value="radial">Radial</option>
-                <option value="conic">Conic</option>
-              </select>
-            </Tooltip>
-            <div
-              className="w-[26px] h-[26px] shrink-0 rounded border border-white/25"
-              style={{
-                backgroundImage: `${cssGradientOfKind(stops, space, gStyle, geom)}, ${CHECKER_IMAGE}`,
-                backgroundSize: 'auto, 6px 6px',
-                backgroundRepeat: 'no-repeat, repeat',
-              }}
-              aria-hidden
-            />
+          {/* Gradient kind (THU-9): a radio-style switcher where each button
+              renders the current stops as that kind, so the choice previews
+              itself. The spine bar below previews the colors only. */}
+          <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={`${F.label} gradient kind`}>
+            {([
+              ['linear', 'Linear', 'Runs along a line at the angle below'],
+              ['radial', 'Radial', 'Spreads from the center out to the radius'],
+              ['conic', 'Conic', 'Sweeps around the center from the start angle'],
+            ] as const).map(([kind, label, tip]) => {
+              const on = geom.kind === kind
+              return (
+                <Tooltip key={kind} content={`${label}: ${tip.toLowerCase()}`} triggerClassName="flex">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => { if (on) return; update(paintPatch({ kind })); recordGradient({ kind }) }}
+                    className={`relative flex-1 h-9 rounded-md overflow-hidden border transition-colors ${
+                      on ? 'border-accent-300 ring-1 ring-accent-300/60' : 'border-white/15 hover:border-white/35'
+                    }`}
+                    style={{
+                      backgroundImage: `${cssGradientOfKind(stops, space, gStyle, { ...geom, kind })}, ${CHECKER_IMAGE}`,
+                      backgroundSize: 'auto, 6px 6px',
+                      backgroundRepeat: 'no-repeat, repeat',
+                    }}
+                  >
+                    <span className={`absolute inset-x-0 bottom-0 px-1 py-px text-[9px] leading-tight text-center ${on ? 'bg-navy-900/85 text-accent-200' : 'bg-navy-900/70 text-gray-300'}`}>
+                      {label}
+                    </span>
+                  </button>
+                </Tooltip>
+              )
+            })}
           </div>
           {/* Vertical preview bar is the gradient's spine (top = first
               stop); each stop row carries a ◄ pointer at its spot on the
@@ -3386,13 +3394,14 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">{geom.kind === 'conic' ? 'Start °' : 'Angle °'}</span>
                 <NumberInput
-                  min={0}
-                  max={360}
-                  value={Math.round(angle)}
+                  value={Math.round(normalizeAngle(angle))}
+                  // No min/max: the spinners never stop, and any value wraps
+                  // into 0..360 on entry (style guide, "Angle fields").
                   // Angle is part of the swatch (brand gradients carry their
                   // direction), so angle edits create/update the tied entry
                   // like any other gradient edit.
-                  onChange={nextAngle => {
+                  onChange={raw => {
+                    const nextAngle = normalizeAngle(raw)
                     update(paintPatch({ angle: nextAngle }))
                     recordGradient({ angle: nextAngle })
                   }}
@@ -3774,7 +3783,9 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
   const lv = liveAll && liveAll.id === layer.id ? liveAll : null
   const dispX = lv ? lv.x : layer.x
   const dispY = lv ? lv.y : layer.y
-  const dispRot = lv ? normalizeAngle(lv.rotation) : layer.rotation
+  // Angle fields (style guide): the live value is the raw accumulated
+  // rotation; the committed value reads wrapped into 0..360.
+  const dispRot = lv ? lv.rotation : normalizeAngle(layer.rotation)
   const dispW = lv?.width ?? layer.width
   const dispH = lv?.height ?? layer.height
 
@@ -3798,7 +3809,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Rotation °</span>
-              <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} snapToStep className="w-full" />
+              <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation: normalizeAngle(rotation) })} snapToStep className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Opacity %</span>
@@ -4054,7 +4065,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 })()}
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Rotation °</span>
-                  <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} snapToStep className="w-full" />
+                  <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation: normalizeAngle(rotation) })} snapToStep className="w-full" />
                 </label>
                 {isMaskLayer ? (
                   <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block">
@@ -4264,7 +4275,10 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 clear controls need the horizontal room. */}
             <div className="flex flex-col gap-1.5">
               <GradientFillControl layer={layer} update={update} fallback="#ffffff" />
-              {/* Stroke paint (THU-8): solid or gradient, same control. */}
+              {/* Stroke paint (THU-8): solid or gradient, same control. A
+                  rule separates it from the fill: both controls grow tall
+                  in gradient mode and read as one block otherwise. */}
+              <div className="border-t border-white/10 mt-2 pt-2.5" />
               <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" />
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">Stroke width</span>
@@ -4287,7 +4301,9 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Fill & Stroke</p>
           <div className="flex flex-col gap-1.5">
             <GradientFillControl layer={layer} update={update} fallback="#6366f1" />
-            {/* Stroke paint (THU-8): solid or gradient, same control. */}
+            {/* Stroke paint (THU-8): solid or gradient, same control, set
+                off from the fill by a rule. */}
+            <div className="border-t border-white/10 mt-2 pt-2.5" />
             <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" />
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Stroke width</span>
@@ -6258,7 +6274,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
         // lives on the inner Konva element inside the Group).
         const dragScaleX = node.scaleX()
         const dragScaleY = node.scaleY()
-        const rot = node.rotation()
+        // Wrapped on commit (style guide, "Angle fields"): the readout showed
+        // the accumulated spin; the stored value is 0..360.
+        const rot = normalizeAngle(node.rotation())
         let x = node.x(), y = node.y()
         if (l.type === 'group') {
           groupScales.push({ id: l.id, sx: dragScaleX, sy: dragScaleY })

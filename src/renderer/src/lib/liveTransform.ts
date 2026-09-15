@@ -50,10 +50,12 @@ export function useLiveTransform(): LiveTransform | null {
   return useSyncExternalStore(subscribe, getLiveTransform, getLiveTransform)
 }
 
-/** Normalize a Konva rotation to the -180..180 range the panel shows. */
+/** Wrap an angle into 0 ≤ a < 360: the committed form of every angle field
+ *  in the app (style guide, "Angle fields"). Live readouts during a gesture
+ *  show the raw accumulated angle instead and wrap on release. */
 export function normalizeAngle(deg: number): number {
-  let a = deg % 360
-  if (a > 180) a -= 360
-  if (a <= -180) a += 360
-  return a
+  if (!Number.isFinite(deg)) return 0
+  const a = ((deg % 360) + 360) % 360
+  // -0 and 359.999… both read as 0.
+  return Math.abs(a) < 1e-9 || Math.abs(a - 360) < 1e-9 ? 0 : a
 }
