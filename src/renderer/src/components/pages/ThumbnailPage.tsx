@@ -5848,7 +5848,18 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   const rightPanelRef = useRef<HTMLDivElement>(null)
   const layersListRef = useRef<HTMLDivElement>(null)
   const layerTabRef = useRef<HTMLDivElement>(null)
-  const [layerTabPos, setLayerTabPos] = useState<{ top: number; right: number } | null>(null)
+  // `top`/`right` place the tab body; the spine is the 4 px bar along the
+  // panel edge spanning the selected rows; the two radii are the tab's
+  // right-hand corners, which square off where the spine continues past
+  // them and round continuously as the tab overhangs it (the same morph as
+  // the player's region pills).
+  // `filletTop`/`filletBottom` are the sizes of the concave joins outside
+  // the tab's right-hand corners where the spine runs past them (0 = none).
+  const [layerTabPos, setLayerTabPos] = useState<{
+    top: number; right: number; tabHeight: number; spineTop: number; spineHeight: number
+    radiusTR: number; radiusBR: number; filletTop: number; filletBottom: number
+    spineRadiusTop: number; spineRadiusBottom: number
+  } | null>(null)
   const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string>>(EMPTY_ID_SET)
   const layerTabShown = selectedIds.length > 0 && !layersCollapsed && !previewMode
   // Synced during render, not in an effect: the measurement below runs in a
@@ -5866,23 +5877,61 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     }
     const bodyRect = body.getBoundingClientRect()
     const listRect = list.getBoundingClientRect()
-    // Topmost selected row as displayed; a selection hidden inside a
-    // collapsed group has no row, so the tab parks at the list's top.
-    let rowTop = Infinity
+    const clampY = (v: number) => Math.min(Math.max(v, listRect.top), listRect.bottom)
+    // Vertical range of the selected rows as displayed; a selection hidden
+    // inside a collapsed group has no rows, so everything parks at the top.
+    let selTop = Infinity, selBottom = -Infinity
     for (const id of sel) {
       const el = list.querySelector<HTMLElement>(`[data-layer-id="${CSS.escape(id)}"]`)
-      if (el) rowTop = Math.min(rowTop, el.getBoundingClientRect().top)
+      if (!el) continue
+      const r = el.getBoundingClientRect()
+      selTop = Math.min(selTop, r.top)
+      selBottom = Math.max(selBottom, r.bottom)
     }
-    if (!Number.isFinite(rowTop)) rowTop = listRect.top
+    if (!Number.isFinite(selTop)) { selTop = listRect.top; selBottom = listRect.top }
+    // The spine covers only the visible part of the range.
+    const spineTop = clampY(selTop)
+    const spineBottom = clampY(selBottom)
+    // Tab body centered on the spine, kept inside the list's visible height.
     const tabH = layerTabRef.current?.offsetHeight ?? 0
     const maxTop = Math.max(listRect.top, listRect.bottom - tabH)
-    // One pixel up: the visible line above a row is the previous row's
-    // bottom border, and the tab's top edge should sit on that line.
-    const top = Math.min(Math.max(rowTop - 1, listRect.top), maxTop) - bodyRect.top
+    const tabTop = Math.min(Math.max((spineTop + spineBottom) / 2 - tabH / 2, listRect.top), maxTop)
+    const tabBottom = tabTop + tabH
+    // Right-hand corners: radius equals the tab's overhang past the spine's
+    // end, capped at the tab's own radius, so a corner the spine runs past
+    // is square and one the tab sticks out beyond is round.
+    const R = 8
+    const radiusTR = Math.min(R, Math.max(0, spineTop - tabTop))
+    const radiusBR = Math.min(R, Math.max(0, tabBottom - spineBottom))
+    // Concave joins the other way round: they grow with the spine's overrun
+    // past the tab's edge, up to the same radius. The spine's rounded end
+    // needs room in the same overrun, so when there is not enough for both
+    // they share it: the end rounding takes up to half, the join the rest.
+    const SPINE_R = 2
+    const share = (overrun: number) => {
+      const end = overrun <= 0 ? SPINE_R : Math.min(SPINE_R, overrun / 2)
+      return { end, fillet: Math.min(R, Math.max(0, overrun - end)) }
+    }
+    const topShare = share(tabTop - spineTop)
+    const bottomShare = share(spineBottom - tabBottom)
+    const filletTop = topShare.fillet, filletBottom = bottomShare.fillet
+    const spineRadiusTop = topShare.end, spineRadiusBottom = bottomShare.end
     // One pixel under the panel so the tab covers the panel's left border
     // and reads as part of it.
     const right = panel.offsetWidth - 1
-    setLayerTabPos(p => (p && Math.abs(p.top - top) < 0.5 && p.right === right ? p : { top, right }))
+    const next = {
+      top: tabTop - bodyRect.top, right, tabHeight: tabH,
+      spineTop: spineTop - bodyRect.top, spineHeight: Math.max(0, spineBottom - spineTop),
+      radiusTR, radiusBR, filletTop, filletBottom, spineRadiusTop, spineRadiusBottom,
+    }
+    setLayerTabPos(p => (
+      p && Math.abs(p.top - next.top) < 0.5 && p.right === next.right && p.tabHeight === next.tabHeight
+        && Math.abs(p.spineTop - next.spineTop) < 0.5 && Math.abs(p.spineHeight - next.spineHeight) < 0.5
+        && p.radiusTR === next.radiusTR && p.radiusBR === next.radiusBR
+        && p.filletTop === next.filletTop && p.filletBottom === next.filletBottom
+        && p.spineRadiusTop === next.spineRadiusTop && p.spineRadiusBottom === next.spineRadiusBottom
+        ? p : next
+    ))
   }, [])
 
   useLayoutEffect(() => {
@@ -7790,17 +7839,24 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
             </div>
 
             {/* Layers panel selection tab (THU-30): the actions for the
-                current selection, beside its topmost row. Tooltips open to
-                the left, over the canvas. */}
+                current selection, centered on the selected rows, with a
+                spine along the panel edge spanning them so a range reads as
+                one target. Tooltips open to the left, over the canvas. */}
             {layerTabShown && layerTabActions.length > 0 && (
+              <>
               <div
                 ref={layerTabRef}
-                className="absolute z-20 rounded-l-lg border border-white/10 border-r-0 bg-navy-800 shadow-lg overflow-hidden"
-                style={{ top: layerTabPos?.top ?? 0, right: layerTabPos?.right ?? 0, visibility: layerTabPos ? 'visible' : 'hidden' }}
+                className="absolute z-20 border border-white/10 border-r-0 bg-navy-800 shadow-lg overflow-hidden"
+                style={{
+                  top: layerTabPos?.top ?? 0,
+                  right: layerTabPos?.right ?? 0,
+                  borderRadius: `8px ${layerTabPos?.radiusTR ?? 8}px ${layerTabPos?.radiusBR ?? 8}px 8px`,
+                  visibility: layerTabPos ? 'visible' : 'hidden',
+                }}
               >
               {/* Inner tint matches a selected row (accent over the panel
                   background) so the tab reads as the selection's own. */}
-              <div className="flex flex-col gap-0.5 p-1 bg-accent-600/20">
+              <div className="flex flex-col gap-0.5 p-1 bg-accent-600/15">
                 {layerTabActions.map(a => a.separator ? (
                   <div key={a.key} className="h-px bg-white/10 my-0.5" />
                 ) : (
@@ -7822,6 +7878,43 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                 ))}
               </div>
               </div>
+              {/* Spine: same face as the tab, painted after it so it covers
+                  the tab's edge lines where the two overlap. Its outer
+                  corners are rounded; the panel side stays flush. */}
+              {layerTabPos && layerTabPos.spineHeight > 0 && (
+                <div
+                  className="absolute z-20 w-1 bg-navy-800 pointer-events-none overflow-hidden"
+                  style={{ top: layerTabPos.spineTop, height: layerTabPos.spineHeight, right: layerTabPos.right, borderRadius: `${layerTabPos.spineRadiusTop}px 0 0 ${layerTabPos.spineRadiusBottom}px` }}
+                >
+                  <div className="absolute inset-0 bg-accent-600/15" />
+                </div>
+              )}
+              {/* Concave joins where the spine runs past the tab: a square
+                  of the tab's face outside each such corner, with a quarter
+                  circle cut from its outer corner by a radial mask. Each
+                  overlaps the tab by a pixel to cover the border segment it
+                  meets. No hairline along the arc: a gradient ring rendered
+                  lighter than the real border. */}
+              {layerTabPos && ([
+                ['top', layerTabPos.filletTop],
+                ['bottom', layerTabPos.filletBottom],
+              ] as const).map(([edge, f]) => f <= 0 ? null : (
+                <div
+                  key={edge}
+                  className="absolute z-20 bg-navy-800 pointer-events-none"
+                  style={{
+                    right: layerTabPos.right + 4,
+                    width: f,
+                    height: f + 1,
+                    top: edge === 'top' ? layerTabPos.top - f : layerTabPos.top + layerTabPos.tabHeight - 1,
+                    WebkitMaskImage: `radial-gradient(circle at ${edge} left, transparent ${f}px, black ${f}px)`,
+                    maskImage: `radial-gradient(circle at ${edge} left, transparent ${f}px, black ${f}px)`,
+                  }}
+                >
+                  <div className="absolute inset-0 bg-accent-600/15" />
+                </div>
+              ))}
+              </>
             )}
 
             {/* Right panel: Layers + Assets + Properties */}
@@ -7914,6 +8007,16 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                           const collapsed = collapsedGroups.has(layer.id)
                           // Members of a hidden group read as hidden too.
                           const dimmed = !layer.visible || hasHiddenAncestor(layers, layer.id)
+                          const isHovered = hoveredLayerId === layer.id
+                          const isAffected = highlightedIds.has(layer.id)
+                          // Name brightness climbs with the row tone so the
+                          // brighter backgrounds keep their contrast.
+                          const nameTone = dimmed
+                            ? (isAffected ? 'text-gray-400' : 'text-gray-500')
+                            : isAffected ? 'text-gray-100'
+                            : isSelected ? 'text-gray-200'
+                            : isHovered ? 'text-gray-300'
+                            : 'text-gray-400'
                           return (
                             <React.Fragment key={layer.id}>
                               {panelDrop?.gapIdx === rowIdx && indicator(panelDrop.depth)}
@@ -7969,7 +8072,21 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 // the same shared hoveredLayerId.
                                 onMouseEnter={() => setHoveredLayerId(layer.id)}
                                 onMouseLeave={() => setHoveredLayerId(null)}
-                                className={`flex items-center gap-1.5 pr-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${highlightedIds.has(layer.id) ? 'bg-accent-500/35 shadow-[inset_2px_0_0_0_theme(colors.accent.300)]' : isSelected ? 'bg-accent-600/20' : hoveredLayerId === layer.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
+                                // Row tone ladder (THU-30 review), one accent
+                                // hue at rising opacity so the steps read as
+                                // brightness: hovered, selected, selected and
+                                // hovered, then affected by a hovered tab
+                                // button, which also gets the right-edge bar
+                                // the streams page and launcher use. Hover is
+                                // driven by hoveredLayerId (set on mouse enter)
+                                // rather than a CSS hover so the states compose.
+                                className={`flex items-center gap-1.5 pr-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 transition-colors ${
+                                  isAffected ? 'bg-accent-600/30 relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-accent-400'
+                                    : isSelected && isHovered ? 'bg-accent-600/[0.22]'
+                                    : isSelected ? 'bg-accent-600/15'
+                                    : isHovered ? 'bg-accent-600/[0.08]'
+                                    : ''
+                                } ${isDragging ? 'opacity-40' : ''}`}
                                 style={{ paddingLeft: indent(depth) }}
                               >
                                 {group && (
@@ -8011,7 +8128,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             ) : (
                               <span
                                 onDoubleClick={e => { e.stopPropagation(); setRenamingLayerId(layer.id) }}
-                                className={`flex-1 text-xs truncate cursor-text ${dimmed ? 'text-gray-500' : 'text-gray-400'}`}
+                                className={`flex-1 text-xs truncate cursor-text ${nameTone}`}
                               >
                                 {layer.name}
                               </span>
