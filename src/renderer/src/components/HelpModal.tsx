@@ -272,6 +272,9 @@ function getItems(isDumpMode: boolean): HelpItem[] {
             { keys: ['Ctrl', 'G'], label: 'Group the selected layers (two or more, in the same place)' },
             { keys: ['Ctrl', 'Shift', 'G'], label: 'Ungroup the selected groups' },
             { keys: ['Double-click'], label: 'Select a layer inside a group on the canvas' },
+            { keys: ['[', ']'], label: 'Select the layer below / above (Shift = bottom / top of the level)' },
+            { keys: ['Enter'], label: 'Select the first layer inside the selected group' },
+            { keys: ['Shift', 'Enter'], label: 'Select the group around the selected layer' },
           ]} />
           <ShortcutGroup title="Navigate" rows={[
             { keys: ['Ctrl', '↑ / ↓'], label: 'Next / previous stream item' },

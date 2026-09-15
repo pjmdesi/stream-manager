@@ -441,6 +441,60 @@ export function needsUniformScale(layers: ThumbnailLayer[], ids: string[]): bool
   })
 }
 
+// ── Keyboard selection (THU-29) ────────────────────────────────────────────
+
+/**
+ * Next selection for the bracket keys. `dir` 'up' is toward the top of the
+ * layers panel (later in storage order), 'down' toward the bottom. With
+ * nothing selected, 'down' picks the top layer and 'up' the bottom one, the
+ * way an arrow key enters an empty list. With a selection, the walk stays
+ * among the siblings of the topmost ('up') or bottommost ('down') selected
+ * layer and stops at the ends; `toEnd` jumps straight to that end. A
+ * multi-selection collapses to one layer. Null when nothing would change.
+ */
+export function walkSelection(layers: ThumbnailLayer[], ids: string[], dir: 'up' | 'down', toEnd: boolean): string | null {
+  const selected = ids.map(id => byId(layers, id)).filter((l): l is ThumbnailLayer => !!l)
+  if (selected.length === 0) {
+    const top = childrenOf(layers, null)
+    if (top.length === 0) return null
+    return dir === 'down' ? top[top.length - 1].id : top[0].id
+  }
+  const from = selected.reduce((best, l) => {
+    const a = layers.indexOf(l), b = layers.indexOf(best)
+    return dir === 'up' ? (a > b ? l : best) : (a < b ? l : best)
+  })
+  const siblings = childrenOf(layers, parentIdOf(from))
+  const i = siblings.indexOf(from)
+  let target: ThumbnailLayer
+  if (toEnd) target = dir === 'up' ? siblings[siblings.length - 1] : siblings[0]
+  else {
+    const j = dir === 'up' ? i + 1 : i - 1
+    target = j >= 0 && j < siblings.length ? siblings[j] : from
+  }
+  if (target.id === from.id && ids.length === 1) return null
+  return target.id
+}
+
+/** Enter: the topmost member (first row in the panel) of the single
+ *  selected group. Null for anything else. */
+export function enterGroup(layers: ThumbnailLayer[], ids: string[]): string | null {
+  if (ids.length !== 1) return null
+  const g = byId(layers, ids[0])
+  if (!g || !isGroup(g)) return null
+  const kids = childrenOf(layers, g.id)
+  return kids.length ? kids[kids.length - 1].id : null
+}
+
+/** Shift+Enter: the group around the selection (the first selected
+ *  layer that has a parent decides). Null at the top level. */
+export function leaveGroup(layers: ThumbnailLayer[], ids: string[]): string | null {
+  for (const id of ids) {
+    const p = byId(layers, id)?.parentId
+    if (p && byId(layers, p)) return p
+  }
+  return null
+}
+
 // ── Layers panel rows ──────────────────────────────────────────────────────
 
 export interface PanelRow { layer: ThumbnailLayer; depth: number; parentId: string | null }

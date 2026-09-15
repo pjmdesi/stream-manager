@@ -31,7 +31,8 @@ import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf,
 import {
   childrenOf, paintableLayers, selectionRoots, copySelection, insertPastedAbove, canGroup, canUngroup, groupLayers, ungroupLayer,
   deleteLayers, duplicateLayer as duplicateLayerTree, clonePasteLayers, moveLayerTo, moveAmongSiblings, scaleGroupMembers,
-  snapResizedBox, needsUniformScale, panelRows, isGroup, hasHiddenAncestor,
+  snapResizedBox, needsUniformScale, panelRows, isGroup, hasHiddenAncestor, ancestorIds,
+  walkSelection, enterGroup, leaveGroup,
 } from '../../lib/layerTree'
 import type { PanelRow } from '../../lib/layerTree'
 import { setLiveTransform, useLiveTransform, normalizeAngle } from '../../lib/liveTransform'
@@ -6552,6 +6553,23 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     await window.api.saveScreenshot(dest, dataUrl.replace(/^data:image\/png;base64,/, ''))
   }, [currentStream, getCanvasDataUrl, waitForStageImages])
 
+  // Keyboard-driven selection (THU-29): select the one layer and expand
+  // every group above it in the panel so the row is there to scroll to.
+  const layersListRef = useRef<HTMLDivElement>(null)
+  const selectFromKeyboard = useCallback((id: string) => {
+    const above = ancestorIds(layersRef.current, id)
+    if (above.length > 0) {
+      setCollapsedGroups(prev => {
+        if (!above.some(a => prev.has(a))) return prev
+        const next = new Set(prev)
+        for (const a of above) next.delete(a)
+        return next
+      })
+    }
+    panelAnchorIdRef.current = id
+    setSelectedIds([id])
+  }, [setSelectedIds])
+
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     if (!isVisible || mode !== 'editor') return
@@ -6627,6 +6645,24 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
           nudgeSelected(dx, dy)
         }
       }
+      // Bracket keys without Ctrl walk the selection (THU-29): ] up, [ down,
+      // among the siblings at the current level; Shift jumps to that end;
+      // with nothing selected [ takes the top layer and ] the bottom one.
+      // Enter steps into the selected group, Shift+Enter back out to it.
+      if (!(e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+        e.preventDefault()
+        const id = walkSelection(layers, selectedIds, e.code === 'BracketRight' ? 'up' : 'down', e.shiftKey)
+        if (id) selectFromKeyboard(id)
+        return
+      }
+      if (e.key === 'Enter' && !(e.ctrlKey || e.metaKey) && !e.altKey) {
+        const id = e.shiftKey ? leaveGroup(layers, selectedIds) : enterGroup(layers, selectedIds)
+        if (id) {
+          e.preventDefault()
+          selectFromKeyboard(id)
+        }
+        return
+      }
       // Layer z-order (Photoshop-style). e.code is layout-independent — with
       // Shift held, e.key becomes '}'/'{', so matching on code avoids that.
       // ] = forward/up, [ = backward/down; Shift = all the way to front/back.
@@ -6640,7 +6676,17 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isVisible, mode, undo, redo, manualSave, deleteSelected, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer, nudgeSelected, groupSelected, ungroupSelected])
+  }, [isVisible, mode, undo, redo, manualSave, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer, nudgeSelected, groupSelected, ungroupSelected, selectFromKeyboard])
+
+  // The layers panel scrolls the selected row into view whenever a single
+  // layer becomes selected (keyboard walk, canvas click); a row already in
+  // view does not move. Runs after render, so a group expanded in the same
+  // keystroke has its rows on screen by then.
+  useEffect(() => {
+    if (selectedIds.length !== 1 || !layersListRef.current) return
+    const row = layersListRef.current.querySelector<HTMLElement>(`[data-layer-id="${CSS.escape(selectedIds[0])}"]`)
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [selectedIds])
 
   // ── Selected layer ────────────────────────────────────────────────────────
   const selectedLayer = useMemo(() => {
@@ -7668,7 +7714,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                 </div>
                 {/* `hidden` (not unmount) so drag/rename state survives a
                     collapse round-trip, matching the assets panel. */}
-                <div className={`overflow-y-auto flex-1${layersCollapsed ? ' hidden' : ''}`}>
+                <div ref={layersListRef} className={`overflow-y-auto flex-1${layersCollapsed ? ' hidden' : ''}`}>
                   {(() => {
                     const rows = panelRows(layers, collapsedGroups)
                     const indent = (depth: number) => 8 + depth * 14
@@ -7706,6 +7752,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             <React.Fragment key={layer.id}>
                               {panelDrop?.gapIdx === rowIdx && indicator(panelDrop.depth)}
                               <div
+                                data-layer-id={layer.id}
                                 draggable={!isRenaming}
                                 onDragStart={e => {
                                   setDraggingLayerId(layer.id)
