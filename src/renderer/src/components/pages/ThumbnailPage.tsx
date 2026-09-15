@@ -3139,7 +3139,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
               Gradient, a little taller, each segment carrying a square
               preview of the current stops rendered as that kind beside its
               label. The spine bar below previews the colors only. */}
-          <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden" role="radiogroup" aria-label={`${F.label} gradient kind`}>
+          <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden my-1" role="radiogroup" aria-label={`${F.label} gradient kind`}>
             {([
               ['linear', 'Linear', 'Runs along a line at the angle below'],
               ['radial', 'Radial', 'Spreads from the center out to the radius'],
@@ -3154,15 +3154,15 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
                     aria-checked={on}
                     onClick={() => { if (on) return; update(paintPatch({ kind })); recordGradient({ kind }) }}
                     // The swatch fills the segment's left side edge to edge
-                    // as a square (h-7 tall, w-7 wide, no padding); the
-                    // group's rounded corners clip the outer ones. The label
-                    // centers in the rest.
-                    className={`relative flex-1 min-w-0 h-7 pl-7 flex items-center justify-center text-[10px] transition-colors ${
+                    // as a square (24 px, the color field's height, no
+                    // padding); the group's rounded corners clip the outer
+                    // ones. The label centers in the rest.
+                    className={`relative flex-1 min-w-0 h-6 pl-6 flex items-center justify-center text-[10px] transition-colors ${
                       on ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                     }`}
                   >
                     <span
-                      className="absolute inset-y-0 left-0 w-7"
+                      className="absolute inset-y-0 left-0 w-6"
                       style={{
                         backgroundImage: `${cssGradientOfKind(stops, space, gStyle, { ...geom, kind })}, ${CHECKER_IMAGE}`,
                         backgroundSize: 'auto, 4px 4px',

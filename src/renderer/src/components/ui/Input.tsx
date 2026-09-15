@@ -309,11 +309,12 @@ interface NumberInputProps {
    *  pixel snap is on, and its rotation field always (THU-27). Typed values
    *  are never altered by it. */
   snapToStep?: boolean
-  /** Wraps or otherwise normalizes the value once editing settles: applied
-   *  to spinner and arrow-key steps and on blur (Enter blurs), never to a
-   *  keystroke, so the user can clear the field, type a minus sign, or
-   *  type past the range and see it fold when they are done. Angle fields
-   *  pass `normalizeAngle` (style guide, "Angle fields"). */
+  /** Wraps or otherwise normalizes every committed value (typed, spinner,
+   *  arrow key). The field keeps showing the text as typed until it loses
+   *  focus, so the user can clear it, type a minus sign, or type past the
+   *  range and see it fold when they are done, while the stored value is
+   *  already the wrapped one (one undo entry, no second commit on blur).
+   *  Angle fields pass `normalizeAngle` (style guide, "Angle fields"). */
   wrap?: (n: number) => number
   'aria-label'?: string
 }
@@ -391,6 +392,10 @@ export const NumberInput: React.FC<NumberInputProps> = ({
           // mid-keystroke would fold "-3" or "40" out from under the user.
           // An empty or partial entry ("", "-") keeps the draft and commits
           // nothing; the value settles on blur.
+          // The draft shows the text as typed, so `wrap` CAN apply to the
+          // committed value at once (-30 is stored as 330 while the field
+          // still reads -30); that keeps the whole entry inside one undo
+          // gesture instead of a second commit on blur.
           const text = e.target.value
           setDraft(text)
           if (text === '') return
@@ -399,7 +404,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
           let next = n
           if (min !== undefined) next = Math.max(min, next)
           if (max !== undefined) next = Math.min(max, next)
-          onChange(next)
+          onChange(wrap ? wrap(next) : next)
         }}
         // Arrow keys nudge the value (Shift → 10× step). We preventDefault
         // so the browser's native step doesn't fire alongside ours
@@ -431,12 +436,10 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         // only way to override that; the value itself is already clamped in
         // onChange, so this is purely cosmetic.
         onBlur={e => {
-          // Editing is over: drop the draft (an empty field falls back to
-          // the last committed value) and let `wrap` settle the value, so a
-          // typed 400° becomes 40° once the user is done.
+          // Editing is over: drop the draft, so the field shows the
+          // committed (and, for angles, wrapped) value; an empty field falls
+          // back to the last committed value.
           setDraft(null)
-          const settled = wrap && Number.isFinite(value) ? wrap(value) : value
-          if (settled !== value) { onChange(settled); return }
           const canonical = Number.isFinite(value) ? String(value) : ''
           if (e.target.value !== canonical) e.target.value = canonical
         }}
