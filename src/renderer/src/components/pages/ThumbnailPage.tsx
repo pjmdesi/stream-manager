@@ -433,8 +433,24 @@ async function waitForGroupRasters(timeoutMs = 3000): Promise<void> {
 }
 
 const outlineActiveOn = (l: ThumbnailLayer): boolean => !!l.outlineEnabled && (l.outlineWidth ?? 0) > 0
+/** Shadows, outline, or filters: anything that makes the group rasterise. */
 function groupHasEffects(l: ThumbnailLayer): boolean {
-  return resolveShadows(l).length > 0 || outlineActiveOn(l)
+  return resolveShadows(l).length > 0 || outlineActiveOn(l) || activeFilters(l).length > 0
+}
+
+/** Push the layer's filter parameters onto a Konva node before caching it
+ *  with `activeFilters`. Shared by ImageInner and the group container. */
+function applyFilterParams(node: Konva.Node, layer: ThumbnailLayer): void {
+  if (layer.filterBrightness !== undefined) node.brightness(layer.filterBrightness)
+  if (layer.filterContrast !== undefined) node.contrast(layer.filterContrast)
+  if (layer.filterBlur !== undefined) node.blurRadius(layer.filterBlur)
+  if (layer.filterHue !== undefined) node.hue(layer.filterHue)
+  if (layer.filterSaturation !== undefined) node.saturation(layer.filterSaturation)
+  if (layer.filterLuminance !== undefined) node.luminance(layer.filterLuminance)
+  if (layer.filterPixelate !== undefined) node.pixelSize(Math.max(1, Math.round(layer.filterPixelate)))
+  if (layer.filterPosterize !== undefined) node.levels(layer.filterPosterize)
+  if (layer.filterEnhance !== undefined) node.enhance(layer.filterEnhance)
+  if (layer.filterThreshold !== undefined) node.threshold(layer.filterThreshold)
 }
 
 interface GroupRaster {
@@ -874,16 +890,7 @@ function ImageInner({
       node.getLayer()?.batchDraw()
       return
     }
-    if (layer.filterBrightness !== undefined) node.brightness(layer.filterBrightness)
-    if (layer.filterContrast !== undefined) node.contrast(layer.filterContrast)
-    if (layer.filterBlur !== undefined) node.blurRadius(layer.filterBlur)
-    if (layer.filterHue !== undefined) node.hue(layer.filterHue)
-    if (layer.filterSaturation !== undefined) node.saturation(layer.filterSaturation)
-    if (layer.filterLuminance !== undefined) node.luminance(layer.filterLuminance)
-    if (layer.filterPixelate !== undefined) node.pixelSize(Math.max(1, Math.round(layer.filterPixelate)))
-    if (layer.filterPosterize !== undefined) node.levels(layer.filterPosterize)
-    if (layer.filterEnhance !== undefined) node.enhance(layer.filterEnhance)
-    if (layer.filterThreshold !== undefined) node.threshold(layer.filterThreshold)
+    applyFilterParams(node, layer)
     node.cache({ pixelRatio: 2 })
     node.filters(filters)
     node.getLayer()?.batchDraw()
@@ -1265,12 +1272,15 @@ function ShapeNode(props: KonvaLayerNodeProps) {
  *  and visibility, with its members rendered inside it so every transform
  *  composes. A click selects the group; a double-click selects the member
  *  under the pointer (double-click again on a nested group to go deeper). */
-function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; maskLayer?: ThumbnailLayer; contentKey: string }) {
-  const { layer, onSelect, children, maskLayer, contentKey } = props
+function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; maskLayer?: ThumbnailLayer; maskSelected?: boolean; contentKey: string }) {
+  const { layer, onSelect, children, maskLayer, maskSelected, contentKey } = props
   const innerRef = useRef<Konva.Group>(null)
   const [raster, setRaster] = useState<GroupRaster | null>(null)
   const shadows = resolveShadows(layer)
-  const hasEffects = shadows.length > 0 || outlineActiveOn(layer)
+  const hasGhosts = shadows.length > 0 || outlineActiveOn(layer)
+  const filters = activeFilters(layer)
+  const hasFilters = filters.length > 0
+  const hasEffects = hasGhosts || hasFilters
   const paused = !!props.effectsPaused
   const drill = (e: Konva.KonvaEventObject<unknown>) => {
     if (props.nested) e.cancelBubble = true
@@ -1282,16 +1292,24 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
   // A hidden mask switches the clip off, which doubles as the mask toggle.
   const clip = maskLayer && maskLayer.visible ? maskLayer : undefined
 
-  // Effects raster (THU-31). Konva's cache() renders a node in its own
-  // local coordinates, clip included, into an offscreen canvas; the copy
-  // becomes the ghosts' source and the cache is cleared at once so the
-  // inner container stays live. Runs a frame after each change of the
-  // group's subtree (contentKey), of the outline, or of the clip, and again
-  // whenever a member reports new content (image loaded). While a gesture
-  // moves a member inside the group the ghosts are dropped and rebuilt on
-  // release.
+  // Effects (THU-31). Konva's cache() renders a node in its own local
+  // coordinates, clip included, into an offscreen canvas. Shadows and
+  // outline copy that canvas for their ghosts; filters keep the cache and
+  // run Konva's filter chain over it (the cached hit canvas keeps each
+  // member's colour key, so clicks and drill-down still reach members).
+  // Without filters the cache is cleared at once so the container stays
+  // live. Runs a frame after each change of the group's subtree
+  // (contentKey), of the outline, or of the clip, and again whenever a
+  // member reports new content (image loaded). While a gesture moves a
+  // member inside the group, ghosts are dropped and the cache cleared so
+  // the member draws live; everything rebuilds on release.
   useEffect(() => {
-    if (!hasEffects || paused) { setRaster(null); return }
+    const inner = innerRef.current
+    if (!hasEffects || paused) {
+      setRaster(null)
+      if (inner) { inner.filters([]); inner.clearCache() }
+      return
+    }
     let raf = 0
     let counted = false
     const count = () => { if (!counted) { counted = true; pendingGroupRasters++ } }
@@ -1301,22 +1319,36 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
       const inner = innerRef.current
       try {
         if (inner) {
-          inner.cache({ pixelRatio: 1 })
+          inner.filters([])
+          inner.clearCache()
+          // A blur needs room past the content's bounds or it clips flat.
+          const blurPad = hasFilters && (layer.filterBlur ?? 0) > 0 ? Math.ceil(layer.filterBlur ?? 0) : 0
+          inner.cache({ pixelRatio: 1, offset: blurPad })
           const cc = inner._getCanvasCache() as { scene?: { _canvas: HTMLCanvasElement }; x: number; y: number } | undefined
           const src = cc?.scene?._canvas
           if (src && src.width > 0 && src.height > 0) {
-            const copy = document.createElement('canvas')
-            copy.width = src.width; copy.height = src.height
-            copy.getContext('2d')!.drawImage(src, 0, 0)
-            inner.clearCache()
-            setRaster(buildGroupRaster(copy, cc!.x, cc!.y, layer))
+            if (hasGhosts) {
+              const copy = document.createElement('canvas')
+              copy.width = src.width; copy.height = src.height
+              copy.getContext('2d')!.drawImage(src, 0, 0)
+              setRaster(buildGroupRaster(copy, cc!.x, cc!.y, layer))
+            } else {
+              setRaster(null)
+            }
+            if (hasFilters) {
+              applyFilterParams(inner, layer)
+              inner.filters(filters)
+              inner.getLayer()?.batchDraw()
+            } else {
+              inner.clearCache()
+            }
           } else {
             inner.clearCache()
             setRaster(null)
           }
         }
       } catch {
-        try { inner?.clearCache() } catch { /* nothing to clear */ }
+        try { inner?.filters([]); inner?.clearCache() } catch { /* nothing to clear */ }
       }
       uncount()
     }
@@ -1331,9 +1363,11 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
       contentListeners.delete(schedule)
       if (raf) cancelAnimationFrame(raf)
       uncount()
+      const node = innerRef.current
+      if (node) { node.filters([]); node.clearCache() }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- contentKey stands in for the subtree; layer is read for the outline fields listed
-  }, [hasEffects, paused, contentKey, layer.outlineEnabled, layer.outlineWidth, layer.outlineColor, clip])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- contentKey serialises the subtree, the group's own filter and outline fields included
+  }, [hasEffects, hasGhosts, hasFilters, paused, contentKey, clip])
 
   return (
     <KonvaGroup
@@ -1382,6 +1416,33 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
       >
         {children}
       </KonvaGroup>
+      {/* Selected mask's dashed outline (THU-21): editor chrome, so it sits
+          outside the inner container (never in its cache, never filtered)
+          and only exists while the mask is selected. The export hides every
+          `mask-outline` node before it snapshots. */}
+      {maskLayer && maskSelected && (
+        <KonvaGroup x={maskLayer.x} y={maskLayer.y} rotation={maskLayer.rotation} listening={false}>
+          <KonvaShape
+            name={MASK_OUTLINE_NAME}
+            width={maskLayer.width ?? 200}
+            height={maskLayer.height ?? 200}
+            listening={false}
+            fillEnabled={false}
+            stroke="#fbbf24"
+            strokeWidth={1.5}
+            dash={[6, 4]}
+            strokeScaleEnabled={false}
+            perfectDrawEnabled={false}
+            shadowForStrokeEnabled={false}
+            sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
+              ctx.save()
+              traceShapeOutlineLocal(ctx, maskLayer)
+              ctx.restore()
+              ctx.fillStrokeShape(shape)
+            }}
+          />
+        </KonvaGroup>
+      )}
     </KonvaGroup>
   )
 }
@@ -1392,7 +1453,7 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
  *  transformer like any shape. Rendered beneath the members, so content
  *  wins every hit it covers. Selected, it shows a dashed outline. */
 function MaskNode(props: KonvaLayerNodeProps) {
-  const { layer, isSelected } = props
+  const { layer } = props
   const w = layer.width ?? 200
   const h = layer.height ?? 200
   return (
@@ -1421,32 +1482,8 @@ function MaskNode(props: KonvaLayerNodeProps) {
           ctx.fillStrokeShape(shape)
         }}
       />
-      {/* Selection outline: its own node, mounted only while selected, so
-          nothing lingers on deselect. It is editor chrome living in the
-          content layer, so the export hides every `mask-outline` node
-          before it snapshots. */}
-      {isSelected && (
-        <KonvaShape
-          name={MASK_OUTLINE_NAME}
-          width={w}
-          height={h}
-          listening={false}
-          fillEnabled={false}
-          stroke="#fbbf24"
-          // Unscaled stroke: 1.5 screen pixels at any zoom.
-          strokeWidth={1.5}
-          dash={[6, 4]}
-          strokeScaleEnabled={false}
-          perfectDrawEnabled={false}
-          shadowForStrokeEnabled={false}
-          sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
-            ctx.save()
-            traceShapeOutlineLocal(ctx, layer)
-            ctx.restore()
-            ctx.fillStrokeShape(shape)
-          }}
-        />
-      )}
+      {/* The selection outline is drawn by GroupNode, outside the clipped
+          (and possibly cached) container, so it is never rasterised. */}
     </KonvaGroup>
   )
 }
@@ -1507,7 +1544,13 @@ function LayerNodes({ layers, parentId, makeProps }: {
             contentKey = JSON.stringify(layers.filter(l => sub.has(l.id)))
           }
           return (
-            <GroupNode key={layer.id} {...props} maskLayer={maskOf(layers, layer.id)} contentKey={contentKey}>
+            <GroupNode
+              key={layer.id}
+              {...props}
+              maskLayer={maskOf(layers, layer.id)}
+              maskSelected={(() => { const m = maskOf(layers, layer.id); return m ? makeProps(m).isSelected : false })()}
+              contentKey={contentKey}
+            >
               <LayerNodes layers={layers} parentId={layer.id} makeProps={makeProps} />
             </GroupNode>
           )
@@ -3449,11 +3492,6 @@ function EffectsSections({ layer, update }: { layer: ThumbnailLayer; update: (pa
           </div>
         )}
       </section>
-      {groupNote && (shadows.length > 0 || layer.outlineEnabled) && (
-        <p className="text-[10px] text-gray-500 leading-snug">
-          Group effects follow the group's outline (its mask when it has one) and refresh when an edit lands. They pause while a layer inside the group is being moved or resized.
-        </p>
-      )}
     </>
   )
 }
@@ -3573,9 +3611,15 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
             Double-click a grouped layer on the canvas to select it.
           </p>
         </section>
-        {/* Group effects (THU-31): the same shadow and outline sections
-            other layers have, rendered on the group as a whole. */}
+        {/* Group effects (THU-31): the same shadow, outline, and filter
+            sections other layers have, rendered on the group as a whole. */}
         <EffectsSections layer={layer} update={update} />
+        <FiltersSection layer={layer} update={update} />
+        {(resolveShadows(layer).length > 0 || layer.outlineEnabled || layer.filtersEnabled) && (
+          <p className="text-[10px] text-gray-500 leading-snug">
+            Group effects follow the group's outline (its mask when it has one) and refresh when an edit lands. They pause while a layer inside the group is being moved or resized.
+          </p>
+        )}
       </div>
     )
   }
@@ -4083,73 +4127,78 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
       <EffectsSections layer={layer} update={update} />
       </MaskDisabled>
 
-      {/* Filters — image layers only. All filter values persist in JSON
-          regardless of the master toggle, so the user can A/B compare without
-          re-dialing settings. The cache + filter application is wired in
-          ImageNode's effect. */}
-      {layer.type === 'image' && (
-        <section>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] uppercase tracking-wider text-gray-400">Filters</p>
-            <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!!layer.filtersEnabled}
-                onChange={e => update({ filtersEnabled: e.target.checked })}
-                className="accent-accent-600"
-              />
-              Enable
-            </label>
-          </div>
-          {layer.filtersEnabled && (
-            <div className="flex flex-col gap-2">
-              <FilterSlider label="Brightness" min={-1} max={1} step={0.05} spinnerStep={0.01} value={layer.filterBrightness ?? 0}
-                onChange={v => update({ filterBrightness: v })} />
-              <FilterSlider label="Contrast" min={-100} max={100} step={1} value={layer.filterContrast ?? 0}
-                onChange={v => update({ filterContrast: v })} />
-              <FilterSlider label="Saturation" min={-2} max={10} step={0.1} spinnerStep={0.01} value={layer.filterSaturation ?? 0}
-                onChange={v => update({ filterSaturation: v })} />
-              <FilterSlider label="Hue" min={-180} max={180} step={1} value={layer.filterHue ?? 0}
-                onChange={v => update({ filterHue: v })} />
-              <FilterSlider label="Luminance" min={-2} max={2} step={0.05} spinnerStep={0.01} value={layer.filterLuminance ?? 0}
-                onChange={v => update({ filterLuminance: v })} />
-              <FilterSlider label="Blur" min={0} max={40} step={1} value={layer.filterBlur ?? 0}
-                onChange={v => update({ filterBlur: v })} />
-              <FilterSlider label="Enhance" min={-1} max={1} step={0.05} spinnerStep={0.01} value={layer.filterEnhance ?? 0}
-                onChange={v => update({ filterEnhance: v })} />
-              <FilterSlider label="Pixelate" min={0} max={50} step={1} value={layer.filterPixelate ?? 0}
-                onChange={v => update({ filterPixelate: v })} />
-              <FilterSlider label="Posterize" min={0} max={1} step={0.05} spinnerStep={0.01} value={layer.filterPosterize ?? 0}
-                onChange={v => update({ filterPosterize: v })} />
-              <FilterSlider label="Threshold" min={0} max={1} step={0.01} value={layer.filterThreshold ?? 0}
-                onChange={v => update({ filterThreshold: v })} />
-              <div className="grid grid-cols-2 gap-1.5 mt-1">
-                <FilterToggle label="Grayscale" checked={!!layer.filterGrayscale}
-                  onChange={v => update({ filterGrayscale: v })} />
-                <FilterToggle label="Sepia" checked={!!layer.filterSepia}
-                  onChange={v => update({ filterSepia: v })} />
-                <FilterToggle label="Invert" checked={!!layer.filterInvert}
-                  onChange={v => update({ filterInvert: v })} />
-                <FilterToggle label="Emboss" checked={!!layer.filterEmboss}
-                  onChange={v => update({ filterEmboss: v })} />
-              </div>
-              <button
-                type="button"
-                onClick={() => update({
-                  filterBrightness: 0, filterContrast: 0, filterBlur: 0,
-                  filterHue: 0, filterSaturation: 0, filterLuminance: 0,
-                  filterPixelate: 0, filterPosterize: 0, filterEnhance: 0, filterThreshold: 0,
-                  filterGrayscale: false, filterSepia: false, filterInvert: false, filterEmboss: false,
-                })}
-                className="text-[10px] text-gray-400 hover:text-gray-300 self-start"
-              >
-                Reset filters
-              </button>
-            </div>
-          )}
-        </section>
-      )}
+      {/* Filters: images (ImageInner's cache + filter chain) and groups
+          (THU-31, the group's inner container cached with the same chain). */}
+      {layer.type === 'image' && <FiltersSection layer={layer} update={update} />}
     </div>
+  )
+}
+
+/** The Filters section, shared by images and groups (THU-31). All filter
+ *  values persist in JSON regardless of the master toggle, so the user can
+ *  A/B compare without re-dialing settings. */
+function FiltersSection({ layer, update }: { layer: ThumbnailLayer; update: (patch: Partial<ThumbnailLayer>) => void }) {
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] uppercase tracking-wider text-gray-400">Filters</p>
+        <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!layer.filtersEnabled}
+            onChange={e => update({ filtersEnabled: e.target.checked })}
+            className="accent-accent-600"
+          />
+          Enable
+        </label>
+      </div>
+      {layer.filtersEnabled && (
+        <div className="flex flex-col gap-2">
+          <FilterSlider label="Brightness" min={-1} max={1} step={0.05} spinnerStep={0.01} value={layer.filterBrightness ?? 0}
+            onChange={v => update({ filterBrightness: v })} />
+          <FilterSlider label="Contrast" min={-100} max={100} step={1} value={layer.filterContrast ?? 0}
+            onChange={v => update({ filterContrast: v })} />
+          <FilterSlider label="Saturation" min={-2} max={10} step={0.1} spinnerStep={0.01} value={layer.filterSaturation ?? 0}
+            onChange={v => update({ filterSaturation: v })} />
+          <FilterSlider label="Hue" min={-180} max={180} step={1} value={layer.filterHue ?? 0}
+            onChange={v => update({ filterHue: v })} />
+          <FilterSlider label="Luminance" min={-2} max={2} step={0.05} spinnerStep={0.01} value={layer.filterLuminance ?? 0}
+            onChange={v => update({ filterLuminance: v })} />
+          <FilterSlider label="Blur" min={0} max={40} step={1} value={layer.filterBlur ?? 0}
+            onChange={v => update({ filterBlur: v })} />
+          <FilterSlider label="Enhance" min={-1} max={1} step={0.05} spinnerStep={0.01} value={layer.filterEnhance ?? 0}
+            onChange={v => update({ filterEnhance: v })} />
+          <FilterSlider label="Pixelate" min={0} max={50} step={1} value={layer.filterPixelate ?? 0}
+            onChange={v => update({ filterPixelate: v })} />
+          <FilterSlider label="Posterize" min={0} max={1} step={0.05} spinnerStep={0.01} value={layer.filterPosterize ?? 0}
+            onChange={v => update({ filterPosterize: v })} />
+          <FilterSlider label="Threshold" min={0} max={1} step={0.01} value={layer.filterThreshold ?? 0}
+            onChange={v => update({ filterThreshold: v })} />
+          <div className="grid grid-cols-2 gap-1.5 mt-1">
+            <FilterToggle label="Grayscale" checked={!!layer.filterGrayscale}
+              onChange={v => update({ filterGrayscale: v })} />
+            <FilterToggle label="Sepia" checked={!!layer.filterSepia}
+              onChange={v => update({ filterSepia: v })} />
+            <FilterToggle label="Invert" checked={!!layer.filterInvert}
+              onChange={v => update({ filterInvert: v })} />
+            <FilterToggle label="Emboss" checked={!!layer.filterEmboss}
+              onChange={v => update({ filterEmboss: v })} />
+          </div>
+          <button
+            type="button"
+            onClick={() => update({
+              filterBrightness: 0, filterContrast: 0, filterBlur: 0,
+              filterHue: 0, filterSaturation: 0, filterLuminance: 0,
+              filterPixelate: 0, filterPosterize: 0, filterEnhance: 0, filterThreshold: 0,
+              filterGrayscale: false, filterSepia: false, filterInvert: false, filterEmboss: false,
+            })}
+            className="text-[10px] text-gray-400 hover:text-gray-300 self-start"
+          >
+            Reset filters
+          </button>
+        </div>
+      )}
+    </section>
   )
 }
 
