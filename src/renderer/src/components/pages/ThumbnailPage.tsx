@@ -8481,6 +8481,17 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                   // the group expands to show it. The row's own
                                   // drag handlers must not see these events, or
                                   // the row would draw its landing indicator too.
+                                  // dragenter is cancelled as well as dragover:
+                                  // an uncancelled dragenter on the icon's SVG
+                                  // child makes the browser treat the body as
+                                  // the target for a frame, which flashed the
+                                  // not-allowed cursor while the pointer moved
+                                  // over the icon.
+                                  onDragEnter={e => {
+                                    e.stopPropagation()
+                                    const d = draggingLayerId ? layers.find(l => l.id === draggingLayerId) : undefined
+                                    if (d && d.type === 'shape' && !isMask(d)) e.preventDefault()
+                                  }}
                                   onDragOver={e => {
                                     e.stopPropagation()
                                     if (!draggingLayerId) return
@@ -8494,6 +8505,8 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                   }}
                                   onDragLeave={e => {
                                     e.stopPropagation()
+                                    const related = e.relatedTarget as Node | null
+                                    if (related && e.currentTarget.contains(related)) return
                                     setSlotDrop(prev => (prev === layer.id ? null : prev))
                                   }}
                                   onDrop={e => {
@@ -8514,7 +8527,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                   }`}
                                   aria-label="Add a mask"
                                 >
-                                  <Blend size={10} />
+                                  <Blend size={10} className="pointer-events-none" />
                                 </button>
                               </Tooltip>
                             ))}
@@ -8539,6 +8552,10 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 // and becomes its mask); the slot lights amber.
                                 // Anything else gets the not-allowed cursor and
                                 // no indicator anywhere.
+                                onDragEnter={e => {
+                                  const d = draggingLayerId ? layers.find(l => l.id === draggingLayerId) : undefined
+                                  if (d && d.type === 'shape' && !isMask(d)) e.preventDefault()
+                                }}
                                 onDragOver={e => {
                                   if (!draggingLayerId) return
                                   const d = layers.find(l => l.id === draggingLayerId)
