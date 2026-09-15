@@ -17,7 +17,7 @@ import {
   FlipHorizontal2, FlipVertical2,
   ChevronDown, ChevronRight, Loader2, Radio, Palette, Upload,
   Layers as LayersIcon,
-  Group as GroupIcon, Ungroup as UngroupIcon, Folder, Blend,
+  Group as GroupIcon, Ungroup as UngroupIcon, Folder, Blend, ArrowDown,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -142,6 +142,23 @@ interface LayerTabAction {
   affects?: string[]
   onClick?: () => void
 }
+/** The mask icon with a small badge at its lower right saying which mask
+ *  action this is (the player's mode-close icon technique: a knocked-out
+ *  disc so the badge reads over the icon). 'group' = use as the group's
+ *  mask (folder), 'below' = apply to the layer below (down arrow),
+ *  'release' = release the mask (red X). */
+function MaskActionIcon({ badge }: { badge: 'group' | 'below' | 'release' }) {
+  const cls = 'absolute -bottom-1 -right-1 rounded-full bg-navy-800'
+  return (
+    <span className="relative shrink-0 flex">
+      <Blend size={14} />
+      {badge === 'group' && <Folder size={9} strokeWidth={3} className={`${cls} text-gray-200`} />}
+      {badge === 'below' && <ArrowDown size={9} strokeWidth={3.5} className={`${cls} text-gray-200`} />}
+      {badge === 'release' && <X size={9} strokeWidth={3.5} className={`${cls} text-red-300`} />}
+    </span>
+  )
+}
+
 /** Full class strings per tone (Tailwind needs them written out). */
 const LAYER_TAB_BUTTON_TONE: Record<LayerTabTone, string> = {
   accent: 'text-gray-400 hover:text-gray-200 hover:bg-white/10',
@@ -6214,7 +6231,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       out.push({ key: 'sep-mask', separator: true })
       if (isMask(single)) {
         out.push({
-          key: 'release-mask', icon: <Blend size={14} />, tone: 'amber',
+          key: 'release-mask', icon: <MaskActionIcon badge="release" />, tone: 'amber',
           label: 'Release mask (the shape stays; the group is no longer clipped)',
           affects: [single.parentId!, ...subtreeIds(layers, single.parentId!)], onClick: () => releaseMask(single.id),
         })
@@ -6222,7 +6239,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
         if (single.parentId) {
           const check = canBeGroupMask(layers, single.id)
           out.push({
-            key: 'use-as-mask', icon: <Blend size={14} />, tone: 'amber',
+            key: 'use-as-mask', icon: <MaskActionIcon badge="group" />, tone: 'amber',
             label: 'Use as group mask (only its outline clips the group)',
             disabled: !check.ok, reason: check.reason,
             affects: [single.parentId, ...subtreeIds(layers, single.parentId)], onClick: () => useAsGroupMask(single.id),
@@ -6234,7 +6251,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
         const siblings = childrenOf(layers, single.parentId ?? null)
         const below = siblings[siblings.indexOf(single) - 1]
         out.push({
-          key: 'mask-below', icon: <Blend size={14} />, tone: 'amber',
+          key: 'mask-below', icon: <MaskActionIcon badge="below" />, tone: 'amber',
           label: below ? `Apply as mask to the layer below (${below.name})` : 'Apply as mask to the layer below',
           disabled: !belowCheck.ok, reason: belowCheck.reason,
           affects: below ? [single.id, ...subtreeIds(layers, below.id)] : [single.id],
