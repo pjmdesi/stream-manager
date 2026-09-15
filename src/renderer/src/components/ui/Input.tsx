@@ -359,11 +359,21 @@ export const NumberInput: React.FC<NumberInputProps> = ({
     } else {
       next = Number((value + dir * amount).toFixed(Math.max(stepDecimals, 2)))
     }
+    setDraft(null)
     onChange(clamp(next))
   }
   const shiftNote = disableShiftStep ? '' : ' (Shift = ×10)'
   const atMin = min !== undefined && value <= min
   const atMax = max !== undefined && value >= max
+  // What the user has typed since focusing, or null when not editing. React
+  // writes "0" into an EMPTY number input whenever the value prop is 0 and
+  // the component re-renders, and every edit here re-renders (the parent
+  // commits it), so without a draft a field sitting at 0 could never be
+  // cleared to type a minus sign. While a draft exists the input shows the
+  // draft verbatim; it is dropped on blur, when the parent's value shows
+  // again (wrapped, if a `wrap` is set).
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft !== null ? draft : (Number.isFinite(value) ? value : '')
 
   const field = (
     <div className={`relative flex items-stretch ${className}`}>
@@ -375,12 +385,17 @@ export const NumberInput: React.FC<NumberInputProps> = ({
       <input
         // eslint-disable-next-line no-restricted-syntax -- the one sanctioned raw number input: this IS the NumberInput primitive the app rule points everyone at
         type="number"
-        value={Number.isFinite(value) ? value : ''}
+        value={shown}
         onChange={e => {
           // Typed values are clamped to min/max but NOT wrapped: wrapping
           // mid-keystroke would fold "-3" or "40" out from under the user.
-          const n = Number(e.target.value)
-          if (!Number.isFinite(n)) { onChange(0); return }
+          // An empty or partial entry ("", "-") keeps the draft and commits
+          // nothing; the value settles on blur.
+          const text = e.target.value
+          setDraft(text)
+          if (text === '') return
+          const n = Number(text)
+          if (!Number.isFinite(n)) return
           let next = n
           if (min !== undefined) next = Math.max(min, next)
           if (max !== undefined) next = Math.min(max, next)
@@ -416,8 +431,10 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         // only way to override that; the value itself is already clamped in
         // onChange, so this is purely cosmetic.
         onBlur={e => {
-          // Wrap settles here: a typed 400° becomes 40° once the user is
-          // done, and the re-render then rewrites the field.
+          // Editing is over: drop the draft (an empty field falls back to
+          // the last committed value) and let `wrap` settle the value, so a
+          // typed 400° becomes 40° once the user is done.
+          setDraft(null)
           const settled = wrap && Number.isFinite(value) ? wrap(value) : value
           if (settled !== value) { onChange(settled); return }
           const canonical = Number.isFinite(value) ? String(value) : ''

@@ -3153,12 +3153,16 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
                     role="radio"
                     aria-checked={on}
                     onClick={() => { if (on) return; update(paintPatch({ kind })); recordGradient({ kind }) }}
-                    className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 px-1.5 py-1 text-[10px] transition-colors ${
+                    // The swatch fills the segment's left side edge to edge
+                    // as a square (h-7 tall, w-7 wide, no padding); the
+                    // group's rounded corners clip the outer ones. The label
+                    // centers in the rest.
+                    className={`relative flex-1 min-w-0 h-7 pl-7 flex items-center justify-center text-[10px] transition-colors ${
                       on ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                     }`}
                   >
                     <span
-                      className="w-4 h-4 shrink-0 rounded-sm border border-white/25"
+                      className="absolute inset-y-0 left-0 w-7"
                       style={{
                         backgroundImage: `${cssGradientOfKind(stops, space, gStyle, { ...geom, kind })}, ${CHECKER_IMAGE}`,
                         backgroundSize: 'auto, 4px 4px',
@@ -3166,7 +3170,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
                       }}
                       aria-hidden
                     />
-                    <span className="truncate">{label}</span>
+                    <span className="truncate px-1">{label}</span>
                   </button>
                 </Tooltip>
               )
