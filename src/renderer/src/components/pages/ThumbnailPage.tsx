@@ -5907,7 +5907,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     // past the tab's edge, up to the same radius. The spine's rounded end
     // needs room in the same overrun, so when there is not enough for both
     // they share it: the end rounding takes up to half, the join the rest.
-    const SPINE_R = 2
+    // Full-width rounding: the spine is 4 px wide and its ends read as
+    // round only when the radius equals that width.
+    const SPINE_R = 4
     const share = (overrun: number) => {
       const end = overrun <= 0 ? SPINE_R : Math.min(SPINE_R, overrun / 2)
       return { end, fillet: Math.min(R, Math.max(0, overrun - end)) }
