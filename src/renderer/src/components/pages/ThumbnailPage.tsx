@@ -8151,6 +8151,14 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                 ? { position: 'fixed', bottom: window.innerHeight - anchor.top + 4, right: Math.max(8, window.innerWidth - anchor.right), zIndex: 61 }
                 : { position: 'fixed', top: anchor.bottom + 4, right: Math.max(8, window.innerWidth - anchor.right), zIndex: 61 }
               const close = () => { setMaskSlotMenu(null); setHighlighted(NO_HIGHLIGHT) }
+              // A pick from a collapsed group's row expands the group so the
+              // new mask row is on screen.
+              const expandGroup = () => setCollapsedGroups(prev => {
+                if (!prev.has(groupId)) return prev
+                const next = new Set(prev)
+                next.delete(groupId)
+                return next
+              })
               const item = 'flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left text-gray-300 hover:bg-white/5 transition-colors'
               return createPortal(
                 <>
@@ -8166,7 +8174,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             className={item}
                             onMouseEnter={() => setHighlighted({ ids: new Set([s.id]), tone: 'amber' })}
                             onMouseLeave={() => setHighlighted(NO_HIGHLIGHT)}
-                            onClick={() => { useAsGroupMask(s.id); close() }}
+                            onClick={() => { useAsGroupMask(s.id); expandGroup(); close() }}
                           >
                             {s.shapeType === 'ellipse' ? <Circle size={12} className="shrink-0 text-gray-400" /> : s.shapeType === 'polygon' ? <Pentagon size={12} className="shrink-0 text-gray-400" /> : <Square size={12} className="shrink-0 text-gray-400" />}
                             <span className="truncate">{s.name}</span>
@@ -8181,7 +8189,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                       ['ellipse', 'Ellipse', <Circle size={12} className="shrink-0 text-gray-400" />],
                       ['polygon', 'Polygon', <Pentagon size={12} className="shrink-0 text-gray-400" />],
                     ] as const).map(([type, label, icon]) => (
-                      <button key={type} type="button" className={item} onClick={() => { addGroupMask(groupId, type); close() }}>
+                      <button key={type} type="button" className={item} onClick={() => { addGroupMask(groupId, type); expandGroup(); close() }}>
                         {icon}
                         <span>{label}</span>
                       </button>
@@ -8453,15 +8461,61 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             {/* Collapsed group: the mask slot shows on the
                                 row's right instead of under it. */}
                             {group && collapsed && (groupMask ? (
-                              <Tooltip content={`Mask: ${groupMask.name}`} side="top" triggerClassName="shrink-0 flex items-center min-w-0 max-w-[88px]">
-                                <span className="flex items-center gap-1 min-w-0 text-[10px] text-amber-300/70">
+                              <Tooltip content={`Mask: ${groupMask.name}. Click to select it.`} side="top" triggerClassName="shrink-0 flex items-center min-w-0 max-w-[88px]">
+                                <button
+                                  type="button"
+                                  onClick={e => { e.stopPropagation(); selectFromKeyboard(groupMask.id) }}
+                                  className="flex items-center gap-1 min-w-0 text-[10px] text-amber-300/70 hover:text-amber-200 transition-colors"
+                                >
                                   <Blend size={10} className="shrink-0" />
                                   <span className="truncate">{groupMask.name}</span>
-                                </span>
+                                </button>
                               </Tooltip>
                             ) : (
-                              <Tooltip content="No mask. Expand the group to add one." side="top" triggerClassName="shrink-0 flex">
-                                <Blend size={10} className="text-gray-600" />
+                              <Tooltip content="No mask. Click to add one, or drop a shape here." side="top" triggerClassName="shrink-0 flex">
+                                <button
+                                  type="button"
+                                  onClick={e => { e.stopPropagation(); setMaskSlotMenu({ groupId: layer.id, anchor: e.currentTarget.getBoundingClientRect() }) }}
+                                  // Same drop target as the expanded slot row:
+                                  // a shape dropped here becomes the mask and
+                                  // the group expands to show it. The row's own
+                                  // drag handlers must not see these events, or
+                                  // the row would draw its landing indicator too.
+                                  onDragOver={e => {
+                                    e.stopPropagation()
+                                    if (!draggingLayerId) return
+                                    const d = layers.find(l => l.id === draggingLayerId)
+                                    const ok = !!d && d.type === 'shape' && !isMask(d)
+                                    if (!ok) { setPanelDrop(null); setSlotDrop(null); return }
+                                    e.preventDefault()
+                                    e.dataTransfer.dropEffect = 'move'
+                                    setPanelDrop(null)
+                                    setSlotDrop(layer.id)
+                                  }}
+                                  onDragLeave={e => {
+                                    e.stopPropagation()
+                                    setSlotDrop(prev => (prev === layer.id ? null : prev))
+                                  }}
+                                  onDrop={e => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    if (draggingLayerId && slotDrop === layer.id) {
+                                      dropShapeIntoSlot(draggingLayerId, layer.id)
+                                      toggleGroupCollapsed(layer.id)
+                                    }
+                                    setDraggingLayerId(null)
+                                    setPanelDrop(null)
+                                    setSlotDrop(null)
+                                  }}
+                                  className={`rounded p-0.5 -m-0.5 transition-colors ${
+                                    slotDrop === layer.id ? 'bg-amber-600/40 text-amber-100'
+                                      : maskSlotMenu?.groupId === layer.id ? 'text-gray-200'
+                                      : 'text-gray-600 hover:text-gray-300'
+                                  }`}
+                                  aria-label="Add a mask"
+                                >
+                                  <Blend size={10} />
+                                </button>
                               </Tooltip>
                             ))}
                             {/* Duplicate and delete moved to the selection
