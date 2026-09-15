@@ -1263,16 +1263,22 @@ function LayerNodes({ layers, parentId, makeProps }: {
   parentId: string | null
   makeProps: (layer: ThumbnailLayer) => KonvaLayerNodeProps
 }) {
-  // A group's mask (THU-21) is stored as its topmost member but drawn
-  // first, as a hit-only node beneath the members (see MaskNode).
+  // A group's mask (THU-21) is stored as its topmost member. Unselected it
+  // is drawn first, a hit-only node beneath the members, so content wins
+  // every click it covers and a double-click on empty masked space reaches
+  // the mask. Selected, it moves on top: the whole outline becomes its
+  // drag target, so the user does not have to aim for the dashed edge.
+  // Click empty canvas (or another row) to hand hits back to the content.
   const members = childrenOf(layers, parentId)
   const mask = parentId ? members.find(isMask) : undefined
-  const ordered = mask ? [mask, ...members.filter(l => l !== mask)] : members
+  const maskProps = mask ? makeProps(mask) : null
+  const others = mask ? members.filter(l => l !== mask) : members
+  const ordered = mask ? (maskProps!.isSelected ? [...others, mask] : [mask, ...others]) : members
   return (
     <>
       {ordered.map(layer => {
+        if (layer === mask) return <MaskNode key={layer.id} {...maskProps!} />
         const props = makeProps(layer)
-        if (layer === mask) return <MaskNode key={layer.id} {...props} />
         if (layer.type === 'group') {
           return (
             <GroupNode key={layer.id} {...props} maskLayer={maskOf(layers, layer.id)}>
