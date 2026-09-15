@@ -3615,11 +3615,6 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
             sections other layers have, rendered on the group as a whole. */}
         <EffectsSections layer={layer} update={update} />
         <FiltersSection layer={layer} update={update} />
-        {(resolveShadows(layer).length > 0 || layer.outlineEnabled || layer.filtersEnabled) && (
-          <p className="text-[10px] text-gray-500 leading-snug">
-            Group effects follow the group's outline (its mask when it has one) and refresh when an edit lands. They pause while a layer inside the group is being moved or resized.
-          </p>
-        )}
       </div>
     )
   }
