@@ -29,9 +29,9 @@ import { seriesNavFor, type SeriesNav } from '../../lib/seriesNav'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
 import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
 import {
-  childrenOf, paintableLayers, selectionRoots, copySelection, insertPastedAbove, canGroup, canUngroup, groupLayers, ungroupLayer,
+  childrenOf, paintableLayers, selectionRoots, copySelection, insertPastedAbove, canGroup, groupLayers, ungroupLayer,
   deleteLayers, duplicateLayer as duplicateLayerTree, clonePasteLayers, moveLayerTo, moveAmongSiblings, scaleGroupMembers,
-  snapResizedBox, needsUniformScale, panelRows, isGroup, hasHiddenAncestor, ancestorIds,
+  snapResizedBox, needsUniformScale, panelRows, isGroup, hasHiddenAncestor, ancestorIds, subtreeIds,
   walkSelection, enterGroup, leaveGroup,
 } from '../../lib/layerTree'
 import type { PanelRow } from '../../lib/layerTree'
@@ -121,6 +121,22 @@ const ROTATION_SNAP_STEPS = { ctrl: 90, shift: 5 } as const
 /** Display precision for position, size, and angle (THU-27): two decimals,
  *  trailing zeros dropped. Stored values keep their full precision. */
 const round2 = (v: number) => Math.round(v * 100) / 100
+
+/** One button in the layers panel's selection tab (THU-30). `affects` are
+ *  the rows that light up while the button is hovered. */
+interface LayerTabAction {
+  key: string
+  separator?: boolean
+  icon?: React.ReactNode
+  label?: string
+  disabled?: boolean
+  reason?: string
+  danger?: boolean
+  affects?: string[]
+  onClick?: () => void
+}
+const EMPTY_ID_SET: ReadonlySet<string> = new Set()
+const byIdOf = (layers: ThumbnailLayer[], id: string): ThumbnailLayer => layers.find(l => l.id === id) ?? ({ type: 'image' } as ThumbnailLayer)
 function rotationSnapStep(ctrl: boolean, shift: boolean): number | null {
   if (shift) return ROTATION_SNAP_STEPS.shift
   if (ctrl) return ROTATION_SNAP_STEPS.ctrl
@@ -5780,16 +5796,8 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     if (next) commitLayers(next)
   }, [layers, commitLayers])
 
-  const duplicateLayer = useCallback((id: string) => {
-    const res = duplicateLayerTree(layers, id, newId)
-    if (!res) return
-    commitLayers(res.layers)
-    setSelectedIds([res.rootId])
-  }, [layers, commitLayers])
-
   // ── Grouping (THU-18) ──────────────────────────────────────────────────
   const groupCheck = useMemo(() => canGroup(layers, selectedIds), [layers, selectedIds])
-  const ungroupCheck = useMemo(() => canUngroup(layers, selectedIds), [layers, selectedIds])
 
   /** Wrap the selection in a new group. The union box comes from the Konva
    *  nodes (relative to each node's parent container) so rotated members
@@ -5811,19 +5819,157 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     setSelectedIds([res.groupId])
   }, [commitLayers])
 
-  /** Dissolve every selected group; the freed members become the selection. */
+  /** Dissolve the selected groups; their freed members join whatever else
+   *  was selected. Other selected layers are left alone (THU-30 relaxed
+   *  this from "every selected root must be a group"). */
   const ungroupSelected = useCallback(() => {
     let ls = layersRef.current
-    const roots = selectionRoots(ls, selectedIdsRef.current)
-    if (!canUngroup(ls, roots).ok) return
+    const sel = selectedIdsRef.current
+    const groups = selectionRoots(ls, sel).filter(id => isGroup(byIdOf(ls, id)))
+    if (groups.length === 0) return
     const freed: string[] = []
-    for (const id of roots) {
+    for (const id of groups) {
       const r = ungroupLayer(ls, id)
       if (r) { ls = r.layers; freed.push(...r.freed) }
     }
     commitLayers(ls)
-    setSelectedIds(freed)
+    setSelectedIds([...sel.filter(id => !groups.includes(id) && ls.some(l => l.id === id)), ...freed])
   }, [commitLayers])
+
+  // ── Layer actions tab (THU-30) ─────────────────────────────────────────
+  // One tab per selection, not per row: it slides out of the layers panel's
+  // left edge beside the topmost selected row and holds the actions that
+  // apply to the current selection (single-layer actions for one layer,
+  // whole-selection actions for several). Hovering a button lights up the
+  // rows it will affect. Positioned against the editor body so it can sit
+  // over the canvas, and re-measured on selection, layout, scroll, and
+  // resize changes.
+  const editorBodyRef = useRef<HTMLDivElement>(null)
+  const rightPanelRef = useRef<HTMLDivElement>(null)
+  const layersListRef = useRef<HTMLDivElement>(null)
+  const layerTabRef = useRef<HTMLDivElement>(null)
+  const [layerTabPos, setLayerTabPos] = useState<{ top: number; right: number } | null>(null)
+  const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string>>(EMPTY_ID_SET)
+  const layerTabShown = selectedIds.length > 0 && !layersCollapsed && !previewMode
+
+  const measureLayerTab = useCallback(() => {
+    const body = editorBodyRef.current, list = layersListRef.current, panel = rightPanelRef.current
+    const sel = selectedIdsRef.current
+    if (!body || !list || !panel || sel.length === 0 || list.offsetParent === null) {
+      setLayerTabPos(null)
+      return
+    }
+    const bodyRect = body.getBoundingClientRect()
+    const listRect = list.getBoundingClientRect()
+    // Topmost selected row as displayed; a selection hidden inside a
+    // collapsed group has no row, so the tab parks at the list's top.
+    let rowTop = Infinity
+    for (const id of sel) {
+      const el = list.querySelector<HTMLElement>(`[data-layer-id="${CSS.escape(id)}"]`)
+      if (el) rowTop = Math.min(rowTop, el.getBoundingClientRect().top)
+    }
+    if (!Number.isFinite(rowTop)) rowTop = listRect.top
+    const tabH = layerTabRef.current?.offsetHeight ?? 0
+    const maxTop = Math.max(listRect.top, listRect.bottom - tabH)
+    const top = Math.min(Math.max(rowTop, listRect.top), maxTop) - bodyRect.top
+    // One pixel under the panel so the tab covers the panel's left border
+    // and reads as part of it.
+    const right = panel.offsetWidth - 1
+    setLayerTabPos(p => (p && Math.abs(p.top - top) < 0.5 && p.right === right ? p : { top, right }))
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!layerTabShown) { setLayerTabPos(null); return }
+    measureLayerTab()
+  }, [layerTabShown, selectedIds, layers, collapsedGroups, measureLayerTab])
+
+  useEffect(() => {
+    if (!layerTabShown) return
+    const list = layersListRef.current
+    const body = editorBodyRef.current
+    if (!list || !body) return
+    list.addEventListener('scroll', measureLayerTab)
+    window.addEventListener('resize', measureLayerTab)
+    const ro = new ResizeObserver(measureLayerTab)
+    ro.observe(list)
+    ro.observe(body)
+    return () => {
+      list.removeEventListener('scroll', measureLayerTab)
+      window.removeEventListener('resize', measureLayerTab)
+      ro.disconnect()
+    }
+  }, [layerTabShown, measureLayerTab])
+
+  // A button that disappears under the pointer (the selection changed)
+  // must not leave its highlight behind.
+  useEffect(() => { setHighlightedIds(EMPTY_ID_SET) }, [selectedIds])
+
+  /** Duplicate every selected unit in one undo entry; the copies become
+   *  the selection. */
+  const duplicateSelected = useCallback(() => {
+    let ls = layersRef.current
+    const roots = selectionRoots(ls, selectedIdsRef.current)
+    const copies: string[] = []
+    for (const id of roots) {
+      const r = duplicateLayerTree(ls, id, newId)
+      if (r) { ls = r.layers; copies.push(r.rootId) }
+    }
+    if (copies.length === 0) return
+    commitLayers(ls)
+    setSelectedIds(copies)
+  }, [commitLayers])
+
+  /** Hide every selected layer, or show them all when any is hidden. */
+  const toggleSelectedVisibility = useCallback(() => {
+    const ls = layersRef.current
+    const sel = new Set(selectedIdsRef.current)
+    const allVisible = ls.filter(l => sel.has(l.id)).every(l => l.visible)
+    commitLayers(ls.map(l => (sel.has(l.id) ? { ...l, visible: !allVisible } : l)))
+  }, [commitLayers])
+
+  const layerTabActions = useMemo<LayerTabAction[]>(() => {
+    if (selectedIds.length === 0) return []
+    const roots = selectionRoots(layers, selectedIds)
+    const subtree = roots.flatMap(id => subtreeIds(layers, id))
+    const groupRoots = roots.filter(id => isGroup(byIdOf(layers, id)))
+    const single = selectedIds.length === 1 ? byIdOf(layers, selectedIds[0]) : undefined
+    const out: LayerTabAction[] = []
+    if (!single) {
+      const allVisible = selectedIds.every(id => byIdOf(layers, id)?.visible !== false)
+      out.push({
+        key: 'visibility', icon: allVisible ? <EyeOff size={14} /> : <Eye size={14} />,
+        label: allVisible ? 'Hide the selected layers' : 'Show the selected layers',
+        affects: subtree, onClick: toggleSelectedVisibility,
+      })
+    }
+    out.push({
+      key: 'duplicate', icon: <Copy size={14} />,
+      label: single ? (isGroup(single) ? 'Duplicate group' : 'Duplicate layer') : 'Duplicate the selected layers',
+      affects: subtree, onClick: duplicateSelected,
+    })
+    out.push({
+      key: 'delete', icon: <Trash2 size={14} />, danger: true,
+      label: single ? (isGroup(single) ? 'Delete group and its layers' : 'Delete layer') : 'Delete the selected layers',
+      affects: subtree, onClick: deleteSelected,
+    })
+    if (!single) {
+      out.push({ key: 'sep-1', separator: true })
+      out.push({
+        key: 'group', icon: <GroupIcon size={14} />, label: 'Group the selected layers (Ctrl+G)',
+        disabled: !groupCheck.ok, reason: groupCheck.reason,
+        affects: roots, onClick: groupSelected,
+      })
+    }
+    if (groupRoots.length > 0) {
+      if (single) out.push({ key: 'sep-1', separator: true })
+      out.push({
+        key: 'ungroup', icon: <UngroupIcon size={14} />,
+        label: groupRoots.length === 1 ? 'Ungroup (Ctrl+Shift+G)' : 'Ungroup the selected groups (Ctrl+Shift+G)',
+        affects: groupRoots.flatMap(id => subtreeIds(layers, id)), onClick: ungroupSelected,
+      })
+    }
+    return out
+  }, [layers, selectedIds, groupCheck, toggleSelectedVisibility, duplicateSelected, deleteSelected, groupSelected, ungroupSelected])
 
   /** Toggle flipX / flipY on every selected layer. Each click on the
    *  toolbar button is a single undo entry that flips all selected
@@ -6555,7 +6701,6 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
 
   // Keyboard-driven selection (THU-29): select the one layer and expand
   // every group above it in the panel so the row is there to scroll to.
-  const layersListRef = useRef<HTMLDivElement>(null)
   const selectFromKeyboard = useCallback((id: string) => {
     const above = ancestorIds(layersRef.current, id)
     if (above.length > 0) {
@@ -7104,8 +7249,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
             </div>
           )}
 
-          {/* Editor body */}
-          <div className="flex flex-1 overflow-hidden min-h-0">
+          {/* Editor body. `relative` anchors the layers panel's selection
+              tab (THU-30), which hangs off the panel over the canvas. */}
+          <div ref={editorBodyRef} className="relative flex flex-1 overflow-hidden min-h-0">
             {/* Left tool panel */}
             <div className="w-12 flex flex-col items-center gap-1 py-2 border-r border-white/5 bg-navy-800 shrink-0">
               <Tooltip content="Add image" side="right">
@@ -7636,8 +7782,39 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
               </div>
             </div>
 
+            {/* Layers panel selection tab (THU-30): the actions for the
+                current selection, beside its topmost row. Tooltips open to
+                the left, over the canvas. */}
+            {layerTabShown && layerTabActions.length > 0 && (
+              <div
+                ref={layerTabRef}
+                className="absolute z-20 flex flex-col gap-0.5 p-1 rounded-l-lg border border-white/10 border-r-0 bg-navy-800 shadow-lg"
+                style={{ top: layerTabPos?.top ?? 0, right: layerTabPos?.right ?? 0, visibility: layerTabPos ? 'visible' : 'hidden' }}
+              >
+                {layerTabActions.map(a => a.separator ? (
+                  <div key={a.key} className="h-px bg-white/10 my-0.5" />
+                ) : (
+                  <Tooltip key={a.key} content={a.disabled ? (a.reason ?? a.label ?? '') : (a.label ?? '')} side="left">
+                    <button
+                      type="button"
+                      onClick={() => { if (!a.disabled) a.onClick?.() }}
+                      disabled={a.disabled}
+                      onMouseEnter={() => setHighlightedIds(new Set(a.affects ?? []))}
+                      onMouseLeave={() => setHighlightedIds(EMPTY_ID_SET)}
+                      aria-label={a.label}
+                      className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                        a.danger ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/15' : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'
+                      }`}
+                    >
+                      {a.icon}
+                    </button>
+                  </Tooltip>
+                ))}
+              </div>
+            )}
+
             {/* Right panel: Layers + Assets + Properties */}
-            <div className="w-64 flex flex-col border-l border-white/5 bg-navy-800 shrink-0 overflow-hidden">
+            <div ref={rightPanelRef} className="w-64 flex flex-col border-l border-white/5 bg-navy-800 shrink-0 overflow-hidden">
               {/* Layers — collapsible like every sidebar panel (UI-polish
                   batch). The Edit/Preview toggle stays visible while
                   collapsed: it switches the whole editor's mode, not panel
@@ -7685,30 +7862,8 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                         </button>
                       </Tooltip>
                     </div>
-                    {/* Group / ungroup (THU-18). Disabled state carries the
-                        reason in its tooltip so the rule is discoverable. */}
-                    <div className="flex items-center gap-0.5">
-                      <Tooltip content={groupCheck.ok ? 'Group the selected layers (Ctrl+G)' : groupCheck.reason}>
-                        <button
-                          type="button"
-                          onClick={groupSelected}
-                          disabled={!groupCheck.ok}
-                          className={`p-1 rounded-md border flex items-center justify-center transition-colors ${groupCheck.ok ? 'bg-navy-900 border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5' : 'border-transparent text-gray-600 cursor-default'}`}
-                        >
-                          <GroupIcon size={13} />
-                        </button>
-                      </Tooltip>
-                      <Tooltip content={ungroupCheck.ok ? 'Ungroup (Ctrl+Shift+G)' : ungroupCheck.reason}>
-                        <button
-                          type="button"
-                          onClick={ungroupSelected}
-                          disabled={!ungroupCheck.ok}
-                          className={`p-1 rounded-md border flex items-center justify-center transition-colors ${ungroupCheck.ok ? 'bg-navy-900 border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/25 hover:bg-white/5' : 'border-transparent text-gray-600 cursor-default'}`}
-                        >
-                          <UngroupIcon size={13} />
-                        </button>
-                      </Tooltip>
-                    </div>
+                    {/* Group, ungroup, duplicate, and delete live in the
+                        selection tab beside the selected rows (THU-30). */}
                     <span className="text-[10px] text-gray-400">{layers.filter(l => !isGroup(l)).length}</span>
                   </div>
                 </div>
@@ -7803,7 +7958,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 // the same shared hoveredLayerId.
                                 onMouseEnter={() => setHoveredLayerId(layer.id)}
                                 onMouseLeave={() => setHoveredLayerId(null)}
-                                className={`flex items-center gap-1.5 pr-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${isSelected ? 'bg-accent-600/20' : hoveredLayerId === layer.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
+                                className={`flex items-center gap-1.5 pr-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 ${highlightedIds.has(layer.id) ? 'bg-accent-500/35 shadow-[inset_2px_0_0_0_theme(colors.accent.300)]' : isSelected ? 'bg-accent-600/20' : hoveredLayerId === layer.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isDragging ? 'opacity-40' : ''}`}
                                 style={{ paddingLeft: indent(depth) }}
                               >
                                 {group && (
@@ -7855,18 +8010,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 <AlertTriangle size={11} className="text-amber-400 shrink-0" />
                               </Tooltip>
                             )}
-                            <div className={`flex gap-0.5 opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''} transition-opacity`}>
-                              <Tooltip content={group ? 'Duplicate group' : 'Duplicate layer'} side="top">
-                                <button onClick={e => { e.stopPropagation(); duplicateLayer(layer.id) }} className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-300">
-                                  <Copy size={10} />
-                                </button>
-                              </Tooltip>
-                              <Tooltip content={group ? 'Delete group and its layers' : 'Delete layer'} side="top">
-                                <button onClick={e => { e.stopPropagation(); deleteLayerIds([layer.id]) }} className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400">
-                                  <Trash2 size={10} />
-                                </button>
-                              </Tooltip>
-                            </div>
+                            {/* Duplicate and delete moved to the selection
+                                tab (THU-30); the row keeps the eye and the
+                                name so indented names have the room. */}
                           </div>
                         </React.Fragment>
                       )

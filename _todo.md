@@ -36,18 +36,19 @@
 32. THU-28
 33. THU-19
 34. THU-29
-35. THU-21
-36. THU-1
-37. THU-8
-38. THU-9
-39. THU-10
-40. THU-12
-41. THU-16
-42. THU-23
-43. THU-20
-44. INTG-1
-45. STR-22
-46. STR-17
+35. THU-30
+36. THU-21
+37. THU-1
+38. THU-8
+39. THU-9
+40. THU-10
+41. THU-12
+42. THU-16
+43. THU-23
+44. THU-20
+45. INTG-1
+46. STR-22
+47. STR-17
 
 ## Improvement ideas
 
@@ -315,9 +316,13 @@
   Replicate the same stream/episode prev/next buttons and "current stream" section in the thumbnail editor. The sidebar is getting cramped already, so that might not be the best plcae for it, like the player page has. The header is probably the natural place since that's where the name of the stream item already lives.
   Built 2026-09-14, awaiting review. The shared StreamNavButtons component (streams sidebar, player) sits in the top bar between the stream title and the variant switcher, in a new `toolbar` size variant: previous and next stream, then the jump-to-episode list and previous and next episode once the series has neighbors. Adjacent streams are date-order neighbors across the whole library (every stream can carry a thumbnail, so none are skipped); episodes come from the shared series helper. The library listing the assets panel already loads feeds it, so it refreshes with the watcher. Switching opens the neighbor through the same path as the recents list (live meta plus series length for merge fields), and the canvas being left flushes its pending saves first. Keyboard: Ctrl+Up/Down walks streams, Ctrl+Shift+Up/Down walks episodes, matching the streams page and the player; the arrow-key nudge now ignores arrows with Ctrl held. Help panel lists both under a Navigate group. The "current stream" block itself was not replicated: the title (with its tooltip and link since THU-28) plus the variant switcher already cover it in the toolbar. Verify: open a thumbnail from a series with several episodes (both button groups, the episode list, tooltips naming the target), a standalone stream (episode buttons disabled), the oldest and newest streams (ends disabled), switch with unsaved edits and come back (edits kept), and the shortcuts with a layer selected (no nudge).
 
-- **THU-29**
+- **THU-29** [done]
   Keyboard layer selection in the thumbnail editor. Decided 2026-09-15: the bracket keys without Ctrl walk the selection the way Ctrl with them walks z-order. With nothing selected, [ selects the top layer and ] the bottom one (the way an arrow key enters an empty list). With a selection, ] selects the next layer up and [ the next one down among the siblings at that level (top level counts a group as one item, matching a canvas click; inside a group the walk stays among its members), stopping at the ends rather than wrapping; a multi-selection collapses to one layer, continuing from its topmost or bottommost member. Shift+] and Shift+[ jump to the top or bottom of the level, mirroring the Ctrl+Shift move-to-front and move-to-back. Enter with one group selected selects its first member and expands the group in the panel; Shift+Enter selects the group around the selected layer; both do nothing otherwise (Figma's convention, and the keyboard counterpart of the canvas double-click). Hidden layers are included in the walk, as the panel lists them. The layers panel scrolls the selected row into view for any single selection, keyboard or canvas click. Filed 2026-09-15.
   Built 2026-09-15, awaiting review. Pure helpers `walkSelection`, `enterGroup`, `leaveGroup` in lib/layerTree.ts (unit-checked); the key handler routes bare brackets and Enter through `selectFromKeyboard`, which expands every collapsed group above the target and selects it; a `data-layer-id` on each panel row plus an effect on the selection scroll the row into view (block nearest, so a visible row does not move). Help panel rows under the Edit group. Verify: brackets with nothing selected, walking a flat list to both ends, Shift to jump, a multi-selection collapsing, Enter into a collapsed group (expands, selects the top member), brackets inside the group staying inside, Shift+Enter back out, and a long layer list scrolling as the selection walks.
+
+- **THU-30**
+  Selection tab for the layers panel. Background: the panel header ran out of room once Group and Ungroup joined it, THU-21's mask actions needed a home, and multi-selections had no on-screen actions at all. Decided 2026-09-15 after weighing a bottom toolbar (generic), a tab per selected row (ambiguous scope with several selected: does Delete on one row delete one or all?), and an actions strip under each selected row (reflows the list on every selection change): one tab per selection. It slides out of the layers panel's left edge over the canvas, aligned with the topmost selected row and clamped to the panel's visible height so it never scrolls away, joined to the panel with no border on the shared edge so it reads as the panel growing a handle. One column of icon buttons the size of the toolbar's. With one layer selected it holds that layer's actions (Duplicate, Delete, Ungroup for a group; THU-21 adds Use as group mask and Release mask, THU-1 adds Apply as mask to the layer below). With several selected it holds whole-selection actions (Hide or Show all, Duplicate, Delete, Group, and Ungroup when the selection holds groups). Hovering any button lights up the rows it will affect. Rows shrink to the eye and the name (Duplicate and Delete leave the row hover state, Group and Ungroup leave the header), which gives indented names their room; the eye stays on every row because it is the one action fired on unselected layers. Hidden in preview mode and while the layers panel is collapsed. Filed 2026-09-15.
+  Built 2026-09-15, awaiting review. The tab is an absolutely positioned child of the editor body (now `relative`), measured from the topmost selected row's rect and the list's rect on selection, layer, collapse, scroll, resize, and panel-size changes (ResizeObserver on the list and the body); a selection with no visible row (inside a collapsed group) parks the tab at the top of the list. Tooltips open to the left. Highlight is a `highlightedIds` set on the row class, cleared whenever the selection changes so a button vanishing under the pointer cannot strand it. New whole-selection helpers: duplicate every selection root in one undo entry (copies become the selection), toggle visibility (hide all, or show all when any is hidden); Ungroup now dissolves the groups in a mixed selection and leaves the other layers selected (the keyboard shortcut gets the same). Group shows disabled with its reason when the selection cannot be grouped. Verify: single layer (Duplicate, Delete), single group (plus Ungroup), several layers (Hide/Show, Duplicate, Delete, Group), a mix with a group (Ungroup appears, only the groups dissolve), the highlight on hover for each button, the tab following the row as the list scrolls and parking at the edges, a selection inside a collapsed group, panel collapsed and preview mode (no tab), and that the row hover no longer shows duplicate or delete.
 
 - **THU-20**
   Add a new shape primitive to the thumbnail editor: arrows. These will need to have several options. Thickness of the stem, type of head, if possible, ability to curve the arrow, and change the flow of the stem (for instance having it smoothly taper to a point or not). And this arrow should have the same fill/stroke options available for the other primitive shapes. Arrows are very important to some for making thumbnails for youtube.
