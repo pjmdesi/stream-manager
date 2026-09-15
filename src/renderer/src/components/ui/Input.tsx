@@ -247,9 +247,12 @@ export const Select: React.FC<SelectProps> = ({
       )}
       <select
         id={inputId}
+        // select-themed (index.css): appearance-none plus a chevron drawn
+        // as a background, so the text sits at the same inset as Input's
+        // and no wrapper is needed for the arrow (APP-29).
         className={`
-          w-full bg-navy-900 border text-gray-200 text-sm rounded-lg
-          px-3 py-2
+          select-themed w-full bg-navy-900 border text-gray-200 text-sm rounded-lg
+          pl-3 pr-9 py-2
           focus:outline-none focus:ring-2 focus:ring-accent-500/50 focus:border-accent-500/50
           transition-colors duration-200
           ${error ? 'border-red-500/50' : 'border-white/10'}
@@ -306,6 +309,12 @@ interface NumberInputProps {
    *  pixel snap is on, and its rotation field always (THU-27). Typed values
    *  are never altered by it. */
   snapToStep?: boolean
+  /** Wraps or otherwise normalizes the value once editing settles: applied
+   *  to spinner and arrow-key steps and on blur (Enter blurs), never to a
+   *  keystroke, so the user can clear the field, type a minus sign, or
+   *  type past the range and see it fold when they are done. Angle fields
+   *  pass `normalizeAngle` (style guide, "Angle fields"). */
+  wrap?: (n: number) => number
   'aria-label'?: string
 }
 
@@ -324,13 +333,13 @@ interface NumberInputProps {
 export const NumberInput: React.FC<NumberInputProps> = ({
   value, onChange, min, max, step = 1, placeholder, disabled, className = '', title,
   inlineNote, frameless = false, merged = false, onEscape, disableShiftStep = false,
-  snapToStep = false, 'aria-label': ariaLabel,
+  snapToStep = false, wrap, 'aria-label': ariaLabel,
 }) => {
   const clamp = (n: number) => {
     let next = n
     if (min !== undefined) next = Math.max(min, next)
     if (max !== undefined) next = Math.min(max, next)
-    return next
+    return wrap ? wrap(next) : next
   }
   // Step amount honors Shift for a 10× nudge — matches the convention
   // in Photoshop / Affinity / Figma's number fields. The result snaps to
@@ -368,8 +377,14 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         type="number"
         value={Number.isFinite(value) ? value : ''}
         onChange={e => {
+          // Typed values are clamped to min/max but NOT wrapped: wrapping
+          // mid-keystroke would fold "-3" or "40" out from under the user.
           const n = Number(e.target.value)
-          onChange(Number.isFinite(n) ? clamp(n) : 0)
+          if (!Number.isFinite(n)) { onChange(0); return }
+          let next = n
+          if (min !== undefined) next = Math.max(min, next)
+          if (max !== undefined) next = Math.min(max, next)
+          onChange(next)
         }}
         // Arrow keys nudge the value (Shift → 10× step). We preventDefault
         // so the browser's native step doesn't fire alongside ours
@@ -387,6 +402,10 @@ export const NumberInput: React.FC<NumberInputProps> = ({
             e.preventDefault()
             e.stopPropagation()
             onEscape()
+          } else if (e.key === 'Enter') {
+            // Enter settles the field the way leaving it does (wrap runs
+            // in onBlur).
+            e.currentTarget.blur()
           }
         }}
         // Canonicalize what's DISPLAYED once editing ends. React compares a
@@ -397,6 +416,10 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         // only way to override that; the value itself is already clamped in
         // onChange, so this is purely cosmetic.
         onBlur={e => {
+          // Wrap settles here: a typed 400° becomes 40° once the user is
+          // done, and the re-render then rewrites the field.
+          const settled = wrap && Number.isFinite(value) ? wrap(value) : value
+          if (settled !== value) { onChange(settled); return }
           const canonical = Number.isFinite(value) ? String(value) : ''
           if (e.target.value !== canonical) e.target.value = canonical
         }}
