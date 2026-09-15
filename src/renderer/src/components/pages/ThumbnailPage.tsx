@@ -123,7 +123,11 @@ const ROTATION_SNAP_STEPS = { ctrl: 90, shift: 5 } as const
 const round2 = (v: number) => Math.round(v * 100) / 100
 
 /** One button in the layers panel's selection tab (THU-30). `affects` are
- *  the rows that light up while the button is hovered. */
+ *  the rows that light up while the button is hovered, in the button's
+ *  `tone`: red for destructive (delete), blue for structure changes (group,
+ *  ungroup), amber for the mask actions (THU-21), which change how several
+ *  layers render, and the accent for the rest. */
+type LayerTabTone = 'accent' | 'blue' | 'amber' | 'red'
 interface LayerTabAction {
   key: string
   separator?: boolean
@@ -131,11 +135,25 @@ interface LayerTabAction {
   label?: string
   disabled?: boolean
   reason?: string
-  danger?: boolean
+  tone?: LayerTabTone
   affects?: string[]
   onClick?: () => void
 }
-const EMPTY_ID_SET: ReadonlySet<string> = new Set()
+/** Full class strings per tone (Tailwind needs them written out). */
+const LAYER_TAB_BUTTON_TONE: Record<LayerTabTone, string> = {
+  accent: 'text-gray-400 hover:text-gray-200 hover:bg-white/10',
+  blue: 'text-gray-400 hover:text-blue-300 hover:bg-blue-500/15',
+  amber: 'text-gray-400 hover:text-amber-300 hover:bg-amber-500/15',
+  red: 'text-gray-400 hover:text-red-400 hover:bg-red-500/15',
+}
+const LAYER_ROW_AFFECTED_TONE: Record<LayerTabTone, string> = {
+  accent: 'bg-accent-600/30 after:bg-accent-400',
+  blue: 'bg-blue-600/30 after:bg-blue-400',
+  amber: 'bg-amber-600/30 after:bg-amber-400',
+  red: 'bg-red-600/30 after:bg-red-400',
+}
+interface LayerHighlight { ids: ReadonlySet<string>; tone: LayerTabTone }
+const NO_HIGHLIGHT: LayerHighlight = { ids: new Set(), tone: 'accent' }
 const byIdOf = (layers: ThumbnailLayer[], id: string): ThumbnailLayer => layers.find(l => l.id === id) ?? ({ type: 'image' } as ThumbnailLayer)
 function rotationSnapStep(ctrl: boolean, shift: boolean): number | null {
   if (shift) return ROTATION_SNAP_STEPS.shift
@@ -5860,7 +5878,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     radiusTR: number; radiusBR: number; filletTop: number; filletBottom: number
     spineRadiusTop: number; spineRadiusBottom: number
   } | null>(null)
-  const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string>>(EMPTY_ID_SET)
+  const [highlighted, setHighlighted] = useState<LayerHighlight>(NO_HIGHLIGHT)
   const layerTabShown = selectedIds.length > 0 && !layersCollapsed && !previewMode
   // Synced during render, not in an effect: the measurement below runs in a
   // layout effect, before the shared selectedIdsRef catches up, and read the
@@ -5960,7 +5978,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
 
   // A button that disappears under the pointer (the selection changed)
   // must not leave its highlight behind.
-  useEffect(() => { setHighlightedIds(EMPTY_ID_SET) }, [selectedIds])
+  useEffect(() => { setHighlighted(NO_HIGHLIGHT) }, [selectedIds])
 
   /** Duplicate every selected unit in one undo entry; the copies become
    *  the selection. */
@@ -6006,14 +6024,14 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       affects: subtree, onClick: duplicateSelected,
     })
     out.push({
-      key: 'delete', icon: <Trash2 size={14} />, danger: true,
+      key: 'delete', icon: <Trash2 size={14} />, tone: 'red',
       label: single ? (isGroup(single) ? 'Delete group and its layers' : 'Delete layer') : 'Delete the selected layers',
       affects: subtree, onClick: deleteSelected,
     })
     if (!single) {
       out.push({ key: 'sep-1', separator: true })
       out.push({
-        key: 'group', icon: <GroupIcon size={14} />, label: 'Group the selected layers (Ctrl+G)',
+        key: 'group', icon: <GroupIcon size={14} />, label: 'Group the selected layers (Ctrl+G)', tone: 'blue',
         disabled: !groupCheck.ok, reason: groupCheck.reason,
         affects: roots, onClick: groupSelected,
       })
@@ -6021,7 +6039,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     if (groupRoots.length > 0) {
       if (single) out.push({ key: 'sep-1', separator: true })
       out.push({
-        key: 'ungroup', icon: <UngroupIcon size={14} />,
+        key: 'ungroup', icon: <UngroupIcon size={14} />, tone: 'blue',
         label: groupRoots.length === 1 ? 'Ungroup (Ctrl+Shift+G)' : 'Ungroup the selected groups (Ctrl+Shift+G)',
         affects: groupRoots.flatMap(id => subtreeIds(layers, id)), onClick: ungroupSelected,
       })
@@ -7859,6 +7877,19 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
               {/* Inner tint matches a selected row (accent over the panel
                   background) so the tab reads as the selection's own. */}
               <div className="flex flex-col gap-0.5 p-1 bg-accent-600/15">
+                {/* Selection count, multi-selections only: a quiet check
+                    that the actions below apply to what the user thinks
+                    they do. A group counts as one, as it does in the panel. */}
+                {selectedIds.length > 1 && (
+                  <>
+                    <Tooltip content={`${selectedIds.length} layers selected`} side="left" triggerClassName="block w-full">
+                      <div className="w-full text-[10px] leading-none tabular-nums text-center text-gray-400 pt-0.5 pb-1 select-none" aria-label={`${selectedIds.length} selected`}>
+                        {selectedIds.length}
+                      </div>
+                    </Tooltip>
+                    <div className="h-px bg-white/10 mb-0.5" />
+                  </>
+                )}
                 {layerTabActions.map(a => a.separator ? (
                   <div key={a.key} className="h-px bg-white/10 my-0.5" />
                 ) : (
@@ -7867,12 +7898,10 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                       type="button"
                       onClick={() => { if (!a.disabled) a.onClick?.() }}
                       disabled={a.disabled}
-                      onMouseEnter={() => setHighlightedIds(new Set(a.affects ?? []))}
-                      onMouseLeave={() => setHighlightedIds(EMPTY_ID_SET)}
+                      onMouseEnter={() => setHighlighted({ ids: new Set(a.affects ?? []), tone: a.tone ?? 'accent' })}
+                      onMouseLeave={() => setHighlighted(NO_HIGHLIGHT)}
                       aria-label={a.label}
-                      className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                        a.danger ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/15' : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'
-                      }`}
+                      className={`p-1.5 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${LAYER_TAB_BUTTON_TONE[a.tone ?? 'accent']}`}
                     >
                       {a.icon}
                     </button>
@@ -8010,7 +8039,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                           // Members of a hidden group read as hidden too.
                           const dimmed = !layer.visible || hasHiddenAncestor(layers, layer.id)
                           const isHovered = hoveredLayerId === layer.id
-                          const isAffected = highlightedIds.has(layer.id)
+                          const isAffected = highlighted.ids.has(layer.id)
                           // Name brightness climbs with the row tone so the
                           // brighter backgrounds keep their contrast.
                           const nameTone = dimmed
@@ -8083,7 +8112,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 // driven by hoveredLayerId (set on mouse enter)
                                 // rather than a CSS hover so the states compose.
                                 className={`flex items-center gap-1.5 pr-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 transition-colors ${
-                                  isAffected ? 'bg-accent-600/30 relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-accent-400'
+                                  isAffected ? `${LAYER_ROW_AFFECTED_TONE[highlighted.tone]} relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5`
                                     : isSelected && isHovered ? 'bg-accent-600/[0.22]'
                                     : isSelected ? 'bg-accent-600/15'
                                     : isHovered ? 'bg-accent-600/[0.08]'
