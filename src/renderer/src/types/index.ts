@@ -97,7 +97,7 @@ export interface CustomPresetForm {
     channels: 'original' | 'stereo' | 'mono'
     /** When true, every audio track in the input is preserved (re-encoded
      *  with the same codec/bitrate, or copied if codec='copy'). When false
-     *  (default), ffmpeg's default behaviour applies: only the first audio
+     *  (default), ffmpeg's default behavior applies: only the first audio
      *  stream is included. Most useful for OBS multi-track recordings
      *  (game/mic/music). */
     keepAllTracks?: boolean
@@ -890,7 +890,7 @@ export interface ThumbnailLayer {
   /** Gradient stroke (THU-8): the stroke's counterpart of the fill
    *  gradient fields above, same conventions. `stroke` keeps mirroring the
    *  first stop so older app versions and solid mode degrade to a flat
-   *  stroke. The outline effect (a single-colour dilation) is separate and
+   *  stroke. The outline effect (a single-color dilation) is separate and
    *  overrides the stroke while enabled, gradient or not. */
   strokeType?: 'solid' | 'linear'
   strokeGradientStops?: { color: string; pos: number }[]
@@ -1037,15 +1037,15 @@ export interface ClipRegion {
   inPoint: number   // seconds
   outPoint: number  // seconds
   // Per-region 9:16 crop overrides. Undefined = fall back to defaults (0.5, 0.5, 1.0).
-  cropX?: number    // 0–1; horizontal centre (0 = left, 1 = right)
-  cropY?: number    // 0–1; vertical centre (only meaningful when cropScale < 1)
+  cropX?: number    // 0–1; horizontal center (0 = left, 1 = right)
+  cropY?: number    // 0–1; vertical center (only meaningful when cropScale < 1)
   cropScale?: number // 0.2–1.0; 1.0 = crop fills full video height, smaller = zoomed in
 }
 
 export interface ClipState {
   clipRegions: ClipRegion[]   // sorted by inPoint; no overlaps
   cropAspect: CropAspect
-  cropX: number               // 0–1; horizontal center of the 9:16 crop region (0 = left, 0.5 = centre, 1 = right)
+  cropX: number               // 0–1; horizontal center of the 9:16 crop region (0 = left, 0.5 = center, 1 = right)
   bleepRegions: BleepRegion[]
   bleepVolume: number         // 0–1; shared across all bleep markers
 }

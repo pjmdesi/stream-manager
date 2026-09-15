@@ -91,7 +91,7 @@ export interface DetectedStructure {
    *  - 'flat'    → date folders sit directly inside the chosen dir
    *  - 'nested'  → date folders sit under intermediate grouping (e.g. year/month)
    *  - 'dump'    → dated files in the chosen dir, no date subfolders
-   *  - 'unknown' → nothing recognisable */
+   *  - 'unknown' → nothing recognizable */
   layoutKind: 'flat' | 'nested' | 'dump' | 'unknown'
   /** For folder-per-stream: 0 = direct child, 1 = under one grouping level, etc. */
   nestingDepth: number

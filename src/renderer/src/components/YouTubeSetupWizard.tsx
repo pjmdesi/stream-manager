@@ -159,7 +159,7 @@ const CONSOLE_STEPS: { key: string; title: string; linkLabel: string; url: strin
           <span className="text-gray-300">Publish app</span>.
         </p>
         <p>
-          Greyed out behind an &ldquo;incomplete configuration&rdquo; banner? A field from the previous step
+          Grayed out behind an &ldquo;incomplete configuration&rdquo; banner? A field from the previous step
           is still empty. Open{' '}
           <button onClick={() => window.api.openUrl('https://console.cloud.google.com/auth/branding')} className="text-accent-400 hover:text-accent-300 hover:underline transition-colors">Branding</button>
           {' '}and check the list again (the two links are the easiest to miss: Google doesn&rsquo;t star them,

@@ -134,7 +134,7 @@ export function useWaveform(sources: string[], vStart: number, vEnd: number, dur
     }
     const gmax = Math.max(...filledRaw.map(globalMax))
 
-    // Per-source paths, each normalised to the SHARED gmax so the
+    // Per-source paths, each normalized to the SHARED gmax so the
     // amplitude difference between tracks is honest.
     const svgPaths = bucketed.map(b => b ? buildSvgPath(b.mins, b.maxs, gmax) : '')
 

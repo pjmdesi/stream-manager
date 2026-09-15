@@ -832,7 +832,7 @@ export function StreamsPage({
   // folder by path (not reference) so the modal survives a folders refresh.
   const [rescheduleTargetKey, setRescheduleTargetKey] = useState<string | null>(null)
   // Captured at click time from the sidebar's date dot — drives the
-  // RescheduleModal's pull-mode / conflict-mode behaviour. Cleared
+  // RescheduleModal's pull-mode / conflict-mode behavior. Cleared
   // when the modal closes so a subsequent normal reschedule reverts
   // to edit mode.
   const [rescheduleDateDirection, setRescheduleDateDirection] = useState<'local' | 'remote' | 'both' | 'unknown' | undefined>(undefined)
@@ -1833,7 +1833,7 @@ export function StreamsPage({
 
   // Open-in-Explorer is mode-aware: in dump-mode the folder doesn't
   // exclusively belong to one stream, so we reveal the first video file
-  // instead of the parent folder (matches StreamsPage behaviour).
+  // instead of the parent folder (matches StreamsPage behavior).
   const isDumpMode = streamMode === 'dump-folder'
   const handleOpenFolder = useCallback((folder: StreamFolder) => {
     if (isDumpMode && folder.videos.length > 0) window.api.openInExplorer(folder.videos[0])
@@ -2528,7 +2528,7 @@ export function StreamsPage({
     await refreshOutOfSyncRef.current()
   }, [updateMeta])
 
-  // Push to Twitch. Honours syncTitle/syncGame: when sync is on (or
+  // Push to Twitch. Honors syncTitle/syncGame: when sync is on (or
   // undefined), the YouTube title/game stand in for the Twitch fields. Tags
   // get sanitised through toTwitchCompatibleTags so anything that violates
   // Twitch's alphanumeric/≤25-char rule is silently dropped (matching the
@@ -2931,7 +2931,7 @@ export function StreamsPage({
 
   // Autocomplete option pools — built from existing folders so users can
   // re-pick games they've used before. Stream-types also seed from the
-  // tagColors map so customised types appear even on streams where they
+  // tagColors map so customized types appear even on streams where they
   // haven't been used yet.
   const allGames = useMemo(() => {
     const set = new Set<string>()
@@ -7176,7 +7176,7 @@ function SidebarDetail({
   // Season change → normalize empty/<1 to '1' (so series association
   // doesn't break against folders whose ytSeason is undefined) AND
   // auto-recount the episode for the new season. Mirrors the old
-  // metamodal behaviour where editing the season resets the episode
+  // metamodal behavior where editing the season resets the episode
   // counter so the user doesn't end up with E5 of S2 when S2 is empty.
   const handleSeasonSave = (v: string) => {
     const parsed = parseInt(v, 10)
@@ -9519,7 +9519,7 @@ function MetaRow({ label, mergeHint, right, attachRight, highlighted, mismatched
 }
 
 /** Inline text editor with autosave-on-blur and focus-aware external
- *  refresh. Behaviour:
+ *  refresh. Behavior:
  *  - The component owns a `local` working copy distinct from the `value`
  *    prop, so the user can type freely.
  *  - When `value` changes externally (e.g. a streams:changed refresh),

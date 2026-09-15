@@ -343,7 +343,7 @@ const speedLabel = (r: number): string => (r === 0.25 ? '¼×' : r === 0.5 ? '½
 // Receives a precomputed SVG path so the parent can call useWaveform
 // once with every extracted track and have all of them share a single
 // `gmax`. That way a quiet mic track renders shorter peaks than a loud
-// game track instead of each one being normalised to its own peak.
+// game track instead of each one being normalized to its own peak.
 function TrackWaveformStrip({
   path, peakCount, loading, dimmed, volume, fillClass, onScrubStart, onHover, onHoverLeave,
 }: {
@@ -355,7 +355,7 @@ function TrackWaveformStrip({
   dimmed: boolean
   /** 0–1 — scales the waveform's vertical amplitude so the visible peaks
    *  shrink as the user drags the volume slider down. The path itself is
-   *  normalised; we apply scaleY via CSS rather than rebuilding the path
+   *  normalized; we apply scaleY via CSS rather than rebuilding the path
    *  so dragging stays cheap (no recompute on every input event). */
   volume: number
   /** Tailwind `fill-…/70` class derived from the track's chosen color
@@ -804,7 +804,7 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
   const [outputDir, setOutputDir] = useState('')
   const [suffix, setSuffix] = useState(defaultSuffix || '_clip')
   // Per-track export selection. Initial value follows the rule the user
-  // wrote up: pristine state = include every track; otherwise honour the
+  // wrote up: pristine state = include every track; otherwise honor the
   // current audio settings — extracted-and-not-muted tracks start
   // checked, unextracted tracks start unchecked (the user can still add
   // any of those by ticking the box — main process pulls them straight
@@ -2651,7 +2651,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       if (ne > dur) { ne = dur; ns = Math.max(0, dur - span) }
       setViewportManual({ viewStart: ns, viewEnd: ne })
     } else {
-      // Zoom: vertical scroll, centred on cursor position
+      // Zoom: vertical scroll, centered on cursor position
       const cursorRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
       const cursorTime = viewStart + cursorRatio * span
       const factor = e.deltaY < 0 ? 0.7 : 1 / 0.7
@@ -3315,7 +3315,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     return () => document.removeEventListener('mousedown', handler)
   }, [activeBleepId])
 
-  // Move an existing bleep region by dragging its centre area
+  // Move an existing bleep region by dragging its center area
   const startBleepMove = useCallback((e: React.MouseEvent, bleepId: string, wrapperRect: DOMRect) => {
     e.preventDefault()
     e.stopPropagation()
@@ -3846,7 +3846,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   // Waveform sources. In single-track mode this is just the video file
   // (so the legacy single waveform strip renders it). In multi-track mode
   // it's every extracted track, in track-index order — the hook returns
-  // a parallel `svgPaths` array where each entry is normalised to the
+  // a parallel `svgPaths` array where each entry is normalized to the
   // shared peak across all tracks, so quiet tracks look quiet relative
   // to loud ones rather than each filling its row.
   const waveformSources = useMemo(() => {
@@ -3860,7 +3860,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   }, [state.filePath, multiTrackEnabled, state.tracks])
 
   const { svgPath: waveformPath, svgPaths: trackWaveformPaths, peakCount, loading: waveformLoading } = useWaveform(waveformSources, vStart, vEnd, duration)
-  // Map track.index → its individually-normalised path, in the order the
+  // Map track.index → its individually-normalized path, in the order the
   // hook produced them. Lookups stay O(1) and the map is stable as long
   // as the underlying svgPaths array reference is.
   const trackPathByIndex = useMemo(() => {

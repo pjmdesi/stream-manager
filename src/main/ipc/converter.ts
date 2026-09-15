@@ -31,7 +31,7 @@ export interface CustomPresetForm {
     channels: 'original' | 'stereo' | 'mono'
     /** When true, every audio track in the input is preserved (re-encoded
      *  with the same codec/bitrate, or copied if codec='copy'). When false
-     *  (default), ffmpeg's default behaviour applies: only the first audio
+     *  (default), ffmpeg's default behavior applies: only the first audio
      *  stream is included. Most useful for OBS multi-track recordings. */
     keepAllTracks?: boolean
   }
@@ -637,7 +637,7 @@ function hbPresetToFfmpegArgs(p: any): string {
     }
   }
 
-  // Web optimisation (faststart for MP4)
+  // Web optimization (faststart for MP4)
   if (p.Optimize) args.push('-movflags +faststart')
 
   return args.join(' ')
@@ -1011,7 +1011,7 @@ export async function startConversionJob(
       }
       // Group bookkeeping — a failure short-circuits the hook for the whole group.
       maybeFireGroupHook(id)
-      // Group continues despite errors (preserves the prior archive behaviour
+      // Group continues despite errors (preserves the prior archive behavior
       // of trying every file in the folder even if some fail).
       scheduleNext()
       reject(err)
@@ -1460,7 +1460,7 @@ export function registerConverterIPC(): void {
     bleepVolume: number
     /** Source audio track indices to include in the clip's audio mix.
      *  Omitted / empty / invalid = use every track on the source (the
-     *  legacy behaviour). Index 0 is the video's first audio track. */
+     *  legacy behavior). Index 0 is the video's first audio track. */
     audioTrackIndices?: number[]
     /** Per-track volume scalar (0–1+ with 1 = unity). Mirrors what the
      *  user set in the audio-controls row during editing. Missing

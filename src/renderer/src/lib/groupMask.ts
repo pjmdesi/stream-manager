@@ -40,7 +40,7 @@ function traceRoundedRect(ctx: PathContext, w: number, h: number, radius: number
 }
 
 /** Trace the shape's outline in its own local space (0..width, 0..height,
- *  before position and rotation). Flips mirror about the box centre, as the
+ *  before position and rotation). Flips mirror about the box center, as the
  *  rendered shape does. */
 export function traceShapeOutlineLocal(ctx: PathContext, layer: ThumbnailLayer): void {
   const w = layer.width ?? 200

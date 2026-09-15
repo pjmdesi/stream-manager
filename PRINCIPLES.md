@@ -44,7 +44,7 @@ down or if YouTube is. This request sends nothing about you, and it only runs
 after a failure.
 
 *Where this lives:* `src/main/services/updateCheck.ts` (6 hour cache TTL,
-honours the `checkForUpdates` setting); `src/main/ipc/net.ts` (the two
+honors the `checkForUpdates` setting); `src/main/ipc/net.ts` (the two
 connectivity probes, reactive only, 30 second result cache). No analytics or
 telemetry package is a dependency.
 
@@ -91,7 +91,7 @@ background or tray-initiated actions raise and focus the main window and surface
 in-app instead.
 
 *What would break it:* any toast library, any use of the Windows notification
-centre, any modal that appears on launch to announce a change.
+center, any modal that appears on launch to announce a change.
 
 ## When something fails, it says so, and says why
 

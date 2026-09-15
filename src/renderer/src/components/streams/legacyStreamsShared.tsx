@@ -324,7 +324,7 @@ function streamIndex(folderName: string): number {
   return m ? parseInt(m[1], 10) : 1
 }
 
-// Normalise legacy string streamType values from stored JSON to the new string[] format
+// Normalize legacy string streamType values from stored JSON to the new string[] format
 function normalizeStreamTypes(v: string | string[] | undefined): string[] {
   if (!v) return []
   return Array.isArray(v) ? v : [v]
@@ -4098,7 +4098,7 @@ export function StreamsPage({
       // and releases outside the handle, that ancestor is the row — so
       // the action panel would toggle even though the handle is tagged
       // `data-no-row-toggle`. Swallow exactly one click in the capture
-      // phase to neutralise the post-drag synthesis. A setTimeout fallback
+      // phase to neutralize the post-drag synthesis. A setTimeout fallback
       // detaches the listener even if no click fires (defensive — keeps
       // a future legitimate click from being eaten).
       let removed = false

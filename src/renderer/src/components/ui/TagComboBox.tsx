@@ -108,7 +108,7 @@ function ComboTagChip({
     </span>
   )
   // Tooltip selection: when selectable, show contextual affordance
-  // hint; otherwise fall back to the truncation-only behaviour so
+  // hint; otherwise fall back to the truncation-only behavior so
   // short chips don't carry a redundant tip echoing their own text.
   const tooltipContent = onSelect
     ? (isSelected
@@ -176,7 +176,7 @@ function SuggestionsPortal({
           const parentRect = scrollParent.getBoundingClientRect()
           // Hide when the anchor is entirely above or below the scroll
           // container's visible area. Partial overlap still renders the
-          // dropdown — that matches native <select> behaviour and lets
+          // dropdown — that matches native <select> behavior and lets
           // the user keep typing as they scroll the input into view.
           if (anchorRect.bottom < parentRect.top || anchorRect.top > parentRect.bottom) {
             setRect(null)

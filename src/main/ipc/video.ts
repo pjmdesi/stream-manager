@@ -33,7 +33,7 @@ export function registerVideoIPC(): void {
 
       // Always pull the existing cache entry first so partial caches survive
       // across calls. The new per-track multi-track flow asks for one index
-      // at a time; we want each call to honour what's already cached and
+      // at a time; we want each call to honor what's already cached and
       // only run ffmpeg for slots that aren't.
       const { probeFile, extractAudioTracks } = await import('../services/ffmpegService')
       const info = await probeFile(filePath)

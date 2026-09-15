@@ -105,7 +105,7 @@ function describeDetection(d: DetectedStructure): { tone: DetectionTone; headlin
   }
   return {
     tone: 'warn',
-    headline: 'Nothing recognisable in this folder',
+    headline: 'Nothing recognizable in this folder',
     detail: 'Stream Manager looks for date-named folders (YYYY-MM-DD) or files whose names include a date. This is usually a sign that the wrong folder was selected — try picking the folder where your streams actually live. If you have an unusual layout, you can choose a mode manually below.',
   }
 }

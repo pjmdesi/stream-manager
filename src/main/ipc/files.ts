@@ -55,7 +55,7 @@ export function isFileConfirmedLocal(filePath: string): boolean {
 
 /**
  * Returns a boolean per path: true = file data is local, false = offline/cloud placeholder.
- * Falls back to true (assume local) on non-Windows or any error so behaviour is unchanged.
+ * Falls back to true (assume local) on non-Windows or any error so behavior is unchanged.
  * Uses async spawn so it never blocks the main thread.
  */
 export async function checkLocalFiles(filePaths: string[]): Promise<boolean[]> {

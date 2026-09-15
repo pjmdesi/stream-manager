@@ -45,7 +45,7 @@ export interface VideoPlayerState {
 /** Compute and apply effective audibility across the video element +
  *  all extracted audio elements, given the current set of M/S flags.
  *  When any track has solo=true, every non-solo track is forced silent
- *  regardless of its own muted flag — standard DAW behaviour. */
+ *  regardless of its own muted flag — standard DAW behavior. */
 function applyAudibility(
   tracks: TrackState[],
   multiTrackEnabled: boolean,
@@ -438,7 +438,7 @@ export function useVideoPlayer() {
 
     const onPlay = () => {
       setState(prev => ({ ...prev, isPlaying: true }))
-      // Honour the effective-audibility table on play so muted/solo'd tracks
+      // Honor the effective-audibility table on play so muted/solo'd tracks
       // don't start sounding when the user hits Play.
       for (const t of tracksRef.current) {
         if (!t.audioEl) continue

@@ -117,7 +117,7 @@ export function markQuotaExceeded(): void {
 
 /** Returns the current quota state. Lazy auto-clears if we've passed
  *  the cached `resetsAt` — callers don't need to poll a clear-loop.
- *  Honours the dev-only `forcedExceeded` flag so we can exercise
+ *  Honors the dev-only `forcedExceeded` flag so we can exercise
  *  outage paths without hitting a real 403; the synthetic resetsAt
  *  rolls forward if the day flips while the toggle is on so the
  *  banner's countdown stays accurate. */

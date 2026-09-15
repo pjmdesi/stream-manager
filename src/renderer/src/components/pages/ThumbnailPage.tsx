@@ -407,7 +407,7 @@ function directChildIdUnder(target: Konva.Node, groupId: string): string | null 
 
 // ── Group effects (THU-31) ────────────────────────────────────────────────────
 // A group has no shadow of its own in Konva (shadows are a Shape feature),
-// so a group with shadows or an outline rasterises its clipped content once
+// so a group with shadows or an outline rasterizes its clipped content once
 // per change and draws ghost images beneath it: one per shadow, carrying
 // that shadow, plus the outline ring. The ghosts sit OUTSIDE the clip, so a
 // shadow extends past the mask the way a shadow under a cut-out should.
@@ -434,7 +434,7 @@ async function waitForGroupRasters(timeoutMs = 3000): Promise<void> {
 }
 
 const outlineActiveOn = (l: ThumbnailLayer): boolean => !!l.outlineEnabled && (l.outlineWidth ?? 0) > 0
-/** Shadows, outline, or filters: anything that makes the group rasterise. */
+/** Shadows, outline, or filters: anything that makes the group rasterize. */
 function groupHasEffects(l: ThumbnailLayer): boolean {
   return resolveShadows(l).length > 0 || outlineActiveOn(l) || activeFilters(l).length > 0
 }
@@ -963,7 +963,7 @@ function ImageNode(props: KonvaLayerNodeProps) {
   // across all clones in the multi-shadow stack so we only build it
   // once per param change, not once per shadow entry.
   const outlinedCanvas = useOutlinedCanvas(img, layer.outlineEnabled, layer.outlineColor, layer.outlineWidth, w, h)
-  // An enclosing group with effects (THU-31) rasterises what its members
+  // An enclosing group with effects (THU-31) rasterizes what its members
   // paint; a bitmap or outlined canvas arriving after a commit is a change
   // it cannot see through the layers, so tell it.
   useEffect(() => { if (img) notifyContentChanged() }, [img, outlinedCanvas])
@@ -1112,7 +1112,7 @@ function TextNode(props: KonvaLayerNodeProps) {
     }
   }
   // Gradient stroke (THU-8): same geometry over the same box. Skipped
-  // while the outline effect overrides the stroke with its single colour.
+  // while the outline effect overrides the stroke with its single color.
   // Spread only when active: the keys' absence is what makes react-konva
   // reset Konva's stroke gradient to none.
   const strokeGradientProps = !outlineActive && gradW > 0 && gradH > 0
@@ -1326,7 +1326,7 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
   // coordinates, clip included, into an offscreen canvas. Shadows and
   // outline copy that canvas for their ghosts; filters keep the cache and
   // run Konva's filter chain over it (the cached hit canvas keeps each
-  // member's colour key, so clicks and drill-down still reach members).
+  // member's color key, so clicks and drill-down still reach members).
   // Without filters the cache is cleared at once so the container stays
   // live. Runs a frame after each change of the group's subtree
   // (contentKey), of the outline, or of the clip, and again whenever a
@@ -1396,7 +1396,7 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
       const node = innerRef.current
       if (node) { node.filters([]); node.clearCache() }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- contentKey serialises the subtree, the group's own filter and outline fields included
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- contentKey serializes the subtree, the group's own filter and outline fields included
   }, [hasEffects, hasGhosts, hasFilters, paused, contentKey, clip])
 
   return (
@@ -1513,7 +1513,7 @@ function MaskNode(props: KonvaLayerNodeProps) {
         }}
       />
       {/* The selection outline is drawn by GroupNode, outside the clipped
-          (and possibly cached) container, so it is never rasterised. */}
+          (and possibly cached) container, so it is never rasterized. */}
     </KonvaGroup>
   )
 }
@@ -1565,8 +1565,8 @@ function LayerNodes({ layers, parentId, makeProps }: {
         if (layer === mask) return <MaskNode key={layer.id} {...maskProps!} />
         const props = makeProps(layer)
         if (layer.type === 'group') {
-          // Groups with effects (THU-31) re-rasterise when their subtree
-          // changes; the key is the subtree's serialisation, computed only
+          // Groups with effects (THU-31) re-rasterize when their subtree
+          // changes; the key is the subtree's serialization, computed only
           // for groups that need it.
           let contentKey = ''
           if (groupHasEffects(layer)) {
@@ -1994,7 +1994,7 @@ function BackgroundRerender({ request }: { request: (PendingThumbnailStream & { 
           while (pending().length > 0 && Date.now() - start < 5000) {
             await nextFrame()
           }
-          // Group effects (THU-31) rasterise after the images land.
+          // Group effects (THU-31) rasterize after the images land.
           await waitForGroupRasters()
           await nextFrame()
         }
@@ -2909,7 +2909,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
   // so adding a stop doesn't change the ramp.
   const addStop = (pos: number, color?: string) => {
     const clamped = Math.round(Math.min(1, Math.max(0, pos)) * 100) / 100
-    // A dropped swatch supplies the colour; otherwise the new stop samples
+    // A dropped swatch supplies the color; otherwise the new stop samples
     // the gradient at its position so adding it does not change the ramp.
     const next = [...stops, { color: color ?? sampleGradientAt(stops, space, clamped, gStyle), pos: clamped }]
     lastTouchedRef.current = stops.length
@@ -2931,7 +2931,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
     addStop((a.pos + b.pos) / 2, color)
   }
   // The Add stop button is a drop target for solid swatches: the dropped
-  // colour becomes a new stop at the smart position. It claims the drag
+  // color becomes a new stop at the smart position. It claims the drag
   // (preventDefault) so the control's own drop handler, which would
   // otherwise replace the whole gradient with the solid, stands down.
   const [addStopDragHover, setAddStopDragHover] = useState(false)
@@ -4708,7 +4708,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   // the state never carries a legacy shape: saved triangles become
   // three-sided polygons with their box refitted (THU-2). Unchanged lists
   // come back by identity, so this is free for current files.
-  // Load-time normalisation: legacy triangles become polygons, and mask
+  // Load-time normalization: legacy triangles become polygons, and mask
   // flags are validated and pinned (THU-21).
   const resetLayers = useCallback((next: ThumbnailLayer[]) => resetLayersRaw(pinMasks(normalizeLayers(next))), [resetLayersRaw])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -5826,7 +5826,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     while (pending().length > 0 && Date.now() - start < timeoutMs) {
       await new Promise<void>(r => requestAnimationFrame(() => r()))
     }
-    // Group shadows and outlines (THU-31) rasterise a frame after the
+    // Group shadows and outlines (THU-31) rasterize a frame after the
     // images land; a snapshot taken before that would miss them.
     await waitForGroupRasters(Math.max(0, timeoutMs - (Date.now() - start)))
   }, [])
