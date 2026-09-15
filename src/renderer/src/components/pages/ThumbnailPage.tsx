@@ -2907,9 +2907,11 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
   // New stops APPEND to the array (stable identity); the sorted display
   // slots them into place. The color samples the gradient at the position
   // so adding a stop doesn't change the ramp.
-  const addStop = (pos: number) => {
+  const addStop = (pos: number, color?: string) => {
     const clamped = Math.round(Math.min(1, Math.max(0, pos)) * 100) / 100
-    const next = [...stops, { color: sampleGradientAt(stops, space, clamped, gStyle), pos: clamped }]
+    // A dropped swatch supplies the colour; otherwise the new stop samples
+    // the gradient at its position so adding it does not change the ramp.
+    const next = [...stops, { color: color ?? sampleGradientAt(stops, space, clamped, gStyle), pos: clamped }]
     lastTouchedRef.current = stops.length
     stopIdsRef.current.ids = [...stopIds, nextStopIdRef.current++]
     update(paintPatch({ stops: next }))
@@ -2919,15 +2921,20 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
   // neighbor ABOVE in the sorted rows (the top-most anchor uses the
   // neighbor below instead). The new stop becomes the anchor, so repeated
   // clicks keep subdividing.
-  const addStopSmart = () => {
+  const addStopSmart = (color?: string) => {
     const lt = lastTouchedRef.current
     const anchorOrig = lt !== null && lt < stops.length ? lt : sortedOrder[sortedOrder.length - 1].origIdx
     const rowIdx = sortedOrder.findIndex(o => o.origIdx === anchorOrig)
     const neighborRow = rowIdx > 0 ? rowIdx - 1 : rowIdx + 1
     const a = sortedOrder[rowIdx].st
     const b = sortedOrder[neighborRow].st
-    addStop((a.pos + b.pos) / 2)
+    addStop((a.pos + b.pos) / 2, color)
   }
+  // The Add stop button is a drop target for solid swatches: the dropped
+  // colour becomes a new stop at the smart position. It claims the drag
+  // (preventDefault) so the control's own drop handler, which would
+  // otherwise replace the whole gradient with the solid, stands down.
+  const [addStopDragHover, setAddStopDragHover] = useState(false)
   const removeStop = (idx: number) => {
     if (stops.length <= 2) return
     const lt = lastTouchedRef.current
@@ -3232,11 +3239,32 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
               last-touched stop, sampling the gradient's color there so
               the ramp doesn't change. Sits between the stops and the
               angle/blend row — it acts on the stops list above it. */}
-          <Tooltip content="Add a stop halfway between the last edited stop and its neighbor above. Its color samples the gradient there, so the look doesn't change." triggerClassName="flex">
+          <Tooltip content="Add a stop halfway between the last edited stop and its neighbor above. Its color samples the gradient there, so the look doesn't change. Drop a color swatch here to add it as a stop instead." triggerClassName="flex">
             <button
               type="button"
-              onClick={addStopSmart}
-              className="flex-1 flex items-center justify-center gap-1 py-1 rounded-md bg-navy-900 border border-white/10 text-[10px] text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+              onClick={() => addStopSmart()}
+              onDragEnter={e => { if (e.dataTransfer.types.includes(COLOR_DRAG_MIME)) e.preventDefault() }}
+              onDragOver={e => {
+                if (!e.dataTransfer.types.includes(COLOR_DRAG_MIME)) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                setAddStopDragHover(true)
+              }}
+              onDragLeave={e => {
+                const related = e.relatedTarget as Node | null
+                if (related && e.currentTarget.contains(related)) return
+                setAddStopDragHover(false)
+              }}
+              onDrop={e => {
+                setAddStopDragHover(false)
+                const color = e.dataTransfer.getData(COLOR_DRAG_MIME)
+                if (!color) return
+                e.preventDefault()
+                addStopSmart(color)
+              }}
+              className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-md bg-navy-900 border text-[10px] transition-colors ${
+                addStopDragHover ? 'border-accent-300/60 text-gray-200 bg-white/5' : 'border-white/10 text-gray-400 hover:text-gray-200 hover:bg-white/5'
+              }`}
             >
               <Plus size={11} />
               Add stop
