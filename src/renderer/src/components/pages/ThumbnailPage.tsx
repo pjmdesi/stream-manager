@@ -363,6 +363,9 @@ interface KonvaLayerNodeProps {
    *  drags, so its events reach the enclosing group, which is what a click
    *  on a group member selects. */
   inert?: boolean
+  /** Groups only (THU-31): a canvas gesture is moving a layer inside this
+   *  group, so its shadow and outline ghosts are dropped until release. */
+  effectsPaused?: boolean
 }
 
 /** The event props every layer wrapper (image, text, shape, group) puts on
@@ -386,16 +389,96 @@ function wrapperHandlers(p: KonvaLayerNodeProps) {
 }
 
 /** Walk up from the Konva node under the pointer to the wrapper that is a
- *  DIRECT member of `groupId`, and return its layer id. */
+ *  DIRECT member of `groupId`, and return its layer id. Members live in the
+ *  group's inner (clipping) container, one level under the node that
+ *  carries the group's id (see GroupNode). */
 function directChildIdUnder(target: Konva.Node, groupId: string): string | null {
   let n: Konva.Node | null = target
   while (n) {
     const parent = n.getParent()
     if (!parent) return null
     if (parent.id() === groupId) return n.id() || null
+    if (parent.name() === GROUP_INNER_NAME && parent.getParent()?.id() === groupId) return n.id() || null
     n = parent
   }
   return null
+}
+
+// ── Group effects (THU-31) ────────────────────────────────────────────────────
+// A group has no shadow of its own in Konva (shadows are a Shape feature),
+// so a group with shadows or an outline rasterises its clipped content once
+// per change and draws ghost images beneath it: one per shadow, carrying
+// that shadow, plus the outline ring. The ghosts sit OUTSIDE the clip, so a
+// shadow extends past the mask the way a shadow under a cut-out should.
+
+/** Name of the inner container that carries the clip and the members. */
+const GROUP_INNER_NAME = 'group-inner'
+/** Name of a selected mask's dashed outline node (editor chrome inside the
+ *  content layer; hidden for every snapshot). */
+const MASK_OUTLINE_NAME = 'mask-outline'
+
+/** Members tell groups with effects when what they paint changed without a
+ *  layers commit (an image bitmap arriving, an outlined canvas landing). */
+const contentListeners = new Set<() => void>()
+function notifyContentChanged(): void { contentListeners.forEach(fn => fn()) }
+
+/** Rasters in flight; the export and the background re-render wait for
+ *  zero so a snapshot never misses a group's shadow. */
+let pendingGroupRasters = 0
+async function waitForGroupRasters(timeoutMs = 3000): Promise<void> {
+  const start = Date.now()
+  while (pendingGroupRasters > 0 && Date.now() - start < timeoutMs) {
+    await new Promise<void>(r => requestAnimationFrame(() => r()))
+  }
+}
+
+const outlineActiveOn = (l: ThumbnailLayer): boolean => !!l.outlineEnabled && (l.outlineWidth ?? 0) > 0
+function groupHasEffects(l: ThumbnailLayer): boolean {
+  return resolveShadows(l).length > 0 || outlineActiveOn(l)
+}
+
+interface GroupRaster {
+  /** What the shadows attach to: the content, dilated when the outline is
+   *  on. Positioned at (x, y) in the group's own frame. */
+  silhouette: HTMLCanvasElement
+  x: number
+  y: number
+  /** The outline ring alone (dilation minus the content's own coverage),
+   *  drawn beneath the live content; null with the outline off. */
+  ring: HTMLCanvasElement | null
+}
+
+/** Build the ghost canvases from a raster of the group's clipped content
+ *  (`base`, whose top-left sits at (x, y) in the group's frame). */
+function buildGroupRaster(base: HTMLCanvasElement, x: number, y: number, layer: ThumbnailLayer): GroupRaster {
+  if (!outlineActiveOn(layer)) return { silhouette: base, x, y, ring: null }
+  const pad = Math.max(1, Math.round(layer.outlineWidth ?? 0))
+  const w = base.width + pad * 2
+  const h = base.height + pad * 2
+  const full = document.createElement('canvas')
+  full.width = w; full.height = h
+  const fctx = full.getContext('2d')!
+  fctx.drawImage(base, pad, pad)
+  const data = fctx.getImageData(0, 0, w, h)
+  const originalAlpha = new Uint8ClampedArray(w * h)
+  for (let i = 0, p = 3; i < originalAlpha.length; i++, p += 4) originalAlpha[i] = data.data[p]
+  makeOutlineFilter(pad, layer.outlineColor ?? '#000000')(data)
+  fctx.putImageData(data, 0, 0)
+  // Ring only: knock the content's own coverage out of the dilated result,
+  // so a translucent member does not see a filled copy of itself beneath.
+  const ring = document.createElement('canvas')
+  ring.width = w; ring.height = h
+  const rctx = ring.getContext('2d')!
+  const rd = rctx.createImageData(w, h)
+  const src = data.data
+  for (let i = 0, p = 0; i < originalAlpha.length; i++, p += 4) {
+    const a0 = originalAlpha[i]
+    if (a0 >= 128) continue
+    rd.data[p] = src[p]; rd.data[p + 1] = src[p + 1]; rd.data[p + 2] = src[p + 2]
+    rd.data[p + 3] = a0 > 0 ? Math.round(src[p + 3] * (1 - a0 / 255)) : src[p + 3]
+  }
+  rctx.putImageData(rd, 0, 0)
+  return { silhouette: full, x: x - pad, y: y - pad, ring }
 }
 
 /** Replace {field} markers in `text` with values from `fields`. When fields
@@ -858,6 +941,10 @@ function ImageNode(props: KonvaLayerNodeProps) {
   // across all clones in the multi-shadow stack so we only build it
   // once per param change, not once per shadow entry.
   const outlinedCanvas = useOutlinedCanvas(img, layer.outlineEnabled, layer.outlineColor, layer.outlineWidth, w, h)
+  // An enclosing group with effects (THU-31) rasterises what its members
+  // paint; a bitmap or outlined canvas arriving after a commit is a change
+  // it cannot see through the layers, so tell it.
+  useEffect(() => { if (img) notifyContentChanged() }, [img, outlinedCanvas])
   const useOutlined = outlinedCanvas !== null
   const imageSource = useOutlined ? outlinedCanvas : img
   // When using the outlined canvas, expand the rendered KonvaImage to
@@ -1178,17 +1265,76 @@ function ShapeNode(props: KonvaLayerNodeProps) {
  *  and visibility, with its members rendered inside it so every transform
  *  composes. A click selects the group; a double-click selects the member
  *  under the pointer (double-click again on a nested group to go deeper). */
-function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; maskLayer?: ThumbnailLayer }) {
-  const { layer, onSelect, children, maskLayer } = props
+function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; maskLayer?: ThumbnailLayer; contentKey: string }) {
+  const { layer, onSelect, children, maskLayer, contentKey } = props
+  const innerRef = useRef<Konva.Group>(null)
+  const [raster, setRaster] = useState<GroupRaster | null>(null)
+  const shadows = resolveShadows(layer)
+  const hasEffects = shadows.length > 0 || outlineActiveOn(layer)
+  const paused = !!props.effectsPaused
   const drill = (e: Konva.KonvaEventObject<unknown>) => {
     if (props.nested) e.cancelBubble = true
     const childId = directChildIdUnder(e.target, layer.id)
     if (childId) onSelect(childId, false)
   }
-  // Group mask (THU-21): Konva clips the group's children (scene and hit
-  // graph alike) to the path this traces in the group's own space. A
-  // hidden mask switches the clip off, which doubles as the mask toggle.
+  // Group mask (THU-21): Konva clips the inner container's children (scene
+  // and hit graph alike) to the path this traces in the group's own space.
+  // A hidden mask switches the clip off, which doubles as the mask toggle.
   const clip = maskLayer && maskLayer.visible ? maskLayer : undefined
+
+  // Effects raster (THU-31). Konva's cache() renders a node in its own
+  // local coordinates, clip included, into an offscreen canvas; the copy
+  // becomes the ghosts' source and the cache is cleared at once so the
+  // inner container stays live. Runs a frame after each change of the
+  // group's subtree (contentKey), of the outline, or of the clip, and again
+  // whenever a member reports new content (image loaded). While a gesture
+  // moves a member inside the group the ghosts are dropped and rebuilt on
+  // release.
+  useEffect(() => {
+    if (!hasEffects || paused) { setRaster(null); return }
+    let raf = 0
+    let counted = false
+    const count = () => { if (!counted) { counted = true; pendingGroupRasters++ } }
+    const uncount = () => { if (counted) { counted = false; pendingGroupRasters-- } }
+    const run = () => {
+      raf = 0
+      const inner = innerRef.current
+      try {
+        if (inner) {
+          inner.cache({ pixelRatio: 1 })
+          const cc = inner._getCanvasCache() as { scene?: { _canvas: HTMLCanvasElement }; x: number; y: number } | undefined
+          const src = cc?.scene?._canvas
+          if (src && src.width > 0 && src.height > 0) {
+            const copy = document.createElement('canvas')
+            copy.width = src.width; copy.height = src.height
+            copy.getContext('2d')!.drawImage(src, 0, 0)
+            inner.clearCache()
+            setRaster(buildGroupRaster(copy, cc!.x, cc!.y, layer))
+          } else {
+            inner.clearCache()
+            setRaster(null)
+          }
+        }
+      } catch {
+        try { inner?.clearCache() } catch { /* nothing to clear */ }
+      }
+      uncount()
+    }
+    const schedule = () => {
+      if (raf) cancelAnimationFrame(raf)
+      count()
+      raf = requestAnimationFrame(run)
+    }
+    schedule()
+    contentListeners.add(schedule)
+    return () => {
+      contentListeners.delete(schedule)
+      if (raf) cancelAnimationFrame(raf)
+      uncount()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- contentKey stands in for the subtree; layer is read for the outline fields listed
+  }, [hasEffects, paused, contentKey, layer.outlineEnabled, layer.outlineWidth, layer.outlineColor, clip])
+
   return (
     <KonvaGroup
       id={layer.id}
@@ -1198,12 +1344,44 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
       rotation={layer.rotation}
       opacity={layer.opacity / 100}
       visible={layer.visible}
-      clipFunc={clip ? (ctx: Konva.Context) => { traceMaskPath(ctx, clip) } : undefined}
       {...wrapperHandlers(props)}
       onDblClick={props.inert ? undefined : drill}
       onDblTap={props.inert ? undefined : drill}
     >
-      {children}
+      {/* Ghosts beneath the content, outside the clip: one per shadow
+          (each carries its shadow; the live content covers the copy), then
+          the outline ring. */}
+      {raster && shadows.map((s, i) => (
+        <KonvaImage
+          key={`shadow-${i}`}
+          image={raster.silhouette}
+          x={raster.x}
+          y={raster.y}
+          width={raster.silhouette.width}
+          height={raster.silhouette.height}
+          listening={false}
+          perfectDrawEnabled={false}
+          {...shadowPropsFor(s)}
+        />
+      ))}
+      {raster?.ring && (
+        <KonvaImage
+          image={raster.ring}
+          x={raster.x}
+          y={raster.y}
+          width={raster.ring.width}
+          height={raster.ring.height}
+          listening={false}
+          perfectDrawEnabled={false}
+        />
+      )}
+      <KonvaGroup
+        ref={innerRef}
+        name={GROUP_INNER_NAME}
+        clipFunc={clip ? (ctx: Konva.Context) => { traceMaskPath(ctx, clip) } : undefined}
+      >
+        {children}
+      </KonvaGroup>
     </KonvaGroup>
   )
 }
@@ -1230,15 +1408,12 @@ function MaskNode(props: KonvaLayerNodeProps) {
         width={w}
         height={h}
         // A transparent fill keeps the hit region while drawing nothing.
+        // No stroke props at all on this node: react-konva leaves a prop
+        // that goes from a value to undefined in place, so a stroke that
+        // was once set would stick after deselection.
         fill="rgba(0,0,0,0)"
-        stroke={isSelected ? '#fbbf24' : undefined}
-        strokeEnabled={isSelected}
-        // Unscaled stroke: 1.5 screen pixels at any zoom.
-        strokeWidth={1.5}
-        dash={[6, 4]}
-        strokeScaleEnabled={false}
+        strokeEnabled={false}
         perfectDrawEnabled={false}
-        shadowForStrokeEnabled={false}
         sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
           ctx.save()
           traceShapeOutlineLocal(ctx, layer)
@@ -1246,6 +1421,32 @@ function MaskNode(props: KonvaLayerNodeProps) {
           ctx.fillStrokeShape(shape)
         }}
       />
+      {/* Selection outline: its own node, mounted only while selected, so
+          nothing lingers on deselect. It is editor chrome living in the
+          content layer, so the export hides every `mask-outline` node
+          before it snapshots. */}
+      {isSelected && (
+        <KonvaShape
+          name={MASK_OUTLINE_NAME}
+          width={w}
+          height={h}
+          listening={false}
+          fillEnabled={false}
+          stroke="#fbbf24"
+          // Unscaled stroke: 1.5 screen pixels at any zoom.
+          strokeWidth={1.5}
+          dash={[6, 4]}
+          strokeScaleEnabled={false}
+          perfectDrawEnabled={false}
+          shadowForStrokeEnabled={false}
+          sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
+            ctx.save()
+            traceShapeOutlineLocal(ctx, layer)
+            ctx.restore()
+            ctx.fillStrokeShape(shape)
+          }}
+        />
+      )}
     </KonvaGroup>
   )
 }
@@ -1297,8 +1498,16 @@ function LayerNodes({ layers, parentId, makeProps }: {
         if (layer === mask) return <MaskNode key={layer.id} {...maskProps!} />
         const props = makeProps(layer)
         if (layer.type === 'group') {
+          // Groups with effects (THU-31) re-rasterise when their subtree
+          // changes; the key is the subtree's serialisation, computed only
+          // for groups that need it.
+          let contentKey = ''
+          if (groupHasEffects(layer)) {
+            const sub = new Set(subtreeIds(layers, layer.id))
+            contentKey = JSON.stringify(layers.filter(l => sub.has(l.id)))
+          }
           return (
-            <GroupNode key={layer.id} {...props} maskLayer={maskOf(layers, layer.id)}>
+            <GroupNode key={layer.id} {...props} maskLayer={maskOf(layers, layer.id)} contentKey={contentKey}>
               <LayerNodes layers={layers} parentId={layer.id} makeProps={makeProps} />
             </GroupNode>
           )
@@ -1712,6 +1921,9 @@ function BackgroundRerender({ request }: { request: (PendingThumbnailStream & { 
           while (pending().length > 0 && Date.now() - start < 5000) {
             await nextFrame()
           }
+          // Group effects (THU-31) rasterise after the images land.
+          await waitForGroupRasters()
+          await nextFrame()
         }
         if (cancelled) { setJob(null); return }
         const url = stageRef.current?.toDataURL({ pixelRatio: 1 }) ?? null
@@ -3071,6 +3283,181 @@ function FilterToggle({ label, checked, onChange }: {
   )
 }
 
+/** The Drop Shadows and Outline sections, shared by every layer type
+ *  including groups (THU-31). `update` is the panel's gesture-aware patch
+ *  function.
+ *
+ *  Drop Shadows: a multi-shadow stack. Each entry renders as its own ghost
+ *  clone of the layer behind the original (Konva supports one shadow per
+ *  node, so stacking is the only way to combine several). `resolveShadows`
+ *  gives the panel the same migrated list the renderer sees; the first
+ *  edit converts the legacy single-shadow fields into a one-entry array.
+ *
+ *  Outline: an alpha-dilation stroke. Text and shapes route to Konva's
+ *  native stroke (overriding the design stroke while enabled), images and
+ *  groups run the custom dilation filter over a raster. Stacked with
+ *  shadows, the shadows attach to the dilated silhouette, which is how a
+ *  spread shadow is had without a spread parameter per entry. */
+function EffectsSections({ layer, update }: { layer: ThumbnailLayer; update: (patch: Partial<ThumbnailLayer>) => void }) {
+  const shadows = resolveShadows(layer)
+  // Migrate-on-write: any change here drops the legacy single-shadow
+  // fields so there are not two sources of truth on disk.
+  const writeShadows = (next: ThumbnailShadow[]) => update({
+    shadows: next,
+    shadowEnabled: undefined,
+    shadowColor: undefined,
+    shadowOffsetX: undefined,
+    shadowOffsetY: undefined,
+    shadowBlur: undefined,
+    shadowOpacity: undefined,
+  })
+  const updateAt = (idx: number, patch: Partial<ThumbnailShadow>) =>
+    writeShadows(shadows.map((s, i) => i === idx ? { ...s, ...patch } : s))
+  const removeAt = (idx: number) =>
+    writeShadows(shadows.filter((_, i) => i !== idx))
+  const addShadow = () =>
+    writeShadows([
+      ...shadows,
+      // A new shadow inherits the last entry's params when one exists:
+      // easier to stack subtle variations than to restart from defaults.
+      shadows.length > 0
+        ? { ...shadows[shadows.length - 1] }
+        : { color: '#000000', offsetX: 4, offsetY: 4, blur: 8, opacity: 100 },
+    ])
+  const groupNote = layer.type === 'group'
+  return (
+    <>
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] uppercase tracking-wider text-gray-400">
+            Drop Shadows {shadows.length > 0 && <span className="text-gray-500 normal-case tracking-normal">({shadows.length})</span>}
+          </p>
+          <Tooltip content="Add a shadow pass">
+          <button
+            type="button"
+            onClick={addShadow}
+            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            <Plus size={11} />
+            Add
+          </button>
+          </Tooltip>
+        </div>
+        {shadows.length === 0 && (
+          <p className="text-[11px] text-gray-500 italic">No shadows. Click "Add" to stack one or more behind the {groupNote ? 'group' : 'layer'}.</p>
+        )}
+        <div className="flex flex-col gap-2.5">
+          {shadows.map((s, idx) => (
+            <div key={idx} className="rounded-lg border border-white/5 p-2 flex flex-col gap-1.5 bg-navy-900/40">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider text-gray-500">Shadow {idx + 1}</span>
+                <Tooltip content="Remove this shadow">
+                <button
+                  type="button"
+                  onClick={() => removeAt(idx)}
+                  className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+                >
+                  <Trash2 size={11} />
+                </button>
+                </Tooltip>
+              </div>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-400">Color</span>
+                {/* Unified color field like every other color property. The
+                    field's % segment IS the shadow opacity (stored s.opacity,
+                    drives Konva shadowOpacity); the color itself stays rgb in
+                    the meta. An applied swatch's alpha lands in the shadow
+                    opacity, full-snapshot style. */}
+                <ColorAlphaField
+                  // splitColorAlpha first: the old raw text input let any
+                  // string into s.color, so normalize to rgb before joining
+                  // with the stored opacity.
+                  value={joinColorAlpha(splitColorAlpha(s.color, '#000000').rgb, (s.opacity ?? 100) / 100)}
+                  fallback="#000000"
+                  showHex
+                  onChange={v => {
+                    const p = splitColorAlpha(v, '#000000')
+                    updateAt(idx, { color: p.rgb, opacity: Math.round(p.alpha * 100) })
+                  }}
+                  recentKey={`${layer.id}:shadow${idx}`}
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-gray-400">Offset X</span>
+                  <NumberInput value={s.offsetX}
+                    onChange={offsetX => updateAt(idx, { offsetX })} className="w-full" />
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-gray-400">Offset Y</span>
+                  <NumberInput value={s.offsetY}
+                    onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
+                </label>
+                <label className="flex flex-col gap-0.5 col-span-2">
+                  <span className="text-[10px] text-gray-400">Blur</span>
+                  <NumberInput min={0} value={s.blur}
+                    onChange={blur => updateAt(idx, { blur })} className="w-full" />
+                </label>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] uppercase tracking-wider text-gray-400">Outline</p>
+          <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!layer.outlineEnabled}
+              onChange={e => update({ outlineEnabled: e.target.checked })}
+              className="accent-accent-600"
+            />
+            Enable
+          </label>
+        </div>
+        {layer.outlineEnabled && (
+          <div className="flex flex-col gap-1.5">
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-400">Color</span>
+              <ColorAlphaField
+                value={layer.outlineColor}
+                fallback="#000000"
+                showHex
+                onChange={outlineColor => update({ outlineColor })}
+                recentKey={`${layer.id}:outline`}
+              />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-400">Width</span>
+              <NumberInput min={0} max={50} value={layer.outlineWidth ?? 0}
+                onChange={outlineWidth => update({ outlineWidth })} className="w-full" />
+            </label>
+            {layer.type === 'image' && (
+              <p className="text-[10px] text-gray-500 leading-snug">
+                Wider outlines on large images can briefly stutter while the
+                filter recomputes. Konva caches the result, so only changes
+                trigger a recompute.
+              </p>
+            )}
+            {layer.type !== 'image' && (layer.strokeWidth ?? 0) > 0 && (
+              <p className="text-[10px] text-yellow-400/80 leading-snug">
+                Overrides the design stroke ({layer.strokeWidth}px) above while enabled.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+      {groupNote && (shadows.length > 0 || layer.outlineEnabled) && (
+        <p className="text-[10px] text-gray-500 leading-snug">
+          Group effects follow the group's outline (its mask when it has one) and refresh when an edit lands. They pause while a layer inside the group is being moved or resized.
+        </p>
+      )}
+    </>
+  )
+}
+
 /** Wraps the appearance sections of a shape that is a group mask (THU-21):
  *  the controls stay visible with their last values but are disabled, and
  *  one tooltip over the whole block says why. Inactive, it renders the
@@ -3186,6 +3573,9 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
             Double-click a grouped layer on the canvas to select it.
           </p>
         </section>
+        {/* Group effects (THU-31): the same shadow and outline sections
+            other layers have, rendered on the group as a whole. */}
+        <EffectsSections layer={layer} update={update} />
       </div>
     )
   }
@@ -3690,176 +4080,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
         </section>
       )}
 
-      {/* Drop Shadows — multi-shadow stack. Each entry renders as its
-          own ghost clone of the layer behind the original (Konva only
-          supports one shadow per node, so stacking is the only way to
-          combine multiple). Use `resolveShadows` so the panel sees the
-          same migrated list the renderer does — first edit converts
-          the legacy single-shadow fields into a one-entry array. */}
-      <section>
-        {(() => {
-          const shadows = resolveShadows(layer)
-          // Migrate-on-write: any change here drops the legacy single-
-          // shadow fields so we don't keep two sources of truth on disk.
-          const writeShadows = (next: ThumbnailShadow[]) => update({
-            shadows: next,
-            shadowEnabled: undefined,
-            shadowColor: undefined,
-            shadowOffsetX: undefined,
-            shadowOffsetY: undefined,
-            shadowBlur: undefined,
-            shadowOpacity: undefined,
-          })
-          const updateAt = (idx: number, patch: Partial<ThumbnailShadow>) =>
-            writeShadows(shadows.map((s, i) => i === idx ? { ...s, ...patch } : s))
-          const removeAt = (idx: number) =>
-            writeShadows(shadows.filter((_, i) => i !== idx))
-          const addShadow = () =>
-            writeShadows([
-              ...shadows,
-              // New shadow inherits the last entry's params when one
-              // exists — easier to stack subtle variations than to
-              // restart from defaults every time.
-              shadows.length > 0
-                ? { ...shadows[shadows.length - 1] }
-                : { color: '#000000', offsetX: 4, offsetY: 4, blur: 8, opacity: 100 },
-            ])
-          return (
-            <>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] uppercase tracking-wider text-gray-400">
-                  Drop Shadows {shadows.length > 0 && <span className="text-gray-500 normal-case tracking-normal">({shadows.length})</span>}
-                </p>
-                <Tooltip content="Add a shadow pass">
-                <button
-                  type="button"
-                  onClick={addShadow}
-                  className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
-                >
-                  <Plus size={11} />
-                  Add
-                </button>
-                </Tooltip>
-              </div>
-              {shadows.length === 0 && (
-                <p className="text-[11px] text-gray-500 italic">No shadows. Click "Add" to stack one or more behind the layer.</p>
-              )}
-              <div className="flex flex-col gap-2.5">
-                {shadows.map((s, idx) => (
-                  <div key={idx} className="rounded-lg border border-white/5 p-2 flex flex-col gap-1.5 bg-navy-900/40">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] uppercase tracking-wider text-gray-500">Shadow {idx + 1}</span>
-                      <Tooltip content="Remove this shadow">
-                      <button
-                        type="button"
-                        onClick={() => removeAt(idx)}
-                        className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                      </Tooltip>
-                    </div>
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-gray-400">Color</span>
-                      {/* Unified color field like every other color property.
-                          The field's % segment IS the shadow opacity
-                          (stored s.opacity, drives Konva shadowOpacity) —
-                          the color itself stays rgb in the meta. Swatch
-                          drops/popover/recents come with the field; an
-                          applied swatch's alpha lands in the shadow
-                          opacity, full-snapshot style. */}
-                      <ColorAlphaField
-                        // splitColorAlpha first: the OLD raw text input let
-                        // any string into s.color, so normalize to rgb
-                        // before joining with the stored opacity.
-                        value={joinColorAlpha(splitColorAlpha(s.color, '#000000').rgb, (s.opacity ?? 100) / 100)}
-                        fallback="#000000"
-                        showHex
-                        onChange={v => {
-                          const p = splitColorAlpha(v, '#000000')
-                          updateAt(idx, { color: p.rgb, opacity: Math.round(p.alpha * 100) })
-                        }}
-                        recentKey={`${layer.id}:shadow${idx}`}
-                      />
-                    </label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <label className="flex flex-col gap-0.5">
-                        <span className="text-[10px] text-gray-400">Offset X</span>
-                        <NumberInput value={s.offsetX}
-                          onChange={offsetX => updateAt(idx, { offsetX })} className="w-full" />
-                      </label>
-                      <label className="flex flex-col gap-0.5">
-                        <span className="text-[10px] text-gray-400">Offset Y</span>
-                        <NumberInput value={s.offsetY}
-                          onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
-                      </label>
-                      <label className="flex flex-col gap-0.5 col-span-2">
-                        <span className="text-[10px] text-gray-400">Blur</span>
-                        <NumberInput min={0} value={s.blur}
-                          onChange={blur => updateAt(idx, { blur })} className="w-full" />
-                      </label>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )
-        })()}
-      </section>
-
-      {/* Outline — alpha-dilation stroke. Works on every layer type:
-          text + shape route to Konva's native stroke (overriding the
-          design-stroke in the fill/stroke section above when enabled);
-          image runs the custom alpha-dilation filter from
-          `makeOutlineFilter`. When stacked with shadows above, the
-          shadows attach to the dilated silhouette — that's how you get
-          spread shadow without a dedicated spread parameter on each
-          shadow entry. */}
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] uppercase tracking-wider text-gray-400">Outline</p>
-          <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={!!layer.outlineEnabled}
-              onChange={e => update({ outlineEnabled: e.target.checked })}
-              className="accent-accent-600"
-            />
-            Enable
-          </label>
-        </div>
-        {layer.outlineEnabled && (
-          <div className="flex flex-col gap-1.5">
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Color</span>
-              <ColorAlphaField
-                value={layer.outlineColor}
-                fallback="#000000"
-                showHex
-                onChange={outlineColor => update({ outlineColor })}
-                recentKey={`${layer.id}:outline`}
-              />
-            </label>
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Width</span>
-              <NumberInput min={0} max={50} value={layer.outlineWidth ?? 0}
-                onChange={outlineWidth => update({ outlineWidth })} className="w-full" />
-            </label>
-            {layer.type === 'image' && (
-              <p className="text-[10px] text-gray-500 leading-snug">
-                Wider outlines on large images can briefly stutter while the
-                filter recomputes. Konva caches the result, so only changes
-                trigger a recompute.
-              </p>
-            )}
-            {layer.type !== 'image' && (layer.strokeWidth ?? 0) > 0 && (
-              <p className="text-[10px] text-yellow-400/80 leading-snug">
-                Overrides the design stroke ({layer.strokeWidth}px) above while enabled.
-              </p>
-            )}
-          </div>
-        )}
-      </section>
+      <EffectsSections layer={layer} update={update} />
       </MaskDisabled>
 
       {/* Filters — image layers only. All filter values persist in JSON
@@ -5489,6 +5710,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     while (pending().length > 0 && Date.now() - start < timeoutMs) {
       await new Promise<void>(r => requestAnimationFrame(() => r()))
     }
+    // Group shadows and outlines (THU-31) rasterise a frame after the
+    // images land; a snapshot taken before that would miss them.
+    await waitForGroupRasters(Math.max(0, timeoutMs - (Date.now() - start)))
   }, [])
 
   // Decode every image asset a set of layers references, up front. Polling the
@@ -5523,6 +5747,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     // Hiding only the Transformer nodes left the bounds overlay rects
     // baking into PNGs saved while a group selection was active.
     transformerLayerRef.current?.hide()
+    // A selected mask's dashed outline (THU-21) is chrome that lives in
+    // the content layer; hide it too, or a save taken while a mask is
+    // selected bakes the dashes into the PNG.
+    const maskOutlines = stage.find(`.${MASK_OUTLINE_NAME}`)
+    maskOutlines.forEach(n => n.hide())
     const prevX = stage.x(), prevY = stage.y()
     const prevSX = stage.scaleX(), prevSY = stage.scaleY()
     const prevW = stage.width(), prevH = stage.height()
@@ -5531,6 +5760,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     const dataUrl = stage.toDataURL({ pixelRatio: 1 })
     stage.x(prevX); stage.y(prevY); stage.scaleX(prevSX); stage.scaleY(prevSY)
     stage.width(prevW); stage.height(prevH)
+    maskOutlines.forEach(n => n.show())
     transformerLayerRef.current?.show()
     bgLayerRef.current?.show()
     guideLayerRef.current?.show()
@@ -6134,7 +6364,10 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   const addGroupMask = useCallback((groupId: string, shapeType: 'rect' | 'ellipse' | 'polygon') => {
     const ls = layersRef.current
     const node = stageRef.current?.findOne(`#${groupId}`)
-    const r = node ? node.getClientRect({ relativeTo: node as unknown as Konva.Container, skipShadow: true, skipStroke: true }) : null
+    // Measure the inner container (members only) so the group's own shadow
+    // and outline ghosts (THU-31) do not widen the fitted mask.
+    const inner = (node as Konva.Group | undefined)?.findOne(`.${GROUP_INNER_NAME}`) ?? node
+    const r = node && inner ? inner.getClientRect({ relativeTo: node as unknown as Konva.Container, skipShadow: true, skipStroke: true }) : null
     const box = r && r.width > 0 && r.height > 0 ? r : { x: 0, y: 0, width: 200, height: 200 }
     const shape: ThumbnailLayer = {
       id: newId(), name: 'Mask', type: 'shape', shapeType, visible: true, opacity: 100,
@@ -7652,6 +7885,10 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                       // once it is selected (panel click or canvas double-click);
                       // otherwise its events belong to the group.
                       inert: nested && !selectedIds.includes(layer.id),
+                      // A gesture on something inside this group pauses its
+                      // effects (THU-31); moving the group itself does not.
+                      effectsPaused: canvasGestureActive && layer.type === 'group'
+                        && selectedIds.some(id => id !== layer.id && ancestorIds(layers, id).includes(layer.id)),
                     }
                   }} />
                 </Layer>
