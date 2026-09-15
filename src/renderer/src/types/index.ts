@@ -883,6 +883,15 @@ export interface ThumbnailLayer {
    *  a solid band whose edges sit at the MIDPOINTS to its neighbors —
    *  no blending, so gradientColorSpace is inert (THU-11). */
   gradientStyle?: 'smooth' | 'hard'
+  /** Gradient kind (THU-9). `fillType: 'linear'` means "gradient on" for
+   *  historical reasons; this field picks linear (default), radial, or
+   *  conic. Radial and conic use the center below; radial uses the radius
+   *  (fraction of the center-to-farthest-corner distance, default 1);
+   *  conic reuses `gradientAngle` as its start angle. */
+  gradientType?: 'linear' | 'radial' | 'conic'
+  gradientCenterX?: number
+  gradientCenterY?: number
+  gradientRadius?: number
   // Shared (text + shape)
   fill?: string
   stroke?: string
@@ -897,6 +906,10 @@ export interface ThumbnailLayer {
   strokeGradientAngle?: number
   strokeGradientColorSpace?: 'oklch' | 'srgb'
   strokeGradientStyle?: 'smooth' | 'hard'
+  strokeGradientType?: 'linear' | 'radial' | 'conic'
+  strokeGradientCenterX?: number
+  strokeGradientCenterY?: number
+  strokeGradientRadius?: number
   // Drop shadow (all layer types). Legacy single-shadow fields below are
   // still read for backwards compat (one-time migrated into `shadows[0]`
   // on first edit) but no longer written. New thumbnails use the
@@ -962,11 +975,20 @@ export interface ThumbnailTemplate {
  *  gradient editor sets except the layer it came from. */
 export interface GradientSwatchData {
   stops: { color: string; pos: number }[]
-  /** App convention: 0° = top→bottom, increasing clockwise. */
+  /** App convention: 0° = top→bottom, increasing clockwise. For a conic
+   *  gradient this is the start angle (0° = up, clockwise). */
   angle: number
   colorSpace: 'oklch' | 'srgb'
   /** Absent on swatches captured before THU-11 — treat as 'smooth'. */
   style?: 'smooth' | 'hard'
+  /** Gradient kind (THU-9). Absent on older swatches = 'linear'. */
+  kind?: 'linear' | 'radial' | 'conic'
+  /** Radial and conic center as fractions of the layer box (0..1, default
+   *  0.5 each), and the radial radius as a fraction of the distance from
+   *  the center to the farthest corner (default 1). */
+  centerX?: number
+  centerY?: number
+  radius?: number
 }
 
 /** One palette swatch (thumbnails #1). Stored in `_palette.json` beside

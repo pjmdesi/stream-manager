@@ -217,6 +217,62 @@ export function gradientLinePoints(
   }
 }
 
+/** Gradient kinds (THU-9). Linear is the original; radial and conic share
+ *  a center, radial adds a radius, conic reuses the angle as its start. */
+export type GradientKind = 'linear' | 'radial' | 'conic'
+
+export interface GradientGeometry {
+  kind: GradientKind
+  /** App angle: linear direction (0° = top→bottom) or conic start (0° = up),
+   *  both increasing clockwise. */
+  angle: number
+  /** Center as fractions of the box, 0..1. */
+  centerX: number
+  centerY: number
+  /** Radial radius as a fraction of the center-to-farthest-corner distance
+   *  (1 = the CSS farthest-corner default). */
+  radius: number
+}
+
+export const DEFAULT_GRADIENT_GEOMETRY: GradientGeometry = { kind: 'linear', angle: 0, centerX: 0.5, centerY: 0.5, radius: 1 }
+
+/** Distance from the center to the farthest corner of a w×h box, the
+ *  reference the radial radius fraction scales. */
+export function farthestCornerDistance(w: number, h: number, centerX: number, centerY: number): number {
+  const cx = centerX * w
+  const cy = centerY * h
+  return Math.hypot(Math.max(cx, w - cx), Math.max(cy, h - cy))
+}
+
+/** Canvas start angle for a conic gradient: the canvas measures from the
+ *  positive x axis (3 o'clock), the app from the top, both clockwise. */
+export function conicStartRadians(angleDeg: number): number {
+  return ((angleDeg - 90) * Math.PI) / 180
+}
+
+/** CSS gradient of the given kind, for swatch tiles and the control's own
+ *  preview square: the real geometry, so a radial or conic swatch reads as
+ *  one. Stops carry the same oklch treatment CSS gives them natively. */
+export function cssGradientOfKind(stops: GradientStop[], space: GradientColorSpace, style: GradientStyle, geom: GradientGeometry): string {
+  if (geom.kind === 'linear') return cssGradientPreview(stops, space, geom.angle + 180, style)
+  const ordered = [...stops].sort((x, y) => x.pos - y.pos)
+  const at = `at ${Math.round(geom.centerX * 100)}% ${Math.round(geom.centerY * 100)}%`
+  const interp = style === 'hard' || space !== 'oklch' ? '' : ' in oklch'
+  if (geom.kind === 'radial') {
+    // farthest-corner is the reference the radius fraction scales, so the
+    // stop positions are multiplied by it instead of sizing the circle.
+    const k = Math.max(0, geom.radius)
+    const list = style === 'hard' && ordered.length >= 2
+      ? hardBands(ordered).map(b => `${b.color} ${Math.round(b.start * k * 100)}%, ${b.color} ${Math.round(b.end * k * 100)}%`).join(', ')
+      : ordered.map(s => `${s.color} ${Math.round(s.pos * k * 100)}%`).join(', ')
+    return `radial-gradient(circle farthest-corner ${at}${interp}, ${list})`
+  }
+  const list = style === 'hard' && ordered.length >= 2
+    ? hardBands(ordered).map(b => `${b.color} ${Math.round(b.start * 100)}%, ${b.color} ${Math.round(b.end * 100)}%`).join(', ')
+    : ordered.map(s => `${s.color} ${Math.round(s.pos * 100)}%`).join(', ')
+  return `conic-gradient(from ${Math.round(geom.angle)}deg ${at}${interp}, ${list})`
+}
+
 /** CSS background for the editor's preview bar. Chromium supports
  *  `linear-gradient(… in oklch, …)` natively, so the bar previews both
  *  blend modes accurately. The angle orients the bar itself (180° for the

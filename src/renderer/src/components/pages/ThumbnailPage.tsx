@@ -26,8 +26,9 @@ import { NumberInput } from '../ui/Input'
 import { AnchoredPanel } from '../ui/AnchoredPanel'
 import { StreamNavButtons } from '../streams/StreamNavButtons'
 import { seriesNavFor, type SeriesNav } from '../../lib/seriesNav'
-import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
-import type { GradientStop, GradientColorSpace, GradientStyle } from '../../lib/gradient'
+import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, cssGradientOfKind, sampleGradientAt, DEFAULT_GRADIENT_GEOMETRY } from '../../lib/gradient'
+import type { GradientStop, GradientColorSpace, GradientStyle, GradientKind, GradientGeometry } from '../../lib/gradient'
+import { makeCanvasGradient } from '../../lib/canvasGradient'
 import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
 import {
   childrenOf, paintableLayers, selectionRoots, copySelection, insertPastedAbove, canGroup, groupLayers, ungroupLayer,
@@ -519,18 +520,66 @@ const THUMBNAIL_SERIES_KEYS = ['season', 'episode', 'total_episodes']
 
 function snapGrid(v: number) { return Math.round(v / GRID_SIZE) * GRID_SIZE }
 
-/** Konva props for a layer's gradient stroke (THU-8), or an empty object
- *  when the stroke is solid. The line runs across the w×h box with the
- *  fill's angle convention; `sx`/`sy` shift it into the shape's local
- *  drawing space (the centered ellipse draws around its own origin). */
-function strokeGradientKonvaProps(layer: ThumbnailLayer, w: number, h: number, sx: number, sy: number): Record<string, unknown> {
-  if (layer.strokeType !== 'linear' || (layer.strokeGradientStops?.length ?? 0) < 2) return {}
-  const { start, end } = gradientLinePoints(layer.strokeGradientAngle ?? 0, w, h)
+/** The geometry a swatch carries, defaults filled in (older swatches are
+ *  linear with no center or radius). */
+function swatchGeometry(g: GradientSwatchData): GradientGeometry {
   return {
-    strokeLinearGradientStartPoint: { x: start.x + sx, y: start.y + sy },
-    strokeLinearGradientEndPoint: { x: end.x + sx, y: end.y + sy },
-    strokeLinearGradientColorStops: buildKonvaColorStops(layer.strokeGradientStops!, layer.strokeGradientColorSpace ?? 'oklch', layer.strokeGradientStyle ?? 'smooth'),
+    kind: g.kind ?? 'linear',
+    angle: g.angle,
+    centerX: g.centerX ?? 0.5,
+    centerY: g.centerY ?? 0.5,
+    radius: g.radius ?? 1,
   }
+}
+
+/** A layer's fill or stroke gradient geometry, defaults filled in. */
+function layerGradientGeometry(layer: ThumbnailLayer, paint: 'fill' | 'stroke'): GradientGeometry {
+  return paint === 'fill'
+    ? { kind: layer.gradientType ?? 'linear', angle: layer.gradientAngle ?? 0, centerX: layer.gradientCenterX ?? 0.5, centerY: layer.gradientCenterY ?? 0.5, radius: layer.gradientRadius ?? 1 }
+    : { kind: layer.strokeGradientType ?? 'linear', angle: layer.strokeGradientAngle ?? 0, centerX: layer.strokeGradientCenterX ?? 0.5, centerY: layer.strokeGradientCenterY ?? 0.5, radius: layer.strokeGradientRadius ?? 1 }
+}
+
+/** Konva props for a layer's gradient FILL over a w×h box whose top-left is
+ *  at (sx, sy) in the shape's drawing space, or an empty object when the
+ *  fill is solid. Linear uses Konva's native gradient props; radial and
+ *  conic (THU-9) hand Konva a CanvasGradient as the fill colour. */
+function fillGradientKonvaProps(layer: ThumbnailLayer, w: number, h: number, sx: number, sy: number): Record<string, unknown> {
+  if (layer.fillType !== 'linear' || (layer.gradientStops?.length ?? 0) < 2 || w <= 0 || h <= 0) return {}
+  const stops = layer.gradientStops!
+  const space = layer.gradientColorSpace ?? 'oklch'
+  const style = layer.gradientStyle ?? 'smooth'
+  const geom = layerGradientGeometry(layer, 'fill')
+  if (geom.kind === 'linear') {
+    const { start, end } = gradientLinePoints(geom.angle, w, h)
+    return {
+      fillPriority: 'linear-gradient',
+      fillLinearGradientStartPoint: { x: start.x + sx, y: start.y + sy },
+      fillLinearGradientEndPoint: { x: end.x + sx, y: end.y + sy },
+      fillLinearGradientColorStops: buildKonvaColorStops(stops, space, style),
+    }
+  }
+  const grad = makeCanvasGradient(stops, space, style, geom, w, h, sx, sy)
+  return grad ? { fill: grad as unknown as string, fillPriority: 'color' } : {}
+}
+
+/** Same for the STROKE (THU-8, THU-9). Konva has no radial or conic stroke
+ *  props, so those kinds pass a CanvasGradient as the stroke colour. */
+function strokeGradientKonvaProps(layer: ThumbnailLayer, w: number, h: number, sx: number, sy: number): Record<string, unknown> {
+  if (layer.strokeType !== 'linear' || (layer.strokeGradientStops?.length ?? 0) < 2 || w <= 0 || h <= 0) return {}
+  const stops = layer.strokeGradientStops!
+  const space = layer.strokeGradientColorSpace ?? 'oklch'
+  const style = layer.strokeGradientStyle ?? 'smooth'
+  const geom = layerGradientGeometry(layer, 'stroke')
+  if (geom.kind === 'linear') {
+    const { start, end } = gradientLinePoints(geom.angle, w, h)
+    return {
+      strokeLinearGradientStartPoint: { x: start.x + sx, y: start.y + sy },
+      strokeLinearGradientEndPoint: { x: end.x + sx, y: end.y + sy },
+      strokeLinearGradientColorStops: buildKonvaColorStops(stops, space, style),
+    }
+  }
+  const grad = makeCanvasGradient(stops, space, style, geom, w, h, sx, sy)
+  return grad ? { stroke: grad as unknown as string } : {}
 }
 
 /** Resolves a layer's effective shadow stack. Reads the new `shadows`
@@ -1097,27 +1146,13 @@ function TextNode(props: KonvaLayerNodeProps) {
   // measured width; height is always measured.
   const gradW = layer.width ?? measured.w
   const gradH = measured.h
-  const gradientActive =
-    layer.fillType === 'linear' &&
-    (layer.gradientStops?.length ?? 0) >= 2 &&
-    gradW > 0 && gradH > 0
-  let gradientFillProps: Record<string, unknown> = {}
-  if (gradientActive) {
-    const { start, end } = gradientLinePoints(layer.gradientAngle ?? 0, gradW, gradH)
-    gradientFillProps = {
-      fillPriority: 'linear-gradient',
-      fillLinearGradientStartPoint: start,
-      fillLinearGradientEndPoint: end,
-      fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch', layer.gradientStyle ?? 'smooth'),
-    }
-  }
+  // Linear, radial, or conic (THU-9), built by the shared helper; spread
+  // only when active, since the keys' absence is what makes react-konva
+  // reset Konva's gradient props to none.
+  const gradientFillProps = fillGradientKonvaProps(layer, gradW, gradH, 0, 0)
   // Gradient stroke (THU-8): same geometry over the same box. Skipped
   // while the outline effect overrides the stroke with its single color.
-  // Spread only when active: the keys' absence is what makes react-konva
-  // reset Konva's stroke gradient to none.
-  const strokeGradientProps = !outlineActive && gradW > 0 && gradH > 0
-    ? strokeGradientKonvaProps(layer, gradW, gradH, 0, 0)
-    : {}
+  const strokeGradientProps = outlineActive ? {} : strokeGradientKonvaProps(layer, gradW, gradH, 0, 0)
 
   // Shared text props — every shadow clone + the original render with
   // identical content; only the shadow attachment differs per clone.
@@ -1205,19 +1240,9 @@ function ShapeNode(props: KonvaLayerNodeProps) {
   // solid `fill` stays set underneath; fillPriority picks the gradient
   // (and older app versions that ignore these fields render the flat
   // fill instead).
-  const gradientActive = layer.fillType === 'linear' && (layer.gradientStops?.length ?? 0) >= 2
-  let gradientFillProps: Record<string, unknown> = {}
-  if (gradientActive) {
-    const { start, end } = gradientLinePoints(layer.gradientAngle ?? 0, w, h)
-    const sx = shapeType === 'ellipse' ? -w / 2 : 0
-    const sy = shapeType === 'ellipse' ? -h / 2 : 0
-    gradientFillProps = {
-      fillPriority: 'linear-gradient',
-      fillLinearGradientStartPoint: { x: start.x + sx, y: start.y + sy },
-      fillLinearGradientEndPoint: { x: end.x + sx, y: end.y + sy },
-      fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch', layer.gradientStyle ?? 'smooth'),
-    }
-  }
+  // Linear, radial, or conic (THU-9), built by the shared helper with the
+  // ellipse's origin shift.
+  const gradientFillProps = fillGradientKonvaProps(layer, w, h, shapeType === 'ellipse' ? -w / 2 : 0, shapeType === 'ellipse' ? -h / 2 : 0)
 
   // Inner-shape props (without shadow) — no id/name/position/rotation/
   // handlers; those live on the Group. Centered shapes still get their
@@ -2239,10 +2264,9 @@ function swatchKey(v: SwatchValue): string {
 function swatchTileStyle(v: SwatchValue): React.CSSProperties {
   const top = 'color' in v
     ? `linear-gradient(${v.color}, ${v.color})`
-    // +180: cssGradientPreview takes a CSS angle (0° = bottom→top), but
-    // the swatch stores the APP angle (0° = top→bottom) — same conversion
-    // gradientLinePoints does for the canvas.
-    : cssGradientPreview(v.gradient.stops, v.gradient.colorSpace, v.gradient.angle + 180, v.gradient.style ?? 'smooth')
+    // The swatch's real geometry: a radial or conic swatch reads as one
+    // (cssGradientOfKind handles the app-to-CSS angle conversion).
+    : cssGradientOfKind(v.gradient.stops, v.gradient.colorSpace, v.gradient.style ?? 'smooth', swatchGeometry(v.gradient))
   return {
     backgroundImage: `${top}, ${CHECKER_IMAGE}`,
     backgroundSize: 'auto, 6px 6px',
@@ -2702,8 +2726,8 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
  *  an entry. */
 type PaintTarget = 'fill' | 'stroke'
 const PAINT_FIELDS = {
-  fill: { label: 'Fill', color: 'fill', type: 'fillType', stops: 'gradientStops', angle: 'gradientAngle', space: 'gradientColorSpace', style: 'gradientStyle', tie: 'fill' },
-  stroke: { label: 'Stroke', color: 'stroke', type: 'strokeType', stops: 'strokeGradientStops', angle: 'strokeGradientAngle', space: 'strokeGradientColorSpace', style: 'strokeGradientStyle', tie: 'stroke' },
+  fill: { label: 'Fill', color: 'fill', type: 'fillType', stops: 'gradientStops', angle: 'gradientAngle', space: 'gradientColorSpace', style: 'gradientStyle', kind: 'gradientType', centerX: 'gradientCenterX', centerY: 'gradientCenterY', radius: 'gradientRadius', tie: 'fill' },
+  stroke: { label: 'Stroke', color: 'stroke', type: 'strokeType', stops: 'strokeGradientStops', angle: 'strokeGradientAngle', space: 'strokeGradientColorSpace', style: 'strokeGradientStyle', kind: 'strokeGradientType', centerX: 'strokeGradientCenterX', centerY: 'strokeGradientCenterY', radius: 'strokeGradientRadius', tie: 'stroke' },
 } as const
 
 /** Solid-or-gradient paint control for one layer property: the fill (the
@@ -2720,7 +2744,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
   const paintColor = layer[F.color] as string | undefined
   const storedStops = layer[F.stops] as GradientStop[] | undefined
   /** A partial patch in paint-neutral terms, mapped onto this paint's fields. */
-  const paintPatch = (p: { type?: 'solid' | 'linear'; color?: string; stops?: GradientStop[]; angle?: number; space?: GradientColorSpace; style?: GradientStyle }): Partial<ThumbnailLayer> => {
+  const paintPatch = (p: { type?: 'solid' | 'linear'; color?: string; stops?: GradientStop[]; angle?: number; space?: GradientColorSpace; style?: GradientStyle; kind?: GradientKind; centerX?: number; centerY?: number; radius?: number }): Partial<ThumbnailLayer> => {
     const out: Record<string, unknown> = {}
     if (p.type !== undefined) out[F.type] = p.type
     if (p.color !== undefined) out[F.color] = p.color
@@ -2728,9 +2752,21 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
     if (p.angle !== undefined) out[F.angle] = p.angle
     if (p.space !== undefined) out[F.space] = p.space
     if (p.style !== undefined) out[F.style] = p.style
+    if (p.kind !== undefined) out[F.kind] = p.kind
+    if (p.centerX !== undefined) out[F.centerX] = p.centerX
+    if (p.centerY !== undefined) out[F.centerY] = p.centerY
+    if (p.radius !== undefined) out[F.radius] = p.radius
     return out as Partial<ThumbnailLayer>
   }
   const isGradient = paintType === 'linear'
+  // Geometry (THU-9): the kind, the shared center, the radial radius.
+  const geom: GradientGeometry = {
+    kind: (layer[F.kind] as GradientKind | undefined) ?? 'linear',
+    angle: (layer[F.angle] as number | undefined) ?? 0,
+    centerX: (layer[F.centerX] as number | undefined) ?? DEFAULT_GRADIENT_GEOMETRY.centerX,
+    centerY: (layer[F.centerY] as number | undefined) ?? DEFAULT_GRADIENT_GEOMETRY.centerY,
+    radius: (layer[F.radius] as number | undefined) ?? DEFAULT_GRADIENT_GEOMETRY.radius,
+  }
   const fillSplit = splitColorAlpha(paintColor, fallback)
   const defaultStops = [
     { color: paintColor ?? fallback, pos: 0 },
@@ -2815,7 +2851,10 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
   const { recordRecent, breakRecentTie } = useContext(PaletteContext)
   const recordGradient = (over: Partial<GradientSwatchData> = {}) => {
     recordRecent(
-      { gradient: { stops: over.stops ?? stops, angle: over.angle ?? angle, colorSpace: over.colorSpace ?? space, style: over.style ?? gStyle } },
+      { gradient: {
+        stops: over.stops ?? stops, angle: over.angle ?? angle, colorSpace: over.colorSpace ?? space, style: over.style ?? gStyle,
+        kind: over.kind ?? geom.kind, centerX: over.centerX ?? geom.centerX, centerY: over.centerY ?? geom.centerY, radius: over.radius ?? geom.radius,
+      } },
       `${layer.id}:${F.tie}-gradient`,
     )
   }
@@ -2828,12 +2867,14 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
   // next gradient tweak starts a NEW entry instead of mutating the
   // adopted swatch — and applying a second swatch can't evict the first.
   const applyGradientSwatch = (g: GradientSwatchData) => {
+    const sg = swatchGeometry(g)
     update(paintPatch({
       type: 'linear',
       stops: g.stops,
       angle: g.angle,
       space: g.colorSpace,
       style: g.style ?? 'smooth',
+      kind: sg.kind, centerX: sg.centerX, centerY: sg.centerY, radius: sg.radius,
       // The flat color mirrors the first stop (solid-mode / back-compat degrade).
       color: g.stops[0]?.color,
     }))
@@ -2841,7 +2882,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
     // switch, and post-adoption edits must never mutate old entries.
     breakRecentTie(`${layer.id}:${F.tie}-gradient`)
     breakRecentTie(`${layer.id}:${F.tie}`)
-    recordRecent({ gradient: { stops: g.stops, angle: g.angle, colorSpace: g.colorSpace, style: g.style ?? 'smooth' } })
+    recordRecent({ gradient: { stops: g.stops, angle: g.angle, colorSpace: g.colorSpace, style: g.style ?? 'smooth', kind: sg.kind, centerX: sg.centerX, centerY: sg.centerY, radius: sg.radius } })
   }
 
   // The reverse adoption: a SOLID swatch dropped on the control while in
@@ -3074,6 +3115,34 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
         />
       ) : (
         <div className="flex flex-col gap-1.5 mt-0.5">
+          {/* Gradient kind (THU-9) with a live preview of the real geometry
+              beside it: the spine bar below previews the colors only. */}
+          <div className="flex items-center gap-1.5">
+            <Tooltip content="Linear runs along a line at the angle below. Radial spreads from the center out to the radius. Conic sweeps around the center from the start angle." triggerClassName="flex-1 min-w-0 flex">
+              <select
+                value={geom.kind}
+                onChange={e => {
+                  const kind = e.target.value as GradientKind
+                  update(paintPatch({ kind }))
+                  recordGradient({ kind })
+                }}
+                className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+              >
+                <option value="linear">Linear</option>
+                <option value="radial">Radial</option>
+                <option value="conic">Conic</option>
+              </select>
+            </Tooltip>
+            <div
+              className="w-[26px] h-[26px] shrink-0 rounded border border-white/25"
+              style={{
+                backgroundImage: `${cssGradientOfKind(stops, space, gStyle, geom)}, ${CHECKER_IMAGE}`,
+                backgroundSize: 'auto, 6px 6px',
+                backgroundRepeat: 'no-repeat, repeat',
+              }}
+              aria-hidden
+            />
+          </div>
           {/* Vertical preview bar is the gradient's spine (top = first
               stop); each stop row carries a ◄ pointer at its spot on the
               bar. Multi-stop (THU-7): clicking the bar adds a stop at the
@@ -3273,23 +3342,64 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
           {/* Angle only ever holds 1-3 digits — fixed narrow column so the
               Style select and the Blend pair get the room they need
               (widths hand-tuned in devtools). */}
+          {/* Radial and conic (THU-9): the center as percentages of the
+              layer box, so it survives resizes. */}
+          {geom.kind !== 'linear' && (
+            <div className="grid grid-cols-2 gap-1.5">
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-400">Center X %</span>
+                <NumberInput
+                  min={-100}
+                  max={200}
+                  value={Math.round(geom.centerX * 100)}
+                  onChange={v => { const centerX = v / 100; update(paintPatch({ centerX })); recordGradient({ centerX }) }}
+                  className="w-full"
+                />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-400">Center Y %</span>
+                <NumberInput
+                  min={-100}
+                  max={200}
+                  value={Math.round(geom.centerY * 100)}
+                  onChange={v => { const centerY = v / 100; update(paintPatch({ centerY })); recordGradient({ centerY }) }}
+                  className="w-full"
+                />
+              </label>
+            </div>
+          )}
           <div className="grid grid-cols-[3.1rem_minmax(0,1.3fr)_minmax(0,1.3fr)] gap-1.5">
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Angle °</span>
-              <NumberInput
-                min={0}
-                max={360}
-                value={Math.round(angle)}
-                // Angle is part of the swatch (brand gradients carry their
-                // direction), so angle edits create/update the tied entry
-                // like any other gradient edit.
-                onChange={nextAngle => {
-                  update(paintPatch({ angle: nextAngle }))
-                  recordGradient({ angle: nextAngle })
-                }}
-                className="w-full"
-              />
-            </label>
+            {geom.kind === 'radial' ? (
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-400">Radius %</span>
+                <Tooltip content="100% reaches the farthest corner of the layer box from the center." triggerClassName="flex">
+                  <NumberInput
+                    min={1}
+                    max={400}
+                    value={Math.round(geom.radius * 100)}
+                    onChange={v => { const radius = v / 100; update(paintPatch({ radius })); recordGradient({ radius }) }}
+                    className="w-full"
+                  />
+                </Tooltip>
+              </label>
+            ) : (
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-gray-400">{geom.kind === 'conic' ? 'Start °' : 'Angle °'}</span>
+                <NumberInput
+                  min={0}
+                  max={360}
+                  value={Math.round(angle)}
+                  // Angle is part of the swatch (brand gradients carry their
+                  // direction), so angle edits create/update the tied entry
+                  // like any other gradient edit.
+                  onChange={nextAngle => {
+                    update(paintPatch({ angle: nextAngle }))
+                    recordGradient({ angle: nextAngle })
+                  }}
+                  className="w-full"
+                />
+              </label>
+            )}
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Style</span>
               <Tooltip content="Smooth blends between stops. Hard renders each stop as a solid band with edges halfway to its neighbors." triggerClassName="flex">
