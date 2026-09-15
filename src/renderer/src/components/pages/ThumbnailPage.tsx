@@ -6141,6 +6141,17 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     commitLayers(res.layers)
     setSelectedIds([res.groupId])
   }, [commitLayers])
+  /** A shape dragged from the panel onto a group's empty slot: it moves into
+   *  the group (kept in place on screen) and becomes the mask. */
+  const dropShapeIntoSlot = useCallback((shapeId: string, groupId: string) => {
+    const ls = layersRef.current
+    const kids = childrenOf(ls, groupId)
+    const moved = moveLayerTo(ls, shapeId, groupId, kids.length ? kids[kids.length - 1].id : null) ?? ls
+    const masked = setGroupMask(moved, shapeId)
+    if (masked) commitLayers(masked)
+  }, [commitLayers])
+  // The group whose empty slot is the current drop target, lit amber.
+  const [slotDrop, setSlotDrop] = useState<string | null>(null)
   // The empty slot's menu: pick a shape already in the group, or create one.
   const [maskSlotMenu, setMaskSlotMenu] = useState<{ groupId: string; anchor: DOMRect } | null>(null)
   useEffect(() => {
@@ -8246,8 +8257,12 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                     // "Below row" = above the next sibling, or the bottom of
                     // the parent when the row is its last member, or the top
                     // slot inside the row when it is an expanded group.
-                    const dropFor = (rowIdx: number, above: boolean) => {
+                    const dropFor = (rowIdx: number, aboveRow: boolean) => {
                       const row: PanelRow = rows[rowIdx]
+                      // Nothing lands above a mask (it is pinned to the top of
+                      // its group), so the upper half of a mask row targets the
+                      // slot below it, where the drop actually lands.
+                      const above = aboveRow && !isMask(row.layer)
                       if (above) return { gapIdx: rowIdx, depth: row.depth, parentId: row.parentId, afterId: row.layer.id }
                       if (isGroup(row.layer) && !collapsedGroups.has(row.layer.id)) {
                         const kids = childrenOf(layers, row.layer.id)
@@ -8302,16 +8317,21 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 }}
                                 onDragOver={e => {
                                   if (!draggingLayerId || draggingLayerId === layer.id) return
-                                  e.preventDefault()
-                                  e.dataTransfer.dropEffect = 'move'
                                   const rect = e.currentTarget.getBoundingClientRect()
                                   const above = e.clientY < rect.top + rect.height / 2
                                   const target = dropFor(rowIdx, above)
-                                  // No indicator for a drop the tree refuses (into
-                                  // its own subtree, past the nesting limit) or one
-                                  // that would change nothing.
+                                  // A drop the tree refuses (into its own subtree,
+                                  // past the nesting limit, a pinned mask) or one
+                                  // that would change nothing gets neither the
+                                  // indicator nor the move cursor: without
+                                  // preventDefault the browser shows not-allowed,
+                                  // which is the truth.
                                   const valid = moveLayerTo(layers, draggingLayerId, target.parentId, target.afterId) !== null
-                                  setPanelDrop(valid ? target : null)
+                                  if (!valid) { setPanelDrop(null); setSlotDrop(null); return }
+                                  e.preventDefault()
+                                  e.dataTransfer.dropEffect = 'move'
+                                  setPanelDrop(target)
+                                  setSlotDrop(null)
                                 }}
                                 onDragLeave={e => {
                                   // Only clear when leaving the entire row, not when
@@ -8334,6 +8354,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 onDragEnd={() => {
                                   setDraggingLayerId(null)
                                   setPanelDrop(null)
+                                  setSlotDrop(null)
                                 }}
                                 onClick={e => { if (!isRenaming) handleLayerRowClick(layer.id, e) }}
                                 // Bidirectional hover sync with the canvas
@@ -8459,7 +8480,38 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 tabIndex={0}
                                 onClick={e => setMaskSlotMenu({ groupId: layer.id, anchor: e.currentTarget.getBoundingClientRect() })}
                                 onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMaskSlotMenu({ groupId: layer.id, anchor: e.currentTarget.getBoundingClientRect() }) } }}
-                                className={`relative flex items-center gap-1.5 pr-2 py-1 border-b border-white/5 cursor-pointer transition-colors ${maskSlotMenu?.groupId === layer.id ? 'bg-white/10 text-gray-300' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+                                // Drop target: a dragged shape can be dropped
+                                // straight into the slot (it moves into the group
+                                // and becomes its mask); the slot lights amber.
+                                // Anything else gets the not-allowed cursor and
+                                // no indicator anywhere.
+                                onDragOver={e => {
+                                  if (!draggingLayerId) return
+                                  const d = layers.find(l => l.id === draggingLayerId)
+                                  const ok = !!d && d.type === 'shape' && !isMask(d)
+                                  if (!ok) { setPanelDrop(null); setSlotDrop(null); return }
+                                  e.preventDefault()
+                                  e.dataTransfer.dropEffect = 'move'
+                                  setPanelDrop(null)
+                                  setSlotDrop(layer.id)
+                                }}
+                                onDragLeave={e => {
+                                  const related = e.relatedTarget as Node | null
+                                  if (related && e.currentTarget.contains(related)) return
+                                  setSlotDrop(prev => (prev === layer.id ? null : prev))
+                                }}
+                                onDrop={e => {
+                                  e.preventDefault()
+                                  if (draggingLayerId && slotDrop === layer.id) dropShapeIntoSlot(draggingLayerId, layer.id)
+                                  setDraggingLayerId(null)
+                                  setPanelDrop(null)
+                                  setSlotDrop(null)
+                                }}
+                                className={`relative flex items-center gap-1.5 pr-2 py-1 border-b border-white/5 cursor-pointer transition-colors ${
+                                  slotDrop === layer.id ? 'bg-amber-600/30 text-amber-100'
+                                    : maskSlotMenu?.groupId === layer.id ? 'bg-white/10 text-gray-300'
+                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                                }`}
                                 style={{ paddingLeft: indent(depth + 1) }}
                               >
                                 {Array.from({ length: depth + 1 }, (_, d) => (
