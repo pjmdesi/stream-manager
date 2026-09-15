@@ -4012,7 +4012,7 @@ export function StreamsPage({
             <select
               value={sortMode}
               onChange={e => setSortMode(e.target.value as typeof sortMode)}
-              className="bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40 [color-scheme:dark]"
+              className="select-themed bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-7 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
             >
               <option value="date-desc">Newest first</option>
               <option value="date-asc">Oldest first</option>
@@ -8319,7 +8319,7 @@ function SidebarDetail({
                   ref={ytCategorySelectRef}
                   value={meta?.ytCategoryId ?? ''}
                   onChange={e => onUpdateMeta({ ytCategoryId: e.target.value || undefined })}
-                  className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40 [color-scheme:dark] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="select-themed w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-7 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500/40 disabled:opacity-40 disabled:cursor-not-allowed"
                   disabled={!ytConnected || ytCategories.length === 0}
                 >
                   <option value="">— None —</option>
@@ -10078,7 +10078,7 @@ function NumberStepperField({
  * (Public / Unlisted / Private). Replaces the native `<select>`
  * because native options don't support per-option icons cross-browser.
  * Icon set matches YouTube Studio (Globe / Link / Lock). Height is
- * aligned with the neighbouring `Button` variant=primary size=sm
+ * aligned with the neighboring `Button` variant=primary size=sm
  * (py-1.5 on the trigger) so the create-broadcast row's controls
  * read as a single visual band.
  */

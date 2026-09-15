@@ -127,6 +127,24 @@ const ROTATION_SNAP_STEPS = { ctrl: 90, shift: 5 } as const
  *  trailing zeros dropped. Stored values keep their full precision. */
 const round2 = (v: number) => Math.round(v * 100) / 100
 
+/** Wrap every stored angle into 0..360 on load (style guide, "Angle
+ *  fields"): older builds committed raw rotations and let gradient angles
+ *  sit at 360. Returns the same array when nothing needed wrapping. */
+function wrapLayerAngles(layers: ThumbnailLayer[]): ThumbnailLayer[] {
+  let changed = false
+  const out = layers.map(l => {
+    const patch: Partial<ThumbnailLayer> = {}
+    const r = normalizeAngle(l.rotation ?? 0)
+    if (r !== (l.rotation ?? 0)) patch.rotation = r
+    if (l.gradientAngle !== undefined && normalizeAngle(l.gradientAngle) !== l.gradientAngle) patch.gradientAngle = normalizeAngle(l.gradientAngle)
+    if (l.strokeGradientAngle !== undefined && normalizeAngle(l.strokeGradientAngle) !== l.strokeGradientAngle) patch.strokeGradientAngle = normalizeAngle(l.strokeGradientAngle)
+    if (Object.keys(patch).length === 0) return l
+    changed = true
+    return { ...l, ...patch }
+  })
+  return changed ? out : layers
+}
+
 /** One button in the layers panel's selection tab (THU-30). `affects` are
  *  the rows that light up while the button is hovered, in the button's
  *  `tone`: red for destructive (delete), blue for structure changes (group,
@@ -3117,10 +3135,11 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
         />
       ) : (
         <div className="flex flex-col gap-1.5 mt-0.5">
-          {/* Gradient kind (THU-9): a radio-style switcher where each button
-              renders the current stops as that kind, so the choice previews
-              itself. The spine bar below previews the colors only. */}
-          <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={`${F.label} gradient kind`}>
+          {/* Gradient kind (THU-9): the same segmented switch as Solid /
+              Gradient, a little taller, each segment carrying a square
+              preview of the current stops rendered as that kind beside its
+              label. The spine bar below previews the colors only. */}
+          <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden" role="radiogroup" aria-label={`${F.label} gradient kind`}>
             {([
               ['linear', 'Linear', 'Runs along a line at the angle below'],
               ['radial', 'Radial', 'Spreads from the center out to the radius'],
@@ -3128,24 +3147,26 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
             ] as const).map(([kind, label, tip]) => {
               const on = geom.kind === kind
               return (
-                <Tooltip key={kind} content={`${label}: ${tip.toLowerCase()}`} triggerClassName="flex">
+                <Tooltip key={kind} content={`${label}: ${tip.toLowerCase()}`} triggerClassName="flex-1 min-w-0 flex">
                   <button
                     type="button"
                     role="radio"
                     aria-checked={on}
                     onClick={() => { if (on) return; update(paintPatch({ kind })); recordGradient({ kind }) }}
-                    className={`relative flex-1 h-9 rounded-md overflow-hidden border transition-colors ${
-                      on ? 'border-accent-300 ring-1 ring-accent-300/60' : 'border-white/15 hover:border-white/35'
+                    className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 px-1.5 py-1 text-[10px] transition-colors ${
+                      on ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                     }`}
-                    style={{
-                      backgroundImage: `${cssGradientOfKind(stops, space, gStyle, { ...geom, kind })}, ${CHECKER_IMAGE}`,
-                      backgroundSize: 'auto, 6px 6px',
-                      backgroundRepeat: 'no-repeat, repeat',
-                    }}
                   >
-                    <span className={`absolute inset-x-0 bottom-0 px-1 py-px text-[9px] leading-tight text-center ${on ? 'bg-navy-900/85 text-accent-200' : 'bg-navy-900/70 text-gray-300'}`}>
-                      {label}
-                    </span>
+                    <span
+                      className="w-4 h-4 shrink-0 rounded-sm border border-white/25"
+                      style={{
+                        backgroundImage: `${cssGradientOfKind(stops, space, gStyle, { ...geom, kind })}, ${CHECKER_IMAGE}`,
+                        backgroundSize: 'auto, 4px 4px',
+                        backgroundRepeat: 'no-repeat, repeat',
+                      }}
+                      aria-hidden
+                    />
+                    <span className="truncate">{label}</span>
                   </button>
                 </Tooltip>
               )
@@ -3394,14 +3415,15 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">{geom.kind === 'conic' ? 'Start °' : 'Angle °'}</span>
                 <NumberInput
-                  value={Math.round(normalizeAngle(angle))}
-                  // No min/max: the spinners never stop, and any value wraps
-                  // into 0..360 on entry (style guide, "Angle fields").
+                  value={Math.round(angle)}
+                  // No min/max: the spinners never stop. `wrap` folds the
+                  // value into 0..360 when the user is done typing or on a
+                  // step (style guide, "Angle fields").
                   // Angle is part of the swatch (brand gradients carry their
                   // direction), so angle edits create/update the tied entry
                   // like any other gradient edit.
-                  onChange={raw => {
-                    const nextAngle = normalizeAngle(raw)
+                  wrap={normalizeAngle}
+                  onChange={nextAngle => {
                     update(paintPatch({ angle: nextAngle }))
                     recordGradient({ angle: nextAngle })
                   }}
@@ -3419,7 +3441,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
                     update(paintPatch({ style: nextStyle }))
                     recordGradient({ style: nextStyle })
                   }}
-                  className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+                  className="select-themed flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
                 >
                   <option value="smooth">Smooth</option>
                   <option value="hard">Hard</option>
@@ -3784,8 +3806,9 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
   const dispX = lv ? lv.x : layer.x
   const dispY = lv ? lv.y : layer.y
   // Angle fields (style guide): the live value is the raw accumulated
-  // rotation; the committed value reads wrapped into 0..360.
-  const dispRot = lv ? lv.rotation : normalizeAngle(layer.rotation)
+  // rotation; the stored value is shown as stored (it is wrapped on
+  // commit and on load, and mid-typing values must not fold).
+  const dispRot = lv ? lv.rotation : layer.rotation
   const dispW = lv?.width ?? layer.width
   const dispH = lv?.height ?? layer.height
 
@@ -3809,7 +3832,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Rotation °</span>
-              <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation: normalizeAngle(rotation) })} snapToStep className="w-full" />
+              <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} snapToStep className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Opacity %</span>
@@ -4065,7 +4088,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 })()}
                 <label className="flex flex-col gap-0.5">
                   <span className={labelCls}>Rotation °</span>
-                  <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation: normalizeAngle(rotation) })} snapToStep className="w-full" />
+                  <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} snapToStep className="w-full" />
                 </label>
                 {isMaskLayer ? (
                   <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block">
@@ -4132,7 +4155,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                     <select
                       value={fam}
                       onChange={e => applyFontFamily(e.target.value)}
-                      className={`bg-navy-900 border rounded-lg px-2 py-1 text-xs w-full ${famMissing ? 'border-amber-500/60 text-amber-300' : 'border-white/10 text-gray-200'}`}
+                      className={`select-themed bg-navy-900 border rounded-lg pl-2 pr-7 py-1 text-xs w-full ${famMissing ? 'border-amber-500/60 text-amber-300' : 'border-white/10 text-gray-200'}`}
                       style={{ fontFamily: fam }}
                     >
                       {/* Keep the missing family selectable/displayed instead of
@@ -4185,7 +4208,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                         <select
                           value={matched.css}
                           onChange={e => update({ fontStyle: e.target.value })}
-                          className="bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+                          className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
                         >
                           {variants.map(v => (
                             <option key={v.name} value={v.css}>{v.name}</option>
@@ -4197,7 +4220,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                       <select
                         value={layer.fontStyle ?? 'normal'}
                         onChange={e => update({ fontStyle: e.target.value })}
-                        className="bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+                        className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
                       >
                         <option value="normal">Normal</option>
                         <option value="bold">Bold</option>
@@ -4234,7 +4257,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                   <select
                     value={layer.align ?? 'left'}
                     onChange={e => update({ align: e.target.value as any })}
-                    className="bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
+                    className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
                   >
                     <option value="left">Left</option>
                     <option value="center">Center</option>
@@ -4836,7 +4859,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   // come back by identity, so this is free for current files.
   // Load-time normalization: legacy triangles become polygons, and mask
   // flags are validated and pinned (THU-21).
-  const resetLayers = useCallback((next: ThumbnailLayer[]) => resetLayersRaw(pinMasks(normalizeLayers(next))), [resetLayersRaw])
+  const resetLayers = useCallback((next: ThumbnailLayer[]) => resetLayersRaw(wrapLayerAngles(pinMasks(normalizeLayers(next)))), [resetLayersRaw])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
@@ -5105,6 +5128,8 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   // ── Snapping ──────────────────────────────────────────────────────────────
   const [smartSnapEnabled, setSmartSnapEnabled] = useState(true)
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false)
+  // Accumulated rotation during a rotate gesture, for the live readout.
+  const rotationTrackRef = useRef<{ last: number; accum: number } | null>(null)
   // Pixel snap (THU-27): moves and resizes land on whole canvas pixels.
   // On by default and remembered; off leaves Konva's raw doubles alone.
   // Typed values in the properties panel are never touched by it.
@@ -8213,6 +8238,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                       setCanvasGestureActive(true)
                       // Modifiers held before the drag started count too.
                       applyRotationSnaps()
+                      // Start the accumulated-angle tracker for the readout
+                      // (style guide, "Angle fields"): Konva keeps the node's
+                      // rotation wrapped, so full turns are counted here.
+                      const first = transformerRef.current?.nodes()[0]
+                      rotationTrackRef.current = first ? { last: first.rotation(), accum: first.rotation() } : null
                     }}
                     onTransform={() => {
                       // Live readout (THU-25, THU-26): the primary node's
@@ -8250,12 +8280,26 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                           height = box.height
                         }
                       }
+                      // Accumulate the rotation across wraps: Konva hands back
+                      // an angle folded into one turn, so the step from one
+                      // frame to the next is taken the short way round and
+                      // summed, which lets a readout climb past 360.
+                      let liveRotation = node.rotation()
+                      const track = rotationTrackRef.current
+                      if (rotating && track) {
+                        let d = liveRotation - track.last
+                        if (d > 180) d -= 360
+                        if (d < -180) d += 360
+                        track.accum += d
+                        track.last = liveRotation
+                        liveRotation = track.accum
+                      }
                       setLiveTransform({
                         kind: rotating ? 'rotate' : 'resize',
                         id: node.id(),
                         x: rotating ? node.x() : pos(node.x()),
                         y: rotating ? node.y() : pos(node.y()),
-                        rotation: node.rotation(),
+                        rotation: liveRotation,
                         width,
                         height,
                         pointer,

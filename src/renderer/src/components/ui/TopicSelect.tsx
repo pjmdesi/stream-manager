@@ -21,7 +21,7 @@ export function TopicSelect({ topics, value, onChange, className = '', ...rest }
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
-      className={`bg-navy-900 border border-white/10 text-gray-200 text-[11px] rounded px-2 py-1 max-w-[180px] truncate focus:outline-none focus:ring-1 focus:ring-accent-500/50 focus:border-accent-500/50 transition-colors ${className}`}
+      className={`select-themed bg-navy-900 border border-white/10 text-gray-200 text-[11px] rounded pl-2 pr-6 py-1 max-w-[180px] truncate focus:outline-none focus:ring-1 focus:ring-accent-500/50 focus:border-accent-500/50 transition-colors ${className}`}
       {...rest}
     >
       {topics.map(t => (

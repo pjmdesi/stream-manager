@@ -2928,12 +2928,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         const r = s.clipRegions.find(c => c.id === regionId)
         if (!r) return s
         const segDur = r.outPoint - r.inPoint
-        // Compute left/right walls from direct neighbour lookup — avoids the anchor-inside-neighbour
+        // Compute left/right walls from direct neighbor lookup — avoids the anchor-inside-neighbor
         // bug that getSegmentFreeInterval has when the handle has already been clamped to the edge.
         const others = s.clipRegions.filter(c => c.id !== regionId)
         const leftWall  = others.reduce<number>((b, c) => c.outPoint < r.outPoint ? Math.max(b, c.outPoint) : b, -Infinity)
         const rightWall = others.reduce<number>((b, c) => c.inPoint  > r.inPoint  ? Math.min(b, c.inPoint)  : b, Infinity)
-        // Stop 1 frame from a neighbour so the merge button can appear; use full extent at video boundary.
+        // Stop 1 frame from a neighbor so the merge button can appear; use full extent at video boundary.
         const lo = leftWall  === -Infinity ? 0   : leftWall  + frameTime
         const hi = rightWall === Infinity  ? dur : rightWall - frameTime
         if (symmetric) {
@@ -3039,13 +3039,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       setClipState(s => {
         const r = s.clipRegions.find(c => c.id === regionId)
         if (!r) return s
-        // Find bounds from neighbouring regions
+        // Find bounds from neighboring regions
         const others = s.clipRegions.filter(c => c.id !== regionId)
         const lo = others.reduce((acc, c) => c.outPoint <= startIn + dtSec ? Math.max(acc, c.outPoint) : acc, 0)
         const hi = others.reduce((acc, c) => c.inPoint >= startIn + dtSec + segDur ? Math.min(acc, c.inPoint) : acc, dur)
         let newIn  = startIn  + dtSec
         let newOut = startOut + dtSec
-        // Clamp to neighbours and video bounds
+        // Clamp to neighbors and video bounds
         if (newIn < lo)          { newIn = lo;         newOut = lo + segDur }
         if (newOut > hi)         { newOut = hi;         newIn  = hi - segDur }
         if (newIn < 0)           { newIn = 0;           newOut = segDur }
@@ -3061,7 +3061,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
             break
           }
         }
-        // If clamped segment overlaps a neighbour (can happen with tight gaps), prevent the move
+        // If clamped segment overlaps a neighbor (can happen with tight gaps), prevent the move
         const wouldOverlap = others.some(c => newIn < c.outPoint - frameTime && newOut > c.inPoint + frameTime)
         if (wouldOverlap) return s
         const updated = s.clipRegions.map(c => c.id === regionId ? { ...c, inPoint: newIn, outPoint: newOut } : c)

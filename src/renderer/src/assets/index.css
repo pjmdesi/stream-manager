@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Native <select> skin (APP-29). Chromium's default menulist adds its own
+   inner padding and arrow, so a select styled with the same padding as an
+   Input still showed its text a few pixels further in and stood a little
+   taller. `select-themed` drops the native chrome and draws the chevron as
+   a background, so the text sits exactly where an Input's does and no
+   wrapper element is needed for the arrow. Callers set the horizontal
+   padding themselves (pl to match the neighboring inputs, pr wide enough
+   for the chevron: pr-7 at text-xs, pr-9 at text-sm). The chevron is the
+   gray-400 token drawn at 12px; color-scheme keeps the option list dark. */
+@layer components {
+  .select-themed {
+    appearance: none;
+    color-scheme: dark;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 12px 12px;
+  }
+}
+
 /* Recursive variable font, bundled so the app needs no network to render.
    Axes: wght 300–1000, slnt 0…-15 (declared as oblique so `italic` uses the
    designed slant), plus MONO/CASL/CRSV set via font-variation-settings. */
