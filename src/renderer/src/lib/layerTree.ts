@@ -20,6 +20,8 @@ export const MAX_GROUP_LEVEL = 3
 
 export const isGroup = (l: ThumbnailLayer): boolean => l.type === 'group'
 export const parentIdOf = (l: ThumbnailLayer): string | null => l.parentId ?? null
+/** A group's mask shape (THU-21): a shape member flagged `mask`. */
+export const isMask = (l: ThumbnailLayer): boolean => !!l.mask && l.type === 'shape'
 
 export function byId(layers: ThumbnailLayer[], id: string): ThumbnailLayer | undefined {
   return layers.find(l => l.id === id)
@@ -158,9 +160,16 @@ export function groupLayers(
     x: minX, y: minY, rotation: 0,
     ...(parentId ? { parentId } : {}),
   }
+  // A mask grouped with other layers leaves its group, so it stops being
+  // one (the flag is dropped from every moved root).
   const moved = layers
     .filter(l => moving.has(l.id))
-    .map(l => rootSet.has(l.id) ? { ...l, parentId: groupId, x: l.x - minX, y: l.y - minY } : l)
+    .map(l => {
+      if (!rootSet.has(l.id)) return l
+      const { mask: _mask, ...rest } = l
+      void _mask
+      return { ...rest, parentId: groupId, x: l.x - minX, y: l.y - minY }
+    })
   const lastMovingIdx = layers.reduce((m, l, i) => (moving.has(l.id) ? i : m), -1)
   const insertAt = layers.slice(0, lastMovingIdx).filter(l => !moving.has(l.id)).length
   const remaining = layers.filter(l => !moving.has(l.id))
@@ -182,8 +191,10 @@ export function ungroupLayer(layers: ThumbnailLayer[], groupId: string): { layer
   const next = layers.filter(l => l.id !== groupId).map(l => {
     if (parentIdOf(l) !== groupId) return l
     freed.push(l.id)
-    const { parentId: _drop, ...rest } = l
-    void _drop
+    // The mask is released along with the group: it survives as a plain
+    // shape, the way Illustrator leaves the clipping path behind.
+    const { parentId: _drop, mask: _mask, ...rest } = l
+    void _drop; void _mask
     return {
       ...rest,
       x: g.x + l.x * cos - l.y * sin,
@@ -226,7 +237,9 @@ export function duplicateLayer(layers: ThumbnailLayer[], id: string, makeId: () 
     ...(l.id === id ? { name: l.name + ' copy', x: l.x + 20, y: l.y + 20 } : {}),
   }))
   const lastIdx = layers.reduce((m, l, i) => (map.has(l.id) ? i : m), -1)
-  return { layers: [...layers.slice(0, lastIdx + 1), ...copies, ...layers.slice(lastIdx + 1)], rootId: map.get(id)! }
+  // pinMasks clears the copy's flag when the source was its group's mask
+  // (the group keeps the original) and keeps a copied group's own mask.
+  return { layers: pinMasks([...layers.slice(0, lastIdx + 1), ...copies, ...layers.slice(lastIdx + 1)]), rootId: map.get(id)! }
 }
 
 /** The selection as clipboard content: every selected unit with its
@@ -265,19 +278,23 @@ export function insertPastedAbove(layers: ThumbnailLayer[], pasted: ThumbnailLay
     : pasted
   const block = subtreeIds(layers, after.id)
   const idx = layers.findIndex(l => l.id === block[block.length - 1])
-  return { layers: [...layers.slice(0, idx + 1), ...placed, ...layers.slice(idx + 1)], rootIds }
+  // A paste above a group's mask lands below it once masks are re-pinned.
+  return { layers: pinMasks([...layers.slice(0, idx + 1), ...placed, ...layers.slice(idx + 1)]), rootIds }
 }
 
 /** Fresh-id copies of the given subtrees for pasting: roots land at the top
- *  level; inner parent links are remapped. */
+ *  level; inner parent links are remapped. A copied mask keeps its role
+ *  only inside a copied group; a mask pasted on its own is a plain shape. */
 export function clonePasteLayers(subtree: ThumbnailLayer[], makeId: () => string): ThumbnailLayer[] {
   const map = new Map(subtree.map(l => [l.id, makeId()]))
   return subtree.map(l => {
-    const { parentId, ...rest } = l
+    const { parentId, mask, ...rest } = l
+    const keepsParent = !!parentId && map.has(parentId)
     return {
       ...rest,
       id: map.get(l.id)!,
-      ...(parentId && map.has(parentId) ? { parentId: map.get(parentId)! } : {}),
+      ...(keepsParent ? { parentId: map.get(parentId!)! } : {}),
+      ...(keepsParent && mask ? { mask } : {}),
     }
   })
 }
@@ -330,6 +347,8 @@ export function reparentTransform(layers: ThumbnailLayer[], layer: ThumbnailLaye
 export function moveLayerTo(layers: ThumbnailLayer[], id: string, parentId: string | null, afterId: string | null): ThumbnailLayer[] | null {
   const src = byId(layers, id)
   if (!src) return null
+  // A mask stays in its slot: release it first to move it.
+  if (isMask(src)) return null
   const block = new Set(subtreeIds(layers, id))
   if (parentId && block.has(parentId)) return null
   if (afterId && block.has(afterId)) return null
@@ -360,7 +379,8 @@ export function moveLayerTo(layers: ThumbnailLayer[], id: string, parentId: stri
   } else {
     insertAt = 0
   }
-  const next = [...remaining.slice(0, insertAt), ...moving, ...remaining.slice(insertAt)]
+  // Re-pin masks: a layer dropped above a group's mask lands below it.
+  const next = pinMasks([...remaining.slice(0, insertAt), ...moving, ...remaining.slice(insertAt)])
   const same = next.length === layers.length && next.every((l, i) => l === layers[i])
   return same ? null : next
 }
@@ -439,6 +459,87 @@ export function needsUniformScale(layers: ThumbnailLayer[], ids: string[]): bool
       return m.type === 'text' || (m.rotation ?? 0) !== 0
     })
   })
+}
+
+// ── Group masks (THU-21) ───────────────────────────────────────────────────
+
+/** The group's mask shape, if it has one. */
+export function maskOf(layers: ThumbnailLayer[], groupId: string): ThumbnailLayer | undefined {
+  return layers.find(l => isMask(l) && l.parentId === groupId)
+}
+
+/**
+ * Enforce the mask invariants after any structural edit: a mask flag is
+ * valid only on a shape that is a direct member of a group, one per group
+ * (the first in storage order wins); every valid mask is the last member
+ * of its group's block, which the panel shows as the slot row directly
+ * under the group. Returns the same array when nothing needed fixing.
+ */
+export function pinMasks(layers: ThumbnailLayer[]): ThumbnailLayer[] {
+  let out = layers
+  let changed = false
+  const owners = new Set<string>()
+  out = out.map(l => {
+    if (!l.mask) return l
+    const p = l.parentId ? byId(layers, l.parentId) : undefined
+    if (l.type === 'shape' && p && isGroup(p) && !owners.has(p.id)) { owners.add(p.id); return l }
+    changed = true
+    const { mask: _mask, ...rest } = l
+    void _mask
+    return rest
+  })
+  for (const gid of owners) {
+    const m = out.find(l => l.mask && l.parentId === gid)!
+    const block = subtreeIds(out, gid)
+    const lastId = block[block.length - 1]
+    if (lastId === m.id) continue
+    const arr = out.filter(l => l.id !== m.id)
+    const idx = arr.findIndex(l => l.id === lastId)
+    out = [...arr.slice(0, idx + 1), m, ...arr.slice(idx + 1)]
+    changed = true
+  }
+  return changed ? out : layers
+}
+
+export function canBeGroupMask(layers: ThumbnailLayer[], id: string): { ok: boolean; reason: string } {
+  const l = byId(layers, id)
+  if (!l || l.type !== 'shape') return { ok: false, reason: 'Only a shape can be a group mask' }
+  if (isMask(l)) return { ok: false, reason: 'This shape is already the group mask' }
+  const p = l.parentId ? byId(layers, l.parentId) : undefined
+  if (!p || !isGroup(p)) return { ok: false, reason: 'Move the shape into a group first' }
+  if (maskOf(layers, p.id)) return { ok: false, reason: 'This group already has a mask; release it first' }
+  return { ok: true, reason: '' }
+}
+
+/** Make the shape its group's mask: it moves into the slot at the top of
+ *  the group. Null when it cannot be one. */
+export function setGroupMask(layers: ThumbnailLayer[], id: string): ThumbnailLayer[] | null {
+  if (!canBeGroupMask(layers, id).ok) return null
+  return pinMasks(layers.map(l => (l.id === id ? { ...l, mask: true } : l)))
+}
+
+/** Turn the mask back into a plain member. It stays where it is, at the
+ *  top of the group. */
+export function releaseGroupMask(layers: ThumbnailLayer[], id: string): ThumbnailLayer[] | null {
+  const l = byId(layers, id)
+  if (!l || !isMask(l)) return null
+  return layers.map(x => {
+    if (x.id !== id) return x
+    const { mask: _mask, ...rest } = x
+    void _mask
+    return rest
+  })
+}
+
+/** Insert a new shape as the group's mask (the group must have none). The
+ *  shape's position and size are in the group's own coordinates. */
+export function insertGroupMask(layers: ThumbnailLayer[], groupId: string, shape: ThumbnailLayer): ThumbnailLayer[] | null {
+  const g = byId(layers, groupId)
+  if (!g || !isGroup(g) || maskOf(layers, groupId)) return null
+  const block = subtreeIds(layers, groupId)
+  const idx = layers.findIndex(l => l.id === block[block.length - 1])
+  const placed: ThumbnailLayer = { ...shape, parentId: groupId, mask: true }
+  return [...layers.slice(0, idx + 1), placed, ...layers.slice(idx + 1)]
 }
 
 // ── Keyboard selection (THU-29) ────────────────────────────────────────────

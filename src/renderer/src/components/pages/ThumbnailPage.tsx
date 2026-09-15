@@ -17,7 +17,7 @@ import {
   FlipHorizontal2, FlipVertical2,
   ChevronDown, ChevronRight, Loader2, Radio, Palette, Upload,
   Layers as LayersIcon,
-  Group as GroupIcon, Ungroup as UngroupIcon, Folder,
+  Group as GroupIcon, Ungroup as UngroupIcon, Folder, Blend,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -33,7 +33,9 @@ import {
   deleteLayers, duplicateLayer as duplicateLayerTree, clonePasteLayers, moveLayerTo, moveAmongSiblings, scaleGroupMembers,
   snapResizedBox, needsUniformScale, panelRows, isGroup, hasHiddenAncestor, ancestorIds, subtreeIds,
   walkSelection, enterGroup, leaveGroup,
+  isMask, maskOf, pinMasks, canBeGroupMask, setGroupMask, releaseGroupMask, insertGroupMask,
 } from '../../lib/layerTree'
+import { traceMaskPath, traceShapeOutlineLocal } from '../../lib/groupMask'
 import type { PanelRow } from '../../lib/layerTree'
 import { setLiveTransform, useLiveTransform, normalizeAngle } from '../../lib/liveTransform'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
@@ -1158,13 +1160,17 @@ function ShapeNode(props: KonvaLayerNodeProps) {
  *  and visibility, with its members rendered inside it so every transform
  *  composes. A click selects the group; a double-click selects the member
  *  under the pointer (double-click again on a nested group to go deeper). */
-function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode }) {
-  const { layer, onSelect, children } = props
+function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; maskLayer?: ThumbnailLayer }) {
+  const { layer, onSelect, children, maskLayer } = props
   const drill = (e: Konva.KonvaEventObject<unknown>) => {
     if (props.nested) e.cancelBubble = true
     const childId = directChildIdUnder(e.target, layer.id)
     if (childId) onSelect(childId, false)
   }
+  // Group mask (THU-21): Konva clips the group's children (scene and hit
+  // graph alike) to the path this traces in the group's own space. A
+  // hidden mask switches the clip off, which doubles as the mask toggle.
+  const clip = maskLayer && maskLayer.visible ? maskLayer : undefined
   return (
     <KonvaGroup
       id={layer.id}
@@ -1174,11 +1180,54 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode }) {
       rotation={layer.rotation}
       opacity={layer.opacity / 100}
       visible={layer.visible}
+      clipFunc={clip ? (ctx: Konva.Context) => { traceMaskPath(ctx, clip) } : undefined}
       {...wrapperHandlers(props)}
       onDblClick={props.inert ? undefined : drill}
       onDblTap={props.inert ? undefined : drill}
     >
       {children}
+    </KonvaGroup>
+  )
+}
+
+/** A group's mask on the canvas (THU-21): paints nothing (the clip lives
+ *  on the group), but keeps a hit region the size of its outline so it can
+ *  be reached by a double-click on empty masked space and driven by the
+ *  transformer like any shape. Rendered beneath the members, so content
+ *  wins every hit it covers. Selected, it shows a dashed outline. */
+function MaskNode(props: KonvaLayerNodeProps) {
+  const { layer, isSelected } = props
+  const w = layer.width ?? 200
+  const h = layer.height ?? 200
+  return (
+    <KonvaGroup
+      id={layer.id}
+      x={layer.x}
+      y={layer.y}
+      rotation={layer.rotation}
+      visible={layer.visible}
+      {...wrapperHandlers(props)}
+    >
+      <KonvaShape
+        width={w}
+        height={h}
+        // A transparent fill keeps the hit region while drawing nothing.
+        fill="rgba(0,0,0,0)"
+        stroke={isSelected ? '#fbbf24' : undefined}
+        strokeEnabled={isSelected}
+        // Unscaled stroke: 1.5 screen pixels at any zoom.
+        strokeWidth={1.5}
+        dash={[6, 4]}
+        strokeScaleEnabled={false}
+        perfectDrawEnabled={false}
+        shadowForStrokeEnabled={false}
+        sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
+          ctx.save()
+          traceShapeOutlineLocal(ctx, layer)
+          ctx.restore()
+          ctx.fillStrokeShape(shape)
+        }}
+      />
     </KonvaGroup>
   )
 }
@@ -1213,13 +1262,19 @@ function LayerNodes({ layers, parentId, makeProps }: {
   parentId: string | null
   makeProps: (layer: ThumbnailLayer) => KonvaLayerNodeProps
 }) {
+  // A group's mask (THU-21) is stored as its topmost member but drawn
+  // first, as a hit-only node beneath the members (see MaskNode).
+  const members = childrenOf(layers, parentId)
+  const mask = parentId ? members.find(isMask) : undefined
+  const ordered = mask ? [mask, ...members.filter(l => l !== mask)] : members
   return (
     <>
-      {childrenOf(layers, parentId).map(layer => {
+      {ordered.map(layer => {
         const props = makeProps(layer)
+        if (layer === mask) return <MaskNode key={layer.id} {...props} />
         if (layer.type === 'group') {
           return (
-            <GroupNode key={layer.id} {...props}>
+            <GroupNode key={layer.id} {...props} maskLayer={maskOf(layers, layer.id)}>
               <LayerNodes layers={layers} parentId={layer.id} makeProps={makeProps} />
             </GroupNode>
           )
@@ -2992,6 +3047,26 @@ function FilterToggle({ label, checked, onChange }: {
   )
 }
 
+/** Wraps the appearance sections of a shape that is a group mask (THU-21):
+ *  the controls stay visible with their last values but are disabled, and
+ *  one tooltip over the whole block says why. Inactive, it renders the
+ *  children as they are. */
+function MaskDisabled({ active, children }: { active: boolean; children: React.ReactNode }) {
+  if (!active) return <>{children}</>
+  return (
+    <>
+      <p className="text-[10px] text-amber-300/90 leading-relaxed">
+        Group mask: only this shape's outline is used, to clip the group. Fill, stroke, shadows, outline, and opacity are switched off while it is a mask and come back when it is released.
+      </p>
+      <Tooltip content="Switched off while this shape is a group mask. Release the mask (selection tab) to use them again." side="left" triggerClassName="block">
+        <fieldset disabled className="flex flex-col gap-3 opacity-50 [&_*]:pointer-events-none" aria-disabled>
+          {children}
+        </fieldset>
+      </Tooltip>
+    </>
+  )
+}
+
 function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, fontsLoaded, fontQueryFailed, standalone, pixelSnapEnabled }: PropsPanelProps) {
   // Last-used font family (THU-6): persisted app-wide via IPC so it
   // survives sessions. Rendered as a quick-pick link under the font
@@ -3045,6 +3120,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
     else onLiveChange(next)
   }
 
+  const isMaskLayer = isMask(layer)
   const lv = liveAll && liveAll.id === layer.id ? liveAll : null
   const dispX = lv ? lv.x : layer.x
   const dispY = lv ? lv.y : layer.y
@@ -3326,10 +3402,19 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                   <span className={labelCls}>Rotation °</span>
                   <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} snapToStep className="w-full" />
                 </label>
-                <label className="flex flex-col gap-0.5">
-                  <span className={labelCls}>Opacity %</span>
-                  <NumberInput value={layer.opacity} onChange={opacity => update({ opacity })} min={0} max={100} className="w-full" />
-                </label>
+                {isMaskLayer ? (
+                  <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block">
+                    <label className="flex flex-col gap-0.5 opacity-50">
+                      <span className={labelCls}>Opacity %</span>
+                      <NumberInput value={layer.opacity} onChange={() => {}} min={0} max={100} disabled className="w-full" />
+                    </label>
+                  </Tooltip>
+                ) : (
+                  <label className="flex flex-col gap-0.5">
+                    <span className={labelCls}>Opacity %</span>
+                    <NumberInput value={layer.opacity} onChange={opacity => update({ opacity })} min={0} max={100} className="w-full" />
+                  </label>
+                )}
               </div>
             </>
           )
@@ -3550,6 +3635,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
         </>
       )}
 
+      <MaskDisabled active={isMaskLayer}>
       {layer.type === 'shape' && (
         <section>
           <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Fill & Stroke</p>
@@ -3747,6 +3833,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           </div>
         )}
       </section>
+      </MaskDisabled>
 
       {/* Filters — image layers only. All filter values persist in JSON
           regardless of the master toggle, so the user can A/B compare without
@@ -4257,7 +4344,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   // the state never carries a legacy shape: saved triangles become
   // three-sided polygons with their box refitted (THU-2). Unchanged lists
   // come back by identity, so this is free for current files.
-  const resetLayers = useCallback((next: ThumbnailLayer[]) => resetLayersRaw(normalizeLayers(next)), [resetLayersRaw])
+  // Load-time normalisation: legacy triangles become polygons, and mask
+  // flags are validated and pinned (THU-21).
+  const resetLayers = useCallback((next: ThumbnailLayer[]) => resetLayersRaw(pinMasks(normalizeLayers(next))), [resetLayersRaw])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
@@ -6003,6 +6092,44 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     commitLayers(ls.map(l => (sel.has(l.id) ? { ...l, visible: !allVisible } : l)))
   }, [commitLayers])
 
+  // ── Group masks (THU-21) ───────────────────────────────────────────────
+  const useAsGroupMask = useCallback((id: string) => {
+    const next = setGroupMask(layersRef.current, id)
+    if (next) commitLayers(next)
+  }, [commitLayers])
+  const releaseMask = useCallback((id: string) => {
+    const next = releaseGroupMask(layersRef.current, id)
+    if (next) commitLayers(next)
+  }, [commitLayers])
+  /** New mask shape fitted to the group's current bounds (in the group's
+   *  own frame, read from the Konva node so rotated members and measured
+   *  text are exact), dropped straight into the slot and selected. */
+  const addGroupMask = useCallback((groupId: string, shapeType: 'rect' | 'ellipse' | 'polygon') => {
+    const ls = layersRef.current
+    const node = stageRef.current?.findOne(`#${groupId}`)
+    const r = node ? node.getClientRect({ relativeTo: node as unknown as Konva.Container, skipShadow: true, skipStroke: true }) : null
+    const box = r && r.width > 0 && r.height > 0 ? r : { x: 0, y: 0, width: 200, height: 200 }
+    const shape: ThumbnailLayer = {
+      id: newId(), name: 'Mask', type: 'shape', shapeType, visible: true, opacity: 100,
+      x: Math.round(box.x), y: Math.round(box.y), rotation: 0,
+      width: Math.max(1, Math.round(box.width)), height: Math.max(1, Math.round(box.height)),
+      fill: '#6366f1', stroke: '#000000', strokeWidth: 0, cornerRadius: 0,
+      ...(shapeType === 'polygon' ? { sides: POLYGON_DEFAULT_SIDES } : {}),
+    }
+    const next = insertGroupMask(ls, groupId, shape)
+    if (!next) return
+    commitLayers(next)
+    setSelectedIds([shape.id])
+  }, [commitLayers])
+  // The empty slot's menu: pick a shape already in the group, or create one.
+  const [maskSlotMenu, setMaskSlotMenu] = useState<{ groupId: string; anchor: DOMRect } | null>(null)
+  useEffect(() => {
+    if (!maskSlotMenu) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMaskSlotMenu(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [maskSlotMenu])
+
   const layerTabActions = useMemo<LayerTabAction[]>(() => {
     if (selectedIds.length === 0) return []
     const roots = selectionRoots(layers, selectedIds)
@@ -6044,8 +6171,29 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
         affects: groupRoots.flatMap(id => subtreeIds(layers, id)), onClick: ungroupSelected,
       })
     }
+    // Mask actions (THU-21), amber: they change how every layer in the
+    // group renders. Affected rows: the group and everything in it.
+    if (single && single.type === 'shape' && single.parentId) {
+      const groupAndMembers = [single.parentId, ...subtreeIds(layers, single.parentId)]
+      out.push({ key: 'sep-mask', separator: true })
+      if (isMask(single)) {
+        out.push({
+          key: 'release-mask', icon: <Blend size={14} />, tone: 'amber',
+          label: 'Release mask (the shape stays; the group is no longer clipped)',
+          affects: groupAndMembers, onClick: () => releaseMask(single.id),
+        })
+      } else {
+        const check = canBeGroupMask(layers, single.id)
+        out.push({
+          key: 'use-as-mask', icon: <Blend size={14} />, tone: 'amber',
+          label: 'Use as group mask (only its outline clips the group)',
+          disabled: !check.ok, reason: check.reason,
+          affects: groupAndMembers, onClick: () => useAsGroupMask(single.id),
+        })
+      }
+    }
     return out
-  }, [layers, selectedIds, groupCheck, toggleSelectedVisibility, duplicateSelected, deleteSelected, groupSelected, ungroupSelected])
+  }, [layers, selectedIds, groupCheck, toggleSelectedVisibility, duplicateSelected, deleteSelected, groupSelected, ungroupSelected, useAsGroupMask, releaseMask])
 
   /** Toggle flipX / flipY on every selected layer. Each click on the
    *  toolbar button is a single undo entry that flips all selected
@@ -7948,6 +8096,58 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
               </>
             )}
 
+            {/* Empty mask slot menu (THU-21): portal-rendered so the
+                scrolling layers list cannot clip it. Hovering a shape
+                lights its row in amber, as the tab's mask actions do. */}
+            {maskSlotMenu && (() => {
+              const { groupId, anchor } = maskSlotMenu
+              const shapes = childrenOf(layers, groupId).filter(l => l.type === 'shape')
+              const dropUp = anchor.bottom > window.innerHeight - 240
+              const style: React.CSSProperties = dropUp
+                ? { position: 'fixed', bottom: window.innerHeight - anchor.top + 4, right: Math.max(8, window.innerWidth - anchor.right), zIndex: 61 }
+                : { position: 'fixed', top: anchor.bottom + 4, right: Math.max(8, window.innerWidth - anchor.right), zIndex: 61 }
+              const close = () => { setMaskSlotMenu(null); setHighlighted(NO_HIGHLIGHT) }
+              const item = 'flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left text-gray-300 hover:bg-white/5 transition-colors'
+              return createPortal(
+                <>
+                  <div className="fixed inset-0 z-[60]" onClick={close} />
+                  <div style={style} className="w-60 bg-navy-700 border border-white/10 rounded-lg shadow-xl py-1">
+                    {shapes.length > 0 && (
+                      <>
+                        <div className="px-3 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-gray-400">Use a shape in this group</div>
+                        {shapes.map(s => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className={item}
+                            onMouseEnter={() => setHighlighted({ ids: new Set([s.id]), tone: 'amber' })}
+                            onMouseLeave={() => setHighlighted(NO_HIGHLIGHT)}
+                            onClick={() => { useAsGroupMask(s.id); close() }}
+                          >
+                            {s.shapeType === 'ellipse' ? <Circle size={12} className="shrink-0 text-gray-400" /> : s.shapeType === 'polygon' ? <Pentagon size={12} className="shrink-0 text-gray-400" /> : <Square size={12} className="shrink-0 text-gray-400" />}
+                            <span className="truncate">{s.name}</span>
+                          </button>
+                        ))}
+                        <div className="my-1 border-t border-white/5" />
+                      </>
+                    )}
+                    <div className="px-3 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-gray-400">New mask, fitted to the group</div>
+                    {([
+                      ['rect', 'Rectangle', <Square size={12} className="shrink-0 text-gray-400" />],
+                      ['ellipse', 'Ellipse', <Circle size={12} className="shrink-0 text-gray-400" />],
+                      ['polygon', 'Polygon', <Pentagon size={12} className="shrink-0 text-gray-400" />],
+                    ] as const).map(([type, label, icon]) => (
+                      <button key={type} type="button" className={item} onClick={() => { addGroupMask(groupId, type); close() }}>
+                        {icon}
+                        <span>{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>,
+                document.body,
+              )
+            })()}
+
             {/* Right panel: Layers + Assets + Properties */}
             <div ref={rightPanelRef} className="w-64 flex flex-col border-l border-white/5 bg-navy-800 shrink-0 overflow-hidden">
               {/* Layers — collapsible like every sidebar panel (UI-polish
@@ -8040,6 +8240,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                           const dimmed = !layer.visible || hasHiddenAncestor(layers, layer.id)
                           const isHovered = hoveredLayerId === layer.id
                           const isAffected = highlighted.ids.has(layer.id)
+                          // Group masks (THU-21): the mask row carries its
+                          // icon; a group row knows its mask for the slot
+                          // row under it and the collapsed-row indicator.
+                          const rowIsMask = isMask(layer)
+                          const groupMask = group ? maskOf(layers, layer.id) : undefined
                           // Name brightness climbs with the row tone so the
                           // brighter backgrounds keep their contrast.
                           const nameTone = dimmed
@@ -8053,7 +8258,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                               {panelDrop?.gapIdx === rowIdx && indicator(panelDrop.depth)}
                               <div
                                 data-layer-id={layer.id}
-                                draggable={!isRenaming}
+                                draggable={!isRenaming && !rowIsMask}
                                 onDragStart={e => {
                                   setDraggingLayerId(layer.id)
                                   e.dataTransfer.effectAllowed = 'move'
@@ -8139,6 +8344,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                   </button>
                                 </Tooltip>
                                 {group && <Folder size={11} className="text-gray-400 shrink-0" />}
+                                {rowIsMask && (
+                                  <Tooltip content="Group mask: its outline clips the group. Hide it to switch the mask off; release it from the selection tab." side="top" triggerClassName="shrink-0 flex">
+                                    <Blend size={11} className="text-amber-300/80" />
+                                  </Tooltip>
+                                )}
                                 {isRenaming ? (
                               <input
                                 autoFocus
@@ -8169,10 +8379,45 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 <AlertTriangle size={11} className="text-amber-400 shrink-0" />
                               </Tooltip>
                             )}
+                            {/* Collapsed group: the mask slot shows on the
+                                row's right instead of under it. */}
+                            {group && collapsed && (groupMask ? (
+                              <Tooltip content={`Mask: ${groupMask.name}`} side="top" triggerClassName="shrink-0 flex items-center min-w-0 max-w-[88px]">
+                                <span className="flex items-center gap-1 min-w-0 text-[10px] text-amber-300/70">
+                                  <Blend size={10} className="shrink-0" />
+                                  <span className="truncate">{groupMask.name}</span>
+                                </span>
+                              </Tooltip>
+                            ) : (
+                              <Tooltip content="No mask. Expand the group to add one." side="top" triggerClassName="shrink-0 flex">
+                                <Blend size={10} className="text-gray-600" />
+                              </Tooltip>
+                            ))}
                             {/* Duplicate and delete moved to the selection
                                 tab (THU-30); the row keeps the eye and the
                                 name so indented names have the room. */}
                           </div>
+                          {/* Mask slot (THU-21): every expanded group shows
+                              its slot under its row. Filled, the mask's own
+                              row is the slot (it is the group's topmost
+                              member, so it lands here). Empty, this row
+                              opens the add-mask menu. */}
+                          {group && !collapsed && !groupMask && (
+                            <Tooltip content="Add a mask: use a shape already in this group, or create one fitted to the group. Only the shape's outline clips." side="top" triggerClassName="block">
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={e => setMaskSlotMenu({ groupId: layer.id, anchor: e.currentTarget.getBoundingClientRect() })}
+                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMaskSlotMenu({ groupId: layer.id, anchor: e.currentTarget.getBoundingClientRect() }) } }}
+                                className={`flex items-center gap-1.5 pr-2 py-1 border-b border-white/5 cursor-pointer transition-colors ${maskSlotMenu?.groupId === layer.id ? 'bg-white/10 text-gray-300' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+                                style={{ paddingLeft: indent(depth + 1) }}
+                              >
+                                <Blend size={11} className="shrink-0 opacity-70" />
+                                <span className="text-[11px] italic">No mask</span>
+                                <span className="ml-auto text-[10px] uppercase tracking-wider">Add</span>
+                              </div>
+                            </Tooltip>
+                          )}
                         </React.Fragment>
                       )
                     })}

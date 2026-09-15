@@ -860,6 +860,12 @@ export interface ThumbnailLayer {
   /** Polygon side count, 3 to 12; new polygons start at 3. */
   sides?: number
   cornerRadius?: number
+  /** Group mask (THU-21): this shape is its group's mask. The group's
+   *  members are clipped to the shape's outline; the shape's own fill,
+   *  stroke, opacity, shadows, and outline do not render. One per group,
+   *  kept as the group's topmost member (lib/layerTree.ts pinMasks). An
+   *  older app version ignores the flag and draws the shape as a member. */
+  mask?: boolean
   /** Gradient fill (thumbnails #2). Absent / 'solid' = flat `fill`. The
    *  `fill` field stays maintained (mirrors the start stop) so older app
    *  versions and the solid toggle degrade to a sensible flat color. */
