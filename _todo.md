@@ -39,16 +39,17 @@
 35. THU-30
 36. THU-21
 37. THU-1
-38. THU-8
-39. THU-9
-40. THU-10
-41. THU-12
-42. THU-16
-43. THU-23
-44. THU-20
-45. INTG-1
-46. STR-22
-47. STR-17
+38. THU-31
+39. THU-8
+40. THU-9
+41. THU-10
+42. THU-12
+43. THU-16
+44. THU-23
+45. THU-20
+46. INTG-1
+47. STR-22
+48. STR-17
 
 ## Improvement ideas
 
@@ -289,6 +290,10 @@
   Mask slot on groups, phase two of grouping. Illustrator's model drawn our way: a group carries one optional mask shape in a slot of its own, and everything inside the group is clipped to that shape's outline; nothing else about the shape (fill, stroke, opacity, filters, shadows) takes part. Konva does this natively with a clip function on the Group: the path runs in the group's own coordinate space, so moving, rotating, or resizing the group carries the mask along, and children's drop shadows are clipped too. Geometric only: no feathering and no partial opacity (a soft or image mask would be a cached-group compositing job, its own ticket if ever wanted). Layers panel: the slot renders under the group's row, and the mask shape is selectable and editable on its own with the clip updating live. THU-1's "apply as mask to the layer below" becomes sugar for wrapping that layer in a group and putting the shape in its mask slot, so a masked single layer and a masked group are the same thing.
   Design settled 2026-09-15: the mask is an ordinary shape member with a `mask` flag (no new type, no reference on the group; an older app draws it as a plain member), one per group, only shapes, stored as the group's topmost member so the panel shows it as the slot row directly under the group and `pinMasks` in lib/layerTree.ts keeps it there through every structural edit (move, drop, paste, duplicate, group; a mask cannot be dragged out of its slot). Every expanded group shows its slot; empty, the slot row itself is the control: click it for a menu listing the group's shapes (hover lights the row in amber) and a "new mask fitted to the group" trio (rectangle, ellipse, polygon, sized from the group's Konva bounds in its own frame). A collapsed group shows the mask's name on the right of its row. The selection tab (THU-30) carries Use as group mask and Release mask in amber, lighting the whole group. Release and ungroup both leave the shape in place as a plain layer; grouping a mask with siblings, duplicating it alone, or pasting it alone drops the flag; duplicating or pasting a group keeps its mask. On the canvas the group's Konva node gets a clip function that traces the mask's outline (rect with corner radius, ellipse, polygon with corner radius, flips, position, rotation) in the group's frame, so scene and hit graph are both clipped; the mask itself is a hit-only node drawn beneath the members (transparent fill, dashed amber outline while selected), so a double-click on empty masked space selects it and it resizes with the normal handles; hiding the mask switches the clip off. The properties panel keeps a mask's fill, stroke, shadow, outline, and opacity controls visible but disabled behind one explaining tooltip, with a note at the top. Accepted limitation: Konva's container bounds ignore clip functions (checked in Container.js), so a group whose content is larger than its mask shows a selection box larger than what is visible.
   Built 2026-09-15, awaiting review. New: `lib/groupMask.ts` (outline tracing shared by the clip and the hit node), `isMask/maskOf/pinMasks/canBeGroupMask/setGroupMask/releaseGroupMask/insertGroupMask` in lib/layerTree.ts (unit-checked), `mask?: boolean` on the layer type, `MaskNode` and the clip on `GroupNode`, `MaskDisabled` wrapper in the properties panel, slot rows and the slot menu in the layers panel, two tab actions, and `pinMasks` on load. Verify: empty slot under every expanded group; add a fitted rectangle mask (clips at once, mask selected with dashed outline); move, rotate, resize the group (mask follows); resize the mask (clip updates live); hide the mask (clip off), show it; ellipse and polygon masks, corner radius on a rectangle mask; use an existing shape as mask from the menu and from the tab; release from the tab (shape stays on top, group unclipped); ungroup (shape survives plain); duplicate the group (copy is masked) and the mask alone (copy is plain); collapsed group row shows the mask name; double-click empty masked space selects the mask, double-click content selects the content; the mask row cannot be dragged and other rows dropped above it land below; the properties panel for a mask (appearance controls disabled with the tooltip, transform and shape fields live); export PNG matches the canvas; and a group larger than its mask shows the oversize selection box (known).
+  Review: group rows and their blocks looked like plain rows with an indent. Now a group row has a faint background tint and a medium-weight name, and a 2 px rail runs under each enclosing group's eye alongside its members (nested groups and the mask slot included), first to last, without touching the group row. The chevron is gone: the folder icon is the collapse toggle (open or closed folder shows the state), so a group's eye lines up with its siblings' eyes and the group no longer looks like a nested item itself.
+
+- **THU-31**
+  Effects and filters on group layers. With masks in place (THU-21) a group is a real compositing unit, so it should take the same appearance controls a single layer has: drop shadows, outline, and, as far as they apply, the image filters, rendered on the group as a whole (a shadow under the masked silhouette, an outline around it) rather than per member. Preferably all of them; which ones and how (cached group node, filter cost, export parity) to be discussed when it comes up. Filed 2026-09-15.
 
 - **THU-22** [maybe]
   Stars in the thumbnail editor. A star is a polygon whose side midpoints are pulled inward, so it is a small addition to the polygon's properties: a checkbox that turns on an inner radius, shown as a handle at the midpoint of one side on the canvas with a matching percentage input in the panel (how far inward the midpoints sit; zero is the plain polygon). Rides on the THU-2 geometry (flat bottom, fills its box, corner radius), and the corner-radius clamp has to account for the inner vertices. Filed 2026-09-13 from the THU-2 discussion; not queued.

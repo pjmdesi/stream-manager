@@ -8252,6 +8252,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             : isAffected ? 'text-gray-100'
                             : isSelected ? 'text-gray-200'
                             : isHovered ? 'text-gray-300'
+                            : group ? 'text-gray-300'
                             : 'text-gray-400'
                           return (
                             <React.Fragment key={layer.id}>
@@ -8316,25 +8317,26 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 // the streams page and launcher use. Hover is
                                 // driven by hoveredLayerId (set on mouse enter)
                                 // rather than a CSS hover so the states compose.
-                                className={`flex items-center gap-1.5 pr-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 transition-colors ${
-                                  isAffected ? `${LAYER_ROW_AFFECTED_TONE[highlighted.tone]} relative after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5`
+                                className={`relative flex items-center gap-1.5 pr-2 py-1.5 ${isRenaming ? '' : 'cursor-pointer'} group border-b border-white/5 transition-colors ${
+                                  isAffected ? `${LAYER_ROW_AFFECTED_TONE[highlighted.tone]} after:content-[""] after:absolute after:inset-y-0 after:right-0 after:w-0.5`
                                     : isSelected && isHovered ? 'bg-accent-600/[0.22]'
                                     : isSelected ? 'bg-accent-600/15'
                                     : isHovered ? 'bg-accent-600/[0.08]'
+                                    : group ? 'bg-white/[0.03]'
                                     : ''
                                 } ${isDragging ? 'opacity-40' : ''}`}
                                 style={{ paddingLeft: indent(depth) }}
                               >
-                                {group && (
-                                  <Tooltip content={collapsed ? 'Expand group' : 'Collapse group'} side="top">
-                                    <button
-                                      onClick={e => { e.stopPropagation(); toggleGroupCollapsed(layer.id) }}
-                                      className="text-gray-400 hover:text-gray-300 shrink-0 -ml-1"
-                                    >
-                                      {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                                    </button>
-                                  </Tooltip>
-                                )}
+                                {/* Group rails (THU-21 review): a 2 px line
+                                    under each enclosing group's eye runs
+                                    alongside its members, first to last, so
+                                    the block reads as bracketed rather than
+                                    merely indented. The group row itself
+                                    carries none, so the rail never touches
+                                    an icon. */}
+                                {Array.from({ length: depth }, (_, d) => (
+                                  <span key={d} aria-hidden className="absolute inset-y-0 w-0.5 bg-white/15 pointer-events-none" style={{ left: indent(d) + 5 }} />
+                                ))}
                                 <Tooltip content={layer.visible ? (group ? 'Hide group' : 'Hide layer') : (group ? 'Show group' : 'Show layer')} side="top">
                                   <button
                                     onClick={e => { e.stopPropagation(); updateLayer({ ...layer, visible: !layer.visible }) }}
@@ -8343,7 +8345,22 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                     {layer.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-gray-400" />}
                                   </button>
                                 </Tooltip>
-                                {group && <Folder size={11} className="text-gray-400 shrink-0" />}
+                                {/* The folder is the collapse toggle (no
+                                    chevron), so a group's eye lines up with
+                                    its siblings' and the open or closed
+                                    folder shows the state. */}
+                                {group && (
+                                  <Tooltip content={collapsed ? 'Expand group' : 'Collapse group'} side="top" triggerClassName="shrink-0 flex">
+                                    <button
+                                      type="button"
+                                      onClick={e => { e.stopPropagation(); toggleGroupCollapsed(layer.id) }}
+                                      className="text-gray-400 hover:text-gray-200 transition-colors"
+                                      aria-label={collapsed ? 'Expand group' : 'Collapse group'}
+                                    >
+                                      {collapsed ? <Folder size={12} /> : <FolderOpen size={12} />}
+                                    </button>
+                                  </Tooltip>
+                                )}
                                 {rowIsMask && (
                                   <Tooltip content="Group mask: its outline clips the group. Hide it to switch the mask off; release it from the selection tab." side="top" triggerClassName="shrink-0 flex">
                                     <Blend size={11} className="text-amber-300/80" />
@@ -8369,7 +8386,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             ) : (
                               <span
                                 onDoubleClick={e => { e.stopPropagation(); setRenamingLayerId(layer.id) }}
-                                className={`flex-1 text-xs truncate cursor-text ${nameTone}`}
+                                className={`flex-1 text-xs truncate cursor-text ${nameTone} ${group ? 'font-medium' : ''}`}
                               >
                                 {layer.name}
                               </span>
@@ -8409,9 +8426,12 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 tabIndex={0}
                                 onClick={e => setMaskSlotMenu({ groupId: layer.id, anchor: e.currentTarget.getBoundingClientRect() })}
                                 onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMaskSlotMenu({ groupId: layer.id, anchor: e.currentTarget.getBoundingClientRect() }) } }}
-                                className={`flex items-center gap-1.5 pr-2 py-1 border-b border-white/5 cursor-pointer transition-colors ${maskSlotMenu?.groupId === layer.id ? 'bg-white/10 text-gray-300' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+                                className={`relative flex items-center gap-1.5 pr-2 py-1 border-b border-white/5 cursor-pointer transition-colors ${maskSlotMenu?.groupId === layer.id ? 'bg-white/10 text-gray-300' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
                                 style={{ paddingLeft: indent(depth + 1) }}
                               >
+                                {Array.from({ length: depth + 1 }, (_, d) => (
+                                  <span key={d} aria-hidden className="absolute inset-y-0 w-0.5 bg-white/15 pointer-events-none" style={{ left: indent(d) + 5 }} />
+                                ))}
                                 <Blend size={11} className="shrink-0 opacity-70" />
                                 <span className="text-[11px] italic">No mask</span>
                                 <span className="ml-auto text-[10px] uppercase tracking-wider">Add</span>
