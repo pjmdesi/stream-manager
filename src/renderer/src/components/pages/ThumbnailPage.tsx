@@ -5851,10 +5851,15 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   const [layerTabPos, setLayerTabPos] = useState<{ top: number; right: number } | null>(null)
   const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string>>(EMPTY_ID_SET)
   const layerTabShown = selectedIds.length > 0 && !layersCollapsed && !previewMode
+  // Synced during render, not in an effect: the measurement below runs in a
+  // layout effect, before the shared selectedIdsRef catches up, and read the
+  // previous selection through it.
+  const tabSelectionRef = useRef(selectedIds)
+  tabSelectionRef.current = selectedIds
 
   const measureLayerTab = useCallback(() => {
     const body = editorBodyRef.current, list = layersListRef.current, panel = rightPanelRef.current
-    const sel = selectedIdsRef.current
+    const sel = tabSelectionRef.current
     if (!body || !list || !panel || sel.length === 0 || list.offsetParent === null) {
       setLayerTabPos(null)
       return
@@ -5871,7 +5876,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     if (!Number.isFinite(rowTop)) rowTop = listRect.top
     const tabH = layerTabRef.current?.offsetHeight ?? 0
     const maxTop = Math.max(listRect.top, listRect.bottom - tabH)
-    const top = Math.min(Math.max(rowTop, listRect.top), maxTop) - bodyRect.top
+    // One pixel up: the visible line above a row is the previous row's
+    // bottom border, and the tab's top edge should sit on that line.
+    const top = Math.min(Math.max(rowTop - 1, listRect.top), maxTop) - bodyRect.top
     // One pixel under the panel so the tab covers the panel's left border
     // and reads as part of it.
     const right = panel.offsetWidth - 1
@@ -7788,9 +7795,12 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
             {layerTabShown && layerTabActions.length > 0 && (
               <div
                 ref={layerTabRef}
-                className="absolute z-20 flex flex-col gap-0.5 p-1 rounded-l-lg border border-white/10 border-r-0 bg-navy-800 shadow-lg"
+                className="absolute z-20 rounded-l-lg border border-white/10 border-r-0 bg-navy-800 shadow-lg overflow-hidden"
                 style={{ top: layerTabPos?.top ?? 0, right: layerTabPos?.right ?? 0, visibility: layerTabPos ? 'visible' : 'hidden' }}
               >
+              {/* Inner tint matches a selected row (accent over the panel
+                  background) so the tab reads as the selection's own. */}
+              <div className="flex flex-col gap-0.5 p-1 bg-accent-600/20">
                 {layerTabActions.map(a => a.separator ? (
                   <div key={a.key} className="h-px bg-white/10 my-0.5" />
                 ) : (
@@ -7810,6 +7820,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                     </button>
                   </Tooltip>
                 ))}
+              </div>
               </div>
             )}
 
