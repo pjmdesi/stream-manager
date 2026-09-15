@@ -34,6 +34,7 @@ import {
   snapResizedBox, needsUniformScale, panelRows, isGroup, hasHiddenAncestor, ancestorIds, subtreeIds,
   walkSelection, enterGroup, leaveGroup,
   isMask, maskOf, pinMasks, canBeGroupMask, setGroupMask, releaseGroupMask, insertGroupMask,
+  canApplyAsMaskBelow, applyAsMaskBelow,
 } from '../../lib/layerTree'
 import { traceMaskPath, traceShapeOutlineLocal } from '../../lib/groupMask'
 import type { PanelRow } from '../../lib/layerTree'
@@ -3058,8 +3059,11 @@ function MaskDisabled({ active, children }: { active: boolean; children: React.R
       <p className="text-[10px] text-amber-300/90 leading-relaxed">
         Group mask: only this shape's outline is used, to clip the group. Fill, stroke, shadows, outline, and opacity are switched off while it is a mask and come back when it is released.
       </p>
-      <Tooltip content="Switched off while this shape is a group mask. Release the mask (selection tab) to use them again." side="left" triggerClassName="block">
-        <fieldset disabled className="flex flex-col gap-3 opacity-50 [&_*]:pointer-events-none" aria-disabled>
+      <Tooltip content="Switched off while this shape is a group mask. Release the mask (selection tab) to use them again." side="left" triggerClassName="block min-w-0 max-w-full">
+        {/* min-w-0: a fieldset's browser default is min-inline-size:
+            min-content, which stops it shrinking below its widest row
+            and gives the panel a horizontal scrollbar. */}
+        <fieldset disabled className="flex flex-col gap-3 min-w-0 w-full opacity-50 [&_*]:pointer-events-none" aria-disabled>
           {children}
         </fieldset>
       </Tooltip>
@@ -6121,6 +6125,22 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     commitLayers(next)
     setSelectedIds([shape.id])
   }, [commitLayers])
+  /** THU-1: the selected shape becomes the mask of the layer below it,
+   *  wrapping that layer in a new group when it is not one already. The
+   *  masked group becomes the selection. */
+  const applyMaskBelow = useCallback((id: string) => {
+    const stage = stageRef.current
+    const rectOf = (lid: string) => {
+      const node = stage?.findOne(`#${lid}`)
+      const parent = node?.getParent()
+      if (!node || !parent) return null
+      return node.getClientRect({ relativeTo: parent as Konva.Container, skipShadow: true, skipStroke: true })
+    }
+    const res = applyAsMaskBelow(layersRef.current, id, rectOf, newId)
+    if (!res) return
+    commitLayers(res.layers)
+    setSelectedIds([res.groupId])
+  }, [commitLayers])
   // The empty slot's menu: pick a shape already in the group, or create one.
   const [maskSlotMenu, setMaskSlotMenu] = useState<{ groupId: string; anchor: DOMRect } | null>(null)
   useEffect(() => {
@@ -6171,29 +6191,42 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
         affects: groupRoots.flatMap(id => subtreeIds(layers, id)), onClick: ungroupSelected,
       })
     }
-    // Mask actions (THU-21), amber: they change how every layer in the
-    // group renders. Affected rows: the group and everything in it.
-    if (single && single.type === 'shape' && single.parentId) {
-      const groupAndMembers = [single.parentId, ...subtreeIds(layers, single.parentId)]
+    // Mask actions (THU-21, THU-1), amber: they change how every layer in
+    // the group renders. Affected rows: the group and everything in it.
+    if (single && single.type === 'shape') {
       out.push({ key: 'sep-mask', separator: true })
       if (isMask(single)) {
         out.push({
           key: 'release-mask', icon: <Blend size={14} />, tone: 'amber',
           label: 'Release mask (the shape stays; the group is no longer clipped)',
-          affects: groupAndMembers, onClick: () => releaseMask(single.id),
+          affects: [single.parentId!, ...subtreeIds(layers, single.parentId!)], onClick: () => releaseMask(single.id),
         })
       } else {
-        const check = canBeGroupMask(layers, single.id)
+        if (single.parentId) {
+          const check = canBeGroupMask(layers, single.id)
+          out.push({
+            key: 'use-as-mask', icon: <Blend size={14} />, tone: 'amber',
+            label: 'Use as group mask (only its outline clips the group)',
+            disabled: !check.ok, reason: check.reason,
+            affects: [single.parentId, ...subtreeIds(layers, single.parentId)], onClick: () => useAsGroupMask(single.id),
+          })
+        }
+        // THU-1: mask the layer directly below. Lights that layer (with
+        // its members when it is a group) and the shape.
+        const belowCheck = canApplyAsMaskBelow(layers, single.id)
+        const siblings = childrenOf(layers, single.parentId ?? null)
+        const below = siblings[siblings.indexOf(single) - 1]
         out.push({
-          key: 'use-as-mask', icon: <Blend size={14} />, tone: 'amber',
-          label: 'Use as group mask (only its outline clips the group)',
-          disabled: !check.ok, reason: check.reason,
-          affects: groupAndMembers, onClick: () => useAsGroupMask(single.id),
+          key: 'mask-below', icon: <Blend size={14} />, tone: 'amber',
+          label: below ? `Apply as mask to the layer below (${below.name})` : 'Apply as mask to the layer below',
+          disabled: !belowCheck.ok, reason: belowCheck.reason,
+          affects: below ? [single.id, ...subtreeIds(layers, below.id)] : [single.id],
+          onClick: () => applyMaskBelow(single.id),
         })
       }
     }
     return out
-  }, [layers, selectedIds, groupCheck, toggleSelectedVisibility, duplicateSelected, deleteSelected, groupSelected, ungroupSelected, useAsGroupMask, releaseMask])
+  }, [layers, selectedIds, groupCheck, toggleSelectedVisibility, duplicateSelected, deleteSelected, groupSelected, ungroupSelected, useAsGroupMask, releaseMask, applyMaskBelow])
 
   /** Toggle flipX / flipY on every selected layer. Each click on the
    *  toolbar button is a single undo entry that flips all selected

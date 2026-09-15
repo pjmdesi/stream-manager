@@ -542,6 +542,56 @@ export function insertGroupMask(layers: ThumbnailLayer[], groupId: string, shape
   return [...layers.slice(0, idx + 1), placed, ...layers.slice(idx + 1)]
 }
 
+/** The layer directly below the shape in its parent (the next row down in
+ *  the panel), or undefined at the bottom. */
+function layerBelow(layers: ThumbnailLayer[], id: string): ThumbnailLayer | undefined {
+  const l = byId(layers, id)
+  if (!l) return undefined
+  const siblings = childrenOf(layers, parentIdOf(l))
+  const i = siblings.findIndex(s => s.id === id)
+  return i > 0 ? siblings[i - 1] : undefined
+}
+
+export function canApplyAsMaskBelow(layers: ThumbnailLayer[], id: string): { ok: boolean; reason: string } {
+  const l = byId(layers, id)
+  if (!l || l.type !== 'shape') return { ok: false, reason: 'Only a shape can be a mask' }
+  if (isMask(l)) return { ok: false, reason: 'This shape is already a group mask' }
+  const below = layerBelow(layers, id)
+  if (!below) return { ok: false, reason: 'Nothing below this shape to mask' }
+  if (isGroup(below)) {
+    if (maskOf(layers, below.id)) return { ok: false, reason: 'The group below already has a mask; release it first' }
+    return { ok: true, reason: '' }
+  }
+  const check = canGroup(layers, [below.id, id])
+  return check.ok ? check : { ok: false, reason: check.reason }
+}
+
+/**
+ * THU-1 as sugar on the mask slot: the shape becomes the mask of the layer
+ * directly below it. A group below takes the shape into its empty slot
+ * (the shape keeps its place on screen); any other layer is wrapped in a
+ * new group with the shape as that group's mask. Returns the masked group.
+ */
+export function applyAsMaskBelow(
+  layers: ThumbnailLayer[],
+  id: string,
+  rectOf: (id: string) => Rect | null,
+  makeId: () => string,
+): { layers: ThumbnailLayer[]; groupId: string } | null {
+  if (!canApplyAsMaskBelow(layers, id).ok) return null
+  const below = layerBelow(layers, id)!
+  if (isGroup(below)) {
+    const kids = childrenOf(layers, below.id)
+    const moved = moveLayerTo(layers, id, below.id, kids.length ? kids[kids.length - 1].id : null) ?? layers
+    const masked = setGroupMask(moved, id)
+    return masked ? { layers: masked, groupId: below.id } : null
+  }
+  const grouped = groupLayers(layers, [below.id, id], rectOf, makeId)
+  if (!grouped) return null
+  const masked = setGroupMask(grouped.layers, id)
+  return masked ? { layers: masked, groupId: grouped.groupId } : null
+}
+
 // ── Keyboard selection (THU-29) ────────────────────────────────────────────
 
 /**
