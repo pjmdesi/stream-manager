@@ -887,6 +887,16 @@ export interface ThumbnailLayer {
   fill?: string
   stroke?: string
   strokeWidth?: number
+  /** Gradient stroke (THU-8): the stroke's counterpart of the fill
+   *  gradient fields above, same conventions. `stroke` keeps mirroring the
+   *  first stop so older app versions and solid mode degrade to a flat
+   *  stroke. The outline effect (a single-colour dilation) is separate and
+   *  overrides the stroke while enabled, gradient or not. */
+  strokeType?: 'solid' | 'linear'
+  strokeGradientStops?: { color: string; pos: number }[]
+  strokeGradientAngle?: number
+  strokeGradientColorSpace?: 'oklch' | 'srgb'
+  strokeGradientStyle?: 'smooth' | 'hard'
   // Drop shadow (all layer types). Legacy single-shadow fields below are
   // still read for backwards compat (one-time migrated into `shadows[0]`
   // on first edit) but no longer written. New thumbnails use the

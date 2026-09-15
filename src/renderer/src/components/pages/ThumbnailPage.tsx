@@ -27,6 +27,7 @@ import { AnchoredPanel } from '../ui/AnchoredPanel'
 import { StreamNavButtons } from '../streams/StreamNavButtons'
 import { seriesNavFor, type SeriesNav } from '../../lib/seriesNav'
 import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, sampleGradientAt } from '../../lib/gradient'
+import type { GradientStop, GradientColorSpace, GradientStyle } from '../../lib/gradient'
 import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
 import {
   childrenOf, paintableLayers, selectionRoots, copySelection, insertPastedAbove, canGroup, groupLayers, ungroupLayer,
@@ -517,6 +518,20 @@ const THUMBNAIL_MERGE_KEYS = ['title', 'topic', 'date', 'season', 'episode', 'to
 const THUMBNAIL_SERIES_KEYS = ['season', 'episode', 'total_episodes']
 
 function snapGrid(v: number) { return Math.round(v / GRID_SIZE) * GRID_SIZE }
+
+/** Konva props for a layer's gradient stroke (THU-8), or an empty object
+ *  when the stroke is solid. The line runs across the w×h box with the
+ *  fill's angle convention; `sx`/`sy` shift it into the shape's local
+ *  drawing space (the centered ellipse draws around its own origin). */
+function strokeGradientKonvaProps(layer: ThumbnailLayer, w: number, h: number, sx: number, sy: number): Record<string, unknown> {
+  if (layer.strokeType !== 'linear' || (layer.strokeGradientStops?.length ?? 0) < 2) return {}
+  const { start, end } = gradientLinePoints(layer.strokeGradientAngle ?? 0, w, h)
+  return {
+    strokeLinearGradientStartPoint: { x: start.x + sx, y: start.y + sy },
+    strokeLinearGradientEndPoint: { x: end.x + sx, y: end.y + sy },
+    strokeLinearGradientColorStops: buildKonvaColorStops(layer.strokeGradientStops!, layer.strokeGradientColorSpace ?? 'oklch', layer.strokeGradientStyle ?? 'smooth'),
+  }
+}
 
 /** Resolves a layer's effective shadow stack. Reads the new `shadows`
  *  array preferentially, but falls back to migrating the legacy single-
@@ -1096,6 +1111,13 @@ function TextNode(props: KonvaLayerNodeProps) {
       fillLinearGradientColorStops: buildKonvaColorStops(layer.gradientStops!, layer.gradientColorSpace ?? 'oklch', layer.gradientStyle ?? 'smooth'),
     }
   }
+  // Gradient stroke (THU-8): same geometry over the same box. Skipped
+  // while the outline effect overrides the stroke with its single colour.
+  // Spread only when active: the keys' absence is what makes react-konva
+  // reset Konva's stroke gradient to none.
+  const strokeGradientProps = !outlineActive && gradW > 0 && gradH > 0
+    ? strokeGradientKonvaProps(layer, gradW, gradH, 0, 0)
+    : {}
 
   // Shared text props — every shadow clone + the original render with
   // identical content; only the shadow attachment differs per clone.
@@ -1122,6 +1144,7 @@ function TextNode(props: KonvaLayerNodeProps) {
     offsetX: layer.flipX ? (layer.width ?? measured.w) : 0,
     offsetY: layer.flipY ? measured.h : 0,
     ...gradientFillProps,
+    ...strokeGradientProps,
   }
   const shadows = resolveShadows(layer)
 
@@ -1200,6 +1223,12 @@ function ShapeNode(props: KonvaLayerNodeProps) {
   // handlers; those live on the Group. Centered shapes still get their
   // own center offset inside the Group so Konva's ellipse/polygon math
   // (centered around x/y) lines up with our top-left-stored coords.
+  // Gradient stroke (THU-8): same endpoints and origin shift as the fill,
+  // skipped while the outline effect overrides the stroke.
+  const strokeGradientProps = outlineActive
+    ? {}
+    : strokeGradientKonvaProps(layer, w, h, shapeType === 'ellipse' ? -w / 2 : 0, shapeType === 'ellipse' ? -h / 2 : 0)
+
   const baseInnerProps = {
     x: isCentered ? w / 2 : 0,
     y: isCentered ? h / 2 : 0,
@@ -1209,6 +1238,7 @@ function ShapeNode(props: KonvaLayerNodeProps) {
     fillAfterStrokeEnabled: true,
     scaleX, scaleY, offsetX, offsetY,
     ...gradientFillProps,
+    ...strokeGradientProps,
   }
 
   const shadows = resolveShadows(layer)
@@ -2665,22 +2695,52 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
  *  versions (which ignore the gradient fields) degrade to a flat color.
  *  The outer element is a div, NOT a label: it contains buttons and nested
  *  color fields, and label click-forwarding would fire the native picker. */
-function GradientFillControl({ layer, update, fallback }: {
+/** Which layer fields a paint control reads and writes (THU-8): the fill
+ *  and the stroke carry parallel field sets, and the same control drives
+ *  both. Recents ties are keyed `${layerId}:${tie}` (solid) and
+ *  `${layerId}:${tie}-gradient` (gradient), so the two paints never share
+ *  an entry. */
+type PaintTarget = 'fill' | 'stroke'
+const PAINT_FIELDS = {
+  fill: { label: 'Fill', color: 'fill', type: 'fillType', stops: 'gradientStops', angle: 'gradientAngle', space: 'gradientColorSpace', style: 'gradientStyle', tie: 'fill' },
+  stroke: { label: 'Stroke', color: 'stroke', type: 'strokeType', stops: 'strokeGradientStops', angle: 'strokeGradientAngle', space: 'strokeGradientColorSpace', style: 'strokeGradientStyle', tie: 'stroke' },
+} as const
+
+/** Solid-or-gradient paint control for one layer property: the fill (the
+ *  original use) or, since THU-8, the stroke. Everything below reads and
+ *  writes through `F` so the two never diverge. */
+function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
   layer: ThumbnailLayer
   update: (patch: Partial<ThumbnailLayer>) => void
   fallback: string
+  paint?: PaintTarget
 }) {
-  const isGradient = layer.fillType === 'linear'
-  const fillSplit = splitColorAlpha(layer.fill, fallback)
+  const F = PAINT_FIELDS[paint]
+  const paintType = layer[F.type] as 'solid' | 'linear' | undefined
+  const paintColor = layer[F.color] as string | undefined
+  const storedStops = layer[F.stops] as GradientStop[] | undefined
+  /** A partial patch in paint-neutral terms, mapped onto this paint's fields. */
+  const paintPatch = (p: { type?: 'solid' | 'linear'; color?: string; stops?: GradientStop[]; angle?: number; space?: GradientColorSpace; style?: GradientStyle }): Partial<ThumbnailLayer> => {
+    const out: Record<string, unknown> = {}
+    if (p.type !== undefined) out[F.type] = p.type
+    if (p.color !== undefined) out[F.color] = p.color
+    if (p.stops !== undefined) out[F.stops] = p.stops
+    if (p.angle !== undefined) out[F.angle] = p.angle
+    if (p.space !== undefined) out[F.space] = p.space
+    if (p.style !== undefined) out[F.style] = p.style
+    return out as Partial<ThumbnailLayer>
+  }
+  const isGradient = paintType === 'linear'
+  const fillSplit = splitColorAlpha(paintColor, fallback)
   const defaultStops = [
-    { color: layer.fill ?? fallback, pos: 0 },
+    { color: paintColor ?? fallback, pos: 0 },
     // Figma convention: fill → same color fully transparent.
     { color: joinColorAlpha(fillSplit.rgb, 0), pos: 1 },
   ]
-  const stops = (layer.gradientStops?.length ?? 0) >= 2 ? layer.gradientStops! : defaultStops
-  const space = layer.gradientColorSpace ?? 'oklch'
-  const angle = layer.gradientAngle ?? 0
-  const gStyle = layer.gradientStyle ?? 'smooth'
+  const stops = (storedStops?.length ?? 0) >= 2 ? storedStops! : defaultStops
+  const space = (layer[F.space] as GradientColorSpace | undefined) ?? 'oklch'
+  const angle = (layer[F.angle] as number | undefined) ?? 0
+  const gStyle = (layer[F.style] as GradientStyle | undefined) ?? 'smooth'
 
   const anim = useAnimationConfig()
   // Rows display in STOP ORDER (top of the bar first) while the ARRAY
@@ -2756,7 +2816,7 @@ function GradientFillControl({ layer, update, fallback }: {
   const recordGradient = (over: Partial<GradientSwatchData> = {}) => {
     recordRecent(
       { gradient: { stops: over.stops ?? stops, angle: over.angle ?? angle, colorSpace: over.colorSpace ?? space, style: over.style ?? gStyle } },
-      `${layer.id}:fill-gradient`,
+      `${layer.id}:${F.tie}-gradient`,
     )
   }
 
@@ -2768,29 +2828,29 @@ function GradientFillControl({ layer, update, fallback }: {
   // next gradient tweak starts a NEW entry instead of mutating the
   // adopted swatch — and applying a second swatch can't evict the first.
   const applyGradientSwatch = (g: GradientSwatchData) => {
-    update({
-      fillType: 'linear',
-      gradientStops: g.stops,
-      gradientAngle: g.angle,
-      gradientColorSpace: g.colorSpace,
-      gradientStyle: g.style ?? 'smooth',
-      // fill mirrors the first stop (solid-mode / back-compat degrade).
-      fill: g.stops[0]?.color,
-    })
-    // Both fill ties: the solid tie could still be live from before a
-    // mode switch, and post-adoption edits must never mutate old entries.
-    breakRecentTie(`${layer.id}:fill-gradient`)
-    breakRecentTie(`${layer.id}:fill`)
+    update(paintPatch({
+      type: 'linear',
+      stops: g.stops,
+      angle: g.angle,
+      space: g.colorSpace,
+      style: g.style ?? 'smooth',
+      // The flat color mirrors the first stop (solid-mode / back-compat degrade).
+      color: g.stops[0]?.color,
+    }))
+    // Both ties: the solid tie could still be live from before a mode
+    // switch, and post-adoption edits must never mutate old entries.
+    breakRecentTie(`${layer.id}:${F.tie}-gradient`)
+    breakRecentTie(`${layer.id}:${F.tie}`)
     recordRecent({ gradient: { stops: g.stops, angle: g.angle, colorSpace: g.colorSpace, style: g.style ?? 'smooth' } })
   }
 
   // The reverse adoption: a SOLID swatch dropped on the control while in
-  // gradient mode replaces the gradient with a flat fill. Same adoption
-  // semantics — record untied, break both fill ties.
+  // gradient mode replaces the gradient with a flat paint. Same adoption
+  // semantics — record untied, break both ties.
   const applySolidSwatch = (color: string) => {
-    update({ fillType: 'solid', fill: color })
-    breakRecentTie(`${layer.id}:fill-gradient`)
-    breakRecentTie(`${layer.id}:fill`)
+    update(paintPatch({ type: 'solid', color }))
+    breakRecentTie(`${layer.id}:${F.tie}-gradient`)
+    breakRecentTie(`${layer.id}:${F.tie}`)
     recordRecent({ color })
   }
 
@@ -2835,13 +2895,13 @@ function GradientFillControl({ layer, update, fallback }: {
   const setStop = (idx: number, color: string) => {
     lastTouchedRef.current = idx
     const next = stops.map((st, k) => (k === idx ? { ...st, color } : st))
-    update({ gradientStops: next, ...(idx === 0 ? { fill: color } : {}) })
+    update(paintPatch({ stops: next, ...(idx === 0 ? { color } : {}) }))
   }
   const setStopPos = (idx: number, pos: number) => {
     lastTouchedRef.current = idx
     const clamped = Math.min(1, Math.max(0, pos))
     const next = stops.map((st, k) => (k === idx ? { ...st, pos: clamped } : st))
-    update({ gradientStops: next })
+    update(paintPatch({ stops: next }))
     recordGradient({ stops: next })
   }
   // New stops APPEND to the array (stable identity); the sorted display
@@ -2852,7 +2912,7 @@ function GradientFillControl({ layer, update, fallback }: {
     const next = [...stops, { color: sampleGradientAt(stops, space, clamped, gStyle), pos: clamped }]
     lastTouchedRef.current = stops.length
     stopIdsRef.current.ids = [...stopIds, nextStopIdRef.current++]
-    update({ gradientStops: next })
+    update(paintPatch({ stops: next }))
     recordGradient({ stops: next })
   }
   // Blender-style add: halfway between the last-touched stop and its
@@ -2874,8 +2934,8 @@ function GradientFillControl({ layer, update, fallback }: {
     if (lt !== null) lastTouchedRef.current = lt === idx ? null : lt > idx ? lt - 1 : lt
     stopIdsRef.current.ids = stopIds.filter((_, k) => k !== idx)
     const next = stops.filter((_, k) => k !== idx)
-    // fill keeps mirroring the FIRST stop (solid-mode / back-compat).
-    update({ gradientStops: next, ...(idx === 0 ? { fill: next[0].color } : {}) })
+    // The flat color keeps mirroring the FIRST stop (solid-mode / back-compat).
+    update(paintPatch({ stops: next, ...(idx === 0 ? { color: next[0].color } : {}) }))
     recordGradient({ stops: next })
   }
   const segCls = (on: boolean) =>
@@ -2931,7 +2991,7 @@ function GradientFillControl({ layer, update, fallback }: {
       }}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-gray-400">Fill</span>
+        <span className="text-[10px] text-gray-400">{F.label}</span>
         <div className="flex items-center gap-1">
           {/* Whole-fill apply path lives on the header row with the
               type toggle — the angle/blend row below is stop-transition
@@ -2950,31 +3010,31 @@ function GradientFillControl({ layer, update, fallback }: {
             </Tooltip>
           )}
           <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
-          <Tooltip content="Flat color fill">
+          <Tooltip content={`Flat color ${F.label.toLowerCase()}`}>
             <button
               type="button"
               onClick={() => {
-                update({ fillType: 'solid' })
+                update(paintPatch({ type: 'solid' }))
                 // Leaving gradient mode ends that editing session — the
                 // captured swatch stays as-is; a later return to gradient
                 // mode records a fresh entry.
-                breakRecentTie(`${layer.id}:fill-gradient`)
+                breakRecentTie(`${layer.id}:${F.tie}-gradient`)
               }}
               className={segCls(!isGradient)}
             >
               Solid
             </button>
           </Tooltip>
-          <Tooltip content="Linear gradient fill (click the preview bar to add stops)">
+          <Tooltip content={`Linear gradient ${F.label.toLowerCase()} (click the preview bar to add stops)`}>
             <button
               type="button"
-              onClick={() => update({
-                fillType: 'linear',
-                gradientStops: stops,
+              onClick={() => update(paintPatch({
+                type: 'linear',
+                stops,
                 // 0° = top→bottom, matching the preview bar.
-                gradientAngle: layer.gradientAngle ?? 0,
-                gradientColorSpace: space,
-              })}
+                angle,
+                space,
+              }))}
               className={segCls(isGradient)}
             >
               Gradient
@@ -2998,11 +3058,11 @@ function GradientFillControl({ layer, update, fallback }: {
       )}
       {!isGradient ? (
         <ColorAlphaField
-          value={layer.fill}
+          value={paintColor}
           fallback={fallback}
           showHex
-          onChange={fill => update({ fill })}
-          recentKey={`${layer.id}:fill`}
+          onChange={color => update(paintPatch({ color }))}
+          recentKey={`${layer.id}:${F.tie}`}
           onApplyGradient={applyGradientSwatch}
         />
       ) : (
@@ -3093,7 +3153,7 @@ function GradientFillControl({ layer, update, fallback }: {
                             if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
                             const pos = posFromEvent(e)
                             if (pos === null || pos === st.pos) return
-                            update({ gradientStops: stops.map((s2, k) => (k === origIdx ? { ...s2, pos } : s2)) })
+                            update(paintPatch({ stops: stops.map((s2, k) => (k === origIdx ? { ...s2, pos } : s2)) }))
                           }}
                           onPointerUp={e => {
                             if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
@@ -3191,13 +3251,13 @@ function GradientFillControl({ layer, update, fallback }: {
               <NumberInput
                 min={0}
                 max={360}
-                value={Math.round(layer.gradientAngle ?? 0)}
+                value={Math.round(angle)}
                 // Angle is part of the swatch (brand gradients carry their
                 // direction), so angle edits create/update the tied entry
                 // like any other gradient edit.
-                onChange={gradientAngle => {
-                  update({ gradientAngle })
-                  recordGradient({ angle: gradientAngle })
+                onChange={nextAngle => {
+                  update(paintPatch({ angle: nextAngle }))
+                  recordGradient({ angle: nextAngle })
                 }}
                 className="w-full"
               />
@@ -3208,9 +3268,9 @@ function GradientFillControl({ layer, update, fallback }: {
                 <select
                   value={gStyle}
                   onChange={e => {
-                    const gradientStyle = e.target.value as 'smooth' | 'hard'
-                    update({ gradientStyle })
-                    recordGradient({ style: gradientStyle })
+                    const nextStyle = e.target.value as 'smooth' | 'hard'
+                    update(paintPatch({ style: nextStyle }))
+                    recordGradient({ style: nextStyle })
                   }}
                   className="flex-1 min-w-0 bg-navy-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-gray-200"
                 >
@@ -3229,10 +3289,10 @@ function GradientFillControl({ layer, update, fallback }: {
                     left the pair unevenly sized. Hard style disables the
                     pair — bands don't blend, so the space does nothing. */}
                 <Tooltip content={gStyle === 'hard' ? 'No blending happens between hard bands' : 'oklch — keeps saturated blends vivid (recommended)'} triggerClassName="flex-1 min-w-0 flex">
-                  <button type="button" disabled={gStyle === 'hard'} onClick={() => { update({ gradientColorSpace: 'oklch' }); recordGradient({ colorSpace: 'oklch' }) }} className={`flex-1 py-1 text-xs transition-colors disabled:cursor-not-allowed ${space === 'oklch' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 enabled:hover:text-gray-200 enabled:hover:bg-white/5'}`}>oklch</button>
+                  <button type="button" disabled={gStyle === 'hard'} onClick={() => { update(paintPatch({ space: 'oklch' })); recordGradient({ colorSpace: 'oklch' }) }} className={`flex-1 py-1 text-xs transition-colors disabled:cursor-not-allowed ${space === 'oklch' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 enabled:hover:text-gray-200 enabled:hover:bg-white/5'}`}>oklch</button>
                 </Tooltip>
                 <Tooltip content={gStyle === 'hard' ? 'No blending happens between hard bands' : 'sRGB — classic CSS blending; use when brand colors expect it'} triggerClassName="flex-1 min-w-0 flex">
-                  <button type="button" disabled={gStyle === 'hard'} onClick={() => { update({ gradientColorSpace: 'srgb' }); recordGradient({ colorSpace: 'srgb' }) }} className={`flex-1 py-1 text-xs transition-colors disabled:cursor-not-allowed ${space === 'srgb' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 enabled:hover:text-gray-200 enabled:hover:bg-white/5'}`}>sRGB</button>
+                  <button type="button" disabled={gStyle === 'hard'} onClick={() => { update(paintPatch({ space: 'srgb' })); recordGradient({ colorSpace: 'srgb' }) }} className={`flex-1 py-1 text-xs transition-colors disabled:cursor-not-allowed ${space === 'srgb' ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 enabled:hover:text-gray-200 enabled:hover:bg-white/5'}`}>sRGB</button>
                 </Tooltip>
               </div>
             </div>
@@ -4066,16 +4126,8 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
                 clear controls need the horizontal room. */}
             <div className="flex flex-col gap-1.5">
               <GradientFillControl layer={layer} update={update} fallback="#ffffff" />
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Stroke</span>
-                <ColorAlphaField
-                  value={layer.stroke}
-                  fallback="#000000"
-                  showHex
-                  onChange={stroke => update({ stroke })}
-                  recentKey={`${layer.id}:stroke`}
-                />
-              </label>
+              {/* Stroke paint (THU-8): solid or gradient, same control. */}
+              <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" />
               <label className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400">Stroke width</span>
                 <NumberInput
@@ -4097,16 +4149,8 @@ function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVaria
           <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Fill & Stroke</p>
           <div className="flex flex-col gap-1.5">
             <GradientFillControl layer={layer} update={update} fallback="#6366f1" />
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Stroke</span>
-              <ColorAlphaField
-                value={layer.stroke}
-                fallback="#000000"
-                showHex
-                onChange={stroke => update({ stroke })}
-                recentKey={`${layer.id}:stroke`}
-              />
-            </label>
+            {/* Stroke paint (THU-8): solid or gradient, same control. */}
+            <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" />
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400">Stroke width</span>
               <NumberInput min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
