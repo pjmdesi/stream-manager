@@ -3552,43 +3552,61 @@ interface PropsPanelProps {
 const SELECTION_STROKE = 'rgb(0,161,255)'
 const SELECTION_STROKE_SOFT = 'rgba(0,161,255,0.55)'
 
-function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0, spinnerStep }: {
+/**
+ * Blender-style value bar (THU-33): one 24 px row that is the control. The
+ * bar's fill is the value (from the left, like Blender, even on ranges that
+ * straddle zero), the label sits inside the bar, and the number field joins
+ * it in the same frame as the readout. Drag anywhere on the bar, arrow keys
+ * step it, double-click resets to `defaultValue` when one is given. Used for
+ * every field with an obvious range: opacity, rotation, sizes, widths,
+ * blur, the filters. Position and offsets, which have no natural ends,
+ * stay plain fields.
+ */
+function ValueBar({
+  label, min, max, step, value, onChange, defaultValue, spinnerStep, wrap, fieldUnbounded = false,
+  snapToStep = false, inlineNote, disabled = false,
+}: {
   label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void
-  /** Value the slider resets to on a double-click of the knob. Filters are all
-   *  neutral at 0, so that's the default. */
+  /** Value a double-click on the bar resets to; also drawn as a dotted
+   *  marker when it sits strictly inside the range. */
   defaultValue?: number
-  /** Finer step for the +/- spinners: the slider roughs the value in at
-   *  `step`, the spinners refine it (e.g. Brightness slider 0.05 →
-   *  spinner 0.01). Defaults to the slider step. */
+  /** Finer step for the +/- spinners: the bar roughs the value in at
+   *  `step`, the spinners refine it (e.g. Brightness bar 0.05 → spinner
+   *  0.01). Defaults to the bar step. */
   spinnerStep?: number
+  /** Angle fields: the bar spans one turn and never lands on `max`; the
+   *  field wraps (style guide, "Angle fields"). */
+  wrap?: (n: number) => number
+  /** The field takes any number (the bar still spans min..max). */
+  fieldUnbounded?: boolean
+  snapToStep?: boolean
+  inlineNote?: string
+  disabled?: boolean
 }) {
-  // Blender-style slider (THU-33): one 24 px row that is the control. The
-  // bar's fill is the value (from the left, like Blender, even on ranges
-  // that straddle zero), the label sits inside the bar, and the number
-  // field joins it in the same frame as the value readout. Drag anywhere on
-  // the bar, arrow keys step it, double-click resets.
   const barRef = useRef<HTMLDivElement>(null)
   const decimals = (String(step).split('.')[1] ?? '').length
-  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100))
+  const shown = wrap ? wrap(value) : value
+  const pct = Math.max(0, Math.min(100, ((shown - min) / (max - min)) * 100))
+  const clampBar = (v: number) => Math.min(wrap ? max - step : max, Math.max(min, v))
   const setFromPointer = (clientX: number) => {
     const r = barRef.current?.getBoundingClientRect()
     if (!r || r.width <= 0) return
     const t = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
     const snapped = Math.round((min + t * (max - min)) / step) * step
-    const next = Number(Math.min(max, Math.max(min, snapped)).toFixed(decimals))
+    const next = Number(clampBar(snapped).toFixed(decimals))
     if (next !== value) onChange(next)
   }
   return (
-    <div className="flex items-stretch h-6 bg-navy-900 border border-white/10 rounded-lg overflow-hidden focus-within:border-accent-500/50 transition-colors">
-      <Tooltip content={`${label}: drag to set, double-click to reset`} triggerClassName="flex-1 min-w-0 flex">
+    <div className={`flex items-stretch h-6 bg-navy-900 border border-white/10 rounded-lg overflow-hidden focus-within:border-accent-500/50 transition-colors ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      <Tooltip content={defaultValue !== undefined ? `${label}: drag to set, double-click to reset` : `${label}: drag to set`} triggerClassName="flex-1 min-w-0 flex">
         <div
           ref={barRef}
           role="slider"
-          tabIndex={0}
+          tabIndex={disabled ? -1 : 0}
           aria-label={label}
           aria-valuemin={min}
           aria-valuemax={max}
-          aria-valuenow={value}
+          aria-valuenow={shown}
           className="relative flex-1 min-w-0 cursor-ew-resize select-none outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500/50"
           onPointerDown={e => {
             if (e.button !== 0) return
@@ -3597,23 +3615,41 @@ function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0
           }}
           onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) setFromPointer(e.clientX) }}
           onPointerUp={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) }}
-          onDoubleClick={() => onChange(defaultValue)}
+          onDoubleClick={() => { if (defaultValue !== undefined) onChange(defaultValue) }}
           onKeyDown={e => {
             const dir = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0
             if (!dir) return
             e.preventDefault()
             const amount = step * (e.shiftKey ? 10 : 1)
-            onChange(Number(Math.min(max, Math.max(min, value + dir * amount)).toFixed(decimals)))
+            const next = wrap ? wrap(value + dir * amount) : Math.min(max, Math.max(min, value + dir * amount))
+            onChange(Number(next.toFixed(decimals)))
           }}
         >
           <div className="absolute inset-y-0 left-0 bg-accent-600/25 pointer-events-none" style={{ width: `${pct}%` }} />
+          {/* Default marker: a dotted hairline where the reset value sits,
+              so a bar that fills from the left still shows where neutral
+              is. Left out when the default is an endpoint. */}
+          {defaultValue !== undefined && defaultValue > min && defaultValue < max && (
+            <div
+              className="absolute inset-y-0 w-px border-l border-dotted border-white/30 pointer-events-none"
+              style={{ left: `${((defaultValue - min) / (max - min)) * 100}%` }}
+              aria-hidden
+            />
+          )}
           <span className="relative block px-2 text-[10px] leading-[22px] text-gray-300 truncate">{label}</span>
         </div>
       </Tooltip>
       <div className="flex w-14 shrink-0 border-l border-white/10">
         <NumberInput
-          min={min} max={max} step={spinnerStep ?? step} value={value}
+          min={fieldUnbounded ? undefined : min}
+          max={fieldUnbounded ? undefined : max}
+          step={spinnerStep ?? step}
+          value={value}
           onChange={onChange}
+          wrap={wrap}
+          snapToStep={snapToStep}
+          inlineNote={inlineNote}
+          disabled={disabled}
           className="w-full h-6"
           frameless
           merged
@@ -3622,6 +3658,11 @@ function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0
       </div>
     </div>
   )
+}
+
+/** A filter's bar: every filter is neutral at 0, so that is its reset. */
+function FilterSlider(props: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; spinnerStep?: number }) {
+  return <ValueBar defaultValue={0} {...props} />
 }
 
 function FilterToggle({ label, checked, onChange }: {
@@ -3879,12 +3920,8 @@ function ShadowsCard({ layer, update, muted, state }: {
               <NumberInput value={s.offsetY}
                 onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
             </label>
-            <label className="flex flex-col gap-0.5 col-span-2">
-              <span className="text-[10px] text-gray-400">Blur</span>
-              <NumberInput min={0} value={s.blur}
-                onChange={blur => updateAt(idx, { blur })} className="w-full" />
-            </label>
           </div>
+          <ValueBar label="Blur" min={0} max={100} step={1} value={s.blur} onChange={blur => updateAt(idx, { blur })} fieldUnbounded defaultValue={0} />
         </div>
       ))}
     </PanelCard>
@@ -3934,11 +3971,7 @@ function OutlineCard({ layer, update, muted, state }: {
               recentKey={`${layer.id}:outline`}
             />
           </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-gray-400">Width</span>
-            <NumberInput min={0} max={50} value={width}
-              onChange={outlineWidth => update({ outlineWidth })} className="w-full" />
-          </label>
+          <ValueBar label="Width" min={0} max={50} step={1} value={width} onChange={outlineWidth => update({ outlineWidth })} defaultValue={0} />
           {layer.type !== 'image' && layer.type !== 'group' && (layer.strokeWidth ?? 0) > 0 && (
             <p className="text-[10px] text-amber-300 leading-snug">
               Replaces the {layer.strokeWidth} px stroke while enabled.
@@ -4334,23 +4367,16 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
             />
           </label>
         </div>
+        {/* Bars (THU-33): rotation spans one turn (the field still wraps
+            and never stops), opacity 0..100. */}
         <div className="grid grid-cols-2 gap-1.5">
-          <label className="flex flex-col gap-0.5">
-            <span className={labelCls}>Rotation °</span>
-            <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} snapToStep className="w-full" />
-          </label>
+          <ValueBar label="Rotation °" min={0} max={360} step={1} value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} fieldUnbounded snapToStep defaultValue={0} />
           {isMaskLayer ? (
-            <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block">
-              <label className="flex flex-col gap-0.5 opacity-50">
-                <span className={labelCls}>Opacity %</span>
-                <NumberInput value={layer.opacity} onChange={() => {}} min={0} max={100} disabled className="w-full" />
-              </label>
+            <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block min-w-0">
+              <ValueBar label="Opacity %" min={0} max={100} step={1} value={Math.round(layer.opacity)} onChange={() => {}} disabled />
             </Tooltip>
           ) : (
-            <label className="flex flex-col gap-0.5">
-              <span className={labelCls}>Opacity %</span>
-              <NumberInput value={Math.round(layer.opacity)} onChange={opacity => update({ opacity: Math.max(0, Math.min(100, opacity)) })} min={0} max={100} className="w-full" />
-            </label>
+            <ValueBar label="Opacity %" min={0} max={100} step={1} value={Math.round(layer.opacity)} onChange={opacity => update({ opacity: Math.max(0, Math.min(100, opacity)) })} defaultValue={100} />
           )}
         </div>
       </PanelCard>
@@ -4365,27 +4391,25 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
         >
           <div className={`grid gap-1.5 ${hasSides && hasRadius ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {hasSides && (
-              <label className="flex flex-col gap-0.5">
-                <span className={labelCls}>Sides</span>
-                <NumberInput
-                  min={POLYGON_MIN_SIDES}
-                  max={POLYGON_MAX_SIDES}
-                  value={polygonSidesOf(layer)}
-                  // Keeps the shape as regular as it was: the box height
-                  // follows the new side count's natural ratio, carrying
-                  // over whatever stretch the user had applied, and the
-                  // visual center stays put (lib/polygon.ts).
-                  onChange={sides => update(polygonSidesPatch(layer, sides))}
-                  className="w-full"
-                />
-              </label>
+              // Keeps the shape as regular as it was: the box height follows
+              // the new side count's natural ratio, carrying over whatever
+              // stretch the user had applied, and the visual center stays
+              // put (lib/polygon.ts).
+              <ValueBar
+                label="Sides"
+                min={POLYGON_MIN_SIDES}
+                max={POLYGON_MAX_SIDES}
+                step={1}
+                value={polygonSidesOf(layer)}
+                onChange={sides => update(polygonSidesPatch(layer, sides))}
+              />
             )}
             {hasRadius && (() => {
               // Corner radius is stored in pixels, independent of width and
-              // height, so corners stay circular through resizes. When the
-              // entered radius exceeds what the geometry can render (rect:
-              // half the short side; polygon: its inradius), the rendered
-              // radius shows beside it.
+              // height, so corners stay circular through resizes. The bar
+              // spans what the geometry can render (rect: half the short
+              // side; polygon: its inradius); a typed value past that keeps
+              // the rendered radius beside it.
               const sw = layer.width ?? 200
               const sh = layer.height ?? 200
               const maxR = layer.shapeType === 'polygon'
@@ -4393,17 +4417,17 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
                 : Math.min(sw, sh) / 2
               const entered = layer.cornerRadius ?? 0
               return (
-                <label className="flex flex-col gap-0.5">
-                  <span className={labelCls}>Corner radius</span>
-                  <NumberInput
-                    min={0}
-                    max={999}
-                    value={entered}
-                    onChange={cornerRadius => update({ cornerRadius })}
-                    inlineNote={entered > maxR ? (maxR % 1 === 0 ? String(maxR) : maxR.toFixed(1)) : undefined}
-                    className="w-full"
-                  />
-                </label>
+                <ValueBar
+                  label="Radius"
+                  min={0}
+                  max={Math.max(1, Math.ceil(maxR))}
+                  step={1}
+                  value={entered}
+                  onChange={cornerRadius => update({ cornerRadius })}
+                  fieldUnbounded
+                  defaultValue={0}
+                  inlineNote={entered > maxR ? (maxR % 1 === 0 ? String(maxR) : maxR.toFixed(1)) : undefined}
+                />
               )
             })()}
           </div>
@@ -4535,28 +4559,6 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
               })()}
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className={labelCls}>Size</span>
-              <NumberInput
-                min={8}
-                max={500}
-                value={layer.fontSize ?? 48}
-                onChange={fontSize => update({ fontSize })}
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-1.5">
-            <label className="flex flex-col gap-0.5">
-              <span className={labelCls}>Line height %</span>
-              {/* Stored as a multiplier (Konva-native); the UI speaks
-                  percent to match the other % fields. */}
-              <NumberInput
-                min={50}
-                max={300}
-                value={Math.round((layer.lineHeight ?? 1) * 100)}
-                onChange={p => update({ lineHeight: p / 100 })}
-              />
-            </label>
-            <label className="flex flex-col gap-0.5">
               <span className={labelCls}>Align</span>
               <select
                 value={layer.align ?? 'left'}
@@ -4568,6 +4570,13 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
                 <option value="right">Right</option>
               </select>
             </label>
+          </div>
+          {/* Size and line height as bars (THU-33). Line height is stored
+              as a multiplier (Konva-native); the UI speaks percent to match
+              the other % fields. */}
+          <div className="grid grid-cols-2 gap-1.5">
+            <ValueBar label="Size" min={8} max={500} step={1} value={layer.fontSize ?? 48} onChange={fontSize => update({ fontSize })} />
+            <ValueBar label="Line height %" min={50} max={300} step={1} value={Math.round((layer.lineHeight ?? 1) * 100)} onChange={p => update({ lineHeight: p / 100 })} defaultValue={100} />
           </div>
           {/* Letter case (thumbnails #7): radio-style group sized to the
               panel's input rows. div, not label: a label would forward
@@ -4619,12 +4628,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
           {...cardState('stroke')}
         >
           <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" headerless />
-          <label className="flex flex-col gap-0.5">
-            <span className={labelCls}>Width</span>
-            <NumberInput min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
-              onChange={strokeWidth => update({ strokeWidth })}
-              className="w-full" />
-          </label>
+          <ValueBar label="Width" min={0} max={100} step={1} value={layer.strokeWidth ?? 0} onChange={strokeWidth => update({ strokeWidth })} defaultValue={0} />
         </PanelCard>
       )}
 
