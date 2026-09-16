@@ -2342,6 +2342,27 @@ const CHECKER_IMAGE = 'conic-gradient(#3d4257 90deg, #23283c 90deg 180deg, #3d42
 /** Drag payload for edit-mode swatch REORDERING — deliberately a different
  *  type so color fields never light up (or accept) a reorder drag. */
 const SWATCH_REORDER_MIME = 'application/x-sm-swatch-reorder'
+/** Marker type set alongside the color or gradient payload when the drag
+ *  starts on a RECENT tile (THU-10). The palette grid accepts only drags
+ *  carrying it: a saved swatch dragged over its own grid is on its way to
+ *  a color field and must not offer an insertion point. */
+const RECENT_DRAG_MIME = 'application/x-sm-recent'
+
+/** The swatch a color-field style drag carries, solid or gradient; null
+ *  when the payload is missing or malformed. */
+function readDraggedSwatch(dt: DataTransfer): SwatchValue | null {
+  const rawGradient = dt.getData(GRADIENT_DRAG_MIME)
+  if (rawGradient) {
+    try {
+      const g = JSON.parse(rawGradient) as GradientSwatchData
+      return Array.isArray(g?.stops) && g.stops.length >= 2 ? { gradient: g } : null
+    } catch {
+      return null
+    }
+  }
+  const color = dt.getData(COLOR_DRAG_MIME)
+  return color ? { color } : null
+}
 
 /** Replace the default drag snapshot — which bakes in the dashed frame and
  *  the panel background behind the rounded corners — with a clean rounded
@@ -3812,13 +3833,6 @@ const getMeasuredVersion = () => measuredVersion
 const CARD_PREFS_KEY = 'thumbPropsCards'
 type CardPrefs = Record<string, 'open' | 'closed'>
 
-// Review toggle (THU-33): filled cards are a raised slab with the fields as
-// dark insets; unfilled cards keep the border and let the panel background
-// run through, so the fields are the only filled shapes. Flip to compare in
-// the dev app; delete this switch once the look is decided.
-const CARD_FILLED = true
-const CARD_BG = CARD_FILLED ? 'bg-navy-900/40' : 'bg-transparent'
-
 /** One glyph per card, keyed by card id, so the stack can be told apart at
  *  a glance while scrolling: the same icon in the same place on every layer
  *  type, whatever the header's title and summary say. */
@@ -3855,8 +3869,10 @@ function PanelCard({ id, title, control, summary, mutedReason, headerTooltip, op
       {title}
     </span>
   )
+  // A filled slab: the border-only variant was tried during the THU-33
+  // review and the fill kept.
   return (
-    <section data-card={id} className={`rounded-lg border border-white/10 ${CARD_BG} ${mutedReason ? 'opacity-60' : ''}`}>
+    <section data-card={id} className={`rounded-lg border border-white/10 bg-navy-900/40 ${mutedReason ? 'opacity-60' : ''}`}>
       <div className="flex items-center gap-1 pl-1.5 pr-2 h-7">
         <button
           type="button"
@@ -4845,6 +4861,19 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     const key = swatchKey(value)
     if (palette.some(s => { const v = paletteSwatchValue(s); return v !== null && swatchKey(v) === key })) return
     persistPalette([...palette, 'color' in value ? { color: value.color.toLowerCase() } : { gradient: value.gradient }])
+  }, [palette, persistPalette])
+  /** A recent tile dropped between two saved swatches (THU-10): same
+   *  dedupe as a click, inserted at the marker instead of the end. The
+   *  recent disappears from its row the way a clicked one does, through
+   *  the duplicate filter on `visibleRecents`. */
+  const insertPaletteSwatch = useCallback((value: SwatchValue, at: number) => {
+    setSwatchDropIndex(null)
+    if (!palette) return
+    const key = swatchKey(value)
+    if (palette.some(s => { const v = paletteSwatchValue(s); return v !== null && swatchKey(v) === key })) return
+    const entry: PaletteSwatch = 'color' in value ? { color: value.color.toLowerCase() } : { gradient: value.gradient }
+    const idx = Math.max(0, Math.min(palette.length, at))
+    persistPalette([...palette.slice(0, idx), entry, ...palette.slice(idx)])
   }, [palette, persistPalette])
 
   // ── Session ties (the "smart recents") ────────────────────────────────────
@@ -9607,7 +9636,26 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                         <Loader2 size={11} className="animate-spin" /> Loading palette…
                       </div>
                     ) : palette.length === 0 ? (
-                      <p className="text-[10px] text-gray-400">Palette is empty — add colors with + or from the recent colors below.</p>
+                      <p
+                        className={`text-[10px] text-gray-400 rounded ${swatchDropIndex !== null ? 'ring-1 ring-accent-500/60' : ''}`}
+                        // An empty palette takes a recent tile too (THU-10).
+                        onDragEnter={e => { if (e.dataTransfer.types.includes(RECENT_DRAG_MIME)) e.preventDefault() }}
+                        onDragOver={e => {
+                          if (!e.dataTransfer.types.includes(RECENT_DRAG_MIME)) return
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'copy'
+                          if (swatchDropIndex !== 0) setSwatchDropIndex(0)
+                        }}
+                        onDragLeave={() => setSwatchDropIndex(null)}
+                        onDrop={e => {
+                          if (!e.dataTransfer.types.includes(RECENT_DRAG_MIME)) return
+                          e.preventDefault()
+                          const v = readDraggedSwatch(e.dataTransfer)
+                          if (v) insertPaletteSwatch(v, 0)
+                        }}
+                      >
+                        Palette is empty: add colors with +, or click or drag a recent color below.
+                      </p>
                     ) : (
                       <div
                         className="flex flex-wrap gap-1.5"
@@ -9624,26 +9672,69 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                         // the cursor flashes no-drop each time the pointer
                         // crosses into a new element, until the first
                         // dragover lands.
+                        // Two drags land here: edit-mode reorders (move) and
+                        // recent tiles being saved at a spot (copy, THU-10).
                         onDragEnter={e => {
-                          if (e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) e.preventDefault()
+                          if (e.dataTransfer.types.includes(SWATCH_REORDER_MIME) || e.dataTransfer.types.includes(RECENT_DRAG_MIME)) e.preventDefault()
                         }}
                         onDragOver={e => {
                           if (e.defaultPrevented) return
-                          if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
-                          e.preventDefault()
-                          e.dataTransfer.dropEffect = 'move'
+                          if (e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) {
+                            e.preventDefault()
+                            e.dataTransfer.dropEffect = 'move'
+                          } else if (e.dataTransfer.types.includes(RECENT_DRAG_MIME)) {
+                            e.preventDefault()
+                            e.dataTransfer.dropEffect = 'copy'
+                            // Entering through the trailing space, without
+                            // crossing a tile, offers the end of the palette.
+                            if (swatchDropIndex === null) setSwatchDropIndex(palette.length)
+                          }
+                        }}
+                        onDragLeave={e => {
+                          // Leaving the grid for good (not moving between its
+                          // tiles) withdraws the marker; the drag may go on to
+                          // a color field.
+                          const related = e.relatedTarget as Node | null
+                          if (related && e.currentTarget.contains(related)) return
+                          if (e.dataTransfer.types.includes(RECENT_DRAG_MIME)) setSwatchDropIndex(null)
                         }}
                         onDrop={e => {
                           if (e.defaultPrevented) return
-                          if (!e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) return
-                          e.preventDefault()
-                          if (swatchDropIndex !== null) commitSwatchReorder(swatchDropIndex)
+                          if (e.dataTransfer.types.includes(SWATCH_REORDER_MIME)) {
+                            e.preventDefault()
+                            if (swatchDropIndex !== null) commitSwatchReorder(swatchDropIndex)
+                          } else if (e.dataTransfer.types.includes(RECENT_DRAG_MIME)) {
+                            e.preventDefault()
+                            const v = readDraggedSwatch(e.dataTransfer)
+                            if (v) insertPaletteSwatch(v, swatchDropIndex ?? palette.length)
+                          }
                         }}
                       >
                         {palette.map((s, i) => {
                           const v = paletteSwatchValue(s)
                           if (!v) return null
                           const isSolid = 'color' in v
+                          // Insertion marker, shared by both tile personalities.
+                          // Anchored INSIDE the tile it precedes (absolute,
+                          // sitting in the 6px flex gap) rather than rendered
+                          // as its own flex item. An in-flow marker could wrap
+                          // independently of its tile: dropping at the start
+                          // of row 2 drew the line at the end of row 1,
+                          // because the 2px divider still fit there while the
+                          // tile wrapped. Offsets are measured from the
+                          // PADDING box, 1px inside the tile's border, hence
+                          // 5px (not 4) to center the 2px line in the 6px gap,
+                          // and -top-px/h-5 to span the full 20px tile height.
+                          const dropMarkers = (
+                            <>
+                              {swatchDropIndex === i && (
+                                <span className="pointer-events-none absolute -left-[5px] -top-px h-5 w-0.5 rounded bg-accent-500" />
+                              )}
+                              {swatchDropIndex === palette.length && i === palette.length - 1 && (
+                                <span className="pointer-events-none absolute -right-[5px] -top-px h-5 w-0.5 rounded bg-accent-500" />
+                              )}
+                            </>
+                          )
                           return (
                             // The Tooltip wrapper IS the flex item (like the
                             // recents row) — an extra block wrapper around the
@@ -9705,25 +9796,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                     className={`relative w-5 h-5 rounded-md border transition-shadow ${selectedSwatches.has(i) ? 'border-transparent ring-2 ring-accent-400' : 'border-white/50 hover:ring-1 hover:ring-white/70'}`}
                                     style={swatchTileStyle(v)}
                                   >
-                                    {/* Reorder insertion marker — anchored INSIDE
-                                        the tile it precedes (absolute, sitting in
-                                        the 6px flex gap) rather than rendered as
-                                        its own flex item. An in-flow marker could
-                                        wrap independently of its tile: dropping at
-                                        the start of row 2 drew the line at the end
-                                        of row 1, because the 2px divider still fit
-                                        there while the tile wrapped. */}
-                                    {/* Offsets are measured from the PADDING box,
-                                        1px inside the tile's border — hence 5px
-                                        (not 4) to center the 2px line in the 6px
-                                        gap, and -top-px/h-5 to span the full
-                                        20px tile height. */}
-                                    {swatchDropIndex === i && (
-                                      <span className="pointer-events-none absolute -left-[5px] -top-px h-5 w-0.5 rounded bg-accent-500" />
-                                    )}
-                                    {swatchDropIndex === palette.length && i === palette.length - 1 && (
-                                      <span className="pointer-events-none absolute -right-[5px] -top-px h-5 w-0.5 rounded bg-accent-500" />
-                                    )}
+                                    {dropMarkers}
                                   </button>
                                 ) : (
                                   <div
@@ -9734,9 +9807,31 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                       e.dataTransfer.effectAllowed = 'copy'
                                       setColorDragImage(e, v)
                                     }}
-                                    className="w-5 h-5 rounded-md border border-white/50 cursor-grab active:cursor-grabbing"
+                                    // A recent tile dragged over this one picks
+                                    // the near side as its insertion point
+                                    // (THU-10); the tile's own drags are unaffected.
+                                    onDragEnter={e => {
+                                      if (e.dataTransfer.types.includes(RECENT_DRAG_MIME)) e.preventDefault()
+                                    }}
+                                    onDragOver={e => {
+                                      if (!e.dataTransfer.types.includes(RECENT_DRAG_MIME)) return
+                                      e.preventDefault()
+                                      e.dataTransfer.dropEffect = 'copy'
+                                      const r = e.currentTarget.getBoundingClientRect()
+                                      const at = e.clientX < r.left + r.width / 2 ? i : i + 1
+                                      if (at !== swatchDropIndex) setSwatchDropIndex(at)
+                                    }}
+                                    onDrop={e => {
+                                      if (!e.dataTransfer.types.includes(RECENT_DRAG_MIME)) return
+                                      e.preventDefault()
+                                      const dragged = readDraggedSwatch(e.dataTransfer)
+                                      if (dragged) insertPaletteSwatch(dragged, swatchDropIndex ?? i + 1)
+                                    }}
+                                    className="relative w-5 h-5 rounded-md border border-white/50 cursor-grab active:cursor-grabbing"
                                     style={swatchTileStyle(v)}
-                                  />
+                                  >
+                                    {dropMarkers}
+                                  </div>
                                 )}
                               </Tooltip>
                             </React.Fragment>
@@ -9762,7 +9857,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 content={(
                                   <>
                                     {swatchDescription(e.value)}
-                                    <div>Click to save to palette</div>
+                                    <div>Click to save to palette, or drag it into the palette where you want it</div>
                                     <div>{isSolid ? 'Drag over color field to apply' : 'Drag over a Fill control to apply'}</div>
                                   </>
                                 )}
@@ -9773,9 +9868,14 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                   onDragStart={ev => {
                                     if ('color' in e.value) ev.dataTransfer.setData(COLOR_DRAG_MIME, e.value.color)
                                     else ev.dataTransfer.setData(GRADIENT_DRAG_MIME, JSON.stringify(e.value.gradient))
+                                    // The marker type lets the palette grid offer
+                                    // an insertion point (THU-10); color fields
+                                    // read the payload types and ignore it.
+                                    ev.dataTransfer.setData(RECENT_DRAG_MIME, '')
                                     ev.dataTransfer.effectAllowed = 'copy'
                                     setColorDragImage(ev, e.value)
                                   }}
+                                  onDragEnd={() => setSwatchDropIndex(null)}
                                   onClick={() => addPaletteSwatch(e.value)}
                                   className={`${RECENT_TILE_CLS} cursor-grab active:cursor-grabbing`}
                                 >
