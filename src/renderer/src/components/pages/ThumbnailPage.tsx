@@ -3564,7 +3564,7 @@ const SELECTION_STROKE_SOFT = 'rgba(0,161,255,0.55)'
  */
 function ValueBar({
   label, min, max, step, value, onChange, defaultValue, spinnerStep, wrap, fieldUnbounded = false,
-  snapToStep = false, inlineNote, disabled = false,
+  softMax = false, snapToStep = false, inlineNote, disabled = false,
 }: {
   label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void
   /** Value a double-click on the bar resets to; also drawn as a dotted
@@ -3579,6 +3579,10 @@ function ValueBar({
   wrap?: (n: number) => number
   /** The field takes any number (the bar still spans min..max). */
   fieldUnbounded?: boolean
+  /** Blender-style soft limit: the bar spans min..max and dragging stops
+   *  there, but the field accepts anything above `max` (the bar then reads
+   *  full). `min` stays a hard floor. */
+  softMax?: boolean
   snapToStep?: boolean
   inlineNote?: string
   disabled?: boolean
@@ -3588,12 +3592,31 @@ function ValueBar({
   const shown = wrap ? wrap(value) : value
   const pct = Math.max(0, Math.min(100, ((shown - min) / (max - min)) * 100))
   const clampBar = (v: number) => Math.min(wrap ? max - step : max, Math.max(min, v))
-  const setFromPointer = (clientX: number) => {
+  const fieldMin = fieldUnbounded ? undefined : min
+  const fieldMax = fieldUnbounded || softMax ? undefined : max
+  // Pointer-down jumps to the clicked position; the drag then moves the
+  // value relative to that point, on both axes: right or up raises it,
+  // left or down lowers it, one bar width (or height of travel) per full
+  // range. Along x this is the same as absolute positioning; the y axis is
+  // extra reach for fine or long adjustments, a convenience the cursor and
+  // tooltip do not advertise. Hard-ranged bars stop at their ends; a
+  // wrapping bar (rotation) keeps turning past them, the way its spinner
+  // does.
+  const dragRef = useRef<{ startX: number; startY: number; startValue: number } | null>(null)
+  const snap = (v: number) => Number((wrap ? wrap(Math.round(v / step) * step) : clampBar(Math.round(v / step) * step)).toFixed(decimals))
+  const setFromPointer = (clientX: number, clientY: number, phase: 'down' | 'move') => {
     const r = barRef.current?.getBoundingClientRect()
     if (!r || r.width <= 0) return
-    const t = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
-    const snapped = Math.round((min + t * (max - min)) / step) * step
-    const next = Number(clampBar(snapped).toFixed(decimals))
+    if (phase === 'down' || !dragRef.current) {
+      const t = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+      const next = snap(min + t * (max - min))
+      dragRef.current = { startX: clientX, startY: clientY, startValue: next }
+      if (next !== value) onChange(next)
+      return
+    }
+    const { startX, startY, startValue } = dragRef.current
+    const travel = (clientX - startX) - (clientY - startY)
+    const next = snap(startValue + (travel / r.width) * (max - min))
     if (next !== value) onChange(next)
   }
   return (
@@ -3611,17 +3634,25 @@ function ValueBar({
           onPointerDown={e => {
             if (e.button !== 0) return
             e.currentTarget.setPointerCapture(e.pointerId)
-            setFromPointer(e.clientX)
+            setFromPointer(e.clientX, e.clientY, 'down')
           }}
-          onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) setFromPointer(e.clientX) }}
-          onPointerUp={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) }}
+          onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) setFromPointer(e.clientX, e.clientY, 'move') }}
+          onPointerUp={e => {
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+            dragRef.current = null
+          }}
           onDoubleClick={() => { if (defaultValue !== undefined) onChange(defaultValue) }}
           onKeyDown={e => {
             const dir = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0
             if (!dir) return
             e.preventDefault()
             const amount = step * (e.shiftKey ? 10 : 1)
-            const next = wrap ? wrap(value + dir * amount) : Math.min(max, Math.max(min, value + dir * amount))
+            // Arrow keys respect the bar's range, except that a value already
+            // typed past a soft max keeps stepping from where it is.
+            const stepped = value + dir * amount
+            const next = wrap ? wrap(stepped)
+              : softMax && value > max ? Math.max(min, stepped)
+              : Math.min(max, Math.max(min, stepped))
             onChange(Number(next.toFixed(decimals)))
           }}
         >
@@ -3641,8 +3672,8 @@ function ValueBar({
       </Tooltip>
       <div className="flex w-14 shrink-0 border-l border-white/10">
         <NumberInput
-          min={fieldUnbounded ? undefined : min}
-          max={fieldUnbounded ? undefined : max}
+          min={fieldMin}
+          max={fieldMax}
           step={spinnerStep ?? step}
           value={value}
           onChange={onChange}
@@ -3921,7 +3952,7 @@ function ShadowsCard({ layer, update, muted, state }: {
                 onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
             </label>
           </div>
-          <ValueBar label="Blur" min={0} max={100} step={1} value={s.blur} onChange={blur => updateAt(idx, { blur })} fieldUnbounded defaultValue={0} />
+          <ValueBar label="Blur" min={0} max={100} step={1} value={s.blur} onChange={blur => updateAt(idx, { blur })} softMax defaultValue={0} />
         </div>
       ))}
     </PanelCard>
@@ -3971,7 +4002,7 @@ function OutlineCard({ layer, update, muted, state }: {
               recentKey={`${layer.id}:outline`}
             />
           </label>
-          <ValueBar label="Width" min={0} max={50} step={1} value={width} onChange={outlineWidth => update({ outlineWidth })} defaultValue={0} />
+          <ValueBar label="Width" min={0} max={50} step={1} value={width} onChange={outlineWidth => update({ outlineWidth })} defaultValue={0} softMax />
           {layer.type !== 'image' && layer.type !== 'group' && (layer.strokeWidth ?? 0) > 0 && (
             <p className="text-[10px] text-amber-300 leading-snug">
               Replaces the {layer.strokeWidth} px stroke while enabled.
@@ -4367,18 +4398,17 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
             />
           </label>
         </div>
-        {/* Bars (THU-33): rotation spans one turn (the field still wraps
-            and never stops), opacity 0..100. */}
-        <div className="grid grid-cols-2 gap-1.5">
-          <ValueBar label="Rotation °" min={0} max={360} step={1} value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} fieldUnbounded snapToStep defaultValue={0} />
-          {isMaskLayer ? (
-            <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block min-w-0">
-              <ValueBar label="Opacity %" min={0} max={100} step={1} value={Math.round(layer.opacity)} onChange={() => {}} disabled />
-            </Tooltip>
-          ) : (
-            <ValueBar label="Opacity %" min={0} max={100} step={1} value={Math.round(layer.opacity)} onChange={opacity => update({ opacity: Math.max(0, Math.min(100, opacity)) })} defaultValue={100} />
-          )}
-        </div>
+        {/* Bars (THU-33), one per row so the labels have room: rotation
+            spans one turn (the field still wraps and never stops), opacity
+            0..100. */}
+        <ValueBar label="Rotation °" min={0} max={360} step={1} value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} fieldUnbounded snapToStep defaultValue={0} />
+        {isMaskLayer ? (
+          <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block min-w-0">
+            <ValueBar label="Opacity %" min={0} max={100} step={1} value={Math.round(layer.opacity)} onChange={() => {}} disabled />
+          </Tooltip>
+        ) : (
+          <ValueBar label="Opacity %" min={0} max={100} step={1} value={Math.round(layer.opacity)} onChange={opacity => update({ opacity: Math.max(0, Math.min(100, opacity)) })} defaultValue={100} />
+        )}
       </PanelCard>
 
       {/* Shape geometry: sides and corner radius, out of Transform. */}
@@ -4389,7 +4419,10 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
           summary={[hasSides ? `${polygonSidesOf(layer)} sides` : '', hasRadius ? `radius ${layer.cornerRadius ?? 0}` : ''].filter(Boolean).join(' · ')}
           {...cardState('shape')}
         >
-          <div className={`grid gap-1.5 ${hasSides && hasRadius ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {/* One bar per row: the bar's value field is a fixed five
+              characters wide, so two bars side by side leave no room for
+              their labels. */}
+          <div className="flex flex-col gap-1.5">
             {hasSides && (
               // Keeps the shape as regular as it was: the box height follows
               // the new side count's natural ratio, carrying over whatever
@@ -4418,13 +4451,13 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
               const entered = layer.cornerRadius ?? 0
               return (
                 <ValueBar
-                  label="Radius"
+                  label="Corner radius"
                   min={0}
                   max={Math.max(1, Math.ceil(maxR))}
                   step={1}
                   value={entered}
                   onChange={cornerRadius => update({ cornerRadius })}
-                  fieldUnbounded
+                  softMax
                   defaultValue={0}
                   inlineNote={entered > maxR ? (maxR % 1 === 0 ? String(maxR) : maxR.toFixed(1)) : undefined}
                 />
@@ -4571,13 +4604,11 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
               </select>
             </label>
           </div>
-          {/* Size and line height as bars (THU-33). Line height is stored
-              as a multiplier (Konva-native); the UI speaks percent to match
-              the other % fields. */}
-          <div className="grid grid-cols-2 gap-1.5">
-            <ValueBar label="Size" min={8} max={500} step={1} value={layer.fontSize ?? 48} onChange={fontSize => update({ fontSize })} />
-            <ValueBar label="Line height %" min={50} max={300} step={1} value={Math.round((layer.lineHeight ?? 1) * 100)} onChange={p => update({ lineHeight: p / 100 })} defaultValue={100} />
-          </div>
+          {/* Size and line height as bars (THU-33), one per row. Line
+              height is stored as a multiplier (Konva-native); the UI speaks
+              percent to match the other % fields. */}
+          <ValueBar label="Size" min={8} max={500} step={1} value={layer.fontSize ?? 48} onChange={fontSize => update({ fontSize })} softMax />
+          <ValueBar label="Line height %" min={50} max={300} step={1} value={Math.round((layer.lineHeight ?? 1) * 100)} onChange={p => update({ lineHeight: p / 100 })} defaultValue={100} softMax />
           {/* Letter case (thumbnails #7): radio-style group sized to the
               panel's input rows. div, not label: a label would forward
               clicks on the caption to the first button. */}
@@ -4628,7 +4659,7 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
           {...cardState('stroke')}
         >
           <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" headerless />
-          <ValueBar label="Width" min={0} max={100} step={1} value={layer.strokeWidth ?? 0} onChange={strokeWidth => update({ strokeWidth })} defaultValue={0} />
+          <ValueBar label="Width" min={0} max={100} step={1} value={layer.strokeWidth ?? 0} onChange={strokeWidth => update({ strokeWidth })} defaultValue={0} softMax />
         </PanelCard>
       )}
 
