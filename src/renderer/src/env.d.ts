@@ -76,6 +76,8 @@ declare global {
       importFilesIntoFolder(paths: string[], destDir: string, mode: 'move' | 'copy'): Promise<{ imported: string[]; failed: { path: string; reason: string }[]; skipped: number }>
       getFileSizes(paths: string[]): Promise<(number | null)[]>
       getNativeThumbnail(filePath: string, size?: number): Promise<string | null>
+      getRowThumb(filePath: string): Promise<string | null>
+      onRowThumbReady(cb: (info: { path: string; url: string }) => void): () => void
       checkLocalFiles(filePaths: string[]): Promise<boolean[]>
       startCloudDownload(filePath: string): Promise<void>
       debugFileAttrs(filePath: string): Promise<{

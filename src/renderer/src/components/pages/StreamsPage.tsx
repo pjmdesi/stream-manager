@@ -5515,6 +5515,10 @@ const StreamListItem = memo(function StreamListItem({
                 path={firstThumb}
                 thumbsKey={thumbsKey}
                 isLocal={firstThumbLocal}
+                // STR-17: the row composites a pre-scaled cached copy once
+                // main has made one, so the hover zoom and the column drag
+                // work on a small texture. The full image shows until then.
+                small
                 className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                 draggable={false}
                 iconSize={12}

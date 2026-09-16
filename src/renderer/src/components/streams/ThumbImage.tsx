@@ -16,6 +16,21 @@ export function toFileUrl(absPath: string): string {
   return 'file:///' + absPath.replace(/\\/g, '/')
 }
 
+// One IPC listener for the row-thumbnail ready event, fanned out to every
+// mounted row (STR-17). A listener per row would put a few hundred on the
+// ipcRenderer emitter and trip Node's max-listeners warning.
+type RowThumbInfo = { path: string; url: string }
+const rowThumbListeners = new Set<(info: RowThumbInfo) => void>()
+let rowThumbUnsub: (() => void) | null = null
+function subscribeRowThumbReady(cb: (info: RowThumbInfo) => void): () => void {
+  rowThumbListeners.add(cb)
+  if (!rowThumbUnsub) rowThumbUnsub = window.api.onRowThumbReady(info => { for (const l of rowThumbListeners) l(info) })
+  return () => {
+    rowThumbListeners.delete(cb)
+    if (rowThumbListeners.size === 0 && rowThumbUnsub) { rowThumbUnsub(); rowThumbUnsub = null }
+  }
+}
+
 /**
  * Renders a thumbnail image cloud-aware:
  *   - When `isLocal` is false and `hydrate` is false → renders a Cloud icon
@@ -28,13 +43,19 @@ export function toFileUrl(absPath: string): string {
  *     was supposedly local but isn't), falls back to the cloud-download flow.
  */
 export function ThumbImage({
-  path, thumbsKey, isLocal = true, hydrate = false, className, style,
+  path, thumbsKey, isLocal = true, hydrate = false, small = false, className, style,
   placeholderClassName, placeholderStyle, draggable, iconSize = 14, onLoad,
 }: {
   path: string
   thumbsKey: number
   isLocal?: boolean
   hydrate?: boolean
+  /** STR-17: swap in the pre-scaled row thumbnail from the cache once main
+   *  has it. The full image renders first, exactly as without the flag, so
+   *  nothing waits on the cache; the cloud state machine is untouched. For
+   *  surfaces that show the image small and animate over it (the stream
+   *  rows' hover zoom). */
+  small?: boolean
   className?: string
   style?: React.CSSProperties
   placeholderClassName?: string
@@ -123,7 +144,21 @@ export function ThumbImage({
     )
   }
 
-  const src = `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
+  // Pre-scaled version (STR-17). Requested whenever the source may have
+  // changed (path, thumbsKey, a hydration); main answers at once from the
+  // cache or later through the ready event. Reset to the full image in the
+  // meantime, so a re-rendered thumbnail is never shown stale.
+  const [smallSrc, setSmallSrc] = useState<string | null>(null)
+  useEffect(() => {
+    if (!small || !effectiveIsLocal) { setSmallSrc(null); return }
+    let cancelled = false
+    setSmallSrc(null)
+    window.api.getRowThumb(path).then(url => { if (!cancelled && url) setSmallSrc(url) }).catch(() => {})
+    const unsub = subscribeRowThumbReady(({ path: p, url }) => { if (!cancelled && p === path) setSmallSrc(url) })
+    return () => { cancelled = true; unsub() }
+  }, [small, path, thumbsKey, effectiveIsLocal])
+
+  const src = smallSrc ?? `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
 
   return (
     <>
@@ -141,7 +176,10 @@ export function ThumbImage({
           const im = e.currentTarget
           onLoad?.(im.naturalWidth > 0 ? { width: im.naturalWidth, height: im.naturalHeight } : undefined)
         }}
-        onError={() => setStatus('syncing')}
+        // A cached small file that fails to load (the cache was cleared under
+        // it) drops back to the full image; only the source's own failure
+        // means the file is not local.
+        onError={() => { if (smallSrc) setSmallSrc(null); else setStatus('syncing') }}
       />
       {status !== 'loaded' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-navy-900" />

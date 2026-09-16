@@ -10,6 +10,12 @@ import { app } from 'electron'
 // invalidated so the strip regenerates without visual repeats.
 const CACHE_VERSION = 2
 
+/** Width of a cached row thumbnail (STR-17): the streams list's widest
+ *  thumbnail column (170 px) at a 2.25 device pixel ratio. One size for
+ *  every column width, so the column drag only CSS-scales it. Bumping this
+ *  invalidates every entry through the sidecar's `width`. */
+export const ROW_THUMB_WIDTH = 384
+
 interface ThumbnailMeta {
   filePath: string
   mtime: number
@@ -155,6 +161,43 @@ class ThumbnailCacheManager {
       this.writeKeystoneMeta(filePath, hash)
       return pathToFileURL(dest).toString()
     } catch { return null }
+  }
+
+  // ── Row thumbnails (STR-17) ─────────────────────────────────────────────
+  // The streams list's thumbnail column shows each stream's primary
+  // thumbnail (usually 1280x720) at 85 to 170 px. A pre-scaled JPEG per
+  // source file lives here so the rows load a small image instead of
+  // asking Chromium to downscale a large one every frame. Keyed by path
+  // hash with an mtime sidecar, like the keystone frames: a re-rendered
+  // thumbnail changes the mtime and the entry regenerates. Counts toward
+  // the cache size and clears with the rest.
+
+  private rowThumbJpgPath(hash: string): string {
+    return path.join(this.cacheDir, 'rows', `${hash}.jpg`)
+  }
+  private rowThumbMetaPath(hash: string): string {
+    return path.join(this.cacheDir, 'rows', `${hash}.json`)
+  }
+
+  /** The cached row thumbnail's file:// URL (with the source mtime as a
+   *  cache-busting query) when it exists and matches the source's mtime. */
+  getRowThumb(filePath: string, sourceMtime: number): string | null {
+    const hash = this.hashKey(filePath)
+    let meta: { mtime: number; width: number }
+    try { meta = JSON.parse(fs.readFileSync(this.rowThumbMetaPath(hash), 'utf-8')) } catch { return null }
+    if (meta.mtime !== sourceMtime || meta.width !== ROW_THUMB_WIDTH) return null
+    const jpg = this.rowThumbJpgPath(hash)
+    if (!fs.existsSync(jpg)) return null
+    return `${pathToFileURL(jpg).toString()}?m=${sourceMtime}`
+  }
+
+  /** Persist a freshly scaled row thumbnail; returns its URL. */
+  saveRowThumb(filePath: string, jpeg: Buffer, sourceMtime: number): string {
+    const hash = this.hashKey(filePath)
+    fs.mkdirSync(path.join(this.cacheDir, 'rows'), { recursive: true })
+    fs.writeFileSync(this.rowThumbJpgPath(hash), jpeg)
+    fs.writeFileSync(this.rowThumbMetaPath(hash), JSON.stringify({ filePath, mtime: sourceMtime, width: ROW_THUMB_WIDTH }))
+    return `${pathToFileURL(this.rowThumbJpgPath(hash)).toString()}?m=${sourceMtime}`
   }
 
   getTotalSize(): number {

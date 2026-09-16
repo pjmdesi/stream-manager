@@ -108,6 +108,16 @@ contextBridge.exposeInMainWorld('api', {
   getNativeThumbnail: (filePath: string, size?: number) =>
     ipcRenderer.invoke('files:getNativeThumbnail', filePath, size),
 
+  // Pre-scaled row thumbnail (STR-17): the cached small file's URL, or null
+  // while it is being generated (onRowThumbReady announces it).
+  getRowThumb: (filePath: string) =>
+    ipcRenderer.invoke('files:getRowThumb', filePath),
+  onRowThumbReady: (callback: (info: { path: string; url: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { path: string; url: string }) => callback(info)
+    ipcRenderer.on('files:rowThumbReady', handler)
+    return () => ipcRenderer.removeListener('files:rowThumbReady', handler)
+  },
+
   checkLocalFiles: (filePaths: string[]) =>
     ipcRenderer.invoke('files:checkLocalFiles', filePaths),
 

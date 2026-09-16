@@ -4,6 +4,7 @@ import path from 'path'
 import { spawnSync, spawn, ChildProcess } from 'child_process'
 import { fileWatcher, WatchRule, WatchEvent } from '../services/fileWatcher'
 import { isInFlightWrite } from '../services/inFlightWrites'
+import { registerRowThumbIPC } from '../services/rowThumbs'
 import { getStore } from './store'
 
 // Windows attribute flags that indicate the file's data is not resident locally:
@@ -140,6 +141,9 @@ export interface FileInfo {
 }
 
 export function registerFilesIPC(): void {
+  // Pre-scaled row thumbnails for the streams list (STR-17).
+  registerRowThumbIPC()
+
   // Move (default) or copy files into a stream folder — the files grid's
   // drag-drop / add-files tile. Honest per-file failures, no silent
   // overwrites and no auto-renaming (a name collision usually means the
