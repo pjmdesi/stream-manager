@@ -18,6 +18,8 @@ import {
   ChevronDown, ChevronRight, Loader2, Radio, Palette, Upload,
   Layers as LayersIcon,
   Group as GroupIcon, Ungroup as UngroupIcon, Folder, Blend, ArrowDown,
+  Move, Shapes, PaintBucket, PenLine, SquareStack, SquareDashed, SlidersHorizontal,
+  type LucideIcon,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
@@ -3817,6 +3819,20 @@ type CardPrefs = Record<string, 'open' | 'closed'>
 const CARD_FILLED = true
 const CARD_BG = CARD_FILLED ? 'bg-navy-900/40' : 'bg-transparent'
 
+/** One glyph per card, keyed by card id, so the stack can be told apart at
+ *  a glance while scrolling: the same icon in the same place on every layer
+ *  type, whatever the header's title and summary say. */
+const CARD_ICONS: Record<string, LucideIcon> = {
+  transform: Move,
+  shape: Shapes,
+  text: Type,
+  fill: PaintBucket,
+  stroke: PenLine,
+  shadows: SquareStack,
+  outline: SquareDashed,
+  filters: SlidersHorizontal,
+}
+
 function PanelCard({ id, title, control, summary, mutedReason, headerTooltip, open, onToggle, children }: {
   id: string
   title: string
@@ -3832,8 +3848,12 @@ function PanelCard({ id, title, control, summary, mutedReason, headerTooltip, op
   onToggle: () => void
   children: React.ReactNode
 }) {
+  const Icon = CARD_ICONS[id]
   const titleNode = (
-    <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">{title}</span>
+    <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-gray-400 shrink-0">
+      {Icon && <Icon size={11} className="shrink-0" aria-hidden />}
+      {title}
+    </span>
   )
   return (
     <section data-card={id} className={`rounded-lg border border-white/10 ${CARD_BG} ${mutedReason ? 'opacity-60' : ''}`}>
