@@ -138,6 +138,8 @@ export function groupLayers(
   ids: string[],
   rectOf: (id: string) => Rect | null,
   makeId: () => string,
+  /** The new group's name; the page passes the next "Group N" (THU-23). */
+  name = 'Group',
 ): { layers: ThumbnailLayer[]; groupId: string } | null {
   if (!canGroup(layers, ids).ok) return null
   const roots = selectionRoots(layers, ids)
@@ -156,7 +158,7 @@ export function groupLayers(
 
   const groupId = makeId()
   const group: ThumbnailLayer = {
-    id: groupId, name: 'Group', type: 'group', visible: true, opacity: 100,
+    id: groupId, name, type: 'group', visible: true, opacity: 100,
     x: minX, y: minY, rotation: 0,
     ...(parentId ? { parentId } : {}),
   }
@@ -577,6 +579,10 @@ export function applyAsMaskBelow(
   id: string,
   rectOf: (id: string) => Rect | null,
   makeId: () => string,
+  /** Name for the group this creates when the layer below is not one.
+   *  Called lazily so the page's counter only advances when a group is
+   *  actually made (THU-23). */
+  groupName?: () => string,
 ): { layers: ThumbnailLayer[]; groupId: string } | null {
   if (!canApplyAsMaskBelow(layers, id).ok) return null
   const below = layerBelow(layers, id)!
@@ -586,7 +592,7 @@ export function applyAsMaskBelow(
     const masked = setGroupMask(moved, id)
     return masked ? { layers: masked, groupId: below.id } : null
   }
-  const grouped = groupLayers(layers, [below.id, id], rectOf, makeId)
+  const grouped = groupLayers(layers, [below.id, id], rectOf, makeId, groupName?.())
   if (!grouped) return null
   const masked = setGroupMask(grouped.layers, id)
   return masked ? { layers: masked, groupId: grouped.groupId } : null

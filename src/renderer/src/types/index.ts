@@ -960,6 +960,11 @@ export interface ThumbnailCanvasFile {
   templateId?: string
   updatedAt: number
   layers: ThumbnailLayer[]
+  /** How many layers of each auto-named kind this file has ever created
+   *  (THU-23): "Group" → 3 means the next group is "Group 4", whether or
+   *  not Groups 1 to 3 still exist. Absent on files from before the
+   *  counters; those seed from the highest numbered name present. */
+  nameCounters?: Record<string, number>
 }
 
 export interface ThumbnailTemplate {

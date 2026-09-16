@@ -42,6 +42,7 @@ import {
 } from '../../lib/layerTree'
 import { traceMaskPath, traceShapeOutlineLocal } from '../../lib/groupMask'
 import type { PanelRow } from '../../lib/layerTree'
+import { seedNameCounters, takeLayerName, type NameCounters } from '../../lib/layerNames'
 import { setLiveTransform, useLiveTransform, normalizeAngle } from '../../lib/liveTransform'
 import { TemplateBodyEditor, MergeFieldPicker } from '../ui/TemplateBodyEditor'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
@@ -5234,7 +5235,15 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   // come back by identity, so this is free for current files.
   // Load-time normalization: legacy triangles become polygons, and mask
   // flags are validated and pinned (THU-21).
-  const resetLayers = useCallback((next: ThumbnailLayer[]) => resetLayersRaw(wrapLayerAngles(pinMasks(normalizeLayers(next)))), [resetLayersRaw])
+  // Auto-name counters (THU-23) travel with the canvas file and reseed on
+  // every load; a fresh or template canvas seeds from its layer names.
+  const nameCountersRef = useRef<NameCounters>({})
+  const resetLayers = useCallback((next: ThumbnailLayer[], storedCounters?: NameCounters) => {
+    nameCountersRef.current = seedNameCounters(next, storedCounters)
+    resetLayersRaw(wrapLayerAngles(pinMasks(normalizeLayers(next))))
+  }, [resetLayersRaw])
+  /** Next "Base N" for a new layer; advances the file's counter. */
+  const takeName = useCallback((base: string) => takeLayerName(nameCountersRef.current, base), [])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
@@ -6451,6 +6460,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
         templateId,
         updatedAt: Date.now(),
         layers: saveLayers,
+        nameCounters: { ...nameCountersRef.current },
       }
       // Missing font → save the layer JSON only and leave the last good PNG
       // on disk. Rendering now would silently bake a substitute font into
@@ -6828,11 +6838,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       if (!node || !parent) return null
       return node.getClientRect({ relativeTo: parent as Konva.Container, skipShadow: true, skipStroke: true })
     }
-    const res = groupLayers(ls, sel, rectOf, newId)
+    const res = groupLayers(ls, sel, rectOf, newId, takeName('Group'))
     if (!res) return
     commitLayers(res.layers)
     setSelectedIds([res.groupId])
-  }, [commitLayers])
+  }, [commitLayers, takeName])
 
   /** Dissolve the selected groups; their freed members join whatever else
    *  was selected. Other selected layers are left alone (THU-30 relaxed
@@ -7021,7 +7031,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     const r = node && inner ? inner.getClientRect({ relativeTo: node as unknown as Konva.Container, skipShadow: true, skipStroke: true }) : null
     const box = r && r.width > 0 && r.height > 0 ? r : { x: 0, y: 0, width: 200, height: 200 }
     const shape: ThumbnailLayer = {
-      id: newId(), name: 'Mask', type: 'shape', shapeType, visible: true, opacity: 100,
+      id: newId(), name: takeName('Mask'), type: 'shape', shapeType, visible: true, opacity: 100,
       x: Math.round(box.x), y: Math.round(box.y), rotation: 0,
       width: Math.max(1, Math.round(box.width)), height: Math.max(1, Math.round(box.height)),
       fill: '#6366f1', stroke: '#000000', strokeWidth: 0, cornerRadius: 0,
@@ -7031,7 +7041,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     if (!next) return
     commitLayers(next)
     setSelectedIds([shape.id])
-  }, [commitLayers])
+  }, [commitLayers, takeName])
   /** THU-1: the selected shape becomes the mask of the layer below it,
    *  wrapping that layer in a new group when it is not one already. The
    *  masked group becomes the selection. */
@@ -7043,11 +7053,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       if (!node || !parent) return null
       return node.getClientRect({ relativeTo: parent as Konva.Container, skipShadow: true, skipStroke: true })
     }
-    const res = applyAsMaskBelow(layersRef.current, id, rectOf, newId)
+    const res = applyAsMaskBelow(layersRef.current, id, rectOf, newId, () => takeName('Group'))
     if (!res) return
     commitLayers(res.layers)
     setSelectedIds([res.groupId])
-  }, [commitLayers])
+  }, [commitLayers, takeName])
   /** A shape dragged from the panel onto a group's empty slot: it moves into
    *  the group (kept in place on screen) and becomes the mask. */
   const dropShapeIntoSlot = useCallback((shapeId: string, groupId: string) => {
@@ -7274,14 +7284,14 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
 
   const addTextLayer = useCallback(() => {
     const layer: ThumbnailLayer = {
-      id: newId(), name: 'Text', type: 'text', visible: true, opacity: 100,
+      id: newId(), name: takeName('Text'), type: 'text', visible: true, opacity: 100,
       x: 100, y: 100, rotation: 0, text: 'New Text',
       fontFamily: systemFonts[0] ?? 'Arial', fontSize: 72, fontStyle: 'bold',
       fill: '#ffffff', stroke: '#000000', strokeWidth: 0, align: 'left',
     }
     commitLayers([...layers, layer])
     setSelectedIds([layer.id])
-  }, [layers, commitLayers, systemFonts])
+  }, [layers, commitLayers, systemFonts, takeName])
 
   const addShapeLayer = useCallback((shapeType: 'rect' | 'ellipse' | 'polygon') => {
     const names = { rect: 'Rectangle', ellipse: 'Ellipse', polygon: 'Polygon' }
@@ -7289,7 +7299,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     // natural ratio for its side count instead of a square.
     const box = shapeType === 'polygon' ? regularPolygonBox(POLYGON_DEFAULT_SIDES, 200) : { width: 200, height: 200 }
     const layer: ThumbnailLayer = {
-      id: newId(), name: names[shapeType], type: 'shape', shapeType, visible: true, opacity: 100,
+      id: newId(), name: takeName(names[shapeType]), type: 'shape', shapeType, visible: true, opacity: 100,
       x: Math.round(CANVAS_W / 2 - box.width / 2), y: Math.round(CANVAS_H / 2 - box.height / 2),
       rotation: 0, width: box.width, height: box.height,
       fill: '#6366f1', stroke: '#000000', strokeWidth: 0, cornerRadius: 0,
@@ -7297,7 +7307,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     }
     commitLayers([...layers, layer])
     setSelectedIds([layer.id])
-  }, [layers, commitLayers])
+  }, [layers, commitLayers, takeName])
 
   // ── Handle select on stage (deselect) ─────────────────────────────────────
   const handleStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -7407,7 +7417,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     setCurrentVariant(initialVariant)
     setSelectedIds([])
     if (canvas) {
-      resetLayers(canvas.layers)
+      resetLayers(canvas.layers, canvas.nameCounters)
       setCurrentTemplateId(canvas.templateId)
     } else {
       // No templates exist at all (picker skipped) — open a blank canvas.
@@ -7566,7 +7576,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     const canvas = await window.api.thumbnailLoadCanvas(currentStream.folderPath, currentStream.date, ordinal)
     setCurrentVariant(ordinal)
     if (canvas) {
-      resetLayers(canvas.layers)
+      resetLayers(canvas.layers, canvas.nameCounters)
       setCurrentTemplateId(canvas.templateId)
     } else {
       resetLayers([])
@@ -7762,7 +7772,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       setVariants(remaining)
       setCurrentVariant(nextOrdinal)
       if (canvas) {
-        resetLayers(canvas.layers)
+        resetLayers(canvas.layers, canvas.nameCounters)
         setCurrentTemplateId(canvas.templateId)
       } else {
         resetLayers([])
@@ -7815,7 +7825,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       const canvas = await window.api.thumbnailLoadCanvas(folderPath, date, nextOrdinal)
       setVariants(remaining)
       setCurrentVariant(nextOrdinal)
-      if (canvas) { resetLayers(canvas.layers); setCurrentTemplateId(canvas.templateId) }
+      if (canvas) { resetLayers(canvas.layers, canvas.nameCounters); setCurrentTemplateId(canvas.templateId) }
       else { resetLayers([]); setCurrentTemplateId(undefined) }
       setIsDirty(false)
       return
