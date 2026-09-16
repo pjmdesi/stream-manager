@@ -3691,6 +3691,35 @@ function ValueBar({
   )
 }
 
+/** The bar frame for a value with no natural range (position, size,
+ *  shadow offset): the same 24 px frame, corners, and focus border as a
+ *  ValueBar, with a one-letter label cell where the bar would be, so a row
+ *  of these and a bar below read as one family. Two fit side by side. */
+function LabeledField({ label, ariaLabel, value, onChange, snapToStep = false, disabled = false }: {
+  label: string
+  ariaLabel: string
+  value: number
+  onChange: (v: number) => void
+  snapToStep?: boolean
+  disabled?: boolean
+}) {
+  return (
+    <div className={`flex items-stretch h-6 min-w-0 bg-navy-900 border border-white/10 rounded-lg overflow-hidden focus-within:border-accent-500/50 transition-colors ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      <span className="w-6 shrink-0 flex items-center justify-center text-[10px] text-gray-300 border-r border-white/10 select-none" aria-hidden>{label}</span>
+      <NumberInput
+        value={value}
+        onChange={onChange}
+        snapToStep={snapToStep}
+        disabled={disabled}
+        className="w-full h-6 min-w-0"
+        frameless
+        merged
+        aria-label={ariaLabel}
+      />
+    </div>
+  )
+}
+
 /** A filter's bar: every filter is neutral at 0, so that is its reset. */
 function FilterSlider(props: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; spinnerStep?: number }) {
   return <ValueBar defaultValue={0} {...props} />
@@ -3951,17 +3980,11 @@ function ShadowsCard({ layer, update, muted, state }: {
               recentKey={`${layer.id}:shadow${idx}`}
             />
           </label>
+          {/* Offsets: under a shadow's own divider, X and Y can only mean
+              its offset, so the letters carry the row. */}
           <div className="grid grid-cols-2 gap-1.5">
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Offset X</span>
-              <NumberInput value={s.offsetX}
-                onChange={offsetX => updateAt(idx, { offsetX })} className="w-full" />
-            </label>
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Offset Y</span>
-              <NumberInput value={s.offsetY}
-                onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
-            </label>
+            <LabeledField label="X" ariaLabel="Shadow offset X" value={s.offsetX} onChange={offsetX => updateAt(idx, { offsetX })} />
+            <LabeledField label="Y" ariaLabel="Shadow offset Y" value={s.offsetY} onChange={offsetY => updateAt(idx, { offsetY })} />
           </div>
           <ValueBar label="Blur" min={0} max={100} step={1} value={s.blur} onChange={blur => updateAt(idx, { blur })} softMax defaultValue={0} />
         </div>
@@ -4354,29 +4377,21 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
         )}
         {...cardState('transform')}
       >
-        <div className="grid grid-cols-2 gap-1.5">
-          <label className="flex flex-col gap-0.5">
-            <span className={labelCls}>X</span>
-            <NumberInput value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} className="w-full" />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className={labelCls}>Y</span>
-            <NumberInput value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} className="w-full" />
-          </label>
-        </div>
-        <div className="grid grid-cols-[1fr_auto_1fr] gap-1.5 items-end">
-          <label className="flex flex-col gap-0.5 min-w-0">
-            <span className={labelCls}>Width</span>
-            <NumberInput
-              value={layer.flipX && !isGroupLayer && !isTextLayer ? -round2(dispW ?? 0) : round2(dispW ?? 0)}
-              onChange={handleWidthChange}
-              snapToStep={pixelSnapEnabled}
-              className="w-full"
-            />
-          </label>
+        {/* Position down the left, size down the right, and the aspect lock
+            in a narrow third column spanning both size rows so it brackets
+            W and H instead of sitting between them. */}
+        <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5 items-stretch">
+          <LabeledField label="X" ariaLabel="X position" value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} />
+          <LabeledField
+            label="W"
+            ariaLabel="Width"
+            value={layer.flipX && !isGroupLayer && !isTextLayer ? -round2(dispW ?? 0) : round2(dispW ?? 0)}
+            onChange={handleWidthChange}
+            snapToStep={pixelSnapEnabled}
+          />
           {isTextLayer ? (
-            <Tooltip content="Text height follows the font; width sets the wrapping box." side="top" triggerClassName="flex">
-              <span className="h-[26px] w-3 flex items-center justify-center text-gray-400"><Unlink2 size={13} className="rotate-90" /></span>
+            <Tooltip content="Text height follows the font; width sets the wrapping box." side="top" triggerClassName="flex row-span-2">
+              <span className="h-full w-4 flex items-center justify-center text-gray-400"><Unlink2 size={13} className="rotate-90" /></span>
             </Tooltip>
           ) : (
             <Tooltip
@@ -4384,30 +4399,30 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
                 ? 'Aspect ratio locked: changing width or height keeps the other in proportion. Click to unlock.'
                 : 'Lock the aspect ratio so width and height change together.'}
               side="top"
-              triggerClassName="flex"
+              triggerClassName="flex row-span-2"
             >
               <button
                 type="button"
                 onClick={toggleAspectLock}
-                className={`h-[26px] w-3 flex items-center justify-center transition-colors ${
+                className={`h-full w-4 flex items-center justify-center rounded transition-colors hover:bg-white/5 ${
                   aspectLocked ? 'text-accent-300 hover:text-accent-200' : 'text-gray-400 hover:text-gray-200'
                 }`}
                 aria-label={aspectLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
               >
-                <span className="rotate-90">{aspectLocked ? <Link2 size={13} /> : <Unlink2 size={13} />}</span>
+                {/* Rotated so the chain runs top to bottom, W to H. */}
+                <span className="rotate-90 flex">{aspectLocked ? <Link2 size={13} /> : <Unlink2 size={13} />}</span>
               </button>
             </Tooltip>
           )}
-          <label className="flex flex-col gap-0.5 min-w-0">
-            <span className={labelCls}>Height</span>
-            <NumberInput
-              value={layer.flipY && !isGroupLayer && !isTextLayer ? -round2(dispH ?? 0) : round2(dispH ?? 0)}
-              onChange={handleHeightChange}
-              snapToStep={pixelSnapEnabled}
-              disabled={isTextLayer}
-              className="w-full"
-            />
-          </label>
+          <LabeledField label="Y" ariaLabel="Y position" value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} />
+          <LabeledField
+            label="H"
+            ariaLabel="Height"
+            value={layer.flipY && !isGroupLayer && !isTextLayer ? -round2(dispH ?? 0) : round2(dispH ?? 0)}
+            onChange={handleHeightChange}
+            snapToStep={pixelSnapEnabled}
+            disabled={isTextLayer}
+          />
         </div>
         {/* Bars (THU-33), one per row so the labels have room: rotation
             spans one turn (the field still wraps and never stops), opacity
