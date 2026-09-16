@@ -50,6 +50,7 @@ import { useOpenItems } from '../../context/OpenItemsContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
+import { useDropdownPlacement } from '../../hooks/useDropdownPlacement'
 import { theme, rgba } from '../../theme'
 import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
 import { Modal } from '../ui/Modal'
@@ -4788,6 +4789,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   // Assets-panel options dropdown (show-from-season / show-from-topic-game).
   const [assetOptionsOpen, setAssetOptionsOpen] = useState(false)
   const assetOptionsRef = useRef<HTMLDivElement>(null)
+  // The menu opens below its button, or above it when the Assets header
+  // has slid to the sidebar's foot (a collapsed list, a short window) and
+  // the menu would be cut off by the window's bottom edge.
+  const assetOptionsMenuRef = useRef<HTMLDivElement>(null)
+  const assetOptionsPlacement = useDropdownPlacement(assetOptionsOpen, assetOptionsRef, assetOptionsMenuRef)
   // Assets-panel collapse — just the header when collapsed (options button
   // and list hidden). Persisted UI pref, same pattern as the files grid.
   // Palette panel collapse (thumbnails #1) — same persistence pattern as
@@ -10009,7 +10015,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                     </button>
                     </Tooltip>
                     {assetOptionsOpen && (
-                      <div className="absolute top-full right-0 mt-1 z-30 w-56 bg-navy-900 border border-white/10 rounded-lg shadow-xl p-1">
+                      <div ref={assetOptionsMenuRef} className={`absolute right-0 z-30 w-56 bg-navy-900 border border-white/10 rounded-lg shadow-xl p-1 ${assetOptionsPlacement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                         {(() => {
                           // Topic/Game implies season — when it's on, the
                           // season row is forced-checked + disabled.
