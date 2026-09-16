@@ -10101,17 +10101,33 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                           {g.sublabel && <span className="text-xs text-gray-100 break-words">{g.sublabel}</span>}
                         </div>
                       ) : null
-                      const header = (
-                        <div className="px-3 pt-2 pb-1 flex flex-col gap-0.5">
+                      const headerText = (
+                        <div className="min-w-0 flex-1 flex flex-col gap-0.5">
                           <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{g.label}</span>
                           {g.sublabel && <span className="text-[10px] text-gray-400 truncate">{g.sublabel}</span>}
                         </div>
                       )
                       return (
                       <div key={g.key} className="border-b border-white/5 last:border-b-0">
-                        {headerTooltip
-                          ? <Tooltip content={headerTooltip} side="left" triggerClassName="block">{header}</Tooltip>
-                          : header}
+                        {/* Header: the group's label and title on the left, and
+                            an Open folder button on the right (THU-16) for
+                            reaching the files with an external app. The group
+                            key IS the stream folder path. */}
+                        <div className="px-3 pt-2 pb-1 flex items-center gap-1.5">
+                          {headerTooltip
+                            ? <Tooltip content={headerTooltip} side="left" triggerClassName="flex min-w-0 flex-1">{headerText}</Tooltip>
+                            : headerText}
+                          <Tooltip content={`Open this stream's folder in Explorer`} side="left">
+                            <button
+                              type="button"
+                              onClick={() => { window.api.openInExplorer(g.key) }}
+                              className="shrink-0 p-1 -my-1 -mr-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                              aria-label="Open this stream's folder"
+                            >
+                              <FolderOpen size={12} />
+                            </button>
+                          </Tooltip>
+                        </div>
                         <div className="px-2 pb-2 grid grid-cols-2 gap-1">
                           {g.images.map(p => {
                             const basename = p.split(/[\\/]/).pop() ?? p
