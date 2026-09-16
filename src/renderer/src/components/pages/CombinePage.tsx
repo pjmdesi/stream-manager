@@ -11,6 +11,7 @@ import { VideoThumb } from '../ui/VideoThumb'
 import { FileDropZone } from '../ui/FileDropZone'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { displayPath } from '../../lib/displayPath'
+import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { subscribeHydration } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
@@ -323,6 +324,10 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
 }) {
   const [groups, setGroups] = useState<CombineGroup[]>([])
   const groupIdRef = useRef(1)
+  // The page scrolls as one; a file row dragged near its top or bottom
+  // edge scrolls it (style guide, drag in scrollable containers).
+  const pageScrollRef = useRef<HTMLDivElement>(null)
+  useDragAutoScroll(pageScrollRef)
   // The single active run (the combine IPC is single-run: one progress
   // channel, one pause, one cancel) — other groups' Combine buttons wait
   // their turn. Progress lives in ITS OWN state: it ticks ~2×/second, and
@@ -850,7 +855,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto px-6 py-4 flex flex-col gap-4">
+      <div className="flex-1 overflow-hidden pr-2"><div ref={pageScrollRef} className="h-full overflow-y-auto px-6 py-4 flex flex-col gap-4">
         {groups.map(g => {
           const compat = computeCompat(g.files)
           const isRunning = runState?.groupId === g.id

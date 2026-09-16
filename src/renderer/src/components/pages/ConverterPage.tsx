@@ -8,6 +8,7 @@ import { FileDropZone } from '../ui/FileDropZone'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
+import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { PresetsModal } from '../preset-editor/PresetsModal'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { VideoThumb } from '../ui/VideoThumb'
@@ -301,6 +302,10 @@ interface PendingConverter { paths: string[]; token: number; stream?: { folderPa
 
 export function ConverterPage({ pending, onNavigateToStream }: { pending?: PendingConverter | null; onNavigateToStream?: (folderPath: string) => void }) {
   const { config, updateConfig } = useStore()
+  // The page scrolls as one; a ready-list row dragged near its top or
+  // bottom edge scrolls it (style guide, drag in scrollable containers).
+  const pageScrollRef = useRef<HTMLDivElement>(null)
+  useDragAutoScroll(pageScrollRef)
   const [builtinPresets, setBuiltinPresets] = useState<ConversionPreset[]>([])
   const [importedPresets, setImportedPresets] = useState<ConversionPreset[]>([])
   const [recommendedArchiveId, setRecommendedArchiveId] = useState<string | null>(null)
@@ -1005,7 +1010,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         </Button>
       </div>
 
-        <div className="flex-1 overflow-hidden pr-2"><div className="h-full overflow-y-auto p-4 flex flex-col gap-4">
+        <div className="flex-1 overflow-hidden pr-2"><div ref={pageScrollRef} className="h-full overflow-y-auto p-4 flex flex-col gap-4">
           <div className="bg-navy-800 border border-white/5 rounded-lg overflow-hidden shrink-0">
               <div className="flex items-center flex-wrap gap-x-3 gap-y-2 px-4 py-2 border-b border-white/5">
                 <span className="text-xs font-medium text-gray-400">{queuedFiles.length} file(s) ready</span>

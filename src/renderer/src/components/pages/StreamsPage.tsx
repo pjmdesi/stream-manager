@@ -22,6 +22,7 @@ import { useCloudOps } from '../../context/CloudOpsContext'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useOpenItems, blockReasonText, type OpenSource } from '../../context/OpenItemsContext'
 import { useInUse } from '../../hooks/useInUse'
+import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { useRelayPrompt } from '../../context/RelayPromptContext'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { PresetPickerModal, VideoCountTooltip, BulkTagModal, SaveAsTemplateButton, Lightbox, DisplayTagChip, ClampedComment } from '../streams/legacyStreamsShared'
@@ -6559,6 +6560,11 @@ function SidebarDetail({
   // recording entirely by going through `onUpdateMetaRef` (wired to the raw
   // prop below). Keyboard-only: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo.
   const sidebarRootRef = useRef<HTMLDivElement>(null)
+  // The sidebar body scrolls; its tag chips reorder by native drag, so a
+  // chip dragged near the top or bottom edge scrolls it (style guide, drag
+  // in scrollable containers).
+  const sidebarScrollRef = useRef<HTMLDivElement>(null)
+  useDragAutoScroll(sidebarScrollRef)
   const metaRef = useRef(meta)
   useEffect(() => { metaRef.current = meta })
   // Current stream's canonical key (relativePath — unique in both modes;
@@ -7860,7 +7866,7 @@ function SidebarDetail({
           internally so rows within a section keep their original
           breathing room. No labels per the user's preference — the
           extra vertical space alone signals the boundary. */}
-      <div className="flex-1 overflow-y-auto px-5 flex text-xs [scrollbar-gutter:stable]">
+      <div ref={sidebarScrollRef} className="flex-1 overflow-y-auto px-5 flex text-xs [scrollbar-gutter:stable]">
         <div className="flex flex-col gap-8 w-full max-w-[80rem] mx-auto pt-4">
             {/* — Files — every file in the folder (videos + thumbnail images).
                 Leads the sidebar so past streams open straight onto their
