@@ -52,6 +52,7 @@ import { usePageActivity } from '../../context/PageActivityContext'
 import { useStore } from '../../hooks/useStore'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { useDropdownPlacement } from '../../hooks/useDropdownPlacement'
+import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { theme, rgba } from '../../theme'
 import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
 import { Modal } from '../ui/Modal'
@@ -6872,6 +6873,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   const editorBodyRef = useRef<HTMLDivElement>(null)
   const rightPanelRef = useRef<HTMLDivElement>(null)
   const layersListRef = useRef<HTMLDivElement>(null)
+  // Dragging a row near the list's top or bottom scrolls it, so a long
+  // stack can be reordered end to end.
+  useDragAutoScroll(layersListRef)
   const layerTabRef = useRef<HTMLDivElement>(null)
   // `top`/`right` place the tab body; the spine is the 4 px bar along the
   // panel edge spanning the selected rows; the two radii are the tab's
