@@ -3270,7 +3270,13 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill', headerle
               CSS renders `in oklch` natively, so both blend modes preview
               accurately; direction is on the canvas. */}
           <div className="flex">
-            <Tooltip content="Click to add a color stop at that spot. Drag the arrows beside the bar to move stops." side="top" triggerClassName="w-3 -ms-3 shrink-0 self-stretch flex">
+            {/* The bar and the arrow track both sit in the margin, so the
+                stop rows start where the card's other fields do. There are
+                17 px from the content to the sidebar's edge (card padding
+                8, card border 1, panel padding 8): the bar takes 8 at the
+                edge and the 9 px track fills the rest, its triangles
+                touching the bar. Update the 17 if any of those change. */}
+            <Tooltip content="Click to add a color stop at that spot. Drag the arrows beside the bar to move stops." side="top" triggerClassName="w-2 -ms-[17px] shrink-0 self-stretch flex">
               <div
                 className="w-full border border-white/25 border-s-0 cursor-copy"
                 // Layered backgrounds: gradient on top (no-repeat — subpixel
