@@ -3562,27 +3562,65 @@ function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0
    *  spinner 0.01). Defaults to the slider step. */
   spinnerStep?: number
 }) {
+  // Blender-style slider (THU-33): one 24 px row that is the control. The
+  // bar's fill is the value (from the left, like Blender, even on ranges
+  // that straddle zero), the label sits inside the bar, and the number
+  // field joins it in the same frame as the value readout. Drag anywhere on
+  // the bar, arrow keys step it, double-click resets.
+  const barRef = useRef<HTMLDivElement>(null)
+  const decimals = (String(step).split('.')[1] ?? '').length
+  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100))
+  const setFromPointer = (clientX: number) => {
+    const r = barRef.current?.getBoundingClientRect()
+    if (!r || r.width <= 0) return
+    const t = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+    const snapped = Math.round((min + t * (max - min)) / step) * step
+    const next = Number(Math.min(max, Math.max(min, snapped)).toFixed(decimals))
+    if (next !== value) onChange(next)
+  }
   return (
-    <label className="flex flex-col gap-0.5">
-      {/* The number field beside the slider is the value readout; a second
-          copy above it repeated the field (THU-33 text audit). */}
-      <span className="text-[10px] text-gray-400">{label}</span>
-      <div className="flex items-center gap-1.5">
-        <Tooltip content="Double-click to reset" triggerClassName="flex-1 min-w-0 flex">
-        <input
-          type="range" min={min} max={max} step={step} value={value}
-          onChange={e => onChange(Number(e.target.value))}
+    <div className="flex items-stretch h-6 bg-navy-900 border border-white/10 rounded-lg overflow-hidden focus-within:border-accent-500/50 transition-colors">
+      <Tooltip content={`${label}: drag to set, double-click to reset`} triggerClassName="flex-1 min-w-0 flex">
+        <div
+          ref={barRef}
+          role="slider"
+          tabIndex={0}
+          aria-label={label}
+          aria-valuemin={min}
+          aria-valuemax={max}
+          aria-valuenow={value}
+          className="relative flex-1 min-w-0 cursor-ew-resize select-none outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500/50"
+          onPointerDown={e => {
+            if (e.button !== 0) return
+            e.currentTarget.setPointerCapture(e.pointerId)
+            setFromPointer(e.clientX)
+          }}
+          onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) setFromPointer(e.clientX) }}
+          onPointerUp={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) }}
           onDoubleClick={() => onChange(defaultValue)}
-          className="flex-1 accent-accent-600"
-        />
-        </Tooltip>
+          onKeyDown={e => {
+            const dir = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0
+            if (!dir) return
+            e.preventDefault()
+            const amount = step * (e.shiftKey ? 10 : 1)
+            onChange(Number(Math.min(max, Math.max(min, value + dir * amount)).toFixed(decimals)))
+          }}
+        >
+          <div className="absolute inset-y-0 left-0 bg-accent-600/25 pointer-events-none" style={{ width: `${pct}%` }} />
+          <span className="relative block px-2 text-[10px] leading-[22px] text-gray-300 truncate">{label}</span>
+        </div>
+      </Tooltip>
+      <div className="flex w-14 shrink-0 border-l border-white/10">
         <NumberInput
           min={min} max={max} step={spinnerStep ?? step} value={value}
           onChange={onChange}
-          className="w-14 shrink-0"
+          className="w-full h-6"
+          frameless
+          merged
+          aria-label={`${label} value`}
         />
       </div>
-    </label>
+    </div>
   )
 }
 
@@ -3960,7 +3998,7 @@ function FiltersCard({ layer, update, state }: {
       {...state}
     >
       {on ? (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           <FilterSlider label="Brightness" min={-1} max={1} step={0.05} spinnerStep={0.01} value={layer.filterBrightness ?? 0}
             onChange={v => update({ filterBrightness: v })} />
           <FilterSlider label="Contrast" min={-100} max={100} step={1} value={layer.filterContrast ?? 0}
