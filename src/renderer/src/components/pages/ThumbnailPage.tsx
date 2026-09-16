@@ -3741,6 +3741,13 @@ const getMeasuredVersion = () => measuredVersion
 const CARD_PREFS_KEY = 'thumbPropsCards'
 type CardPrefs = Record<string, 'open' | 'closed'>
 
+// Review toggle (THU-33): filled cards are a raised slab with the fields as
+// dark insets; unfilled cards keep the border and let the panel background
+// run through, so the fields are the only filled shapes. Flip to compare in
+// the dev app; delete this switch once the look is decided.
+const CARD_FILLED = true
+const CARD_BG = CARD_FILLED ? 'bg-navy-900/40' : 'bg-transparent'
+
 function PanelCard({ id, title, control, summary, mutedReason, headerTooltip, open, onToggle, children }: {
   id: string
   title: string
@@ -3760,7 +3767,7 @@ function PanelCard({ id, title, control, summary, mutedReason, headerTooltip, op
     <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">{title}</span>
   )
   return (
-    <section data-card={id} className={`rounded-lg border border-white/10 bg-navy-900/40 ${mutedReason ? 'opacity-60' : ''}`}>
+    <section data-card={id} className={`rounded-lg border border-white/10 ${CARD_BG} ${mutedReason ? 'opacity-60' : ''}`}>
       <div className="flex items-center gap-1 pl-1.5 pr-2 h-7">
         <button
           type="button"
@@ -3906,14 +3913,18 @@ function ShadowsCard({ layer, update, muted, state }: {
         <p className="text-[10px] text-gray-400">None</p>
       )}
       {shadows.map((s, idx) => (
-        <div key={idx} className="rounded-lg border border-white/5 p-2 flex flex-col gap-1.5 bg-navy-900/40">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider text-gray-400">Shadow {idx + 1}</span>
+        // Entries are separated, not boxed: a labeled hairline row carries
+        // the number and the delete, and the fields sit flush with the rest
+        // of the card. A box here made a card inside a card inside the panel.
+        <div key={idx} className={`flex flex-col gap-1.5 ${idx > 0 ? 'pt-1' : ''}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">Shadow {idx + 1}</span>
+            <div className="flex-1 border-t border-white/10" />
             <Tooltip content="Remove this shadow">
             <button
               type="button"
               onClick={() => removeAt(idx)}
-              className="p-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+              className="p-1 -my-1 -mr-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-colors"
             >
               <Trash2 size={11} />
             </button>
