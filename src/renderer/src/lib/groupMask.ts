@@ -1,5 +1,6 @@
 import type { ThumbnailLayer } from '../types'
 import { polygonPoints, polygonSidesOf, tracePolygonPath } from './polygon'
+import { arrowOutline, traceArrowPath } from './arrow'
 
 /**
  * Group mask geometry (THU-21). A mask is a shape layer whose OUTLINE clips
@@ -58,6 +59,8 @@ export function traceShapeOutlineLocal(ctx: PathContext, layer: ThumbnailLayer):
     ctx.beginPath()
     ctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2)
     ctx.closePath()
+  } else if (type === 'arrow') {
+    traceArrowPath(ctx, arrowOutline(layer, w, h), layer.cornerRadius ?? 0)
   } else {
     tracePolygonPath(ctx, polygonPoints(polygonSidesOf(layer), w, h), layer.cornerRadius ?? 0)
     ctx.closePath()

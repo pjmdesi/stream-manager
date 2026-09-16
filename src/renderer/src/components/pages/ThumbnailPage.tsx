@@ -18,7 +18,7 @@ import {
   ChevronDown, ChevronRight, Loader2, Radio, Palette, Upload,
   Layers as LayersIcon,
   Group as GroupIcon, Ungroup as UngroupIcon, Folder, Blend, ArrowDown,
-  Move, Shapes, PaintBucket, PenLine, SquareStack, SquareDashed, SlidersHorizontal,
+  Move, Shapes, PaintBucket, PenLine, SquareStack, SquareDashed, SlidersHorizontal, ArrowBigRight,
   type LucideIcon,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
@@ -32,6 +32,7 @@ import { buildKonvaColorStops, gradientLinePoints, cssGradientPreview, cssGradie
 import type { GradientStop, GradientColorSpace, GradientStyle, GradientKind, GradientGeometry } from '../../lib/gradient'
 import { makeCanvasGradient } from '../../lib/canvasGradient'
 import { normalizeLayers, polygonPoints, polygonMaxCornerRadius, polygonSidesOf, polygonSidesPatch, regularPolygonBox, tracePolygonPath, POLYGON_MIN_SIDES, POLYGON_MAX_SIDES, POLYGON_DEFAULT_SIDES } from '../../lib/polygon'
+import { arrowOutline, arrowMaxCornerRadius, arrowParamsOf, arrowParamsPatch, arrowBox, traceArrowPath, ARROW_DEFAULTS, ARROW_DEFAULT_WIDTH, ARROW_HEAD_LENGTH_MIN, ARROW_HEAD_LENGTH_MAX, ARROW_STEM_MIN, ARROW_STEM_MAX, ARROW_BEND_MAX, type ArrowHead } from '../../lib/arrow'
 import {
   childrenOf, paintableLayers, selectionRoots, copySelection, insertPastedAbove, canGroup, groupLayers, ungroupLayer,
   deleteLayers, duplicateLayer as duplicateLayerTree, clonePasteLayers, moveLayerTo, moveAmongSiblings, scaleGroupMembers,
@@ -1240,8 +1241,8 @@ function ShapeNode(props: KonvaLayerNodeProps) {
   // Legacy 'triangle' layers are migrated on load; treating one as a
   // polygon here is only a fallback for a layer that slipped past that.
   const shapeType = layer.shapeType === 'triangle' ? 'polygon' : (layer.shapeType ?? 'rect')
-  // Ellipse and polygon are centered on x/y in Konva; we store top-left
-  const isCentered = shapeType === 'ellipse' || shapeType === 'polygon'
+  // Ellipse, polygon, and arrow are centered on x/y in Konva; we store top-left
+  const isCentered = shapeType === 'ellipse' || shapeType === 'polygon' || shapeType === 'arrow'
 
   // Flip in place. Centered shapes (ellipse, polygon) already have
   // their origin at the center, so scale alone mirrors around the
@@ -1303,6 +1304,27 @@ function ShapeNode(props: KonvaLayerNodeProps) {
     }
     if (shapeType === 'ellipse') {
       return <KonvaEllipse key={key} {...props} radiusX={w / 2} radiusY={h / 2} />
+    }
+    if (shapeType === 'arrow') {
+      // Arrow (THU-20): one closed outline that fills the box, traced the
+      // way the polygon is, with the corner radius in pixels rounding its
+      // true vertices (lib/arrow.ts).
+      const outline = arrowOutline(layer, w, h)
+      const radius = layer.cornerRadius ?? 0
+      return (
+        <KonvaShape
+          key={key}
+          {...props}
+          width={w}
+          height={h}
+          offsetX={w / 2}
+          offsetY={h / 2}
+          sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
+            traceArrowPath(ctx, outline, radius)
+            ctx.fillStrokeShape(shape)
+          }}
+        />
+      )
     }
     // Polygon (THU-2): a flat-bottomed regular polygon stretched to fill
     // the layer box, drawn by a custom sceneFunc so corners can round
@@ -4415,9 +4437,10 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
     : layer.type === 'group' ? <Folder size={11} />
     : layer.shapeType === 'ellipse' ? <Circle size={11} />
     : layer.shapeType === 'polygon' ? <Pentagon size={11} />
+    : layer.shapeType === 'arrow' ? <ArrowBigRight size={11} />
     : <Square size={11} />
   const typeLabel = isMaskLayer ? 'Mask'
-    : layer.type === 'shape' ? (layer.shapeType === 'ellipse' ? 'Ellipse' : layer.shapeType === 'polygon' ? 'Polygon' : 'Rectangle')
+    : layer.type === 'shape' ? (layer.shapeType === 'ellipse' ? 'Ellipse' : layer.shapeType === 'polygon' ? 'Polygon' : layer.shapeType === 'arrow' ? 'Arrow' : 'Rectangle')
     : layer.type.charAt(0).toUpperCase() + layer.type.slice(1)
 
   const labelCls = 'text-[10px] text-gray-400'
@@ -4425,7 +4448,9 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
   const paintable = layer.type === 'shape' || layer.type === 'text'
   const fillFallback = layer.type === 'text' ? '#ffffff' : '#6366f1'
   const hasSides = layer.type === 'shape' && layer.shapeType === 'polygon'
-  const hasRadius = layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'polygon')
+  const isArrow = layer.type === 'shape' && layer.shapeType === 'arrow'
+  const hasRadius = layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'polygon' || isArrow)
+  const arrow = isArrow ? arrowParamsOf(layer) : null
   const shadowsCount = resolveShadows(layer).length
 
   return (
@@ -4521,13 +4546,49 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
         <PanelCard
           id="shape"
           title="Shape"
-          summary={[hasSides ? `${polygonSidesOf(layer)} sides` : '', hasRadius ? `radius ${layer.cornerRadius ?? 0}` : ''].filter(Boolean).join(' · ')}
+          summary={[
+            hasSides ? `${polygonSidesOf(layer)} sides` : '',
+            arrow ? `${arrow.head === 'none' ? 'No head' : arrow.head === 'notched' ? 'Notched head' : 'Triangle head'}${arrow.bend ? `, bend ${arrow.bend}` : ''}` : '',
+            hasRadius ? `radius ${layer.cornerRadius ?? 0}` : '',
+          ].filter(Boolean).join(' · ')}
           {...cardState('shape')}
         >
           {/* One bar per row: the bar's value field is a fixed five
               characters wide, so two bars side by side leave no room for
               their labels. */}
           <div className="flex flex-col gap-1.5">
+            {arrow && (() => {
+              // Every change goes through arrowParamsPatch so the box height
+              // refits to the new natural ratio and the arrow keeps its
+              // stretch (lib/arrow.ts), the way the polygon's side count does.
+              const set = (patch: Parameters<typeof arrowParamsPatch>[1]) => update(arrowParamsPatch(layer, patch))
+              const heads: Array<[ArrowHead, string, string]> = [
+                ['triangle', 'Triangle', 'Triangle head'],
+                ['notched', 'Notched', 'Notched head: the barbs sweep back behind the stem'],
+                ['none', 'None', 'No head: a bar, or a taper on its own'],
+              ]
+              return (
+                <>
+                  <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
+                    {heads.map(([value, label, tip]) => (
+                      <Tooltip key={value} content={tip} triggerClassName="flex flex-1">
+                        <button
+                          type="button"
+                          onClick={() => set({ head: value })}
+                          className={`flex-1 h-6 text-[10px] transition-colors ${arrow.head === value ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                        >
+                          {label}
+                        </button>
+                      </Tooltip>
+                    ))}
+                  </div>
+                  <ValueBar label="Head length %" min={ARROW_HEAD_LENGTH_MIN} max={ARROW_HEAD_LENGTH_MAX} step={1} value={arrow.headLength} onChange={headLength => set({ headLength })} defaultValue={ARROW_DEFAULTS.headLength} disabled={arrow.head === 'none'} />
+                  <ValueBar label="Stem %" min={ARROW_STEM_MIN} max={ARROW_STEM_MAX} step={1} value={arrow.stem} onChange={stem => set({ stem })} defaultValue={ARROW_DEFAULTS.stem} />
+                  <ValueBar label="Tail taper %" min={0} max={100} step={1} value={arrow.taper} onChange={taper => set({ taper })} defaultValue={ARROW_DEFAULTS.taper} />
+                  <ValueBar label="Bend" min={-ARROW_BEND_MAX} max={ARROW_BEND_MAX} step={1} value={arrow.bend} onChange={bend => set({ bend })} defaultValue={0} />
+                </>
+              )
+            })()}
             {hasSides && (
               // Keeps the shape as regular as it was: the box height follows
               // the new side count's natural ratio, carrying over whatever
@@ -4552,6 +4613,8 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
               const sh = layer.height ?? 200
               const maxR = layer.shapeType === 'polygon'
                 ? polygonMaxCornerRadius(polygonPoints(polygonSidesOf(layer), sw, sh))
+                : layer.shapeType === 'arrow'
+                ? arrowMaxCornerRadius(arrowOutline(layer, sw, sh))
                 : Math.min(sw, sh) / 2
               const entered = layer.cornerRadius ?? 0
               return (
@@ -4568,6 +4631,9 @@ function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFo
                 />
               )
             })()}
+            {arrow && arrow.head !== 'none' && (
+              <FilterToggle label="Sharp tip" checked={arrow.sharpTip} onChange={sharpTip => update(arrowParamsPatch(layer, { sharpTip }))} />
+            )}
           </div>
         </PanelCard>
       )}
@@ -7297,11 +7363,14 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     setSelectedIds([layer.id])
   }, [layers, commitLayers, systemFonts, takeName])
 
-  const addShapeLayer = useCallback((shapeType: 'rect' | 'ellipse' | 'polygon') => {
-    const names = { rect: 'Rectangle', ellipse: 'Ellipse', polygon: 'Polygon' }
+  const addShapeLayer = useCallback((shapeType: 'rect' | 'ellipse' | 'polygon' | 'arrow') => {
+    const names = { rect: 'Rectangle', ellipse: 'Ellipse', polygon: 'Polygon', arrow: 'Arrow' }
     // A new polygon arrives regular (all edges equal): its box takes the
-    // natural ratio for its side count instead of a square.
-    const box = shapeType === 'polygon' ? regularPolygonBox(POLYGON_DEFAULT_SIDES, 200) : { width: 200, height: 200 }
+    // natural ratio for its side count instead of a square. A new arrow
+    // takes its natural proportions too (300 by 120, straight).
+    const box = shapeType === 'polygon' ? regularPolygonBox(POLYGON_DEFAULT_SIDES, 200)
+      : shapeType === 'arrow' ? arrowBox(ARROW_DEFAULTS, ARROW_DEFAULT_WIDTH)
+      : { width: 200, height: 200 }
     const layer: ThumbnailLayer = {
       id: newId(), name: takeName(names[shapeType]), type: 'shape', shapeType, visible: true, opacity: 100,
       x: Math.round(CANVAS_W / 2 - box.width / 2), y: Math.round(CANVAS_H / 2 - box.height / 2),
@@ -8475,6 +8544,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                   <Pentagon size={16} />
                 </button>
               </Tooltip>
+              <Tooltip content="Add arrow" side="right">
+                <button onClick={() => addShapeLayer('arrow')} className="p-2 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
+                  <ArrowBigRight size={16} />
+                </button>
+              </Tooltip>
             </div>
 
             {/* Canvas center */}
@@ -9120,7 +9194,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             onMouseLeave={() => setHighlighted(NO_HIGHLIGHT)}
                             onClick={() => { useAsGroupMask(s.id); expandGroup(); close() }}
                           >
-                            {s.shapeType === 'ellipse' ? <Circle size={12} className="shrink-0 text-gray-400" /> : s.shapeType === 'polygon' ? <Pentagon size={12} className="shrink-0 text-gray-400" /> : <Square size={12} className="shrink-0 text-gray-400" />}
+                            {s.shapeType === 'ellipse' ? <Circle size={12} className="shrink-0 text-gray-400" /> : s.shapeType === 'polygon' ? <Pentagon size={12} className="shrink-0 text-gray-400" /> : s.shapeType === 'arrow' ? <ArrowBigRight size={12} className="shrink-0 text-gray-400" /> : <Square size={12} className="shrink-0 text-gray-400" />}
                             <span className="truncate">{s.name}</span>
                           </button>
                         ))}

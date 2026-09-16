@@ -856,10 +856,22 @@ export interface ThumbnailLayer {
   /** 'triangle' is legacy: files written before THU-2 carry it, and the
    *  editor migrates it to a three-sided 'polygon' on load
    *  (lib/polygon.ts). Never written by the current app. */
-  shapeType?: 'rect' | 'ellipse' | 'polygon' | 'triangle'
+  shapeType?: 'rect' | 'ellipse' | 'polygon' | 'triangle' | 'arrow'
   /** Polygon side count, 3 to 12; new polygons start at 3. */
   sides?: number
   cornerRadius?: number
+  /** Arrow shape (THU-20, lib/arrow.ts). The arrow fills its box and points
+   *  left to right; rotation gives direction. Proportions are relative to
+   *  the box: head length as a percent of the length, stem thickness as a
+   *  percent of the head span, tail taper 0..100 (100 = uniform), bend
+   *  -100..100 (0 = straight). Absent fields take the defaults. */
+  arrowHead?: 'triangle' | 'notched' | 'none'
+  arrowHeadLength?: number
+  arrowStem?: number
+  arrowTaper?: number
+  arrowBend?: number
+  /** Keep the tip sharp while the corner radius rounds the other vertices. */
+  arrowSharpTip?: boolean
   /** Group mask (THU-21): this shape is its group's mask. The group's
    *  members are clipped to the shape's outline; the shape's own fill,
    *  stroke, opacity, shadows, and outline do not render. One per group,
