@@ -3694,21 +3694,61 @@ function ValueBar({
 /** The bar frame for a value with no natural range (position, size,
  *  shadow offset): the same 24 px frame, corners, and focus border as a
  *  ValueBar, with a one-letter label cell where the bar would be, so a row
- *  of these and a bar below read as one family. Two fit side by side. */
-function LabeledField({ label, ariaLabel, value, onChange, snapToStep = false, disabled = false }: {
+ *  of these and a bar below read as one family. Two fit side by side.
+ *
+ *  The letter cell scrubs: drag it and the value moves one step per pixel
+ *  of travel, right or up raising it, left or down lowering it, with no
+ *  ends, the way the bars drag. Shift makes it ten per pixel, matching the
+ *  spinners. A click that does not move focuses the number field. */
+function LabeledField({ label, ariaLabel, value, onChange, step = 1, snapToStep = false, disabled = false }: {
   label: string
   ariaLabel: string
   value: number
   onChange: (v: number) => void
+  step?: number
   snapToStep?: boolean
   disabled?: boolean
 }) {
+  const frameRef = useRef<HTMLDivElement>(null)
+  const scrubRef = useRef<{ startX: number; startY: number; startValue: number; moved: boolean } | null>(null)
+  const decimals = Math.max((String(step).split('.')[1] ?? '').length, 2)
+  const scrubTo = (clientX: number, clientY: number, shift: boolean) => {
+    const s = scrubRef.current
+    if (!s) return
+    const travel = (clientX - s.startX) - (clientY - s.startY)
+    if (travel !== 0) s.moved = true
+    // Whole steps from the start value. With pixel snap on the start is
+    // rounded to the step first, like the spinners; off, a fractional
+    // start keeps its fraction.
+    const base = snapToStep ? Math.round(s.startValue / step) * step : s.startValue
+    const next = Number((base + travel * step * (shift ? 10 : 1)).toFixed(decimals))
+    if (next !== value) onChange(next)
+  }
   return (
-    <div className={`flex items-stretch h-6 min-w-0 bg-navy-900 border border-white/10 rounded-lg overflow-hidden focus-within:border-accent-500/50 transition-colors ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
-      <span className="w-6 shrink-0 flex items-center justify-center text-[10px] text-gray-300 border-r border-white/10 select-none" aria-hidden>{label}</span>
+    <div ref={frameRef} className={`flex items-stretch h-6 min-w-0 bg-navy-900 border border-white/10 rounded-lg overflow-hidden focus-within:border-accent-500/50 transition-colors ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      <span
+        className="w-6 shrink-0 flex items-center justify-center text-[10px] text-gray-300 border-r border-white/10 select-none cursor-ew-resize hover:bg-white/5 transition-colors"
+        aria-hidden
+        onPointerDown={e => {
+          if (e.button !== 0) return
+          e.preventDefault()
+          e.currentTarget.setPointerCapture(e.pointerId)
+          scrubRef.current = { startX: e.clientX, startY: e.clientY, startValue: value, moved: false }
+        }}
+        onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) scrubTo(e.clientX, e.clientY, e.shiftKey) }}
+        onPointerUp={e => {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+          const moved = scrubRef.current?.moved ?? false
+          scrubRef.current = null
+          if (!moved) frameRef.current?.querySelector('input')?.focus()
+        }}
+      >
+        {label}
+      </span>
       <NumberInput
         value={value}
         onChange={onChange}
+        step={step}
         snapToStep={snapToStep}
         disabled={disabled}
         className="w-full h-6 min-w-0"
