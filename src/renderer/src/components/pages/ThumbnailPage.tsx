@@ -1,5 +1,5 @@
 import React, {
-  useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useContext, createContext,
+  useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useContext, createContext, useSyncExternalStore,
 } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { Stage, Layer, Group as KonvaGroup, Image as KonvaImage, Text as KonvaText, Transformer, Rect as KonvaRect, Ellipse as KonvaEllipse, Shape as KonvaShape } from 'react-konva'
@@ -1156,6 +1156,8 @@ function TextNode(props: KonvaLayerNodeProps) {
     const w = n.width()
     const h = n.height()
     if (w !== measured.w || h !== measured.h) setMeasured({ w, h })
+    // The Transform card shows a text layer's font-driven height (THU-33).
+    publishMeasuredBox(layer.id, w, h)
   })
 
   // Gradient fill (thumbnails #2, text). Konva's Text draws from its own
@@ -1364,6 +1366,15 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
   // and hit graph alike) to the path this traces in the group's own space.
   // A hidden mask switches the clip off, which doubles as the mask toggle.
   const clip = maskLayer && maskLayer.visible ? maskLayer : undefined
+
+  // The Transform card shows a group's measured box (THU-33): the members'
+  // extent in the group's own frame, read after every render.
+  useLayoutEffect(() => {
+    const inner = innerRef.current
+    if (!inner) return
+    const r = inner.getClientRect({ relativeTo: inner as unknown as Konva.Container, skipShadow: true, skipStroke: true })
+    publishMeasuredBox(layer.id, r.width, r.height)
+  })
 
   // Effects (THU-31). Konva's cache() renders a node in its own local
   // coordinates, clip included, into an offscreen canvas. Shadows and
@@ -2696,7 +2707,7 @@ function ColorAlphaField({ value, fallback, onChange, showHex = false, stopPos, 
         <button
           type="button"
           onClick={() => { if (paletteOpen) setPaletteOpen(false); else openPopover() }}
-          className={`p-1 rounded shrink-0 transition-colors ${paletteOpen ? 'text-gray-200 bg-white/10' : 'text-gray-500 hover:text-gray-200 hover:bg-white/10'}`}
+          className={`p-1 rounded shrink-0 transition-colors ${paletteOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'}`}
         >
           <Palette size={12} />
         </button>
@@ -2750,21 +2761,17 @@ const PAINT_FIELDS = {
   stroke: { label: 'Stroke', color: 'stroke', type: 'strokeType', stops: 'strokeGradientStops', angle: 'strokeGradientAngle', space: 'strokeGradientColorSpace', style: 'strokeGradientStyle', kind: 'strokeGradientType', centerX: 'strokeGradientCenterX', centerY: 'strokeGradientCenterY', radius: 'strokeGradientRadius', tie: 'stroke' },
 } as const
 
-/** Solid-or-gradient paint control for one layer property: the fill (the
- *  original use) or, since THU-8, the stroke. Everything below reads and
- *  writes through `F` so the two never diverge. */
-function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
-  layer: ThumbnailLayer
-  update: (patch: Partial<ThumbnailLayer>) => void
-  fallback: string
-  paint?: PaintTarget
-}) {
+/** Everything a paint's controls need, read through its field descriptor:
+ *  mode, flat color, effective stops (a default pair when none are stored),
+ *  blend space, style, geometry, and a patch builder that maps neutral
+ *  names onto this paint's fields. Shared by the paint control, the
+ *  header mode switch, and the collapsed-card summary (THU-33). */
+function paintState(layer: ThumbnailLayer, paint: PaintTarget, fallback: string) {
   const F = PAINT_FIELDS[paint]
   const paintType = layer[F.type] as 'solid' | 'linear' | undefined
   const paintColor = layer[F.color] as string | undefined
   const storedStops = layer[F.stops] as GradientStop[] | undefined
-  /** A partial patch in paint-neutral terms, mapped onto this paint's fields. */
-  const paintPatch = (p: { type?: 'solid' | 'linear'; color?: string; stops?: GradientStop[]; angle?: number; space?: GradientColorSpace; style?: GradientStyle; kind?: GradientKind; centerX?: number; centerY?: number; radius?: number }): Partial<ThumbnailLayer> => {
+  const patch = (p: { type?: 'solid' | 'linear'; color?: string; stops?: GradientStop[]; angle?: number; space?: GradientColorSpace; style?: GradientStyle; kind?: GradientKind; centerX?: number; centerY?: number; radius?: number }): Partial<ThumbnailLayer> => {
     const out: Record<string, unknown> = {}
     if (p.type !== undefined) out[F.type] = p.type
     if (p.color !== undefined) out[F.color] = p.color
@@ -2787,16 +2794,32 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
     centerY: (layer[F.centerY] as number | undefined) ?? DEFAULT_GRADIENT_GEOMETRY.centerY,
     radius: (layer[F.radius] as number | undefined) ?? DEFAULT_GRADIENT_GEOMETRY.radius,
   }
-  const fillSplit = splitColorAlpha(paintColor, fallback)
-  const defaultStops = [
+  const split = splitColorAlpha(paintColor, fallback)
+  const defaultStops: GradientStop[] = [
     { color: paintColor ?? fallback, pos: 0 },
     // Figma convention: fill → same color fully transparent.
-    { color: joinColorAlpha(fillSplit.rgb, 0), pos: 1 },
+    { color: joinColorAlpha(split.rgb, 0), pos: 1 },
   ]
   const stops = (storedStops?.length ?? 0) >= 2 ? storedStops! : defaultStops
   const space = (layer[F.space] as GradientColorSpace | undefined) ?? 'oklch'
-  const angle = (layer[F.angle] as number | undefined) ?? 0
+  const angle = geom.angle
   const gStyle = (layer[F.style] as GradientStyle | undefined) ?? 'smooth'
+  return { F, isGradient, paintColor, stops, space, angle, gStyle, geom, patch }
+}
+
+/** Solid-or-gradient paint control for one layer property: the fill (the
+ *  original use) or, since THU-8, the stroke. Everything below reads and
+ *  writes through `F` so the two never diverge. `headerless` (THU-33) drops
+ *  the label row and the mode switch: the card that hosts the control owns
+ *  those, and the swatch popover button moves beside the kind switch. */
+function GradientFillControl({ layer, update, fallback, paint = 'fill', headerless = false }: {
+  layer: ThumbnailLayer
+  update: (patch: Partial<ThumbnailLayer>) => void
+  fallback: string
+  paint?: PaintTarget
+  headerless?: boolean
+}) {
+  const { F, isGradient, paintColor, stops, space, angle, gStyle, geom, patch: paintPatch } = paintState(layer, paint, fallback)
 
   const anim = useAnimationConfig()
   // Rows display in STOP ORDER (top of the bar first) while the ARRAY
@@ -3058,20 +3081,21 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
         applySolidSwatch(color)
       }}
     >
+      {/* Whole-paint apply path (the gradient swatch popover) lives on the
+          header row with the mode switch, or beside the kind switch when
+          the card owns the header. Gradient mode only: in solid mode the
+          color field's own popover carries gradients. */}
+      {!headerless && (
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-gray-400">{F.label}</span>
         <div className="flex items-center gap-1">
-          {/* Whole-fill apply path lives on the header row with the
-              type toggle — the angle/blend row below is stop-transition
-              parameters, not whole-fill actions. Gradient mode only: in
-              solid mode the fill field's own popover carries gradients. */}
           {isGradient && (
             <Tooltip content="Apply a gradient swatch">
               <button
                 ref={gradPopBtnRef}
                 type="button"
                 onClick={() => { if (gradPopOpen) setGradPopOpen(false); else openGradPopover() }}
-                className={`p-1 rounded shrink-0 transition-colors ${gradPopOpen ? 'text-gray-200 bg-white/10' : 'text-gray-500 hover:text-gray-200 hover:bg-white/10'}`}
+                className={`p-1 rounded shrink-0 transition-colors ${gradPopOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'}`}
               >
                 <Palette size={12} />
               </button>
@@ -3111,6 +3135,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
           </div>
         </div>
       </div>
+      )}
       {gradPopOpen && gradPopPos && createPortal(
         <div
           ref={gradPopRef}
@@ -3139,7 +3164,8 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
               Gradient, a little taller, each segment carrying a square
               preview of the current stops rendered as that kind beside its
               label. The spine bar below previews the colors only. */}
-          <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden my-1" role="radiogroup" aria-label={`${F.label} gradient kind`}>
+          <div className="flex items-center gap-1.5 my-1">
+          <div className="flex-1 min-w-0 flex bg-navy-900 border border-white/10 rounded-md overflow-hidden" role="radiogroup" aria-label={`${F.label} gradient kind`}>
             {([
               ['linear', 'Linear', 'Runs along a line at the angle below'],
               ['radial', 'Radial', 'Spreads from the center out to the radius'],
@@ -3175,6 +3201,19 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
                 </Tooltip>
               )
             })}
+          </div>
+          {headerless && (
+            <Tooltip content="Apply a gradient swatch">
+              <button
+                ref={gradPopBtnRef}
+                type="button"
+                onClick={() => { if (gradPopOpen) setGradPopOpen(false); else openGradPopover() }}
+                className={`h-6 w-6 flex items-center justify-center rounded-md border border-white/10 shrink-0 transition-colors ${gradPopOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'}`}
+              >
+                <Palette size={12} />
+              </button>
+            </Tooltip>
+          )}
           </div>
           {/* Vertical preview bar is the gradient's spine (top = first
               stop); each stop row carries a ◄ pointer at its spot on the
@@ -3328,7 +3367,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill' }: {
                     type="button"
                     onClick={() => removeStop(origIdx)}
                     disabled={stops.length <= 2}
-                    className="p-0.5 rounded shrink-0 text-gray-500 transition-colors enabled:hover:text-red-400 enabled:hover:bg-red-500/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="p-0.5 rounded shrink-0 text-gray-400 transition-colors enabled:hover:text-red-400 enabled:hover:bg-red-500/10 disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <Trash2 size={11} />
                   </button>
@@ -3486,6 +3525,9 @@ interface PropsPanelProps {
    *  continuation of a gesture so a color drag / scrub / typing burst lands
    *  as a single undo entry (see `useCommitOnRelease`). */
   onLiveChange: (updated: ThumbnailLayer) => void
+  /** Scales a group's members by the given factors (THU-33): the Transform
+   *  card's width and height for a group edit the members, not the group. */
+  onScaleGroup?: (id: string, sx: number, sy: number) => void
   systemFonts: string[]
   fontVariantMap: Record<string, { name: string; css: string }[]>
   /** True once the real queryLocalFonts list loaded — gates the
@@ -3522,10 +3564,9 @@ function FilterSlider({ label, min, max, step, value, onChange, defaultValue = 0
 }) {
   return (
     <label className="flex flex-col gap-0.5">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] text-gray-400">{label}</span>
-        <span className="text-[10px] text-gray-400 tabular-nums">{Number.isInteger(step) ? value : value.toFixed(2)}</span>
-      </div>
+      {/* The number field beside the slider is the value readout; a second
+          copy above it repeated the field (THU-33 text audit). */}
+      <span className="text-[10px] text-gray-400">{label}</span>
       <div className="flex items-center gap-1.5">
         <Tooltip content="Double-click to reset" triggerClassName="flex-1 min-w-0 flex">
         <input
@@ -3559,22 +3600,152 @@ function FilterToggle({ label, checked, onChange }: {
   )
 }
 
-/** The Drop Shadows and Outline sections, shared by every layer type
- *  including groups (THU-31). `update` is the panel's gesture-aware patch
- *  function.
- *
- *  Drop Shadows: a multi-shadow stack. Each entry renders as its own ghost
- *  clone of the layer behind the original (Konva supports one shadow per
- *  node, so stacking is the only way to combine several). `resolveShadows`
- *  gives the panel the same migrated list the renderer sees; the first
- *  edit converts the legacy single-shadow fields into a one-entry array.
- *
- *  Outline: an alpha-dilation stroke. Text and shapes route to Konva's
- *  native stroke (overriding the design stroke while enabled), images and
- *  groups run the custom dilation filter over a raster. Stacked with
- *  shadows, the shadows attach to the dilated silhouette, which is how a
- *  spread shadow is had without a spread parameter per entry. */
-function EffectsSections({ layer, update }: { layer: ThumbnailLayer; update: (patch: Partial<ThumbnailLayer>) => void }) {
+// ── Properties panel cards (THU-33) ──────────────────────────────────────────
+// The panel is a fixed-order stack of cards, one per concern (Transform,
+// Shape or Text, Fill, Stroke, Shadows, Outline, Filters), each with the
+// same header (chevron, title, one contextual control on the right) and a
+// one-line summary while collapsed. Cards absent for a layer type are simply
+// not rendered, so the order never changes. Collapsed state is remembered
+// per card across layers; a card with nothing active starts collapsed.
+
+/** Measured boxes for layers whose size the layer record does not hold:
+ *  text height (font-driven) and group extents (from the members). The
+ *  canvas nodes publish them after each render; the Transform card reads
+ *  them through a tiny external store so it re-renders when they land. */
+const measuredBoxes = new Map<string, { w: number; h: number }>()
+const measuredListeners = new Set<() => void>()
+let measuredVersion = 0
+function publishMeasuredBox(id: string, w: number, h: number): void {
+  const prev = measuredBoxes.get(id)
+  if (prev && Math.abs(prev.w - w) < 0.01 && Math.abs(prev.h - h) < 0.01) return
+  measuredBoxes.set(id, { w, h })
+  measuredVersion++
+  measuredListeners.forEach(fn => fn())
+}
+function subscribeMeasured(fn: () => void): () => void {
+  measuredListeners.add(fn)
+  return () => { measuredListeners.delete(fn) }
+}
+const getMeasuredVersion = () => measuredVersion
+
+const CARD_PREFS_KEY = 'thumbPropsCards'
+type CardPrefs = Record<string, 'open' | 'closed'>
+
+function PanelCard({ id, title, control, summary, mutedReason, headerTooltip, open, onToggle, children }: {
+  id: string
+  title: string
+  /** The one control that belongs in the header: Reset, Enable, Add, or
+   *  the Solid/Gradient switch. Clicks on it never toggle the card. */
+  control?: React.ReactNode
+  /** Shown after the title while collapsed, so collapsed is not hidden. */
+  summary?: string
+  /** The body is disabled and this says why (a shape serving as a mask). */
+  mutedReason?: string
+  headerTooltip?: string
+  open: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  const titleNode = (
+    <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">{title}</span>
+  )
+  return (
+    <section data-card={id} className={`rounded-lg border border-white/10 bg-navy-900/40 ${mutedReason ? 'opacity-60' : ''}`}>
+      <div className="flex items-center gap-1 pl-1.5 pr-2 h-7">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex items-center gap-1 min-w-0 flex-1 h-full text-left text-gray-400 hover:text-gray-200 transition-colors"
+        >
+          {open ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
+          {headerTooltip ? <Tooltip content={headerTooltip} side="left" triggerClassName="flex shrink-0">{titleNode}</Tooltip> : titleNode}
+          {mutedReason ? (
+            <span className="text-[10px] text-amber-300 truncate">· {mutedReason}</span>
+          ) : (!open && summary) ? (
+            <span className="text-[10px] text-gray-400 truncate">· {summary}</span>
+          ) : null}
+        </button>
+        {control && (
+          <div className={`shrink-0 flex items-center ${mutedReason ? 'pointer-events-none' : ''}`}>
+            {control}
+          </div>
+        )}
+      </div>
+      {open && (mutedReason ? (
+        <Tooltip content={`${mutedReason}. Release the mask (selection tab) to use these again.`} side="left" triggerClassName="block min-w-0 max-w-full">
+          {/* min-w-0: a fieldset's browser default is min-inline-size:
+              min-content, which stops it shrinking below its widest row. */}
+          <fieldset disabled className="flex flex-col gap-1.5 min-w-0 w-full px-2 pb-2 [&_*]:pointer-events-none" aria-disabled>
+            {children}
+          </fieldset>
+        </Tooltip>
+      ) : (
+        <div className="flex flex-col gap-1.5 px-2 pb-2">
+          {children}
+        </div>
+      ))}
+    </section>
+  )
+}
+
+/** The Solid / Gradient switch for a paint, lifted out of the paint control
+ *  so it can sit in its card's header and stay visible while the card is
+ *  collapsed. Same behavior as before: leaving gradient mode ends that
+ *  recents session; entering it seeds the stops from the flat color. */
+function PaintModeToggle({ layer, update, paint, fallback }: {
+  layer: ThumbnailLayer
+  update: (patch: Partial<ThumbnailLayer>) => void
+  paint: PaintTarget
+  fallback: string
+}) {
+  const { F, isGradient, stops, space, angle, patch } = paintState(layer, paint, fallback)
+  const { breakRecentTie } = useContext(PaletteContext)
+  const segCls = (on: boolean) =>
+    `px-1.5 py-0.5 text-[10px] transition-colors ${on ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`
+  return (
+    <div className="flex bg-navy-900 border border-white/10 rounded-md overflow-hidden">
+      <Tooltip content={`Flat color ${F.label.toLowerCase()}`}>
+        <button
+          type="button"
+          onClick={() => {
+            update(patch({ type: 'solid' }))
+            breakRecentTie(`${layer.id}:${F.tie}-gradient`)
+          }}
+          className={segCls(!isGradient)}
+        >
+          Solid
+        </button>
+      </Tooltip>
+      <Tooltip content={`Gradient ${F.label.toLowerCase()} (linear, radial, or conic)`}>
+        <button
+          type="button"
+          onClick={() => update(patch({ type: 'linear', stops, angle, space }))}
+          className={segCls(isGradient)}
+        >
+          Gradient
+        </button>
+      </Tooltip>
+    </div>
+  )
+}
+
+/** One line for a collapsed Fill or Stroke card. */
+function paintSummary(layer: ThumbnailLayer, paint: PaintTarget, fallback: string): string {
+  const { isGradient, paintColor, stops, geom } = paintState(layer, paint, fallback)
+  if (!isGradient) return splitColorAlpha(paintColor, fallback).rgb
+  const kind = geom.kind.charAt(0).toUpperCase() + geom.kind.slice(1)
+  return `${kind} gradient, ${stops.length} stops`
+}
+
+interface CardState { open: boolean; onToggle: () => void }
+
+function ShadowsCard({ layer, update, muted, state }: {
+  layer: ThumbnailLayer
+  update: (patch: Partial<ThumbnailLayer>) => void
+  muted?: string
+  state: CardState
+}) {
   const shadows = resolveShadows(layer)
   // Migrate-on-write: any change here drops the legacy single-shadow
   // fields so there are not two sources of truth on disk.
@@ -3600,15 +3771,15 @@ function EffectsSections({ layer, update }: { layer: ThumbnailLayer; update: (pa
         ? { ...shadows[shadows.length - 1] }
         : { color: '#000000', offsetX: 4, offsetY: 4, blur: 8, opacity: 100 },
     ])
-  const groupNote = layer.type === 'group'
+  const summary = shadows.length === 0 ? 'None' : shadows.length === 1 ? '1 shadow' : `${shadows.length} shadows`
   return (
-    <>
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] uppercase tracking-wider text-gray-400">
-            Drop Shadows {shadows.length > 0 && <span className="text-gray-500 normal-case tracking-normal">({shadows.length})</span>}
-          </p>
-          <Tooltip content="Add a shadow pass">
+    <PanelCard
+      id="shadows"
+      title="Shadows"
+      summary={summary}
+      mutedReason={muted}
+      control={(
+        <Tooltip content="Add a shadow (each one stacks behind the layer)">
           <button
             type="button"
             onClick={addShadow}
@@ -3617,762 +3788,178 @@ function EffectsSections({ layer, update }: { layer: ThumbnailLayer; update: (pa
             <Plus size={11} />
             Add
           </button>
-          </Tooltip>
-        </div>
-        {shadows.length === 0 && (
-          <p className="text-[11px] text-gray-500 italic">No shadows. Click "Add" to stack one or more behind the {groupNote ? 'group' : 'layer'}.</p>
-        )}
-        <div className="flex flex-col gap-2.5">
-          {shadows.map((s, idx) => (
-            <div key={idx} className="rounded-lg border border-white/5 p-2 flex flex-col gap-1.5 bg-navy-900/40">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wider text-gray-500">Shadow {idx + 1}</span>
-                <Tooltip content="Remove this shadow">
-                <button
-                  type="button"
-                  onClick={() => removeAt(idx)}
-                  className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
-                >
-                  <Trash2 size={11} />
-                </button>
-                </Tooltip>
-              </div>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Color</span>
-                {/* Unified color field like every other color property. The
-                    field's % segment IS the shadow opacity (stored s.opacity,
-                    drives Konva shadowOpacity); the color itself stays rgb in
-                    the meta. An applied swatch's alpha lands in the shadow
-                    opacity, full-snapshot style. */}
-                <ColorAlphaField
-                  // splitColorAlpha first: the old raw text input let any
-                  // string into s.color, so normalize to rgb before joining
-                  // with the stored opacity.
-                  value={joinColorAlpha(splitColorAlpha(s.color, '#000000').rgb, (s.opacity ?? 100) / 100)}
-                  fallback="#000000"
-                  showHex
-                  onChange={v => {
-                    const p = splitColorAlpha(v, '#000000')
-                    updateAt(idx, { color: p.rgb, opacity: Math.round(p.alpha * 100) })
-                  }}
-                  recentKey={`${layer.id}:shadow${idx}`}
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-1.5">
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-400">Offset X</span>
-                  <NumberInput value={s.offsetX}
-                    onChange={offsetX => updateAt(idx, { offsetX })} className="w-full" />
-                </label>
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-400">Offset Y</span>
-                  <NumberInput value={s.offsetY}
-                    onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
-                </label>
-                <label className="flex flex-col gap-0.5 col-span-2">
-                  <span className="text-[10px] text-gray-400">Blur</span>
-                  <NumberInput min={0} value={s.blur}
-                    onChange={blur => updateAt(idx, { blur })} className="w-full" />
-                </label>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] uppercase tracking-wider text-gray-400">Outline</p>
-          <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={!!layer.outlineEnabled}
-              onChange={e => update({ outlineEnabled: e.target.checked })}
-              className="accent-accent-600"
-            />
-            Enable
-          </label>
-        </div>
-        {layer.outlineEnabled && (
-          <div className="flex flex-col gap-1.5">
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Color</span>
-              <ColorAlphaField
-                value={layer.outlineColor}
-                fallback="#000000"
-                showHex
-                onChange={outlineColor => update({ outlineColor })}
-                recentKey={`${layer.id}:outline`}
-              />
-            </label>
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Width</span>
-              <NumberInput min={0} max={50} value={layer.outlineWidth ?? 0}
-                onChange={outlineWidth => update({ outlineWidth })} className="w-full" />
-            </label>
-            {layer.type === 'image' && (
-              <p className="text-[10px] text-gray-500 leading-snug">
-                Wider outlines on large images can briefly stutter while the
-                filter recomputes. Konva caches the result, so only changes
-                trigger a recompute.
-              </p>
-            )}
-            {layer.type !== 'image' && (layer.strokeWidth ?? 0) > 0 && (
-              <p className="text-[10px] text-yellow-400/80 leading-snug">
-                Overrides the design stroke ({layer.strokeWidth}px) above while enabled.
-              </p>
-            )}
+        </Tooltip>
+      )}
+      {...state}
+    >
+      {shadows.length === 0 && (
+        <p className="text-[10px] text-gray-400">None</p>
+      )}
+      {shadows.map((s, idx) => (
+        <div key={idx} className="rounded-lg border border-white/5 p-2 flex flex-col gap-1.5 bg-navy-900/40">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-gray-400">Shadow {idx + 1}</span>
+            <Tooltip content="Remove this shadow">
+            <button
+              type="button"
+              onClick={() => removeAt(idx)}
+              className="p-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+            >
+              <Trash2 size={11} />
+            </button>
+            </Tooltip>
           </div>
-        )}
-      </section>
-    </>
-  )
-}
-
-/** Wraps the appearance sections of a shape that is a group mask (THU-21):
- *  the controls stay visible with their last values but are disabled, and
- *  one tooltip over the whole block says why. Inactive, it renders the
- *  children as they are. */
-function MaskDisabled({ active, children }: { active: boolean; children: React.ReactNode }) {
-  if (!active) return <>{children}</>
-  return (
-    <>
-      <p className="text-[10px] text-amber-300/90 leading-relaxed">
-        Group mask: only this shape's outline is used, to clip the group. Fill, stroke, shadows, outline, and opacity are switched off while it is a mask and come back when it is released.
-      </p>
-      <Tooltip content="Switched off while this shape is a group mask. Release the mask (selection tab) to use them again." side="left" triggerClassName="block min-w-0 max-w-full">
-        {/* min-w-0: a fieldset's browser default is min-inline-size:
-            min-content, which stops it shrinking below its widest row
-            and gives the panel a horizontal scrollbar. */}
-        <fieldset disabled className="flex flex-col gap-3 min-w-0 w-full opacity-50 [&_*]:pointer-events-none" aria-disabled>
-          {children}
-        </fieldset>
-      </Tooltip>
-    </>
-  )
-}
-
-function PropertiesPanel({ layer, onChange, onLiveChange, systemFonts, fontVariantMap, fontsLoaded, fontQueryFailed, standalone, pixelSnapEnabled }: PropsPanelProps) {
-  // Last-used font family (THU-6): persisted app-wide via IPC so it
-  // survives sessions. Rendered as a quick-pick link under the font
-  // dropdown whenever it differs from the selected layer's family.
-  const [lastUsedFont, setLastUsedFont] = useState('')
-  useEffect(() => { window.api.thumbnailGetLastFont().then(setLastUsedFont).catch(() => {}) }, [])
-  // Chip-editor wiring for the text-layer body. Hooks must run
-  // unconditionally (the editor only renders for text layers), so they
-  // live above the early return. Stable sets keep TemplateBodyEditor from
-  // rebuilding its chips every render.
-  const textInsertRef = useRef<((text: string) => void) | null>(null)
-  // Include the legacy {game} alias so pre-rename text layers still read as
-  // chips (the picker only offers the canonical {topic}).
-  const knownKeys = useMemo(() => new Set<string>([...THUMBNAIL_MERGE_KEYS, 'game']), [])
-  const inapplicableKeys = useMemo(
-    () => standalone ? new Set<string>(THUMBNAIL_SERIES_KEYS) : new Set<string>(),
-    [standalone],
-  )
-  const pickerKeys = useMemo(
-    () => standalone
-      ? THUMBNAIL_MERGE_KEYS.filter(k => !THUMBNAIL_SERIES_KEYS.includes(k))
-      : THUMBNAIL_MERGE_KEYS,
-    [standalone],
-  )
-
-  // Gesture tracker so a continuous edit (color-picker drag, held nudge,
-  // typing burst) on one property collapses to a single undo entry.
-  const beginsGesture = useCommitOnRelease()
-  // Live canvas gesture (THU-26): while this layer is being dragged,
-  // resized, or rotated, the transform inputs show the node's live numbers
-  // instead of the committed layer. Display only; the layer state is never
-  // written mid-gesture.
-  const liveAll = useLiveTransform()
-
-  if (!layer) {
-    return (
-      <div className="p-4 text-xs text-gray-400 text-center">
-        Select a layer to edit properties
-      </div>
-    )
-  }
-
-  // Every property edit funnels through here. The first change of a gesture
-  // commits to undo history; continuations of the same gesture apply live
-  // (no history). Keyed by layer + which property changed so switching
-  // field/layer starts a fresh undo entry.
-  const update = (patch: Partial<ThumbnailLayer>) => {
-    const next = { ...layer, ...patch }
-    const key = `${layer.id}:${Object.keys(patch).sort().join(',')}`
-    if (beginsGesture(key)) onChange(next)
-    else onLiveChange(next)
-  }
-
-  const isMaskLayer = isMask(layer)
-  const lv = liveAll && liveAll.id === layer.id ? liveAll : null
-  const dispX = lv ? lv.x : layer.x
-  const dispY = lv ? lv.y : layer.y
-  // Angle fields (style guide): the live value is the raw accumulated
-  // rotation; the stored value is shown as stored (it is wrapped on
-  // commit and on load, and mid-typing values must not fold).
-  const dispRot = lv ? lv.rotation : layer.rotation
-  const dispW = lv?.width ?? layer.width
-  const dispH = lv?.height ?? layer.height
-
-  // Groups (THU-18) carry position, rotation, and opacity of their own; size
-  // follows the members and is edited on the canvas, where the group's
-  // scale is baked into them on release.
-  if (layer.type === 'group') {
-    const labelCls = 'text-[10px] text-gray-400'
-    return (
-      <div className="p-3 flex flex-col gap-3 overflow-y-auto flex-1 min-h-0">
-        <section>
-          <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Group</p>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-gray-400">Color</span>
+            {/* Unified color field like every other color property. The
+                field's % segment IS the shadow opacity (stored s.opacity,
+                drives Konva shadowOpacity); the color itself stays rgb in
+                the meta. An applied swatch's alpha lands in the shadow
+                opacity, full-snapshot style. */}
+            <ColorAlphaField
+              // splitColorAlpha first: the old raw text input let any
+              // string into s.color, so normalize to rgb before joining
+              // with the stored opacity.
+              value={joinColorAlpha(splitColorAlpha(s.color, '#000000').rgb, (s.opacity ?? 100) / 100)}
+              fallback="#000000"
+              showHex
+              onChange={v => {
+                const p = splitColorAlpha(v, '#000000')
+                updateAt(idx, { color: p.rgb, opacity: Math.round(p.alpha * 100) })
+              }}
+              recentKey={`${layer.id}:shadow${idx}`}
+            />
+          </label>
           <div className="grid grid-cols-2 gap-1.5">
             <label className="flex flex-col gap-0.5">
-              <span className={labelCls}>X</span>
-              <NumberInput value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} className="w-full" />
+              <span className="text-[10px] text-gray-400">Offset X</span>
+              <NumberInput value={s.offsetX}
+                onChange={offsetX => updateAt(idx, { offsetX })} className="w-full" />
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className={labelCls}>Y</span>
-              <NumberInput value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} className="w-full" />
+              <span className="text-[10px] text-gray-400">Offset Y</span>
+              <NumberInput value={s.offsetY}
+                onChange={offsetY => updateAt(idx, { offsetY })} className="w-full" />
             </label>
-            <label className="flex flex-col gap-0.5">
-              <span className={labelCls}>Rotation °</span>
-              <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} snapToStep className="w-full" />
-            </label>
-            <label className="flex flex-col gap-0.5">
-              <span className={labelCls}>Opacity %</span>
-              <NumberInput min={0} max={100} value={Math.round(layer.opacity)} onChange={opacity => update({ opacity: Math.max(0, Math.min(100, opacity)) })} className="w-full" />
+            <label className="flex flex-col gap-0.5 col-span-2">
+              <span className="text-[10px] text-gray-400">Blur</span>
+              <NumberInput min={0} value={s.blur}
+                onChange={blur => updateAt(idx, { blur })} className="w-full" />
             </label>
           </div>
-          <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
-            Double-click a grouped layer on the canvas to select it.
-          </p>
-        </section>
-        {/* Group effects (THU-31): the same shadow, outline, and filter
-            sections other layers have, rendered on the group as a whole. */}
-        <EffectsSections layer={layer} update={update} />
-        <FiltersSection layer={layer} update={update} />
-      </div>
-    )
-  }
-
-  // Aspect-ratio lock is per-layer + persisted on the layer itself.
-  // Undefined defaults to `true` — newly added images/shapes start
-  // locked to their natural aspect, matching every other vector
-  // editor's convention. Toggling persists via `update`.
-  const aspectLocked = layer.aspectLocked ?? true
-  const toggleAspectLock = () => update({ aspectLocked: !aspectLocked })
-
-  // The locked ratio is always derived from the layer's current
-  // width/height (not a separately stored "original"). So if the
-  // user unlocks, resizes weirdly, then re-locks, the new lock pins
-  // to whatever ratio is current — matches expected vector-editor
-  // behavior and avoids stale-ratio bugs.
-  const lockedRatio = (() => {
-    const w = layer.width ?? 0
-    const h = layer.height ?? 0
-    return h > 0 ? w / h : 1
-  })()
-
-  // Width/height inputs accept signed values: a negative number sets
-  // the corresponding flip flag and stores the absolute magnitude.
-  // Zero leaves the flip state alone so typing "-" → "0" → digits
-  // doesn't bounce flip state mid-keystroke. Positive values
-  // explicitly unflip — typing a fresh positive number reads as
-  // "remove the flip and resize."
-  const handleWidthChange = (w: number) => {
-    const abs = Math.abs(w)
-    const flipX = w < 0 ? true : (w > 0 ? false : !!layer.flipX)
-    if (aspectLocked && lockedRatio > 0) {
-      // The derived dimension keeps the exact ratio (THU-27); it is
-      // rounded only for shapes and text, which always take whole pixels.
-      const h = abs / lockedRatio
-      update({ width: abs, height: Math.max(1, layer.type === 'image' ? h : Math.round(h)), flipX })
-    } else {
-      update({ width: abs, flipX })
-    }
-  }
-  const handleHeightChange = (h: number) => {
-    const abs = Math.abs(h)
-    const flipY = h < 0 ? true : (h > 0 ? false : !!layer.flipY)
-    if (aspectLocked && lockedRatio > 0) {
-      const w = abs * lockedRatio
-      update({ height: abs, width: Math.max(1, layer.type === 'image' ? w : Math.round(w)), flipY })
-    } else {
-      update({ height: abs, flipY })
-    }
-  }
-
-  // Reset position/rotation (and for images, contain-fit scale) to the same
-  // defaults a freshly-added layer would have. Opacity isn't touched — the
-  // user might have intentionally dimmed an overlay and resetting it would
-  // be surprising.
-  const resetTransform = async () => {
-    if (layer.type === 'image' && layer.src) {
-      const { naturalW, naturalH } = await new Promise<{ naturalW: number; naturalH: number }>(resolve => {
-        const img = new Image()
-        img.onload = () => resolve({ naturalW: img.naturalWidth, naturalH: img.naturalHeight })
-        img.onerror = () => resolve({ naturalW: layer.width ?? CANVAS_W, naturalH: layer.height ?? CANVAS_H })
-        img.src = `file://${layer.src}`
-      })
-      const containScale = Math.min(1, CANVAS_W / naturalW, CANVAS_H / naturalH)
-      const width = Math.round(naturalW * containScale)
-      const height = Math.round(naturalH * containScale)
-      update({
-        x: Math.round((CANVAS_W - width) / 2),
-        y: Math.round((CANVAS_H - height) / 2),
-        rotation: 0,
-        width,
-        height,
-      })
-      return
-    }
-    const w = layer.width ?? 0
-    const h = layer.height ?? 0
-    update({
-      x: Math.round((CANVAS_W - w) / 2),
-      y: Math.round((CANVAS_H - h) / 2),
-      rotation: 0,
-    })
-  }
-
-  return (
-    <div className="p-3 flex flex-col gap-3 overflow-y-auto flex-1 min-h-0">
-      {/* Common */}
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] uppercase tracking-wider text-gray-400">Transform</p>
-          <Tooltip content="Reset position, rotation, and (for images) scale to defaults">
-          <button
-            type="button"
-            onClick={() => { resetTransform().catch(() => {}) }}
-            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
-          >
-            <RotateCcw size={10} />
-            Reset
-          </button>
-          </Tooltip>
         </div>
-        {(() => {
-          const hasWH = layer.width !== undefined && (layer.type === 'image' || layer.type === 'shape') && layer.height !== undefined
-          const labelCls = 'text-[10px] text-gray-400'
-          return (
-            <>
-              {hasWH ? (
-                // Image / shape: X+W on row 1, Y+H on row 2, lock icon spans
-                // both rows on the right (Affinity-style pairing).
-                <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5 items-end">
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>X</span>
-                    <NumberInput value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} className="w-full" />
-                  </label>
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>Width</span>
-                    <NumberInput
-                      value={layer.flipX ? -round2(dispW ?? 0) : round2(dispW ?? 0)}
-                      onChange={handleWidthChange}
-                      snapToStep={pixelSnapEnabled}
-                      className="w-full"
-                    />
-                  </label>
-                  <Tooltip
-                    content={aspectLocked
-                      ? 'Aspect ratio locked — changing width or height keeps the other dimension proportional. Click to unlock.'
-                      : (layer.type === 'image'
-                          ? 'Lock aspect ratio. When locked, changing width or height preserves the original image aspect ratio.'
-                          : 'Lock aspect ratio. When locked, changing width or height preserves the current ratio.')}
-                    triggerClassName="row-span-2 self-stretch pt-4"
-                  >
-                    <button
-                      type="button"
-                      onClick={toggleAspectLock}
-                      className={`h-full w-3 relative flex items-center justify-center transition-colors ${
-                        aspectLocked ? 'text-accent-300 hover:text-accent-200' : 'text-gray-400 hover:text-gray-200'
-                      }`}
-                      aria-label={aspectLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
-                    >
-                      {/* Bracket: short horizontal stubs at top + bottom connect
-                          to a vertical line broken in the middle where the icon
-                          sits. Implies the icon "owns" both inputs at once.
-                          pt-4 on the parent wrapper shifts the entire button
-                          (and so the SVG + icon together) down by the label
-                          height — top stub aligns with top of W input, bottom
-                          stub aligns with bottom of H input. */}
-                      <svg
-                        className="absolute inset-0 w-full h-full pointer-events-none"
-                        viewBox="0 0 20 100"
-                        preserveAspectRatio="none"
-                      >
-                        <path
-                          d="M 0 4 L 10 4 L 10 38 M 10 62 L 10 96 L 0 96"
-                          stroke="currentColor"
-                          strokeWidth="1"
-                          fill="none"
-                          vectorEffect="non-scaling-stroke"
-                        />
-                      </svg>
-                      <span className="relative rotate-90">
-                        {aspectLocked ? <Link2 size={14} /> : <Unlink2 size={14} />}
-                      </span>
-                    </button>
-                  </Tooltip>
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>Y</span>
-                    <NumberInput value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} className="w-full" />
-                  </label>
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>Height</span>
-                    <NumberInput
-                      value={layer.flipY ? -round2(dispH ?? 0) : round2(dispH ?? 0)}
-                      onChange={handleHeightChange}
-                      snapToStep={pixelSnapEnabled}
-                      className="w-full"
-                    />
-                  </label>
-                </div>
-              ) : (
-                // Text layers (no width/height): just X / Y on one row.
-                <div className="grid grid-cols-2 gap-1.5">
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>X</span>
-                    <NumberInput value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} className="w-full" />
-                  </label>
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>Y</span>
-                    <NumberInput value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} className="w-full" />
-                  </label>
-                </div>
-              )}
-              {/* Rotation + Opacity get their own full-width rows below. */}
-              <div className="flex flex-col gap-1.5 mt-1.5">
-                {/* Corner radius — rect + triangle (todo #23). Stored in
-                    pixels, independent of width/height, so corners stay
-                    perfectly circular through resizes. When the entered
-                    radius exceeds what the shape's geometry can render
-                    (rect: half the short side; triangle: the inradius),
-                    the ACTUAL rendered radius shows in parentheses. */}
-                {layer.type === 'shape' && layer.shapeType === 'polygon' && (
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>Sides</span>
-                    <NumberInput
-                      min={POLYGON_MIN_SIDES}
-                      max={POLYGON_MAX_SIDES}
-                      value={polygonSidesOf(layer)}
-                      // Keeps the shape as regular as it was: the box height
-                      // follows the new side count's natural ratio, carrying
-                      // over whatever stretch the user had applied, and the
-                      // visual center stays put (lib/polygon.ts).
-                      onChange={sides => update(polygonSidesPatch(layer, sides))}
-                      className="w-full"
-                    />
-                  </label>
-                )}
-                {layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'polygon') && (() => {
-                  const sw = layer.width ?? 200
-                  const sh = layer.height ?? 200
-                  const maxR = layer.shapeType === 'polygon'
-                    ? polygonMaxCornerRadius(polygonPoints(polygonSidesOf(layer), sw, sh))
-                    : Math.min(sw, sh) / 2
-                  const entered = layer.cornerRadius ?? 0
-                  return (
-                    <label className="flex flex-col gap-0.5">
-                      <span className={labelCls}>Corner radius</span>
-                      <NumberInput
-                        min={0}
-                        max={999}
-                        value={entered}
-                        onChange={cornerRadius => update({ cornerRadius })}
-                        // Odd dimensions give fractional caps (e.g. 201×201
-                        // rect → 100.5) — show the exact value rather than
-                        // rounding up past what actually renders.
-                        inlineNote={entered > maxR ? (maxR % 1 === 0 ? String(maxR) : maxR.toFixed(1)) : undefined}
-                        className="w-full"
-                      />
-                    </label>
-                  )
-                })()}
-                <label className="flex flex-col gap-0.5">
-                  <span className={labelCls}>Rotation °</span>
-                  <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} snapToStep className="w-full" />
-                </label>
-                {isMaskLayer ? (
-                  <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block">
-                    <label className="flex flex-col gap-0.5 opacity-50">
-                      <span className={labelCls}>Opacity %</span>
-                      <NumberInput value={layer.opacity} onChange={() => {}} min={0} max={100} disabled className="w-full" />
-                    </label>
-                  </Tooltip>
-                ) : (
-                  <label className="flex flex-col gap-0.5">
-                    <span className={labelCls}>Opacity %</span>
-                    <NumberInput value={layer.opacity} onChange={opacity => update({ opacity })} min={0} max={100} className="w-full" />
-                  </label>
-                )}
-              </div>
-            </>
-          )
-        })()}
-      </section>
-
-      {layer.type === 'text' && (
-        <>
-          <section>
-            <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Text</p>
-            <TemplateBodyEditor
-              value={layer.text ?? ''}
-              onSave={v => update({ text: v })}
-              placeholder="Text…"
-              knownKeys={knownKeys}
-              inapplicableKeys={inapplicableKeys}
-              insertRef={textInsertRef}
-              multiline
-              minHeight={54}
-            />
-            <MergeFieldPicker
-              keys={pickerKeys}
-              onInsert={k => textInsertRef.current?.(`{${k}}`)}
-            />
-          </section>
-          <section>
-            <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Font</p>
-            <div className="flex flex-col gap-1.5">
-              {(() => {
-                const fam = layer.fontFamily ?? 'Arial'
-                const famMissing = fontsLoaded && !systemFonts.includes(fam)
-                const applyFontFamily = (next: string) => {
-                  const variants = fontVariantMap[next]
-                  if (variants && variants.length > 0) {
-                    // Try to preserve current weight; fall back to first variant
-                    const cur = layer.fontStyle ?? 'normal'
-                    const match = variants.find(v => v.css === cur) ?? variants.find(v => v.css === 'normal') ?? variants[0]
-                    update({ fontFamily: next, fontStyle: match.css })
-                  } else {
-                    update({ fontFamily: next })
-                  }
-                  // Any pick becomes the new last-used; the quick-pick link
-                  // hides by itself since last-used now equals the layer's
-                  // family (THU-6).
-                  window.api.thumbnailSetLastFont(next).catch(() => {})
-                  setLastUsedFont(next)
-                }
-                return (
-                  <>
-                    <select
-                      value={fam}
-                      onChange={e => applyFontFamily(e.target.value)}
-                      className={`select-themed bg-navy-900 border rounded-lg pl-2 pr-7 py-1 text-xs w-full ${famMissing ? 'border-amber-500/60 text-amber-300' : 'border-white/10 text-gray-200'}`}
-                      style={{ fontFamily: fam }}
-                    >
-                      {/* Keep the missing family selectable/displayed instead of
-                          the select silently showing nothing. Options inherit the
-                          select's text color, so when it's amber (missing state)
-                          each installed option pins itself back to the normal
-                          text color — only the missing entry reads amber. */}
-                      {famMissing && <option value={fam} style={{ color: '#fbbf24' }}>{fam} (missing)</option>}
-                      {systemFonts.map(f => (
-                        <option key={f} value={f} style={{ fontFamily: f, color: '#e5e7eb' }}>{f}</option>
-                      ))}
-                    </select>
-                    {famMissing && (
-                      <p className="text-[10px] text-amber-400 flex items-center gap-1">
-                        <AlertTriangle size={10} className="shrink-0" />
-                        Not installed — pick a replacement to resume image updates
-                      </p>
-                    )}
-                    {fontQueryFailed && !fontsLoaded && (
-                      <p className="text-[10px] text-amber-400 flex items-center gap-1">
-                        <AlertTriangle size={10} className="shrink-0" />
-                        Couldn’t read installed fonts — showing a minimal list; missing-font checks are off
-                      </p>
-                    )}
-                    {/* Quick-pick for the last-used family (THU-6). Hidden
-                        when it IS the current family, and never offers a
-                        font that isn't installed. */}
-                    {lastUsedFont && lastUsedFont !== fam && systemFonts.includes(lastUsedFont) && (
-                      <Tooltip content={`Switch to ${lastUsedFont}`} triggerClassName="self-start">
-                        <button
-                          onClick={() => applyFontFamily(lastUsedFont)}
-                          className="text-[10px] text-gray-400 hover:text-accent-300 transition-colors"
-                        >
-                          Last used: <span className="text-gray-300" style={{ fontFamily: lastUsedFont }}>{lastUsedFont}</span>
-                        </button>
-                      </Tooltip>
-                    )}
-                  </>
-                )
-              })()}
-              <div className="grid grid-cols-2 gap-1.5">
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-400">Style</span>
-                  {(() => {
-                    const variants = fontVariantMap[layer.fontFamily ?? 'Arial'] ?? []
-                    if (variants.length > 0) {
-                      const cur = layer.fontStyle ?? 'normal'
-                      const matched = variants.find(v => v.css === cur) ?? variants[0]
-                      return (
-                        <select
-                          value={matched.css}
-                          onChange={e => update({ fontStyle: e.target.value })}
-                          className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
-                        >
-                          {variants.map(v => (
-                            <option key={v.name} value={v.css}>{v.name}</option>
-                          ))}
-                        </select>
-                      )
-                    }
-                    return (
-                      <select
-                        value={layer.fontStyle ?? 'normal'}
-                        onChange={e => update({ fontStyle: e.target.value })}
-                        className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
-                      >
-                        <option value="normal">Normal</option>
-                        <option value="bold">Bold</option>
-                        <option value="italic">Italic</option>
-                        <option value="bold italic">Bold Italic</option>
-                      </select>
-                    )
-                  })()}
-                </label>
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-400">Size</span>
-                  <NumberInput
-                    min={8}
-                    max={500}
-                    value={layer.fontSize ?? 48}
-                    onChange={fontSize => update({ fontSize })}
-                  />
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-400">Line height %</span>
-                  {/* Stored as a multiplier (Konva-native); the UI speaks
-                      percent to match the other % fields. */}
-                  <NumberInput
-                    min={50}
-                    max={300}
-                    value={Math.round((layer.lineHeight ?? 1) * 100)}
-                    onChange={p => update({ lineHeight: p / 100 })}
-                  />
-                </label>
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-gray-400">Align</span>
-                  <select
-                    value={layer.align ?? 'left'}
-                    onChange={e => update({ align: e.target.value as any })}
-                    className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
-                  >
-                    <option value="left">Left</option>
-                    <option value="center">Center</option>
-                    <option value="right">Right</option>
-                  </select>
-                </label>
-              </div>
-              {/* Letter case (thumbnails #7) — radio-style group matching the
-                  settings page's first-day-of-week control, sized to the
-                  panel's input rows. div, not label: a label would forward
-                  clicks on the caption to the first button. */}
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Case</span>
-                <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
-                  {TEXT_TRANSFORM_OPTIONS.map(opt => {
-                    const selected = (layer.textTransform ?? 'none') === opt.value
-                    return (
-                      <Tooltip key={opt.value} content={opt.tip} triggerClassName="flex-1 flex min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => update({ textTransform: opt.value })}
-                          className={`flex-1 py-1 text-xs transition-colors ${
-                            selected ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      </Tooltip>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-          </section>
-          <section>
-            <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Color</p>
-            {/* Stacked full-width rows (was a 2-col grid) — the alpha% +
-                clear controls need the horizontal room. */}
-            <div className="flex flex-col gap-1.5">
-              <GradientFillControl layer={layer} update={update} fallback="#ffffff" />
-              {/* Stroke paint (THU-8): solid or gradient, same control. A
-                  rule separates it from the fill: both controls grow tall
-                  in gradient mode and read as one block otherwise. */}
-              <div className="border-t border-white/10 mt-2 pt-2.5" />
-              <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" />
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-gray-400">Stroke width</span>
-                <NumberInput
-                  min={0}
-                  max={50}
-                  value={layer.strokeWidth ?? 0}
-                  onChange={strokeWidth => update({ strokeWidth })}
-                  className="w-full"
-                />
-              </label>
-            </div>
-          </section>
-        </>
-      )}
-
-      <MaskDisabled active={isMaskLayer}>
-      {layer.type === 'shape' && (
-        <section>
-          <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Fill & Stroke</p>
-          <div className="flex flex-col gap-1.5">
-            <GradientFillControl layer={layer} update={update} fallback="#6366f1" />
-            {/* Stroke paint (THU-8): solid or gradient, same control, set
-                off from the fill by a rule. */}
-            <div className="border-t border-white/10 mt-2 pt-2.5" />
-            <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" />
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-400">Stroke width</span>
-              <NumberInput min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
-                onChange={strokeWidth => update({ strokeWidth })}
-                className="w-full" />
-            </label>
-            {/* Corner radius moved to the Transform section (under size/
-                position) — it applies to rect AND triangle now. */}
-          </div>
-        </section>
-      )}
-
-      <EffectsSections layer={layer} update={update} />
-      </MaskDisabled>
-
-      {/* Filters: images (ImageInner's cache + filter chain) and groups
-          (THU-31, the group's inner container cached with the same chain). */}
-      {layer.type === 'image' && <FiltersSection layer={layer} update={update} />}
-    </div>
+      ))}
+    </PanelCard>
   )
 }
 
-/** The Filters section, shared by images and groups (THU-31). All filter
- *  values persist in JSON regardless of the master toggle, so the user can
- *  A/B compare without re-dialing settings. */
-function FiltersSection({ layer, update }: { layer: ThumbnailLayer; update: (patch: Partial<ThumbnailLayer>) => void }) {
+/** Outline: an alpha-dilation stroke. Text and shapes route to Konva's
+ *  native stroke (overriding the design stroke while enabled), images and
+ *  groups run the dilation filter over a raster. Stacked with shadows, the
+ *  shadows attach to the dilated silhouette. */
+function OutlineCard({ layer, update, muted, state }: {
+  layer: ThumbnailLayer
+  update: (patch: Partial<ThumbnailLayer>) => void
+  muted?: string
+  state: CardState
+}) {
+  const on = !!layer.outlineEnabled
+  const width = layer.outlineWidth ?? 0
   return (
-    <section>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] uppercase tracking-wider text-gray-400">Filters</p>
+    <PanelCard
+      id="outline"
+      title="Outline"
+      summary={on ? `${width} px` : 'Off'}
+      mutedReason={muted}
+      control={(
         <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
           <input
             type="checkbox"
-            checked={!!layer.filtersEnabled}
+            checked={on}
+            onChange={e => update({ outlineEnabled: e.target.checked })}
+            className="accent-accent-600"
+          />
+          Enable
+        </label>
+      )}
+      {...state}
+    >
+      {on ? (
+        <>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-gray-400">Color</span>
+            <ColorAlphaField
+              value={layer.outlineColor}
+              fallback="#000000"
+              showHex
+              onChange={outlineColor => update({ outlineColor })}
+              recentKey={`${layer.id}:outline`}
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-gray-400">Width</span>
+            <NumberInput min={0} max={50} value={width}
+              onChange={outlineWidth => update({ outlineWidth })} className="w-full" />
+          </label>
+          {layer.type !== 'image' && layer.type !== 'group' && (layer.strokeWidth ?? 0) > 0 && (
+            <p className="text-[10px] text-amber-300 leading-snug">
+              Replaces the {layer.strokeWidth} px stroke while enabled.
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="text-[10px] text-gray-400">Off</p>
+      )}
+    </PanelCard>
+  )
+}
+
+/** Filters, shared by images and groups (THU-31). All filter values persist
+ *  regardless of the master toggle, so the user can A/B compare without
+ *  re-dialing settings. */
+function FiltersCard({ layer, update, state }: {
+  layer: ThumbnailLayer
+  update: (patch: Partial<ThumbnailLayer>) => void
+  state: CardState
+}) {
+  const on = !!layer.filtersEnabled
+  const active: string[] = []
+  if (on) {
+    if ((layer.filterBrightness ?? 0) !== 0) active.push('Brightness')
+    if ((layer.filterContrast ?? 0) !== 0) active.push('Contrast')
+    if ((layer.filterSaturation ?? 0) !== 0) active.push('Saturation')
+    if ((layer.filterHue ?? 0) !== 0) active.push('Hue')
+    if ((layer.filterLuminance ?? 0) !== 0) active.push('Luminance')
+    if ((layer.filterBlur ?? 0) > 0) active.push(`Blur ${layer.filterBlur}`)
+    if ((layer.filterEnhance ?? 0) !== 0) active.push('Enhance')
+    if ((layer.filterPixelate ?? 0) > 1) active.push('Pixelate')
+    if ((layer.filterPosterize ?? 0) > 0 && (layer.filterPosterize ?? 0) < 1) active.push('Posterize')
+    if ((layer.filterThreshold ?? 0) > 0) active.push('Threshold')
+    if (layer.filterGrayscale) active.push('Grayscale')
+    if (layer.filterSepia) active.push('Sepia')
+    if (layer.filterInvert) active.push('Invert')
+    if (layer.filterEmboss) active.push('Emboss')
+  }
+  const summary = !on ? 'Off' : active.length === 0 ? 'On, all neutral' : active.join(', ')
+  return (
+    <PanelCard
+      id="filters"
+      title="Filters"
+      summary={summary}
+      control={(
+        <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={on}
             onChange={e => update({ filtersEnabled: e.target.checked })}
             className="accent-accent-600"
           />
           Enable
         </label>
-      </div>
-      {layer.filtersEnabled && (
+      )}
+      {...state}
+    >
+      {on ? (
         <div className="flex flex-col gap-2">
           <FilterSlider label="Brightness" min={-1} max={1} step={0.05} spinnerStep={0.01} value={layer.filterBrightness ?? 0}
             onChange={v => update({ filterBrightness: v })} />
@@ -4417,8 +4004,598 @@ function FiltersSection({ layer, update }: { layer: ThumbnailLayer; update: (pat
             Reset filters
           </button>
         </div>
+      ) : (
+        <p className="text-[10px] text-gray-400">Off</p>
       )}
-    </section>
+    </PanelCard>
+  )
+}
+
+function PropertiesPanel({ layer, onChange, onLiveChange, onScaleGroup, systemFonts, fontVariantMap, fontsLoaded, fontQueryFailed, standalone, pixelSnapEnabled }: PropsPanelProps) {
+  // Last-used font family (THU-6): persisted app-wide via IPC so it
+  // survives sessions. Rendered as a quick-pick link under the font
+  // dropdown whenever it differs from the selected layer's family.
+  const [lastUsedFont, setLastUsedFont] = useState('')
+  useEffect(() => { window.api.thumbnailGetLastFont().then(setLastUsedFont).catch(() => {}) }, [])
+  // Chip-editor wiring for the text-layer body. Hooks must run
+  // unconditionally (the editor only renders for text layers), so they
+  // live above the early return. Stable sets keep TemplateBodyEditor from
+  // rebuilding its chips every render.
+  const textInsertRef = useRef<((text: string) => void) | null>(null)
+  // Include the legacy {game} alias so pre-rename text layers still read as
+  // chips (the picker only offers the canonical {topic}).
+  const knownKeys = useMemo(() => new Set<string>([...THUMBNAIL_MERGE_KEYS, 'game']), [])
+  const inapplicableKeys = useMemo(
+    () => standalone ? new Set<string>(THUMBNAIL_SERIES_KEYS) : new Set<string>(),
+    [standalone],
+  )
+  const pickerKeys = useMemo(
+    () => standalone
+      ? THUMBNAIL_MERGE_KEYS.filter(k => !THUMBNAIL_SERIES_KEYS.includes(k))
+      : THUMBNAIL_MERGE_KEYS,
+    [standalone],
+  )
+
+  // Gesture tracker so a continuous edit (color-picker drag, held nudge,
+  // typing burst) on one property collapses to a single undo entry.
+  const beginsGesture = useCommitOnRelease()
+  // Live canvas gesture (THU-26): while this layer is being dragged,
+  // resized, or rotated, the transform inputs show the node's live numbers
+  // instead of the committed layer. Display only; the layer state is never
+  // written mid-gesture.
+  const liveAll = useLiveTransform()
+  // Measured text and group boxes (see publishMeasuredBox).
+  useSyncExternalStore(subscribeMeasured, getMeasuredVersion, getMeasuredVersion)
+
+  // Card collapse state (THU-33), remembered per card across layers. A card
+  // with nothing active (no shadows, outline off) starts collapsed until the
+  // user opens it once.
+  const [cardPrefs, setCardPrefs] = useState<CardPrefs>(() => {
+    try { return JSON.parse(localStorage.getItem(CARD_PREFS_KEY) ?? '{}') as CardPrefs } catch { return {} }
+  })
+  const cardOpen = (id: string, emptyByDefault = false) => (cardPrefs[id] ?? (emptyByDefault ? 'closed' : 'open')) === 'open'
+  const cardState = (id: string, emptyByDefault = false): CardState => ({
+    open: cardOpen(id, emptyByDefault),
+    onToggle: () => {
+      const next: CardPrefs = { ...cardPrefs, [id]: cardOpen(id, emptyByDefault) ? 'closed' : 'open' }
+      setCardPrefs(next)
+      try { localStorage.setItem(CARD_PREFS_KEY, JSON.stringify(next)) } catch { /* per-viewer convenience only */ }
+    },
+  })
+
+  if (!layer) {
+    return (
+      <div className="p-4 text-xs text-gray-400 text-center">
+        Select a layer to edit properties
+      </div>
+    )
+  }
+
+  // Every property edit funnels through here. The first change of a gesture
+  // commits to undo history; continuations of the same gesture apply live
+  // (no history). Keyed by layer + which property changed so switching
+  // field/layer starts a fresh undo entry.
+  const update = (patch: Partial<ThumbnailLayer>) => {
+    const next = { ...layer, ...patch }
+    const key = `${layer.id}:${Object.keys(patch).sort().join(',')}`
+    if (beginsGesture(key)) onChange(next)
+    else onLiveChange(next)
+  }
+
+  const isMaskLayer = isMask(layer)
+  const isGroupLayer = layer.type === 'group'
+  const isTextLayer = layer.type === 'text'
+  const lv = liveAll && liveAll.id === layer.id ? liveAll : null
+  const dispX = lv ? lv.x : layer.x
+  const dispY = lv ? lv.y : layer.y
+  // Angle fields (style guide): the live value is the raw accumulated
+  // rotation; the stored value is shown as stored (it is wrapped on
+  // commit and on load, and mid-typing values must not fold).
+  const dispRot = lv ? lv.rotation : layer.rotation
+
+  // Size model (THU-33): every type shows width and height. Images and
+  // shapes store both; text stores an optional width (auto until set) and
+  // its height is font-driven; groups hold neither, their box is measured
+  // from the members and editing it scales them.
+  const measured = measuredBoxes.get(layer.id)
+  const sizeW = isGroupLayer ? measured?.w : isTextLayer ? (layer.width ?? measured?.w) : layer.width
+  const sizeH = isGroupLayer ? measured?.h : isTextLayer ? measured?.h : layer.height
+  const dispW = lv?.width ?? sizeW
+  const dispH = lv?.height ?? sizeH
+
+  // Aspect-ratio lock is per-layer + persisted on the layer itself.
+  // Undefined defaults to `true` — newly added layers start locked,
+  // matching every other vector editor's convention.
+  const aspectLocked = layer.aspectLocked ?? true
+  const toggleAspectLock = () => update({ aspectLocked: !aspectLocked })
+  // The locked ratio is always derived from the current box (not a stored
+  // "original"), so unlock, resize, re-lock pins whatever ratio is current.
+  const lockedRatio = (() => {
+    const w = sizeW ?? 0
+    const h = sizeH ?? 0
+    return h > 0 ? w / h : 1
+  })()
+
+  // Width/height inputs accept signed values on images and shapes: a
+  // negative number sets the corresponding flip flag and stores the
+  // magnitude. Zero leaves the flip state alone so typing "-" → "0" →
+  // digits doesn't bounce flip state mid-keystroke.
+  const handleWidthChange = (w: number) => {
+    const abs = Math.abs(w)
+    if (isGroupLayer) {
+      const cur = sizeW ?? 0
+      if (cur <= 0 || abs <= 0 || !onScaleGroup) return
+      const f = abs / cur
+      onScaleGroup(layer.id, f, aspectLocked ? f : 1)
+      return
+    }
+    if (isTextLayer) { if (abs > 0) update({ width: Math.round(abs) }); return }
+    const flipX = w < 0 ? true : (w > 0 ? false : !!layer.flipX)
+    if (aspectLocked && lockedRatio > 0) {
+      // The derived dimension keeps the exact ratio (THU-27); it is
+      // rounded only for shapes, which always take whole pixels.
+      const h = abs / lockedRatio
+      update({ width: abs, height: Math.max(1, layer.type === 'image' ? h : Math.round(h)), flipX })
+    } else {
+      update({ width: abs, flipX })
+    }
+  }
+  const handleHeightChange = (h: number) => {
+    const abs = Math.abs(h)
+    if (isGroupLayer) {
+      const cur = sizeH ?? 0
+      if (cur <= 0 || abs <= 0 || !onScaleGroup) return
+      const f = abs / cur
+      onScaleGroup(layer.id, aspectLocked ? f : 1, f)
+      return
+    }
+    if (isTextLayer) return
+    const flipY = h < 0 ? true : (h > 0 ? false : !!layer.flipY)
+    if (aspectLocked && lockedRatio > 0) {
+      const w = abs * lockedRatio
+      update({ height: abs, width: Math.max(1, layer.type === 'image' ? w : Math.round(w)), flipY })
+    } else {
+      update({ height: abs, flipY })
+    }
+  }
+
+  // Reset position/rotation (and for images, contain-fit scale) to the same
+  // defaults a freshly-added layer would have. Opacity isn't touched — the
+  // user might have intentionally dimmed an overlay and resetting it would
+  // be surprising.
+  const resetTransform = async () => {
+    if (layer.type === 'image' && layer.src) {
+      const { naturalW, naturalH } = await new Promise<{ naturalW: number; naturalH: number }>(resolve => {
+        const img = new Image()
+        img.onload = () => resolve({ naturalW: img.naturalWidth, naturalH: img.naturalHeight })
+        img.onerror = () => resolve({ naturalW: layer.width ?? CANVAS_W, naturalH: layer.height ?? CANVAS_H })
+        img.src = `file://${layer.src}`
+      })
+      const containScale = Math.min(1, CANVAS_W / naturalW, CANVAS_H / naturalH)
+      const width = Math.round(naturalW * containScale)
+      const height = Math.round(naturalH * containScale)
+      update({
+        x: Math.round((CANVAS_W - width) / 2),
+        y: Math.round((CANVAS_H - height) / 2),
+        rotation: 0,
+        width,
+        height,
+      })
+      return
+    }
+    const w = sizeW ?? 0
+    const h = sizeH ?? 0
+    update({
+      x: Math.round((CANVAS_W - w) / 2),
+      y: Math.round((CANVAS_H - h) / 2),
+      rotation: 0,
+    })
+  }
+
+  // Context line: which layer these properties belong to. The panel sits
+  // far from the Layers row, so the name and type repeat here.
+  const typeIcon = isMaskLayer ? <Blend size={11} className="text-amber-300/80" />
+    : layer.type === 'image' ? <ImageIcon size={11} />
+    : layer.type === 'text' ? <Type size={11} />
+    : layer.type === 'group' ? <Folder size={11} />
+    : layer.shapeType === 'ellipse' ? <Circle size={11} />
+    : layer.shapeType === 'polygon' ? <Pentagon size={11} />
+    : <Square size={11} />
+  const typeLabel = isMaskLayer ? 'Mask'
+    : layer.type === 'shape' ? (layer.shapeType === 'ellipse' ? 'Ellipse' : layer.shapeType === 'polygon' ? 'Polygon' : 'Rectangle')
+    : layer.type.charAt(0).toUpperCase() + layer.type.slice(1)
+
+  const labelCls = 'text-[10px] text-gray-400'
+  const mutedReason = isMaskLayer ? 'Off while this shape is a mask' : undefined
+  const paintable = layer.type === 'shape' || layer.type === 'text'
+  const fillFallback = layer.type === 'text' ? '#ffffff' : '#6366f1'
+  const hasSides = layer.type === 'shape' && layer.shapeType === 'polygon'
+  const hasRadius = layer.type === 'shape' && (layer.shapeType === 'rect' || layer.shapeType === 'polygon')
+  const shadowsCount = resolveShadows(layer).length
+
+  return (
+    <div className="p-2 flex flex-col gap-2 overflow-y-auto flex-1 min-h-0">
+      <div className="flex items-center gap-1.5 px-1 min-w-0 text-gray-400">
+        <span className="shrink-0">{typeIcon}</span>
+        <span className="text-[11px] text-gray-200 truncate">{layer.name}</span>
+        <span className="text-[10px] shrink-0">· {typeLabel}</span>
+      </div>
+
+      {/* Transform: the same four rows for every layer type. */}
+      <PanelCard
+        id="transform"
+        title="Transform"
+        summary={`${Math.round(layer.x)}, ${Math.round(layer.y)}${sizeW && sizeH ? ` · ${Math.round(sizeW)}×${Math.round(sizeH)}` : ''}${layer.rotation ? ` · ${round2(normalizeAngle(layer.rotation))}°` : ''}`}
+        headerTooltip={isGroupLayer ? 'Double-click a grouped layer on the canvas to select it.' : undefined}
+        control={(
+          <Tooltip content="Reset position and rotation (and, for images, the fitted size)">
+            <button
+              type="button"
+              onClick={() => { resetTransform().catch(() => {}) }}
+              className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
+            >
+              <RotateCcw size={10} />
+              Reset
+            </button>
+          </Tooltip>
+        )}
+        {...cardState('transform')}
+      >
+        <div className="grid grid-cols-2 gap-1.5">
+          <label className="flex flex-col gap-0.5">
+            <span className={labelCls}>X</span>
+            <NumberInput value={round2(dispX)} onChange={x => update({ x })} snapToStep={pixelSnapEnabled} className="w-full" />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className={labelCls}>Y</span>
+            <NumberInput value={round2(dispY)} onChange={y => update({ y })} snapToStep={pixelSnapEnabled} className="w-full" />
+          </label>
+        </div>
+        <div className="grid grid-cols-[1fr_auto_1fr] gap-1.5 items-end">
+          <label className="flex flex-col gap-0.5 min-w-0">
+            <span className={labelCls}>Width</span>
+            <NumberInput
+              value={layer.flipX && !isGroupLayer && !isTextLayer ? -round2(dispW ?? 0) : round2(dispW ?? 0)}
+              onChange={handleWidthChange}
+              snapToStep={pixelSnapEnabled}
+              className="w-full"
+            />
+          </label>
+          {isTextLayer ? (
+            <Tooltip content="Text height follows the font; width sets the wrapping box." side="top" triggerClassName="flex">
+              <span className="h-[26px] w-3 flex items-center justify-center text-gray-400"><Unlink2 size={13} className="rotate-90" /></span>
+            </Tooltip>
+          ) : (
+            <Tooltip
+              content={aspectLocked
+                ? 'Aspect ratio locked: changing width or height keeps the other in proportion. Click to unlock.'
+                : 'Lock the aspect ratio so width and height change together.'}
+              side="top"
+              triggerClassName="flex"
+            >
+              <button
+                type="button"
+                onClick={toggleAspectLock}
+                className={`h-[26px] w-3 flex items-center justify-center transition-colors ${
+                  aspectLocked ? 'text-accent-300 hover:text-accent-200' : 'text-gray-400 hover:text-gray-200'
+                }`}
+                aria-label={aspectLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+              >
+                <span className="rotate-90">{aspectLocked ? <Link2 size={13} /> : <Unlink2 size={13} />}</span>
+              </button>
+            </Tooltip>
+          )}
+          <label className="flex flex-col gap-0.5 min-w-0">
+            <span className={labelCls}>Height</span>
+            <NumberInput
+              value={layer.flipY && !isGroupLayer && !isTextLayer ? -round2(dispH ?? 0) : round2(dispH ?? 0)}
+              onChange={handleHeightChange}
+              snapToStep={pixelSnapEnabled}
+              disabled={isTextLayer}
+              className="w-full"
+            />
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <label className="flex flex-col gap-0.5">
+            <span className={labelCls}>Rotation °</span>
+            <NumberInput value={round2(dispRot)} onChange={rotation => update({ rotation })} wrap={normalizeAngle} snapToStep className="w-full" />
+          </label>
+          {isMaskLayer ? (
+            <Tooltip content="Opacity has no effect on a group mask; only its outline is used." side="left" triggerClassName="block">
+              <label className="flex flex-col gap-0.5 opacity-50">
+                <span className={labelCls}>Opacity %</span>
+                <NumberInput value={layer.opacity} onChange={() => {}} min={0} max={100} disabled className="w-full" />
+              </label>
+            </Tooltip>
+          ) : (
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>Opacity %</span>
+              <NumberInput value={Math.round(layer.opacity)} onChange={opacity => update({ opacity: Math.max(0, Math.min(100, opacity)) })} min={0} max={100} className="w-full" />
+            </label>
+          )}
+        </div>
+      </PanelCard>
+
+      {/* Shape geometry: sides and corner radius, out of Transform. */}
+      {(hasSides || hasRadius) && (
+        <PanelCard
+          id="shape"
+          title="Shape"
+          summary={[hasSides ? `${polygonSidesOf(layer)} sides` : '', hasRadius ? `radius ${layer.cornerRadius ?? 0}` : ''].filter(Boolean).join(' · ')}
+          {...cardState('shape')}
+        >
+          <div className={`grid gap-1.5 ${hasSides && hasRadius ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {hasSides && (
+              <label className="flex flex-col gap-0.5">
+                <span className={labelCls}>Sides</span>
+                <NumberInput
+                  min={POLYGON_MIN_SIDES}
+                  max={POLYGON_MAX_SIDES}
+                  value={polygonSidesOf(layer)}
+                  // Keeps the shape as regular as it was: the box height
+                  // follows the new side count's natural ratio, carrying
+                  // over whatever stretch the user had applied, and the
+                  // visual center stays put (lib/polygon.ts).
+                  onChange={sides => update(polygonSidesPatch(layer, sides))}
+                  className="w-full"
+                />
+              </label>
+            )}
+            {hasRadius && (() => {
+              // Corner radius is stored in pixels, independent of width and
+              // height, so corners stay circular through resizes. When the
+              // entered radius exceeds what the geometry can render (rect:
+              // half the short side; polygon: its inradius), the rendered
+              // radius shows beside it.
+              const sw = layer.width ?? 200
+              const sh = layer.height ?? 200
+              const maxR = layer.shapeType === 'polygon'
+                ? polygonMaxCornerRadius(polygonPoints(polygonSidesOf(layer), sw, sh))
+                : Math.min(sw, sh) / 2
+              const entered = layer.cornerRadius ?? 0
+              return (
+                <label className="flex flex-col gap-0.5">
+                  <span className={labelCls}>Corner radius</span>
+                  <NumberInput
+                    min={0}
+                    max={999}
+                    value={entered}
+                    onChange={cornerRadius => update({ cornerRadius })}
+                    inlineNote={entered > maxR ? (maxR % 1 === 0 ? String(maxR) : maxR.toFixed(1)) : undefined}
+                    className="w-full"
+                  />
+                </label>
+              )
+            })()}
+          </div>
+        </PanelCard>
+      )}
+
+      {/* Text: content, then the font controls, one card. */}
+      {isTextLayer && (
+        <PanelCard
+          id="text"
+          title="Text"
+          summary={`${layer.fontFamily ?? 'Arial'} ${layer.fontSize ?? 48}`}
+          {...cardState('text')}
+        >
+          <TemplateBodyEditor
+            value={layer.text ?? ''}
+            onSave={v => update({ text: v })}
+            placeholder="Text…"
+            knownKeys={knownKeys}
+            inapplicableKeys={inapplicableKeys}
+            insertRef={textInsertRef}
+            multiline
+            minHeight={54}
+          />
+          <MergeFieldPicker
+            keys={pickerKeys}
+            onInsert={k => textInsertRef.current?.(`{${k}}`)}
+          />
+          {(() => {
+            const fam = layer.fontFamily ?? 'Arial'
+            const famMissing = fontsLoaded && !systemFonts.includes(fam)
+            const applyFontFamily = (next: string) => {
+              const variants = fontVariantMap[next]
+              if (variants && variants.length > 0) {
+                // Try to preserve current weight; fall back to first variant
+                const cur = layer.fontStyle ?? 'normal'
+                const match = variants.find(v => v.css === cur) ?? variants.find(v => v.css === 'normal') ?? variants[0]
+                update({ fontFamily: next, fontStyle: match.css })
+              } else {
+                update({ fontFamily: next })
+              }
+              // Any pick becomes the new last-used; the quick-pick link
+              // hides by itself since last-used now equals the layer's
+              // family (THU-6).
+              window.api.thumbnailSetLastFont(next).catch(() => {})
+              setLastUsedFont(next)
+            }
+            return (
+              <>
+                <label className="flex flex-col gap-0.5 mt-1">
+                  <span className={labelCls}>Font</span>
+                  <select
+                    value={fam}
+                    onChange={e => applyFontFamily(e.target.value)}
+                    className={`select-themed bg-navy-900 border rounded-lg pl-2 pr-7 py-1 text-xs w-full ${famMissing ? 'border-amber-500/60 text-amber-300' : 'border-white/10 text-gray-200'}`}
+                    style={{ fontFamily: fam }}
+                  >
+                    {/* Keep the missing family selectable/displayed instead of
+                        the select silently showing nothing. Options inherit the
+                        select's text color, so when it's amber (missing state)
+                        each installed option pins itself back to the normal
+                        text color — only the missing entry reads amber. */}
+                    {famMissing && <option value={fam} style={{ color: '#fbbf24' }}>{fam} (missing)</option>}
+                    {systemFonts.map(f => (
+                      <option key={f} value={f} style={{ fontFamily: f, color: '#e5e7eb' }}>{f}</option>
+                    ))}
+                  </select>
+                </label>
+                {famMissing && (
+                  <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                    <AlertTriangle size={10} className="shrink-0" />
+                    Not installed. Pick a replacement to resume image updates.
+                  </p>
+                )}
+                {fontQueryFailed && !fontsLoaded && (
+                  <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                    <AlertTriangle size={10} className="shrink-0" />
+                    Could not read installed fonts; showing a minimal list.
+                  </p>
+                )}
+                {/* Quick-pick for the last-used family (THU-6). Hidden when
+                    it IS the current family, and never offers a font that
+                    isn't installed. */}
+                {lastUsedFont && lastUsedFont !== fam && systemFonts.includes(lastUsedFont) && (
+                  <Tooltip content={`Switch to ${lastUsedFont}`} triggerClassName="self-start">
+                    <button
+                      onClick={() => applyFontFamily(lastUsedFont)}
+                      className="text-[10px] text-gray-400 hover:text-accent-300 transition-colors"
+                    >
+                      Last used: <span className="text-gray-300" style={{ fontFamily: lastUsedFont }}>{lastUsedFont}</span>
+                    </button>
+                  </Tooltip>
+                )}
+              </>
+            )
+          })()}
+          <div className="grid grid-cols-2 gap-1.5">
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>Style</span>
+              {(() => {
+                const variants = fontVariantMap[layer.fontFamily ?? 'Arial'] ?? []
+                if (variants.length > 0) {
+                  const cur = layer.fontStyle ?? 'normal'
+                  const matched = variants.find(v => v.css === cur) ?? variants[0]
+                  return (
+                    <select
+                      value={matched.css}
+                      onChange={e => update({ fontStyle: e.target.value })}
+                      className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
+                    >
+                      {variants.map(v => (
+                        <option key={v.name} value={v.css}>{v.name}</option>
+                      ))}
+                    </select>
+                  )
+                }
+                return (
+                  <select
+                    value={layer.fontStyle ?? 'normal'}
+                    onChange={e => update({ fontStyle: e.target.value })}
+                    className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="bold">Bold</option>
+                    <option value="italic">Italic</option>
+                    <option value="bold italic">Bold Italic</option>
+                  </select>
+                )
+              })()}
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>Size</span>
+              <NumberInput
+                min={8}
+                max={500}
+                value={layer.fontSize ?? 48}
+                onChange={fontSize => update({ fontSize })}
+              />
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>Line height %</span>
+              {/* Stored as a multiplier (Konva-native); the UI speaks
+                  percent to match the other % fields. */}
+              <NumberInput
+                min={50}
+                max={300}
+                value={Math.round((layer.lineHeight ?? 1) * 100)}
+                onChange={p => update({ lineHeight: p / 100 })}
+              />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className={labelCls}>Align</span>
+              <select
+                value={layer.align ?? 'left'}
+                onChange={e => update({ align: e.target.value as 'left' | 'center' | 'right' })}
+                className="select-themed bg-navy-900 border border-white/10 rounded-lg pl-2 pr-7 py-1 text-xs text-gray-200"
+              >
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
+          </div>
+          {/* Letter case (thumbnails #7): radio-style group sized to the
+              panel's input rows. div, not label: a label would forward
+              clicks on the caption to the first button. */}
+          <div className="flex flex-col gap-0.5">
+            <span className={labelCls}>Case</span>
+            <div className="flex bg-navy-900 border border-white/10 rounded-lg overflow-hidden">
+              {TEXT_TRANSFORM_OPTIONS.map(opt => {
+                const selected = (layer.textTransform ?? 'none') === opt.value
+                return (
+                  <Tooltip key={opt.value} content={opt.tip} triggerClassName="flex-1 flex min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => update({ textTransform: opt.value })}
+                      className={`flex-1 py-1 text-xs transition-colors ${
+                        selected ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  </Tooltip>
+                )
+              })}
+            </div>
+          </div>
+        </PanelCard>
+      )}
+
+      {/* Fill and Stroke, one card each, the mode switch in the header. */}
+      {paintable && (
+        <PanelCard
+          id="fill"
+          title="Fill"
+          summary={paintSummary(layer, 'fill', fillFallback)}
+          mutedReason={mutedReason}
+          control={<PaintModeToggle layer={layer} update={update} paint="fill" fallback={fillFallback} />}
+          {...cardState('fill')}
+        >
+          <GradientFillControl layer={layer} update={update} fallback={fillFallback} headerless />
+        </PanelCard>
+      )}
+      {paintable && (
+        <PanelCard
+          id="stroke"
+          title="Stroke"
+          summary={`${paintSummary(layer, 'stroke', '#000000')}, ${layer.strokeWidth ?? 0} px`}
+          mutedReason={mutedReason}
+          control={<PaintModeToggle layer={layer} update={update} paint="stroke" fallback="#000000" />}
+          {...cardState('stroke')}
+        >
+          <GradientFillControl layer={layer} update={update} fallback="#000000" paint="stroke" headerless />
+          <label className="flex flex-col gap-0.5">
+            <span className={labelCls}>Width</span>
+            <NumberInput min={0} max={100} placeholder="0" value={layer.strokeWidth ?? 0}
+              onChange={strokeWidth => update({ strokeWidth })}
+              className="w-full" />
+          </label>
+        </PanelCard>
+      )}
+
+      <ShadowsCard layer={layer} update={update} muted={mutedReason} state={cardState('shadows', shadowsCount === 0)} />
+      <OutlineCard layer={layer} update={update} muted={mutedReason} state={cardState('outline', !layer.outlineEnabled)} />
+      {(layer.type === 'image' || isGroupLayer) && (
+        <FiltersCard layer={layer} update={update} state={cardState('filters', !layer.filtersEnabled)} />
+      )}
+    </div>
   )
 }
 
@@ -6432,6 +6609,13 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     const next = moveAmongSiblings(layers, id, direction)
     if (next) commitLayers(next)
   }, [layers, commitLayers])
+
+  /** The Transform card's width and height for a group (THU-33): scale the
+   *  members by the factors, the same math a canvas resize bakes in. */
+  const scaleGroupFromPanel = useCallback((id: string, sx: number, sy: number) => {
+    if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 0 || sy <= 0) return
+    commitLayers(scaleGroupMembers(layersRef.current, id, sx, sy, pixelSnapEnabledRef.current))
+  }, [commitLayers])
 
   // ── Grouping (THU-18) ──────────────────────────────────────────────────
   const groupCheck = useMemo(() => canGroup(layers, selectedIds), [layers, selectedIds])
@@ -9506,7 +9690,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                     a collapse round-trip. */}
                 <div className={`flex flex-col flex-1 overflow-hidden min-h-0${propertiesCollapsed ? ' hidden' : ''}`}>
                   <PaletteContext.Provider value={paletteCtx}>
-                    <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} pixelSnapEnabled={pixelSnapEnabled} />
+                    <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onLiveChange={liveUpdateLayer} onScaleGroup={scaleGroupFromPanel} systemFonts={systemFonts} fontVariantMap={fontVariantMap} fontsLoaded={fontsLoaded} fontQueryFailed={fontQueryFailed} standalone={currentStream?.meta?.isSeries === false} pixelSnapEnabled={pixelSnapEnabled} />
                   </PaletteContext.Provider>
                 </div>
               </div>
@@ -9684,7 +9868,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 <span className="font-mono text-[11px] text-gray-200 break-all">{basename}</span>
                                 <span className="text-[10px] text-gray-400 tabular-nums">
                                   {dims ? `${dims.w} × ${dims.h}` : 'Loading…'}
-                                  {sizeText && <span className="text-gray-500"> · {sizeText}</span>}
+                                  {sizeText && <span className="text-gray-400"> · {sizeText}</span>}
                                 </span>
                               </div>
                             )
