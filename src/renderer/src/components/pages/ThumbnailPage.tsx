@@ -7087,7 +7087,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   }, [commitLayers])
 
   // ── Group masks (THU-21) ───────────────────────────────────────────────
-  const useAsGroupMask = useCallback((id: string) => {
+  // (Named without a "use" prefix: it is a callback, and the rules-of-hooks
+  // lint reads any use-prefixed identifier as a hook.)
+  const makeGroupMask = useCallback((id: string) => {
     const next = setGroupMask(layersRef.current, id)
     if (next) commitLayers(next)
   }, [commitLayers])
@@ -7212,7 +7214,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
             key: 'use-as-mask', icon: <MaskActionIcon badge="group" />, tone: 'amber',
             label: 'Use as group mask (only its outline clips the group)',
             disabled: !check.ok, reason: check.reason,
-            affects: [single.parentId, ...subtreeIds(layers, single.parentId)], onClick: () => useAsGroupMask(single.id),
+            affects: [single.parentId, ...subtreeIds(layers, single.parentId)], onClick: () => makeGroupMask(single.id),
           })
         }
         // THU-1: mask the layer directly below. Lights that layer (with
@@ -7230,7 +7232,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       }
     }
     return out
-  }, [layers, selectedIds, groupCheck, toggleSelectedVisibility, duplicateSelected, deleteSelected, groupSelected, ungroupSelected, useAsGroupMask, releaseMask, applyMaskBelow])
+  }, [layers, selectedIds, groupCheck, toggleSelectedVisibility, duplicateSelected, deleteSelected, groupSelected, ungroupSelected, makeGroupMask, releaseMask, applyMaskBelow])
 
   /** Toggle flipX / flipY on every selected layer. Each click on the
    *  toolbar button is a single undo entry that flips all selected
@@ -9198,7 +9200,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             className={item}
                             onMouseEnter={() => setHighlighted({ ids: new Set([s.id]), tone: 'amber' })}
                             onMouseLeave={() => setHighlighted(NO_HIGHLIGHT)}
-                            onClick={() => { useAsGroupMask(s.id); expandGroup(); close() }}
+                            onClick={() => { makeGroupMask(s.id); expandGroup(); close() }}
                           >
                             {s.shapeType === 'ellipse' ? <Circle size={12} className="shrink-0 text-gray-400" /> : s.shapeType === 'polygon' ? <Pentagon size={12} className="shrink-0 text-gray-400" /> : s.shapeType === 'arrow' ? <ArrowBigRight size={12} className="shrink-0 text-gray-400" /> : <Square size={12} className="shrink-0 text-gray-400" />}
                             <span className="truncate">{s.name}</span>

@@ -124,6 +124,24 @@ export function ThumbImage({
     if (el && el.complete && el.naturalWidth > 0) { setStatus('loaded'); onLoad?.({ width: el.naturalWidth, height: el.naturalHeight }) }
   })
 
+  // Pre-scaled version (STR-17). Requested whenever the source may have
+  // changed (path, thumbsKey, a hydration); main answers at once from the
+  // cache or later through the ready event. Reset to the full image in the
+  // meantime, so a re-rendered thumbnail is never shown stale. Declared up
+  // here with the other hooks, above the placeholder return, for the same
+  // reason as imgRef: the first build of STR-17 had these below it, and a
+  // row whose status flipped to a placeholder state threw React error 300
+  // (found 2026-09-19 on the packaged build after the window sat idle).
+  const [smallSrc, setSmallSrc] = useState<string | null>(null)
+  useEffect(() => {
+    if (!small || !effectiveIsLocal) { setSmallSrc(null); return }
+    let cancelled = false
+    setSmallSrc(null)
+    window.api.getRowThumb(path).then(url => { if (!cancelled && url) setSmallSrc(url) }).catch(() => {})
+    const unsub = subscribeRowThumbReady(({ path: p, url }) => { if (!cancelled && p === path) setSmallSrc(url) })
+    return () => { cancelled = true; unsub() }
+  }, [small, path, thumbsKey, effectiveIsLocal])
+
   if (status === 'cloud' || status === 'syncing' || status === 'error') {
     const baseCls = 'flex flex-col items-center justify-center gap-1 bg-navy-800/40'
     const cls = `${baseCls} ${placeholderClassName ?? className ?? ''}`
@@ -143,20 +161,6 @@ export function ThumbImage({
       </Tooltip>
     )
   }
-
-  // Pre-scaled version (STR-17). Requested whenever the source may have
-  // changed (path, thumbsKey, a hydration); main answers at once from the
-  // cache or later through the ready event. Reset to the full image in the
-  // meantime, so a re-rendered thumbnail is never shown stale.
-  const [smallSrc, setSmallSrc] = useState<string | null>(null)
-  useEffect(() => {
-    if (!small || !effectiveIsLocal) { setSmallSrc(null); return }
-    let cancelled = false
-    setSmallSrc(null)
-    window.api.getRowThumb(path).then(url => { if (!cancelled && url) setSmallSrc(url) }).catch(() => {})
-    const unsub = subscribeRowThumbReady(({ path: p, url }) => { if (!cancelled && p === path) setSmallSrc(url) })
-    return () => { cancelled = true; unsub() }
-  }, [small, path, thumbsKey, effectiveIsLocal])
 
   const src = smallSrc ?? `${toFileUrl(path)}?t=${thumbsKey}&r=${reloadKey}`
 

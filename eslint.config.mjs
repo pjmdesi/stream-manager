@@ -23,6 +23,11 @@ export default [
     plugins: { 'react-hooks': reactHooks },
     rules: {
       'react-hooks/exhaustive-deps': 'off',
+      // A hook placed after an early return changes the component's hook
+      // count between renders and throws React error 300 at runtime, on
+      // whatever render happens to take the early path. Lint catches it at
+      // the desk instead (enabled 2026-09-19 after ThumbImage shipped one).
+      'react-hooks/rules-of-hooks': 'error',
       'no-restricted-syntax': [
         'error',
         {

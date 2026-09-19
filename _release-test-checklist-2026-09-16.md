@@ -2,6 +2,10 @@
 
 Build: Stream Manager 2.6.0_DEV.exe from dev @ 4638615 (the STR-17 commit; the dist cut on 2026-09-16 for the row-thumbnail test is this commit). Fixes found during the sweep get a fresh build and an updated hash here.
 
+Sweep fixes so far (each needs a fresh build; update the hash above when cut):
+
+- 2026-09-19: the streams page threw React error 300 ("Something went wrong on this page") after the window sat idle. Cause: STR-17 declared two hooks in ThumbImage below the cloud/syncing/error early return, so a row whose image flipped into a placeholder state changed its hook count. Hooks moved above the return; `react-hooks/rules-of-hooks` enabled in lint so the class cannot ship again.
+
 FROZEN 2026-09-16: the queue is fully built. Code changes from here are limited to bugs and fixes found during this sweep.
 
 Batch: no single theme. The Electron 34 to 44 upgrade, a converter and cloud round, stream list additions, player navigation and track naming, and a large thumbnail editor batch (groups, masks, effects on groups, gradient strokes and kinds, the properties panel rework, arrows, layer naming), plus the row-thumbnail cache. All checks run against the PACKAGED build, not the dev server. The relay and Twitch items pair with a real stream night.
@@ -24,7 +28,7 @@ Batch: no single theme. The Electron 34 to 44 upgrade, a converter and cloud rou
 - [ ] Reschedule: the second step (push the new date) stays open until you choose; the push you tick runs.
 - [ ] Archived marker in the files grid is right on first open for an archived file and appears for a freshly finished archive without reopening the stream.
 - [ ] Send a cloud-only video to the player: confirm-only dialog, download runs in the widget, the video opens in the player without switching pages; the Player nav item shows it.
-- [ ] Row thumbnails (STR-17): second launch on this build is not slower than before; thumbnail column drag with 200 rows is smooth; hover zoom is smooth; Settings cache size includes the rows folder; Clear cache while the list is open keeps rows showing and refills; re-render a thumbnail in the editor and the row updates; a cloud-only thumbnail keeps its cloud icon.
+- [ ] Row thumbnails (STR-17), on the rebuilt exe: leave the streams page open for an hour or through a stream (rows flipping to a cloud or syncing placeholder must not blank the page); second launch on this build is not slower than before; thumbnail column drag with 200 rows is smooth; hover zoom is smooth; Settings cache size includes the rows folder; Clear cache while the list is open keeps rows showing and refills; re-render a thumbnail in the editor and the row updates; a cloud-only thumbnail keeps its cloud icon.
 - [ ] Drag a tag chip in the sidebar with the body scrolled: no regression in chip reorder (auto-scroll only fires near the body's edges).
 
 ### Converter and cloud (CONV-8, CONV-9, CONV-10, CONV-11, CONV-12, APP-36, APP-37, COMB-3, COMB-4)
