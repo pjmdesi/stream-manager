@@ -14,6 +14,21 @@ import type { StreamMeta, StreamFolder } from '../types'
 // here so display code outside the streams page can render titles without
 // importing that 6k-line module.
 
+/** The merge fields offered in every title and description picker: the
+ *  keys `assembleFields` resolves, minus the legacy aliases. One list for
+ *  the streams sidebar and the Templates modal, so the two cannot drift
+ *  (they did: the modal kept a private copy with `game` after the topic
+ *  rename, so `{topic}` showed as raw text in its editor, found 2026-09-24). */
+export const TITLE_MERGE_KEYS = ['topic', 'topics', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
+/** Legacy aliases still resolved and rendered as chips (templates authored
+ *  before the topic/game rename keep working) but no longer offered in the
+ *  pickers. `{topic}`/`{topics}` are the canonical replacements. */
+export const TITLE_LEGACY_KEYS = ['game', 'games'] as const
+/** Every key the title engine recognizes: canonical picker keys plus the
+ *  legacy aliases. Drives chip rendering and the preview detector, NOT the
+ *  pickers. */
+export const TITLE_KNOWN_KEYS = [...TITLE_MERGE_KEYS, ...TITLE_LEGACY_KEYS] as const
+
 /** `{key}` → fields[key], leaving unknown placeholders untouched. */
 export function applyMergeFields(template: string, fields: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)

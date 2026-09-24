@@ -49,7 +49,7 @@ import { releaseThumbDecodes } from '../ui/VideoThumb'
 import { StreamFilesGrid, parseSmThumbnailOrdinal, type FilesGridHandle } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
-import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber } from '../../lib/streamTitle'
+import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber, TITLE_MERGE_KEYS, TITLE_KNOWN_KEYS } from '../../lib/streamTitle'
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import { TwitchChannelPanel } from '../streams/TwitchChannelPanel'
@@ -249,18 +249,13 @@ function applyMergeFields(template: string, fields: Record<string, string>): str
   return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
 }
 
-/** Known YouTube-title merge fields. The set of keys the title template
- *  engine resolves at render time — also drives the preview detector
- *  in the sidebar (the preview only surfaces when one of these tokens
- *  appears verbatim in the title field). */
-const YT_TITLE_MERGE_KEYS = ['topic', 'topics', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
-/** Legacy aliases still resolved + rendered as chips (so templates authored
- *  before the topic/game rename keep working) but no longer offered in the
- *  merge-field picker. `{topic}`/`{topics}` are the canonical replacements. */
-const YT_TITLE_LEGACY_KEYS = ['game', 'games'] as const
-/** Every key the title engine recognizes — canonical picker keys plus legacy
- *  aliases. Drives chip rendering + the preview detector, NOT the picker. */
-const YT_TITLE_KNOWN_KEYS = [...YT_TITLE_MERGE_KEYS, ...YT_TITLE_LEGACY_KEYS] as const
+/** Known YouTube-title merge fields, shared with the Templates modal through
+ *  lib/streamTitle so the two surfaces cannot drift: the picker keys, and
+ *  every key the engine recognizes (picker keys plus legacy aliases), which
+ *  drives chip rendering and the sidebar's preview detector (the preview
+ *  only surfaces when one of these tokens appears verbatim in the field). */
+const YT_TITLE_MERGE_KEYS = TITLE_MERGE_KEYS
+const YT_TITLE_KNOWN_KEYS = TITLE_KNOWN_KEYS
 
 /** Platform title length limits, counted against the *resolved* title
  *  (merge fields substituted). YouTube truncates video titles past 100

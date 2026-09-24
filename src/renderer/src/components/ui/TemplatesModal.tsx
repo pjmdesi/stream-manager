@@ -10,11 +10,16 @@ import { useStore } from '../../hooks/useStore'
 import type { YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate } from '../../types'
 import { ytTagCharCount, YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
+import { TITLE_MERGE_KEYS, TITLE_KNOWN_KEYS } from '../../lib/streamTitle'
 
-// Merge-field key sets — same as the sidebar's title field, plus
-// `season_links` (description-only, resolved async at apply time).
-const TITLE_MERGE_KEYS = ['game', 'season', 'episode', 'tagline', 'title', 'total_episodes'] as const
+// Merge-field key sets come from the title engine, the same lists the
+// sidebar's fields use: the pickers offer the canonical keys, the editors
+// also chip the legacy aliases (`game`, `games`) so older templates read
+// right. Descriptions add `season_links` (description-only, resolved async
+// at apply time).
 const DESCRIPTION_MERGE_KEYS = [...TITLE_MERGE_KEYS, 'season_links'] as const
+const TITLE_KNOWN_SET: ReadonlySet<string> = new Set<string>(TITLE_KNOWN_KEYS)
+const DESCRIPTION_KNOWN_SET: ReadonlySet<string> = new Set<string>([...TITLE_KNOWN_KEYS, 'season_links'])
 
 /** A merge-field key rendered as the editors' chip, for instructional
  *  prose — the braces convention is gone from the UI; the chip is the
@@ -33,7 +38,6 @@ function TitleForm({ initial, onSave, onCancel }: {
   const [name, setName] = useState(initial.name ?? '')
   const [template, setTemplate] = useState(initial.template ?? '')
   const [error, setError] = useState('')
-  const keySet = useMemo(() => new Set<string>(TITLE_MERGE_KEYS as readonly string[]), [])
   const insertRef = useRef<((text: string) => void) | null>(null)
   const handleSave = () => {
     if (!name.trim()) { setError('Name is required.'); return }
@@ -52,7 +56,7 @@ function TitleForm({ initial, onSave, onCancel }: {
         <TemplateBodyEditor
           value={template}
           onSave={setTemplate}
-          knownKeys={keySet}
+          knownKeys={TITLE_KNOWN_SET}
           insertRef={insertRef}
           placeholder="{topic} S{season} — Part {episode} of {total_episodes} | {tagline}"
         />
@@ -75,7 +79,6 @@ function DescriptionForm({ initial, onSave, onCancel }: {
   const [name, setName] = useState(initial.name ?? '')
   const [description, setDescription] = useState(initial.description ?? '')
   const [error, setError] = useState('')
-  const keySet = useMemo(() => new Set<string>(DESCRIPTION_MERGE_KEYS as readonly string[]), [])
   const insertRef = useRef<((text: string) => void) | null>(null)
   const handleSave = () => {
     if (!name.trim()) { setError('Name is required.'); return }
@@ -97,7 +100,7 @@ function DescriptionForm({ initial, onSave, onCancel }: {
         <TemplateBodyEditor
           value={description}
           onSave={setDescription}
-          knownKeys={keySet}
+          knownKeys={DESCRIPTION_KNOWN_SET}
           insertRef={insertRef}
           placeholder="Stream description…"
           multiline

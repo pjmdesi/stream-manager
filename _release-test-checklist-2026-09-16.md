@@ -5,6 +5,7 @@ Build: Stream Manager 2.6.0_DEV.exe from dev @ 4638615 (the STR-17 commit; the d
 Sweep fixes so far (each needs a fresh build; update the hash above when cut):
 
 - 2026-09-19: the streams page threw React error 300 ("Something went wrong on this page") after the window sat idle. Cause: STR-17 declared two hooks in ThumbImage below the cloud/syncing/error early return, so a row whose image flipped into a placeholder state changed its hook count. Hooks moved above the return; `react-hooks/rules-of-hooks` enabled in lint so the class cannot ship again.
+- 2026-09-24: the Templates modal's title and description editors showed `{topic}` as raw text and still offered `game` in their Insert row. Cause: the modal kept a private copy of the merge-key list from before the topic rename, while the sidebar had the updated list. Both now read `TITLE_MERGE_KEYS` and `TITLE_KNOWN_KEYS` from `lib/streamTitle.ts`: pickers offer topic and topics, editors also chip the legacy game and games so older templates read right. Check: edit a title template containing `{topic}`, it renders as a chip and the Insert row reads topic, topics, season, episode, tagline, title, total_episodes; a template with `{game}` still shows a chip and still resolves; same in the description editor with season_links added.
 
 FROZEN 2026-09-16: the queue is fully built. Code changes from here are limited to bugs and fixes found during this sweep.
 
