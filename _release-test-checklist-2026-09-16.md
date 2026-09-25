@@ -6,6 +6,7 @@ Sweep fixes so far (each needs a fresh build; update the hash above when cut):
 
 - 2026-09-19: the streams page threw React error 300 ("Something went wrong on this page") after the window sat idle. Cause: STR-17 declared two hooks in ThumbImage below the cloud/syncing/error early return, so a row whose image flipped into a placeholder state changed its hook count. Hooks moved above the return; `react-hooks/rules-of-hooks` enabled in lint so the class cannot ship again.
 - 2026-09-24: the Templates modal's title and description editors showed `{topic}` as raw text and still offered `game` in their Insert row. Cause: the modal kept a private copy of the merge-key list from before the topic rename, while the sidebar had the updated list. Both now read `TITLE_MERGE_KEYS` and `TITLE_KNOWN_KEYS` from `lib/streamTitle.ts`: pickers offer topic and topics, editors also chip the legacy game and games so older templates read right. Check: edit a title template containing `{topic}`, it renders as a chip and the Insert row reads topic, topics, season, episode, tagline, title, total_episodes; a template with `{game}` still shows a chip and still resolves; same in the description editor with season_links added.
+- 2026-09-25: file sizes disagreed between surfaces (a recording read 7.9 GB in the files grid and 8.51 GB in the cloud sync dialog). Cause: nine private byte formatters, half dividing by 1024 and half by 1000, with different decimals. One shared `lib/formatBytes.ts` now serves all of them, counting by 1024 with KB, MB, GB labels and three significant figures, the way Explorer shows sizes. Check: the same file reads the same in the files grid, the player's video rows, the send-to-converter dialog, the converter and combine rows, the cloud sync dialog, the streams header library size and its tooltip, the Settings cache size, and the thumbnail editor's asset tooltips; each matches Explorer's Properties size to the shown precision.
 
 FROZEN 2026-09-16: the queue is fully built. Code changes from here are limited to bugs and fixes found during this sweep.
 
@@ -15,18 +16,18 @@ Batch: no single theme. The Electron 34 to 44 upgrade, a converter and cloud rou
 
 ### Under the hood (APP-1, APP-24, APP-27)
 
-- [ ] Two-launch check on Electron 44: with the app in the tray, double-click the exe again; the running instance comes to the front in well under a second, no second tray icon, no window flash, and ffprobe still works hours later (open a file's info).
-- [ ] Folder pickers open in the folder last chosen for that setting, else the streams folder, else Videos; the JSON import pickers (YouTube setup, palette import) open in Downloads.
-- [ ] No 1 px tall buttons in toolbars after the Tooltip trigger change: eyeball the player transport row, the clip toolbar, the converter row actions, the thumbnail editor toolbar.
-- [ ] Nothing looks or behaves differently for the Electron upgrade across a normal session (a black window on first launch is APP-33; note it if it happens, with what was on screen).
+- [x] Two-launch check on Electron 44: with the app in the tray, double-click the exe again; the running instance comes to the front in well under a second, no second tray icon, no window flash, and ffprobe still works hours later (open a file's info).
+- [x] Folder pickers open in the folder last chosen for that setting, else the streams folder, else Videos; the JSON import pickers (YouTube setup, palette import) open in Downloads.
+- [x] No 1 px tall buttons in toolbars after the Tooltip trigger change: eyeball the player transport row, the clip toolbar, the converter row actions, the thumbnail editor toolbar.
+- [x] Nothing looks or behaves differently for the Electron upgrade across a normal session (a black window on first launch is APP-33; note it if it happens, with what was on screen).
 
 ### Streams page (STR-2, STR-3, STR-18, STR-19, STR-20, STR-21, STR-23, STR-24, STR-17)
 
-- [ ] Header shows the library size next to the item count; hover breaks it down by videos, clips, images; with cloud sync active it reads as used on this PC out of the full size.
-- [ ] Rows show views, likes, dislikes beside the date for linked videos; hover shows exact figures; counts refresh during a session without a manual reload.
-- [ ] With Twitch connected, close the sidebar: the Twitch channel panel shows the current title, category, and tag count (tags in the tooltip) and links to the matching stream; that stream carries the Twitch badge in its row; push to Twitch and confirm the panel updates at once.
-- [ ] Delete a stream: the row flashes red and slides shut on confirm; no wave of cloud downloads afterward (watch the sync client), which is STR-23's fix.
-- [ ] Reschedule: the second step (push the new date) stays open until you choose; the push you tick runs.
+- [x] Header shows the library size next to the item count; hover breaks it down by videos, clips, images; with cloud sync active it reads as used on this PC out of the full size.
+- [x] Rows show views, likes, dislikes beside the date for linked videos; hover shows exact figures; counts refresh during a session without a manual reload.
+- [x] With Twitch connected, close the sidebar: the Twitch channel panel shows the current title, category, and tag count (tags in the tooltip) and links to the matching stream; that stream carries the Twitch badge in its row; push to Twitch and confirm the panel updates at once.
+- [x] Delete a stream: the row flashes red and slides shut on confirm; no wave of cloud downloads afterward (watch the sync client), which is STR-23's fix.
+- [x] Reschedule: the second step (push the new date) stays open until you choose; the push you tick runs.
 - [ ] Archived marker in the files grid is right on first open for an archived file and appears for a freshly finished archive without reopening the stream.
 - [ ] Send a cloud-only video to the player: confirm-only dialog, download runs in the widget, the video opens in the player without switching pages; the Player nav item shows it.
 - [ ] Row thumbnails (STR-17), on the rebuilt exe: leave the streams page open for an hour or through a stream (rows flipping to a cloud or syncing placeholder must not blank the page); second launch on this build is not slower than before; thumbnail column drag with 200 rows is smooth; hover zoom is smooth; Settings cache size includes the rows folder; Clear cache while the list is open keeps rows showing and refills; re-render a thumbnail in the editor and the row updates; a cloud-only thumbnail keeps its cloud icon.

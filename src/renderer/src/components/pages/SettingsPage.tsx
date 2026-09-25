@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Plus, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
 import { Youtube, Twitch, Claude } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
+import { formatBytes } from '../../lib/formatBytes'
 import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { Button } from '../ui/Button'
@@ -12,14 +13,6 @@ import { DumpConvertExplainer } from '../DumpConvertExplainer'
 import type { ConversionPreset, ThumbnailTemplate, Page } from '../../types'
 import { isClipExportCompatible } from '../../lib/clipExport'
 import { DEFAULT_TRACK_NAME_SLOTS } from '../../lib/trackNames'
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
-}
 
 function DirInput({
   label,

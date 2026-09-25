@@ -11,6 +11,7 @@ import { VideoThumb } from '../ui/VideoThumb'
 import { FileDropZone } from '../ui/FileDropZone'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { displayPath } from '../../lib/displayPath'
+import { formatBytes } from '../../lib/formatBytes'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { subscribeHydration } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
@@ -92,12 +93,6 @@ function formatDur(sec: number): string {
   const s = Math.floor(sec % 60)
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   return `${m}:${String(s).padStart(2, '0')}`
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
-  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
 function parseTimestamp(filename: string): Date | null {

@@ -8,19 +8,12 @@ import { TruncatedText } from '../ui/TruncatedText'
 import { FileDropZone } from '../ui/FileDropZone'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useInUse } from '../../hooks/useInUse'
+import { formatBytes } from '../../lib/formatBytes'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { getCachedHydration, rememberHydration, rememberHydrationOne, stalePaths, subscribeHydration } from '../../lib/hydrationCache'
 import { videoMapKey } from '../../lib/videoMapKey'
 import type { ClipDraft, StreamFolder, VideoEntry, VideoInfo } from '../../types'
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let val = bytes / 1024
-  let i = 0
-  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++ }
-  return `${val.toFixed(val >= 10 ? 0 : 1)} ${units[i]}`
-}
 
 function formatTimecode(seconds: number): string {
   if (!isFinite(seconds) || seconds <= 0) return '0:00'

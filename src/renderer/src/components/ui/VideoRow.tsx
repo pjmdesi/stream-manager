@@ -3,15 +3,8 @@ import { CloudCheck, Cloud, Loader2 } from 'lucide-react'
 import { VideoThumb } from './VideoThumb'
 import { Tooltip } from './Tooltip'
 import type { VideoEntry, VideoInfo } from '../../types'
+import { formatBytes } from '../../lib/formatBytes'
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let val = bytes / 1024
-  let i = 0
-  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++ }
-  return `${val.toFixed(val >= 10 ? 0 : 1)} ${units[i]}`
-}
 
 function formatTimecode(seconds: number): string {
   if (!isFinite(seconds) || seconds <= 0) return '0:00'

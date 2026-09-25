@@ -9,6 +9,7 @@ import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
+import { formatBytes } from '../../lib/formatBytes'
 import { PresetsModal } from '../preset-editor/PresetsModal'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { VideoThumb } from '../ui/VideoThumb'
@@ -27,13 +28,6 @@ const ROW_ACTION_GREEN = `${ROW_ACTION_BASE} hover:text-green-400 hover:bg-green
 const ROW_ACTION_RED = `${ROW_ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
 const ROW_ACTION_YELLOW = `${ROW_ACTION_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
 const ROW_ACTION_BLUE = `${ROW_ACTION_BASE} hover:text-blue-400 hover:bg-blue-500/10`
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
-  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
-  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`
-  return `${bytes} B`
-}
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000)

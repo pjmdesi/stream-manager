@@ -54,6 +54,7 @@ import { useStore } from '../../hooks/useStore'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { useDropdownPlacement } from '../../hooks/useDropdownPlacement'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
+import { formatBytes } from '../../lib/formatBytes'
 import { theme, rgba } from '../../theme'
 import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
 import { Modal } from '../ui/Modal'
@@ -10235,11 +10236,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                             const basename = p.split(/[\\/]/).pop() ?? p
                             const dims = assetDims.get(p)
                             const sizeBytes = assetSizes.get(p)
-                            const sizeText = sizeBytes == null
-                              ? null
-                              : sizeBytes >= 1e9 ? `${(sizeBytes / 1e9).toFixed(1)} GB`
-                              : sizeBytes >= 1e6 ? `${(sizeBytes / 1e6).toFixed(1)} MB`
-                              : `${(sizeBytes / 1e3).toFixed(0)} KB`
+                            const sizeText = sizeBytes == null ? null : formatBytes(sizeBytes)
                             const tooltipContent = (
                               <div className="flex flex-col gap-0.5">
                                 <span className="font-mono text-[11px] text-gray-200 break-all">{basename}</span>

@@ -17,6 +17,7 @@ import { TagComboBox } from '../ui/TagComboBox'
 import { TopicSelect } from '../ui/TopicSelect'
 import { Modal } from '../ui/Modal'
 import { useStore } from '../../hooks/useStore'
+import { formatBytes } from '../../lib/formatBytes'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useConversionJobs } from '../../context/ConversionContext'
@@ -62,14 +63,6 @@ function compactCount(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '')}M`
   if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, '')}K`
   return String(n)
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2)} TB`
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
-  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
-  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`
-  return `${bytes} B`
 }
 
 /** "412 GB / 1.2 TB" when the library is cloud-synced (on disk / total),

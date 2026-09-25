@@ -4,6 +4,7 @@ import { Button } from './ui/Button'
 import { Tooltip } from './ui/Tooltip'
 import { Loader2, CheckCircle2, XCircle, Cloud, CloudCheck, CloudDownload, Pin, Ban, Info, RotateCw } from 'lucide-react'
 import { useCloudOps, type CloudOpItem, type CloudOpItemStatus, type CloudOpDirection } from '../context/CloudOpsContext'
+import { formatBytes } from '../lib/formatBytes'
 
 // A working row that has run this long shows how long, with a hint that
 // the sync client may be paused (APP-37). SM cannot see download progress
@@ -20,13 +21,6 @@ export function formatWait(ms: number): string {
 }
 
 export const CLOUD_WAIT_HINT = 'Stream Manager cannot see download progress. If the sync client is paused, this download continues on its own when it resumes; if it is stopped, the download fails.'
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
-  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
-  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`
-  return `${bytes} B`
-}
 
 interface SectionTotals {
   total: number
