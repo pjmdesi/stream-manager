@@ -471,6 +471,29 @@ export function maskOf(layers: ThumbnailLayer[], groupId: string): ThumbnailLaye
 }
 
 /**
+ * Load-time repair: a layer whose `parentId` names no layer in the list is
+ * an orphan. It exists in the file but no group renders it, so it is
+ * invisible and unreachable. Adopt it to the top level (its position was
+ * group-relative and now reads as canvas-relative, which is visible and
+ * movable, the better failure). Files written by the 2026-09 variant and
+ * template cloners had every group member orphaned this way: they gave
+ * each layer a fresh id without remapping the members' parent links.
+ * Returns the same array when nothing needed fixing.
+ */
+export function adoptOrphans(layers: ThumbnailLayer[]): ThumbnailLayer[] {
+  const ids = new Set(layers.map(l => l.id))
+  let changed = false
+  const out = layers.map(l => {
+    if (!l.parentId || ids.has(l.parentId)) return l
+    changed = true
+    const { parentId: _p, mask: _m, ...rest } = l
+    void _p; void _m
+    return rest
+  })
+  return changed ? out : layers
+}
+
+/**
  * Enforce the mask invariants after any structural edit: a mask flag is
  * valid only on a shape that is a direct member of a group, one per group
  * (the first in storage order wins); every valid mask is the last member

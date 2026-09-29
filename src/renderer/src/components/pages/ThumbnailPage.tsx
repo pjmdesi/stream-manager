@@ -38,7 +38,7 @@ import {
   deleteLayers, duplicateLayer as duplicateLayerTree, clonePasteLayers, moveLayerTo, moveAmongSiblings, scaleGroupMembers,
   snapResizedBox, needsUniformScale, panelRows, isGroup, hasHiddenAncestor, ancestorIds, subtreeIds,
   walkSelection, enterGroup, leaveGroup,
-  isMask, maskOf, pinMasks, canBeGroupMask, setGroupMask, releaseGroupMask, insertGroupMask,
+  isMask, maskOf, pinMasks, adoptOrphans, canBeGroupMask, setGroupMask, releaseGroupMask, insertGroupMask,
   canApplyAsMaskBelow, applyAsMaskBelow,
 } from '../../lib/layerTree'
 import { traceMaskPath, traceShapeOutlineLocal } from '../../lib/groupMask'
@@ -5314,7 +5314,9 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   const nameCountersRef = useRef<NameCounters>({})
   const resetLayers = useCallback((next: ThumbnailLayer[], storedCounters?: NameCounters) => {
     nameCountersRef.current = seedNameCounters(next, storedCounters)
-    resetLayersRaw(wrapLayerAngles(pinMasks(normalizeLayers(next))))
+    // Orphans (members whose group is gone) are adopted before the mask
+    // pass, so a stray mask flag on one is dropped with its parent link.
+    resetLayersRaw(wrapLayerAngles(pinMasks(adoptOrphans(normalizeLayers(next)))))
   }, [resetLayersRaw])
   /** Next "Base N" for a new layer; advances the file's counter. */
   const takeName = useCallback((base: string) => takeLayerName(nameCountersRef.current, base), [])
@@ -7613,7 +7615,10 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     // Compute the layers locally so we can both seed the editor AND
     // pass them straight to the eager save below — avoids waiting on
     // a React state read after `resetLayers`.
-    const newLayers = t ? t.layers.map(l => ({ ...l, id: newId() })) : []
+    // clonePasteLayers, not a per-layer id swap: it remaps the members'
+    // parent links to the groups' new ids and keeps masks with their
+    // groups. A plain swap orphaned every group member (2026-09-29).
+    const newLayers = t ? clonePasteLayers(t.layers, newId) : []
     resetLayers(newLayers)
     setCurrentTemplateId(t?.id)
     setIsDirty(false)
@@ -7701,7 +7706,8 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     if (isDirty) {
       await doSave(layers, folderPath, date, currentTemplateId, currentVariant)
     }
-    const dupLayers = layers.map(l => ({ ...l, id: newId() }))
+    // Fresh ids with the parent links remapped (see the template path).
+    const dupLayers = clonePasteLayers(layers, newId)
     setTemplatePickerStream(null)
     setCurrentStream({ folderPath, date, title, meta, totalEpisodes })
     setSelectedIds([])
@@ -7721,7 +7727,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     saveEpochRef.current++
     setCurrentStream(null)
     setSelectedIds([])
-    resetLayers(t.layers.map(l => ({ ...l, id: newId() })))
+    resetLayers(clonePasteLayers(t.layers, newId))
     setCurrentTemplateId(t.id)
     setIsDirty(false)
     setMode('editor')
