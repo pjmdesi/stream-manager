@@ -110,6 +110,21 @@ class AudioCacheManager {
     return Object.values(this.loadIndex().entries).reduce((s, e) => s + e.totalSize, 0)
   }
 
+  /** Entries for the shared cache limit (services/cacheLimit.ts): one per
+   *  source file, last used when its tracks were last read or written. */
+  listEntries(): Array<{ size: number; lastUsed: number; remove: () => void }> {
+    const index = this.loadIndex()
+    return Object.entries(index.entries).map(([key, entry]) => ({
+      size: entry.totalSize,
+      lastUsed: entry.lastAccessed,
+      remove: () => {
+        for (const t of entry.tracks) { try { if (t) fs.unlinkSync(t) } catch {} }
+        delete index.entries[key]
+        this.saveIndex()
+      },
+    }))
+  }
+
   /** Remove every cached track; returns the files that could not be
    *  removed ("<path>: <code>"), so the caller can say so. Entries whose
    *  files stayed behind are kept in the index, so the size stays honest

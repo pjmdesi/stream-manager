@@ -3,6 +3,7 @@ import path from 'path'
 import { audioCacheManager } from '../services/audioCacheManager'
 import { thumbnailCacheManager } from '../services/thumbnailCacheManager'
 import { waveformCacheManager } from '../services/waveformCacheManager'
+import { scheduleCacheEnforcement, DEFAULT_CACHE_LIMIT_BYTES } from '../services/cacheLimit'
 import { getStore } from './store'
 
 // In-process waveform cache. Bounded FIFO (Maps iterate in insertion order):
@@ -20,6 +21,10 @@ function waveformCacheSet(filePath: string, buf: Buffer): void {
 }
 
 export function registerVideoIPC(): void {
+  // One pass a minute after launch catches growth from a previous session
+  // (the limit was audio-only before 2026-09-29, so old caches can be over).
+  scheduleCacheEnforcement(60_000)
+
   ipcMain.handle('video:probe', async (_event: IpcMainInvokeEvent, filePath: string) => {
     const { probeFile } = await import('../services/ffmpegService')
     return await probeFile(filePath)
@@ -76,8 +81,11 @@ export function registerVideoIPC(): void {
       // Merge: newly-extracted paths overlay onto whatever was already cached.
       const merged = cached.map((existing, i) => extracted[i] || existing)
 
-      const limitBytes = getStore().get('config').audioCacheLimit ?? 1_073_741_824
+      const limitBytes = getStore().get('config').audioCacheLimit ?? DEFAULT_CACHE_LIMIT_BYTES
       audioCacheManager.setCachedTracks(filePath, merged, limitBytes)
+      // The audio cache's own pass above keeps audio under the limit on its
+      // own; the shared pass counts the thumbnails and waveforms too.
+      scheduleCacheEnforcement()
       return merged
     }
   )
@@ -136,6 +144,7 @@ export function registerVideoIPC(): void {
 
   ipcMain.handle('video:finalizeThumbnailCache', async (_event, filePath: string, timecodes: number[]) => {
     thumbnailCacheManager.finalizeMeta(filePath, timecodes)
+    scheduleCacheEnforcement()
   })
 
   // Keystone thumbnail (single representative frame) — prefer the cached one,
@@ -146,6 +155,7 @@ export function registerVideoIPC(): void {
 
   ipcMain.handle('video:saveKeystoneThumbnail', async (_event, filePath: string, dataUrl: string) => {
     thumbnailCacheManager.saveKeystone(filePath, dataUrl)
+    scheduleCacheEnforcement()
   })
 
   ipcMain.handle('video:getWaveform', async (_event, filePath: string) => {
@@ -156,6 +166,7 @@ export function registerVideoIPC(): void {
     const samples = await extractWaveformData(filePath)
     waveformCacheSet(filePath, samples)
     waveformCacheManager.save(filePath, samples)
+    scheduleCacheEnforcement()
     return samples
   })
 

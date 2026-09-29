@@ -79,7 +79,15 @@ class ThumbnailCacheManager {
       frameUrls.push(pathToFileURL(fp).toString())
     }
 
+    this.touch(metaFile)
     return { timecodes: meta.timecodes, frameUrls }
+  }
+
+  /** A hit counts as use for the shared cache limit's least-recently-used
+   *  order (NTFS does not maintain access times by default); the entry's
+   *  sidecar carries the stamp. */
+  private touch(file: string): void {
+    try { const now = new Date(); fs.utimesSync(file, now, now) } catch {}
   }
 
   /** Write a single JPEG frame (base64 data URL) to disk. */
@@ -129,6 +137,7 @@ class ThumbnailCacheManager {
     } catch { return null }
     const jpg = this.keystoneJpgPath(hash)
     if (!fs.existsSync(jpg)) return null
+    this.touch(this.keystoneMetaPath(hash))
     return pathToFileURL(jpg).toString()
   }
 
@@ -189,6 +198,7 @@ class ThumbnailCacheManager {
     if (meta.mtime !== sourceMtime || meta.width !== ROW_THUMB_WIDTH) return null
     const jpg = this.rowThumbJpgPath(hash)
     if (!fs.existsSync(jpg)) return null
+    this.touch(this.rowThumbMetaPath(hash))
     return `${pathToFileURL(jpg).toString()}?m=${sourceMtime}`
   }
 
@@ -199,6 +209,48 @@ class ThumbnailCacheManager {
     fs.writeFileSync(this.rowThumbJpgPath(hash), jpeg)
     fs.writeFileSync(this.rowThumbMetaPath(hash), JSON.stringify({ filePath, mtime: sourceMtime, width: ROW_THUMB_WIDTH }))
     return `${pathToFileURL(this.rowThumbJpgPath(hash)).toString()}?m=${sourceMtime}`
+  }
+
+  /** Entries for the shared cache limit (services/cacheLimit.ts): each
+   *  finished strip (a hash folder with its meta.json; one still being
+   *  written has none and is skipped), each keystone frame, and each row
+   *  thumbnail, last used when its sidecar was last written or touched. */
+  listEntries(): Array<{ size: number; lastUsed: number; remove: () => void }> {
+    const out: Array<{ size: number; lastUsed: number; remove: () => void }> = []
+    const sizeOfDir = (dir: string): number => {
+      let total = 0
+      try { for (const f of fs.readdirSync(dir)) { try { total += fs.statSync(path.join(dir, f)).size } catch {} } } catch {}
+      return total
+    }
+    const pairs = (dir: string) => {
+      try {
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith('.json')) continue
+          const json = path.join(dir, f)
+          const jpg = path.join(dir, f.replace(/\.json$/, '.jpg'))
+          try {
+            const st = fs.statSync(json)
+            let size = st.size
+            try { size += fs.statSync(jpg).size } catch {}
+            out.push({ size, lastUsed: st.mtimeMs, remove: () => { try { fs.unlinkSync(jpg) } catch {} fs.unlinkSync(json) } })
+          } catch {}
+        }
+      } catch {}
+    }
+    try {
+      for (const entry of fs.readdirSync(this.cacheDir)) {
+        if (entry === 'keystone' || entry === 'rows') continue
+        const dir = path.join(this.cacheDir, entry)
+        const meta = path.join(dir, 'meta.json')
+        try {
+          const st = fs.statSync(meta)
+          out.push({ size: sizeOfDir(dir), lastUsed: st.mtimeMs, remove: () => { removeTree(dir) } })
+        } catch { /* no meta.json: a strip still being written, or not a strip */ }
+      }
+    } catch {}
+    pairs(path.join(this.cacheDir, 'keystone'))
+    pairs(path.join(this.cacheDir, 'rows'))
+    return out
   }
 
   getTotalSize(): number {

@@ -40,8 +40,28 @@ class WaveformCacheManager {
       return null
     }
 
+    // A hit counts as use for the shared cache limit's least-recently-used
+    // order (NTFS does not maintain access times by default).
+    try { const now = new Date(); fs.utimesSync(file, now, now) } catch {}
     // Return only the samples portion (skip 8-byte header)
     return data.subarray(8)
+  }
+
+  /** Entries for the shared cache limit (services/cacheLimit.ts): one per
+   *  waveform file, last used when it was last read or written. */
+  listEntries(): Array<{ size: number; lastUsed: number; remove: () => void }> {
+    const out: Array<{ size: number; lastUsed: number; remove: () => void }> = []
+    try {
+      for (const file of fs.readdirSync(this.cacheDir)) {
+        if (!file.endsWith('.bin')) continue
+        const p = path.join(this.cacheDir, file)
+        try {
+          const st = fs.statSync(p)
+          out.push({ size: st.size, lastUsed: st.mtimeMs, remove: () => { fs.unlinkSync(p) } })
+        } catch {}
+      }
+    } catch {}
+    return out
   }
 
   save(filePath: string, samples: Buffer): void {

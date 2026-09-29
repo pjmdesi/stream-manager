@@ -864,40 +864,14 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
         {/* Cache: maintenance, so it sits just above System. The copy says
             what is in it and steers away from clearing it for no reason. */}
         <Section id="cache" icon={<HardDrive size={14} />} title="Cache" registerRef={registerSection}>
-          <div className="flex flex-col gap-2 text-xs text-gray-400 leading-relaxed">
-            <p>
-              Stream Manager keeps files it would otherwise have to generate again, so the app stays quick and expensive work runs once:
-            </p>
-            <ul className="list-disc list-outside ps-4 marker:text-gray-500 flex flex-col gap-0.5">
-              <li><span className="text-gray-300">Extracted audio tracks</span> for the player's multi-track mode, one file per track you have listened to or exported. These are the largest part.</li>
-              <li><span className="text-gray-300">Thumbnails</span>: the frame strip along the player's timeline, one frame per video for the files grid and converter rows, and the small copies the streams list shows.</li>
-              <li><span className="text-gray-300">Waveforms</span> drawn under the player's timeline.</li>
+          <div className="flex flex-col gap-1.5 text-xs text-gray-400 leading-relaxed">
+            <p>Stream Manager generates and stores files to improve performance and avoid re-running expensive processes:</p>
+            <ul className="list-disc list-outside ps-4 marker:text-gray-500">
+              <li>Extracted audio tracks</li>
+              <li>Thumbnails</li>
+              <li>Waveforms</li>
             </ul>
-            <p>
-              Anything you clear is rebuilt on demand the next time it is needed, so the cache is rarely empty for long. There is no need to clear it unless it has grown far past the limit or a cached file looks wrong, such as a stale thumbnail or a waveform that does not match its video.
-            </p>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Cache limit {dirtyDot('audioCacheLimit')}</label>
-            <div className="flex items-center gap-2">
-              {/* NumberInput (app-wide number-field convention): clamps to
-                  min and max itself. Its spinner buttons self-document the
-                  128 step. The ceiling keeps a typo from reserving a whole
-                  drive. */}
-              <NumberInput
-                value={Math.round((local.audioCacheLimit ?? 1_073_741_824) / (1024 * 1024))}
-                onChange={v => set('audioCacheLimit', v * 1024 * 1024)}
-                min={128}
-                max={32768}
-                step={128}
-                className="w-28"
-                aria-label="Cache limit in megabytes"
-              />
-              <span className="text-sm text-gray-400">MB</span>
-            </div>
-            <p className="text-xs text-gray-400">
-              Applies to the extracted audio tracks: when they pass this size, the least recently used are removed first. Thumbnails and waveforms are small per file and are not counted against it.
-            </p>
+            <p>After clearing, items repopulate on demand, so the cache will never stay empty.</p>
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium text-gray-300">Location</span>
@@ -912,7 +886,26 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                 </button>
               </Tooltip>
             </div>
-            <p className="text-xs text-gray-400">Inside your user account's temporary files folder, so Windows can reclaim it as well.</p>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Cache limit {dirtyDot('audioCacheLimit')}</label>
+            <div className="flex items-center gap-2">
+              {/* NumberInput (app-wide number-field convention): clamps to
+                  min and max itself. Its spinner buttons self-document the
+                  128 step. The ceiling keeps a typo from reserving a whole
+                  drive. */}
+              <NumberInput
+                value={Math.round((local.audioCacheLimit ?? 1_073_741_824) / (1024 * 1024))}
+                onChange={v => set('audioCacheLimit', v * 1024 * 1024)}
+                min={512}
+                max={32768}
+                step={128}
+                className="w-28"
+                aria-label="Cache limit in megabytes"
+              />
+              <span className="text-sm text-gray-400">MB</span>
+            </div>
+            <p className="text-xs text-gray-400">Past this size, the least recently used files are removed first.</p>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-400">Currently using: <span className="font-semibold text-gray-300">{formatBytes(cacheSize)}</span></span>

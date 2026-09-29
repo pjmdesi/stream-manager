@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, nativeImage } from 'electron'
 import fs from 'fs'
 import { thumbnailCacheManager, ROW_THUMB_WIDTH } from './thumbnailCacheManager'
+import { scheduleCacheEnforcement } from './cacheLimit'
 
 /**
  * Pre-scaled thumbnails for the streams list (STR-17).
@@ -56,6 +57,7 @@ async function generate(filePath: string): Promise<void> {
     const scaled = width > ROW_THUMB_WIDTH ? img.resize({ width: ROW_THUMB_WIDTH, quality: 'best' }) : img
     const url = thumbnailCacheManager.saveRowThumb(filePath, scaled.toJPEG(JPEG_QUALITY), mtime)
     broadcast('files:rowThumbReady', { path: filePath, url })
+    scheduleCacheEnforcement()
   } catch (err) {
     console.warn('[rowThumbs] could not scale', filePath, err)
     failedAt.set(filePath, mtime)
