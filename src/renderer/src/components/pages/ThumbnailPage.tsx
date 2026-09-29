@@ -8236,6 +8236,24 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
           {/* Top bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0 bg-navy-800">
             <div className="flex-1 flex items-center gap-2 min-w-0">
+              {/* Stream and episode navigation (THU-19), once the library
+                  listing has resolved the open stream. First in the row, so
+                  the buttons stay put while the title beside them changes
+                  length from one stream to the next (2026-09-29). */}
+              {currentStream && currentNavFolder && (
+                <div className="shrink-0 mr-1">
+                  <StreamNavButtons
+                    current={currentNavFolder}
+                    folders={sortedStreamFolders}
+                    prevStream={prevNavStream}
+                    nextStream={nextNavStream}
+                    onPickStream={openNeighborStream}
+                    series={thumbSeriesNav}
+                    onPickEpisode={openNeighborStream}
+                    variant="toolbar"
+                  />
+                </div>
+              )}
               {currentStream ? (
                 // Title links back to the stream item (THU-28); the tooltip
                 // carries the full title since the toolbar truncates it.
@@ -8263,22 +8281,6 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                 <span className="text-xs text-gray-400 italic">Unsaved canvas</span>
               )}
               {isDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
-              {/* Stream and episode navigation (THU-19), once the library
-                  listing has resolved the open stream. */}
-              {currentStream && currentNavFolder && (
-                <div className="shrink-0 ml-1">
-                  <StreamNavButtons
-                    current={currentNavFolder}
-                    folders={sortedStreamFolders}
-                    prevStream={prevNavStream}
-                    nextStream={nextNavStream}
-                    onPickStream={openNeighborStream}
-                    series={thumbSeriesNav}
-                    onPickEpisode={openNeighborStream}
-                    variant="toolbar"
-                  />
-                </div>
-              )}
               {/* Variant switcher + Delete — only when editing a
                   stream (templates-only sessions don't have variants).
                   The switcher's button displays a 1-indexed position
