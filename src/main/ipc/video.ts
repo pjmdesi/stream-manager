@@ -1,4 +1,5 @@
-import { ipcMain, IpcMainInvokeEvent, BrowserWindow } from 'electron'
+import { ipcMain, IpcMainInvokeEvent, BrowserWindow, app } from 'electron'
+import path from 'path'
 import { audioCacheManager } from '../services/audioCacheManager'
 import { thumbnailCacheManager } from '../services/thumbnailCacheManager'
 import { waveformCacheManager } from '../services/waveformCacheManager'
@@ -115,6 +116,11 @@ export function registerVideoIPC(): void {
     const remaining = audioCacheManager.getTotalSize() + thumbnailCacheManager.getTotalSize() + waveformCacheManager.getTotalSize()
     return { failed, remaining }
   })
+
+  // Where the caches live: the fixed folder under the OS temp directory
+  // that all three managers share. Shown read-only in Settings (the old
+  // "Cache Directory" setting was never read by anything).
+  ipcMain.handle('video:getCacheDir', async (): Promise<string> => path.join(app.getPath('temp'), 'stream-manager'))
 
   ipcMain.handle('video:getAudioCacheSize', async () => {
     return audioCacheManager.getTotalSize() + thumbnailCacheManager.getTotalSize() + waveformCacheManager.getTotalSize()

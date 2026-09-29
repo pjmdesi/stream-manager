@@ -183,6 +183,8 @@ export interface AppConfig {
   defaultWatchDir: string
   defaultOutputDir: string
   presetsDir: string
+  /** Unused: nothing reads it (the caches live under the OS temp folder,
+   *  shown read-only in Settings). Kept so older config files load. */
   tempDir: string
   theme: 'dark' | 'light'
   autoStartWatcher: boolean

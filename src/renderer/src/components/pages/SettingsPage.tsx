@@ -9,6 +9,7 @@ import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Input, NumberInput } from '../ui/Input'
 import { Modal } from '../ui/Modal'
+import { Tooltip } from '../ui/Tooltip'
 import { DumpConvertExplainer } from '../DumpConvertExplainer'
 import type { ConversionPreset, ThumbnailTemplate, Page } from '../../types'
 import { isClipExportCompatible } from '../../lib/clipExport'
@@ -117,17 +118,20 @@ interface SettingsSectionMeta {
 }
 
 const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
+  // Each folder setting lives in the section that uses it (the streams
+  // root under Streams, the watch folder under Auto-rules); the old
+  // Directories section is gone. Cache sits low, just above System: it is
+  // maintenance, not something to set up. (2026-09-29)
   { id: 'profile', label: 'Profile', icon: <User size={14} />, keys: ['streamerName'] },
-  { id: 'directories', label: 'Directories', icon: <FolderTree size={14} />, keys: ['streamsDir', 'defaultWatchDir', 'tempDir'] },
-  { id: 'cache', label: 'Cache', icon: <HardDrive size={14} />, keys: ['audioCacheLimit'] },
-  { id: 'streams', label: 'Streams', icon: <Radio size={14} />, keys: ['useBuiltinThumbnailByDefault', 'defaultBuiltinThumbnailTemplate', 'defaultThumbnailTemplate', 'archivePresetId', 'checkEpisodeIteration', 'defaultBroadcastTime', 'defaultYouTubeCategoryId', 'twitchSkipCategoryRenamePrompt'] },
+  { id: 'streams', label: 'Streams', icon: <Radio size={14} />, keys: ['streamsDir', 'useBuiltinThumbnailByDefault', 'defaultBuiltinThumbnailTemplate', 'defaultThumbnailTemplate', 'archivePresetId', 'checkEpisodeIteration', 'defaultBroadcastTime', 'defaultYouTubeCategoryId', 'twitchSkipCategoryRenamePrompt'] },
   { id: 'player', label: 'Video Player', icon: <Film size={14} />, keys: ['clipPresetId', 'defaultBleepVolume', 'skipClipMergeWarning', 'defaultAudioTrackNames'] },
   { id: 'converter', label: 'Converter', icon: <Zap size={14} />, keys: ['maxConcurrentConversions', 'autoDeletePartialOnCancel'] },
   { id: 'appearance', label: 'Appearance', icon: <Palette size={14} />, keys: ['disableAnimations', 'calendarFirstDayOfWeek', 'uiZoomPercent'] },
-  { id: 'autorules', label: 'Auto-rules', icon: <Shuffle size={14} />, keys: ['autoStartWatcher'] },
+  { id: 'autorules', label: 'Auto-rules', icon: <Shuffle size={14} />, keys: ['autoStartWatcher', 'defaultWatchDir'] },
   // Only rendered (nav chip + section body) when a Claude API key is
   // connected via Integrations — see the `sections` filter.
   { id: 'ai', label: 'AI Suggestions', icon: <Bot size={14} />, keys: ['aiPreventRepeatSuggestions'] },
+  { id: 'cache', label: 'Cache', icon: <HardDrive size={14} />, keys: ['audioCacheLimit'] },
   { id: 'system', label: 'System', icon: <MonitorCog size={14} />, keys: ['checkForUpdates', 'startWithWindows', 'startMinimized', 'startMinimizedOnlyAtStartup'] },
   { id: 'devtools', label: 'Dev Tools', icon: <FlaskConical size={14} />, keys: ['slowAnimations', 'devForceYouTubeQuotaExceeded'], dev: true },
 ]
@@ -230,8 +234,10 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
     window.api.thumbnailListTemplates(local.streamsDir).then(setBuiltinTemplates).catch(() => setBuiltinTemplates([]))
   }, [local.streamsDir])
 
+  const [cacheDir, setCacheDir] = useState<string>('')
   useEffect(() => {
     window.api.getAudioCacheSize().then(setCacheSize)
+    window.api.getCacheDir().then(setCacheDir).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -528,8 +534,8 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
           )}
         </Section>
 
-        {/* Directories */}
-        <Section id="directories" icon={<FolderTree size={14} />} title="Directories" registerRef={registerSection}>
+        {/* Streams */}
+        <Section id="streams" icon={<Radio size={14} />} title="Streams" registerRef={registerSection}>
           <DirInput
             label={<>Streams Directory {dirtyDot('streamsDir')}</>}
             value={local.streamsDir}
@@ -554,65 +560,6 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               <span className="text-xs text-gray-400">Currently using dump-folder mode.</span>
             </div>
           )}
-          <DirInput
-            label={<>Default Watch Directory {dirtyDot('defaultWatchDir')}</>}
-            value={local.defaultWatchDir}
-            onChange={v => set('defaultWatchDir', v)}
-            hint="Where Auto-Rules watch for new files by default"
-          />
-          <DirInput
-            label={<>Cache Directory {dirtyDot('tempDir')}</>}
-            value={local.tempDir}
-            onChange={v => set('tempDir', v)}
-            hint="Where temporary cached files are stored during processing"
-          />
-        </Section>
-
-        {/* Cache */}
-        <Section id="cache" icon={<HardDrive size={14} />} title="Cache Files" registerRef={registerSection}>
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Cache Limit {dirtyDot('audioCacheLimit')}</label>
-            <div className="flex items-center gap-2">
-              {/* NumberInput (app-wide number-field convention): clamps to
-                  min itself, so the old Math.max guard lives in its props.
-                  Its spinner buttons self-document the 128 step. */}
-              <NumberInput
-                value={Math.round((local.audioCacheLimit ?? 1_073_741_824) / (1024 * 1024))}
-                onChange={v => set('audioCacheLimit', v * 1024 * 1024)}
-                min={128}
-                step={128}
-                className="w-28"
-                aria-label="Cache limit in megabytes"
-              />
-              <span className="text-sm text-gray-400">MB</span>
-            </div>
-            <p className="text-xs text-gray-400">
-              Maximum disk space used by cached files. Oldest entries are evicted automatically when the limit is reached.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-400">Currently using: <span className="font-semibold text-gray-300">{formatBytes(cacheSize)}</span></span>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Trash2 size={13} />}
-              loading={clearingCache}
-              onClick={clearCache}
-              disabled={cacheSize === 0}
-            >
-              {clearingCache ? 'Clearing…' : 'Clear cache'}
-            </Button>
-          </div>
-          {cacheError && (
-            <p className="flex items-start gap-1.5 text-xs text-red-400">
-              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-              <span className="break-all">{cacheError}</span>
-            </p>
-          )}
-        </Section>
-
-        {/* Streams */}
-        <Section id="streams" icon={<Radio size={14} />} title="Streams" registerRef={registerSection}>
           <Checkbox
             checked={local.useBuiltinThumbnailByDefault ?? true}
             onChange={v => set('useBuiltinThumbnailByDefault', v)}
@@ -889,6 +836,12 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
 
         {/* Auto-rules */}
         <Section id="autorules" icon={<Shuffle size={14} />} title="Auto-rules" registerRef={registerSection}>
+          <DirInput
+            label={<>Default Watch Directory {dirtyDot('defaultWatchDir')}</>}
+            value={local.defaultWatchDir}
+            onChange={v => set('defaultWatchDir', v)}
+            hint="Where Auto-Rules watch for new files by default"
+          />
           <Checkbox
             checked={local.autoStartWatcher}
             onChange={v => set('autoStartWatcher', v)}
@@ -907,6 +860,80 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
             />
           </Section>
         )}
+
+        {/* Cache: maintenance, so it sits just above System. The copy says
+            what is in it and steers away from clearing it for no reason. */}
+        <Section id="cache" icon={<HardDrive size={14} />} title="Cache" registerRef={registerSection}>
+          <div className="flex flex-col gap-2 text-xs text-gray-400 leading-relaxed">
+            <p>
+              Stream Manager keeps files it would otherwise have to generate again, so the app stays quick and expensive work runs once:
+            </p>
+            <ul className="list-disc list-outside ps-4 marker:text-gray-500 flex flex-col gap-0.5">
+              <li><span className="text-gray-300">Extracted audio tracks</span> for the player's multi-track mode, one file per track you have listened to or exported. These are the largest part.</li>
+              <li><span className="text-gray-300">Thumbnails</span>: the frame strip along the player's timeline, one frame per video for the files grid and converter rows, and the small copies the streams list shows.</li>
+              <li><span className="text-gray-300">Waveforms</span> drawn under the player's timeline.</li>
+            </ul>
+            <p>
+              Anything you clear is rebuilt on demand the next time it is needed, so the cache is rarely empty for long. There is no need to clear it unless it has grown far past the limit or a cached file looks wrong, such as a stale thumbnail or a waveform that does not match its video.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-300">Cache limit {dirtyDot('audioCacheLimit')}</label>
+            <div className="flex items-center gap-2">
+              {/* NumberInput (app-wide number-field convention): clamps to
+                  min and max itself. Its spinner buttons self-document the
+                  128 step. The ceiling keeps a typo from reserving a whole
+                  drive. */}
+              <NumberInput
+                value={Math.round((local.audioCacheLimit ?? 1_073_741_824) / (1024 * 1024))}
+                onChange={v => set('audioCacheLimit', v * 1024 * 1024)}
+                min={128}
+                max={32768}
+                step={128}
+                className="w-28"
+                aria-label="Cache limit in megabytes"
+              />
+              <span className="text-sm text-gray-400">MB</span>
+            </div>
+            <p className="text-xs text-gray-400">
+              Applies to the extracted audio tracks: when they pass this size, the least recently used are removed first. Thumbnails and waveforms are small per file and are not counted against it.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-gray-300">Location</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <Tooltip content="Open the cache folder in Explorer" triggerClassName="flex min-w-0">
+                <button
+                  type="button"
+                  onClick={() => { if (cacheDir) window.api.openInExplorer(cacheDir) }}
+                  className="text-xs font-mono text-gray-400 hover:text-gray-300 transition-colors truncate text-left"
+                >
+                  {cacheDir || '…'}
+                </button>
+              </Tooltip>
+            </div>
+            <p className="text-xs text-gray-400">Inside your user account's temporary files folder, so Windows can reclaim it as well.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-400">Currently using: <span className="font-semibold text-gray-300">{formatBytes(cacheSize)}</span></span>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Trash2 size={13} />}
+              loading={clearingCache}
+              onClick={clearCache}
+              disabled={cacheSize === 0}
+            >
+              {clearingCache ? 'Clearing…' : 'Clear cache'}
+            </Button>
+          </div>
+          {cacheError && (
+            <p className="flex items-start gap-1.5 text-xs text-red-400">
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+              <span className="break-all">{cacheError}</span>
+            </p>
+          )}
+        </Section>
 
         {/* System */}
         <Section id="system" icon={<MonitorCog size={14} />} title="System" registerRef={registerSection}>

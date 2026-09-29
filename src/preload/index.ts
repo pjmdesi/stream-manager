@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   getAudioCacheSize: () =>
     ipcRenderer.invoke('video:getAudioCacheSize'),
 
+  getCacheDir: () =>
+    ipcRenderer.invoke('video:getCacheDir'),
+
   getThumbnailCache: (filePath: string) =>
     ipcRenderer.invoke('video:getThumbnailCache', filePath),
 

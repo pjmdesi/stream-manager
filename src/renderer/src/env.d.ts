@@ -43,6 +43,7 @@ declare global {
       getWaveform(filePath: string): Promise<Uint8Array>
       clearAudioCache(): Promise<{ failed: string[]; remaining: number }>
       getAudioCacheSize(): Promise<number>
+      getCacheDir(): Promise<string>
       getThumbnailCache(filePath: string): Promise<{ timecodes: number[]; frameUrls: string[] } | null>
       saveThumbnailFrame(filePath: string, index: number, dataUrl: string): Promise<void>
       finalizeThumbnailCache(filePath: string, timecodes: number[]): Promise<void>
