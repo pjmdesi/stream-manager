@@ -1371,6 +1371,37 @@ function ShapeNode(props: KonvaLayerNodeProps) {
   )
 }
 
+/** The region of a masked group's inner container worth rasterizing, in
+ *  the container's own space: the union of the members' boxes (the mask's
+ *  hit node excluded) cut to the mask's bounding box. Null when there is
+ *  no mask or nothing measurable, which leaves Konva's default. Nothing
+ *  outside this region can render, since the clip removes it. */
+function clipCacheBounds(inner: Konva.Group, clip: ThumbnailLayer | undefined): { x: number; y: number; width: number; height: number } | null {
+  if (!clip) return null
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const child of inner.getChildren()) {
+    if (child.id() === clip.id || !child.visible()) continue
+    const r = child.getClientRect({ relativeTo: inner as unknown as Konva.Container, skipShadow: true, skipStroke: true })
+    if (!(r.width > 0 && r.height > 0)) continue
+    minX = Math.min(minX, r.x); minY = Math.min(minY, r.y)
+    maxX = Math.max(maxX, r.x + r.width); maxY = Math.max(maxY, r.y + r.height)
+  }
+  if (!Number.isFinite(minX)) return null
+  const w = clip.width ?? 200, h = clip.height ?? 200
+  const rad = ((clip.rotation ?? 0) * Math.PI) / 180
+  const cos = Math.cos(rad), sin = Math.sin(rad)
+  let mx0 = Infinity, my0 = Infinity, mx1 = -Infinity, my1 = -Infinity
+  for (const [px, py] of [[0, 0], [w, 0], [w, h], [0, h]] as const) {
+    const x = clip.x + px * cos - py * sin
+    const y = clip.y + px * sin + py * cos
+    mx0 = Math.min(mx0, x); my0 = Math.min(my0, y); mx1 = Math.max(mx1, x); my1 = Math.max(my1, y)
+  }
+  const x = Math.floor(Math.max(minX, mx0)), y = Math.floor(Math.max(minY, my0))
+  const x1 = Math.ceil(Math.min(maxX, mx1)), y1 = Math.ceil(Math.min(maxY, my1))
+  // Disjoint: nothing shows, so the smallest raster that keeps Konva happy.
+  return { x, y, width: Math.max(1, x1 - x), height: Math.max(1, y1 - y) }
+}
+
 /** A group (THU-18): one Konva Group carrying position, rotation, opacity,
  *  and visibility, with its members rendered inside it so every transform
  *  composes. A click selects the group; a double-click selects the member
@@ -1435,7 +1466,12 @@ function GroupNode(props: KonvaLayerNodeProps & { children: React.ReactNode; mas
           inner.clearCache()
           // A blur needs room past the content's bounds or it clips flat.
           const blurPad = hasFilters && (layer.filterBlur ?? 0) > 0 ? Math.ceil(layer.filterBlur ?? 0) : 0
-          inner.cache({ pixelRatio: 1, offset: blurPad })
+          // With a mask, the raster covers only what can show: the
+          // members' extent cut to the mask's box. Konva would otherwise
+          // size it to the container's full client rect, mask included,
+          // and a mask far larger than the canvas made a multi-megapixel
+          // bitmap that a blur took seconds over (2026-09-29).
+          inner.cache({ pixelRatio: 1, offset: blurPad, ...(clipCacheBounds(inner, clip) ?? {}) })
           const cc = inner._getCanvasCache() as { scene?: { _canvas: HTMLCanvasElement }; x: number; y: number } | undefined
           const src = cc?.scene?._canvas
           if (src && src.width > 0 && src.height > 0) {
@@ -1652,17 +1688,24 @@ function LayerNodes({ layers, parentId, makeProps }: {
           // Groups with effects (THU-31) re-rasterize when their subtree
           // changes; the key is the subtree's serialization, computed only
           // for groups that need it.
+          const groupMask = maskOf(layers, layer.id)
+          const groupMaskSelected = groupMask ? makeProps(groupMask).isSelected : false
           let contentKey = ''
           if (groupHasEffects(layer)) {
             const sub = new Set(subtreeIds(layers, layer.id))
-            contentKey = JSON.stringify(layers.filter(l => sub.has(l.id)))
+            // The mask's selection is part of the key: selecting it moves
+            // it to the top of the group (see below), and a cached group's
+            // hit canvas is frozen at raster time, so without a rebuild a
+            // drag on the mask's body over content would grab the content
+            // (2026-09-29). One re-raster per select and deselect.
+            contentKey = JSON.stringify(layers.filter(l => sub.has(l.id))) + (groupMaskSelected ? '|mask-selected' : '')
           }
           return (
             <GroupNode
               key={layer.id}
               {...props}
-              maskLayer={maskOf(layers, layer.id)}
-              maskSelected={(() => { const m = maskOf(layers, layer.id); return m ? makeProps(m).isSelected : false })()}
+              maskLayer={groupMask}
+              maskSelected={groupMaskSelected}
               contentKey={contentKey}
             >
               <LayerNodes layers={layers} parentId={layer.id} makeProps={makeProps} />
@@ -5486,6 +5529,36 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   const [viewPan, setViewPan] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const viewZoomRef = useRef(1)
+
+  // Selection inside a cached group (a filtered group's mask or member):
+  // Konva's Container._clearSelfAndDescendantCache returns early when the
+  // container is cached, so when the stage pans or zooms the nodes inside
+  // keep a stale absolute transform and the Transformer attached to one
+  // never hears about the move; its frame stayed put on screen while the
+  // canvas slid away (2026-09-29). Finish the walk Konva skips: clear the
+  // transform cache below every cached ancestor of a selected node, then
+  // have the Transformer recompute. Effects stay live meanwhile.
+  useEffect(() => {
+    const tr = transformerRef.current
+    const stage = stageRef.current
+    if (!tr || !stage || selectedIds.length === 0) return
+    let touched = false
+    for (const id of selectedIds) {
+      const node: Konva.Node | undefined = stage.findOne(`#${id}`)
+      if (!node) continue
+      let anc: Konva.Container | null = node.getParent()
+      while (anc && anc !== (stage as unknown as Konva.Container)) {
+        if (anc.isCached()) {
+          for (const child of anc.getChildren()) {
+            (child as unknown as { _clearSelfAndDescendantCache: (attr: string) => void })._clearSelfAndDescendantCache('absoluteTransform')
+          }
+          touched = true
+        }
+        anc = anc.getParent()
+      }
+    }
+    if (touched) { tr.forceUpdate(); tr.getLayer()?.batchDraw() }
+  }, [selectedIds, viewZoom, viewPan, containerSize])
   const viewPanRef = useRef({ x: 0, y: 0 })
   const fitScaleRef = useRef(1)
 
@@ -8643,6 +8716,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                       inert: nested && !selectedIds.includes(layer.id),
                       // A gesture on something inside this group pauses its
                       // effects (THU-31); moving the group itself does not.
+                      // A mere selection inside it does not pause them: the
+                      // frame's staleness under a cached container is
+                      // handled by the transform-cache walk below the
+                      // Transformer sync, so the effects stay visible while
+                      // a member or the mask is being edited.
                       effectsPaused: canvasGestureActive && layer.type === 'group'
                         && selectedIds.some(id => id !== layer.id && ancestorIds(layers, id).includes(layer.id)),
                     }
@@ -8721,6 +8799,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                   <Transformer
                     ref={transformerRef}
                     rotateEnabled
+                    // No shouldOverdrawWholeArea: Konva makes the frame's
+                    // back rect a hit target, which would swallow clicks and
+                    // double-clicks on anything inside the selection (drill
+                    // into a group, pick a small layer over a selected
+                    // background). Tried and dropped 2026-09-29.
                     onTransformStart={() => {
                       setCanvasGestureActive(true)
                       // Modifiers held before the drag started count too.
