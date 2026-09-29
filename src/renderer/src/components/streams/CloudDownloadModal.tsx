@@ -7,10 +7,10 @@ import { Modal } from '../ui/Modal'
  *  for when they are. */
 export type CloudDownloadDestination = 'player' | 'converter' | 'combine'
 
-const DESTINATION_COPY: Record<CloudDownloadDestination, { verb: string; where: string }> = {
-  player: { verb: 'open in the player', where: 'the Player item in the navigation shows what is open' },
-  converter: { verb: 'be added to the converter queue', where: 'the Converter item in the navigation shows the queue' },
-  combine: { verb: 'be added to the combine list', where: 'the Combine page lists it' },
+const DESTINATION_COPY: Record<CloudDownloadDestination, { verb: string }> = {
+  player: { verb: 'open in the player' },
+  converter: { verb: 'be added to the converter queue' },
+  combine: { verb: 'be added to the combine list' },
 }
 
 /**
@@ -47,7 +47,7 @@ export function CloudDownloadModal({
         <div className="flex gap-2 justify-end w-full">
           <Button variant="ghost" onClick={onDismiss}>Dismiss</Button>
           <Button variant="primary" icon={<CloudDownload size={13} />} onClick={onConfirm}>
-            Download
+            Download now
           </Button>
         </div>
       }
@@ -57,10 +57,10 @@ export function CloudDownloadModal({
           <span className="font-medium text-gray-100">{fileName}</span> is stored in the cloud and has not been downloaded to this device.
         </p>
         <p className="text-sm text-gray-400">
-          Download it now? The download runs in the background (progress shows in the cloud sync widget), and when it finishes the file will {copy.verb} automatically. You will not be switched there; {copy.where}.
+          Download it now?
         </p>
         <p className="text-xs text-gray-400">
-          Downloads cannot be interrupted once started, so this dialog closes as soon as the download begins.
+          The download runs in the background (progress shows in the cloud sync widget), and when it finishes the file will {copy.verb} automatically. Stream Manager cannot interrupt a download once it has started.
         </p>
         <p className="text-xs text-gray-400 font-mono break-all">{filePath}</p>
       </div>
