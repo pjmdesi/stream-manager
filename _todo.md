@@ -779,6 +779,15 @@
     - Audience by one honest signal, not heuristics: fresh install (went through onboarding) counts as new and gets the pulse plus any first-visit hints; an existing library counts as experienced and gets nothing unsolicited, with tours available behind Help.
     - Per-page tours from that page's Help affordance; never one grand whole-app tour.
 
+- **BIG-6**
+  Right click functionality:
+  Currently, I think its only used inside inputs/textareas for basic copy/paste and auto correct. Everywhere else, it's disabled.
+  I'm not sure it's worth adding, and it may cause more problems than any value it can add, but perhaps a radial menu of some sort kind of like how blender has (except it would only be the one, and would be opened with right click instead of one of several shortcuts). The only question is... what would go in such a menu? Would it be context-dependent? I think 8 options max, depending on the design. Context-dependant sounds like way too much to keep up with, so I'm definitely more in favor of global app actions.
+
+  Some ideas:
+  * A quick navigator of some sort, swithcing between the different app pages without having to use the sideabar? Would that really be helpful?
+  * Maybe it replaces the awkward nav buttons in the navigation sidebar (like the launch button and the auto-rules start/stop buttons). That would make them less traditionally accesible... and there's only the two right now.
+
 ## Archive
 
 - **STR-10** [done]

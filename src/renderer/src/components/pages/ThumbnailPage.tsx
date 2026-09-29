@@ -3256,7 +3256,10 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill', headerle
               Gradient, a little taller, each segment carrying a square
               preview of the current stops rendered as that kind beside its
               label. The spine bar below previews the colors only. */}
-          <div className="flex items-center gap-1.5 my-1">
+          {/* Tight row: the switch's three labels need every pixel of the
+              card's width at 10 px (Linear and Radial truncated with the
+              swatch button at 24 px bordered and a 6 px gap, 2026-09-29). */}
+          <div className="flex items-center gap-1 my-1">
           <div className="flex-1 min-w-0 flex bg-navy-900 border border-white/10 rounded-md overflow-hidden" role="radiogroup" aria-label={`${F.label} gradient kind`}>
             {([
               ['linear', 'Linear', 'Runs along a line at the angle below'],
@@ -3288,7 +3291,7 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill', headerle
                       }}
                       aria-hidden
                     />
-                    <span className="truncate px-1">{label}</span>
+                    <span className="truncate px-0.5">{label}</span>
                   </button>
                 </Tooltip>
               )
@@ -3296,11 +3299,13 @@ function GradientFillControl({ layer, update, fallback, paint = 'fill', headerle
           </div>
           {headerless && (
             <Tooltip content="Apply a gradient swatch">
+              {/* Same chrome as the stop rows' palette buttons: no border,
+                  4 px padding, so the switch keeps the width its labels need. */}
               <button
                 ref={gradPopBtnRef}
                 type="button"
                 onClick={() => { if (gradPopOpen) setGradPopOpen(false); else openGradPopover() }}
-                className={`h-6 w-6 flex items-center justify-center rounded-md border border-white/10 shrink-0 transition-colors ${gradPopOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'}`}
+                className={`p-1 rounded shrink-0 transition-colors ${gradPopOpen ? 'text-gray-200 bg-white/10' : 'text-gray-400 hover:text-gray-200 hover:bg-white/10'}`}
               >
                 <Palette size={12} />
               </button>
