@@ -163,6 +163,18 @@
 - **STR-26** [ui]
   Show a YouTube tag template's topic links from the template's side. Today the link is set only from the Manage Tags dialog: each topic row has a link button that picks one YouTube tag template, stored as a topic-to-template map that the sidebar's auto-apply reads. The map is many topics to one template, so the template side is read-only by decision (2026-09-24): in the Templates dialog's YouTube Tags tab, a template row that any topic points at shows a link indicator (the same link glyph the topic rows use), and its tooltip lists the linked topics. Editing the links stays in Manage Tags, where a topic picks its one template. No new data; the indicator reads the existing map. Filed 2026-09-24.
 
+- **STR-27**
+  Add a subtle visualization to the view count icon and text to help indicate the performance of the stream items. I'm imagining the icon/text could be colored based on how well it did compared to the rest of the items in the library. Not sure what the correct way to evaulate the numbers would be. I'm thinking "typical" view counts would be a neutral color (perhaps the light gray we're using now), maybe median value?. If lower than "typical", it would start to go "down" through yellow, to orange and then to red. Red would be the final color to indicate the lowest-performing video (whichever has the minimum amount af views). If a video performs better than "typical", then the colors would go "up" through the spectrum, starting with green -> blue -> purple -> pink (max). We would need to bold the view count text/icon to account for this new funcitonality.
+
+  So the full spectrum would be:
+  Red (min) -> orange -> yellow -> "Neutral" gray (current color, median within some threshold) -> green -> blue -> purple -> pink (max).
+
+  I'm linking we may need to use a log or exponential scale for the measurements (or allow the user to pick somehow). Going over the data for my videos, my median is probably ~200–300 views, but my best video 17K (with others between 1k and 8k). The pink view counts should be very rare.
+
+  This functionality should probably not start working until there are enough videos to get meaningful data from. Perhaps around 50 or maybe 100?
+
+  It should be able to be toggled off in the column header with an icon-button.
+
 ### Player
 
 - **PLR-2** [needs-design] [done]

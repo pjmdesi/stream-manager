@@ -98,13 +98,22 @@ export function registerVideoIPC(): void {
   // Cleanup is now a no-op — files live in the cache managed by audioCacheManager
   ipcMain.handle('video:cleanupTracks', async () => {})
 
-  ipcMain.handle('video:clearAudioCache', async () => {
-    audioCacheManager.clearAll()
-    thumbnailCacheManager.clearAll()
-    waveformCacheManager.clearAll()
+  // Clears every cache and reports what stayed behind: the files that could
+  // not be removed (in use by another process, a permissions problem) and
+  // the size still on disk, measured rather than assumed, so Settings can
+  // show the truth instead of "0 B" over a half-cleared folder.
+  ipcMain.handle('video:clearAudioCache', async (): Promise<{ failed: string[]; remaining: number }> => {
+    const failed = [
+      ...audioCacheManager.clearAll(),
+      ...thumbnailCacheManager.clearAll(),
+      ...waveformCacheManager.clearAll(),
+    ]
     // The in-process map too — clearing only the disk caches left the whole
     // session's waveforms resident in main's memory.
     waveformCache.clear()
+    if (failed.length > 0) console.warn('[cache] clear left files behind:', failed)
+    const remaining = audioCacheManager.getTotalSize() + thumbnailCacheManager.getTotalSize() + waveformCacheManager.getTotalSize()
+    return { failed, remaining }
   })
 
   ipcMain.handle('video:getAudioCacheSize', async () => {

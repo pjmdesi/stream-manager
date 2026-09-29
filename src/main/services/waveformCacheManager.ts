@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { app } from 'electron'
+import { removeTree } from './removeTree'
 
 class WaveformCacheManager {
   private _cacheDir: string | null = null
@@ -63,11 +64,12 @@ class WaveformCacheManager {
     return total
   }
 
-  clearAll(): void {
-    try {
-      fs.rmSync(this.cacheDir, { recursive: true, force: true })
-      this._cacheDir = null
-    } catch {}
+  /** Remove every cached file; returns the ones that could not be removed
+   *  (see removeTree). The folder is recreated lazily on the next use. */
+  clearAll(): string[] {
+    const failed = removeTree(this.cacheDir)
+    if (failed.length === 0) this._cacheDir = null
+    return failed
   }
 }
 

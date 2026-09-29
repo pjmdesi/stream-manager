@@ -110,25 +110,37 @@ class AudioCacheManager {
     return Object.values(this.loadIndex().entries).reduce((s, e) => s + e.totalSize, 0)
   }
 
-  clearAll(): void {
-    const index = this.loadIndex()
-    for (const entry of Object.values(index.entries)) {
-      for (const t of entry.tracks) {
-        try { fs.unlinkSync(t) } catch {}
+  /** Remove every cached track; returns the files that could not be
+   *  removed ("<path>: <code>"), so the caller can say so. Entries whose
+   *  files stayed behind are kept in the index, so the size stays honest
+   *  and the next clear tries them again. */
+  clearAll(): string[] {
+    const failed: string[] = []
+    const codeOf = (err: unknown) => (err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : String(err))
+    const tryUnlink = (p: string): boolean => {
+      try { fs.unlinkSync(p); return true } catch (err) {
+        if (codeOf(err) === 'ENOENT') return true
+        failed.push(`${p}: ${codeOf(err)}`)
+        return false
       }
     }
-    // Sweep stray .opus files the index loop can't see — partials from
+    const index = this.loadIndex()
+    const kept: Record<string, CacheEntry> = {}
+    for (const [key, entry] of Object.entries(index.entries)) {
+      const remaining = entry.tracks.filter(t => !tryUnlink(t))
+      if (remaining.length > 0) kept[key] = { ...entry, tracks: remaining }
+    }
+    // Sweep stray .opus files the index loop can't see: partials from
     // cancelled extractions were never indexed, so "clear cache" walked
     // right past them and they accumulated forever.
     try {
       for (const f of fs.readdirSync(this.cacheDir)) {
-        if (f.endsWith('.opus')) {
-          try { fs.unlinkSync(path.join(this.cacheDir, f)) } catch {}
-        }
+        if (f.endsWith('.opus')) tryUnlink(path.join(this.cacheDir, f))
       }
-    } catch { /* cache dir missing — nothing to sweep */ }
-    this._index = { entries: {} }
+    } catch { /* cache dir missing: nothing to sweep */ }
+    this._index = { entries: kept }
     this.saveIndex()
+    return failed
   }
 }
 

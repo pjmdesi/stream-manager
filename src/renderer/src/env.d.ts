@@ -41,7 +41,7 @@ declare global {
       cancelExtractAudioTracks(trackIndex?: number): Promise<void>
       cleanupTracks(paths: string[]): Promise<void>
       getWaveform(filePath: string): Promise<Uint8Array>
-      clearAudioCache(): Promise<void>
+      clearAudioCache(): Promise<{ failed: string[]; remaining: number }>
       getAudioCacheSize(): Promise<number>
       getThumbnailCache(filePath: string): Promise<{ timecodes: number[]; frameUrls: string[] } | null>
       saveThumbnailFrame(filePath: string, index: number, dataUrl: string): Promise<void>

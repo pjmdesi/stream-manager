@@ -267,11 +267,27 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
 
   const [ytCategories, setYtCategories] = useState<{ id: string; title: string; assignable: boolean }[]>([])
 
+  // Clearing can take a few seconds on a full cache (the button shows a
+  // spinner meanwhile) and can leave files behind when another process
+  // holds one open; main reports those and the size actually left on
+  // disk, and the row says so instead of claiming an empty cache.
+  const [cacheError, setCacheError] = useState<string | null>(null)
   const clearCache = async () => {
     setClearingCache(true)
-    await window.api.clearAudioCache()
-    setCacheSize(0)
-    setClearingCache(false)
+    setCacheError(null)
+    try {
+      const { failed, remaining } = await window.api.clearAudioCache()
+      setCacheSize(remaining)
+      if (failed.length > 0) {
+        const n = failed.length
+        setCacheError(`${n} cached file${n === 1 ? '' : 's'} could not be removed and ${n === 1 ? 'is' : 'are'} still on disk. ${n === 1 ? 'It' : 'They'} may be in use by the player or another program; close it and clear again. First: ${failed[0]}`)
+      }
+    } catch (err) {
+      setCacheError(`Clearing the cache failed: ${err instanceof Error ? err.message : String(err)}`)
+      window.api.getAudioCacheSize().then(setCacheSize).catch(() => {})
+    } finally {
+      setClearingCache(false)
+    }
   }
 
   const isDirty = JSON.stringify(local) !== JSON.stringify(config)
@@ -580,12 +596,19 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               variant="ghost"
               size="sm"
               icon={<Trash2 size={13} />}
+              loading={clearingCache}
               onClick={clearCache}
-              disabled={clearingCache || cacheSize === 0}
+              disabled={cacheSize === 0}
             >
-              {clearingCache ? 'Clearing…' : 'Clear Cache'}
+              {clearingCache ? 'Clearing…' : 'Clear cache'}
             </Button>
           </div>
+          {cacheError && (
+            <p className="flex items-start gap-1.5 text-xs text-red-400">
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+              <span className="break-all">{cacheError}</span>
+            </p>
+          )}
         </Section>
 
         {/* Streams */}
