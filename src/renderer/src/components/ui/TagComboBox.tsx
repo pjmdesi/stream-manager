@@ -128,12 +128,16 @@ function ComboTagChip({
 function HighlightMatch({ text, query }: { text: string; query: string }) {
   const idx = text.toLowerCase().indexOf(query.toLowerCase())
   if (idx === -1) return <>{text}</>
+  // One inline span, not a fragment: the chip is a flex box, and a fragment
+  // hands it three flex items whose edge whitespace flex layout trims, so a
+  // space next to the match disappeared ("Dead as Disco" read "Deadas
+  // Disco" while typing "dead"; found 2026-09-30).
   return (
-    <>
+    <span>
       {text.slice(0, idx)}
       <span className="font-semibold text-accent-300">{text.slice(idx, idx + query.length)}</span>
       {text.slice(idx + query.length)}
-    </>
+    </span>
   )
 }
 
