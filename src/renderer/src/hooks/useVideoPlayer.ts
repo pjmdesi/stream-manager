@@ -40,6 +40,11 @@ export interface VideoPlayerState {
   videoUrl: string | null
   filePath: string | null
   error: string | null
+  /** Where playback stopped when `error` is a mid-playback failure (the
+   *  recording has a damaged or missing stretch there); null for a file
+   *  that never produced a frame. Drives the banner's "Skip past it" and
+   *  the play button's recovery (recoverPlayback). */
+  errorAt: number | null
 }
 
 /** Compute and apply effective audibility across the video element +
@@ -115,6 +120,7 @@ export function useVideoPlayer() {
     videoUrl: null,
     filePath: null,
     error: null,
+    errorAt: null,
   })
 
   // Tracks snapshot kept in sync via effect — used by callbacks that need
@@ -156,7 +162,8 @@ export function useVideoPlayer() {
     filePath: string,
     savedSettings?: Record<number, AudioTrackSetting>,
   ) => {
-    setState(prev => ({ ...prev, error: null }))
+    setState(prev => ({ ...prev, error: null, errorAt: null }))
+    recoverSkipRef.current = null
     loadSessionRef.current++
     // A stale resume flag from the previous file must not auto-play this one
     // on its first seek.
@@ -564,9 +571,48 @@ export function useVideoPlayer() {
     return pendingSeekTime.current ?? video.currentTime
   }, [])
 
+  // Recovery from a mid-playback failure. A media element that has raised
+  // an error is dead until its source is loaded again, so play() on it
+  // does nothing (the old "stuck but the controls still work" state).
+  // Reload the same source, seek a little past where it stopped (a seek
+  // lands on the next keyframe anyway, which clears a gap like the one
+  // described at the error listener below), and resume. Each call skips
+  // further than the last from the same spot, so a longer hole yields to
+  // a second press.
+  const recoverSkipRef = useRef<{ at: number; skip: number } | null>(null)
+  const recoverPlayback = useCallback(() => {
+    const v = videoRef.current
+    const url = state.videoUrl
+    if (!v || !url) return
+    const at = state.errorAt ?? v.currentTime
+    const prevSkip = recoverSkipRef.current
+    const skip = prevSkip && Math.abs(prevSkip.at - at) < 0.5 ? prevSkip.skip * 2 : 2
+    recoverSkipRef.current = { at, skip }
+    const target = Math.min(Math.max(0, at + skip), Math.max(0, (state.duration || v.duration || at + skip) - 0.1))
+    setState(prev => ({ ...prev, error: null, errorAt: null }))
+    resumeAfterSeek.current = false
+    isSeeking.current = false
+    pendingSeekTime.current = null
+    const onMeta = () => {
+      v.removeEventListener('loadedmetadata', onMeta)
+      seek(target)
+      v.play().catch(() => {})
+    }
+    v.addEventListener('loadedmetadata', onMeta)
+    // Assigning the same URL does not restart the load on its own.
+    v.src = url
+    v.load()
+  }, [state.videoUrl, state.errorAt, state.duration, seek])
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current
     if (!video) return
+    if (video.error && state.errorAt !== null) {
+      // The element is dead after a mid-playback failure; play() would be
+      // a no-op. Play means "get going again", so it recovers instead.
+      recoverPlayback()
+      return
+    }
     if (video.paused) {
       video.play().catch((err: DOMException) => {
         // AbortError = a load/pause interrupted the play() — routine
@@ -583,7 +629,7 @@ export function useVideoPlayer() {
       resumeAfterSeek.current = false
       video.pause()
     }
-  }, [])
+  }, [state.errorAt, recoverPlayback])
 
   /** Re-derive video.muted / audioEl.muted from the current track M/S state.
    *  External callers (e.g. the bleep logic) that bypass the system to force
@@ -594,7 +640,7 @@ export function useVideoPlayer() {
   }, [])
 
   const clearError = useCallback(() => {
-    setState(prev => ({ ...prev, error: null }))
+    setState(prev => ({ ...prev, error: null, errorAt: null }))
   }, [])
 
   // Surface decode failures. There was no error listener on the <video>
@@ -602,6 +648,16 @@ export function useVideoPlayer() {
   // pack, MPEG-2) rendered a black frame with live-looking controls and
   // no message anywhere. Re-attached whenever the source changes so the
   // listener exists even if the element mounted after the hook.
+  //
+  // Two kinds of failure, told apart by whether the file had played: a
+  // file that never produced a frame has a codec or container the player
+  // cannot handle, and converting it is the answer; a file that was
+  // playing and then failed has a damaged or missing stretch at that
+  // point (a two-second hole in a 2024 recording, where the muxer gave
+  // the last audio packet before the hole a two-second duration and
+  // Chromium's decoder refused it, 2026-10-01). The old handler called
+  // both "codec not supported", which for the second kind was wrong and
+  // sent the user to convert a file that plays fine past the spot.
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
@@ -610,14 +666,19 @@ export function useVideoPlayer() {
       // "src not supported" for the empty source — ignore those.
       if (!v.src) return
       const me = v.error
-      const codecProblem = me?.code === MediaError.MEDIA_ERR_DECODE
-        || me?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+      const hadPlayed = v.currentTime > 0 || v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+      const detail = me?.message ? ` (${me.message})` : ''
+      const neverPlayable = me?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+        || (me?.code === MediaError.MEDIA_ERR_DECODE && !hadPlayed)
       setState(prev => ({
         ...prev,
         isPlaying: false,
-        error: codecProblem
+        error: neverPlayable
           ? 'Can’t play this file: its codec isn’t supported by the built-in player. Convert it (H.264/MP4) in the Converter to view it here.'
-          : `Video playback error${me?.message ? `: ${me.message}` : ''}`,
+          : hadPlayed
+            ? `The recording has a damaged or missing stretch here and playback stopped${detail}. Skip past it to keep watching.`
+            : `Video playback error${detail}`,
+        errorAt: hadPlayed ? v.currentTime : null,
       }))
     }
     v.addEventListener('error', onError)
@@ -645,6 +706,7 @@ export function useVideoPlayer() {
       videoUrl: null,
       filePath: null,
       error: null,
+      errorAt: null,
     })
   }, [releaseAudioElements])
 
@@ -682,6 +744,7 @@ export function useVideoPlayer() {
     getSeekTarget,
     setPlaybackRate,
     togglePlay,
+    recoverPlayback,
     clearError,
     closeVideo,
   }

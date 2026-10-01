@@ -1417,7 +1417,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     videoRef, state, loadFile, handleDurationChange,
     enableMultiTrack, disableMultiTrack, playTrack, cancelExtraction, cancelTrackExtraction,
     setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, setTrackName, recomputeAudibility,
-    clearError, closeVideo, seek, fastSeek, getSeekTarget, setPlaybackRate, togglePlay,
+    clearError, closeVideo, seek, fastSeek, getSeekTarget, setPlaybackRate, togglePlay, recoverPlayback,
   } = useVideoPlayer()
 
   // Mark the open video as in-use so the Streams page blocks deleting it (and
@@ -7026,10 +7026,27 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
 
       {error && (
         <div className="px-4 py-2 bg-red-900/30 border-t border-red-800/50 text-red-400 text-sm flex items-center gap-2">
-          <span className="flex-1 select-text cursor-text">{error}</span>
-          <button onClick={clearError} className="shrink-0 hover:text-red-200 transition-colors">
-            <X size={14} />
-          </button>
+          {/* A mid-playback failure names where it happened and offers to
+              skip past it; play does the same (useVideoPlayer.recoverPlayback). */}
+          <span className="flex-1 select-text cursor-text">
+            {state.errorAt !== null ? `Playback stopped at ${formatTime(state.errorAt, videoInfo?.fps)}. ` : ''}{error}
+          </span>
+          {state.errorAt !== null && (
+            <Tooltip content="Reload the file and resume a little past this point">
+              <button
+                type="button"
+                onClick={recoverPlayback}
+                className="shrink-0 px-2 py-0.5 rounded border border-red-700/60 text-red-200 hover:bg-red-800/40 transition-colors text-xs"
+              >
+                Skip past it
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip content="Dismiss">
+            <button onClick={clearError} className="shrink-0 hover:text-red-200 transition-colors">
+              <X size={14} />
+            </button>
+          </Tooltip>
         </div>
       )}
 
