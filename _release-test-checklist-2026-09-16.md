@@ -109,9 +109,9 @@ Batch: no single theme. The Electron 34 to 44 upgrade, a converter and cloud rou
 
 ## Docs (every release)
 
-- [ ] README.md reviewed against the shipped app: features (one sentence for arrows and groups if anything), prerequisites and versions (Electron 44, Node 24), every link, the hero screenshot from the new shoot, the project layout block (new files: lib/arrow.ts, lib/layerNames.ts, lib/groupMask.ts, hooks/useDragAutoScroll.ts, hooks/useDropdownPlacement.ts, services/rowThumbs.ts, services/streamsWatcher.ts).
-- [ ] CONTRIBUTING.md and PRINCIPLES.md still accurate; principles: code citations resolve; the host list is unchanged by this cycle (no new outbound host, credential, or database or telemetry dependency).
-- [ ] Style guide: the Angle fields, Native select skin, Drag and drop in scrollable containers, and Anchored popovers rules match what shipped.
+- [ ] README.md reviewed against the shipped app (2026-10-01): one sentence added to Thumbnail Editor for groups, masks, group effects, polygons, arrows, and gradient kinds; Electron 44 and Node 24 already right; all eleven links answer 200; layout block gained `constants/` and names the new lib and hook areas. Still open: the hero screenshot, to be swapped in from the website's new shoot before promotion.
+- [x] CONTRIBUTING.md and PRINCIPLES.md (2026-10-01): every file and symbol PRINCIPLES cites exists (updateCheck 6 h TTL and net 30 s cache match the text); the main process references no host outside the published list (gstatic and cloudflare are the two probes, oauth2.googleapis.com is covered by googleapis.com, developers.google.com is a browser link); package.json changed only Electron and @types/node since v2.6.0. CONTRIBUTING corrected: the app writes no log files, so the "logs are at AppData/logs" line is replaced by the Ctrl+` dev tools console; the version is at the bottom of the navigation (About opens from it), not the title bar; three em-dashes removed.
+- [x] Style guide (2026-10-01): Angle fields, Native select skin, Drag and drop in scrollable containers, and Anchored popovers each describe what shipped, with the open items (APP-39 engine, APP-40 wheel) named in the text.
 
 ## Promotion (after the sweep is green)
 

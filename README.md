@@ -61,7 +61,7 @@ Stream Manager keeps everything about your stream sessions in one place: the rec
 
 **Video Player.** Review, clip, and export stream sessions with thumbnail and waveform tracks. Timeline markers (including chapters written by OBS's Hybrid MP4 chapter hotkey), per-track mute/solo/volume on multi-track recordings with your choice of tracks in the export mix, clip drafts that stay linked to their source, shape-aware cropping for widescreen, square, or vertical exports, bleep markers, and a frameless pop-out window that OBS can capture for rolling clips on stream.
 
-**Thumbnail Editor.** A built-in canvas editor for stream and clip thumbnails. Save layouts as reusable templates, and use merge fields (`{title}`, `{topic}`, `{season}`, `{episode}`, `{date}`) in text layers that substitute live, so one template covers a whole series.
+**Thumbnail Editor.** A built-in canvas editor for stream and clip thumbnails. Save layouts as reusable templates, and use merge fields (`{title}`, `{topic}`, `{season}`, `{episode}`, `{date}`) in text layers that substitute live, so one template covers a whole series. Layers group, a group can be clipped by a shape mask and carry its own shadow, outline, and filters, and the shape tools include polygons and arrows with linear, radial, or conic gradient fills and strokes.
 
 **Converter and Combine.** Queue video conversions using ffmpeg presets (useful presets included; HandBrake JSON presets import directly), batch-archive sessions straight from the Streams page, remux containers without re-encoding, and combine multiple recordings into one file losslessly.
 
@@ -139,9 +139,10 @@ src/
 ├── preload/         # Context bridges (main window + the video pop-out)
 └── renderer/src/
     ├── components/  # Pages (one per nav item), modals, widgets, and the shared ui/ primitives
+    ├── constants/   # Tag colors and other fixed tables
     ├── context/     # App-wide state (store, conversions, cloud ops, watcher, ...)
-    ├── hooks/       # Player, waveform, thumbnail strip, AI suggestions, ...
-    ├── lib/         # Pure helpers (merge fields, mismatch detection, clip export, ...)
+    ├── hooks/       # Player, waveform, thumbnail strip, AI suggestions, drag auto-scroll, ...
+    ├── lib/         # Pure helpers (merge fields, mismatch detection, clip export, layer tree, arrow and polygon geometry, ...)
     └── types/       # Shared TypeScript interfaces
 ```
 
