@@ -15,6 +15,8 @@ Sweep fixes so far (each needs a fresh build; update the hash above when cut):
 
 FROZEN 2026-09-16: the queue is fully built. Code changes from here are limited to bugs and fixes found during this sweep.
 
+SWEEP COMPLETE 2026-10-02: every app item green, docs pass done, and the 2026-10-01 stream night ran on the packaged build with no Stream Manager issues (relay lifecycle, post-stream Twitch update, the Twitch channel panel). Last code commit on dev is 1411796 (the player mid-playback recovery); the two commits after it are docs and the hero image. Remaining lines below are promotion steps, not tests.
+
 Batch: no single theme. The Electron 34 to 44 upgrade, a converter and cloud round, stream list additions, player navigation and track naming, and a large thumbnail editor batch (groups, masks, effects on groups, gradient strokes and kinds, the properties panel rework, arrows, layer naming), plus the row-thumbnail cache. All checks run against the PACKAGED build, not the dev server. The relay and Twitch items pair with a real stream night.
 
 ## This batch

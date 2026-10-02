@@ -399,6 +399,15 @@
   One of the things that makes groups annoying in Illustrator is that by default the group layers in the layer panel are all called "group" by default. Could we have the layer panel auto-name groups as "Group [N]" where N is the count of how many groups have ever been added to a particular file. So it would start with "Group 1", and then "Group 2", and then if a user deleted (or ungroups) "Group 2", the next time they group, it would be "Group 3". That way we don't have to keep track of which ones still exist (we just iterate the N) and it is a simple way the user can track which groups are what. And of course we can allow the user to change the names of the groups the same way they can rename layers now. We might want to think about doing this for all the other types of layers as well: text, shapes, etc.
   Built 2026-09-16, awaiting review. Applied to groups (Ctrl+G and Apply as mask to the layer below), text, rectangles, ellipses, polygons, and slot-created masks ("Group 1", "Text 2", "Mask 1"); images keep their file name, which is the better label. The per-kind counts live in the canvas file as an optional `nameCounters` map (`lib/layerNames.ts`), written on every save and reseeded on every load; a file from before the counters, a template, or a duplicated variant seeds each kind from the highest "Kind N" already among its layers, so nothing restarts at 1. The count is "ever created": undoing a group, deleting it, or ungrouping does not give the number back. Renaming is unchanged (double-click the row). Verify: three groups in a fresh canvas read Group 1 to 3; ungroup Group 2, group again, read Group 4; the names survive a save and reload and a variant switch; an older canvas with a "Group 2" already in it gets Group 3 next; text and shapes number the same way; an image still takes its file name.
 
+- **THU-35** [bug] [ui]
+  When pasting in an image, and then using ctrl+Z to undo, the toolbar in the layer panel remains visible despite the layer now being absent (because the paste was undone.)
+
+- **THU-36** [bug] [investigate]
+  I seem unable to paste certain images from the clipboard into the thumbnail editor. It worked in the past, but for some reason when I copy an image from my web browser and ctrl+v it into the thumbnail canvas, the last copied item from SM (in this case an image layer from another thumbnail file) keeps getting pasted in.
+
+- **THU-37**
+  Add the ability to drag in image files directly into the thumbnail canvas from another app or from explorer (if that's even a meaningful distiction).
+
 ### Converter
 
 - **CONV-3** [perf] [investigate]
