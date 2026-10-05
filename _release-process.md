@@ -62,6 +62,7 @@ Build: Stream Manager <version>_DEV.exe from dev @ <commit>
 ## Docs (every release)
 - [ ] README.md reviewed against the shipped app (features, prerequisites, links, hero screenshot, layout block)
 - [ ] CONTRIBUTING.md and PRINCIPLES.md still accurate (principles: code citations resolve)
+- [ ] `npm audit` read, both ways: the full count and `npm audit --omit=dev` (what ships). Anything in the shipped set gets fixed or a written reason in the todo before promotion
 ```
 
 ## Promotion (dev → master)

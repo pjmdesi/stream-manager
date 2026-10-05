@@ -10,30 +10,31 @@
 6. APP-39
 7. CONV-13
 8. CONV-15
-9. NAV-1
-10. COMB-6
-11. PLR-30
-12. STR-30
-13. STR-11
-14. STR-25
-15. STR-26
-16. STR-29
-17. PLR-17
-18. PLR-25
-19. PLR-26
-20. THU-35
-21. THU-36
-22. THU-37
-23. INTG-1
-24. APP-25
-25. APP-26
-26. APP-28
-27. APP-31
-28. APP-34
-29. APP-35
-30. CONV-14
-31. CONV-16
-32. SYNC-7
+9. CONV-17
+10. NAV-1
+11. COMB-6
+12. PLR-30
+13. STR-30
+14. STR-11
+15. STR-25
+16. STR-26
+17. STR-29
+18. PLR-17
+19. PLR-25
+20. PLR-26
+21. THU-35
+22. THU-36
+23. THU-37
+24. INTG-1
+25. APP-25
+26. APP-26
+27. APP-28
+28. APP-31
+29. APP-34
+30. APP-35
+31. CONV-14
+32. CONV-16
+33. SYNC-7
 
 ## Next up
 
@@ -283,6 +284,9 @@
   Archive preset review (split from CONV-15, 2026-10-05). Original text: I also want to check once more that the encoding preset we've provided and recommended for archiving is indeed the correct one. I'm still skeptical that it's a good, well-rounded solution. Windows' basic player app is unable to play the AV1 encodings, sometimes playing only audio, and sometimes not playing at all.
   Scope note: an investigation that ends in a recommendation (keep, retune, or change the codec), with evidence: a few representative recordings encoded both ways, sizes and encode times, and which players open the result. Changing the shipped preset, if that is the outcome, is a follow-up decision, since existing archives were made with the current one.
 
+- **CONV-17** [bug]
+  When I had a large list of items being converted that I needed to cancel, I had to click through one-by-one since there's no cancel all button. We should add this (with a confirm dialoge). Additionally, once I had cancelled all of them one at a time, the fans on my machine were stilll ramped up. I checked task manager and indeed there were still ffmpeg processes running even though there was nothing left in the conversion queue. This needs to be made impossible. SM should track all ffmpeg processes it spawns, know their state at all times, and make sure that state matches what SM indicates. If an sm-spawned ffmpeg process is running and has to correlating item in SM (conversion, combine, audio-extract, etc.), it should be immediately cancelled. But we should also make sure to avoid false postives in the case of app hang or errors. We proably already have a process to handle killing multiple ffmpeg processes since quitting the app is supposed to do this.
+
 ### Combine
 
 - **COMB-1** [needs-design]
@@ -482,6 +486,7 @@
 
 - **APP-43** [cleanup]
   Dependency update round, early in the cycle after v2.7.0 (filed 2026-10-02 from the `npm ci` report in the v2.7.0 release build: 19 vulnerabilities, 17 high). Only 3 of the 19 touch what ships; the rest sit in build-time tooling (electron-builder's updater and XML libraries, browserslist, postcss, brace-expansion), which never runs on a user's machine, so the headline number overstates the exposure. The shipped three are all `image-size` (infinite loops in its JXL, HEIF, and ICNS parsers, fixed in 2.0.4); the app feeds it only YouTube's own thumbnail bytes in `services/youtubeApi.ts`, so the risk was small, and it is a patch bump. Steps, in order, each with a `_DEV` dist and the core regression list: (1) `npm audit fix` without `--force`, which covers all 19 through in-range updates; (2) the in-range "Wanted" column from `npm outdated`: Electron 44.5.1, electron-builder 26.15.3, konva 10.7.0, react-konva 18.2.16, lucide-react 1.50.0, motion 12.43, eslint and typescript-eslint, autoprefixer, postcss, @types/node 24.19; the electron-builder bump needs the portable launcher pre-check re-verified (APP-32 patches its template and fails loudly if the template moved) and the two-launch test; (3) decide, separately and not in this round unless trivial: the majors held back on purpose, React 19 with react-konva 19, Tailwind 4, Vite 8 with plugin-react 6, TypeScript 7, chokidar 5 (the streams watcher no longer uses it; only the recording-rule watcher does), electron-store 11, glob 13, uuid 14, motion 14. Each major gets its own ticket when picked up. Also make the audit summary part of the release checklist's docs section so the number is read at every sweep rather than noticed in a build log.
+  Built 2026-10-05, awaiting review (steps 1 and 2; lockfile only, `package.json` ranges unchanged). `npm audit fix` cleared 14 of the 19, including all three `image-size` advisories (now 2.0.4). `npm update` then took every in-range bump: Electron 44.5.1, electron-builder 26.15.3, konva 10.7.1, react-konva 18.2.16, lucide-react 1.52.0, motion 12.43.0, eslint 10.12.0, typescript-eslint 8.71.1, autoprefixer 10.6.1, postcss 8.5.29, @types/node 24.19.1. Typecheck and lint pass after each step. The portable launcher patch's anchor (`RMDir /r $INSTDIR` then `SetOutPath $INSTDIR`) is still present in the 26.15.3 template, so the build script will inject the pre-check; the two-launch test on a dist is the real proof. The release process's checklist template gained the audit line. What remains in the audit: 5 entries that are one advisory, a stack-exhaustion denial of service in `braces` (every released version, no patched one), reaching shipped code through chokidar 3 and micromatch in `services/fileWatcher.ts` (the auto-rules watcher) and build tooling through Tailwind. The input it parses there is the user's own watch-rule patterns, so the exposure is a user crashing their own watcher with a pathological pattern. Clearing it means chokidar 5 (which drops braces and globbing) and picomatch in place of micromatch for rule matching: a real change to the auto-rules watcher, so it is step 3 material and its own ticket if wanted, not part of this round. Verify on a `_DEV` dist: the core regression list; two launches (second one focuses the first, no window flash, no second tray icon); the thumbnail editor end to end, since Konva and react-konva moved (groups, masks, group effects, arrows, gradients, export); icons across the app after the Lucide bump (a renamed or redrawn glyph would show as a wrong or missing icon); nav and row animations after the motion bump; an auto-rule firing on a dropped recording.
 
 - **APP-44** [cleanup]
   Retake the README hero on a release build. The current `resources/sm-hero.webp` (a7858f7, also serving as the website's streams screenshot) was captured on a dev build: its corner reads v2.6.0 with the branch chip, while the other site captures read v2.7.0 with no chip. Harmless at display size; the style guide's build-naming rule says release builds carry no markers, so the next shoot should use the published exe. Noted by the website instance 2026-10-02. Not queued.
