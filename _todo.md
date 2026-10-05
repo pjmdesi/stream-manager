@@ -82,7 +82,7 @@
 - **STR-9** [ui]
   Replace the native time picker on the broadcast time field with a custom one that matches the app's design; the native Chromium dropdown clashes with the rest of the UI. Model it on the DatePicker approach: keep the native input for segment typing and arrow-key editing, suppress the built-in dropdown, and render a custom popup (probably hour/minute columns plus AM/PM, honoring the locale's 12/24-hour format). The 2026-08 polish pass already made the native clock indicator read as a button (pointer + hover tint); this item replaces the dropdown it opens.
 
-- **STR-11**
+- **STR-11** [impact:3]
   Add a hover/focus interaction to the inline stream type and topics/games tags in each stream item row on the streams page. This interaction will animate the tags so their width increases to reveal an icon-only button. This button will be a "filter by this tag" action which will allow the user to quickly filter the stream item list based on the tag whose button was clicked. The icon should be a filter icon and the tooltip should read "Filter stream items by this tag". When the list is filtered, this icon will switch to a clear filter button with tooltip reading "Clear this tag from filters." When filters are applied, all tags in stream items which are matched with the filters list will have this button revealed already without needing to hover/focus. That way the user also has an easy way to identify and clear the filters from the using the tag chip elements. The filter status will need to sync with the actual column filter menu. So if the user filters by a tag using the column filters menu, all the tags which match a checked tag field in the menu will reveal the "clear this tag" version of the button.
 
   This will need to pair with STR-30.
@@ -110,10 +110,10 @@
 - **STR-22**
   Video thumbnails that land on a black or white frame. The keystone thumbnail (the one frame per video shown in the files grid, converter rows, and elsewhere) is taken at the video's temporal midpoint, either copied from the player's strip cache when one exists (`deriveKeystoneFromStrip`) or captured fresh. A midpoint that falls on a scene transition, a fade, or a flash produces a useless all-black or all-white image. Add a rejection check at capture time: sample the captured frame's luminance (a coarse grid of pixels is enough) and treat it as bad when the mean is near 0 or near 255 AND the spread is small (compression noise and partial fades need a threshold, not equality; start around mean < 16 or > 239 with a low standard deviation, tune on real files). On a bad frame, move the capture point forward by about 5% of the duration and try again, at most 3 times, then keep whatever the last attempt gave (a video that is black throughout must still get a thumbnail, and the loop must end). Filed 2026-09-10. Wherever the check lands (the renderer's canvas capture or the strip derivation), it must not hydrate cloud placeholders: keystones are only generated for local files today, keep it that way.
 
-- **STR-25** [ui]
+- **STR-25** [ui] [impact:2]
   Drag to reorder the items in the Templates dialog, on every tab: titles, descriptions, YouTube tags, Twitch tags. Same pattern as the converter's ready list and the combine queue: native drag with a private MIME type per list so nothing else reads as a reorder, a half-row threshold to pick the slot, the marker drawn inside the row the slot precedes, and `useDragAutoScroll` on the dialog's scroll container. The saved order is the order the pickers and the sidebar's template menus show, so persist it with the templates themselves rather than as a separate preference. A row's Edit form open should not be draggable. The wheel does not scroll during a native drag (APP-40); the auto-scroll is the floor. Filed 2026-09-24.
 
-- **STR-26** [ui]
+- **STR-26** [ui] [impact:1]
   Show a YouTube tag template's topic links from the template's side. Today the link is set only from the Manage Tags dialog: each topic row has a link button that picks one YouTube tag template, stored as a topic-to-template map that the sidebar's auto-apply reads. The map is many topics to one template, so the template side is read-only by decision (2026-09-24): in the Templates dialog's YouTube Tags tab, a template row that any topic points at shows a link indicator (the same link glyph the topic rows use), and its tooltip lists the linked topics. Editing the links stays in Manage Tags, where a topic picks its one template. No new data; the indicator reads the existing map. Filed 2026-09-24.
 
 - **STR-27**
@@ -131,10 +131,10 @@
 - **STR-28**
   MAYBE... Allow AI suggestion to use the built in merge fields. This will probably invove editing the behind-the-scenes prompt. We need to pass the available merge fields for the input from which the suggestion request comes to the AI ingest and describe what they're basically for.
 
-- **STR-29** [ui]
+- **STR-29** [ui] [impact:1]
   The episode selection button needs to stay visible but disabled when a stream item is not applicable to display the list. The skip to prev/next episode buttons already do this.
 
-- **STR-30**
+- **STR-30** [impact:4]
   Extend/Marry the tag filtering functionality by adding the appropriate text which would achieve the same filtering into the search bar in the header of the streams page. I think the best way to do this would be to use some sort of wrapper, maybe brackets or parentheses? So for example: Typing (Beat Saber) into the search bar would filter the streams list to show only streams with the Beat Saber tag in the topics/games field. So then when a person clicks the column filter for the topics/games field, instead of filtering the list directly, it would add the appropriate text into the search bar. Checking multiple would add them with commas between, since that matches the current functionality ("both must match"). Maybe brackets would be the category field and do the same thing? Then we could wean the users off of the column filter popup (I'm not a fan of the design or functionality).
 
   We then need to add the abillity for the app to present options for tags when the user types a "(" or "[" into the search bar. It should show a popup that matches the popups used for the tag fields in the stream detail sidebar. When the user closes the tag search key (either by typing ")" or "]" or by clicking a presented tag option in the popup), it should then render as a chip element matching the design of the respective tag (colored/textured correctly for category).
@@ -162,7 +162,7 @@
 - **PLR-16** [differentiator] [blocked:IDEA-12]
   The {markers} merge field for YouTube descriptions (phase 2 of the marker system, split from IDEA-4). A merge field that expands into the video's marker names and timecodes so streamers get description chapters from the markers they placed. Proceeds ONLY if IDEA-12 finds a viable shape: recording-vs-VOD clock offset plus Studio trimming makes automatic timecode mapping impossible in the general case. Relevant verified fact: OBS Hybrid MP4 auto-writes a "Start" chapter at 0:00, a freebie for YouTube's first-chapter-must-be-0:00 rule.
 
-- **PLR-17** [differentiator]
+- **PLR-17** [differentiator] [impact:3]
   Marker carry-through (phase 3 of the marker system, split from IDEA-4). Markers are never written into files automatically; these are the explicit, user-prompted paths that move them:
   - Bake markers into a file on request: a remux copy (no re-encode, fast) through the archive pipeline's crash-safe backup swap so the original is never at risk.
   - Converter option to bake markers during a conversion, since the file is being rewritten anyway. Verified 2026-09-05 with the bundled ffmpeg: embedded chapters survive the Lossless Copy remux by default (ffmpeg carries chapters as container metadata independent of stream mapping), so the plumbing exists; the option is about writing SM markers in, not preserving what's there.
@@ -183,10 +183,10 @@
 - **PLR-22**
   Add buttons & keyboard shortcuts to be able to skip to next/previous markers in an open video.
 
-- **PLR-25** [ui]
+- **PLR-25** [ui] [impact:2]
   Replace the player's video zoom indicator with the thumbnail editor's zoom control. Today the video stage shows a lone percentage badge top-left when zoomed (click to reset), while the thumbnail canvas has a proper control: quick zoom presets as small percent buttons, Fit, and a reset button, in the black/50 chip styling, bottom-left of the canvas. Rebuild the player's as the same control in the same place (bottom-left of the video stage, over the video, hidden until the video is zoomed or on hover of the stage), with presets that make sense for video (100%, 150%, 200%, 400% plus Fit), and keep the existing wheel zoom and middle-drag pan. Share the control between the two pages if the thumbnail one can be lifted out cleanly; if not, mirror the classes and note both sites in the style guide. Filed 2026-09-10 during the APP-27 sweep.
 
-- **PLR-26** [ui]
+- **PLR-26** [ui] [impact:1]
   A link from the player to the open video's stream item on the Streams page. Confirmed 2026-09-10 that none exists: the Converter and Combine pages get `onNavigateToStream` from App, the Player does not, and the sidebar's Selected Stream section only navigates between sibling streams inside the player (prev/next, Jump to stream). Make the Selected Stream group itself the link: clicking its thumbnail/title block calls App's `navigateToStream(folderPath)` (which selects the stream and switches to the Streams page), with hover styling that reads as a link and a tooltip "Open this stream on the Streams page". Keep the existing prev/next/Jump controls as they are; they are a different action (change the player's stream) and must not be inside the link's hit area. Collapsed sidebar: the section's collapsed form gets the same click.
 
 - **PLR-28** [investigate] [maybe]
@@ -195,7 +195,7 @@
 - **PLR-29** [ui]
   Follow-up to the 2026-10-01 playback-failure recovery (sweep notes under the v2.7.0 checklist), for the cycle after v2.7.0. Two awkward parts. (1) The error banner sits in the layout flow under the transport row, so it pushes the controls up when it appears and they jump back down when it goes; buttons must not move on their own. Move the banner out of the flow: an overlay anchored to the bottom of the video stage (or the top of the controls column) that covers nothing interactive, same red styling. (2) Skipping past a hole took three presses on the known file. The skip starts at two seconds and doubles only when the next failure lands within half a second of the previous one, but after a reload-and-seek the failure point moves, so every press restarted at two seconds and the first target (stop plus two) landed inside the hole, whose stretched audio packet still covered it. Make the sequence remember the recovery it is part of (double while the presses come within a short window, say thirty seconds, regardless of where the new stop is), start at a larger step, or, with PLR-28's gap data, jump straight past the hole's end. Filed 2026-10-01.
 
-- **PLR-30** [bug]
+- **PLR-30** [bug] [impact:1]
   After adjusting the volume of an audio track in multi-track editing mode, the focus remains on the volume slider, taking over functionality of keyboard shortcuts. The focus on the sliders should only stick the the user focused it manually with the tab key, otherwise it should release focus immediately after lifting the mouse.
 
 ### Thumbnail editor
@@ -230,13 +230,13 @@
 - **THU-32**
   Filters section rework in the thumbnail editor's properties panel (not queued; filed 2026-09-15 while reviewing THU-31). 1. Move the Grayscale, Invert, and Emboss checkboxes to the top of the section. 2. Replace Sepia with Colorize: sepia is colorize with one fixed color, and colorize is what it would be used for. 3. Emboss gets its options when checked (Konva exposes strength, white level, direction, and blend). 4. Drop the second value label from the slider input groups; it repeats the field (done 2026-09-16 in the THU-33 review). 5. Drop shadows and some filters do not render together as expected; work out which combinations are incompatible and either resolve them or account for them (for instance, pixelate, blur, and similar disabled while a layer has a drop shadow, with the reason in a tooltip).
 
-- **THU-35** [bug] [ui]
+- **THU-35** [bug] [ui] [impact:1]
   When pasting in an image, and then using ctrl+Z to undo, the toolbar in the layer panel remains visible despite the layer now being absent (because the paste was undone.)
 
-- **THU-36** [bug] [investigate]
+- **THU-36** [bug] [investigate] [impact:2]
   I seem unable to paste certain images from the clipboard into the thumbnail editor. It worked in the past, but for some reason when I copy an image from my web browser and ctrl+v it into the thumbnail canvas, the last copied item from SM (in this case an image layer from another thumbnail file) keeps getting pasted in.
 
-- **THU-37**
+- **THU-37** [impact:2]
   Add the ability to drag in image files directly into the thumbnail canvas from another app or from explorer (if that's even a meaningful distiction).
 
 ### Converter
@@ -257,7 +257,7 @@
 - **CONV-7** [investigate]
   Plan the exit from fluent-ffmpeg. Its repo went readonly with a "no longer maintained, no longer works properly with recent ffmpeg versions" warning (noticed 2026-09-05). Risk today is LOW: ffmpeg-static pins the exact ffmpeg binary the wrapper talks to, so the pairing is frozen and tested together, and the library has no network surface. The exposure is the future ffmpeg-static or Electron bump where an abandoned wrapper becomes the blocker. SM already builds raw ffmpeg argument strings for presets; fluent's remaining value is spawn lifecycle, progress parsing, and the kill/pause plumbing, all ownable in ffmpegService with direct child_process spawning. Do the migration assessment BEFORE the next ffmpeg-static bump, and treat any ffmpeg upgrade as blocked on it.
 
-- **CONV-13** [bug]
+- **CONV-13** [bug] [impact:2]
   This applies to dropzones for the converter and the player, but the issue was first discovered in the converter.
 
   Wierdly, I'm able to drag in a folder into the dropzone of the converter page. When I did this, it treated the folder itself as the thing to be converted instead of the things inside. I tried to start the conversion ttask just to see what would happen and it just showed an error, which was what I expected.
@@ -266,25 +266,25 @@
 
   We can discuss whether the import should be recursive (identifying and reading subfolder content).
 
-- **CONV-14** [ui] [feature]
+- **CONV-14** [ui] [feature] [impact:3]
   Need the abillity to merge audio tracks into one track. I had to edit a livestream recently and it required adjusting the audio levels of the individual tracks. YouTube only accepts the first track as the video's primary audio and subsequent tracks are used for alternate languages I believe. I need a way in SM to be able to mix separate audio tracks into one and set it as the first track. Maybe this should be an option in the converter preset as one of the built-ins? Basically the remux option but with the ability to combine all audio tracks in a video file. And/or it could be an additional option for the YouTube Ready preset, a new checkbox item in the queue task rows: "Combine all audio tracks into one".
 
   Second related issue: I was able to accomplish this sort of by accident because the clip export automatically merges the selected audio tracks. This is good functionality, and we should keep it, but it should be exeplicitly checked as an option (can be checked by default) when exporting. I'd say we put it underneath the track selection section.
 
   Split 2026-10-05: the combine half of this ticket (track management across combined files, with the track chart) moved to COMB-7, since it is a design project of its own. What stays here is the two small pieces above, which share the same mixing step: the converter's "combine all audio tracks into one" option, and the clip export's merge made an explicit checkbox under the track selection, on by default.
 
-- **CONV-15** [investigate]
+- **CONV-15** [investigate] [impact:3]
   When archiving streams, sometimes the archive preset creates files that are larger than the original. This mostly happens to my older streams where I was using a much lower bitrate. It's not really archiving if the output is larger, and since the archive process deletes the original, we need to add a check after the conversion process is complete (or maybe during the conversion process if we could estimate the output file size), and if it is bigger than the source file, it should warn the user and give them a choice to keep the original or let the app overwite anyway.
 
   In fact, it would be great if we could add a new data point in the ETA row for converting items which estimates the output file size.
 
   Split 2026-10-05: the archive preset review that sat here moved to CONV-16. This ticket is the size guard (never delete an original for a larger output without asking) and the estimated output size in the progress row.
 
-- **CONV-16** [investigate]
+- **CONV-16** [investigate] [impact:2]
   Archive preset review (split from CONV-15, 2026-10-05). Original text: I also want to check once more that the encoding preset we've provided and recommended for archiving is indeed the correct one. I'm still skeptical that it's a good, well-rounded solution. Windows' basic player app is unable to play the AV1 encodings, sometimes playing only audio, and sometimes not playing at all.
   Scope note: an investigation that ends in a recommendation (keep, retune, or change the codec), with evidence: a few representative recordings encoded both ways, sizes and encode times, and which players open the result. Changing the shipped preset, if that is the outcome, is a follow-up decision, since existing archives were made with the current one.
 
-- **CONV-17** [bug]
+- **CONV-17** [bug] [impact:3]
   When I had a large list of items being converted that I needed to cancel, I had to click through one-by-one since there's no cancel all button. We should add this (with a confirm dialoge). Additionally, once I had cancelled all of them one at a time, the fans on my machine were stilll ramped up. I checked task manager and indeed there were still ffmpeg processes running even though there was nothing left in the conversion queue. This needs to be made impossible. SM should track all ffmpeg processes it spawns, know their state at all times, and make sure that state matches what SM indicates. If an sm-spawned ffmpeg process is running and has to correlating item in SM (conversion, combine, audio-extract, etc.), it should be immediately cancelled. But we should also make sure to avoid false postives in the case of app hang or errors. We proably already have a process to handle killing multiple ffmpeg processes since quitting the app is supposed to do this.
 
 ### Combine
@@ -304,7 +304,7 @@
 - **COMB-5** [investigate]
   Check sources for timeline damage while combining, and decide whether conversions should too. Combining the 2024-10-09 recordings copied the two-second hole from 16-47-30 (see PLR-28) straight into the combined file, so the output fails in the player at the same spot and nothing warned about it. The combine already reads every source packet, so the detection is cheapest here: watch for a video timestamp jump far above one frame or an audio packet duration far above one AAC frame (ffmpeg's own stderr may already report the discontinuity; check what it logs on that file), then either warn in the completed row with the timecode (the output is still a faithful copy) or, as an option, repair in passing (re-time with a fill of the last frame plus silence, which a copy cannot do and a re-encode can). The converter's lossless copy would carry the same hole; a re-encode may heal it by accident. Decide per path, and share one detector with PLR-28 rather than three copies. Not queued; filed 2026-10-01.
 
-- **COMB-6** [ui]
+- **COMB-6** [ui] [impact:1]
   Add a line for external files to indicate that they are external and to keep a consistent height for task rows. This would go in place of the stream item title/link. It would not need to link to anything.
 
 - **COMB-7** [needs-design] [blocked:CONV-14]
@@ -318,7 +318,7 @@
 
 ### Integrations
 
-- **INTG-1** [investigate]
+- **INTG-1** [investigate] [impact:3]
   Investigate binding the stream relay's listener to 127.0.0.1 by default instead of 0.0.0.0. A loopback-only listener does not trigger the Windows Firewall allow prompt, which currently appears for ffmpeg.exe on the first launch of every new version while the relay is enabled. The any-interface bind only matters when the streaming software runs on a different machine and sends to SM over the LAN, so that case should become an explicit toggle (something like "Allow connections from other devices") that switches the bind back. Needs a migration path: anyone who set up the relay under the old bind must get a warning modal on update explaining the change, since a LAN-based setup would otherwise silently stop receiving; offer the toggle right in that modal. Also confirm what Server URL the integrations card displays for same-machine setups (localhost vs LAN IP) to be sure those are unaffected.
 
 ### YouTube & Twitch sync
@@ -341,7 +341,7 @@
 - **SYNC-6** [big]
   Add ability to manage YouTube playlists in SM. Add and remove videos from playlists, create new playlists, and maybe even have the option to automatically add stream items to a particular playlist based on certain criteria (like by stream item type and topic/game tags). Add duplicate detection (which YouTube currently lacks) so if a user tries to add a video to a playlist that already contains it, it will warn the user and ask if they want to add it anyway or not. Will need a marker+link element to appear in the stream item rows to indicate that the item is part of on or more playlists, and be able to link to that playlist. Something minimal like the video counter column. Since many will not be part of a playlist, we'll need to account for empty rows. The controls for adding and removing from playlists will likely appear in the stream item detail sidebar, and maybe even a bulk action for adding/removing multiple items to/from playlists at once. Will also need to build a playlist management page that lists all the playlists for the channel, and allow the user to create new playlists, delete playlists, and edit the playlist details (like title, description, privacy, etc.). The playlist management page/modal will also need to show which videos are in each playlist and allow the user to add/remove videos from the playlist from there as well. This will likely be a big feature that will take some time to implement.
 
-- **SYNC-7**
+- **SYNC-7** [impact:2]
   Investigate if there are any parts of the YouTube or Twitch APIs that are not being utilized bout could be and list them as part of this ticket.
 
 ### Auto-rules
@@ -420,16 +420,16 @@
     - Clown Vomit (stupid/silly theme)
   Eventually, allow users to create their own theme. This would probably be a modal in the settings page which lists all the editable colors in the app. It would need to change them on the fly, have dummy versions of commin elements, and warn against hard-to-read combinations using accessibility standards.
 
-- **APP-19**
+- **APP-19** [impact:2]
   Promote the tag color palette to a shared app-level palette module. constants/tagColors.ts is already the de-facto shared content-color palette (tag chips, audio track colors, waveform fills, and future consumers like player markers and milestone cards), so rename and reshape it as the app's reusable palette (e.g. constants/palette.ts) with the color KEYS byte-stable, since they are persisted in users' tag and track color data. Pure refactor, no visual change. Deliberately NOT part of the theming chain (APP-16/15/14): this palette is user-content color choice, which the APP-15 catalog explicitly excludes. Two coordination notes: the Gray entry's purple-* utility classes will be renamed by APP-16's sweep, so whichever of these lands second touches that file; and when APP-14 themes land, give this palette a quick contrast check on Light and OLED. No blockers either direction: marker or card work landing first simply imports tagColors and this refactor updates the import later.
 
 - **APP-20**
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
 
-- **APP-21** [investigate]
+- **APP-21** [investigate] [impact:4]
   Single-authority audit: sweep the app for subsystems quietly running their own private copy of a shared concern, the pattern that has now bitten repeatedly. Known instances, all since fixed: the converter's private cloud-hydration loop that the cloud widget, files grid, and thumbnail fill-in never heard about (CONV-1); encode starts bypassing the concurrency scheduler (CONV-2); the out-of-sync panel's lazy tag-template sync (v2.4.0); the zoom shortcuts split between SM's handler and Electron's invisible default menu (APP-12). Method: inventory the cross-cutting concerns (cloud/hydration status, file-change notification, scheduling and caps, caching layers, config writes, event broadcast channels) and verify each has exactly ONE authority that every consumer routes through; anything found gets fixed inline if small or filed as its own item. Candidates to check first: ETA/elapsed calculations (converter nav extra vs converter page rows), per-page checkLocalFiles caching vs the shared hydrationCache, thumbnail generation triggers across surfaces, streams:changed emission sites, and any remaining direct getStore().set('config') writes that skip setConfigPartial's broadcast.
 
-- **APP-25**
+- **APP-25** [impact:3]
   Extend _meta.json's corruption recovery to the app-config and templates stores (from the website-side audit, 2026-09-06). Writes are already safe (electron-store 8.2.0 writes through conf 10.2.0's atomic writer) and a corrupt store correctly throws instead of silently resetting (clearInvalidConfig stays false); the gap is recovery: a damaged app-config.json has no backup to restore from, and since getStore() throws, the likely user experience is an app that will not start with no explanation.
   Scope: the "app-config" store and the templates it holds only (watch rules, title/description/tag templates, imported presets, stream type tags and textures: user-authored work). Deliberately NOT youtube-auth or twitch-auth (reconnecting is trivial, restoring a stale token is worse than failing clean, and encrypted values are meant to be undecryptable when AppData moves between machines), and not window state or caches, where regenerating is correct.
   Port the whole recovery design from writeAllMeta/readAllMeta in src/main/ipc/streams.ts:
@@ -441,13 +441,13 @@
   First task: confirm what actually happens today when getStore() throws at startup. If that is an unhandled crash, fixing it is the highest-value part of the work: it is the difference between "the app healed itself" and "the app is bricked with no explanation".
   Coordination: when this lands, PRINCIPLES.md's crash-safe entry drops its caveat that backups are specific to library metadata, and its "what would break it" line updates in the same commit (tell the website instance).
 
-- **APP-26** [ui]
+- **APP-26** [ui] [impact:3]
   Let the Help modal pop out into its own window (2026-09-06). The modal is the default, but a modal covering the exact UI the user is trying to understand defeats the purpose: add a button (footer candidate) that breaks the Help content out into a separate window the user can place beside the app. No state passes between Help and the rest of the app, so the content is fully self-contained. Implementation notes: the player's pop-out video window is the precedent (own BrowserWindow + dedicated preload, see out/preload/popup.js); the pop-out should preserve the section the user was reading, remember its size/position, and reopening Help while the window is open should focus the window instead of showing the modal. Close buttons follow the style guide's same-slot rule.
 
-- **APP-28** [ui]
+- **APP-28** [ui] [impact:1]
   Maybe add a tooltip to the blue "changed" dots in the settings that tells users they must save for settings to apply.
 
-- **APP-31** [bug] [blocked:INTG-1]
+- **APP-31** [bug] [blocked:INTG-1] [impact:2]
   2026-09-08 update: the destruction described here is FIXED by APP-32 (shipped in v2.6.0). What remains of this item is the optional stable-binaries follow-up in the last paragraph (firewall prompt once per ffmpeg version instead of once per build); re-tag or drop at the next triage.
   A second launch of the portable exe destroys the running instance's files. Found 2026-09-08 during the v2.6.0 sweep: the portable launcher (electron-builder's NSIS portable script) unpacks every launch of the same build into ONE fixed Temp folder (name = a per-build id) and runs `RMDir /r` on it both before unpacking and after its app instance exits. Double-clicking the exe while SM sits in the tray therefore hits the single-instance lock, exits, and its launcher deletes everything the running instance has not locked; ffprobe goes first (it is not held open), and the symptom is "video:probe ... ENOENT" hours later. Present in every portable build to date. The v2.6.0 sweep only fixed the redundant instance running its full startup (window flash, second tray icon, relay respawn); the deletion remains, and the checklist documents the workaround (bring SM back via the tray; quit before relaunching).
   Tried and reverted 2026-09-08: `portable.unpackDirName: true` (private per-process folder per launch, so the second launcher only deletes its own). It works, but Windows Firewall keys rules by executable path, so the relay's ffmpeg listener prompted on EVERY launch instead of once per build. Unacceptable for relay users.
@@ -460,31 +460,31 @@
 
   As of 2026-10-04, this issue has not been seen again. Likely a fluke. Will continue to monitor for a while longer before losing.
 
-- **APP-34** [ui]
+- **APP-34** [ui] [impact:3]
   Case-by-case pass over every file and folder picker to give each a starting folder that makes sense for what it does. Prompted 2026-09-10 by the Electron 44 bump: Electron 43+ opens any dialog without a `defaultPath` in Downloads, and the stopgap that shipped with the bump only sets sensible fallbacks (open dialogs: explicit path, then the streams root, then Videos; a `startIn: 'downloads'` opt-in for downloaded JSON; save dialogs untouched because a bare file name keeps Windows' last-folder memory). That is uniform, not thoughtful.
   Working defaults, refine per site: EXPORTS start on the Desktop unless the app owns a better home (the palette export belongs in the library's `_thumbnail-assets` folder next to `_palette.json`, and the thumbnail PNG export in the stream's folder or its last export folder); IMPORTS start in Downloads unless the file is known to live elsewhere (media into a stream: that stream's folder; a video into the player: the streams root or the last opened folder); FOLDER pickers start at the folder currently set, then the streams root. Decide per site whether "the last folder used for this picker" should win over the static default and, if so, remember it per picker in config rather than relying on Windows.
   Inventory at filing (22 call sites across 13 files): OnboardingModal (2 folder), SettingsPage (streams folder), RulesPage (watch + destination), TemplatesPage (folder), ConverterPage (preset import, output folder), CombinePage (add files), PlayerPage (open video, export folder), StreamFilesGrid (add files + drop-zone browse), FileDropZone (shared browse; Combine, Converter, Player and wizard zones), LauncherPage (2 app pickers), ThumbnailPage (palette export, palette import, image layer picker, PNG export), legacyStreamsShared (1, parked code). Record the chosen folder per site in a short table in this ticket when done so the next audit has a baseline.
 
-- **APP-35** [ui]
+- **APP-35** [ui] [impact:2]
   Cloud sync widget: animate in and out, linger, and announce itself. Today the sidebar widget (`CloudOpsWidget`) mounts and unmounts instantly with the first and last active cloud operation. Three changes, filed 2026-09-10:
   - Slide it open and closed with the nav's existing height-reveal animation (`SlideOpen`/`SlideBlock` in `ui/Slide.tsx`, the same choreography the nav sublines use), honoring `useAnimationConfig`.
   - Keep it visible for about 30 seconds after the last operation completes, so the user can still open the cloud modal to see results or retry a failure without racing it; then slide out. A new operation during the linger cancels the countdown.
   - After the open animation finishes, pulse the widget's background twice (a gentle tint, not the outline-pulse attention ring; a short one-off keyframe) to draw the eye the first times it appears and remind users where cloud activity shows up. Every appearance, not just the first; it is two pulses, not a loop.
   Context: STR-19 made this widget the only feedback for a confirmed cloud download once the prompt closes, which is why it needs to be findable.
 
-- **APP-38** [cleanup]
+- **APP-38** [cleanup] [impact:2]
   Move every remaining `<select>` onto the shared `select-themed` skin (APP-29). About twenty sites still use the older pattern of `appearance-none` plus a wrapper `div.relative` with an absolutely positioned ChevronDown: the Settings page's five template, preset, and category selects, the Converter page's preset, output, and audio-track selects (including the `ROW_SELECT` constant), the player's clip export preset select, the preset editor form, the Integrations page's Claude model select, the streams sidebar's privacy select, the YouTube link and import modals (their `SELECT_CLS` constants), and the archive preset picker in the legacy streams module. They render correctly, so this is housekeeping: switch each to `select-themed` with explicit `pl`/`pr` padding per the style guide's native select rule, delete the wrapper and the icon, and check any layout that depended on the wrapper (flex sizing, max widths). End state: one way to draw a select, and the style guide's "raw selects still exist in 12 files" line goes away. Not queued; filed 2026-09-15.
 
-- **APP-39** [cleanup] [ui]
+- **APP-39** [cleanup] [ui] [impact:4]
   One positioning engine for every anchored popup. `Tooltip` already owns the right machinery (portal to body, anchor rect from the trigger, side priority with fallback, cross-axis clamp) and every inline dropdown menu in the app re-implements a weaker version with `absolute top-full` and no room check; the Assets options menu ran off the window that way on 2026-09-16 and got a one-off hook (`hooks/useDropdownPlacement.ts`). Plan: extract Tooltip's core into a `Popover` primitive (portal, anchor, side priority, clamp, plus live tracking of the anchor while open, which Tooltip lacks today: a tooltip open while layout shifts under it floats at the old spot), then two thin skins on it: `Tooltip` (hover, tooltip chrome) and a new `DropdownMenu` (click to open, outside click and Escape to close, menu chrome, rows that keep the menu open for checkbox items). Portalling also frees menus from overflow-hidden ancestors, which is why the streams page filter menus carry a computed max height today. Migrate: the thumbnail editor's Assets options menu and variant picker, the streams page type and game filter menus and its two other `top-full` popups, the date picker's popup form, the player's track menu. The legacy streams module stays as is. Delete `useDropdownPlacement` when the last caller moves. Not queued; filed 2026-09-16.
 
 - **APP-40** [ui] [needs-design]
   Wheel scrolling during a drag. Every reorder and move drag in the app uses native HTML5 `draggable`, and Chromium delivers no wheel events while such a drag is in progress (confirmed 2026-09-16 in the layers panel and the converter's ready list), so a long list can only be traversed mid-drag by the edge auto-scroll (THU-34, `hooks/useDragAutoScroll.ts`). The style guide's rule wants the wheel to work too. The only route is a pointer-event drag (pointer capture, a moved ghost, our own hit-testing for the drop slot) in place of `draggable` on the surfaces where lists get long: the layers panel first, then the converter ready list and the combine queue. Native drag stays where it must: file drops from Explorer, swatch drags onto color fields, asset drags onto the canvas. Design points: one shared pointer-drag hook rather than three copies; keep the existing drop-slot logic (half-row threshold, marker inside the row) and the auto-scroll; a ghost that matches the current drag image; Escape cancels. Not queued; filed 2026-09-16.
 
-- **APP-41** [cleanup]
+- **APP-41** [cleanup] [impact:4]
   Duplicate private code sweep, the first item of the round after v2.7.0 by decision (2026-09-25). Private copies of the same helper have now caused bugs three times in one cycle: the merge-key list (the Templates modal kept the pre-rename copy, `{topic}` rendered raw), the byte formatter (nine copies, half dividing by 1024 and half by 1000, so one recording read 7.9 GB in the files grid and 8.51 GB in the cloud sync dialog), and the dropdown positioning (every inline menu re-implemented a weaker version of Tooltip's engine, APP-39). Each copy started identical and drifted. The sweep: (1) find the copies mechanically, not by memory: a duplicate detector over `src/` (jscpd or equivalent, run once, not added to the toolchain unless it earns it) plus a grep for the same function name declared in more than one file (`^(export )?function (\w+)\(` and `^const (\w+) = ` grouped by name); (2) for each cluster decide one home in `lib/`, `hooks/`, or `components/ui/`, move it, delete the copies, and note any behavior difference the copies had (that difference IS the bug); (3) known clusters to start from: `formatDuration` and timecode formatting (converter, player, combine), the converter and combine row anatomy (deliberately mirrored so far; decide again), `TogglePill` (in StreamsPage, guide says move to ui at the second user), `Kbd` (in HelpModal), the panel-header icon-button class strings, the segmented-switch class strings (PaintModeToggle, the arrow head switch, the gradient kind switch), the `ACTION_*` button chrome constants, the hydration-aware file checks; (4) add a rule to the style guide's "How to use this" section: a helper that exists in one component is moved to a shared home before a second component needs it, and a reviewer grep for the function name is part of adding one. (5) Second pass, the neighboring class: settings nothing reads. `tempDir` ("Cache Directory") shipped in the initial commit with a setter no code ever called and a field nothing outside Settings ever read, and stayed that way until 2026-09-29 because nothing measured it. For every key in `AppConfig`, grep for a reader outside SettingsPage and the store; a key with none is either wired or removed, and the verify steps for any new setting include the effect it has, not just that it saves. Filed 2026-09-25; queue it first when the next Queue is written.
 
-- **APP-43** [cleanup]
+- **APP-43** [cleanup] [impact:3]
   Dependency update round, early in the cycle after v2.7.0 (filed 2026-10-02 from the `npm ci` report in the v2.7.0 release build: 19 vulnerabilities, 17 high). Only 3 of the 19 touch what ships; the rest sit in build-time tooling (electron-builder's updater and XML libraries, browserslist, postcss, brace-expansion), which never runs on a user's machine, so the headline number overstates the exposure. The shipped three are all `image-size` (infinite loops in its JXL, HEIF, and ICNS parsers, fixed in 2.0.4); the app feeds it only YouTube's own thumbnail bytes in `services/youtubeApi.ts`, so the risk was small, and it is a patch bump. Steps, in order, each with a `_DEV` dist and the core regression list: (1) `npm audit fix` without `--force`, which covers all 19 through in-range updates; (2) the in-range "Wanted" column from `npm outdated`: Electron 44.5.1, electron-builder 26.15.3, konva 10.7.0, react-konva 18.2.16, lucide-react 1.50.0, motion 12.43, eslint and typescript-eslint, autoprefixer, postcss, @types/node 24.19; the electron-builder bump needs the portable launcher pre-check re-verified (APP-32 patches its template and fails loudly if the template moved) and the two-launch test; (3) decide, separately and not in this round unless trivial: the majors held back on purpose, React 19 with react-konva 19, Tailwind 4, Vite 8 with plugin-react 6, TypeScript 7, chokidar 5 (the streams watcher no longer uses it; only the recording-rule watcher does), electron-store 11, glob 13, uuid 14, motion 14. Each major gets its own ticket when picked up. Also make the audit summary part of the release checklist's docs section so the number is read at every sweep rather than noticed in a build log.
   Built 2026-10-05, awaiting review (steps 1 and 2; lockfile only, `package.json` ranges unchanged). `npm audit fix` cleared 14 of the 19, including all three `image-size` advisories (now 2.0.4). `npm update` then took every in-range bump: Electron 44.5.1, electron-builder 26.15.3, konva 10.7.1, react-konva 18.2.16, lucide-react 1.52.0, motion 12.43.0, eslint 10.12.0, typescript-eslint 8.71.1, autoprefixer 10.6.1, postcss 8.5.29, @types/node 24.19.1. Typecheck and lint pass after each step. The portable launcher patch's anchor (`RMDir /r $INSTDIR` then `SetOutPath $INSTDIR`) is still present in the 26.15.3 template, so the build script will inject the pre-check; the two-launch test on a dist is the real proof. The release process's checklist template gained the audit line. What remains in the audit: 5 entries that are one advisory, a stack-exhaustion denial of service in `braces` (every released version, no patched one), reaching shipped code through chokidar 3 and micromatch in `services/fileWatcher.ts` (the auto-rules watcher) and build tooling through Tailwind. The input it parses there is the user's own watch-rule patterns, so the exposure is a user crashing their own watcher with a pathological pattern. Clearing it means chokidar 5 (which drops braces and globbing) and picomatch in place of micromatch for rule matching: a real change to the auto-rules watcher, so it is step 3 material and its own ticket if wanted, not part of this round. Verify on a `_DEV` dist: the core regression list; two launches (second one focuses the first, no window flash, no second tray icon); the thumbnail editor end to end, since Konva and react-konva moved (groups, masks, group effects, arrows, gradients, export); icons across the app after the Lucide bump (a renamed or redrawn glyph would show as a wrong or missing icon); nav and row animations after the motion bump; an auto-rule firing on a dropped recording.
 
@@ -532,7 +532,7 @@
 
 ### Navigation
 
-- **NAV-1** [bug]
+- **NAV-1** [bug] [impact:1]
   Raw merge fields were visisble in the nav subtitle for some reason. Unable to reproduce, but I grabbed a screenshot:
   "D:\SMAUG\Desktop\stream-manager-thumbnails-new.webp"
 
