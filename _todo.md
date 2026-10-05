@@ -32,7 +32,15 @@
 28. APP-34
 29. APP-35
 30. CONV-14
-31. SYNC-7
+31. CONV-16
+32. SYNC-7
+
+## Next up
+
+1. STR-9
+2. APP-15
+3. APP-14
+4. STR-27
 
 ## Improvement ideas
 
@@ -269,7 +277,11 @@
 
   In fact, it would be great if we could add a new data point in the ETA row for converting items which estimates the output file size.
 
-  I also want to check once more that the encoding preset we've provided and recommended for archiving is indeed the correct one. I'm still skeptical that it's a good, well-rounded solution. Windows' basic player app is unable to play the AV1 encodings, sometimes playing only audio, and sometimes not playing at all.
+  Split 2026-10-05: the archive preset review that sat here moved to CONV-16. This ticket is the size guard (never delete an original for a larger output without asking) and the estimated output size in the progress row.
+
+- **CONV-16** [investigate]
+  Archive preset review (split from CONV-15, 2026-10-05). Original text: I also want to check once more that the encoding preset we've provided and recommended for archiving is indeed the correct one. I'm still skeptical that it's a good, well-rounded solution. Windows' basic player app is unable to play the AV1 encodings, sometimes playing only audio, and sometimes not playing at all.
+  Scope note: an investigation that ends in a recommendation (keep, retune, or change the codec), with evidence: a few representative recordings encoded both ways, sizes and encode times, and which players open the result. Changing the shipped preset, if that is the outcome, is a follow-up decision, since existing archives were made with the current one.
 
 ### Combine
 
