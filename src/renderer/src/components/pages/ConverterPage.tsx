@@ -19,16 +19,8 @@ import { displayPath } from '../../lib/displayPath'
 import { renderStreamTitle } from '../../lib/streamTitle'
 import { CLOUD_WAIT_HINT, CLOUD_WAIT_HINT_MS, formatWait } from '../CloudOpsModal'
 import { resolveTrackName } from '../../lib/trackNames'
+import { rowActionClass } from '../ui/rowAction'
 import type { AudioTrackSetting } from '../../types'
-
-// Row action buttons — neutral at rest, colored only on hover, with a label
-// that collapses to icon-only as the row narrows. Mirrors the stream detail
-// sidebar's footer buttons (PANEL_ACTION_BUTTON_*).
-const ROW_ACTION_BASE = 'inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'
-const ROW_ACTION_GREEN = `${ROW_ACTION_BASE} hover:text-green-400 hover:bg-green-500/10`
-const ROW_ACTION_RED = `${ROW_ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
-const ROW_ACTION_YELLOW = `${ROW_ACTION_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
-const ROW_ACTION_BLUE = `${ROW_ACTION_BASE} hover:text-blue-400 hover:bg-blue-500/10`
 
 /** Shorten an output directory for the per-file dropdown so the drive letter
  *  and the final directory stay visible (native selects clip the END, hiding
@@ -940,7 +932,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             at rest, color on hover, label collapses to icon-only as it narrows). */}
         <div className="self-center flex flex-row items-center justify-center gap-1 shrink-0">
           {job.status === 'queued' && !job.autoStart && (
-            <button onClick={() => window.api.startQueuedJob(job.id)} className={ROW_ACTION_GREEN}>
+            <button onClick={() => window.api.startQueuedJob(job.id)} className={rowActionClass('green')}>
               <Play size={13} />
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
             </button>
@@ -956,26 +948,26 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           {isActive && (
             <button
               onClick={() => job.status === 'paused' ? resumeJob(job.id) : pauseJob(job.id)}
-              className={job.status === 'paused' ? ROW_ACTION_BLUE : ROW_ACTION_YELLOW}
+              className={job.status === 'paused' ? rowActionClass('blue') : rowActionClass('yellow')}
             >
               {job.status === 'paused' ? <Play size={13} /> : <Pause size={13} />}
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">{job.status === 'paused' ? 'Resume' : 'Pause'}</CollapsibleLabel>
             </button>
           )}
           {isWorking && (
-            <button onClick={() => cancelJob(job.id)} className={ROW_ACTION_RED}>
+            <button onClick={() => cancelJob(job.id)} className={rowActionClass('red')}>
               <Ban size={13} />
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Cancel</CollapsibleLabel>
             </button>
           )}
           {isCancelled && (
-            <button onClick={() => requeueJob(job)} className={ROW_ACTION_BLUE}>
+            <button onClick={() => requeueJob(job)} className={rowActionClass('blue')}>
               <RotateCcw size={13} />
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Requeue</CollapsibleLabel>
             </button>
           )}
           {(isDone || isCancelled || isError || job.status === 'queued') && (
-            <button onClick={() => removeJob(job.id)} className={ROW_ACTION_RED}>
+            <button onClick={() => removeJob(job.id)} className={rowActionClass('red')}>
               <Trash2 size={13} />
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
             </button>
@@ -1167,13 +1159,13 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                       <button
                         onClick={() => startOne(file)}
                         disabled={!preset || (isAudioPreset(preset) && localByPath[path] === false)}
-                        className={ROW_ACTION_GREEN}
+                        className={rowActionClass('green')}
                       >
                         <Zap size={13} />
                         <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
                       </button>
                       </Tooltip>
-                      <button onClick={() => removeFile(path)} className={ROW_ACTION_RED}>
+                      <button onClick={() => removeFile(path)} className={rowActionClass('red')}>
                         <Trash2 size={13} />
                         <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
                       </button>
@@ -1215,7 +1207,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                                 const targets = jobs.filter(j => j.status === 'running')
                                 await Promise.all(targets.map(j => window.api.pauseJob(j.id).catch(() => {})))
                               }}
-                              className={ROW_ACTION_YELLOW}
+                              className={rowActionClass('yellow')}
                             >
                               <Pause size={13} />
                               Pause all
@@ -1229,7 +1221,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                                 const targets = jobs.filter(j => j.status === 'paused')
                                 await Promise.all(targets.map(j => window.api.resumeJob(j.id).catch(() => {})))
                               }}
-                              className={ROW_ACTION_BLUE}
+                              className={rowActionClass('blue')}
                             >
                               <Play size={13} />
                               Resume all

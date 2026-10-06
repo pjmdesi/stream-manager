@@ -6,6 +6,7 @@ import { ThumbImage } from './ThumbImage'
 import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
 import { FileDropZone } from '../ui/FileDropZone'
+import { rowActionClass } from '../ui/rowAction'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { formatBytes } from '../../lib/formatBytes'
@@ -27,17 +28,6 @@ export function parseSmThumbnailOrdinal(path: string): number | null {
   if (!m) return null
   return m[1] ? parseInt(m[1], 10) : 1
 }
-
-// Per-file action buttons — same scheme as the converter rows: neutral at rest,
-// color only on hover. The row is right-aligned.
-const ACTION_BASE = 'inline-flex shrink-0 items-center gap-1 px-1.5 py-1 rounded-md text-[11px] text-gray-400 transition-colors'
-const ACTION_PURPLE = `${ACTION_BASE} hover:text-accent-300 hover:bg-accent-500/10`
-const ACTION_GREEN = `${ACTION_BASE} hover:text-green-400 hover:bg-green-500/10`
-const ACTION_GRAY = `${ACTION_BASE} hover:text-gray-200 hover:bg-white/10`
-const ACTION_PINK = `${ACTION_BASE} hover:text-pink-400 hover:bg-pink-500/10`
-const ACTION_CYAN = `${ACTION_BASE} hover:text-cyan-400 hover:bg-cyan-500/10`
-const ACTION_RED = `${ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
-const ACTION_YELLOW = `${ACTION_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
 
 const CARD = 'group/file relative flex gap-3 p-2 rounded-lg bg-white/[0.03] border border-white/5 hover:bg-white/5 transition-colors'
 const ACTION_ROW = 'mt-auto flex items-center justify-end gap-0.5 opacity-0 group-hover/file:opacity-100 transition-opacity'
@@ -123,7 +113,7 @@ function CloudAction({ isLocal, active, busy, onOffload, onPin, offloadBlockReas
   if (busy || isLocal === undefined) {
     return (
       <Tooltip content={busy ? 'Syncing…' : 'Checking…'} side="top">
-        <button disabled className={`${ACTION_BASE} opacity-60 cursor-not-allowed`}>
+        <button disabled className={rowActionClass('gray', 'sm')}>
           <Loader2 size={12} className="animate-spin" />
         </button>
       </Tooltip>
@@ -133,17 +123,17 @@ function CloudAction({ isLocal, active, busy, onOffload, onPin, offloadBlockReas
     ? offloadBlockReason
       ? (
         <Tooltip content={`Can't offload: ${offloadBlockReason}`} side="top">
-          <button disabled className={`${ACTION_BASE} opacity-60 cursor-not-allowed`}><Cloud size={12} /></button>
+          <button disabled className={rowActionClass('gray', 'sm')}><Cloud size={12} /></button>
         </Tooltip>
       )
       : (
       <Tooltip content="Offload to cloud" side="top">
-        <button onClick={onOffload} className={ACTION_PINK}><Cloud size={12} /></button>
+        <button onClick={onOffload} className={rowActionClass('pink', 'sm')}><Cloud size={12} /></button>
       </Tooltip>
     )
     : (
       <Tooltip content="Pin local" side="top">
-        <button onClick={onPin} className={ACTION_CYAN}><CloudDownload size={12} /></button>
+        <button onClick={onPin} className={rowActionClass('cyan', 'sm')}><CloudDownload size={12} /></button>
       </Tooltip>
     )
 }
@@ -375,13 +365,13 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
         {secondary && <p className={META_SECONDARY}>{secondary}</p>}
         <div className={`${ACTION_ROW}${selectMode ? ' invisible' : ''}`}>
           <Tooltip content="Send to player" side="top">
-            <button onClick={() => onSendToPlayer(path)} className={ACTION_PURPLE}>
+            <button onClick={() => onSendToPlayer(path)} className={rowActionClass('accent', 'sm')}>
               <Play size={12} />
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Player</CollapsibleLabel>
             </button>
           </Tooltip>
           <Tooltip content="Send to converter" side="top">
-            <button onClick={() => onSendToConverter(path)} className={ACTION_GREEN}>
+            <button onClick={() => onSendToConverter(path)} className={rowActionClass('green', 'sm')}>
               <Zap size={12} />
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Convert</CollapsibleLabel>
             </button>
@@ -401,7 +391,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
                 try { await window.api.trashFile(path) } catch { return }
                 onDeleted()
               }}
-              className={`${ACTION_RED} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+              className={rowActionClass('red', 'sm')}
             ><Trash2 size={12} /></button>
           </Tooltip>
         </div>
@@ -537,7 +527,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
         <div className={`${ACTION_ROW}${selectMode ? ' invisible' : ''}`}>
           {isSm && (
             <Tooltip content="Open in thumbnail editor" side="top" shortcut="Ctrl+Shift+T">
-              <button onClick={() => onEditThumbnail(ordinal!)} className={ACTION_GRAY}>
+              <button onClick={() => onEditThumbnail(ordinal!)} className={rowActionClass('gray', 'sm')}>
                 <FileImage size={12} />
                 <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Edit</CollapsibleLabel>
               </button>
@@ -557,7 +547,7 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
             <button
               disabled={!!blockReason}
               onClick={() => onDeleteThumbnail(path)}
-              className={`${ACTION_RED} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+              className={rowActionClass('red', 'sm')}
             ><Trash2 size={12} /></button>
           </Tooltip>
         </div>
@@ -1127,15 +1117,15 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
       {cloudSyncActive && hasVideos && (
         <>
           <Tooltip content="Offload this stream's files to the cloud" side="top">
-            <button onClick={onOffloadAll} className={ACTION_PINK}><Cloud size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
+            <button onClick={onOffloadAll} className={rowActionClass('pink', 'sm')}><Cloud size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
           </Tooltip>
           <Tooltip content="Pin this stream's files on this device" side="top">
-            <button onClick={onPinAllLocal} className={ACTION_CYAN}><CloudDownload size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
+            <button onClick={onPinAllLocal} className={rowActionClass('cyan', 'sm')}><CloudDownload size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
           </Tooltip>
         </>
       )}
       <Tooltip content="Open this stream's folder in Explorer" side="top">
-        <button onClick={onOpenFolder} className={ACTION_YELLOW}><FolderOpen size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Open folder</CollapsibleLabel></button>
+        <button onClick={onOpenFolder} className={rowActionClass('yellow', 'sm')}><FolderOpen size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Open folder</CollapsibleLabel></button>
       </Tooltip>
     </div>
   )
@@ -1188,7 +1178,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             <>
               <div className="w-px h-5 bg-white/10 mx-1 self-center" />
               <Tooltip content="Select multiple files for bulk actions" side="top" shortcut="Ctrl+Shift+A">
-                <button onClick={() => setSelectMode(true)} className={ACTION_GRAY}><ListChecks size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Select</CollapsibleLabel></button>
+                <button onClick={() => setSelectMode(true)} className={rowActionClass('gray', 'sm')}><ListChecks size={12} /><CollapsibleLabel expandClass="@[600px]:grid-cols-[1fr] @[600px]:ms-0" collapsedMarginStart="-ms-1">Select</CollapsibleLabel></button>
               </Tooltip>
             </>
           ) : (
@@ -1197,10 +1187,10 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               {selectedVideos.length > 0 && (
                 <>
                   <Tooltip content={`Send selected (${selectedVideos.length}) to converter`} side="top">
-                    <button onClick={bulkConvert} className={ACTION_GREEN}><Zap size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Convert</CollapsibleLabel></button>
+                    <button onClick={bulkConvert} className={rowActionClass('green', 'sm')}><Zap size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Convert</CollapsibleLabel></button>
                   </Tooltip>
                   <Tooltip content={`Send selected (${selectedVideos.length}) to combine`} side="top">
-                    <button onClick={bulkCombine} className={ACTION_PURPLE}><Combine size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Combine</CollapsibleLabel></button>
+                    <button onClick={bulkCombine} className={rowActionClass('accent', 'sm')}><Combine size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Combine</CollapsibleLabel></button>
                   </Tooltip>
                 </>
               )}
@@ -1216,14 +1206,14 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                     <button
                       onClick={bulkOffload}
                       disabled={selectedLocalCount === 0}
-                      className={`${ACTION_PINK} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                      className={rowActionClass('pink', 'sm')}
                     ><Cloud size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Offload</CollapsibleLabel></button>
                   </Tooltip>
                   <Tooltip content={`Pin selected (${selectedRemoteCount}) on this device`} side="top">
                     <button
                       onClick={bulkPin}
                       disabled={selectedRemoteCount === 0}
-                      className={`${ACTION_CYAN} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                      className={rowActionClass('cyan', 'sm')}
                     ><CloudDownload size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Pin local</CollapsibleLabel></button>
                   </Tooltip>
                 </>
@@ -1233,7 +1223,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                   <button
                     onClick={bulkTrash}
                     disabled={selectedDeletableCount === 0}
-                    className={`${ACTION_RED} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                    className={rowActionClass('red', 'sm')}
                   ><Trash2 size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Delete</CollapsibleLabel></button>
                 </Tooltip>
               )}
@@ -1245,7 +1235,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                   <button
                     onClick={() => setSelected(new Set(visiblePaths))}
                     disabled={selectedPaths.length === visiblePaths.length}
-                    className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                    className={rowActionClass('gray', 'sm')}
                   >
                     <CheckCheck size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Select all</CollapsibleLabel>
                   </button>
@@ -1254,14 +1244,14 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                   <button
                     onClick={clearSelection}
                     disabled={selectedPaths.length === 0}
-                    className={`${ACTION_GRAY} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                    className={rowActionClass('gray', 'sm')}
                   >
                     <Square size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Clear</CollapsibleLabel>
                   </button>
                 </Tooltip>
                 <div className="w-px h-5 bg-white/10 mx-1 self-center" />
                 <Tooltip content="Exit selection mode" side="top" shortcut="Ctrl+Shift+A">
-                  <button onClick={exitSelectMode} className={ACTION_GRAY}><X size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Stop</CollapsibleLabel></button>
+                  <button onClick={exitSelectMode} className={rowActionClass('gray', 'sm')}><X size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Stop</CollapsibleLabel></button>
                 </Tooltip>
               </div>
             </>

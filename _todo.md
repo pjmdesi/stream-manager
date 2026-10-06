@@ -14,40 +14,38 @@
 10. NAV-1
 11. COMB-6
 12. PLR-30
-13. STR-31
-14. STR-32
-15. STR-30
-16. STR-11
-17. STR-25
-18. STR-26
-19. STR-29
-20. PLR-31
-21. PLR-17
-22. PLR-25
-23. PLR-26
-24. PLR-32
-25. THU-38
-26. THU-35
-27. THU-36
-28. THU-37
-29. THU-39
-30. INTG-1
-31. APP-25
-32. APP-26
-33. APP-28
-34. APP-31
-35. APP-34
-36. APP-35
-37. CONV-14
-38. CONV-16
-39. SYNC-7
+13. STR-36
+14. STR-31
+15. STR-32
+16. STR-30
+17. STR-11
+18. STR-25
+19. STR-26
+20. STR-29
+21. PLR-31
+22. PLR-17
+23. PLR-25
+24. PLR-26
+25. PLR-32
+26. THU-38
+27. THU-35
+28. THU-36
+29. THU-37
+30. THU-39
+31. INTG-1
+32. APP-25
+33. APP-26
+34. APP-28
+35. APP-31
+36. APP-34
+37. APP-35
+38. CONV-14
+39. CONV-16
+40. SYNC-7
 
 ## Next up
 
-1. STR-9
-2. APP-15
-3. APP-14
-4. STR-27
+1. STR-34
 
 ## Improvement ideas
 
@@ -169,8 +167,13 @@
 
   Just off the top of my head, there should be a few ways to know which videos match with which files. File name first of all. If the user doesn't change it, it shoud be the same, it's automatically set as the YouTube title of new uploads. In the perfect workflow, the user wouldn't change this, but in the case that they do, we can also use duration. This also isn't perfect since 2 videos could have the same exact length (down to the frame), and the user may be one of those who does that on purpose, and we should account for that. Timing is another soft correlation that we could check against. For instance the new YouTube upload would most likely be created after the stream item date (although again not perfect, but very leikely to be accurate). Whether the upload date is NEAR the stream itm date is another story and likey not a good determining factor (I've uploaded "highlights" versions of videos months after the actual stream).
 
+  This will require a redesign of several areas of the streams page, most especially the footer.
+
 - **STR-35** [impact:2]
   Add a new icon item to the video counter column which roughly indicates the cloud status of the files within the stream item. For instance, if all items are hydrated, we should show a solid cloud with check icon, like the one for individual files in the files grid. If there's a mix of hydrated and dehydrated files, we should show the same icon with a dashed check (or maybe something else... not sure). If all files (exluding the perminently pinned-local thumnail image file) are dehydrated we show a muted cloud, again, just like individual files.
+
+- **STR-36** [impact:2] [bug]
+  I recently changed the privacy status of several streams to unlisted. For some reason. 2 stream items keep appearing in the out of sync panel on the streams page. The privacy status for both of them have been pushed and pulled multiple times and ive check and double checked that their privacystatus matches on YouTube. When I manually run a refresh, the items disappear, but they keep coming back both on app startup and seemingly after every automatic check.
 
 ### Player
 
@@ -231,10 +234,12 @@
 - **PLR-30** [bug] [impact:1]
   After adjusting the volume of an audio track in multi-track editing mode, the focus remains on the volume slider, taking over functionality of keyboard shortcuts. The focus on the sliders should only stick the the user focused it manually with the tab key, otherwise it should release focus immediately after lifting the mouse.
 
-- **PLR-31** [impact:2] [bug]
+- **PLR-31** [bug] [impact:3]
   When attempting to go to a next/prev stream item in the player using the provided buttons, if that stream item in question does not have a hydrated video, it attempts to play that video instead of detecting that it is not hydrated and displays an error, then refuses the navigation. It should navigate anyway, and show that no videos could be opened since none of them are hydrated, and then offer to hydrated the primary video (the one that is auto-picked to be the one that opens at first).
 
   Similarly, when I select a stream item from the popup list, and select one which is not hydrated, SM triggers a hydration, but otherwise gives no feedback (I only know it got triggered because I see the windows notification). We need to give the same feedback as attempting to open from the streams page: show the "this file isn't hydrated" modal with the offer to begin the hydration.
+
+  This actually seems to have broken the cloud sync functionality as every cloud-based action I attempted after that hydration was triggered failed on the SM side.
 
 - **PLR-32** [bug] [ui] [impact:1]
   When the zoom/pan is at or near max, the zoom indicator in the clipper toolbar disappears. It should not disappear. It should stay visible regardless of the values.
@@ -533,6 +538,7 @@
   Scan run 2026-10-05 (read-only, scripts in the session scratchpad, nothing added to the toolchain): a same-name scan over 150 source files found 47 names declared in more than one file, a block-level clone pass found 19 cross-file clones, and the config-key pass found 7 keys with no reader outside Settings, the store, and the type (plus a caveat: it matches by word, so a key named like a common word can hide; `tempDir` did). Config keys, decided 2026-10-05 and built the same day: Default Watch Directory stays and now pre-fills the watch folder when a new auto-rule is added (its hint says so); the three thumbnail defaults are removed (use the built-in creator by default, default built-in template, default external template), together with the `_Templates` listing handler, the external-template copy in `streams:createFolder` (whose signature lost that parameter; the live callers and the parked legacy page updated), and the three config keys; `defaultOutputDir` and `presetsDir` have no field and no reader and are left for the same pass as the rest of the dead keys. `checkEpisodeIteration`, which had no reader since the initial commit, is wired by decision (2026-10-06) rather than removed: relabeled "Number episodes automatically", default on; off leaves the episode field empty at all three fill sites (New episode from a source, the series auto-promotion when a tag matches an existing series, and the sidebar's series toggle) and the user types the number; season carry-over is unchanged. Verify: with the setting off, New episode and a manual series toggle leave Episode blank while Season still fills; with it on, both fill as before. Verify: add a new auto-rule, the watch folder is pre-filled from Settings, an existing rule keeps its own; the Streams section of Settings shows Streams Directory, then Default Archive Preset, with the three thumbnail fields gone and no unsaved dot appearing for them; New stream and New episode still create folders and carry the previous episode's primary thumbnail; the YouTube import still creates stream folders.
   Duplicate review 2026-10-06, four commits decided: (1) renderer helpers, (2) the row-action button chrome, (3) main helpers, (4) a `src/shared/` folder for the values main and renderer both need (the video extension list and `AppConfig` with its defaults, which are declared twice today and differ in three keys), plus the dead keys `defaultOutputDir` and `presetsDir`. Decisions: path identity for the in-use and open-item checks is case-insensitive (Windows volumes are; the Streams Directory field accepts typed text, so a file opened from an Explorer drop could compare unequal to the same file in the grid and read as not in use); one 21-entry extension list for every video dropzone, the open dialogs and the Player's sibling list, the files grid staying unrestricted; the row-action chrome goes to `text-gray-200` at rest on all four surfaces (sidebar Archive/Delete, Converter rows, Combine rows, file-card and grid-toolbar actions) with the disabled styling in the base. Left alone: name-only collisions (`getCreds`, `BASE`, `listeners`, `frameOf`, `Section`, `FilterToggle`, `TOPIC_CHIP`), the arrow and polygon corner tracing (different clamps on purpose), `TogglePill` and `Kbd` (one user each). Leftover for its own ticket: the two YouTube modals' native `<select>` with `appearance-none` (`SELECT_CLS`, drifted) should become `SelectMenu`, a visible change.
   Built 2026-10-06, awaiting review (commit 1 of 4, renderer helpers; no visible change intended). New homes in `lib/`: `formatTimecode` (replaces nine copies: three identical `formatTimecode`, the Converter's ms variant, Combine's `formatDur`, the YouTube import's `fmtDuration`, the relay widget's `formatDurationSec`, the Player's `formatTime` now builds on it, and a dead legacy copy; the shared one returns `0:00` for a duration that is not a positive finite number, where four of the copies printed `NaN:NaN`), `localDate` (`localDateString`, `localTimeString`, `localDateFromIso`; replaces two `localDateFromIso` declarations, `todayStr`'s body, the legacy page's unguarded `utcToLocalDate`, and eleven inline `YYYY-MM-DD` / `HH:MM` constructions in StreamsPage and broadcastMismatch), `formatScheduledTime` (relay widget, broadcast picker), `pathKey` (`pathKey` for in-memory identity, now lowercased, used by `useInUse` and `OpenItemsContext`; `relativeKey` for persisted keys, used by `videoMapKey` and by `streamMetaKey`, which moved from its two page copies into `lib/videoMapKey.ts`), `lucideIcon` (`toPascal` and `lucideIcon`, replacing three copies; `ui/GroupIcon` replaces the two `GroupIcon` components in App and the launcher page), `webrtc` (`injectSdpBandwidth` with the Player's bitrate guard, which the popup copy lacked, and `waitForIceComplete`). `lib/streamTitle.ts` gained `normalizeStreamTypes` (three copies) and the StreamsPage doc comments for `isStandalone` and `resolvePrimaryGame`; StreamsPage, ManageTagsModal and the legacy file import these and `applyMergeFields` instead of declaring them; the legacy file's dead `formatDuration` and `formatBytes` (the last 1000-based one) are deleted. The style guide's "How to use this" section has the one-home rule with the list of shared homes. Verify on a `_DEV` dist that nothing looks different: durations in the files grid, video rows, Send to Converter, the Combine and Converter pages (elapsed and ETA), the YouTube import list and the relay widget; the Player clock with and without a frame counter; Today/Tomorrow labels in the broadcast picker and the relay widget; launcher group icons in the launcher page and the nav row, and the icon picker's grid; the popout player still connects; a stream's thumbnail saved from the editor still lands on the right stream in `_meta.json` (dump mode and folder mode); Push to YouTube still reports in sync after a no-op edit and the scheduled time still round-trips. The in-use fix: open a video in the Player by dragging it from Explorer, then on the Streams page the same file's Delete is disabled with "open in the player", with the Streams Directory setting typed in a different letter case than Explorer shows.
+  Built 2026-10-06, awaiting review (commit 2 of 4, row-action button chrome; visible change). `components/ui/rowAction.ts` exports `rowActionClass(tone, size?)` and replaces the four private families: Converter `ROW_ACTION_*`, Combine `ROW_ACTION_*`, StreamsPage `PANEL_ACTION_BUTTON_*`, StreamFilesGrid `ACTION_*` (the legacy file's icon-only `PANEL_ACTION_BUTTON_*` stays with the parked page). Resting text is `gray-200` on every surface by decision; the Converter, Combine and files-grid buttons were `gray-400`. Disabled styling (`opacity-40`, `cursor-not-allowed`, hover suppressed) is in the base, so the seven grid buttons that appended it per call site and the sidebar's Delete no longer do; the grid's two tone-less disabled buttons (the spinner while syncing and the blocked cloud) move from `opacity-60` to the shared `opacity-40`. The grid's `gray` tone hovers to white now that its rest color is the old hover color. Size `sm` keeps the grid's tighter padding. Style guide: a "Row action chrome" section under Components. Verify on a `_DEV` dist: Converter job rows (Start, Pause/Resume, Cancel, Requeue, Remove) and input list (Convert now, Remove) read brighter at rest and still color on hover; Combine rows the same; the sidebar's Archive and Delete unchanged; file cards' hover actions and the grid toolbar (Offload, Pin local, Open folder, Select, and the select-mode row) brighter at rest, with disabled ones visibly dimmer than before next to them; the blocked-cloud and syncing spinner buttons dimmed to the same degree as other disabled buttons; labels still collapse to icons as rows narrow, with no label spilling outside a button.
 
 - **APP-43** [cleanup] [impact:3] [done]
   Dependency update round, early in the cycle after v2.7.0 (filed 2026-10-02 from the `npm ci` report in the v2.7.0 release build: 19 vulnerabilities, 17 high). Only 3 of the 19 touch what ships; the rest sit in build-time tooling (electron-builder's updater and XML libraries, browserslist, postcss, brace-expansion), which never runs on a user's machine, so the headline number overstates the exposure. The shipped three are all `image-size` (infinite loops in its JXL, HEIF, and ICNS parsers, fixed in 2.0.4); the app feeds it only YouTube's own thumbnail bytes in `services/youtubeApi.ts`, so the risk was small, and it is a patch bump. Steps, in order, each with a `_DEV` dist and the core regression list: (1) `npm audit fix` without `--force`, which covers all 19 through in-range updates; (2) the in-range "Wanted" column from `npm outdated`: Electron 44.5.1, electron-builder 26.15.3, konva 10.7.0, react-konva 18.2.16, lucide-react 1.50.0, motion 12.43, eslint and typescript-eslint, autoprefixer, postcss, @types/node 24.19; the electron-builder bump needs the portable launcher pre-check re-verified (APP-32 patches its template and fails loudly if the template moved) and the two-launch test; (3) decide, separately and not in this round unless trivial: the majors held back on purpose, React 19 with react-konva 19, Tailwind 4, Vite 8 with plugin-react 6, TypeScript 7, chokidar 5 (the streams watcher no longer uses it; only the recording-rule watcher does), electron-store 11, glob 13, uuid 14, motion 14. Each major gets its own ticket when picked up. Also make the audit summary part of the release checklist's docs section so the number is read at every sweep rather than noticed in a build log.

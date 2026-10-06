@@ -94,7 +94,7 @@ CSS vars in `index.css` (`--color-bg`, `--color-bg-elevated`, `--color-panel`, `
 
 > Props below are the load-bearing ones; see each file for the full API.
 
-**Directory (2026-09-10).** Documented in detail below: `Button`, `Input`/`Textarea`/`Select`/`NumberInput`, `Checkbox`, `TogglePill` (in StreamsPage for now), `Modal`, `Tooltip`. Also in `components/ui/` and worth reaching for before writing bespoke markup: `CollapsibleLabel` (icon-only ↔ icon+label via container query; Button wraps it), `Slide` (`SlideOpen`/`SlideBlock` height reveals), `TruncatedText` (truncate + full-text tooltip), `DatePicker` (popup and `inline` variants), `FileDropZone` (drop + browse, `browseStartIn` picks the dialog's folder), `TagChipEditor`, `TagComboBox`, `TopicSelect`, `TemplateBodyEditor` (merge-field chips; exports the chip classes), `BroadcastPicker`, `VideoRow`, `VideoThumb`, `RecentRow` (with `SmoothThumb`, the canvas downscaler), `BrandIcons` (YouTube/Twitch marks), and the modals `TemplatesModal`, `ManageTagsModal`, `IconPickerModal`, `TwitchCategoryRenamePrompt`. Two are effectively retired: `GhostTextArea` is used only by the parked legacy streams code, and `Slider` by one preset-editor field; both go with the legacy dead-code pass. `Kbd` (keyboard chips) lives inside `HelpModal`; move it to `ui/` the first time a second surface needs it.
+**Directory (2026-09-10).** Documented in detail below: `Button`, `rowAction` (the row and card action-button chrome), `Input`/`Textarea`/`Select`/`NumberInput`, `Checkbox`, `TogglePill` (in StreamsPage for now), `Modal`, `Tooltip`. Also in `components/ui/` and worth reaching for before writing bespoke markup: `CollapsibleLabel` (icon-only ↔ icon+label via container query; Button wraps it), `Slide` (`SlideOpen`/`SlideBlock` height reveals), `TruncatedText` (truncate + full-text tooltip), `DatePicker` (popup and `inline` variants), `FileDropZone` (drop + browse, `browseStartIn` picks the dialog's folder), `TagChipEditor`, `TagComboBox`, `TopicSelect`, `TemplateBodyEditor` (merge-field chips; exports the chip classes), `BroadcastPicker`, `VideoRow`, `VideoThumb`, `RecentRow` (with `SmoothThumb`, the canvas downscaler), `BrandIcons` (YouTube/Twitch marks), and the modals `TemplatesModal`, `ManageTagsModal`, `IconPickerModal`, `TwitchCategoryRenamePrompt`. Two are effectively retired: `GhostTextArea` is used only by the parked legacy streams code, and `Slider` by one preset-editor field; both go with the legacy dead-code pass. `Kbd` (keyboard chips) lives inside `HelpModal`; move it to `ui/` the first time a second surface needs it.
 
 ### Button (`Button.tsx`)
 
@@ -102,6 +102,12 @@ CSS vars in `index.css` (`--color-bg`, `--color-bg-elevated`, `--color-panel`, `
 - **Sizes:** `icon-sm` · `sm` · `md` (**default**) · `lg`.
 - `icon`, `loading` (built-in spinner), `collapsibleLabel` (animated icon-only↔icon+label via container query, see file), `labelCollapsed` (force the collapsed state, for slide animations that must start collapsed).
 - Sets `data-variant`, which **Modal autofocus relies on** to find the action button. Keep action buttons as `primary`/`danger`/`success`, cancel buttons as `ghost`/`secondary`.
+
+### Row action chrome (`rowAction.ts`, rule 2026-10-06)
+
+- `rowActionClass(tone, size?)` is the class for the small action buttons in rows, cards and panel footers: Converter and Combine job rows, the Streams sidebar's Archive and Delete, the file cards' hover row and the files-grid toolbar. Neutral `gray-200` at rest, tone color on hover only (`green`, `red`, `yellow`, `blue`, `accent`, `gray`, `pink`, `cyan`), `opacity-40` plus `cursor-not-allowed` when disabled, with the hover color suppressed. Size `md` (default) for rows and footers, `sm` for the file cards and grid toolbar.
+- The resting text is the same shade on the sidebar's lighter footer and on the darker row fills; the decision was one shade everywhere rather than a per-surface tint. Do not append disabled classes at the call site; the base owns them.
+- Before this file, four private copies existed (Converter, Combine, StreamsPage, StreamFilesGrid) and had drifted in resting color, padding and disabled styling.
 
 ### Inputs (`Input.tsx`)
 

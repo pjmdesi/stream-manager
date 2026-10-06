@@ -43,6 +43,7 @@ import { Globe, Lock, Link as LinkIcon, Link2 } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { videoMapKey, streamMetaKey } from '../../lib/videoMapKey'
+import { rowActionClass } from '../ui/rowAction'
 import { localDateString, localTimeString, localDateFromIso } from '../../lib/localDate'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { SendToConverterModal } from '../streams/SendToConverterModal'
@@ -431,24 +432,6 @@ function buildDateMarks(folders: StreamFolder[] | undefined): Map<string, DateMa
   }
   return map
 }
-
-// Action-button styling pulled from the existing ExpandedStreamPanel so the
-// new sidebar matches the row's hover-revealed action panel design verbatim.
-// Keeping these as local constants avoids cross-file coupling while we
-// iterate on the new page; if the colors drift we'll consolidate later.
-// `shrink-0` keeps the button from shrinking as a flex item of its
-// section, and `min-w-max` forces its intrinsic width to its full
-// max-content. Together these stop the inner CollapsibleLabel's
-// `min-w-0` (needed for the 0fr↔1fr collapse animation) from
-// propagating up through the inline-grid and letting Chromium
-// resolve the button's content width to "just the icon" — without
-// `min-w-max` the button was sizing to ~icon+gap and the label was
-// rendering outside the button's box (label overflow, not actual
-// overlap; visually identical to overlap when the bg-on-hover
-// extended past the box).
-const PANEL_ACTION_BUTTON_BASE = 'inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-200'
-const PANEL_ACTION_BUTTON_GREEN = `${PANEL_ACTION_BUTTON_BASE} hover:text-green-400 hover:bg-green-500/10`
-const PANEL_ACTION_BUTTON_RED = `${PANEL_ACTION_BUTTON_BASE} hover:text-red-400 hover:bg-red-500/10`
 
 /**
  * Streams page — new architecture. Replaces the table-with-modal layout of
@@ -9261,14 +9244,14 @@ function SidebarDetail({
                 {/* Permanent icon+label (no CollapsibleLabel): with only
                     these two in the row there's room at any sidebar
                     width, and destructive verbs deserve their names. */}
-                <button onClick={onArchive} disabled={isArchiving} className={PANEL_ACTION_BUTTON_GREEN}>
+                <button onClick={onArchive} disabled={isArchiving} className={rowActionClass('green')}>
                   <Archive size={13} />
                   Archive
                 </button>
               </Tooltip>
             )}
             <Tooltip content={deleteBlockReason ? "Can't delete: files are currently in use" : 'Delete this stream and all its contents'}>
-              <button onClick={onDelete} disabled={!!deleteBlockReason} className={`${PANEL_ACTION_BUTTON_RED} disabled:opacity-40 disabled:cursor-not-allowed`}>
+              <button onClick={onDelete} disabled={!!deleteBlockReason} className={rowActionClass('red')}>
                 <Trash2 size={13} />
                 Delete
               </button>

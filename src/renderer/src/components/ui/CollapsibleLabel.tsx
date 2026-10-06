@@ -54,7 +54,7 @@ interface CollapsibleLabelProps {
  *     Templates
  *   </CollapsibleLabel>
  *
- *   // gap-1.5 parent (e.g. PANEL_ACTION_BUTTON_BASE on bare buttons):
+ *   // gap-1.5 parent (e.g. rowActionClass('red') on bare buttons):
  *   <CollapsibleLabel
  *     expandClass="@xl:grid-cols-[1fr] @xl:ms-0"
  *     collapsedMarginStart="-ms-1.5"

@@ -13,6 +13,7 @@ import { useOpenItems } from '../../context/OpenItemsContext'
 import { displayPath } from '../../lib/displayPath'
 import { formatBytes } from '../../lib/formatBytes'
 import { formatTimecode } from '../../lib/formatTimecode'
+import { rowActionClass } from '../ui/rowAction'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { subscribeHydration } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
@@ -144,13 +145,6 @@ const ROW_REORDER_MIME = 'application/x-sm-combine-row'
  *  filters by these; dropped paths are re-filtered in the intake handlers
  *  (drops bypass the dialog). */
 const VIDEO_EXTS = ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']
-
-// Row action buttons — neutral at rest, colored only on hover. Mirrors the
-// converter's ROW_ACTION_* scheme so the in-progress controls match.
-const ROW_ACTION_BASE = 'inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400'
-const ROW_ACTION_RED = `${ROW_ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
-const ROW_ACTION_YELLOW = `${ROW_ACTION_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
-const ROW_ACTION_BLUE = `${ROW_ACTION_BASE} hover:text-blue-400 hover:bg-blue-500/10`
 
 function makeCombineFile(p: string, stream?: CombineFile['stream']): CombineFile {
   const name = nameOf(p)
@@ -1247,7 +1241,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                   if (paused) { void window.api.resumeCombine(); setRunState(prev => prev ? { ...prev, paused: false } : prev) }
                                   else { void window.api.pauseCombine(); setRunState(prev => prev ? { ...prev, paused: true } : prev) }
                                 }}
-                                className={paused ? ROW_ACTION_BLUE : ROW_ACTION_YELLOW}
+                                className={paused ? rowActionClass('blue') : rowActionClass('yellow')}
                               >
                                 {paused ? <Play size={13} /> : <Pause size={13} />}
                                 {paused ? 'Resume' : 'Pause'}
@@ -1265,7 +1259,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                 else void window.api.cancelCombine()
                               }}
                               disabled={cancelling}
-                              className={ROW_ACTION_RED}
+                              className={rowActionClass('red')}
                             >
                               <Ban size={13} />
                               {cancelling ? 'Cancelling…' : 'Cancel'}
