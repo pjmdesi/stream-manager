@@ -60,7 +60,7 @@ Build: Stream Manager <version>_DEV.exe from dev @ <commit>
 - [ ] Quit/relaunch: no orphaned processes, state restored
 
 ## Docs (every release)
-- [ ] README.md reviewed against the shipped app (features, prerequisites, links, hero screenshot, layout block)
+- [ ] README.md reviewed against the shipped app (features, prerequisites, links, hero screenshot, layout block). Open the Discord invite in a browser: a dead invite still answers 200, so a status check proves nothing (caught 2026-10-05)
 - [ ] CONTRIBUTING.md and PRINCIPLES.md still accurate (principles: code citations resolve)
 - [ ] `npm audit` read, both ways: the full count and `npm audit --omit=dev` (what ships). Anything in the shipped set gets fixed or a written reason in the todo before promotion
 ```
@@ -87,7 +87,7 @@ Then on GitHub:
 
 1. Actions: wait for the release workflow run on the tag to go green (a few minutes; typecheck + lint + dist on a clean runner).
 2. Releases: the workflow created a DRAFT release for the tag with the exe attached. Download that exe and smoke it: correct name, normal icon, **no chips** (a dev marker means the tag was cut from the wrong branch).
-3. Edit the draft: paste notes (edited from `_release-notes-draft.md`, then empty the draft file for the next cycle), mark **latest**, publish. No manual exe attach; the workflow already did it.
+3. Edit the draft: paste notes (edited from `_release-notes-draft.md`, then empty the draft file for the next cycle), mark **latest**, publish. No manual exe attach; the workflow already did it. Every release's copy ends with the "Questions and bug reports" section (Discord invite plus the issues link); when the draft is emptied, that section is re-added to the empty draft so it cannot be forgotten.
 4. Verify `releases/latest` resolves to the new version; the website's download buttons point there.
 
 Back in the repo:
