@@ -124,7 +124,7 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
           ytLastPushedTags: v.tags, ytLastPushedCategoryId: v.categoryId,
           ytLastPushedPrivacy: privacy, ytLastPushedDate: v.date,
         }
-        const folderPath = await window.api.createStreamFolder(config.streamsDir, v.date, meta, undefined, undefined, mode)
+        const folderPath = await window.api.createStreamFolder(config.streamsDir, v.date, meta, undefined, mode)
         if (v.thumbnailUrl) {
           const dl = await window.api.youtubeDownloadThumbnail(folderPath, v.thumbnailUrl)
           if (dl) await window.api.updateStreamMeta(folderPath, { preferredThumbnail: dl.filename, ytThumbnailPushedHash: dl.hash })

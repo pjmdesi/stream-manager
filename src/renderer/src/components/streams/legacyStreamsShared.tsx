@@ -4360,7 +4360,10 @@ export function StreamsPage({
     })
   }, [config.streamMode])
 
-  const [templates, setTemplates] = useState<{ name: string; path: string }[]>([])
+  // External thumbnail template files are no longer listed or copied
+  // (removed app-wide 2026-10-05); this parked page keeps an empty list so
+  // its dialog still type-checks until the legacy dead-code pass.
+  const [templates] = useState<{ name: string; path: string }[]>([])
   const [builtinTemplates, setBuiltinTemplates] = useState<ThumbnailTemplate[]>([])
 
   const streamsDir = config.streamsDir
@@ -4392,7 +4395,6 @@ export function StreamsPage({
   useEffect(() => {
     if (!streamsDir) return
     loadFolders(streamsDir)
-    window.api.listStreamTemplates(streamsDir).then(setTemplates)
     window.api.thumbnailListTemplates(streamsDir).then(setBuiltinTemplates).catch(() => setBuiltinTemplates([]))
     window.api.watchStreamsDir(streamsDir, streamMode as any)
     return () => { window.api.unwatchStreamsDir() }
@@ -4839,10 +4841,10 @@ export function StreamsPage({
     }))
   }, [])
 
-  const handleSave = useCallback(async (meta: StreamMeta, date: string, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, builtinTemplateId?: string) => {
+  const handleSave = useCallback(async (meta: StreamMeta, date: string, _thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, builtinTemplateId?: string) => {
     if (modal.mode === 'new') {
       const finalMeta = builtinTemplateId ? { ...meta, smThumbnailTemplate: builtinTemplateId } : meta
-      await window.api.createStreamFolder(streamsDir, date, finalMeta, thumbnailTemplatePath, prevEpisodeFolderPath, streamMode as any)
+      await window.api.createStreamFolder(streamsDir, date, finalMeta, prevEpisodeFolderPath, streamMode as any)
       await loadFolders(streamsDir)
       // Successful Create — the in-progress draft has been committed as a
       // real stream item, so nothing left to preserve.
@@ -6452,10 +6454,7 @@ return (
               allStreamTypes={allStreamTypes}
               allFolders={modal.mode === 'edit' ? folders.filter(f => f.folderPath !== modal.folder.folderPath) : folders}
               templates={templates}
-              defaultTemplateName={config.defaultThumbnailTemplate}
               builtinTemplates={builtinTemplates}
-              defaultBuiltinTemplateId={config.defaultBuiltinThumbnailTemplate}
-              useBuiltinByDefault={config.useBuiltinThumbnailByDefault}
               claudeEnabled={!!config.claudeApiKey}
               defaultBroadcastTime={config.defaultBroadcastTime || '19:00'}
               tagColors={tagColors}

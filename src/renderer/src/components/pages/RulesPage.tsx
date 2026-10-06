@@ -8,6 +8,7 @@ import { Input, Select } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { useWatcher } from '../../context/WatcherContext'
+import { useStore } from '../../hooks/useStore'
 
 function RuleModal({
   rule,
@@ -18,8 +19,12 @@ function RuleModal({
   onClose: () => void
   onSave: (r: WatchRule) => void
 }) {
+  const { config } = useStore()
   const [name, setName] = useState(rule?.name || '')
-  const [watchPath, setWatchPath] = useState(rule?.watchPath || '')
+  // A new rule starts on the Default Watch Directory from Settings; an
+  // existing rule keeps its own folder. (The setting had no reader at all
+  // until 2026-10-05, found by the APP-41 config-key scan.)
+  const [watchPath, setWatchPath] = useState(rule?.watchPath || (rule ? '' : config.defaultWatchDir) || '')
   const [pattern, setPattern] = useState(rule?.pattern || '*.mkv')
   const [action, setAction] = useState<WatchRule['action']>(rule?.action || 'move')
   const [destinationMode, setDestinationMode] = useState<'static' | 'auto' | 'next-to-original'>(rule?.destinationMode || 'static')

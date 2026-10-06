@@ -195,9 +195,6 @@ export interface AppConfig {
   clipPresetId: string
   /** Preset assigned to new files added to the Converter page. */
   defaultConversionPresetId: string
-  defaultThumbnailTemplate: string
-  defaultBuiltinThumbnailTemplate: string
-  useBuiltinThumbnailByDefault: boolean
   defaultBroadcastTime: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number

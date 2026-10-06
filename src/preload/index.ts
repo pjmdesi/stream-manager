@@ -374,11 +374,8 @@ contextBridge.exposeInMainWorld('api', {
   clipTagExport: (folderPath: string, outputFilename: string, sourceName: string, clipState: any, draftId?: string | null, metaKey?: string) =>
     ipcRenderer.invoke('clip:tagExport', folderPath, outputFilename, sourceName, clipState, draftId, metaKey),
 
-  listStreamTemplates: (streamsDir: string) =>
-    ipcRenderer.invoke('streams:listTemplates', streamsDir),
-
-  createStreamFolder: (parentDir: string, date: string, meta?: any, thumbnailTemplatePath?: string, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder', sourceThumbName?: string) =>
-    ipcRenderer.invoke('streams:createFolder', parentDir, date, meta, thumbnailTemplatePath, prevEpisodeFolderPath, mode, sourceThumbName),
+  createStreamFolder: (parentDir: string, date: string, meta?: any, prevEpisodeFolderPath?: string, mode?: 'folder-per-stream' | 'dump-folder', sourceThumbName?: string) =>
+    ipcRenderer.invoke('streams:createFolder', parentDir, date, meta, prevEpisodeFolderPath, mode, sourceThumbName),
 
 
   listFilesForDate: (dir: string, date: string) =>

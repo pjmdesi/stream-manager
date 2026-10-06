@@ -1784,16 +1784,10 @@ export function registerStreamsIPC(): void {
     return blank(isEmpty)
   })
 
-  ipcMain.handle('streams:listTemplates', async (
-    _event,
-    streamsDir: string
-  ): Promise<{ name: string; path: string }[]> => {
-    const templatesDir = path.join(streamsDir, '_Templates')
-    if (!fs.existsSync(templatesDir)) return []
-    return fs.readdirSync(templatesDir, { withFileTypes: true })
-      .filter(e => e.isFile() && !e.name.startsWith('.'))
-      .map(e => ({ name: e.name, path: path.join(templatesDir, e.name) }))
-  })
+  // (The `streams:listTemplates` handler that listed a `_Templates` folder
+  // of external thumbnail source files, and the copy of one into each new
+  // stream, were removed 2026-10-05. Thumbnails start in the built-in
+  // editor; files made in an outside tool are added like any other file.)
 
   /** Pick which of the previous episode's thumbnail-ish files carry to a
    *  new episode: ONLY the primary (the stream item's selected thumbnail,
@@ -1828,7 +1822,6 @@ export function registerStreamsIPC(): void {
     parentDir: string,
     date: string,
     meta?: StreamMeta,
-    thumbnailTemplatePath?: string,
     prevEpisodeFolderPath?: string,
     mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream',
     sourceThumbName?: string
@@ -1837,15 +1830,12 @@ export function registerStreamsIPC(): void {
     const effectiveMode = mode || (store.get('config').streamMode) || 'folder-per-stream'
 
     if (effectiveMode === 'dump-folder') {
-      // In dump mode: just write the meta entry and copy template to the dump dir root
+      // In dump mode: just write the meta entry (and carry the previous
+      // episode's primary thumbnail, below); there is no folder to create.
       if (meta) {
         const allMeta = readAllMeta(parentDir)
         allMeta[date] = meta
         writeAllMeta(parentDir, allMeta)
-      }
-      if (thumbnailTemplatePath && fs.existsSync(thumbnailTemplatePath)) {
-        const ext = path.extname(thumbnailTemplatePath)
-        fs.copyFileSync(thumbnailTemplatePath, path.join(parentDir, `${date} thumbnail${ext}`))
       }
       if (prevEpisodeFolderPath && fs.existsSync(prevEpisodeFolderPath)) {
         // Copy the PRIMARY thumbnail from the prev episode folder (or dump
@@ -1871,10 +1861,6 @@ export function registerStreamsIPC(): void {
       const allMeta = readAllMeta(parentDir)
       allMeta[folderName] = meta
       writeAllMeta(parentDir, allMeta)
-    }
-    if (thumbnailTemplatePath && fs.existsSync(thumbnailTemplatePath)) {
-      const ext = path.extname(thumbnailTemplatePath)
-      fs.copyFileSync(thumbnailTemplatePath, path.join(folderPath, `${date} thumbnail${ext}`))
     }
     if (prevEpisodeFolderPath && fs.existsSync(prevEpisodeFolderPath)) {
       const files = fs.readdirSync(prevEpisodeFolderPath).filter(f => {

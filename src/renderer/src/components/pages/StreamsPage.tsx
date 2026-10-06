@@ -11316,7 +11316,6 @@ function NewStreamModal({
         streamsDir,
         date,
         buildInheritedMeta(),
-        undefined,
         source?.folderPath,
         streamMode,
         sourceThumb ? (sourceThumb.split(/[\\/]/).pop() ?? undefined) : undefined,

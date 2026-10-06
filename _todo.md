@@ -14,27 +14,31 @@
 10. NAV-1
 11. COMB-6
 12. PLR-30
-13. STR-30
-14. STR-11
-15. STR-25
-16. STR-26
-17. STR-29
-18. PLR-17
-19. PLR-25
-20. PLR-26
-21. THU-35
-22. THU-36
-23. THU-37
-24. INTG-1
-25. APP-25
-26. APP-26
-27. APP-28
-28. APP-31
-29. APP-34
-30. APP-35
-31. CONV-14
-32. CONV-16
-33. SYNC-7
+13. STR-31
+14. STR-32
+15. STR-30
+16. STR-11
+17. STR-25
+18. STR-26
+19. STR-29
+20. PLR-17
+21. PLR-25
+22. PLR-26
+23. THU-38
+24. THU-35
+25. THU-36
+26. THU-37
+27. THU-39
+28. INTG-1
+29. APP-25
+30. APP-26
+31. APP-28
+32. APP-31
+33. APP-34
+34. APP-35
+35. CONV-14
+36. CONV-16
+37. SYNC-7
 
 ## Next up
 
@@ -139,6 +143,12 @@
 
   We then need to add the abillity for the app to present options for tags when the user types a "(" or "[" into the search bar. It should show a popup that matches the popups used for the tag fields in the stream detail sidebar. When the user closes the tag search key (either by typing ")" or "]" or by clicking a presented tag option in the popup), it should then render as a chip element matching the design of the respective tag (colored/textured correctly for category).
 
+- **STR-31** [impact:2] [bug]
+  Thumnbail in the YouTube Sync panel did not update to show the new thumbnail, even though that was the only thing that changed compared to YouTube. The YouTube sync panel should always show the selected thumbnail.
+
+- **STR-32** [bug] [impact:3]
+  YouTube Sync panel doesn't show errors when thumbnail or title pushes fail due to A/B testing on video through YouTube Studio. If the push fails, it needs to do so loudly and recommend an action to allow the user to clear the list successfully. I believe the only actino for now would be to end the A/B test through studio since SM cannot see or effect those.
+
 ### Player
 
 - **PLR-3** [perf] [maybe]
@@ -238,6 +248,12 @@
 
 - **THU-37** [impact:2]
   Add the ability to drag in image files directly into the thumbnail canvas from another app or from explorer (if that's even a meaningful distiction).
+
+- **THU-38** [bug] [impact:2]
+  When loading a thumbnail file, somethimes it can take a few seconds for all the assets to load fully. This can sometimes cause a thumbnail with multiple layers (especially ones with multiple full-coverage screenshot files) to appear incorrect for several seconds. Two possible solutions: obscure the canvas area with a loading overlay until all objects are loaded in or make sure to load items in from top to bottom in layer order (currently, it seems like they are loading in parallel, whatever is smallest tends to become visible first). Loading here might not mean actually loading of the file items into RAM, but actually probably the rasterization of the files to display them on the canvas. The larger a layer is, the longer it seems to take to load in at first.
+
+- **THU-39** [impact:1]
+  Group collapse / expand state should be recorded in the thumbnail JSON so they return to the same state when repoeneing.
 
 ### Converter
 
@@ -412,7 +428,7 @@
 - **APP-15** [ui]
   Catalog colors across SM. Find and record all uses of color in the app and catalog based on how they are used. Background variants, accents, borders, warnings, text variants. Only need to exclude things that are already UI customization elements such as the tag color picker and various thumbnail editor items. This will be used to build the themes in the APP-14 task.
 
-- **APP-14** [blocked:APP-15] [ui]
+- **APP-14** [blocked:APP-15] [ui] [impact:5]
   Add theme options to SM UI. 4 Options to start with:
     - Slate (current design)
     - Light
@@ -483,6 +499,7 @@
 
 - **APP-41** [cleanup] [impact:4]
   Duplicate private code sweep, the first item of the round after v2.7.0 by decision (2026-09-25). Private copies of the same helper have now caused bugs three times in one cycle: the merge-key list (the Templates modal kept the pre-rename copy, `{topic}` rendered raw), the byte formatter (nine copies, half dividing by 1024 and half by 1000, so one recording read 7.9 GB in the files grid and 8.51 GB in the cloud sync dialog), and the dropdown positioning (every inline menu re-implemented a weaker version of Tooltip's engine, APP-39). Each copy started identical and drifted. The sweep: (1) find the copies mechanically, not by memory: a duplicate detector over `src/` (jscpd or equivalent, run once, not added to the toolchain unless it earns it) plus a grep for the same function name declared in more than one file (`^(export )?function (\w+)\(` and `^const (\w+) = ` grouped by name); (2) for each cluster decide one home in `lib/`, `hooks/`, or `components/ui/`, move it, delete the copies, and note any behavior difference the copies had (that difference IS the bug); (3) known clusters to start from: `formatDuration` and timecode formatting (converter, player, combine), the converter and combine row anatomy (deliberately mirrored so far; decide again), `TogglePill` (in StreamsPage, guide says move to ui at the second user), `Kbd` (in HelpModal), the panel-header icon-button class strings, the segmented-switch class strings (PaintModeToggle, the arrow head switch, the gradient kind switch), the `ACTION_*` button chrome constants, the hydration-aware file checks; (4) add a rule to the style guide's "How to use this" section: a helper that exists in one component is moved to a shared home before a second component needs it, and a reviewer grep for the function name is part of adding one. (5) Second pass, the neighboring class: settings nothing reads. `tempDir` ("Cache Directory") shipped in the initial commit with a setter no code ever called and a field nothing outside Settings ever read, and stayed that way until 2026-09-29 because nothing measured it. For every key in `AppConfig`, grep for a reader outside SettingsPage and the store; a key with none is either wired or removed, and the verify steps for any new setting include the effect it has, not just that it saves. Filed 2026-09-25; queue it first when the next Queue is written.
+  Scan run 2026-10-05 (read-only, scripts in the session scratchpad, nothing added to the toolchain): a same-name scan over 150 source files found 47 names declared in more than one file, a block-level clone pass found 19 cross-file clones, and the config-key pass found 7 keys with no reader outside Settings, the store, and the type (plus a caveat: it matches by word, so a key named like a common word can hide; `tempDir` did). Config keys, decided 2026-10-05 and built the same day: Default Watch Directory stays and now pre-fills the watch folder when a new auto-rule is added (its hint says so); the three thumbnail defaults are removed (use the built-in creator by default, default built-in template, default external template), together with the `_Templates` listing handler, the external-template copy in `streams:createFolder` (whose signature lost that parameter; the live callers and the parked legacy page updated), and the three config keys; `defaultOutputDir` and `presetsDir` have no field and no reader and are left for the same pass as the rest of the dead keys. `checkEpisodeIteration` is still in Settings pending a decision: it has had no reader since the initial commit, and the new-stream dialog always numbers episodes. Verify: add a new auto-rule, the watch folder is pre-filled from Settings, an existing rule keeps its own; the Streams section of Settings shows Streams Directory, then Default Archive Preset, with the three thumbnail fields gone and no unsaved dot appearing for them; New stream and New episode still create folders and carry the previous episode's primary thumbnail; the YouTube import still creates stream folders.
 
 - **APP-43** [cleanup] [impact:3]
   Dependency update round, early in the cycle after v2.7.0 (filed 2026-10-02 from the `npm ci` report in the v2.7.0 release build: 19 vulnerabilities, 17 high). Only 3 of the 19 touch what ships; the rest sit in build-time tooling (electron-builder's updater and XML libraries, browserslist, postcss, brace-expansion), which never runs on a user's machine, so the headline number overstates the exposure. The shipped three are all `image-size` (infinite loops in its JXL, HEIF, and ICNS parsers, fixed in 2.0.4); the app feeds it only YouTube's own thumbnail bytes in `services/youtubeApi.ts`, so the risk was small, and it is a patch bump. Steps, in order, each with a `_DEV` dist and the core regression list: (1) `npm audit fix` without `--force`, which covers all 19 through in-range updates; (2) the in-range "Wanted" column from `npm outdated`: Electron 44.5.1, electron-builder 26.15.3, konva 10.7.0, react-konva 18.2.16, lucide-react 1.50.0, motion 12.43, eslint and typescript-eslint, autoprefixer, postcss, @types/node 24.19; the electron-builder bump needs the portable launcher pre-check re-verified (APP-32 patches its template and fails loudly if the template moved) and the two-launch test; (3) decide, separately and not in this round unless trivial: the majors held back on purpose, React 19 with react-konva 19, Tailwind 4, Vite 8 with plugin-react 6, TypeScript 7, chokidar 5 (the streams watcher no longer uses it; only the recording-rule watcher does), electron-store 11, glob 13, uuid 14, motion 14. Each major gets its own ticket when picked up. Also make the audit summary part of the release checklist's docs section so the number is read at every sweep rather than noticed in a build log.

@@ -29,7 +29,6 @@ export interface AppConfig {
   clipPresetId: string
   /** Preset assigned to new files added to the Converter page. */
   defaultConversionPresetId: string
-  defaultThumbnailTemplate: string
   checkEpisodeIteration: boolean
   audioCacheLimit: number
   /** Max conversions the scheduler runs at once — enforced on EVERY start
@@ -63,8 +62,6 @@ export interface AppConfig {
   aiPreventRepeatSuggestions: boolean
   launcherWidgetGroupId: string
   listThumbWidth: number
-  defaultBuiltinThumbnailTemplate: string
-  useBuiltinThumbnailByDefault: boolean
   /** Default start time (24h "HH:MM", local) pre-filled when scheduling a
    *  YouTube broadcast — both the new-broadcast flow in the MetaModal and the
    *  reschedule modal. */
@@ -168,7 +165,6 @@ function getDefaultConfig(): AppConfig {
     archivePresetId: '',
     clipPresetId: '',
     defaultConversionPresetId: '',
-    defaultThumbnailTemplate: '',
     checkEpisodeIteration: true,
     audioCacheLimit: 1_073_741_824,  // 1 GB
     maxConcurrentConversions: 2,
@@ -190,8 +186,6 @@ function getDefaultConfig(): AppConfig {
     aiPreventRepeatSuggestions: true,
     launcherWidgetGroupId: '',
     listThumbWidth: 85,
-    defaultBuiltinThumbnailTemplate: '',
-    useBuiltinThumbnailByDefault: true,
     defaultBroadcastTime: '19:00',
     checkForUpdates: true,
     skipClipMergeWarning: false,

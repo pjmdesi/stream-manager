@@ -1,17 +1,16 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Plus, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
+import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
 import { Youtube, Twitch, Claude } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
 import { formatBytes } from '../../lib/formatBytes'
 import { useOnlineStatus } from '../../hooks/useOnlineStatus'
-import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Input, NumberInput } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { DumpConvertExplainer } from '../DumpConvertExplainer'
-import type { ConversionPreset, ThumbnailTemplate, Page } from '../../types'
+import type { ConversionPreset, Page } from '../../types'
 import { isClipExportCompatible } from '../../lib/clipExport'
 import { DEFAULT_TRACK_NAME_SLOTS } from '../../lib/trackNames'
 
@@ -123,7 +122,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   // Directories section is gone. Cache sits low, just above System: it is
   // maintenance, not something to set up. (2026-09-29)
   { id: 'profile', label: 'Profile', icon: <User size={14} />, keys: ['streamerName'] },
-  { id: 'streams', label: 'Streams', icon: <Radio size={14} />, keys: ['streamsDir', 'useBuiltinThumbnailByDefault', 'defaultBuiltinThumbnailTemplate', 'defaultThumbnailTemplate', 'archivePresetId', 'checkEpisodeIteration', 'defaultBroadcastTime', 'defaultYouTubeCategoryId', 'twitchSkipCategoryRenamePrompt'] },
+  { id: 'streams', label: 'Streams', icon: <Radio size={14} />, keys: ['streamsDir', 'archivePresetId', 'checkEpisodeIteration', 'defaultBroadcastTime', 'defaultYouTubeCategoryId', 'twitchSkipCategoryRenamePrompt'] },
   { id: 'player', label: 'Video Player', icon: <Film size={14} />, keys: ['clipPresetId', 'defaultBleepVolume', 'skipClipMergeWarning', 'defaultAudioTrackNames'] },
   { id: 'converter', label: 'Converter', icon: <Zap size={14} />, keys: ['maxConcurrentConversions', 'autoDeletePartialOnCancel'] },
   { id: 'appearance', label: 'Appearance', icon: <Palette size={14} />, keys: ['disableAnimations', 'calendarFirstDayOfWeek', 'uiZoomPercent'] },
@@ -174,9 +173,6 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
   useEffect(() => { lastSavedStreamsDirRef.current = config.streamsDir }, [config.streamsDir])
   const [saved, setSaved] = useState(false)
   const [allPresets, setAllPresets] = useState<ConversionPreset[]>([])
-  const [thumbnailTemplates, setThumbnailTemplates] = useState<{ name: string; path: string }[]>([])
-  const [builtinTemplates, setBuiltinTemplates] = useState<ThumbnailTemplate[]>([])
-  const { navigateToEditor } = useThumbnailEditor()
   const [cacheSize, setCacheSize] = useState<number>(0)
   const [clearingCache, setClearingCache] = useState(false)
   const [ytStatus, setYtStatus] = useState<{ connected: boolean; valid: boolean; reason?: 'auth' | 'network' } | null>(null)
@@ -227,12 +223,6 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
     Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
       .then(([builtin, imported]) => setAllPresets([...builtin, ...imported]))
   }, [])
-
-  useEffect(() => {
-    if (!local.streamsDir) { setThumbnailTemplates([]); setBuiltinTemplates([]); return }
-    window.api.listStreamTemplates(local.streamsDir).then(setThumbnailTemplates)
-    window.api.thumbnailListTemplates(local.streamsDir).then(setBuiltinTemplates).catch(() => setBuiltinTemplates([]))
-  }, [local.streamsDir])
 
   const [cacheDir, setCacheDir] = useState<string>('')
   useEffect(() => {
@@ -560,55 +550,11 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               <span className="text-xs text-gray-400">Currently using dump-folder mode.</span>
             </div>
           )}
-          <Checkbox
-            checked={local.useBuiltinThumbnailByDefault ?? true}
-            onChange={v => set('useBuiltinThumbnailByDefault', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Use the built-in thumbnail creator by default {dirtyDot('useBuiltinThumbnailByDefault')}</div><div className="text-xs text-gray-400">Pre-checks the "use the built-in thumbnail creator" option when creating new streams, so the thumbnail editor opens with your default built-in template instead of copying an external template file.</div></div>}
-          />
-
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default Built-in Thumbnail Template {dirtyDot('defaultBuiltinThumbnailTemplate')}</label>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <select
-                  value={local.defaultBuiltinThumbnailTemplate ?? ''}
-                  onChange={e => set('defaultBuiltinThumbnailTemplate', e.target.value)}
-                  className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
-                >
-                  <option value="">— None —</option>
-                  {builtinTemplates.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              </div>
-              {builtinTemplates.length === 0 && (
-                <Button variant="secondary" size="sm" icon={<Plus size={13} />} onClick={navigateToEditor}>
-                  Create Template
-                </Button>
-              )}
-            </div>
-            <p className="text-xs text-gray-400">Used when the "use built-in thumbnail creator" option is checked in the new-stream dialog.</p>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-300">Default External Thumbnail Template {dirtyDot('defaultThumbnailTemplate')}</label>
-            <div className="relative">
-              <select
-                value={local.defaultThumbnailTemplate ?? ''}
-                onChange={e => set('defaultThumbnailTemplate', e.target.value)}
-                className="w-full appearance-none bg-navy-900 border border-white/10 text-gray-200 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
-              >
-                <option value="">— None —</option>
-                {thumbnailTemplates.map(t => (
-                  <option key={t.name} value={t.name}>{t.name}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-            <p className="text-xs text-gray-400">Copied into new stream folders as <span className="font-mono">[date] thumbnail.af</span> when the built-in option is unchecked.</p>
-          </div>
-
+          {/* The three thumbnail defaults that sat here (use the built-in
+              creator by default, default built-in template, default external
+              template) were removed 2026-10-05: nothing had read them since
+              the streams page was rebuilt, and copying an external template
+              file into new streams is no longer something the app does. */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">Default Archive Preset {dirtyDot('archivePresetId')}</label>
             <div className="relative">
@@ -840,7 +786,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
             label={<>Default Watch Directory {dirtyDot('defaultWatchDir')}</>}
             value={local.defaultWatchDir}
             onChange={v => set('defaultWatchDir', v)}
-            hint="Where Auto-Rules watch for new files by default"
+            hint="Fills in the watch folder when you add a new auto-rule"
           />
           <Checkbox
             checked={local.autoStartWatcher}
