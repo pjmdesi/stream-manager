@@ -1,5 +1,5 @@
 {
-  "include": ["src/renderer/src/**/*"],
+  "include": ["src/renderer/src/**/*", "src/shared/**/*"],
   "compilerOptions": {
     "composite": true,
     "module": "ESNext",

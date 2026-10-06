@@ -20,6 +20,7 @@ import { renderStreamTitle } from '../../lib/streamTitle'
 import { CLOUD_WAIT_HINT, CLOUD_WAIT_HINT_MS, formatWait } from '../CloudOpsModal'
 import { resolveTrackName } from '../../lib/trackNames'
 import { rowActionClass } from '../ui/rowAction'
+import { VIDEO_EXTENSIONS } from '../../../../shared/videoExts'
 import type { AudioTrackSetting } from '../../types'
 
 /** Shorten an output directory for the per-file dropdown so the drive letter
@@ -1179,7 +1180,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                 <FileDropZone
                   compact
                   onFiles={addFiles}
-                  accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
+                  accept={VIDEO_EXTENSIONS}
                   label="Drop or click to add files"
                   className="m-2"
                 />
@@ -1265,7 +1266,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             <>
               <FileDropZone
                 onFiles={addFiles}
-                accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
+                accept={VIDEO_EXTENSIONS}
                 label="Drop video files here to convert"
                 className="min-h-[100px] shrink-0"
               />

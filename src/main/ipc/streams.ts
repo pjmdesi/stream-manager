@@ -11,6 +11,7 @@ import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './fil
 import { probeFile, parseClipProvenance, probeArchiveTag, isArchiveTag } from '../services/ffmpegService'
 import { isInFlightWrite } from '../services/inFlightWrites'
 import { broadcast } from '../services/broadcast'
+import { isVideoExtension } from '../../shared/videoExts'
 import { consumeSelfWrite } from '../services/selfWrites'
 
 export type VideoCategory = 'full' | 'short' | 'clip' | 'combined'
@@ -137,12 +138,6 @@ const DATE_IN_FILENAME_RE = /(\d{4}-\d{2}-\d{2})/
 const META_FILENAME = '_meta.json'
 const OLD_META_FILENAME = 'stream-meta.json'
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
-const VIDEO_EXTS = new Set([
-  '.mkv', '.mp4', '.mov', '.avi', '.ts', '.flv', '.webm',
-  '.wmv', '.m4v', '.mpg', '.mpeg', '.m2ts', '.mts', '.vob',
-  '.divx', '.3gp', '.ogv', '.asf', '.rmvb', '.f4v', '.hevc'
-])
-
 /** Returns the YYYY-MM-DD portion of a folder name, stripping any -N suffix. */
 function calendarDate(folderName: string): string {
   return folderName.slice(0, 10)
@@ -259,7 +254,7 @@ function collectStreamFiles(folderPath: string, maxDepth = 4): {
       // finished file with its clip provenance in place.
       if (isInFlightWrite(full)) continue
       const ext = path.extname(e.name).toLowerCase()
-      if (VIDEO_EXTS.has(ext)) videos.push(full)
+      if (isVideoExtension(ext)) videos.push(full)
       else if (IMAGE_EXTS.has(ext)) thumbnails.push(full)
     }
   }
@@ -1026,7 +1021,7 @@ export function registerStreamsIPC(): void {
         const filePath = path.join(dir, entry.name)
         // Same in-flight-output skip as collectStreamFiles (folder mode).
         if (isInFlightWrite(filePath)) continue
-        if (VIDEO_EXTS.has(ext)) groups.get(date)!.videos.push(filePath)
+        if (isVideoExtension(ext)) groups.get(date)!.videos.push(filePath)
         else if (IMAGE_EXTS.has(ext)) groups.get(date)!.thumbnails.push(filePath)
       }
 
@@ -1747,7 +1742,7 @@ export function registerStreamsIPC(): void {
         if (!groups.has(date)) groups.set(date, { videos: [], thumbnails: [] })
         const ext = path.extname(e.name).toLowerCase()
         const filePath = path.join(dir, e.name)
-        if (VIDEO_EXTS.has(ext)) groups.get(date)!.videos.push(filePath)
+        if (isVideoExtension(ext)) groups.get(date)!.videos.push(filePath)
         else if (IMAGE_EXTS.has(ext)) groups.get(date)!.thumbnails.push(filePath)
       }
     } catch {}
@@ -1945,7 +1940,7 @@ export function registerStreamsIPC(): void {
       const local = localFlags[i]
       const ext = path.extname(f.path).toLowerCase()
       let slot: 'videos' | 'clips' | 'images' | 'other'
-      if (VIDEO_EXTS.has(ext)) {
+      if (isVideoExtension(ext)) {
         const known = allMeta[f.key]?.videoMap?.[videoRelKey(f.folderPath, f.path)]?.category
         const category = known ?? classifyVideo(undefined, undefined, size, false)
         slot = (category === 'clip' || category === 'short') ? 'clips' : 'videos'

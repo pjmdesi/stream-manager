@@ -14,6 +14,7 @@ import { displayPath } from '../../lib/displayPath'
 import { formatBytes } from '../../lib/formatBytes'
 import { formatTimecode } from '../../lib/formatTimecode'
 import { rowActionClass } from '../ui/rowAction'
+import { VIDEO_EXTENSIONS, isVideoFile } from '../../../../shared/videoExts'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { subscribeHydration } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
@@ -140,11 +141,6 @@ function isCombinedOutput(name: string): boolean {
 /** Drag payload type for row reordering — a dedicated MIME so the handlers
  *  never react to other drags (OS file drops, palette swatches, …). */
 const ROW_REORDER_MIME = 'application/x-sm-combine-row'
-
-/** Same container set the converter accepts. FileDropZone's browse dialog
- *  filters by these; dropped paths are re-filtered in the intake handlers
- *  (drops bypass the dialog). */
-const VIDEO_EXTS = ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']
 
 function makeCombineFile(p: string, stream?: CombineFile['stream']): CombineFile {
   const name = nameOf(p)
@@ -513,8 +509,8 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     // Completed job → start over (see the stream-intake note).
     const base = group.completed ? [] : group.files
     const have = new Set(base.map(f => f.path))
-    const fresh = paths.filter(p =>
-      VIDEO_EXTS.includes((p.split('.').pop() ?? '').toLowerCase()) && !have.has(p))
+    // Dropped paths are re-filtered here: drops bypass the browse dialog's filter.
+    const fresh = paths.filter(p => isVideoFile(p) && !have.has(p))
     if (fresh.length === 0) return
     const added = fresh.map(p => makeCombineFile(p))
     patchGroup(groupId, g => ({
@@ -531,7 +527,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   /** Page-level intake: every drop starts its own NEW group (a drop is one
    *  intended combine set — files can be dragged between groups after). */
   const addFilesAsNewGroup = useCallback((paths: string[]) => {
-    const vids = paths.filter(p => VIDEO_EXTS.includes((p.split('.').pop() ?? '').toLowerCase()))
+    const vids = paths.filter(isVideoFile)
     if (vids.length === 0) return
     createGroup(vids.map(p => makeCombineFile(p)))
   }, [createGroup])
@@ -812,7 +808,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
       <div className="flex flex-col items-center justify-center h-full gap-4 px-8">
         <FileDropZone
           onFiles={addFilesAsNewGroup}
-          accept={VIDEO_EXTS}
+          accept={VIDEO_EXTENSIONS}
           label="Drop video files here to combine"
           className="w-full max-w-xl min-h-[140px]"
         />
@@ -936,7 +932,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                   <FileDropZone
                     compact
                     onFiles={paths => addFilesToGroup(g.id, paths)}
-                    accept={VIDEO_EXTS}
+                    accept={VIDEO_EXTENSIONS}
                     label="Drop or click to add files to this job"
                   />
                 </div>
@@ -1112,7 +1108,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                       <FileDropZone
                         compact
                         onFiles={paths => addFilesToGroup(g.id, paths)}
-                        accept={VIDEO_EXTS}
+                        accept={VIDEO_EXTENSIONS}
                         label="Drop or click to add files to this job"
                       />
                     </div>
@@ -1409,7 +1405,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
         <FileDropZone
           compact
           onFiles={addFilesAsNewGroup}
-          accept={VIDEO_EXTS}
+          accept={VIDEO_EXTENSIONS}
           label="Drop or click to start a new combine job"
           className="shrink-0"
         />

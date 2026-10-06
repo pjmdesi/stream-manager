@@ -11,6 +11,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 ## Across the app
 
 - The small action buttons in rows and file cards (the converter and combine rows, the file cards and their toolbar) are brighter at rest, matching the stream sidebar's Archive and Delete, and a disabled one now stands apart from its neighbors.
+- The Converter, Combine and Player accept every video format a stream folder can hold (WMV, M4V, MPG, M2TS and the rest), where their drop zones and open dialogs used to take seven.
 
 ## Settings
 

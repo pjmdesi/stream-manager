@@ -1,11 +1,16 @@
 import React, { useState, useRef } from 'react'
 import { Upload, Film } from 'lucide-react'
+import { Tooltip } from './Tooltip'
+
+/** How many accepted extensions the empty state names before "and N more";
+ *  the full list is the line's tooltip. The video list is 21 long. */
+const SUPPORTS_SHOWN = 7
 
 interface FileDropZoneProps {
   /** `opts.ctrlKey` reflects the modifier held at DROP time (false for
    *  click-to-browse) — the files grid uses it for move-vs-copy. */
   onFiles: (paths: string[], opts?: { ctrlKey: boolean }) => void
-  accept?: string[]
+  accept?: readonly string[]
   className?: string
   children?: React.ReactNode
   label?: string
@@ -145,7 +150,13 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       </div>
       <div className="text-center">
         <p className="text-gray-300 font-medium">{label}</p>
-        {accept && (
+        {accept && accept.length > SUPPORTS_SHOWN + 1 ? (
+          <Tooltip content={accept.join(', ')} triggerClassName="flex justify-center">
+            <p className="text-gray-400 text-sm mt-1">
+              Supports: {accept.slice(0, SUPPORTS_SHOWN).join(', ')} and {accept.length - SUPPORTS_SHOWN} more
+            </p>
+          </Tooltip>
+        ) : accept && (
           <p className="text-gray-400 text-sm mt-1">
             Supports: {accept.join(', ')}
           </p>

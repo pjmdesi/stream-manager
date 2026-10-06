@@ -4417,12 +4417,6 @@ export function StreamsPage({
     stage: 'confirm' | 'downloading'
   } | null>(null)
 
-  const VIDEO_EXTS_RENDERER = new Set([
-    '.mkv', '.mp4', '.mov', '.avi', '.ts', '.flv', '.webm',
-    '.wmv', '.m4v', '.mpg', '.mpeg', '.m2ts', '.mts', '.vob',
-    '.divx', '.3gp', '.ogv', '.asf', '.rmvb', '.f4v', '.hevc'
-  ])
-
   const getVideosForFolder = async (folder: StreamFolder): Promise<string[]> => {
     // Main's listStreams already walks the stream folder recursively (handles
     // sub-org layouts like clips/, recordings/, exports/). Just reuse that list

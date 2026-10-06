@@ -1,66 +1,11 @@
-import { useState, useEffect, useCallback, createContext, useContext } from 'react'
+import { createContext, useContext } from 'react'
 import { AppConfig } from '../types'
+import { CONFIG_DEFAULTS } from '../../../shared/config'
 
-const defaultConfig: AppConfig = {
-  defaultWatchDir: '',
-  defaultOutputDir: '',
-  presetsDir: '',
-  tempDir: '',
-  theme: 'dark',
-  autoStartWatcher: false,
-  streamerName: '',
-  streamsDir: '',
-  streamMode: '' as import('../types').StreamMode,
-  archivePresetId: '',
-  clipPresetId: '',
-  defaultConversionPresetId: '',
-  defaultBleepVolume: 0.25,
-  defaultBroadcastTime: '19:00',
-  checkEpisodeIteration: true,
-  audioCacheLimit: 1_073_741_824,
-  maxConcurrentConversions: 2,
-  uiZoomPercent: 100,
-  youtubeClientId: '',
-  youtubeClientSecret: '',
-  twitchClientId: '',
-  twitchClientSecret: '',
-  startWithWindows: false,
-  startMinimized: false,
-  startMinimizedOnlyAtStartup: false,
-  disableAnimations: false,
-  slowAnimations: false,
-  autoDeletePartialOnCancel: false,
-  claudeApiKey: '',
-  claudeSystemPrompt: '',
-  claudeModel: '',
-  aiPreventRepeatSuggestions: true,
-  launcherWidgetGroupId: '',
-  listThumbWidth: 85,
-  checkForUpdates: true,
-  skipClipMergeWarning: false,
-  defaultAudioTrackNames: [],
-  streamRelayEnabled: false,
-  streamRelayPort: 1935,
-  streamRelayInboundKey: 'live',
-  streamRelayOutboundKey: '',
-  streamRelayStreamId: '',
-  streamRelayActiveBroadcastId: '',
-  streamRelayActivePickedAt: 0,
-  autoUpdateTwitchAfterStream: 'ask',
-  streamsNewSidebarCollapsed: false,
-  startupPage: 'streams',
-  calendarFirstDayOfWeek: 'sunday',
-  calendarShowWeekNumbers: false,
-  calendarShowAdjacentMonthDays: true,
-  thumbnailAssetsFromSeason: true,
-  thumbnailAssetsFromTopicGame: false,
-  hasOpenedHelp: false,
-  twitchSkipCategoryRenamePrompt: false,
-  defaultYouTubeCategoryId: '',
-  defaultYouTubeTagsTemplateId: '',
-  defaultTwitchTagsTemplateId: '',
-  devForceYouTubeQuotaExceeded: false,
-}
+/** The context's value until main's config arrives (`loading` is true
+ *  meanwhile). The same defaults main merges under a stored config, so a
+ *  key that is new to this version reads the same before and after load. */
+const defaultConfig: AppConfig = CONFIG_DEFAULTS
 
 interface StoreContextValue {
   config: AppConfig

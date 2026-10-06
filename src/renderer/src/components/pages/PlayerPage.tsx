@@ -30,6 +30,7 @@ import { isClipExportCompatible } from '../../lib/clipExport'
 import { renderStreamTitle } from '../../lib/streamTitle'
 import { formatTimecode } from '../../lib/formatTimecode'
 import { injectSdpBandwidth, waitForIceComplete } from '../../lib/webrtc'
+import { VIDEO_EXTENSIONS, isVideoExtension } from '../../../../shared/videoExts'
 import { seriesNavFor, EMPTY_SERIES_NAV, type SeriesNav } from '../../lib/seriesNav'
 import { StreamNavButtons } from '../streams/StreamNavButtons'
 import { resolveTrackName } from '../../lib/trackNames'
@@ -1054,11 +1055,6 @@ const SESSION_CATEGORY_STYLES: Record<string, string> = {
   clip:  'text-gray-400 border-gray-600',
 }
 
-const SESSION_VIDEO_EXTS = new Set([
-  '.mkv', '.mp4', '.mov', '.avi', '.ts', '.flv', '.webm',
-  '.wmv', '.m4v', '.mpg', '.mpeg', '.m2ts', '.mts',
-])
-
 interface SiblingFile {
   path: string
   name: string
@@ -1634,7 +1630,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       setFolderDrafts(Object.values(drafts))
       const seenPaths = new Set<string>()
       const videoFiles = files
-        .filter(f => !f.isDirectory && SESSION_VIDEO_EXTS.has(f.extension.toLowerCase()))
+        .filter(f => !f.isDirectory && isVideoExtension(f.extension))
         .filter(f => !isDump || !date || f.name.includes(date))
         // Dedupe by path: a synced-folder quirk (reparse points / junctions) can
         // surface the same file twice, which would collide keys in the panel.
@@ -3522,7 +3518,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     // told no would be worse.
     if (isExtractingRef.current) { setExtractionBlocked(true); return }
     const paths = await window.api.openFileDialog({
-      filters: [{ name: 'Video Files', extensions: ['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm'] }],
+      filters: [{ name: 'Video Files', extensions: [...VIDEO_EXTENSIONS] }],
       // Electron 43+ opens dialogs in Downloads when no path is given; the
       // library root is where a streamer's videos live.
       defaultPath: config.streamsDir || undefined,
@@ -4502,7 +4498,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
             <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">Open a video</h2>
             <FileDropZone
               onFiles={handleFiles}
-              accept={['mkv', 'mp4', 'mov', 'avi', 'ts', 'flv', 'webm']}
+              accept={VIDEO_EXTENSIONS}
               label="Drop a video file here or click to browse"
               className="w-full"
             />
