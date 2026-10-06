@@ -582,7 +582,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
           <Checkbox
             checked={local.checkEpisodeIteration ?? true}
             onChange={v => set('checkEpisodeIteration', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Check for episode iteration {dirtyDot('checkEpisodeIteration')}</div><div className="text-xs text-gray-400">When creating a new stream folder, automatically detect and increment the episode number based on previous sessions of the same game.</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Number episodes automatically {dirtyDot('checkEpisodeIteration')}</div><div className="text-xs text-gray-400">When a stream joins a series, its episode number is filled in as the next one for that topic and season. Turn this off to leave the number empty and enter it yourself; the season still carries over.</div></div>}
           />
 
           <div className="flex flex-col gap-1">

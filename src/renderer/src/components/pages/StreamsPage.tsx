@@ -6557,6 +6557,15 @@ function SidebarDetail({
   // in scrollable containers).
   const sidebarScrollRef = useRef<HTMLDivElement>(null)
   useDragAutoScroll(sidebarScrollRef)
+  // Read once near the top: the series auto-promotion effect below and the
+  // AI-suggestion gating further down both need it, and a const declared
+  // after an effect cannot sit in that effect's dependency list.
+  const { config: appConfig } = useStore()
+  // "Number episodes automatically" (Settings, Streams). Off leaves the
+  // episode field empty wherever the app would have filled it; the user
+  // numbers by hand. Season carry-over is unaffected. The setting had no
+  // reader from the initial commit until 2026-10-06.
+  const autoNumberEpisodes = appConfig.checkEpisodeIteration !== false
   const metaRef = useRef(meta)
   useEffect(() => { metaRef.current = meta })
   // Current stream's canonical key (relativePath — unique in both modes;
@@ -6894,9 +6903,9 @@ function SidebarDetail({
     // anything the user already typed). Clear the pending flag either way.
     const update: Partial<StreamMeta> = { isSeries: true, seriesAutoDetectPending: undefined }
     if (!meta?.ytSeason) update.ytSeason = nums.ytSeason
-    if (!meta?.ytEpisode) update.ytEpisode = nums.ytEpisode
+    if (!meta?.ytEpisode && autoNumberEpisodes) update.ytEpisode = nums.ytEpisode
     onUpdateMetaRef.current(update)
-  }, [meta?.seriesAutoDetectPending, meta?.games, meta?.ytSeason, meta?.ytEpisode, folder.folderPath, folders, computeSeriesNumbers])
+  }, [meta?.seriesAutoDetectPending, meta?.games, meta?.ytSeason, meta?.ytEpisode, folder.folderPath, folders, computeSeriesNumbers, autoNumberEpisodes])
 
   // Auto-apply a linked YT tags template when a stream gains its first
   // game tag. Fires when the *primary game* transitions from absent to
@@ -7240,8 +7249,8 @@ function SidebarDetail({
   // sent with each request so the model steers away from repeats. Gated on
   // the "Prevent repeat suggestions" setting (default on); lists are capped
   // oldest-off-first and entries truncated (module consts) so _meta.json
-  // and the prompt stay bounded.
-  const { config: appConfig } = useStore()
+  // and the prompt stay bounded. (appConfig is read near the top of the
+  // component.)
   const preventRepeatSuggestions = appConfig.aiPreventRepeatSuggestions !== false
   const rejectedFor = useCallback((field: AiSuggestField): string[] | undefined => {
     if (!preventRepeatSuggestions) return undefined
@@ -7988,7 +7997,7 @@ function SidebarDetail({
                         const update: Partial<StreamMeta> = { isSeries: true, seriesAutoDetectPending: undefined }
                         if (nums) {
                           if (!meta?.ytSeason) update.ytSeason = nums.ytSeason
-                          if (!meta?.ytEpisode) update.ytEpisode = nums.ytEpisode
+                          if (!meta?.ytEpisode && autoNumberEpisodes) update.ytEpisode = nums.ytEpisode
                         }
                         onUpdateMeta(update)
                       }}
@@ -11238,7 +11247,11 @@ function NewStreamModal({
     // already only counts strictly-before by date, so as long as the
     // new date is on/after the source's date this works correctly.
     const allFolders = folders ?? []
-    const ytEpisode = game ? String(detectEpisodeNumber(allFolders, game, season, date)) : ''
+    // Automatic numbering is a setting (Streams, "Number episodes
+    // automatically"); off, the new episode's field starts empty and the
+    // user types the number.
+    const autoNumber = config.checkEpisodeIteration !== false
+    const ytEpisode = game && autoNumber ? String(detectEpisodeNumber(allFolders, game, season, date)) : ''
 
     const meta: StreamMeta = {
       date,

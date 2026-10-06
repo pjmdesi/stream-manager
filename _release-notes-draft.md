@@ -12,6 +12,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 
 - Three thumbnail settings that no longer did anything are gone: use the built-in creator by default, default built-in template, and default external template. Thumbnails start in the built-in editor, and a file made elsewhere is added to a stream like any other file.
 - Default Watch Directory now does what it says: adding a new auto-rule starts with that folder filled in.
+- The episode numbering setting works now, under its new name, Number episodes automatically. Off, a new episode starts with an empty episode number for you to type; on, it fills in the next number for that topic and season as before.
 
 ## Questions and bug reports
 
